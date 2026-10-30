@@ -1272,18 +1272,16 @@ func (e *Engine) noteRollover(row *db.Destination, actual string) {
 
 	// Nil-safe by the same discipline as e.Hooks() elsewhere: an install with no
 	// hooks configured still gets the log line and the status field. Read through
-	// the accessor, which is what holds the lock against SetHooks.
-	if dispatcher := e.Hooks(); dispatcher != nil {
-		dispatcher.Publish(hooks.Event{
-			Trigger: hooks.TriggerDestinationRolledOver,
-			At:      time.Now(),
-			Source:  hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},
-			Destination: &hooks.DestinationRef{
-				ID: row.ID, Name: row.Name, Platform: string(row.Platform),
-			},
-			Reason: actual,
-		})
-	}
+	// the accessors, which are what hold the lock against SetHooks and SetStream.
+	e.publishLifecycleEvent(hooks.Event{
+		Trigger: hooks.TriggerDestinationRolledOver,
+		At:      time.Now(),
+		Source:  hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},
+		Destination: &hooks.DestinationRef{
+			ID: row.ID, Name: row.Name, Platform: string(row.Platform),
+		},
+		Reason: actual,
+	})
 }
 
 // RolledOver is the path a file destination is actually writing to, when that

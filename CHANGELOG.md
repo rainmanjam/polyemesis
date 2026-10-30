@@ -10,6 +10,29 @@ its first tagged release.
 
 ### Added
 
+- **Real-time events API.** `GET /api/v1/events` streams what is happening as
+  Server-Sent Events, in the same envelope as webhooks: destinations going up,
+  down, held, restarted or changing level (live or by restart), the ingest,
+  failover switches, a platform broadcast going live or ending, the recorder
+  starting and stopping, chat messages, retractions and moderation actions,
+  and operator alerts. A destination's events carry the classified `cause`,
+  `held`, `keyChanged` and the whole failure reason.
+  - Authenticated like the rest of the API: a bearer token or the session
+    cookie, never a token in the URL. A `read` token gets everything except
+    chat.
+  - Every event is numbered. A client that reconnects with `Last-Event-ID` is
+    replayed what it missed, for up to 5 minutes, or told `stream.gap`.
+  - A client that falls 256 events behind is disconnected, not silently
+    skipped, and resumes from the replay. A heartbeat every 15 seconds keeps
+    proxies from cutting a quiet stream. Revoking a token, or changing the
+    password, ends an open stream.
+  - Webhook redaction applies to every event before it is sent or held for
+    replay.
+  - `?topics=` filters by family.
+  - curl, browser, Node and Python examples are in
+    [docs/EVENTS.md](docs/EVENTS.md). Polls, viewer samples and the failover
+    degraded reason are listed there as coming with #14, #4 and #6.
+
 - **Why a destination is failing.** When a destination fails, polyemesis
   reads the end of FFmpeg's stderr and the timing of the run, and names the
   cause. The causes are `key_rejected`, `platform_not_ready`, `dns`,

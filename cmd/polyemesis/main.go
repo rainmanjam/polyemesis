@@ -26,6 +26,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
@@ -388,6 +389,15 @@ func run(h *hooks) error {
 	go hookd.Run(ctx)
 	eng.SetHooks(hookd)
 
+	// The real-time events API (GET /api/v1/events). One hub for the whole
+	// process, like the webhook dispatcher and for the same reason: an event id
+	// and a replay ring belong to the install, not to one programme. Engines
+	// publish their edges, alerts and recorder/failover/level changes into it;
+	// the chat family arrives from the bus, where the chat hub already puts it.
+	streamHub := eventstream.NewHub()
+	go eventstream.BridgeBus(ctx, bus, streamHub)
+	eng.SetStream(streamHub)
+
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
 		DiagLevel: diagSwitch,
@@ -396,6 +406,7 @@ func run(h *hooks) error {
 		Chat:          hub,
 		AutomodBudget: automodBudget,
 		Hooks:         hookd,
+		Stream:        streamHub,
 		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on

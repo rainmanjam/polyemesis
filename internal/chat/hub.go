@@ -713,6 +713,9 @@ func (h *Hub) Delete(ctx context.Context, p db.Platform, account, messageID stri
 	// overlay fed from the pane, kept showing it. One moderator action should
 	// not leave the room in two states.
 	h.retract(r, messageID)
+	h.publishModeration(ctx, Moderation{
+		Action: ModDelete, Platform: p, Account: account, MessageID: messageID,
+	})
 	return nil
 }
 
@@ -748,6 +751,13 @@ func (h *Hub) Hide(ctx context.Context, p db.Platform, account, messageID string
 	if hidden {
 		h.retract(r, messageID)
 	}
+	action := ModHide
+	if !hidden {
+		action = ModUnhide
+	}
+	h.publishModeration(ctx, Moderation{
+		Action: action, Platform: p, Account: account, MessageID: messageID,
+	})
 	return nil
 }
 
@@ -765,6 +775,12 @@ func (h *Hub) Hide(ctx context.Context, p db.Platform, account, messageID string
 // UI has to repeat it; a control that looks like a delete and is not would be
 // worse than having no control at all.
 func (h *Hub) HideLocally(p db.Platform, account, messageID string) error {
+	return h.hideLocally(context.Background(), p, account, messageID)
+}
+
+// hideLocally is HideLocally with the context that says who asked, so automod's
+// local hide is announced as automod's (see WithActor).
+func (h *Hub) hideLocally(ctx context.Context, p db.Platform, account, messageID string) error {
 	if strings.TrimSpace(messageID) == "" {
 		return fmt.Errorf("no message id to hide")
 	}
@@ -779,6 +795,9 @@ func (h *Hub) HideLocally(p db.Platform, account, messageID string) error {
 		r = &runner{platform: p, account: account, hub: h}
 	}
 	h.retract(r, messageID)
+	h.publishModeration(ctx, Moderation{
+		Action: ModHideLocal, Platform: p, Account: account, MessageID: messageID,
+	})
 	return nil
 }
 
@@ -810,6 +829,11 @@ func (h *Hub) Ban(ctx context.Context, p db.Platform, account, userID string, d 
 		return err
 	}
 	h.retractUser(r, userID)
+	m := Moderation{Action: ModBan, Platform: p, Account: account, UserID: userID, Reason: reason}
+	if d > 0 {
+		m.Action, m.Seconds = ModTimeout, int(d/time.Second)
+	}
+	h.publishModeration(ctx, m)
 	return nil
 }
 
@@ -832,7 +856,11 @@ func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
 	defer cancel()
-	return b.Unban(ctx, userID)
+	if err := b.Unban(ctx, userID); err != nil {
+		return err
+	}
+	h.publishModeration(ctx, Moderation{Action: ModUnban, Platform: p, Account: account, UserID: userID})
+	return nil
 }
 
 // ------------------------------------------------------------------- status

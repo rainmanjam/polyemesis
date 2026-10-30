@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/netguard"
@@ -147,6 +148,10 @@ func WithRulesTTL(d time.Duration) Option {
 
 // Notifier accepts events and delivers them.
 type Notifier struct {
+	// tap is handed every event Publish accepts, already redacted. The
+	// real-time events API is the one tap; see SetTap.
+	tap atomic.Pointer[func(Event)]
+
 	log      *slog.Logger
 	rules    RuleSource
 	doer     Doer
@@ -224,12 +229,35 @@ func (n *Notifier) Publish(ev Event) {
 		// coalesces, so give it the coarsest one that is still correct.
 		ev.Key = string(ev.Type)
 	}
+	red := ev.Redacted()
+	if tap := n.tap.Load(); tap != nil {
+		// BEFORE the queue and regardless of it. The tap is a live stream of
+		// what happened, not a delivery: an event the webhook queue had no
+		// room for still happened, and coalescing -- which exists to spare a
+		// chat channel two hundred messages -- is not a stream's business.
+		(*tap)(red)
+	}
 	select {
-	case n.events <- ev.Redacted():
+	case n.events <- red:
 		n.bump(func(s *Stats) { s.Queued++ })
 	default:
 		n.bump(func(s *Stats) { s.Dropped++ })
 	}
+}
+
+// SetTap installs fn as the receiver of every event Publish accepts, redacted,
+// or removes it when fn is nil. fn runs on the publisher's goroutine and MUST
+// NOT BLOCK, under the same contract as Publish itself: the caller is the
+// sweep or a supervisor callback. Nil-receiver safe.
+func (n *Notifier) SetTap(fn func(Event)) {
+	if n == nil {
+		return
+	}
+	if fn == nil {
+		n.tap.Store(nil)
+		return
+	}
+	n.tap.Store(&fn)
 }
 
 // Run drives the notifier until ctx ends. It owns two goroutines: this one,

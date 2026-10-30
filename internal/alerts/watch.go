@@ -136,6 +136,11 @@ type DestState struct {
 	// padding, so the source is starving. Same symptom, opposite fixes.
 	DropFrames int64
 	DupFrames  int64
+	// Restarts is the supervisor's respawn count for this destination's
+	// current process. No alert judges it; the real-time events API turns an
+	// increase into destination.restarted, from this same snapshot, so a
+	// respawn is announced from the one sampler every other edge comes from.
+	Restarts int
 }
 
 // FailoverState is the source-selector tier, absent when it is off.

@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
@@ -503,6 +504,10 @@ type Server struct {
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
 
+	// stream is the real-time events hub behind GET /events. Optional: nil
+	// answers 503 there, and every publish through it is nil-safe.
+	stream *eventstream.Hub
+
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
 	// how several tests in this package build one.
@@ -682,6 +687,9 @@ type Options struct {
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
 
+	// Stream is the real-time events hub (GET /events). Optional.
+	Stream *eventstream.Hub
+
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
 	// refused, never opened. See auth.PrepareSetupCode.
@@ -715,6 +723,7 @@ func New(o Options) *Server {
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
 		hooks:         o.Hooks,
+		stream:        o.Stream,
 		version:       o.Version,
 		diag:          o.Diag,
 		diagLevel:     o.DiagLevel,
@@ -768,6 +777,7 @@ func New(o Options) *Server {
 	if o.DB != nil {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
+		s.lifecycle.announce = s.announceBroadcastPhase
 	}
 	return s
 }
@@ -1285,6 +1295,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
 			r.Get("/timeline", s.handleListTimeline)
+			// The real-time events API (SSE). In this group, not beside /ws,
+			// because it needs nothing /ws is carved out for: EventSource sends
+			// the cookie on an ordinary GET, which requireCSRF lets through,
+			// and curl sends a bearer token. A read token is welcome; what it is
+			// sent is decided per event by the catalogue (internal/eventstream).
+			r.Get("/events", s.handleEvents)
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)

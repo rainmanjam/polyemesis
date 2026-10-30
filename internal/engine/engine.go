@@ -34,6 +34,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/meters"
@@ -115,7 +116,10 @@ var stopTimeout = 12 * time.Second
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
-// supervisor, meters.Store) are outside this table.
+// supervisor, meters.Store) are outside this table. One of those is taken
+// under mu on purpose: eventstream.Hub's, by streamLevelLocked. It is a leaf
+// by construction -- Hub.Publish takes nothing else and calls nothing back --
+// so holding mu across it orders nothing.
 type Engine struct {
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
@@ -383,6 +387,13 @@ type Engine struct {
 	// tests build one; every use is nil-safe.
 	hooks     *hooks.Dispatcher
 	hookWatch *hooks.Watcher
+	// stream is the real-time events API's hub, shared across engines like
+	// hooks and for the same reason; streamWatch is the per-programme half
+	// that turns each sweep's webhook edges into stream events. Under e.mu
+	// (stream) and owned by observeLoop (streamWatch). Both nil on an engine
+	// assembled field by field; every use is nil-safe. See stream.go.
+	stream      *eventstream.Hub
+	streamWatch *eventstream.Watcher
 	// lifecycle is the THIRD consumer of the edges hookWatch derives, and it is
 	// a consumer rather than a second sampler on purpose -- see observeLoop.
 	// It decides when a platform's broadcast goes live and when it ends.
@@ -797,6 +808,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// Named from the source row on the first sweep; SourceRef starts with the
 	// id alone so an event raised before that still identifies its programme.
 	e.hookWatch = hooks.NewWatcher(hooks.SourceRef{ID: sourceID}, hooks.WatchConfig{})
+	e.streamWatch = eventstream.NewWatcher()
 	return e, nil
 }
 
@@ -1171,6 +1183,9 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
 	stop(recorder)
+	if recorder != nil {
+		e.streamRecording(false, "the programme was stopped")
+	}
 	stop(preview)
 	stop(meters)
 	// A playout variant is a rendition consumer exactly as a destination is, so
@@ -1901,6 +1916,11 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	if !s.Recording.Enabled || !e.recman.RecordingAllowed() {
 		if cur != nil {
 			e.stopAux(auxRecorder)
+			why := "recording turned off"
+			if s.Recording.Enabled {
+				why = "stopped by the free-space guard: the recordings volume is nearly full"
+			}
+			e.streamRecording(false, why)
 		}
 		return
 	}
@@ -1913,6 +1933,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	}
 	if cur != nil {
 		e.stopAux(auxRecorder)
+		e.streamRecording(false, "stopped to apply changed recording settings")
 	}
 
 	if err := os.MkdirAll(e.cfg.RecordingsDir(), 0o755); err != nil {
@@ -1984,6 +2005,15 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.recorderSig = sig
 	e.mu.Unlock()
 	proc.Start()
+	// THE REAL START POINT, not the setting: recording.enabled=true with the
+	// free-space guard holding, or with no relay port, never reaches here, and
+	// nothing was recorded. A restart for new settings (a stems change) is a
+	// stop above and a start here, and is announced as both.
+	why := "started"
+	if cur != nil {
+		why = "restarted to apply changed recording settings"
+	}
+	e.streamRecording(true, why)
 }
 
 // relayWaker is the Spec.WakeOnStop for a consumer subscribed to hub as name.
@@ -5193,8 +5223,12 @@ func observeWanted(alertRules, hookRules, lifecycleWanted, timeline bool) bool {
 // existing rules a second time about an outage they were already told of.
 // The timeline is the record of what started before a rule existed.
 func (e *Engine) sweepWanted() bool {
+	// An open events-API connection is a consumer like the other four: with
+	// nobody else listening it is the only reason to derive edges at all, and
+	// a stream that showed nothing on an install with no hooks and no rules
+	// would look broken exactly when somebody is first trying it.
 	return observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted(),
-		e.alerter.HasRecorder())
+		e.alerter.HasRecorder()) || e.Stream().HasSubscribers()
 }
 
 // observeLoop samples the pipeline and hands each snapshot to BOTH watchers.
@@ -5271,34 +5305,7 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			snap := e.alertSnapshot(now, live)
 			snap.Disk = disk
 			e.observeAlerts(snap)
-			if e.hookWatch != nil {
-				// Re-stamped every sweep: the source row is named after the
-				// engine is built, and an event carrying only an id tells a
-				// script which programme but not which one an operator would
-				// recognise.
-				e.hookWatch.SetSource(hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()})
-				// ONE DERIVATION, THREE CONSUMERS. The lifecycle coordinator
-				// sees exactly the events the webhook dispatcher sees, from the
-				// same Observe call on the same watcher over the same snapshot.
-				// A second sampler would mean two Status() calls at two
-				// cadences that could disagree about what they saw -- and the
-				// disagreement that matters is "was this destination disabled
-				// or did it crash", which is the difference between ending a
-				// broadcast and leaving it alone.
-				lc := e.lifecycleObserver()
-				// Read ONCE for the whole batch rather than per event: a
-				// SetHooks landing mid-loop would otherwise publish some of one
-				// Observe's events to the old dispatcher and some to the new,
-				// which is a split nobody could explain from the delivery log.
-				dispatcher := e.Hooks()
-				for _, ev := range e.hookWatch.Observe(snap) {
-					dispatcher.Publish(ev)
-					if lc != nil {
-						// Contractually non-blocking; see LifecycleObserver.
-						lc.Observe(ev)
-					}
-				}
-			}
+			e.observeEdges(snap)
 		}
 	}
 }
@@ -5382,6 +5389,7 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 			ds.OutTimeMS = d.Process.Progress.OutTimeMS
 			ds.DropFrames = d.Process.Progress.DropFrames
 			ds.DupFrames = d.Process.Progress.DupFrames
+			ds.Restarts = d.Process.Restarts
 		}
 		snap.Destinations = append(snap.Destinations, ds)
 	}

@@ -1,6 +1,6 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 50,
+  "excusedCeiling": 51,
   "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
@@ -8,16 +8,16 @@
   "unstableCeiling": 4,
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
-  "shapeFloor": 27,
+  "shapeFloor": 29,
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 235,
+    "methodPatternPairs": 236,
     "swept": 67,
-    "excused": 50,
+    "excused": 51,
     "denied": 118,
     "nonTrieProbes": 12,
-    "shapesEmitted": 27,
+    "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
@@ -464,6 +464,12 @@
       "method": "GET",
       "pattern": "/api/v1/encoders",
       "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/events",
+      "coverage": "excused",
       "zeroSource": "unguarded"
     },
     {
@@ -2049,6 +2055,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/events",
+      "scope": "route",
+      "why": "a Server-Sent Events stream: the response never ends, so the body sweep cannot read it to completion any more than it can read /ws. The sweep's fixture wires no events hub, so the GET is a 503 at once, which is what the Want below observes; the counterpart opens a real stream as a read token.",
+      "want": {
+        "as": "read",
+        "status": 503
+      },
+      "counterpart": "eventStream"
+    },
+    {
       "route": "GET /api/v1/jobs",
       "scope": "route",
       "why": "503 without a job queue wired; the handler never reaches storage",
@@ -2462,10 +2478,17 @@
     },
     {
       "shape": "sse",
-      "emitted": false,
-      "inspected": false,
-      "inspectedBy": "",
-      "note": "ABSENT: this API emits no server-sent events, and assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever appears in this package's source"
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectSSE",
+      "note": "the real-time events API. One catalogue row per eventstream.Type over a CLOSED table; an uncatalogued type is refused at Publish, and a Withheld type is never sent to a read scope, live or replayed"
+    },
+    {
+      "shape": "response-header/X-Accel-Buffering",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectXAccelBufferingHeader",
+      "note": "`no`, on the event stream only: nginx buffers proxied responses by default, and a buffered stream delivers nothing until the buffer fills"
     },
     {
       "shape": "mqtt-retained-topic",

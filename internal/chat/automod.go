@@ -268,6 +268,9 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 	// generation also abandons an action already in flight.
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	// Every action below is announced as automod's, not an operator's: the
+	// same Delete/Hide/Ban path a human takes, told who is taking it.
+	ctx = WithActor(ctx, ActorAutomod)
 
 	// PlatformReason, NEVER finding.Reason.
 	//
@@ -286,7 +289,7 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 		// Already recorded by the caller. Nothing to send.
 		return
 	case automod.ActionHideLocal:
-		err = h.HideLocally(job.platform, job.account, job.msgID)
+		err = h.hideLocally(ctx, job.platform, job.account, job.msgID)
 	case automod.ActionHide:
 		err = h.Hide(ctx, job.platform, job.account, job.msgID, true)
 	case automod.ActionDelete:

@@ -1238,7 +1238,9 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	} else {
 		e.log.Warn("source switched", "to", string(want), "reason", reason)
 	}
-	e.bus.Publish(eventFailover, e.Failover())
+	fo := e.Failover()
+	e.bus.Publish(eventFailover, fo)
+	e.streamFailover(fo)
 	e.publishStatus()
 }
 

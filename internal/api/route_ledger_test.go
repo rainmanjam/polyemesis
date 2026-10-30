@@ -564,6 +564,14 @@ var excusedRoutes = map[string]coverageExcus{
 		Want:        &routeWant{As: "read", Status: http.StatusBadRequest},
 		Counterpart: "websocketFrames",
 	},
+	"GET /api/v1/events": {
+		Why: "a Server-Sent Events stream: the response never ends, so the body sweep " +
+			"cannot read it to completion any more than it can read /ws. The sweep's " +
+			"fixture wires no events hub, so the GET is a 503 at once, which is what the " +
+			"Want below observes; the counterpart opens a real stream as a read token.",
+		Want:        &routeWant{As: "read", Status: http.StatusServiceUnavailable},
+		Counterpart: "eventStream",
+	},
 	"GET /api/v1/playout/public": {
 		Why: "gated by authorizePlayout; a read token receives exactly what a stranger " +
 			"does. The old text said \"no body at all\", which is false when driven -- " +
@@ -1151,6 +1159,7 @@ type counterpartProof func(t *testing.T) proofResult
 var counterpartProofs = map[string]counterpartProof{
 	"runningDestinationLogs":                proveRunningDestinationLogs,
 	"websocketFrames":                       proveWebsocketFrames,
+	"eventStream":                           proveEventStream,
 	"hookDeliveries":                        proveHookDeliveries,
 	"playoutPublicView":                     provePlayoutPublicView,
 	"playoutManifestBytes":                  provePlayoutManifest,
@@ -2001,9 +2010,16 @@ func shapeRegistry() []shapeRow {
 		// a scan that FINDS NOTHING, in the same run in which the same scan
 		// finds the eight media types this package does emit. That second half
 		// is not decoration: an absence proved by a broken scanner is free.
-		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events, and " +
-			"assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever " +
-			"appears in this package's source"},
+		// NO LONGER ABSENT. GET /events (#17) emits it, and the census that
+		// used to discharge the negative claim is what found the handler.
+		{Shape: "sse", Emitted: true, Inspector: inspectSSE,
+			Note: "the real-time events API. One catalogue row per eventstream.Type over a " +
+				"CLOSED table; an uncatalogued type is refused at Publish, and a Withheld " +
+				"type is never sent to a read scope, live or replayed"},
+		{Shape: "response-header/X-Accel-Buffering", Emitted: true,
+			Inspector: inspectXAccelBufferingHeader,
+			Note: "`no`, on the event stream only: nginx buffers proxied responses by " +
+				"default, and a buffered stream delivers nothing until the buffer fills"},
 		{Shape: "mqtt-retained-topic", Emitted: true, Issue: "#160",
 			Jurisdiction: &shapeJurisdiction{
 				Package: "cmd/polyemesis", Test: "TestTheRetainedDestTopicIsScrubbedAtTheSink",

@@ -153,7 +153,8 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
-arrive).
+arrive). The [events stream](EVENTS.md) gives the same answer: a `read` token
+may open `GET /events` and is sent everything except the `chat` topic.
 
 `GET /library/search` is the one worth reading twice. It looks like a metadata
 query and is not: iterating common words would rebuild whole
@@ -532,6 +533,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?, process?, sourceId?}`. `process` names the supervised process whose log holds the detail (`dest:3`, `ingest`), when there is exactly one, and `sourceId` names the programme it belongs to. A destination deleted since the event names neither. Install-wide, so it takes no `?source=` |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
+| `GET` | `/events` | The real-time events API, as Server-Sent Events: destination, ingest, failover, go-live and stop, recording, chat and alert events in the webhook envelope, numbered, with `Last-Event-ID` replay for 5 minutes. `?topics=` filters. A bearer token or the session cookie; no token in the query string. A `read` token is sent everything but `chat`. Install-wide, so it takes no `?source=`. See [EVENTS.md](EVENTS.md) |
 
 `/status`, `/source`, `/source/annotations`, `/levels`, `/processes`,
 `/processes/{name}/logs` and `/ws` are programme-scoped: on an install with
@@ -1370,6 +1372,11 @@ apart on `status.source.id`. What a UI cannot do is keep one status series and
 one bitrate series for the socket — those get redrawn from whichever engine
 spoke last — which is why a multi-source grid polls `GET /previews` instead of
 deriving one from this feed.
+
+`/ws` is the console's own feed and its frames are not a stable contract. A
+program that wants to be told what happened should read the [events
+stream](EVENTS.md) (`GET /events`) instead: a versioned envelope, numbered
+events and replay after a disconnect.
 
 ## A worked example
 
