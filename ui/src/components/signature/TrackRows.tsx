@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -31,7 +32,8 @@ import {
   type TrackRole,
   type TrackSel,
 } from "@/lib/types";
-import { AlertTriangle, VolumeX } from "lucide-react";
+import { AlertTriangle, Volume2, VolumeX } from "lucide-react";
+import { LIVE_MIN_GAIN } from "@/lib/liveTrackLevel";
 
 /* ===========================================================================
    Simple mode: one row per ingest track, with a checkbox and a gain slider.
@@ -51,6 +53,22 @@ import { AlertTriangle, VolumeX } from "lucide-react";
 /** Sentinel for the Select: Radix treats "" as "no value chosen" and will not
  *  accept it as an item, but "no role" is a value the operator can pick. */
 const NO_ROLE = "__none__";
+
+/** Live per-track mute and gain (I4).
+ *
+ *  Given only to the editor of the destination's LIVE mix: the route it calls
+ *  writes the stored live profile, so the same control under the second (VOD)
+ *  mix would silently change the live one. Absent, the rows are what they were:
+ *  the slider edits the draft and Save sends it. */
+export interface TrackRowsLive {
+  /** Why this track cannot take a live level, already translated, or null.
+   *  `inline` puts the reason under the row; false leaves it to a notice the
+   *  page shows once, for a reason that holds for every row. */
+  blocked: (track: number) => { reason: string; inline: boolean } | null;
+  /** Each resolves once the server has answered, whatever it answered. */
+  onMute: (track: number, muted: boolean) => Promise<void>;
+  onGain: (track: number, gain: number) => Promise<void>;
+}
 
 interface TrackRowsProps {
   /** Namespaces the checkbox ids, and is REQUIRED rather than defaulted.
@@ -87,6 +105,8 @@ interface TrackRowsProps {
   /** Tracks that cause a duck, and tracks pushed down by one. */
   duckTrigger?: number[];
   duckTarget?: number[];
+  /** Live mute and gain; see TrackRowsLive. */
+  live?: TrackRowsLive;
 }
 
 /** A15: the role chip is bounded by its column, cuts its text rather than
@@ -124,6 +144,7 @@ export function TrackRows({
   excludeRoles = [],
   duckTrigger = [],
   duckTarget = [],
+  live,
 }: TrackRowsProps) {
   const t = useT();
   const translate = useT();
@@ -141,6 +162,18 @@ export function TrackRows({
       if (Number.isFinite(db)) lastRef.current.set(tr.index, { db, at });
     }
   }, [levels, tracks, meterFeedLive]);
+  /* The slider's position while a live drag is in flight. The draft is not
+     touched until the server has stored the level, so a refused change snaps
+     back to what is stored instead of leaving the form dirty. */
+  const [drag, setDrag] = useState<Record<number, number>>({});
+  const [busy, setBusy] = useState<Record<number, boolean>>({});
+  const settle = (index: number, work: Promise<void>) => {
+    setBusy((b) => ({ ...b, [index]: true }));
+    void work.finally(() => {
+      setBusy(({ [index]: _done, ...rest }) => rest);
+      setDrag(({ [index]: _gone, ...rest }) => rest);
+    });
+  };
   const selFor = (index: number): TrackSel =>
     selection.find((s) => s.track === index) ?? { track: index, enabled: false, gain: 1 };
 
@@ -179,6 +212,10 @@ export function TrackRows({
         const sending = sel.enabled && !excluded;
         const label = ann.label || t.title || "";
         const last = lastRef.current.get(t.index);
+        const block = live ? live.blocked(t.index) : null;
+        const liveOk = !!live && !block;
+        const rowBusy = busy[t.index] === true;
+        const shownGain = drag[t.index] ?? sel.gain;
 
         return (
           <div
@@ -192,7 +229,14 @@ export function TrackRows({
                   : "border-border bg-card opacity-55 hover:opacity-80",
             )}
           >
-            <div className="grid grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem] items-center gap-3">
+            <div
+              className={cn(
+                "grid items-center gap-3",
+                live
+                  ? "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem_auto]"
+                  : "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem]",
+              )}
+            >
               <Checkbox
                 id={`${idPrefix}-track-${t.index}`}
                 checked={sel.enabled}
@@ -210,6 +254,11 @@ export function TrackRows({
                   </span>
                   {role !== "" && (
                     <RoleBadge role={role as Exclude<TrackRole, "">} excluded={excluded} />
+                  )}
+                  {sel.muted && (
+                    <Badge variant="warn" className="shrink-0" data-testid={`muted-${t.index}`}>
+                      <VolumeX className="h-2.5 w-2.5" /> {translate("route.live.mutedWord")}
+                    </Badge>
                   )}
                 </div>
                 <div className="truncate font-mono text-sm leading-tight text-muted-foreground">
@@ -278,12 +327,21 @@ export function TrackRows({
 
               <div className="flex items-center gap-2">
                 <Slider
-                  value={[sel.gain]}
-                  min={0}
+                  value={[shownGain]}
+                  min={liveOk ? LIVE_MIN_GAIN : 0}
                   max={2}
                   step={0.05}
-                  disabled={!sel.enabled}
-                  onValueChange={([v]) => update(t.index, { gain: v })}
+                  disabled={!sel.enabled || rowBusy}
+                  onValueChange={([v]) =>
+                    liveOk
+                      ? setDrag((d) => ({ ...d, [t.index]: v }))
+                      : update(t.index, { gain: v })
+                  }
+                  onValueCommit={([v]) => {
+                    if (!liveOk || !live) return;
+                    // The route refuses zero: silence is the mute button.
+                    settle(t.index, live.onGain(t.index, Math.max(v, LIVE_MIN_GAIN)));
+                  }}
                   aria-label={`Track ${t.index + 1} gain`}
                   className={cn(!sel.enabled && "opacity-40")}
                 />
@@ -295,10 +353,37 @@ export function TrackRows({
                     sel.enabled && sel.gain > 1 && "text-warn",
                   )}
                 >
-                  {gainPct(sel.gain)}
+                  {gainPct(shownGain)}
                 </span>
               </div>
+
+              {live && (
+                <Button
+                  type="button"
+                  variant={sel.muted ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={sel.muted === true}
+                  aria-label={translate(
+                    sel.muted ? "route.live.unmuteTrack" : "route.live.muteTrack",
+                    { n: t.index + 1 },
+                  )}
+                  title={block?.reason}
+                  disabled={!!block || rowBusy}
+                  className={cn(sel.muted && "text-warn")}
+                  onClick={() => settle(t.index, live.onMute(t.index, !sel.muted))}
+                >
+                  {sel.muted ? <VolumeX /> : <Volume2 />}
+                  {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
+                </Button>
+              )}
             </div>
+
+            {block?.inline && sel.enabled && (
+              <div className="flex items-start gap-1.5 text-sm text-muted-foreground" data-testid={`live-block-${t.index}`}>
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
+                <span>{block.reason}</span>
+              </div>
+            )}
 
             {excluded && (
               <Tooltip>

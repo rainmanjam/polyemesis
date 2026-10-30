@@ -31,7 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/AppLayout";
 import { Experimental, ExperimentalBadge } from "@/components/Experimental";
-import { TrackRows } from "@/components/signature/TrackRows";
+import { TrackRows, type TrackRowsLive } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
 import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
 import { FilterString } from "@/components/signature/FilterString";
@@ -41,6 +41,15 @@ import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
+import {
+  carryMutes,
+  destinationLiveBlock,
+  levelOutcome,
+  trackLiveBlock,
+  withLevel,
+  type LevelChange,
+  type LevelOutcome,
+} from "@/lib/liveTrackLevel";
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
 import { toneForState } from "@/lib/signal";
@@ -186,6 +195,29 @@ export function RoutingPage() {
   // at the same time do not cancel each other.
   const presetSeq = useRef<{ live: number; vod: number }>({ live: 0, vod: 0 });
 
+  // ---- live per-track mute and gain (I4) ----
+  //
+  // The outcome of the most recent live change, per destination, as the
+  // operator reads it. `liveSeq` keeps a slower earlier answer from replacing
+  // the report of a later one.
+  const [liveOutcome, setLiveOutcome] = useState<{
+    dest: DestinationId;
+    outcome: LevelOutcome;
+  } | null>(null);
+  const liveSeq = useRef<Record<number, number>>({});
+  // Refusals the stored row could not predict: a 409 keyed by the destination,
+  // a 404 by "destination:track". Cleared by a save, which changes what the
+  // server holds.
+  const [liveRefusals, setLiveRefusals] = useState<Record<string, string>>({});
+  // A live change writes the stored row, and the list has to hold it: Discard
+  // reads the list, and a draft seeded from an older list would put the old
+  // level back on the next Save. But writing the list re-runs the selection
+  // effect, which reseeds the draft and clears dirty. This names the one
+  // destination whose next reseed is skipped: the one on screen, whose draft
+  // either has the level merged in already or was not touched by it, and may
+  // carry unsaved edits besides.
+  const keepDraftFor = useRef<DestinationId | null>(null);
+
   // ---- load destinations & presets ----
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +266,14 @@ export function RoutingPage() {
       return;
     }
     const found = list.find((d) => d.destination.id === Number(id));
+    const keep = keepDraftFor.current;
+    keepDraftFor.current = null;
+    if (found && keep === found.destination.id) {
+      // A live level landed on the destination being edited. Its draft has the
+      // change already (applyLevel), so only the stored row moves.
+      setSelected(found.destination);
+      return;
+    }
     if (found) {
       setSelected(found.destination);
       setProfile(structuredClone(found.destination.profile));
@@ -354,6 +394,7 @@ export function RoutingPage() {
           : "Routing saved.",
       );
       setDirty(false);
+      setLiveRefusals({});
       setList(await api.listDestinations());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
@@ -418,7 +459,8 @@ export function RoutingPage() {
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
-        if (mix === "live") setProfile(res.profile);
+        // A preset arrives unmuted; a mute the operator set stays (carryMutes).
+        if (mix === "live") setProfile((prev) => carryMutes(res.profile, prev));
         else setVodProfile(res.profile);
         setDirty(true);
         toast.success(t("route.presetApplied"));
@@ -440,6 +482,89 @@ export function RoutingPage() {
     (presetId: string) => applyPresetTo("vod", presetId),
     [applyPresetTo],
   );
+
+  // One track's mute or gain, through the live route rather than Save. The
+  // server stores it in the destination's LIVE mix and reconciles, so a
+  // level-only change reaches the running output without a restart, and the
+  // answer says whether it did.
+  const applyLevel = useCallback(
+    async (track: number, change: LevelChange): Promise<void> => {
+      const dest = selectedIdRef.current;
+      if (dest == null) return;
+      const seq = (liveSeq.current[dest] = (liveSeq.current[dest] ?? 0) + 1);
+      try {
+        const res = await api.setTrackLevel(dest, track, change, editedSourceId);
+        // Stored: the list must say so whatever else happens, or Discard and the
+        // next Save would put the old level back. Merged per track rather than
+        // replaced wholesale, so answers for two tracks commute.
+        // The list write below must not reseed whichever draft is on screen: if
+        // it is this destination's, the level is merged into it here; if the
+        // operator has moved on, that destination's stored row did not change.
+        keepDraftFor.current = selectedIdRef.current;
+        if (selectedIdRef.current === dest) {
+          setProfile((p) => (p ? withLevel(p, track, change) : p));
+        }
+        setList((prev) =>
+          prev.map((row) =>
+            row.destination.id === dest
+              ? {
+                  ...row,
+                  destination: {
+                    ...row.destination,
+                    profile: withLevel(row.destination.profile, track, change),
+                  },
+                }
+              : row,
+          ),
+        );
+        if (seq === liveSeq.current[dest]) setLiveOutcome({ dest, outcome: levelOutcome(res) });
+      } catch (err) {
+        // 409 and 404 are states, not failures: the control is disabled with
+        // the server's reason rather than offered again.
+        if (err instanceof ApiError && err.status === 409) {
+          setLiveRefusals((r) => ({ ...r, [String(dest)]: err.message }));
+          return;
+        }
+        if (err instanceof ApiError && err.status === 404) {
+          setLiveRefusals((r) => ({ ...r, [`${dest}:${track}`]: err.message }));
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : t("route.live.failed"));
+      }
+    },
+    [editedSourceId, t],
+  );
+
+  const storedRow = useMemo(
+    () => list.find((r) => r.destination.id === selected?.id)?.destination ?? null,
+    [list, selected?.id],
+  );
+
+  const liveRows = useMemo<TrackRowsLive | undefined>(() => {
+    if (!storedRow) return undefined;
+    return {
+      blocked: (track) => {
+        const whole = liveRefusals[String(storedRow.id)];
+        if (whole) return { reason: whole, inline: false };
+        const one = liveRefusals[`${storedRow.id}:${track}`];
+        if (one) return { reason: one, inline: true };
+        const key = trackLiveBlock(storedRow, track);
+        if (!key) return null;
+        // The copy reason holds for every row and is shown once, above them.
+        return { reason: t(key), inline: key !== "route.live.copyBlocked" };
+      },
+      onMute: (track, muted) => applyLevel(track, { muted }),
+      onGain: (track, gain) => applyLevel(track, { gain }),
+    };
+  }, [storedRow, liveRefusals, applyLevel, t]);
+
+  const liveNotice = useMemo(() => {
+    if (!storedRow) return null;
+    const refused = liveRefusals[String(storedRow.id)];
+    if (refused) return refused;
+    const key = destinationLiveBlock(storedRow);
+    return key ? t(key) : null;
+  }, [storedRow, liveRefusals, t]);
 
   const trackOptions = useMemo(
     () => tracks.map((t) => ({ value: String(t.index), label: `Track ${t.index + 1}` })),
@@ -717,6 +842,13 @@ export function RoutingPage() {
               onApplyPreset={applyPreset}
               onCompileError={setLiveError}
               allowAnnotating
+              live={
+                liveRows && {
+                  rows: liveRows,
+                  notice: liveNotice,
+                  outcome: liveOutcome?.dest === selected.id ? liveOutcome.outcome : null,
+                }
+              }
               footer={(compiled) => (
                 <>
                   {t("route.copyFooter")}
@@ -894,6 +1026,7 @@ function ProfileEditor({
   onCompileError,
   allowAnnotating = false,
   footer,
+  live,
 }: {
   /** Namespaces every DOM id this editor emits. Must differ between instances. */
   idPrefix: string;
@@ -914,6 +1047,15 @@ function ProfileEditor({
    *  two independent controls that mysteriously move together. */
   allowAnnotating?: boolean;
   footer: (compiled: RoutingResult | null) => ReactNode;
+  /** Live per-track mute and gain (I4). Given ONLY to the live mix's editor:
+   *  the route writes the destination's live profile, so the second mix's
+   *  editor must never carry it. */
+  live?: {
+    rows: TrackRowsLive;
+    /** A reason that holds for every row (an audio-copy destination). */
+    notice: string | null;
+    outcome: LevelOutcome | null;
+  };
 }) {
   const t = useT();
   const [compiled, setCompiled] = useState<RoutingResult | null>(null);
@@ -1073,6 +1215,7 @@ function ProfileEditor({
             </div>
 
             <TabsContent value="simple">
+              {live && <LiveLevelStatus live={live} />}
               <TrackRows
                 idPrefix={idPrefix}
                 tracks={ctx.tracks}
@@ -1087,6 +1230,7 @@ function ProfileEditor({
                 excludeRoles={excludeRoles}
                 duckTrigger={profile.ducking?.trigger ?? []}
                 duckTarget={profile.ducking?.target ?? []}
+                live={live?.rows}
               />
               {allowAnnotating && ctx.annotating && ctx.annotationsStored === false && (
                 <p className="mt-2 text-sm text-warn">{t("route.localOnlyNote")}</p>
@@ -1184,6 +1328,55 @@ function ProfileEditor({
         </CardContent>
       </Card>
     </>
+  );
+}
+
+/** What the operator is told about live mute and gain: that they apply without
+ *  Save, why they cannot (once, for the whole destination), and how the last
+ *  change took effect. A live apply is a quiet line; a restart, or a stored
+ *  change whose reconcile failed, is a visible notice with the reason. */
+function LiveLevelStatus({
+  live,
+}: {
+  live: { notice: string | null; outcome: LevelOutcome | null };
+}) {
+  const t = useT();
+  if (live.notice) {
+    return (
+      <div
+        className="mb-2 flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
+        data-testid="live-level-notice"
+      >
+        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+        <span>{live.notice}</span>
+      </div>
+    );
+  }
+  const o = live.outcome;
+  return (
+    <div className="mb-2 flex flex-col gap-1">
+      <p className="text-sm text-muted-foreground">{t("route.live.hint")}</p>
+      {o && o.tone === "quiet" && (
+        <p className="text-sm text-muted-foreground" data-testid="live-level-outcome" role="status">
+          {t(o.key, { reason: o.reason })}
+        </p>
+      )}
+      {o && o.tone === "warn" && (
+        <div
+          className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
+          data-testid="live-level-outcome"
+          role="status"
+        >
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="flex flex-col gap-0.5">
+            <span>{t(o.key, { reason: o.reason })}</span>
+            {o.warnings.map((w) => (
+              <span key={w}>{w}</span>
+            ))}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

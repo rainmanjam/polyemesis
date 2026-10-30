@@ -1,5 +1,6 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
+import type { LevelChange, TrackLevelResult } from "@/lib/liveTrackLevel";
 import type {
   BroadcastWindowRow,
   MetaJob,
@@ -744,6 +745,21 @@ export const api = {
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
   restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
+  /** Live per-track mute or gain (I4). Writes the STORED live mix and
+   *  reconciles, so a level-only change reaches the running FFmpeg without a
+   *  restart. `applied` says which happened and `reason` why. 409 for an
+   *  audio-copy destination, 404 for a track outside the stored selection. Named
+   *  by programme like every other scoped write (#497). */
+  setTrackLevel: (
+    id: DestinationId,
+    track: number,
+    change: LevelChange,
+    sourceId?: number | null,
+  ) =>
+    post<TrackLevelResult>(
+      `/destinations/${id}/tracks/${track}/gain${sourceQuery(sourceId)}`,
+      change,
+    ),
 
   /* --- every destination at once ----------------------------------------
    *
