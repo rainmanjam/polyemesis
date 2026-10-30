@@ -282,10 +282,10 @@ const rooms = [
   },
   {
     title: "Home and away, one ingest",
-    body: "Home commentary on one track, away commentary on another, the game's own audio on a third. The home feed and the away feed each take their commentary; the clean league feed takes only the game.",
+    body: "Home commentary on one track, away commentary on another, the game's own audio on a third. The home feed takes the game with home commentary, the away feed takes it with away commentary, and the clean league feed takes the game alone.",
     routes: [
-      ["track 1 · home commentary", "home feed"],
-      ["track 2 · away commentary", "away feed"],
+      ["tracks 1 + 3 · home commentary + game", "home feed"],
+      ["tracks 2 + 3 · away commentary + game", "away feed"],
       ["track 3 · game audio", "clean league feed"],
     ],
   },
@@ -439,7 +439,11 @@ const rooms = [
       a case for saying them out loud HERE, where a reader who already arrived is
       deciding whether this product is for them. These earn their place by
       recognition, not by traffic, and this comment exists so nobody later
-      "promotes" them to pages on the assumption that nobody checked. */}
+      "promotes" them to pages on the assumption that nobody checked.
+
+      THE SEARCH CHECK ABOVE COVERS THE THREE ORIGINAL ROOMS ONLY. The sports and
+      esports rooms were added afterwards as routing cases and have NOT been
+      checked for search demand, so do not cite that check as covering them. */}
   <section class="border-t border-line py-16 sm:py-20" data-reveal>
     <div class="wrap">
       <p class="eyebrow">Who it is for</p>

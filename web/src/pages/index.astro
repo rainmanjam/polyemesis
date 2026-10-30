@@ -145,7 +145,12 @@ const features = [
           screenshot the docs and features page use stays the single source. */}
       <div class="relative flex items-center">
         <figure class="rise rise-5 w-full">
-          <div class="aspect-[4/3] overflow-hidden rounded-token border border-line bg-surface">
+          {/* Cropped to the destination list and the track rows. The top of the
+              screenshot is the "Development build dev" banner and app chrome,
+              so a plain object-top crop showed the banner. The image is
+              enlarged and offset so only the region from the destinations down
+              to the track checkboxes is inside the frame. */}
+          <div class="relative aspect-[39/20] overflow-hidden rounded-token border border-line bg-surface">
             <Picture
               src={routing}
               formats={["avif", "webp"]}
@@ -155,7 +160,7 @@ const features = [
               alt="The polyemesis routing screen: a destination list on the left and, on the right, a checkbox per track for the selected destination."
               loading="eager"
               decoding="async"
-              class="h-full w-full object-cover object-top"
+              class="absolute left-[-15%] top-[-22.6%] w-[116%] max-w-none"
             />
           </div>
           <figcaption class="mt-3 font-mono text-[11px] text-subtle">
@@ -482,7 +487,7 @@ const features = [
           {repo && (
             <span class="text-subtle">
               {repo.stars} {repo.stars === 1 ? "star" : "stars"} on GitHub
-              {repo.release && <> · latest release {repo.release}</>}
+              {repo.release && <> · release {repo.release}</>}
             </span>
           )}
         </div>
