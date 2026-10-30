@@ -68,6 +68,7 @@ import type {
   Platform,
   PlatformAccount,
   Rendition,
+  PlatformCreds,
   PlatformPresetInfo,
   SetupGuide,
   ServiceInfo,
@@ -691,6 +692,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // a redirect. Only those get the in-place code path.
   const [guidesRead, setGuidesRead] = useState<ReadState<SetupGuide[]>>(pendingRead);
   const [deviceOpen, setDeviceOpen] = useState(false);
+  // The server refuses a device start without this platform's developer
+  // credentials, so the code path is offered only when they are stored. The
+  // same rule as Settings' platformConnectControls.
+  const [credsRead, setCredsRead] = useState<ReadState<PlatformCreds[]>>(pendingRead);
   const accounts = rowsOf(accountsRead);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
   // RenditionView, not Rendition. The view carries `destinations` and
@@ -772,6 +777,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       .platformGuides()
       .then((r) => setGuidesRead(okRead(r)))
       .catch(() => setGuidesRead(failedRead()));
+    api
+      .listCreds()
+      .then((r) => setCredsRead(okRead(r)))
+      .catch(() => setCredsRead(failedRead()));
     api
       .listRenditions()
       .then((r) => setRenditionsRead(okRead(r)))
@@ -871,7 +880,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // connected from inside this form without a redirect back to this origin.
   const deviceCodeOK =
     caps?.connect !== undefined &&
-    rowsOf(guidesRead).some((g) => g.platform === caps.connect && platformSupportsDeviceCode(g));
+    rowsOf(guidesRead).some((g) => g.platform === caps.connect && platformSupportsDeviceCode(g)) &&
+    rowsOf(credsRead).some((c) => String(c.platform) === caps.connect);
   // A bare IP origin cannot be a registered redirect target on most platforms.
   // Read from the browser: a self-signed certificate on a name is not visible
   // here, and the dialog does not claim that it is.
