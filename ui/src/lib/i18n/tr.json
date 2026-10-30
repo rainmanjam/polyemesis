@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Kilitli",
   "firstRun.addDestination": "Hedef ekle",
   "firstRun.tour": "Bana gezdir",
-  "firstRun.ingestHeading": "Alım adresi"
+  "firstRun.ingestHeading": "Alım adresi",
+  "firstRun.badgeWaiting": "Bekliyor"
 }

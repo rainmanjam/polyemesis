@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Bloqueado",
   "firstRun.addDestination": "Añadir destino",
   "firstRun.tour": "Muéstrame cómo funciona",
-  "firstRun.ingestHeading": "Dirección de ingesta"
+  "firstRun.ingestHeading": "Dirección de ingesta",
+  "firstRun.badgeWaiting": "Esperando"
 }

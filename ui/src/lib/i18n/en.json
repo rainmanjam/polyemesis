@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Locked",
   "firstRun.addDestination": "Add destination",
   "firstRun.tour": "Show me around",
-  "firstRun.ingestHeading": "Ingest address"
+  "firstRun.ingestHeading": "Ingest address",
+  "firstRun.badgeWaiting": "Waiting"
 }

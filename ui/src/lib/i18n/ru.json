@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Заблокировано",
   "firstRun.addDestination": "Добавить направление",
   "firstRun.tour": "Покажите, как всё устроено",
-  "firstRun.ingestHeading": "Адрес приёма"
+  "firstRun.ingestHeading": "Адрес приёма",
+  "firstRun.badgeWaiting": "Ожидание"
 }

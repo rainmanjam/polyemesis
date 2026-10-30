@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Zablokowane",
   "firstRun.addDestination": "Dodaj miejsce docelowe",
   "firstRun.tour": "Pokaż mi",
-  "firstRun.ingestHeading": "Adres ingest"
+  "firstRun.ingestHeading": "Adres ingest",
+  "firstRun.badgeWaiting": "Oczekuje"
 }

@@ -31,6 +31,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
@@ -1297,6 +1299,18 @@ export function Dashboard() {
    * See lib/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
 
+  /* The first-run checklist, shown in place of the "no destinations" sentence
+   * when a source exists and nothing is configured to send it anywhere. Every
+   * tick is derived from what the server reports now (lib/setupChecklist), so
+   * an operator who loses their source or encoder sees the list reopen rather
+   * than a stored "done" over an empty page. Null while the source count has
+   * not arrived: that is drawn as the plain card, never as a guessed checklist. */
+  const checklist = setupChecklist({
+    sourceCount,
+    signal: ingestLive,
+    destinations: destinations.length,
+  });
+
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
    * The move arrows reorder the whole list and the order is persisted whole, so
@@ -1792,6 +1806,16 @@ export function Dashboard() {
               <p className="text-sm text-muted-foreground">{t("dash.loadingDestinations")}</p>
             </CardContent>
           </Card>
+        ) : destinations.length === 0 && checklist ? (
+          <SetupChecklist
+            checklist={checklist}
+            ingestUrl={system?.ingestUrl ?? ""}
+            onCopyIngest={copyIngest}
+            onAddDestination={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          />
         ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">

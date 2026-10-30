@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "잠금",
   "firstRun.addDestination": "대상 추가",
   "firstRun.tour": "둘러보기",
-  "firstRun.ingestHeading": "수집 주소"
+  "firstRun.ingestHeading": "수집 주소",
+  "firstRun.badgeWaiting": "대기 중"
 }

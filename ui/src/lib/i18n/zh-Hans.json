@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "已锁定",
   "firstRun.addDestination": "添加目标",
   "firstRun.tour": "带我参观",
-  "firstRun.ingestHeading": "接入地址"
+  "firstRun.ingestHeading": "接入地址",
+  "firstRun.badgeWaiting": "等待中"
 }

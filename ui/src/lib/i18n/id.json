@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Terkunci",
   "firstRun.addDestination": "Tambah tujuan",
   "firstRun.tour": "Tunjukkan kepada saya",
-  "firstRun.ingestHeading": "Alamat ingest"
+  "firstRun.ingestHeading": "Alamat ingest",
+  "firstRun.badgeWaiting": "Menunggu"
 }

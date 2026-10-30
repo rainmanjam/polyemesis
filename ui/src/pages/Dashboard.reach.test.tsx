@@ -228,3 +228,15 @@ describe("Dashboard: the Ingest card while the backup is on air", () => {
     expect(await screen.findByText(translate("en", "dash.ingestBackupOnAir"))).toBeTruthy();
   });
 });
+
+describe("Dashboard: the first-run checklist replaces the empty-destinations sentence", () => {
+  it("draws the checklist when a source exists and nothing is configured to send it", async () => {
+    draw();
+
+    expect(
+      await screen.findByText(translate("en", "firstRun.title")),
+      "an operator with a source and no destination gets one sentence and no next step",
+    ).toBeTruthy();
+    expect(screen.queryByText(translate("en", "dash.noDestinations"))).toBeNull();
+  });
+});

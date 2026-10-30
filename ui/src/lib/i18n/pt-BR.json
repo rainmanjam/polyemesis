@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Bloqueado",
   "firstRun.addDestination": "Adicionar destino",
   "firstRun.tour": "Me mostre o painel",
-  "firstRun.ingestHeading": "Endereço de ingestão"
+  "firstRun.ingestHeading": "Endereço de ingestão",
+  "firstRun.badgeWaiting": "Aguardando"
 }

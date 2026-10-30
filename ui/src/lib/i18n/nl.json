@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Vergrendeld",
   "firstRun.addDestination": "Bestemming toevoegen",
   "firstRun.tour": "Laat me rondkijken",
-  "firstRun.ingestHeading": "Ingest-adres"
+  "firstRun.ingestHeading": "Ingest-adres",
+  "firstRun.badgeWaiting": "Wacht"
 }

@@ -1743,5 +1743,6 @@
   "firstRun.badgeLocked": "Gesperrt",
   "firstRun.addDestination": "Ziel hinzufügen",
   "firstRun.tour": "Zeig mir die Oberfläche",
-  "firstRun.ingestHeading": "Ingest-Adresse"
+  "firstRun.ingestHeading": "Ingest-Adresse",
+  "firstRun.badgeWaiting": "Wartet"
 }
