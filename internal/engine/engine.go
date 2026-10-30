@@ -256,7 +256,9 @@ type Engine struct {
 	liveNotes map[int64]liveNote
 	// levelRespawning holds the processes respawnStaleLevels has already asked
 	// to restart, so two upstream events in quick succession cycle a stale
-	// destination once rather than twice. Guarded by mu.
+	// destination once rather than twice. Its own mutex, not mu: it is written
+	// from an ingest's state callback, which must never take mu for writing.
+	levelRespawnMu  sync.Mutex
 	levelRespawning map[*supervisor.Process]bool
 
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called

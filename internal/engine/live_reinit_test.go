@@ -96,7 +96,11 @@ func reinitDest(t *testing.T, ffmpegBin, input string, holder *graphHolder) (*su
 	argv := func() []string {
 		n := spawn.Add(1)
 		g := holder.get()
-		return []string{"-hide_banner", "-loglevel", "warning", "-re", "-i", input,
+		// -progress so the test can tell when media is flowing through a built
+		// graph (muteLive); the supervisor parses it off stdout as it does for
+		// every destination.
+		return []string{"-hide_banner", "-loglevel", "warning", "-nostats",
+			"-progress", "pipe:1", "-stats_period", "0.1", "-re", "-i", input,
 			"-filter_complex", g.FilterComplex, "-map", "[" + g.OutLabel + "]",
 			"-c:a", "pcm_s16le", "-y", outPath(n)}
 	}
@@ -128,9 +132,20 @@ func muteLive(t *testing.T, e *Engine, p *supervisor.Process, holder *graphHolde
 	_, store := storeEngine(t)
 	row := liveRow(t, store, true)
 	muted := planFor(t, e, row).compiled
-	// The graph is built when the first frame arrives; a command before then
-	// has no graph to reach. -re delivers that frame within a few ms of start.
-	time.Sleep(700 * time.Millisecond)
+	// The graph is built when the first frame arrives, so a command before then
+	// has no graph to reach, and the mute must land well before the format
+	// changes at 4 s of media. Waiting on the process's own progress rather
+	// than a fixed sleep keeps both true on a loaded -race runner.
+	deadline := time.Now().Add(20 * time.Second)
+	for p.Status().Progress.OutTimeMS < 300 {
+		if time.Now().After(deadline) {
+			t.Fatal("no media progress from the destination; the graph never ran")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if ms := p.Status().Progress.OutTimeMS; ms > 2000 {
+		t.Fatalf("media is already at %d ms; too close to the 4 s format change to measure", ms)
+	}
 	if err := liveApplyTo(p, holder, muted); err != nil {
 		t.Fatalf("the live mute was refused: %v", err)
 	}
@@ -156,7 +171,7 @@ func TestFFmpegRevertsALiveLevelAtAFormatChange(t *testing.T) {
 	muteLive(t, e, p, holder)
 	waitExited(t, p)
 
-	// The mute is sent 0.7 s in; the format changes at 4 s of media.
+	// The mute is sent once media flows (0.3 to 2 s in); the format changes at 4 s.
 	if v := maxVolume(t, bin, last(), 2.5, 1.0); v > -60 {
 		t.Fatalf("the track is audible between the live mute and the format change (%.1f dB): "+
 			"the mute never applied, so this measures nothing", v)

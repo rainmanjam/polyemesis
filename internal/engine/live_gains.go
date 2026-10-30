@@ -260,24 +260,24 @@ func (e *Engine) staleLevelProcs() []staleLevelProc {
 // seconds. A process already being cycled for this reason is not cycled again.
 func (e *Engine) respawnStaleLevels(why string) {
 	for _, s := range e.staleLevelProcs() {
-		e.mu.Lock()
+		e.levelRespawnMu.Lock()
 		if e.levelRespawning[s.proc] {
-			e.mu.Unlock()
+			e.levelRespawnMu.Unlock()
 			continue
 		}
 		if e.levelRespawning == nil {
 			e.levelRespawning = map[*supervisor.Process]bool{}
 		}
 		e.levelRespawning[s.proc] = true
-		e.mu.Unlock()
+		e.levelRespawnMu.Unlock()
 
 		e.log.Warn("restarting destination so a live level survives the upstream change",
 			"dest", s.name, "event", why)
 		go func(p *supervisor.Process) {
 			defer func() {
-				e.mu.Lock()
+				e.levelRespawnMu.Lock()
 				delete(e.levelRespawning, p)
-				e.mu.Unlock()
+				e.levelRespawnMu.Unlock()
 			}()
 			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 			defer cancel()
