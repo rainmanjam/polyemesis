@@ -19,6 +19,7 @@
 //	gain <name> <gain>    change track 0's gain live on one destination
 //	pin <kind>            put a source on air by hand (primary|backup|slate|auto)
 //	status                print "<active> <switches>"
+//	stopall               stop every destination, so each flushes its last audio
 //	restarts <name>       print one destination's restart count, or -1
 package main
 
@@ -71,6 +72,9 @@ func main() {
 		need(5, "gain <name> <gain>")
 		driverlib.Login(user, pass)
 		setGain(os.Args[3], os.Args[4])
+	case "stopall":
+		driverlib.Login(user, pass)
+		driverlib.StopAll()
 	case "status":
 		driverlib.Login(user, pass)
 		st := readStatus()

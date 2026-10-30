@@ -26,7 +26,10 @@
 #                  Padding clamped onto one timestamp is exactly this; a correct
 #                  run reads <= 0 (an outage before a rebuild stays a timestamp
 #                  gap, as it does on the copied video).
-#   end offset     where the audio's timestamps end minus where the video's do.
+#   A/V offset     every encoder flashes the picture white and beeps at 3 kHz
+#                  for 0.1 s every 2 s; each beep's timestamp minus the nearest
+#                  flash's, as the median over the whole session. This is lip
+#                  sync as a platform that honours timestamps would play it.
 #   longest gap    the longest silence on the SAMPLE timeline, i.e. as heard.
 # The subject must also have exactly one session at the sink.
 #
@@ -54,14 +57,15 @@ AFTER="${DRIFT_AFTER:-30}"
 MAX_MS=100
 # A failover is an outage: grace plus the switch is heard as a few seconds of
 # silence, and that is correct. A third of the runtime is far above it and far
-# below the fault.
+# below the fault. The slate's audio IS silence, so in slate mode its time on
+# air is added.
 MAX_GAP_S=$(( RUNTIME / 3 ))
 HTTP=18480; INGEST=19355
 NET="${P}net"; SRV="${P}server"; SINK="${P}sink"
 
 case "$MODE" in
   backup) P_RATE=48000; P_CH=2; FAILTO=backup ;;
-  slate)  P_RATE=44100; P_CH=1; FAILTO=slate ;;
+  slate)  P_RATE=44100; P_CH=1; FAILTO=slate; MAX_GAP_S=$(( MAX_GAP_S + AFTER )) ;;
   *) poly_preflight_fail "DRIFT_MODE must be backup or slate, not '$MODE'" ;;
 esac
 
@@ -106,32 +110,43 @@ wait_active() { # wait_active <kind> <seconds>
 # publish <tag> <key> <audio-rate> <channels> <tone-hz>: an encoder standing in
 # for OBS. Every encoder shares one video shape -- destinations copy video, and a
 # codec change is a different fault -- and they differ only in their audio.
+# The flash and the beep are the sync marks; the steady tone under the beep
+# keeps the audio from reading as silence.
+MARK='lt(mod(t,2),0.1)'
 publish() {
   ffmpeg -hide_banner -loglevel error -re \
-    -f lavfi -i "testsrc2=size=640x360:rate=30" \
-    -f lavfi -i "sine=frequency=$5:sample_rate=$3" \
+    -f lavfi -i "testsrc2=size=640x360:rate=30,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='$MARK'" \
+    -f lavfi -i "aevalsrc='0.1*sin(2*PI*$5*t)+if($MARK,0.6*sin(2*PI*3000*t),0)':s=$3" \
     -metadata comment="drift-publisher-${P}$1" \
     -map 0:v -map 1:a -c:v libx264 -preset veryfast -profile:v high -level 4.0 \
     -g 60 -pix_fmt yuv420p -b:v 1000k -c:a aac -b:a 128k -ar "$3" -ac "$4" \
     -t 3600 -f flv "rtmp://127.0.0.1:$INGEST/live/$2" > "publisher-$1.log" 2>&1 &
 }
 
-# measure <flv>: "<hidden-ms> <end-offset-ms> <longest-gap-s> <audio-s>"
+# measure <flv>: "<hidden-ms> <av-offset-ms> <beeps> <longest-gap-s> <audio-s>"
 measure() {
-  local f="$1" dec a v g
+  local f="$1" dec a g sync
   dec=$(ffmpeg -v error -i "$f" -map 0:a:0 -ac 1 -ar 48000 -f s16le - 2>/dev/null \
       | wc -c | awk '{printf "%.3f", $1/(2*48000)}')
   a=$(ffprobe -v error -select_streams a:0 -show_entries packet=pts_time -of csv=p=0 "$f" \
       | awk 'NR==1{f=$1} {l=$1} END{printf "%s %s", f, l}')
-  v=$(ffprobe -v error -select_streams v:0 -show_entries packet=pts_time -of csv=p=0 "$f" \
-      | sort -n | tail -1)
   g=$(ffmpeg -hide_banner -nostats -i "$f" -map 0:a:0 \
       -af "asetpts=N/SR/TB,silencedetect=n=-60dB:d=0.5" -f null - 2>&1 \
       | awk -F'silence_duration: ' '/silence_duration/{if($2>m)m=$2} END{printf "%.3f", m+0}')
+  # Beep onsets on the audio's timestamps, flash onsets on the video's. The
+  # flash is found as black after negating the picture.
+  ffmpeg -hide_banner -nostats -i "$f" -map 0:a:0 \
+    -af "highpass=f=2500,highpass=f=2500,highpass=f=2500,silencedetect=n=-30dB:d=0.04" -f null - 2>&1 \
+    | grep -o "silence_end: [0-9.]*" | awk '{print $2}' > "$f.beeps"
+  ffmpeg -hide_banner -nostats -i "$f" -map 0:v:0 -an \
+    -vf "negate,blackdetect=d=0.03:pix_th=0.1:pic_th=0.9" -f null - 2>&1 \
+    | grep -o "black_start:[0-9.]*" | cut -d: -f2 > "$f.flashes"
+  sync=$(awk 'NR==FNR{fl[n++]=$1; next} {b=1e9; for(i=0;i<n;i++){d=$1-fl[i]; if((d<0?-d:d)<(b<0?-b:b)) b=d}
+              if(b<1 && b>-1) printf "%d\n", b*1000}' "$f.flashes" "$f.beeps" \
+      | sort -n | awk '{v[NR]=$1} END{if(!NR){print "99999 0"; exit} printf "%d %d", v[int((NR+1)/2)], NR}')
   set -- $a
-  awk -v d="$dec" -v af="$1" -v al="$2" -v vl="$v" -v g="$g" 'BEGIN{
-    fr = 1024/48000
-    printf "%d %d %s %s\n", (d - (al - af + fr))*1000, ((al + fr) - (vl + 1/30))*1000, g, d }'
+  awk -v d="$dec" -v af="$1" -v al="$2" -v g="$g" -v s="$sync" 'BEGIN{
+    printf "%d %s %s %s\n", (d - (al - af + 1024/48000))*1000, s, g, d }'
 }
 
 step "1. Server and an RTMP sink, in containers ($MODE mode)"
@@ -193,8 +208,12 @@ sleep 8
 drive pin primary | grep -q PIN_OK || bad "could not put the primary back on air"
 wait_active primary 30 && ok "the primary is back on air" || bad "the primary never came back"
 sleep "$AFTER"
+# Stopped through the API first, so each destination's FFmpeg flushes its
+# encoder and its last packets reach the sink rather than being cut off.
+drive stopall | grep -q STOPPED || bad "could not stop the destinations cleanly"
+sleep 3
 pkill -f "drift-publisher-${P}" 2>/dev/null
-docker rm -f "$SRV" >/dev/null 2>&1   # ends the sessions, so the sink closes its files
+docker rm -f "$SRV" >/dev/null 2>&1
 sleep 2
 docker cp "$SINK:/sink" "$WORK/sink" >/dev/null 2>&1
 
@@ -203,8 +222,8 @@ for name in live restarted; do
   last=$(ls "$WORK/sink/$name"-*.flv 2>/dev/null | sort -t- -k2 -n | tail -1)
   segs=$(ls "$WORK/sink/$name"-*.flv 2>/dev/null | wc -l | tr -d ' ')
   [ -n "$last" ] || { bad "$name: the sink recorded nothing"; continue; }
-  read -r hidden endoff gap dec < <(measure "$last")
-  note "$name: $segs session(s); last: ${dec}s of audio, hidden ${hidden} ms, end offset ${endoff} ms, longest silence ${gap}s"
+  read -r hidden avoff beeps gap dec < <(measure "$last")
+  note "$name: $segs session(s); last: ${dec}s of audio, hidden ${hidden} ms, A/V offset ${avoff} ms over $beeps beeps, longest silence ${gap}s"
   if [ "$name" = live ]; then
     [ "$segs" = 1 ] && ok "live: one unbroken session at the sink (the subject rode both switches)" \
       || bad "live: $segs sessions at the sink, so it was restarted and measures nothing"
@@ -216,8 +235,9 @@ for name in live restarted; do
   fi
   [ "$hidden" -lt "$MAX_MS" ] && ok "$name: no audio hidden behind the timestamps (${hidden} ms)" \
     || bad "$name: ${hidden} ms of audio squeezed behind the timestamps"
-  [ "${endoff#-}" -lt "$MAX_MS" ] && ok "$name: audio ends within ${MAX_MS} ms of the video (${endoff} ms)" \
-    || bad "$name: audio ends ${endoff} ms off the video"
+  [ "${avoff#-}" -lt "$MAX_MS" ] && [ "$beeps" -ge 10 ] \
+    && ok "$name: audio within ${MAX_MS} ms of the video (median ${avoff} ms over $beeps marks)" \
+    || bad "$name: audio ${avoff} ms off the video ($beeps marks matched)"
   awk -v g="$gap" -v m="$MAX_GAP_S" 'BEGIN{exit !(g < m)}' \
     && ok "$name: no runtime-length silence (longest ${gap}s)" \
     || bad "$name: ${gap}s of silence, against a ${RUNTIME}s runtime"
