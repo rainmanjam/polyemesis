@@ -203,6 +203,28 @@ export interface StreamHandlers {
   /** The key was refused (401): rotated, revoked or mistyped. Not retried. */
   onDenied: () => void;
   onState?: (connected: boolean) => void;
+  /** Each time the stream (re)connects. A reconnect follows every save in
+   *  Settings -- the server ends open streams so a new platform filter
+   *  applies -- so this is where the page re-reads its style. */
+  onConnect?: () => void | Promise<void>;
+}
+
+/** Reads the overlay's config with its key. null means refused (401). */
+export async function fetchOverlayConfig(
+  key: string,
+  signal: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<OverlayConfig | null> {
+  const res = await fetchImpl("/api/v1/overlay/config", {
+    headers: { [OVERLAY_KEY_HEADER]: key },
+    cache: "no-store",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    signal,
+  });
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`config ${res.status}`);
+  return (await res.json()) as OverlayConfig;
 }
 
 /** Opens the display stream and keeps it open, resuming with Last-Event-ID
@@ -237,6 +259,7 @@ export async function runOverlayStream(
       if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
       h.onState?.(true);
       attempt = 0;
+      await h.onConnect?.();
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       const parser = new SSEParser();

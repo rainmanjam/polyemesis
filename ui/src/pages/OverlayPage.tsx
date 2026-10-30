@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { ChatOverlayView } from "@/components/overlay/ChatOverlayView";
 import {
-  OVERLAY_KEY_HEADER,
   addLine,
   expireLines,
+  fetchOverlayConfig,
   keyFromHash,
   removeLines,
   runOverlayStream,
@@ -50,35 +50,48 @@ export function OverlayPage() {
     };
   }, []);
 
+  // maxLines is read through a ref: the stream's handlers are created once,
+  // and a restyle that changes it arrives on a later reconnect.
+  const maxRef = useRef(DOCK_LINES);
+
   useEffect(() => {
     if (!key) return;
     const ctl = new AbortController();
+    const apply = (config: OverlayConfig) => {
+      maxRef.current = dock ? DOCK_LINES : config.style.maxLines;
+      setPhase({ kind: "ready", config });
+      setLines((ls) => (ls.length > maxRef.current ? ls.slice(ls.length - maxRef.current) : ls));
+    };
     (async () => {
       try {
-        const res = await fetch("/api/v1/overlay/config", {
-          headers: { [OVERLAY_KEY_HEADER]: key },
-          cache: "no-store",
-          credentials: "omit",
-          referrerPolicy: "no-referrer",
-          signal: ctl.signal,
-        });
-        if (!res.ok) {
+        const config = await fetchOverlayConfig(key, ctl.signal);
+        if (!config) {
           setPhase({ kind: "denied" });
           return;
         }
-        const config = (await res.json()) as OverlayConfig;
-        setPhase({ kind: "ready", config });
-        const max = dock ? DOCK_LINES : config.style.maxLines;
+        apply(config);
+        let first = true;
         await runOverlayStream(
           key,
           {
-            onLine: (l) => setLines((ls) => addLine(ls, { ...l, receivedAt: Date.now() }, max)),
+            onLine: (l) => setLines((ls) => addLine(ls, { ...l, receivedAt: Date.now() }, maxRef.current)),
             onRemove: (ids) => setLines((ls) => removeLines(ls, ids)),
             onDenied: () => {
               setLines([]);
               setPhase({ kind: "denied" });
             },
             onState: setConnected,
+            // Saving in Settings ends open streams on purpose; the reconnect is
+            // where a new style is picked up. Not on the first connect, which
+            // the read above already covers.
+            onConnect: async () => {
+              if (first) {
+                first = false;
+                return;
+              }
+              const fresh = await fetchOverlayConfig(key, ctl.signal).catch(() => undefined);
+              if (fresh) apply(fresh);
+            },
           },
           ctl.signal,
         );
