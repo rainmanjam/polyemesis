@@ -92,6 +92,29 @@ func TestDroppingFramesIsJudgedOnTheWindowNotTheRun(t *testing.T) {
 	}
 }
 
+// TestDroppedFramesAreReadFromTheRenditionThatEncodesThem: a destination
+// copies its video, so its own drop counter never moves; the encoder that drops
+// is its rendition's. A rendition dropping frames is every running destination
+// on it dropping them, and none of the stopped ones.
+func TestDroppedFramesAreReadFromTheRenditionThatEncodesThem(t *testing.T) {
+	copying := &supervisor.Status{State: supervisor.StateRunning, DroppedRecent: 0, FramesRecent: 300, DropsKnown: true}
+	encoder := &supervisor.Status{State: supervisor.StateRunning, DroppedRecent: 30, FramesRecent: 300, DropsKnown: true}
+	if got := droppingFramesFor(copying, encoder, true, time.Minute); got != 30 {
+		t.Fatalf("a destination on a dropping rendition reads %d, want the rendition's 30", got)
+	}
+	if got := droppingFramesFor(copying, nil, true, time.Minute); got != 0 {
+		t.Fatalf("a destination with no rendition reads %d, want its own 0", got)
+	}
+	stopped := &supervisor.Status{State: supervisor.StateStopped}
+	if got := droppingFramesFor(stopped, encoder, true, time.Minute); got != 0 {
+		t.Fatalf("a stopped destination reads its rendition's drops: %d", got)
+	}
+	reencoding := &supervisor.Status{State: supervisor.StateRunning, DroppedRecent: 12, FramesRecent: 300, DropsKnown: true}
+	if got := droppingFramesFor(reencoding, nil, true, time.Minute); got != 12 {
+		t.Fatalf("an expert-mode destination that encodes reads %d, want its own 12", got)
+	}
+}
+
 type stubAccountHealth map[int64]string
 
 func (s stubAccountHealth) AccountHealth(id int64) string { return s[id] }

@@ -63,9 +63,10 @@ type ytHealthStream struct {
 	} `json:"status"`
 }
 
-// StreamHealths lists the channel's liveStreams with part=cdn,status: one quota
-// unit a page, and every page, bounded by ytKeyPagesMax, for StreamKeys' reason
-// -- a destination whose stream is on page two must not read as unjudged.
+// StreamHealths lists the channel's liveStreams with part=cdn,status: every
+// page, bounded by ytKeyPagesMax, for StreamKeys' reason -- a destination whose
+// stream is on page two must not read as unjudged. Each page is one list call,
+// whose quota cost Google does not publish (see internal/chat/quota.go).
 // part=status is on the liveStreams.list part table, and the poller can hold the
 // narrower youtube.readonly grant (the evidence file above).
 func (y *YouTube) StreamHealths(ctx context.Context, _, accessToken string) (map[[32]byte]StreamHealthVerdict, error) {

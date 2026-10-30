@@ -873,7 +873,7 @@ absent while there is nothing to report.
 | Field | Present when | Value |
 |---|---|---|
 | `restartStorm` | More than 5 respawns in the last 15 minutes, the threshold of `PolyemesisDestinationRestartStorm` | The respawn count in that window |
-| `droppingFrames` | At least 1% of the frames in the last 10 seconds were dropped | The frames dropped in that window |
+| `droppingFrames` | At least 1% of the frames in the last 10 seconds were dropped, by the destination's own FFmpeg or by the rendition that encodes its video | The frames dropped in that window |
 | `accountHealth` | The connected account is not healthy | `expiring`, `refreshFailing` or `expired`. The state only: the refresh error stays on `GET /platforms/accounts` |
 | `platformHealth` | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `{"platform", "status", "issues"}`: YouTube's own status word and its issue codes |
 

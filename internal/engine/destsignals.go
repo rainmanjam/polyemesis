@@ -57,6 +57,25 @@ func destinationDropping(p *supervisor.Status, ingestConfigured bool, sourceLive
 	return p.DroppedRecent
 }
 
+// droppingFramesFor is DestStatus.DroppingFrames for a destination and the
+// rendition that feeds it, if any.
+//
+// WHY THE RENDITION. A destination's own FFmpeg copies its video (CopyVideo is
+// always true, internal/ffmpeg/build.go), and a stream copy never moves
+// FFmpeg's drop_frames counter: the counter belongs to the frame-rate sync of
+// an ENCODER. The encoder a destination's frames go through is its rendition's,
+// so a rendition dropping frames is every one of its destinations dropping
+// them. The destination's own reading is still taken, for the expert-mode
+// destination that re-encodes. Only while the destination itself is running:
+// a rendition's drops are not news on a destination that is off.
+func droppingFramesFor(own, rendition *supervisor.Status, ingestConfigured bool, sourceLive time.Duration) int64 {
+	n := destinationDropping(own, ingestConfigured, sourceLive)
+	if own == nil || own.State != supervisor.StateRunning {
+		return n
+	}
+	return max(n, destinationDropping(rendition, ingestConfigured, sourceLive))
+}
+
 // AccountHealthReader reads a connected account's health: the same state word
 // GET /platforms/accounts carries as health.state, "ok", "expiring",
 // "refreshFailing" or "expired", and "" when the account is unknown.
@@ -138,13 +157,18 @@ func (e *Engine) SetPlatformHealth(c PlatformHealthChecker) {
 }
 
 // platformHealthEvery is how often a live destination's platform health is
-// read. YouTube's liveStreams.list costs one quota unit a page (see
-// ytKeyPagesMax in internal/oauth/streamkeys.go), so at this cadence one live
-// destination spends 288 units a day, under 3% of a default project's 10,000,
-// and the api side shares one read between every destination on a channel.
-// Chat, which paces itself against the same allowance (internal/chat/quota.go),
-// is the reason this is not faster: a health badge that starved the chat pane
-// would be switched off, and rightly.
+// read: at most 288 reads a day per destination, and the api side shares one
+// read between every destination on a channel for channelHealthTTL, so a
+// channel is read at most 360 times a day however many destinations it has.
+//
+// WHAT THAT COSTS IS NOT KNOWN EXACTLY. Google's quota calculator omits the Live
+// Streaming endpoints; one unit per liveStreams.list page is the value list
+// calls historically carried, and internal/chat/quota.go says out loud that it
+// is a guess. At one unit, a channel's reads are under 4% of a default
+// project's 10,000. These reads are NOT charged to the chat pacer's budget,
+// which is per adapter and has no install-wide hook; chat's own 403 handling
+// stays the authority on running out. Chat is also why this is not faster: a
+// health badge that starved the chat pane would be switched off, and rightly.
 const platformHealthEvery = 5 * time.Minute
 
 // platformHealthTimeout bounds one read.

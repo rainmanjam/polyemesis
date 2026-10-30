@@ -448,8 +448,13 @@ func (e *Engine) Status() Status {
 	st.ingestConfigured = configured
 
 	names := make(map[int64]string, len(st.Renditions))
+	// The shared encodes' processes, for DroppingFrames: a destination fed by
+	// a rendition copies its video, so the frames are dropped (if anywhere)
+	// in the rendition's encoder, not in the destination's own FFmpeg.
+	rendProc := make(map[int64]*supervisor.Status, len(st.Renditions))
 	for _, r := range st.Renditions {
 		names[r.ID] = r.Name
+		rendProc[r.ID] = r.Process
 	}
 
 	// Indexed once instead of scanned twice per row. destByID is linear, and it
@@ -602,7 +607,11 @@ func (e *Engine) Status() Status {
 			// The Stream Deck's signals (destsignals.go). Additive fields, each
 			// absent while there is nothing to say.
 			ds.RestartStorm = destinationRestartStorm(ds.Process)
-			ds.DroppingFrames = destinationDropping(ds.Process, st.ingestConfigured, sourceLive)
+			var rend *supervisor.Status
+			if row.RenditionID != nil {
+				rend = rendProc[*row.RenditionID]
+			}
+			ds.DroppingFrames = droppingFramesFor(ds.Process, rend, st.ingestConfigured, sourceLive)
 			ds.AccountHealth = e.accountHealth(row)
 			ds.PlatformHealth = e.platformHealth(row, ds.Process)
 			if w := stallWarning(ds); w != "" {

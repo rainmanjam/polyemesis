@@ -14,7 +14,9 @@ its first tagged release.
   stream.** Beside the states it already showed, the key now shows:
   - **Reconnecting ×N**: more than five restarts in 15 minutes, the threshold of
     the restart-storm alert.
-  - **Dropping frames**.
+  - **Dropping frames**: for a destination fed by a rendition, or one that
+    re-encodes. A destination that passes its video straight through never
+    shows it.
   - **YouTube: poor**: YouTube's own stream-health verdict, for a destination
     with a connected account.
   - **Reconnect account** (red) or **Account expiring**.

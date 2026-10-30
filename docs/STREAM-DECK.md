@@ -248,7 +248,12 @@ The plugin makes no new requests for any of this. It reads every field from the
 - **Dropping frames.** Judged on a 10-second window, not on FFmpeg's cumulative
   count. A destination that dropped a burst at its start is not dropping now.
   Only dropped frames count. Duplicated frames mean the source is short of
-  frames, which is the source's problem, not the upload's.
+  frames, which is the source's problem, not the upload's. FFmpeg drops frames
+  only where it encodes. A destination copies its video, so the reading comes
+  from the rendition (shared encode) that feeds it, or from an expert-mode
+  destination that re-encodes. A destination that passes its source's video
+  straight through never shows this face. Its slowness shows as **Upload slow**
+  instead.
 - **Account.** The same state as the account chip in the destination dialog,
   from the same derivation. The status carries only the state word. The refresh
   error stays on `GET /platforms/accounts`, which needs an admin token.
@@ -257,9 +262,11 @@ The plugin makes no new requests for any of this. It reads every field from the
   destination that is delivering and has a connected account. A destination with
   a pasted key has no token to ask with. The read happens at most once every 5
   minutes per destination, and one read answers for every destination on the same
-  channel. One live destination spends about 288 of a project's 10,000 daily
-  quota units. `noData`, `ok` and `good` show nothing. In YouTube's order, `good`
-  is better than `ok`.
+  channel for 4 minutes, so a channel is read at most 360 times a day. Google
+  does not publish the quota cost of the Live Streaming reads. At the usual 1
+  unit per read, that is under 4% of a project's 10,000 daily units. These reads
+  are not counted in the chat pane's quota pacing. `noData`, `ok` and `good`
+  show nothing. In YouTube's order, `good` is better than `ok`.
 - **Twitch has no stream-health API,** so a Twitch destination never shows a
   platform face. Neither does Facebook, Kick or a custom RTMP target.
 - **Source.** Shown on every destination of the programme, not only on the

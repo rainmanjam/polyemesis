@@ -59,6 +59,42 @@ func TestYouTubeStreamHealthReadsEveryStreamOnTheChannelInOneListAndChangesNothi
 	}
 }
 
+// TestYouTubeStreamHealthReadsEveryPage: a stream on page two is judged, not
+// missing; and a channel past ytKeyPagesMax pages is an error, never a partial
+// answer that would leave some destinations silently unjudged.
+func TestYouTubeStreamHealthReadsEveryPage(t *testing.T) {
+	var log []capture
+	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"GET " + ytStreamsPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("pageToken") == "" {
+				_, _ = io.WriteString(w, `{"nextPageToken":"p2","items":[{"cdn":{"ingestionInfo":{"streamName":"k1"}},"status":{"healthStatus":{"status":"good"}}}]}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"items":[{"cdn":{"ingestionInfo":{"streamName":"k2"}},"status":{"healthStatus":{"status":"bad"}}}]}`)
+		},
+	})
+	got, err := y.StreamHealths(context.Background(), "cid", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[sha256.Sum256([]byte("k2"))].Status != "bad" || len(got) != 2 {
+		t.Fatalf("verdicts = %v, want both pages, k2 bad", got)
+	}
+
+	var endless []capture
+	y = ytScheduleStub(t, &endless, map[string]http.HandlerFunc{
+		"GET " + ytStreamsPath: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, `{"nextPageToken":"more","items":[]}`)
+		},
+	})
+	if _, err := y.StreamHealths(context.Background(), "cid", "tok"); err == nil {
+		t.Fatal("a channel with endless pages answered, want an error")
+	}
+	if len(endless) != ytKeyPagesMax {
+		t.Fatalf("%d pages read, want the bound of %d", len(endless), ytKeyPagesMax)
+	}
+}
+
 // TestOnlyYouTubeOffersStreamHealth: Twitch publishes no stream-health API, and
 // nor do Facebook or Kick in a form with a verdict. A platform that answered
 // would have to make one up.

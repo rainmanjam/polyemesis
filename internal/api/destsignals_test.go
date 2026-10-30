@@ -2,18 +2,17 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
-	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
@@ -156,28 +155,123 @@ func TestNoHealthReadForAPastedKeyOrAPlatformWithoutOne(t *testing.T) {
 	}
 }
 
-// TestTheStatusCarriesNoStreamKeyOrAccountDetail is the leak test for the two
-// account-backed fields as the read-scope status serialises them: the account
-// state word and the platform's codes, and none of the stream key, the access
-// token or the refresh error behind them.
-func TestTheStatusCarriesNoStreamKeyOrAccountDetail(t *testing.T) {
+// TestNoHealthReadWithAnotherPlatformsToken: a row whose account is on another
+// platform is one dropUnsendableSettings has not repaired yet; asking YouTube
+// with a Twitch token can only fail, or answer about the wrong channel.
+func TestNoHealthReadWithAnotherPlatformsToken(t *testing.T) {
 	acct := int64(5)
-	key := strings.Repeat("k", 4) + "-secret-key"
-	rows := map[int64]*db.Destination{1: {ID: 1, Platform: db.PlatformYouTube, StreamKey: key, AccountID: &acct}}
-	listed := strings.Replace(ytListedHealth, "key-a", key, 1)
-	k, _ := healthFixture(t, rows, listed)
-	ph, ok, err := k.StreamHealth(context.Background(), 1)
-	if err != nil || !ok {
-		t.Fatalf("ok=%v err=%v", ok, err)
+	rows := map[int64]*db.Destination{1: {ID: 1, Platform: db.PlatformYouTube, StreamKey: "key-a", AccountID: &acct}}
+	k, calls := healthFixture(t, rows, ytListedHealth)
+	k.token = func(context.Context, int64) (*db.PlatformAccount, error) {
+		return &db.PlatformAccount{ID: 5, Platform: db.PlatformTwitch, AccessToken: "tok"}, nil
 	}
-	ds := engine.DestStatus{ID: 1, AccountHealth: AccountHealthRefreshFailing, PlatformHealth: &ph}
-	raw, err := json.Marshal(ds)
+	if _, ok, err := k.StreamHealth(context.Background(), 1); ok || err != nil {
+		t.Fatalf("ok=%v err=%v, want not asked", ok, err)
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("%d platform reads with another platform's token, want 0", n)
+	}
+}
+
+// TestAKeyTheChannelDoesNotListIsNotJudged: no stream with this key on the
+// channel means YouTube has said nothing about this destination.
+func TestAKeyTheChannelDoesNotListIsNotJudged(t *testing.T) {
+	acct := int64(5)
+	rows := map[int64]*db.Destination{1: {ID: 1, Platform: db.PlatformYouTube, StreamKey: "key-elsewhere", AccountID: &acct}}
+	k, _ := healthFixture(t, rows, ytListedHealth)
+	if _, ok, err := k.StreamHealth(context.Background(), 1); ok || err != nil {
+		t.Fatalf("ok=%v err=%v, want unjudged", ok, err)
+	}
+}
+
+// TestAReadTokensStatusCarriesTheAccountStateAndNothingBehindIt is the leak
+// test for DestStatus.AccountHealth, end to end through GET /status with a
+// read-scoped token: the state word arrives, and none of what it was derived
+// from does -- not the refresh error, not the account's name, not its tokens,
+// not the destination's stream key. Every sentinel is built at runtime.
+//
+// MUTATION: blank `ds.AccountHealth = e.accountHealth(row)` in the engine's
+// Status. Observed: FAIL here, "the status does not carry the account's state".
+// The whitelist's half is TestOnlyAStateWordCanReachTheStatus: with
+// engine.accountHealth's default arm returning h, it FAILs with the refresh
+// error on the status.
+func TestAReadTokensStatusCarriesTheAccountStateAndNothingBehindIt(t *testing.T) {
+	s, h, store, sign := engineServer(t, defaultTools(), Options{})
+	mark := strconv.FormatInt(time.Now().UnixNano(), 36)
+	refreshErr := "refresh-refused-" + mark
+	acctName := "channel-" + mark
+	access := "access-" + mark
+	refresh := "refresh-" + mark
+	streamKey := "streamkey-" + mark
+	acct, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformYouTube, AccountName: acctName, AccountRef: "ref-" + mark,
+		AccessToken: access, RefreshToken: refresh, ExpiresAt: time.Now().Add(time.Hour), ScopeVer: 8,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{key, "tok", "invalid_grant"} {
-		if strings.Contains(string(raw), secret) {
-			t.Fatalf("the destination status carries %q: %s", secret, raw)
+	s.acctHealth.fail(acct.ID, errors.New(refreshErr), time.Now())
+	one := int64(1)
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube, URL: "rtmp://a.rtmp.youtube.com/live2",
+		StreamKey: streamKey, AccountID: &acct.ID, SourceID: &one,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// What main.go does; the test server is built without it.
+	s.mgr.SetAccountHealth(s.AccountHealth())
+	if err := s.mgr.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	read := createScopedToken(t, h, sign, "deck", db.ScopeRead)
+
+	r := jsonRequest(t, http.MethodGet, "/api/v1/status", nil)
+	bearer(read)(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /status = %d to a read token", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"accountHealth":"refreshFailing"`) {
+		t.Fatalf("the status does not carry the account's state: %s", body)
+	}
+	for _, secret := range []string{refreshErr, acctName, access, refresh, streamKey} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("GET /status handed a read token %q", secret)
+		}
+	}
+}
+
+// leakyAccountHealth answers with whatever it is given, to prove the engine's
+// whitelist is what keeps a non-state value off the status.
+type leakyAccountHealth string
+
+func (l leakyAccountHealth) AccountHealth(int64) string { return string(l) }
+
+// TestOnlyAStateWordCanReachTheStatus: a reader that returned something other
+// than a state word -- a refresh error, say -- is not passed through.
+func TestOnlyAStateWordCanReachTheStatus(t *testing.T) {
+	s, _, store, _ := engineServer(t, defaultTools(), Options{})
+	acct, err := store.UpsertPlatformAccount(s.box, &db.PlatformAccount{
+		Platform: db.PlatformYouTube, AccountName: "n", AccountRef: "r", AccessToken: "a", ScopeVer: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := int64(1)
+	if _, err := store.CreateDestination(&db.Destination{
+		Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube, URL: "rtmp://a.rtmp.youtube.com/live2",
+		StreamKey: "k", AccountID: &acct.ID, SourceID: &one,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.mgr.SetAccountHealth(leakyAccountHealth("invalid_grant: token revoked"))
+	if err := s.mgr.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range s.mgr.DestinationStatuses() {
+		if d.AccountHealth != "" {
+			t.Fatalf("accountHealth = %q: a non-state value reached the status", d.AccountHealth)
 		}
 	}
 }
