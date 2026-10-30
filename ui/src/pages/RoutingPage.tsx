@@ -535,27 +535,6 @@ export function RoutingPage() {
   // turned off.
   const blockingError = liveError || (vodProfile ? vodError : "");
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (list.length === 0) {
-    return (
-      <div className="p-3">
-        <PageHeader title={t("route.title")} />
-        <Card>
-          <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
-            Add a destination first — routing is configured per destination.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   /* A4: the Overview tab. Its rows read the same routing the editor edits: the
      live draft for the selected destination, and each other destination's stored
      mixes. A cell edit goes through `patch`, the path the Simple view uses, so the
@@ -605,6 +584,27 @@ export function RoutingPage() {
     const roles = [...new Set([...(vodProfile.excludeRoles ?? []), "music" as TrackRole])];
     patchVod({ excludeRoles: roles });
   }, [vodProfile, patchVod]);
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (list.length === 0) {
+    return (
+      <div className="p-3">
+        <PageHeader title={t("route.title")} />
+        <Card>
+          <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
+            Add a destination first — routing is configured per destination.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-3">
