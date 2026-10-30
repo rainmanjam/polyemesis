@@ -99,6 +99,7 @@ import {
   type ReadState,
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
+import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import type {
   AcmeCheckId,
   AcmeCheckStatus,
@@ -1316,6 +1317,13 @@ function PipelineSettings({
                   />
                 </div>
               )}
+
+              <DegradedLinkSettings
+                value={draft.failover?.degraded}
+                onChange={(degraded) =>
+                  setDraft({ ...draft, failover: { ...draft.failover, enabled: true, degraded } })
+                }
+              />
 
               <div className="flex items-center justify-between">
                 <Label htmlFor="fo-slate">{t("set.showSlate")}</Label>

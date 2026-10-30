@@ -71,6 +71,10 @@ type sourceView struct {
 	// keeps `link` meaning exactly what it meant before, which is what stops
 	// this from being a breaking change to every existing consumer.
 	RTMPLink *rtmpserver.LinkStats `json:"rtmpLink,omitempty"`
+	// Degraded is set while this programme's primary link is judged degraded
+	// by degraded-link failover (#6): the measured explanation, e.g. "bitrate
+	// 640 kbps below 800 kbps for 5s". Selector text, never an encoder's.
+	Degraded string `json:"degraded,omitempty"`
 	// Destinations and Renditions are what a delete would take with it.
 	//
 	// Counts rather than prose, and computed server-side rather than guessed by
@@ -177,7 +181,14 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
+	degraded := ""
+	if s.mgr != nil {
+		if fo := s.mgr.Engine(src.ID).Failover(); fo != nil {
+			degraded = fo.Degraded
+		}
+	}
 	view := sourceView{
+		Degraded:       degraded,
 		Publishing:     publishing,
 		Link:           link,
 		RTMPLink:       rtmpLink,

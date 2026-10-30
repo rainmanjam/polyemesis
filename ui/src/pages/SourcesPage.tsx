@@ -742,9 +742,31 @@ export function SourceCard({
               <Activity className="h-3 w-3" /> {t("sources.publishing")}
             </span>
             <span className="font-mono text-sm text-muted-foreground">{source.link.peer}</span>
+            <span className="tnum font-mono text-sm">
+              {t("sources.bitrate")} {Math.round(source.link.bitrateKbps ?? 0)} kbps
+            </span>
             <span className="tnum font-mono text-sm">{t("sources.rtt")} {source.link.rttMs.toFixed(1)} ms</span>
-            <span className="tnum font-mono text-sm">{t("sources.loss")} {source.link.lossPackets}</span>
+            {/* Packets lost since connect, and the share lost over the last
+                interval: the first says the link has history, the second says
+                whether it is breaking up NOW, which is what failover reads. */}
+            <span className="tnum font-mono text-sm">
+              {t("sources.loss")} {source.link.lossPackets} ({(source.link.lossPercent ?? 0).toFixed(1)}%)
+            </span>
             <span className="tnum font-mono text-sm">{t("sources.retrans")} {source.link.retransPackets}</span>
+          </div>
+        )}
+
+        {source.degraded && (
+          /* Degraded-link failover (#6) judged this programme's primary link
+             degraded. Shown even when nothing switched -- with no backup or
+             slate the primary stays on air, and this is how the operator
+             learns the uplink is breaking up. */
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-sm"
+          >
+            <span className="font-semibold uppercase tracking-wider text-warn">{t("sources.degraded")}</span>
+            <span className="font-mono text-muted-foreground">{source.degraded}</span>
           </div>
         )}
 

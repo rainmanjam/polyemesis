@@ -1113,6 +1113,12 @@ export interface FailoverStatus {
   slateEnabled: boolean;
   feed?: ProcessStatus | null;
   backup?: ProcessStatus | null;
+  /** Set while the primary's link is judged degraded: the measured
+   *  explanation, e.g. "bitrate 640 kbps below 800 kbps for 5s". Present even
+   *  when the primary stayed on air because there was nowhere to switch to. */
+  degraded?: string;
+  /** Present while degraded-link failover is on. */
+  primaryLink?: LinkReading;
 }
 
 /** peak[track][channel] and rms[track][channel], in dBFS. */
@@ -1216,7 +1222,13 @@ export interface SourceView extends Source {
     rttMs: number;
     lossPackets: number;
     retransPackets: number;
+    /** Over the last interval; 0 until one has elapsed. */
+    bitrateKbps: number;
+    lossPercent: number;
   };
+  /** Degraded-link explanation for this programme's primary, when judged
+   *  degraded. See FailoverStatus.degraded. */
+  degraded?: string;
   /** Uplink for a source on the RTMP listener, when a publisher is connected.
    *  TCP has no RTT or loss to report, so only who and since are here. */
   rtmpLink?: {
@@ -1543,6 +1555,29 @@ export interface FailoverSettings {
   /** A file playlist as a failover candidate beside the slate: something that
    *  plays, rather than something that just holds. */
   playlist?: PlaylistSettings;
+  /** Degraded-link failover (#6): leave a primary that is still delivering,
+   *  but delivering badly. */
+  degraded?: DegradedSettings;
+}
+
+/** Link-health thresholds. Each is independent and 0 switches it off. RTT and
+ *  loss are measured for SRT and SRTLA primaries only; an RTMP or pull primary
+ *  is judged on bitrate alone. */
+export interface DegradedSettings {
+  enabled: boolean;
+  minBitrateKbps?: number;
+  maxRttMs?: number;
+  maxLossPercent?: number;
+  /** How long a breach -- and a recovery -- must last. 0 means the default. */
+  sustainSeconds?: number;
+}
+
+/** The primary's last measurement. Each figure is absent until measured, and
+ *  RTT and loss are absent for an RTMP or pull primary: absent is not zero. */
+export interface LinkReading {
+  bitrateKbps?: number;
+  rttMs?: number;
+  lossPercent?: number;
 }
 
 // -------------------------------------------------------------------- mqtt
@@ -3336,7 +3371,10 @@ export type HookTrigger =
   /** Polyemesis stopped retrying a destination after repeated quick
    *  rejections; nothing happens until Retry. Sent once per hold, after the
    *  destination's down if it was live. */
-  | "destination.held";
+  | "destination.held"
+  /** A programme's source selector put another source on air. A switch caused
+   *  by a degraded link has a reason starting "degraded: ". */
+  | "failover.switched";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot
