@@ -323,6 +323,14 @@ func (d *destination) readHub(fallback *relay.Hub) *relay.Hub {
 func (e *Engine) delayDue(id int64, dd *destDelay) {
 	e.mu.Lock()
 	dd.due = true
+	// The shutdown latch, as every publish site reads it: an engine that has
+	// stopped starts nothing (#631). Stop has already taken this destination
+	// and retired its processes, so this is belt and braces -- and it is what
+	// TestEveryProcessIsPublishedUnderTheShutdownLatch requires of a Start.
+	if e.stopped {
+		e.mu.Unlock()
+		return
+	}
 	d := e.dests[id]
 	if d == nil || d.delay != dd {
 		d = e.draining[id]
@@ -422,6 +430,30 @@ func (e *Engine) CutDelay(id int64) bool {
 		time.Sleep(25 * time.Millisecond)
 	}
 	return true
+}
+
+// attachDelay feeds a just-published delayed destination's line from its
+// upstream hub. On failure the destination is taken back out and torn down.
+func (e *Engine) attachDelay(row *db.Destination, d *destination, upstream *relay.Hub) error {
+	if err := d.delay.attach(upstream); err != nil {
+		e.unpublishDest(row.ID, d)
+		e.teardownDest(d)
+		return err
+	}
+	e.log.Info("destination buffering its broadcast delay", "dest", row.Name,
+		"delay", time.Duration(row.DelaySeconds)*time.Second)
+	e.streamDelay(row, d.delay, DelayBuffering, "")
+	return nil
+}
+
+// unpublishDest takes a destination that startDest has just published back
+// out of the running set, if it is still the one there.
+func (e *Engine) unpublishDest(id int64, d *destination) {
+	e.mu.Lock()
+	if e.dests[id] == d {
+		delete(e.dests, id)
+	}
+	e.mu.Unlock()
 }
 
 // DelayStatus is a delayed destination's buffer on the status payload.
@@ -564,7 +596,12 @@ type drainRegistry struct {
 
 func newDrainRegistry() *drainRegistry { return &drainRegistry{by: map[int64]*Engine{}} }
 
+// Nil-safe throughout: an Engine built as a literal (tests) has none, and has
+// nothing draining that another engine could need to know about.
 func (r *drainRegistry) add(id int64, e *Engine) {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	r.by[id] = e
 	r.mu.Unlock()
@@ -572,6 +609,9 @@ func (r *drainRegistry) add(id int64, e *Engine) {
 
 // remove forgets id, but only if e is the engine that registered it.
 func (r *drainRegistry) remove(id int64, e *Engine) {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	if r.by[id] == e {
 		delete(r.by, id)
@@ -580,6 +620,9 @@ func (r *drainRegistry) remove(id int64, e *Engine) {
 }
 
 func (r *drainRegistry) owner(id int64) *Engine {
+	if r == nil {
+		return nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.by[id]

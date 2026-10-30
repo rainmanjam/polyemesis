@@ -1233,23 +1233,13 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// A new child supersedes whatever the previous one's stop failed to observe:
 	// the warning is about THIS destination's current situation, not a log.
 	e.noteStopOutcome(row.ID, nil)
-	if dd != nil {
-		// NOT proc.Start(). The line is fed from here on, and delayDue starts
-		// the child when the first delayed datagram is about to come out.
-		if err := dd.attach(hub); err != nil {
-			e.mu.Lock()
-			if e.dests[row.ID] == published {
-				delete(e.dests, row.ID)
-			}
-			e.mu.Unlock()
-			e.teardownDest(published)
-			return err
-		}
-		e.log.Info("destination buffering its broadcast delay", "dest", row.Name,
-			"delay", time.Duration(row.DelaySeconds)*time.Second)
-		e.streamDelay(row, dd, DelayBuffering, "")
-	} else {
+	if dd == nil {
 		proc.Start()
+	} else if err := e.attachDelay(row, published, hub); err != nil {
+		// NOT proc.Start() for a delayed one: the line is fed from here on,
+		// and delayDue starts the child when the first delayed datagram is
+		// about to come out.
+		return err
 	}
 	// SPAWNED, NOT PUBLISHING, and the wording now says so.
 	//
