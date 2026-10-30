@@ -61,7 +61,7 @@ function withoutLevels(profile: unknown): string {
     }
     if (typeof v === "object") {
       const out: Record<string, unknown> = {};
-      for (const k of Object.keys(v as object).sort()) {
+      for (const k of Object.keys(v as object).sort((a, b) => a.localeCompare(b))) {
         if (key === "tracks" && (k === "gain" || k === "muted")) continue;
         // `key` names the array an object sits in, so a track row (inside
         // "tracks") is the one whose gain and mute are dropped above.

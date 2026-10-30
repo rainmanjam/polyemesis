@@ -422,7 +422,6 @@ export function MeterScale({ className, range }: { className?: string; range?: D
   // -12 and -14 sit 2 dB apart: about 3% of the ruler, so their 9px numbers collide.
   // The streaming reference keeps its number; -12 keeps its tick on the bar.
   const showNumber = (m: number) => !(m === -12 && marks.includes(STREAMING_REFERENCE_DB));
-  const isBreak = (m: number) => ZONE_BREAKS.includes(m);
   return (
     <div className={cn("relative h-4 w-full select-none", className)}>
       {marks.map((m) => {
@@ -430,10 +429,7 @@ export function MeterScale({ className, range }: { className?: string; range?: D
         return (
           <div
             key={m}
-            className={cn(
-              "absolute top-0 font-mono text-[9px] leading-none",
-              isBreak(m) ? "text-muted-foreground" : "text-muted-foreground",
-            )}
+            className="absolute top-0 font-mono text-[9px] leading-none text-muted-foreground"
             style={{
               left: `${left}%`,
               transform:

@@ -12,7 +12,7 @@ const KEEP = /^streamdeck\.(pi|auth|err)\./;
 /** The full source of ui/strings.js, built from the catalogs. Deterministic: the test compares it to the committed file. */
 export function inspectorCatalogSource() {
   const catalogs = {};
-  for (const file of readdirSync(LOCALES).filter((f) => f.endsWith(".json")).sort()) {
+  for (const file of readdirSync(LOCALES).filter((f) => f.endsWith(".json")).sort((a, b) => a.localeCompare(b))) {
     const locale = basename(file, ".json");
     const all = JSON.parse(readFileSync(join(LOCALES, file), "utf8"));
     catalogs[locale] = Object.fromEntries(Object.entries(all).filter(([k]) => KEEP.test(k)).sort(([a], [b]) => (a < b ? -1 : 1)));

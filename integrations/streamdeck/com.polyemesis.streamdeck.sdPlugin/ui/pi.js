@@ -72,7 +72,7 @@
     const dest = Number(isTrackAction() ? savedDestinationId : $("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
     // Number("") is 0, which is a real track: an unchosen track saves nothing.
-    const track = savedTrack === "" ? NaN : Number(savedTrack);
+    const track = savedTrack === "" ? Number.NaN : Number(savedTrack);
     if (isTrackAction() && Number.isSafeInteger(track) && track >= 0) payload.track = track;
     if ($("presetId").value) payload.presetId = $("presetId").value;
     savedPresetId = $("presetId").value;
