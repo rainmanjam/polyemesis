@@ -209,14 +209,18 @@ describe("TrackRows live gain from the keyboard", () => {
     // Busy from the first key press, before anything is sent.
     expect(mute().getAttribute("aria-disabled")).toBe("true");
     await debounce();
+    // A second level is gathered but not yet sent when the first answers.
     await press();
-    await debounce();
     await g.answer();
-    // The first answer is back, the second level is out: not idle yet.
     expect(mute().getAttribute("aria-disabled")).toBe("true");
     expect(slider().getAttribute("aria-valuenow")).toBe("0.9");
     await act(async () => fireEvent.click(mute()));
     expect(l.onMute).not.toHaveBeenCalled();
+    // Sent, and still busy while it is out.
+    await debounce();
+    expect(g.onGain).toHaveBeenCalledTimes(2);
+    expect(mute().getAttribute("aria-disabled")).toBe("true");
+    expect(slider().getAttribute("aria-valuenow")).toBe("0.9");
     await g.answer();
     expect(mute().getAttribute("aria-disabled")).toBeNull();
   });
