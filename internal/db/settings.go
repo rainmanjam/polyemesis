@@ -120,6 +120,18 @@ type IngestSettings struct {
 	// omitempty so a settings blob written before roles existed round-trips
 	// byte-identically.
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
+	// Degraded is this programme's link-health thresholds for degraded-link
+	// failover (#6): leave a primary that is still delivering, but badly.
+	//
+	// ON THE INGEST, NOT ON FAILOVER, BECAUSE IT IS PER PROGRAMME. Failover's
+	// own settings are install-wide; an ingest block is stored per source, and
+	// link quality is a property of one encoder's uplink -- a bonded cellular
+	// rig and a studio fibre line on the same install want different floors.
+	// The selector reads it from the programme's own ingest.
+	//
+	// A zero value is "off, with no thresholds": it validates, and it is what
+	// a row from before #6 decodes to.
+	Degraded DegradedSettings `json:"degraded"`
 }
 
 // problems reports everything wrong with one ingest configuration.
@@ -197,6 +209,7 @@ func (i IngestSettings) problems() []string {
 		add("rtmp app name is required (it is the /live in the publish URL; " +
 			"the source is addressed by its token, not by this)")
 	}
+	probs = append(probs, i.Degraded.problems()...)
 	return probs
 }
 
@@ -657,9 +670,6 @@ type FailoverSettings struct {
 	// its own top-level section, because it is one more answer to the same
 	// question the slate answers -- what feeds the hub when nothing else does.
 	Playlist PlaylistSettings `json:"playlist"`
-	// Degraded is link-health failover (#6): leave a primary that is still
-	// delivering, but delivering badly, instead of waiting for it to stop.
-	Degraded DegradedSettings `json:"degraded"`
 }
 
 // DegradedSettings are a programme's link-health thresholds.
@@ -697,6 +707,16 @@ const (
 	MaxDegradedBitrateKbps        = 200_000
 	MaxDegradedRTTMs              = 10_000
 )
+
+// DefaultDegradedSettings is the thresholds a programme starts with: off.
+func DefaultDegradedSettings() DegradedSettings {
+	return DegradedSettings{
+		MinBitrateKbps: 800,
+		MaxRTTMs:       1500,
+		MaxLossPercent: 15,
+		SustainSeconds: DefaultDegradedSustainSeconds,
+	}
+}
 
 // Sustain is SustainSeconds with the zero value resolved.
 func (d DegradedSettings) Sustain() int {
@@ -863,7 +883,6 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	if t := f.ReturnStableSeconds; t < 0 || t > MaxFailoverReturnStable {
 		add("failover return delay %ds out of range (0-%d)", t, MaxFailoverReturnStable)
 	}
-	probs = append(probs, f.Degraded.problems()...)
 
 	b := f.Backup
 	switch b.Mode {
@@ -2078,6 +2097,11 @@ func DefaultSettings() Settings {
 			// grandfather clause from ever colliding with a source created
 			// afterwards.
 			RTMP: RTMPSettings{App: "live"},
+			// Off, with thresholds already filled in so switching it on is one
+			// tick: 800 kbps is where a 720p30 picture visibly falls apart, and
+			// the RTT and loss figures are the ones IRL cellular links cross
+			// when they are about to drop.
+			Degraded: DefaultDegradedSettings(),
 			Pull: PullSettings{
 				ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -2139,16 +2163,6 @@ func DefaultSettings() Settings {
 			GraceSeconds:        5,
 			Return:              FailoverReturnManual,
 			ReturnStableSeconds: 30,
-			// Off, like the rest of the tier, with thresholds already filled in
-			// so switching it on is one tick: 800 kbps is where a 720p30 picture
-			// visibly falls apart, and the RTT and loss figures are the ones
-			// IRL cellular links cross when they are about to drop.
-			Degraded: DegradedSettings{
-				MinBitrateKbps: 800,
-				MaxRTTMs:       1500,
-				MaxLossPercent: 15,
-				SustainSeconds: DefaultDegradedSustainSeconds,
-			},
 			Backup: BackupIngestSettings{
 				Enabled: false,
 				Mode:    IngestSRT,

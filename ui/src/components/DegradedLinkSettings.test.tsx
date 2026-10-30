@@ -49,6 +49,20 @@ describe("DegradedLinkSettings", () => {
     const value: DegradedSettings = { enabled: true, minBitrateKbps: 1234 };
     render(<DegradedLinkSettings value={value} onChange={onChange} />);
     fireEvent.click(screen.getByRole("switch"));
-    expect(onChange).toHaveBeenLastCalledWith({ enabled: false, minBitrateKbps: 1234 });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false, minBitrateKbps: 1234 }),
+    );
+  });
+
+  /* A programme saved before #6 has no thresholds stored. Switching it on must
+   * send the numbers the form shows, or the server refuses a save whose four
+   * thresholds are all zero. */
+  it("switching on with nothing stored sends the defaults it was showing", () => {
+    const onChange = vi.fn<(next: DegradedSettings) => void>();
+    render(<DegradedLinkSettings value={undefined} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onChange).toHaveBeenLastCalledWith({
+      enabled: true, minBitrateKbps: 800, maxRttMs: 1500, maxLossPercent: 15, sustainSeconds: 5,
+    });
   });
 });

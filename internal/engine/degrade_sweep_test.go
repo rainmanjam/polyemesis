@@ -27,7 +27,7 @@ import (
 // window, so a test drives a trip in a few simulated seconds.
 func degradedSettings() db.Settings {
 	s := failoverOnSettings()
-	s.Failover.Degraded = db.DegradedSettings{Enabled: true, MinBitrateKbps: 800, SustainSeconds: 2}
+	s.Ingest.Degraded = db.DegradedSettings{Enabled: true, MinBitrateKbps: 800, SustainSeconds: 2}
 	return s
 }
 
@@ -202,7 +202,7 @@ func TestManualReturnStaysOnTheBackupAfterADegradedLinkClears(t *testing.T) {
 // with a healthy bitrate but a collapsing round trip is degraded too.
 func TestAHighRTTFromTheSRTProbeTripsAPrimaryWithAHealthyBitrate(t *testing.T) {
 	s := degradedSettings()
-	s.Failover.Degraded.MaxRTTMs = 500
+	s.Ingest.Degraded.MaxRTTMs = 500
 	e := failoverEngine(t)
 	e.linkProbe = func(id int64, backup bool) (linkHealth, bool) {
 		if id != e.sourceID || backup {
@@ -235,7 +235,7 @@ func TestAHighRTTFromTheSRTProbeTripsAPrimaryWithAHealthyBitrate(t *testing.T) {
 // slow one, exactly as before #6.
 func TestDegradedLinkFailoverOffLeavesASlowPrimaryOnAir(t *testing.T) {
 	s := degradedSettings()
-	s.Failover.Degraded.Enabled = false
+	s.Ingest.Degraded.Enabled = false
 	e, _ := startDegradedTier(t, s)
 	pace(t, e, time.Now(), 8*time.Second, 1, nil)
 	st := e.Failover()
@@ -352,5 +352,43 @@ func TestFixWithFailoverOffSaysThereIsNothingToRefresh(t *testing.T) {
 	setSettings(e, db.DefaultSettings())
 	if err := e.FixSource(); err == nil {
 		t.Fatal("!fix with failover off reported success")
+	}
+}
+
+// PER PROGRAMME, which is why the thresholds live on the ingest. Failover's
+// own settings are install-wide; each programme's ingest block is its own row,
+// and effectiveSettings lays it over the install's. Two programmes on one
+// install -- a bonded cellular rig and a studio line -- get their own floors.
+//
+// Mutation: effectiveSettings, delete `settings.Ingest = src.Ingest`. Expected
+// to fail: both engines read the install-wide default.
+func TestEachProgrammeReadsItsOwnDegradedThresholds(t *testing.T) {
+	e := failoverEngine(t)
+	irl := &db.Source{Name: "IRL", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	irl.Ingest.Mode = db.IngestSRT
+	irl.Ingest.Degraded = db.DegradedSettings{Enabled: true, MinBitrateKbps: 2500, SustainSeconds: 3}
+	if err := e.store.CreateSource(irl); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	studio := &db.Source{Name: "Studio", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	studio.Ingest.Mode = db.IngestSRT
+	studio.Ingest.Degraded = db.DegradedSettings{Enabled: false, MinBitrateKbps: 600}
+	if err := e.store.CreateSource(studio); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	read := func(id int64) db.DegradedSettings {
+		eng := &Engine{log: e.log, store: e.store, sourceID: id}
+		s, err := eng.effectiveSettings()
+		if err != nil {
+			t.Fatalf("effectiveSettings(%d): %v", id, err)
+		}
+		return s.Ingest.Degraded
+	}
+	if got := read(irl.ID); !got.Enabled || got.MinBitrateKbps != 2500 {
+		t.Errorf("the IRL programme reads %+v, want its own 2500 kbps, on", got)
+	}
+	if got := read(studio.ID); got.Enabled || got.MinBitrateKbps != 600 {
+		t.Errorf("the studio programme reads %+v, want its own 600 kbps, off", got)
 	}
 }

@@ -596,6 +596,15 @@ function IngestSettings({
             </>
           )}
 
+          {/* Degraded-link failover's thresholds (#6) are this programme's, so
+              they sit with its ingest. They take effect without a restart; see
+              docs/LINK-HEALTH.md. */}
+          <DegradedLinkSettings
+            idPrefix="ingest-degraded"
+            value={draft.ingest.degraded}
+            onChange={(degraded) => setDraft({ ...draft, ingest: { ...draft.ingest, degraded } })}
+          />
+
           {/* Saving ingest settings reconciles the ingest, which restarts the
               FFmpeg child and drops every viewer. That is sometimes exactly
               what an operator means to do -- so this is a warning stating the
@@ -1336,13 +1345,6 @@ function PipelineSettings({
                   />
                 </div>
               )}
-
-              <DegradedLinkSettings
-                value={draft.failover?.degraded}
-                onChange={(degraded) =>
-                  setDraft({ ...draft, failover: { ...draft.failover, enabled: true, degraded } })
-                }
-              />
 
               <div className="flex items-center justify-between">
                 <Label htmlFor="fo-slate">{t("set.showSlate")}</Label>

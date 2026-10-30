@@ -663,16 +663,23 @@ function signatureOf(shot: Shot): string {
  *  something somebody decided rather than a hole that opened. The population is
  *  small and it is entirely switches: the copy-paste this pass exists to catch
  *  lives in repeated TEXT blocks, and every one of those is still checked. */
+/** A control's key with any fingerprint string normalised, so a REFORMATS entry
+ *  naming a control by its fingerprinted label survives leaves being added
+ *  elsewhere in Settings -- which renumbers every fingerprint after them. */
+function reformatKey(key: string): string {
+  return key.replace(/zz[qr]\d+/g, "zzq#");
+}
+
 const REFORMATS: Record<string, string> = {
   "Recordings #rec-enabled": "save-through: onCheckedChange calls saveRecording, no local draft",
   "Recordings #rec-stems": "save-through: onCheckedChange calls saveRecording, no local draft",
   "Playout @Enable playout": "save-through: onCheckedChange calls savePlayoutSettings",
   "Playout @Serve viewers without a session": "save-through: onCheckedChange calls onSaveSettings",
   "Playout @Allow cross-origin playback": "save-through: onCheckedChange calls onSaveSettings",
-  // The suffix is the row's name leaf's fingerprint, which counts leaves in
-  // types.ts order: it moves whenever a leaf is added above playout (#6 added
-  // listeners.srtlaPort).
-  "Playout @Enable zzq42": "save-through: a rendition row's switch, saved on change",
+  // `zzq#` stands for the row's name-leaf fingerprint. The number counts
+  // leaves in types.ts order, so it moved every time a leaf was added above
+  // playout; see reformatKey.
+  "Playout @Enable zzq#": "save-through: a rendition row's switch, saved on change",
 };
 
 /** Controls the write pass cannot drive, with why.
@@ -1234,7 +1241,7 @@ describe("every settings leaf an operator is meant to change", () => {
     ).toBeGreaterThan(20);
 
     // TEMP PROBE
-    const unexplained = reverted.filter((k) => !(k in REFORMATS));
+    const unexplained = reverted.filter((k) => !(reformatKey(k) in REFORMATS));
     expect(
       unexplained,
       `these controls did not keep what was typed into them. A CONTROLLED input that ` +

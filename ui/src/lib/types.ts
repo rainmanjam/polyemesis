@@ -1306,6 +1306,10 @@ export interface Settings {
     rtmp: { app: string; streamKey: string };
     /** Optional so a client that predates pull can still PUT settings. */
     pull?: PullSettings;
+    /** This programme's degraded-link failover thresholds (#6). On the ingest
+     *  because it is per programme: failover itself is install-wide, but link
+     *  quality belongs to one encoder's uplink. */
+    degraded?: DegradedSettings;
   };
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
@@ -1574,9 +1578,6 @@ export interface FailoverSettings {
   /** A file playlist as a failover candidate beside the slate: something that
    *  plays, rather than something that just holds. */
   playlist?: PlaylistSettings;
-  /** Degraded-link failover (#6): leave a primary that is still delivering,
-   *  but delivering badly. */
-  degraded?: DegradedSettings;
 }
 
 /** The shared listeners. One SRT and one RTMP port serve every programme, told

@@ -71,8 +71,12 @@ between them, and `reload.go` is the authority for every number on this page.
 
 - **Ingest:** `ingest.mode`, the SRT and RTMP blocks, `ingest.pull.*`,
   `ingest.annotations.*` (which recompiles every routing graph).
+  `ingest.degraded.*`, the [degraded-link](LINK-HEALTH.md) thresholds, are the
+  exception: they are live, read by the failover sweep twice a second.
 - **Listeners:** `listeners.rtmpPort` is in the ingest child's argv.
-  `listeners.srtPort` **rebinds a shared socket**.
+  `listeners.srtPort` **rebinds a shared socket**, and so does
+  `listeners.srtlaPort`, the [SRTLA](SRTLA.md) receiver's port; moving the SRT
+  port also restarts the SRTLA receiver that forwards into it.
 - **Recorder:** `segmentSeconds`, `stems`, `stemCodec`, and `enabled`.
 - **Preview and playout:** every geometry, bitrate and muxer field.
 - **Renditions:** geometry, fps, bitrate, encoder, preset, GOP, deinterlace,

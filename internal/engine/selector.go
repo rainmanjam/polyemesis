@@ -927,7 +927,7 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) int {
 	grace := failoverGrace(s)
 	// Asked BEFORE e.mu: the probe takes the SRT listener's own lock, and
 	// nothing about one publisher's statistics needs the engine's.
-	deg := s.Failover.Degraded
+	deg := s.Ingest.Degraded
 	var link *linkHealth
 	if deg.Enabled && e.linkProbe != nil {
 		if lh, ok := e.linkProbe(e.sourceID, false); ok {
@@ -1046,7 +1046,7 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		grace:           failoverGrace(s),
 		autoReturn:      s.Failover.Return == db.FailoverReturnAuto,
 		returnStable:    time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
-		primaryDegraded: s.Failover.Degraded.Enabled && sel.degrade.tripped,
+		primaryDegraded: s.Ingest.Degraded.Enabled && sel.degrade.tripped,
 	}
 	degradedDetail := sel.degrade.detail
 	e.mu.Unlock()
@@ -2912,7 +2912,7 @@ func (e *Engine) Failover() *FailoverStatus {
 		SlateEnabled:  s.Failover.Slate.Enabled,
 		Degraded:      sel.degrade.detail,
 	}
-	if s.Failover.Degraded.Enabled {
+	if s.Ingest.Degraded.Enabled {
 		r := sel.degrade.last
 		st.PrimaryLink = &r
 	}

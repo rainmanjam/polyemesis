@@ -130,8 +130,9 @@ is what lets you write the alert before the first source exists.
 
 ### Failover and link health
 
-[Degraded-link failover](LINK-HEALTH.md#degraded-link-failover) adds four
-per-programme families, labelled `id` and `name` like the ingest series:
+[Degraded-link failover](LINK-HEALTH.md#degraded-link-failover) and the
+[SRTLA receiver](SRTLA.md) add five per-programme families, labelled `id` and
+`name` like the ingest series:
 
 - `polyemesis_failover_degraded` is 1 while the primary's link is judged
   degraded, and 0 otherwise. It is 0, not absent, for a programme with failover
@@ -144,6 +145,8 @@ per-programme families, labelled `id` and `name` like the ingest series:
   over the last interval (0–1). Only an SRT or SRTLA primary has them, and only
   while degraded-link failover is on. They are **absent**, not 0, otherwise:
   0 ms and 0% are claims about a link, and an RTMP primary has made none.
+- `polyemesis_srtla_links` is how many network links the programme's encoder
+  is bonding through the SRTLA receiver, and 0 when it is not bonding.
 
 ```promql
 polyemesis_failover_degraded == 1                           # a link is breaking up

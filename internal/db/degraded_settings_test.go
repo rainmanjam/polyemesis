@@ -12,7 +12,7 @@ import (
 // operator turning it on should not first have to design a form.
 func TestDegradedLinkFailoverShipsOffWithThresholdsThatValidate(t *testing.T) {
 	s := DefaultSettings()
-	d := s.Failover.Degraded
+	d := s.Ingest.Degraded
 	if d.Enabled {
 		t.Fatal("degraded-link failover is on by default; an upgrade would start switching sources nobody asked it to")
 	}
@@ -20,7 +20,7 @@ func TestDegradedLinkFailoverShipsOffWithThresholdsThatValidate(t *testing.T) {
 		t.Errorf("default thresholds %+v leave a check off; turning the feature on should be one switch", d)
 	}
 	s.Failover.Enabled = true
-	s.Failover.Degraded.Enabled = true
+	s.Ingest.Degraded.Enabled = true
 	if err := s.Validate(); err != nil {
 		t.Errorf("the defaults with degraded-link failover switched on do not validate: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestASettingsRowFromBeforeDegradedLinkFailoverStillValidates(t *testing.T) 
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	delete(m["failover"].(map[string]any), "degraded")
+	delete(m["ingest"].(map[string]any), "degraded")
 	raw, _ = json.Marshal(m)
 	var old Settings
 	if err := json.Unmarshal(raw, &old); err != nil {
@@ -51,7 +51,7 @@ func TestASettingsRowFromBeforeDegradedLinkFailoverStillValidates(t *testing.T) 
 	if err := old.Validate(); err != nil {
 		t.Fatalf("a pre-#6 settings row no longer validates: %v", err)
 	}
-	if got := old.Failover.Degraded.Sustain(); got != DefaultDegradedSustainSeconds {
+	if got := old.Ingest.Degraded.Sustain(); got != DefaultDegradedSustainSeconds {
 		t.Errorf("a zero sustain resolved to %ds, want the default %ds", got, DefaultDegradedSustainSeconds)
 	}
 }
@@ -78,7 +78,7 @@ func TestDegradedLinkThresholdsRefuseWhatCannotMeanAnything(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := DefaultSettings()
-			tc.mut(&s.Failover.Degraded)
+			tc.mut(&s.Ingest.Degraded)
 			err := s.Validate()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Validate() = %v, want an error mentioning %q", err, tc.want)
@@ -93,7 +93,7 @@ func TestDegradedLinkThresholdsRefuseWhatCannotMeanAnything(t *testing.T) {
 func TestEachDegradedLinkThresholdCanBeSwitchedOffAlone(t *testing.T) {
 	s := DefaultSettings()
 	s.Failover.Enabled = true
-	s.Failover.Degraded = DegradedSettings{Enabled: true, MinBitrateKbps: 500}
+	s.Ingest.Degraded = DegradedSettings{Enabled: true, MinBitrateKbps: 500}
 	if err := s.Validate(); err != nil {
 		t.Errorf("bitrate-only thresholds do not validate: %v", err)
 	}

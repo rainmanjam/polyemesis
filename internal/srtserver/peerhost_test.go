@@ -22,7 +22,11 @@ func TestThePeerHostResolverKeepsOneBondedSendersGuessesFromLockingOutAnother(t 
 	s, addr := serve(t, tg)
 	var who atomic.Value
 	who.Store("attacker")
-	s.SetPeerHost(func(net.Addr) string { return who.Load().(string) })
+	var seen atomic.Value
+	s.SetPeerHost(func(a net.Addr) string {
+		seen.CompareAndSwap(nil, a)
+		return who.Load().(string)
+	})
 
 	for i := 0; i < authgate.Threshold; i++ {
 		if c, err := dial(t, addr, "not-a-real-token"); err == nil {
@@ -36,6 +40,16 @@ func TestThePeerHostResolverKeepsOneBondedSendersGuessesFromLockingOutAnother(t 
 			t.Fatal("the gate never blocked the resolved attacker host")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	// The Manager's resolver (engine.Manager.srtPeerHost) type-asserts the
+	// peer to *net.UDPAddr and asks the SRTLA receiver by its String(); if
+	// gosrt handed back anything else the rename would silently never happen.
+	ua, ok := seen.Load().(*net.UDPAddr)
+	if !ok {
+		t.Fatalf("the resolver was handed a %T, not a *net.UDPAddr", seen.Load())
+	}
+	if !ua.IP.IsLoopback() || ua.Port == 0 {
+		t.Errorf("the resolver was handed %v, want this dialler's loopback address and port", ua)
 	}
 	if s.gate.Blocked("127.0.0.1") {
 		t.Fatal("the lockout landed on loopback, which every bonded encoder shares")

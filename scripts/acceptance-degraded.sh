@@ -29,6 +29,8 @@ IMAGE="${PREFIX}polyemesis:degraded"
 ENC_IMAGE="${PREFIX}encoder:degraded"
 CTR="${PREFIX}deg-server"
 ENC="${PREFIX}deg-encoder"
+BOND="${PREFIX}deg-bonded"
+SRTLA_IMAGE="${PREFIX}srtla-send:degraded"
 NET="${PREFIX}deg-net"
 VOL="${PREFIX}deg-data"
 PORT="${POLY_DEG_PORT:-18096}"
@@ -41,11 +43,11 @@ step() { printf "\n\033[1m%s\033[0m\n" "$1"; poly_step_record "$1"; }
 note() { printf "        %s\n" "$1"; }
 
 cleanup() {
-  docker rm -f "$ENC" "$CTR" >/dev/null 2>&1
+  docker rm -f "$BOND" "$ENC" "$CTR" >/dev/null 2>&1
   docker network rm "$NET" >/dev/null 2>&1
   docker volume rm "$VOL" >/dev/null 2>&1
   if [ "${KEEP_IMAGES:-0}" != 1 ]; then
-    docker rmi "$IMAGE" "$ENC_IMAGE" >/dev/null 2>&1
+    docker rmi "$IMAGE" "$ENC_IMAGE" "$SRTLA_IMAGE" >/dev/null 2>&1
   fi
 }
 trap 'poly_verdict_trap $? cleanup' EXIT
@@ -136,6 +138,45 @@ if wait_for "the primary back after the loss clears" 60 '[[ "$S" =~ ^primary\ tr
   ok "primary back after the loss cleared: $S"
 else
   bad "the primary did not come back after the loss cleared"
+fi
+
+# ------------------------------------------------------------------ srtla
+# The integrated SRTLA path: BELABOX's reference srtla_send bonding over two
+# source addresses into the polyemesis CONTAINER's own receiver, which hands
+# the session to its SRT listener under the programme's token. srtla_send runs
+# in the server's network namespace, so its two links are 127.0.0.1 and
+# 127.0.0.2 -- two distinct peers to the receiver with no routing between
+# Docker networks to get wrong.
+step "7. A bonded encoder (srtla_send, two links) publishes through the SRTLA receiver"
+docker rm -f "$ENC" >/dev/null 2>&1
+if docker build -q -t "$SRTLA_IMAGE" "$SCRIPTS/srtla-interop" >/dev/null 2>&1; then
+  ok "srtla_send image built (BELABOX srtla, pinned in scripts/srtla-interop/Dockerfile)"
+  if drive srtla 5000 >/dev/null; then ok "SRTLA receiver on 5000/udp"; else bad "could not set the SRTLA port"; fi
+  docker run -d --name "$BOND" --network "container:$CTR" --entrypoint sh "$SRTLA_IMAGE" -c \
+    "printf '127.0.0.1\n127.0.0.2\n' >/tmp/ips
+     srtla_send 7000 127.0.0.1 5000 /tmp/ips >/tmp/send.log 2>&1 &
+     sleep 2
+     exec ffmpeg -hide_banner -loglevel error -nostdin -re -f lavfi -i testsrc=size=1280x720:rate=30 \
+       -c:v mpeg2video -b:v 3M -maxrate 3M -bufsize 2M -f mpegts \
+       'srt://127.0.0.1:7000?streamid=$TOKEN&pkt_size=1316&latency=500000'" >/dev/null
+  B=""
+  for _ in $(seq 1 40); do
+    B="$(drive bonded 2>/dev/null)"
+    [ "$B" = "true 2" ] && break
+    sleep 1
+  done
+  if [ "$B" = "true 2" ]; then
+    ok "the programme is publishing over 2 bonded links (/sources: $B)"
+  else
+    bad "the bonded encoder never showed as publishing over 2 links (last: '$B')"
+  fi
+  if wait_for "the bonded primary on air" 30 '[[ "$S" =~ ^primary\ true\ [0-9]+\|\| ]]'; then
+    ok "the bonded primary is on air and not degraded: $S"
+  else
+    bad "the bonded primary did not go on air"
+  fi
+else
+  bad "could not build the srtla_send image"
 fi
 
 printf "\n%d passed, %d failed\n" "$pass" "$fail"

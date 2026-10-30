@@ -13,7 +13,7 @@ its first tagged release.
 - **Degraded-link failover.** Failover can now leave a primary that is still
   connected but failing. Set a bitrate floor, an RTT ceiling and a loss ceiling
   (RTT and loss for SRT and SRTLA encoders only), and how long a breach must
-  last. The backup, the playlist or the slate then goes on air, and the reason
+  last, per programme on its ingest settings. The backup, the playlist or the slate then goes on air, and the reason
   starts `degraded: ` and says what was measured. The link must read healthy
   for the same time before it counts as recovered, and your return rule then
   applies. Off by default. The reason reaches status, the timeline, the events

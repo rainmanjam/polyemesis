@@ -44,6 +44,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
+import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
@@ -614,6 +615,14 @@ export function SourceCard({
             </>
           )}
         </div>
+
+        {/* This programme's degraded-link thresholds (#6), with its ingest:
+            link quality is a property of one encoder's uplink. */}
+        <DegradedLinkSettings
+          idPrefix={`source-${source.id}-degraded`}
+          value={ing.degraded}
+          onChange={(degraded) => setIngest({ degraded })}
+        />
 
         {phase === "waiting" && <WaitingForEncoder />}
 

@@ -11,16 +11,30 @@ import type { DegradedSettings } from "@/lib/types";
  *  line rather than five fields of state plumbing. The defaults shown match the
  *  server's (internal/db DefaultSettings), so a fresh install that ticks the
  *  switch sees the numbers it will actually get. */
+/** The server's defaults (internal/db DefaultDegradedSettings). */
+const DEFAULTS: Required<Omit<DegradedSettings, "enabled">> = {
+  minBitrateKbps: 800,
+  maxRttMs: 1500,
+  maxLossPercent: 15,
+  sustainSeconds: 5,
+};
+
 export function DegradedLinkSettings({
   value,
   onChange,
+  idPrefix = "degraded",
 }: {
   value: DegradedSettings | undefined;
   onChange: (next: DegradedSettings) => void;
+  /** Distinguishes the controls when several programmes' cards share a page. */
+  idPrefix?: string;
 }) {
   const t = useT();
   const v: DegradedSettings = value ?? { enabled: false };
-  const set = (patch: Partial<DegradedSettings>) => onChange({ ...v, ...patch });
+  // Every change sends the thresholds the form is SHOWING, defaults included,
+  // so a programme saved before #6 -- which has no thresholds stored -- does
+  // not switch on with all four at zero and get refused for it.
+  const set = (patch: Partial<DegradedSettings>) => onChange({ ...DEFAULTS, ...v, ...patch });
   const num = (field: keyof Omit<DegradedSettings, "enabled">, id: string, label: string, fallback: number, step?: number) => (
     <div className="flex flex-col gap-1">
       <Label htmlFor={id}>{label}</Label>
@@ -37,20 +51,17 @@ export function DegradedLinkSettings({
   return (
     <div className="flex flex-col gap-3 rounded-md border border-border p-3">
       <div className="flex items-center justify-between">
-        <Label htmlFor="fo-degraded">{t("set.degraded")}</Label>
-        <Switch id="fo-degraded" checked={v.enabled} onCheckedChange={(enabled) => set({ enabled })} />
+        <Label htmlFor={idPrefix}>{t("set.degraded")}</Label>
+        <Switch id={idPrefix} checked={v.enabled} onCheckedChange={(enabled) => set({ enabled })} />
       </div>
       <span className="text-sm text-muted-foreground">{t("set.degradedDesc")}</span>
       {/* Always shown, not revealed by the switch: the thresholds are worth
-          reading before deciding to turn this on, and a section that mounts
-          and unmounts under the switch renumbers every unnamed control below
-          it on the page, which the settings-reachability walk reads by
-          position. */}
+          reading before deciding to turn this on. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {num("minBitrateKbps", "fo-degraded-bitrate", t("set.degradedMinBitrate"), 800)}
-        {num("sustainSeconds", "fo-degraded-sustain", t("set.degradedSustain"), 5)}
-        {num("maxRttMs", "fo-degraded-rtt", t("set.degradedMaxRtt"), 1500)}
-        {num("maxLossPercent", "fo-degraded-loss", t("set.degradedMaxLoss"), 15, 0.1)}
+        {num("minBitrateKbps", `${idPrefix}-bitrate`, t("set.degradedMinBitrate"), DEFAULTS.minBitrateKbps)}
+        {num("sustainSeconds", `${idPrefix}-sustain`, t("set.degradedSustain"), DEFAULTS.sustainSeconds)}
+        {num("maxRttMs", `${idPrefix}-rtt`, t("set.degradedMaxRtt"), DEFAULTS.maxRttMs)}
+        {num("maxLossPercent", `${idPrefix}-loss`, t("set.degradedMaxLoss"), DEFAULTS.maxLossPercent, 0.1)}
       </div>
       <span className="text-sm text-muted-foreground">{t("set.degradedSrtOnly")}</span>
       <span className="text-sm text-muted-foreground">{t("set.degradedClearNote")}</span>
