@@ -291,7 +291,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Platforms you think you are streaming to and are not. Normal between shows only if your destinations stop with the stream.",
+      "description": "Platforms you think you are streaming to and are not: enabled, not delivering, while their programme is receiving. The same test as the PolyemesisDestinationDown alert.",
       "gridPos": {
         "h": 4,
         "w": 3,
@@ -304,7 +304,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count((polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1) and on(instance, id) polyemesis_destination_info{source_id=~\"$programme\"}) or vector(0)",
+          "expr": "count((polyemesis_destination_up == 0 and polyemesis_destination_enabled == 1) and on(instance, id) (polyemesis_destination_info{source_id=~\"$programme\"} and on(instance, source_id) label_replace(polyemesis_ingest_bitrate_bits_per_second > 0, \"source_id\", \"$1\", \"id\", \"(.*)\"))) or vector(0)",
           "refId": "A",
           "legendFormat": "__auto",
           "range": false,

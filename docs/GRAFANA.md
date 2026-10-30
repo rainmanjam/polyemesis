@@ -126,7 +126,7 @@ is included too.
 
 | Row | What it shows |
 |---|---|
-| Overview | Programmes, ingests receiving, destinations delivering, enabled destinations that are **not** delivering, held destinations, engines down, uptime and version |
+| Overview | Programmes, ingests receiving, destinations delivering, enabled destinations that are **not** delivering while their programme is receiving, held destinations, engines down, uptime and version |
 | Ingest | Bitrate arriving per programme, whether anything is arriving and whether the programme has a running engine, ingest restarts, and relay throughput, drops and subscribers |
 | Destinations | Whether each destination is delivering; **why each failing destination is failing, and whether it is held**; failures by cause over time and over the whole range; delivery speed; output bitrate; restarts, dropped frames and stalls |
 | Host | Host and polyemesis CPU, as a share of the whole host; memory |
@@ -138,15 +138,16 @@ taking data keeps its FFmpeg process running; it reads *Down* here anyway,
 because its output has stopped. A lost ingest is not counted against the
 destinations. See [MONITORING.md](MONITORING.md#queries-to-start-from).
 
-**"Receiving" is the bitrate, not `polyemesis_ingest_up`.** A push ingest on
-the shared SRT or RTMP port has no ingest process of its own, so
+**"Receiving" is the bitrate, not `polyemesis_ingest_up`.** Currently, a push
+ingest on the shared SRT or RTMP port has no ingest process of its own, so
 `polyemesis_ingest_up` reads 0 for it even while the stream arrives. Whether
 anything is arriving is the honest signal, and the dashboard draws that.
 
-**Between shows, destinations can read *Down*.** Once the encoder disconnects
-from a push ingest, a running destination's output stops and it is reported as
-stalled. That is why `PolyemesisDestinationDown` only fires while the
-destination's programme is receiving.
+**Between shows, destinations can currently read *Down*.** Once the encoder
+disconnects from a push ingest, a running destination's output stops and it is
+reported as stalled. That is why `PolyemesisDestinationDown`, and the
+*Enabled, not delivering* count on the overview, only count a destination while
+its programme is receiving.
 
 **The failure cause is the one the destination card shows**, from
 [Why a destination is failing](MONITORING.md#why-a-destination-is-failing):

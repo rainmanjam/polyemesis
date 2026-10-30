@@ -2,8 +2,10 @@
 #
 # Load with `rule_files: [alerts.yml]` in prometheus.yml; deploy/monitoring/
 # does exactly that. Every metric named here is checked against what the server
-# actually exports by internal/metrics/dashboard_drift_test.go, and the file is
-# checked with `promtool check rules` in the Grafana guide's e2e.
+# actually exports by internal/metrics/dashboard_drift_test.go. The rules'
+# behaviour is pinned by alerts_test.yml beside this file:
+#   docker run --rm -v "$PWD/deploy/prometheus:/r:ro" --entrypoint promtool \
+#     prom/prometheus:v3.15.0 test rules /r/alerts_test.yml
 #
 # These are the Prometheus side. polyemesis also has built-in alert rules that
 # deliver from inside the server (docs/MONITORING.md, "Built-in alerts"); the
