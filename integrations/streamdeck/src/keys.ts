@@ -27,6 +27,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.meter.noFeed",
   "streamdeck.meter.quiet",
   "streamdeck.auth.connected",
+  "streamdeck.auth.notPaired",
   "streamdeck.auth.needsAdmin",
   "streamdeck.auth.refused",
   "streamdeck.auth.unreachable",
@@ -41,6 +42,10 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.pi.test",
   "streamdeck.pi.testing",
   "streamdeck.pi.saved",
+  "streamdeck.err.urlRequired",
+  "streamdeck.err.urlInvalid",
+  "streamdeck.err.urlScheme",
+  "streamdeck.err.tokenRequired",
 ] as const;
 
 export type StreamDeckKey = (typeof STREAM_DECK_KEYS)[number];

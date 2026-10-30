@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "BRAK SYGNAŁU",
   "streamdeck.meter.quiet": "CISZA",
   "streamdeck.auth.connected": "Połączono",
+  "streamdeck.auth.notPaired": "Niesparowany",
   "streamdeck.auth.needsAdmin": "Potrzebny token admina",
   "streamdeck.auth.refused": "Token odrzucony",
   "streamdeck.auth.unreachable": "Brak połączenia",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID miejsca docelowego",
   "streamdeck.pi.test": "Testuj połączenie",
   "streamdeck.pi.testing": "Testowanie…",
-  "streamdeck.pi.saved": "Zapisano"
+  "streamdeck.pi.saved": "Zapisano",
+  "streamdeck.err.urlRequired": "Wpisz adres serwera.",
+  "streamdeck.err.urlInvalid": "Adres serwera nie jest prawidłowym adresem URL.",
+  "streamdeck.err.urlScheme": "Użyj https:// dla serwera. Zwykłe http:// jest dozwolone tylko dla localhost.",
+  "streamdeck.err.tokenRequired": "Wklej token API z Ustawień instalacji."
 }

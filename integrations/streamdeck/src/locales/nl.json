@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "GEEN SIGNAAL",
   "streamdeck.meter.quiet": "STIL",
   "streamdeck.auth.connected": "Verbonden",
+  "streamdeck.auth.notPaired": "Niet gekoppeld",
   "streamdeck.auth.needsAdmin": "Admin-token nodig",
   "streamdeck.auth.refused": "Token geweigerd",
   "streamdeck.auth.unreachable": "Niet bereikbaar",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "Bestemmings-ID",
   "streamdeck.pi.test": "Verbinding testen",
   "streamdeck.pi.testing": "Testen…",
-  "streamdeck.pi.saved": "Opgeslagen"
+  "streamdeck.pi.saved": "Opgeslagen",
+  "streamdeck.err.urlRequired": "Voer het serveradres in.",
+  "streamdeck.err.urlInvalid": "Het serveradres is geen geldige URL.",
+  "streamdeck.err.urlScheme": "Gebruik https:// voor de server. Gewoon http:// is alleen toegestaan voor localhost.",
+  "streamdeck.err.tokenRequired": "Plak een API-token uit de instellingen van de installatie."
 }

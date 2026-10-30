@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "无信号",
   "streamdeck.meter.quiet": "静音",
   "streamdeck.auth.connected": "已连接",
+  "streamdeck.auth.notPaired": "未配对",
   "streamdeck.auth.needsAdmin": "需要管理员令牌",
   "streamdeck.auth.refused": "令牌被拒绝",
   "streamdeck.auth.unreachable": "无法连接",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "目标 ID",
   "streamdeck.pi.test": "测试连接",
   "streamdeck.pi.testing": "测试中…",
-  "streamdeck.pi.saved": "已保存"
+  "streamdeck.pi.saved": "已保存",
+  "streamdeck.err.urlRequired": "请输入服务器地址。",
+  "streamdeck.err.urlInvalid": "服务器地址不是有效的 URL。",
+  "streamdeck.err.urlScheme": "服务器请使用 https://。仅 localhost 允许使用明文 http://。",
+  "streamdeck.err.tokenRequired": "请从安装的设置中粘贴 API 令牌。"
 }

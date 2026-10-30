@@ -13,12 +13,12 @@ describe("parseServerUrl", () => {
 
   it("refuses plain http to a remote host, because the token is a bearer credential", () => {
     expect(() => parseServerUrl("http://studio.example")).toThrow(ConfigError);
-    expect(() => parseServerUrl("http://192.168.1.20")).toThrow(/https/);
+    expect(() => parseServerUrl("http://192.168.1.20")).toThrow("streamdeck.err.urlScheme");
   });
 
   it("refuses an empty or unparseable address", () => {
-    expect(() => parseServerUrl("   ")).toThrow(/Enter the server address/);
-    expect(() => parseServerUrl("not a url")).toThrow(/valid URL/);
+    expect(() => parseServerUrl("   ")).toThrow("streamdeck.err.urlRequired");
+    expect(() => parseServerUrl("not a url")).toThrow("streamdeck.err.urlInvalid");
     expect(() => parseServerUrl(undefined)).toThrow(ConfigError);
   });
 });

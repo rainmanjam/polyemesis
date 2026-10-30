@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "SİNYAL YOK",
   "streamdeck.meter.quiet": "SESSİZ",
   "streamdeck.auth.connected": "Bağlandı",
+  "streamdeck.auth.notPaired": "Eşleştirilmedi",
   "streamdeck.auth.needsAdmin": "Yönetici jetonu gerekli",
   "streamdeck.auth.refused": "Jeton reddedildi",
   "streamdeck.auth.unreachable": "Ulaşılamıyor",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "Hedef kimliği",
   "streamdeck.pi.test": "Bağlantıyı sına",
   "streamdeck.pi.testing": "Sınanıyor…",
-  "streamdeck.pi.saved": "Kaydedildi"
+  "streamdeck.pi.saved": "Kaydedildi",
+  "streamdeck.err.urlRequired": "Sunucu adresini girin.",
+  "streamdeck.err.urlInvalid": "Sunucu adresi geçerli bir URL değil.",
+  "streamdeck.err.urlScheme": "Sunucu için https:// kullanın. Düz http:// yalnızca localhost için izinlidir.",
+  "streamdeck.err.tokenRequired": "Kurulumun Ayarlar bölümünden bir API jetonu yapıştırın."
 }

@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "NESSUN SEGNALE",
   "streamdeck.meter.quiet": "SILENZIO",
   "streamdeck.auth.connected": "Connesso",
+  "streamdeck.auth.notPaired": "Non associato",
   "streamdeck.auth.needsAdmin": "Serve token admin",
   "streamdeck.auth.refused": "Token rifiutato",
   "streamdeck.auth.unreachable": "Non raggiungibile",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID destinazione",
   "streamdeck.pi.test": "Verifica connessione",
   "streamdeck.pi.testing": "Verifica in corso…",
-  "streamdeck.pi.saved": "Salvato"
+  "streamdeck.pi.saved": "Salvato",
+  "streamdeck.err.urlRequired": "Inserisci l'indirizzo del server.",
+  "streamdeck.err.urlInvalid": "L'indirizzo del server non è un URL valido.",
+  "streamdeck.err.urlScheme": "Usa https:// per il server. http:// semplice è consentito solo per localhost.",
+  "streamdeck.err.tokenRequired": "Incolla un token API dalle Impostazioni dell'installazione."
 }

@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "信号なし",
   "streamdeck.meter.quiet": "無音",
   "streamdeck.auth.connected": "接続済み",
+  "streamdeck.auth.notPaired": "未接続",
   "streamdeck.auth.needsAdmin": "管理者トークンが必要",
   "streamdeck.auth.refused": "トークンが拒否されました",
   "streamdeck.auth.unreachable": "接続できません",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "配信先ID",
   "streamdeck.pi.test": "接続をテスト",
   "streamdeck.pi.testing": "テスト中…",
-  "streamdeck.pi.saved": "保存しました"
+  "streamdeck.pi.saved": "保存しました",
+  "streamdeck.err.urlRequired": "サーバーのアドレスを入力してください。",
+  "streamdeck.err.urlInvalid": "サーバーのアドレスは有効な URL ではありません。",
+  "streamdeck.err.urlScheme": "サーバーには https:// を使用してください。http:// はローカルホストでのみ使えます。",
+  "streamdeck.err.tokenRequired": "インストールの設定から API トークンを貼り付けてください。"
 }

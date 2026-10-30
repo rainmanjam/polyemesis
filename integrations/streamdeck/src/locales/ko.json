@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "신호 없음",
   "streamdeck.meter.quiet": "무음",
   "streamdeck.auth.connected": "연결됨",
+  "streamdeck.auth.notPaired": "연결 안 됨",
   "streamdeck.auth.needsAdmin": "관리자 토큰 필요",
   "streamdeck.auth.refused": "토큰이 거부됨",
   "streamdeck.auth.unreachable": "연결할 수 없음",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "대상 ID",
   "streamdeck.pi.test": "연결 테스트",
   "streamdeck.pi.testing": "테스트 중…",
-  "streamdeck.pi.saved": "저장됨"
+  "streamdeck.pi.saved": "저장됨",
+  "streamdeck.err.urlRequired": "서버 주소를 입력하세요.",
+  "streamdeck.err.urlInvalid": "서버 주소가 올바른 URL이 아닙니다.",
+  "streamdeck.err.urlScheme": "서버에는 https://를 사용하세요. http://는 localhost에서만 허용됩니다.",
+  "streamdeck.err.tokenRequired": "설치의 설정에서 API 토큰을 붙여넣으세요."
 }

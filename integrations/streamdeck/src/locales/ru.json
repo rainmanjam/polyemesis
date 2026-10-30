@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "НЕТ СИГНАЛА",
   "streamdeck.meter.quiet": "ТИШИНА",
   "streamdeck.auth.connected": "Подключено",
+  "streamdeck.auth.notPaired": "Не подключено",
   "streamdeck.auth.needsAdmin": "Нужен токен админа",
   "streamdeck.auth.refused": "Токен отклонён",
   "streamdeck.auth.unreachable": "Недоступно",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID назначения",
   "streamdeck.pi.test": "Проверить соединение",
   "streamdeck.pi.testing": "Проверка…",
-  "streamdeck.pi.saved": "Сохранено"
+  "streamdeck.pi.saved": "Сохранено",
+  "streamdeck.err.urlRequired": "Введите адрес сервера.",
+  "streamdeck.err.urlInvalid": "Адрес сервера не является допустимым URL.",
+  "streamdeck.err.urlScheme": "Используйте https:// для сервера. Обычный http:// разрешён только для localhost.",
+  "streamdeck.err.tokenRequired": "Вставьте API-токен из настроек установки."
 }

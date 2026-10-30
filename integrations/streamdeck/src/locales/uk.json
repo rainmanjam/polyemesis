@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "НЕМАЄ СИГНАЛУ",
   "streamdeck.meter.quiet": "ТИША",
   "streamdeck.auth.connected": "Підключено",
+  "streamdeck.auth.notPaired": "Не під'єднано",
   "streamdeck.auth.needsAdmin": "Потрібен токен адміна",
   "streamdeck.auth.refused": "Токен відхилено",
   "streamdeck.auth.unreachable": "Недоступно",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID призначення",
   "streamdeck.pi.test": "Перевірити з'єднання",
   "streamdeck.pi.testing": "Перевірка…",
-  "streamdeck.pi.saved": "Збережено"
+  "streamdeck.pi.saved": "Збережено",
+  "streamdeck.err.urlRequired": "Введіть адресу сервера.",
+  "streamdeck.err.urlInvalid": "Адреса сервера не є дійсною URL-адресою.",
+  "streamdeck.err.urlScheme": "Використовуйте https:// для сервера. Звичайний http:// дозволено лише для localhost.",
+  "streamdeck.err.tokenRequired": "Вставте API-токен з налаштувань інсталяції."
 }

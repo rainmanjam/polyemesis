@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "TIDAK ADA SINYAL",
   "streamdeck.meter.quiet": "SENYAP",
   "streamdeck.auth.connected": "Terhubung",
+  "streamdeck.auth.notPaired": "Belum dipasangkan",
   "streamdeck.auth.needsAdmin": "Perlu token admin",
   "streamdeck.auth.refused": "Token ditolak",
   "streamdeck.auth.unreachable": "Tidak dapat dijangkau",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID tujuan",
   "streamdeck.pi.test": "Uji koneksi",
   "streamdeck.pi.testing": "Menguji…",
-  "streamdeck.pi.saved": "Tersimpan"
+  "streamdeck.pi.saved": "Tersimpan",
+  "streamdeck.err.urlRequired": "Masukkan alamat server.",
+  "streamdeck.err.urlInvalid": "Alamat server bukan URL yang valid.",
+  "streamdeck.err.urlScheme": "Gunakan https:// untuk server. http:// biasa hanya diizinkan untuk localhost.",
+  "streamdeck.err.tokenRequired": "Tempel token API dari Pengaturan instalasi."
 }

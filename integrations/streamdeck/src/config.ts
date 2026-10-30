@@ -2,12 +2,15 @@
 // only: action settings are plain text in a profile export, and a token must
 // not travel with a profile. Keys carry programme and destination IDs only.
 
+import type { StreamDeckKey } from "./keys.js";
+
+/** A pairing or key setting that cannot be used. `key` is the translated message to show. */
 export class ConfigError extends Error {
   constructor(
     readonly field: "url" | "token" | "sourceId" | "destinationId",
-    message: string,
+    readonly key: StreamDeckKey,
   ) {
-    super(message);
+    super(key);
     this.name = "ConfigError";
   }
 }
@@ -33,21 +36,21 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  */
 export function parseServerUrl(raw: string | undefined): URL {
   const text = (raw ?? "").trim();
-  if (text === "") throw new ConfigError("url", "Enter the server address.");
+  if (text === "") throw new ConfigError("url", "streamdeck.err.urlRequired");
   let url: URL;
   try {
     url = new URL(text);
   } catch {
-    throw new ConfigError("url", "The server address is not a valid URL.");
+    throw new ConfigError("url", "streamdeck.err.urlInvalid");
   }
   if (url.protocol === "https:") return url;
   if (url.protocol === "http:" && LOOPBACK.has(url.hostname)) return url;
-  throw new ConfigError("url", "Use https:// for the server. Plain http:// is allowed only for localhost.");
+  throw new ConfigError("url", "streamdeck.err.urlScheme");
 }
 
 export function requireToken(raw: string | undefined): string {
   const token = (raw ?? "").trim();
-  if (token === "") throw new ConfigError("token", "Paste an API token from the install's Settings.");
+  if (token === "") throw new ConfigError("token", "streamdeck.err.tokenRequired");
   return token;
 }
 

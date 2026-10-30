@@ -23,6 +23,7 @@
   "streamdeck.meter.noFeed": "AUCUN FLUX",
   "streamdeck.meter.quiet": "SILENCE",
   "streamdeck.auth.connected": "Connecté",
+  "streamdeck.auth.notPaired": "Non associé",
   "streamdeck.auth.needsAdmin": "Jeton admin requis",
   "streamdeck.auth.refused": "Jeton refusé",
   "streamdeck.auth.unreachable": "Injoignable",
@@ -36,5 +37,9 @@
   "streamdeck.pi.destinationId": "ID de la destination",
   "streamdeck.pi.test": "Tester la connexion",
   "streamdeck.pi.testing": "Test en cours…",
-  "streamdeck.pi.saved": "Enregistré"
+  "streamdeck.pi.saved": "Enregistré",
+  "streamdeck.err.urlRequired": "Saisissez l'adresse du serveur.",
+  "streamdeck.err.urlInvalid": "L'adresse du serveur n'est pas une URL valide.",
+  "streamdeck.err.urlScheme": "Utilisez https:// pour le serveur. http:// simple n'est autorisé que pour localhost.",
+  "streamdeck.err.tokenRequired": "Collez un jeton API depuis les Réglages de l'installation."
 }
