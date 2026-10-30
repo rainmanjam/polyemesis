@@ -5172,6 +5172,20 @@ func observeWanted(alertRules, hookRules, lifecycleWanted, timeline bool) bool {
 // A method rather than four arguments at the call site because the last three
 // bugs were all the call site forgetting an input; the table test above cannot
 // see that, and TestSweepWantedForTheTimelineAlone tests this instead.
+//
+// A CONSEQUENCE, KEPT ON PURPOSE AND DOCUMENTED (docs/MONITORING.md, "A rule
+// hears transitions that happen after it is saved"). With a recorder, every
+// install sweeps, so the watcher sees a condition start even when no rule
+// exists. An alert rule added while that condition lasts is not told it started,
+// because the watcher raises an event once, at the transition. Before the
+// timeline opened the gate, an install with no rule never swept, so its first
+// rule happened to meet a fresh watcher and hear an outage already in progress.
+// An install that already had one rule never had that, so the behaviour is
+// now the same for every install. Replaying in-progress conditions to a new
+// rule would need a delivery aimed at that one rule. The notifier fans every
+// event out to every matching rule, so a plain re-publish would alert the
+// existing rules a second time about an outage they were already told of.
+// The timeline is the record of what started before a rule existed.
 func (e *Engine) sweepWanted() bool {
 	return observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted(),
 		e.alerter.HasRecorder())

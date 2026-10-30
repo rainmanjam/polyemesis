@@ -272,6 +272,16 @@ defaults and then wondering:
 | `events` | empty | any type on this page | Empty means **every** type |
 | `allowPrivateTarget` | `false` | — | The deliberate opt-in past the SSRF guard; see below |
 
+**A rule hears transitions that happen after it is saved.** The stream
+conditions below are raised once, when they start, and once more when they
+end. They are not repeated while they last. A rule added while a condition is
+already in progress, such as an ingest already lost or a destination already
+down, is not told it started. It hears the recovery, and every later
+occurrence. To see what is already wrong when you add a rule, read the
+Monitoring page or [the stream timeline](#the-stream-timeline). The timeline
+records every transition whether or not any rule exists, so it is the record
+of conditions that started before your rule.
+
 A debounce or interval out of range is **clamped rather than refused**, because
 a value that drifted out of bounds should cost a bounded message rate and not a
 rule that has silently stopped alerting. An unknown `format` or `minSeverity` is
