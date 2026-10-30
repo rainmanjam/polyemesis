@@ -108,3 +108,57 @@ func TestStopImpactForAMalformedDestinationIsRejected(t *testing.T) {
 		}
 	}
 }
+
+// A per-destination preview scoped to a programme must refuse a destination
+// that is on ANOTHER programme. A Stream Deck key is bound to a programme; a
+// count for a row on a different one would arm a stop the key's face says it
+// does not own. Refused as 404, the same answer as an unknown id: from the
+// named programme's point of view the row is not there.
+func TestStopImpactForAForeignDestinationIsRefused(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	read := createScopedToken(t, h, sign, "streamdeck", db.ScopeRead)
+
+	first := s.eng()
+	if first == nil {
+		t.Fatal("the fixture started no engine, so there is no first programme")
+	}
+	second := &db.Source{Name: "second programme", Enabled: true, Ingest: db.DefaultSettings().Ingest}
+	if err := s.store.CreateSource(second); err != nil {
+		t.Fatalf("create second source: %v", err)
+	}
+	if second.ID == first.SourceID() {
+		t.Fatalf("both sources report id %d, so the filter cannot be shown to discriminate", second.ID)
+	}
+	onSecond, err := s.store.CreateDestination(&db.Destination{
+		Name:      "on-second",
+		Kind:      db.DestRTMP,
+		Platform:  db.PlatformYouTube,
+		SourceID:  &second.ID,
+		URL:       "rtmp://example.com/live",
+		StreamKey: "abc",
+	})
+	if err != nil {
+		t.Fatalf("seed destination on the second programme: %v", err)
+	}
+
+	preview := func(source int64) int {
+		url := "/api/v1/destinations/stop-impact?destination=" + strconv.FormatInt(onSecond.ID, 10) +
+			"&source=" + strconv.FormatInt(source, 10)
+		r := jsonRequest(t, http.MethodGet, url, nil)
+		r.Header.Set("Authorization", "Bearer "+read)
+		return do(t, h, r).Code
+	}
+
+	if code := preview(first.SourceID()); code != http.StatusNotFound {
+		t.Errorf("destination on programme %d previewed under programme %d: status = %d, want 404",
+			second.ID, first.SourceID(), code)
+	}
+	if code := preview(second.ID); code != http.StatusOK {
+		t.Errorf("destination previewed under its own programme: status = %d, want 200", code)
+	}
+
+	// A programme that does not exist is the source parameter's own 400, not a count.
+	if code := preview(999999); code != http.StatusBadRequest {
+		t.Errorf("destination previewed under an unknown programme: status = %d, want 400", code)
+	}
+}

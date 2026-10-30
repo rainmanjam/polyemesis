@@ -65,9 +65,23 @@ func (s *Server) handleStopImpact(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, `"`+destinationParam+`" must be a destination id`)
 			return
 		}
+		// ?source= still means what it means on every other request: the
+		// programme the caller is acting on. Validated first, so an unknown
+		// programme is the source parameter's own 400.
+		sourceID, ok := s.namedSourceParam(w, r)
+		if !ok {
+			return
+		}
 		row, err := s.store.GetDestination(id)
 		if err != nil {
 			writeStoreError(w, err)
+			return
+		}
+		// A row on another programme is not there, as far as the named
+		// programme is concerned: 404, like an unknown id, never its count.
+		// A key bound to programme A must not arm a stop of programme B's row.
+		if sourceID != nil && (row.SourceID == nil || *row.SourceID != *sourceID) {
+			writeError(w, http.StatusNotFound, "destination not found on this source")
 			return
 		}
 		writeJSON(w, http.StatusOK, stopImpact([]*db.Destination{row}))

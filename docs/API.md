@@ -692,6 +692,8 @@ With `?destination=<id>` the same route previews one destination's stop, which i
 per-destination stop would end: `destinations` is 1 and `youtubeBroadcasts` is 0 or 1. An id that
 names no destination is a `404`, and a malformed one a `400`, never a zero count: a zero would read
 as a stop that ends nothing, over a row the caller never saw.
+Add `?source=<id>` to scope it to a programme: a destination that is on another programme is
+also a `404`, so a caller bound to one programme never gets a count for another's row.
 
 `start-all` and `stop-all` take no id list. **With `?source=<id>` they act on
 that programme's destinations only; without it, on every destination on the
