@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -48,8 +50,29 @@ func stopImpact(rows []*db.Destination) stopImpactBody {
 	return out
 }
 
-// handleStopImpact answers GET /destinations/stop-impact?source=N.
+// destinationParam narrows the preview to one destination: what a per-destination
+// stop of that row would end. The same count stop-all's preview gives, for one row.
+const destinationParam = "destination"
+
+// handleStopImpact answers GET /destinations/stop-impact?source=N, or with
+// ?destination=N the preview of that one destination's stop. An id that names
+// no destination is a 404, never a zero count: a zero is a claim that the stop
+// ends nothing, and a caller that trusted it would act on a row it never saw.
 func (s *Server) handleStopImpact(w http.ResponseWriter, r *http.Request) {
+	if raw := strings.TrimSpace(r.URL.Query().Get(destinationParam)); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeError(w, http.StatusBadRequest, `"`+destinationParam+`" must be a destination id`)
+			return
+		}
+		row, err := s.store.GetDestination(id)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, stopImpact([]*db.Destination{row}))
+		return
+	}
 	sourceID, ok := s.namedSourceParam(w, r)
 	if !ok {
 		return
