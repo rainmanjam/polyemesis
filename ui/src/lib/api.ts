@@ -600,7 +600,7 @@ export const api = {
   status: (sourceId: number | null) => get<Status>("/status" + sourceQuery(sourceId)),
   source: (sourceId: number | null) => get<SourceInfo>("/source" + sourceQuery(sourceId)),
   levels: (sourceId: number | null) =>
-    get<{ levels: Levels; at: string }>("/levels" + sourceQuery(sourceId)),
+    get<{ levels: Levels; at: string; feed: "none" | "live" | "stale" }>("/levels" + sourceQuery(sourceId)),
   stats: () =>
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
@@ -1386,8 +1386,6 @@ export interface ConnectionInfo {
   prefix: string;
   scope: string;
   adminScope: boolean;
-  /** The token's previous use, absent when it has never been used. */
-  lastUsedAt?: string;
 }
 
 /**

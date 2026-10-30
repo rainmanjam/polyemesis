@@ -35,7 +35,7 @@ describe("PairingCheck", () => {
   it("shows the token's name and scope for a read token, with no admin warning", async () => {
     checkConnection.mockResolvedValue({
       ok: true,
-      info: { ...readInfo, lastUsedAt: "2026-10-29T10:00:00Z" },
+      info: readInfo,
     });
     render(<PairingCheck />);
     testToken("pmk_abcdefgh-secret");
@@ -52,13 +52,6 @@ describe("PairingCheck", () => {
     render(<PairingCheck />);
     testToken("pmk_zzzzzzzz-secret");
     expect(await screen.findByTestId("pairing-admin-warning")).toBeTruthy();
-  });
-
-  it("says a token has never been used rather than showing a date", async () => {
-    checkConnection.mockResolvedValue({ ok: true, info: readInfo });
-    render(<PairingCheck />);
-    testToken("pmk_abcdefgh-secret");
-    expect(await screen.findByTestId("pairing-never-used")).toBeTruthy();
   });
 
   it("reports a refused token as refused, not as a failed connection", async () => {

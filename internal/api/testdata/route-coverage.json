@@ -7,7 +7,7 @@
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
   "inertCeiling": 6,
-  "varianceExemptCeiling": 7,
+  "varianceExemptCeiling": 6,
   "shapeFloor": 27,
   "guardedFloor": 23,
   "shapesNotInspectedCeiling": 3,
@@ -1437,7 +1437,6 @@
       "class": "explained-variance",
       "pointers": [
         "/adminScope",
-        "/lastUsedAt",
         "/name",
         "/prefix",
         "/scope"

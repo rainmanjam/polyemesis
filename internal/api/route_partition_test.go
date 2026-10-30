@@ -106,8 +106,6 @@ var nonCredentialVariance = map[string]string{
 	"GET /api/v1/auth/connection#/scope": "the caller's own token scope, a property of the " +
 		"credential the caller already holds.",
 	"GET /api/v1/auth/connection#/adminScope": "derived from the caller's own scope.",
-	"GET /api/v1/auth/connection#/lastUsedAt": "the caller's own token's previous use. It " +
-		"moves on every request by design, which is what the check reports it for.",
 }
 
 // unstableSweeps are the swept paths whose bytes move between two samples with

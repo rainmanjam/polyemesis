@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -21,10 +20,10 @@ import (
 // everything the operator can, and the client chooses the sentence. Keeping
 // English out of the API is what lets the UI translate it.
 //
-// lastUsedAt is the value BEFORE this request (see db.APIToken
-// PreviousLastUsedAt). There is no server clock in the answer: the body must
-// not change between two identical requests, and a client that wants the time
-// has its own.
+// There is no last-used time and no server clock in the answer. Each lookup
+// advances last_used_at, so any such field differs between two identical
+// requests, and the route ledger requires a swept body to be byte-stable. The
+// Settings token list shows last use.
 
 // connectionCheckBody is the answer.
 type connectionCheckBody struct {
@@ -38,9 +37,6 @@ type connectionCheckBody struct {
 	Scope string `json:"scope"`
 	// AdminScope is true when the token can change anything the operator can.
 	AdminScope bool `json:"adminScope"`
-	// LastUsedAt is the token's previous use, omitted when it has never been
-	// used.
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 }
 
 func (s *Server) handleConnectionCheck(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +58,5 @@ func (s *Server) handleConnectionCheck(w http.ResponseWriter, r *http.Request) {
 	body.Prefix = p.token.Prefix
 	body.Scope = p.token.Scope
 	body.AdminScope = p.token.Scope == db.ScopeAdmin
-	if !p.token.PreviousLastUsedAt.IsZero() {
-		prev := p.token.PreviousLastUsedAt
-		body.LastUsedAt = &prev
-	}
 	writeJSON(w, http.StatusOK, body)
 }

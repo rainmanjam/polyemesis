@@ -500,10 +500,9 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 | `POST` | `/tour/complete` |
 
 `GET /auth/connection` answers for the token that made the request, and for no other:
-`{name, prefix, scope, adminScope, lastUsedAt}`. `lastUsedAt` is that token's use **before**
-this check, and is absent if it has never been used. It carries no secret, and a read token
-may call it. A pairing client (a Stream Deck plugin, a script) should call it once after a
-token is pasted, and warn when `adminScope` is `true`, since a plugin needs only read access.
+`{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
+`adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
+pairing client should say so when it is pasted. A status or meter plugin needs only a read token.
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not
@@ -523,7 +522,7 @@ does not get to change what another operator's console shows them.
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
 | `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
-| `GET` | `/levels` | Current audio levels |
+| `GET` | `/levels` | Current audio levels, and `feed`: `none`, `live` or `stale` (see below) |
 | `GET` | `/source` | Probed track layout |
 | `PUT` | `/source/annotations` | Label what each incoming track is |
 | `GET` | `/version`, `POST` `/version/check` | |
@@ -662,6 +661,11 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
+
+`GET /levels` returns `{levels, at, feed}`. `feed` says whether the reading is current, so a
+dial can show NO FEED rather than a frozen bar. `none` means no reading has arrived in this run
+of the engine. `live` means the newest reading is inside the window, which is the larger of
+three meter intervals and one second. `stale` means readings arrived and have stopped.
 
 `GET /destinations/stop-impact` previews a stop without making one. It answers
 `{"destinations": n, "youtubeBroadcasts": m}`: how many destinations a stop would touch,

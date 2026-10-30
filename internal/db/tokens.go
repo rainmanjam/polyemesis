@@ -61,12 +61,6 @@ type APIToken struct {
 	Scope      string    `json:"scope"`
 	CreatedAt  time.Time `json:"createdAt"`
 	LastUsedAt time.Time `json:"lastUsedAt"`
-	// PreviousLastUsedAt is the value LastUsedAt held BEFORE the lookup that
-	// produced this struct advanced it. Set only by LookupAPIToken, and kept
-	// out of JSON so the token list is unchanged. The test-connection check
-	// reports it, because LastUsedAt is already "now" by the time a handler
-	// reads it.
-	PreviousLastUsedAt time.Time `json:"-"`
 }
 
 // MigrateAPITokenScope adds api_tokens.scope to a database created before
@@ -259,7 +253,6 @@ func (d *DB) LookupAPIToken(plaintext string) (*APIToken, error) {
 	// Coarse: an API client can poll several times a second, and "last used"
 	// to the minute is all the operator is reading it for. A write per
 	// request would serialise behind the single SQLite connection.
-	t.PreviousLastUsedAt = t.LastUsedAt
 	now := time.Now().Unix()
 	if now-used >= 60 {
 		if _, err := d.sql.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, now, t.ID); err == nil {

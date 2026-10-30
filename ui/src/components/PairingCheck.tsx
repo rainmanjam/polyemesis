@@ -100,15 +100,6 @@ function PairingOutcome({ outcome }: { outcome: ConnectionOutcome }) {
           scope: scopeLabel(t, info.scope),
         })}
       </p>
-      {info.lastUsedAt ? (
-        <p className="text-sm text-muted-foreground">
-          {t("pairing.lastUsed", { date: new Date(info.lastUsedAt).toLocaleString() })}
-        </p>
-      ) : (
-        <p data-testid="pairing-never-used" className="text-sm text-muted-foreground">
-          {t("pairing.neverUsed")}
-        </p>
-      )}
       {info.adminScope && (
         <p role="note" data-testid="pairing-admin-warning" className="text-sm text-warn">
           {t("pairing.adminWarning")}

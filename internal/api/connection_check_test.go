@@ -45,10 +45,6 @@ func TestConnectionCheckAnswersOnlyForThePresentedToken(t *testing.T) {
 	if rd.Name != "streamdeck" || rd.Scope != db.ScopeRead || rd.AdminScope {
 		t.Errorf("read token answer = %+v, want name streamdeck, scope read, adminScope false", rd)
 	}
-	// Its first check: the token has never been used, so no previous use is claimed.
-	if rd.LastUsedAt != nil {
-		t.Errorf("first check of a never-used token reported lastUsedAt = %v, want none", rd.LastUsedAt)
-	}
 
 	w = get(admin)
 	if w.Code != http.StatusOK {
