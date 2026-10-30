@@ -247,6 +247,10 @@ its first tagged release.
 
 ### Fixed
 
+- **Connecting an MCP client no longer writes a warning to the log.** Every
+  client sends `GET /mcp` as it connects, and the stateless server answers it
+  with the `405` the spec calls for. That answer is now logged at debug. Every
+  other `405`, and any other refusal on `/mcp`, is still a warning.
 - **An SRT programme's healthy destinations no longer read as stalled after a
   show.** An SRT source has no ingest process, because the shared SRT listener
   feeds the programme directly, and the server took "no ingest process" to

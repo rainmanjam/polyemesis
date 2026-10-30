@@ -32,7 +32,7 @@ as the HTTP API.
 | | |
 |---|---|
 | Endpoint | `POST https://your-server/mcp` |
-| Transport | MCP streamable HTTP, stateless: no `Mcp-Session-Id`, one JSON answer per request. `GET` and `DELETE` answer `405` |
+| Transport | MCP streamable HTTP, stateless: no `Mcp-Session-Id`, one JSON answer per request. `GET` and `DELETE` answer `405`; clients send that `GET` on every connect, so it is logged at debug rather than as a warning |
 | Protocol versions | `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (official Go SDK v1.8.0) |
 | Authentication | `Authorization: Bearer <API token>`. A browser session cookie is refused with `403` |
 | Origin | A request carrying an `Origin` header for another host is refused with `403`, as the MCP spec requires against DNS rebinding |

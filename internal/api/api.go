@@ -1599,15 +1599,32 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			return
 		}
 		level := slog.LevelDebug
-		if ww.Status() >= 500 {
+		switch {
+		case ww.Status() >= 500:
 			level = slog.LevelError
-		} else if ww.Status() >= 400 {
+		case expectedMCPRefusal(r, ww.Status()):
+			// Debug, not WARN. See expectedMCPRefusal.
+		case ww.Status() >= 400:
 			level = slog.LevelWarn
 		}
 		s.log.Log(r.Context(), level, "http",
 			"method", r.Method, "path", loggedPath(r),
 			"status", ww.Status(), "dur", time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// expectedMCPRefusal reports whether a 4xx is the one an MCP client asks for
+// on every connect: GET /mcp, answered 405.
+//
+// The streamable HTTP transport lets a client open a GET stream for messages
+// the server starts, and the spec has a server that offers none answer 405.
+// This one is stateless and never offers one, and every client tries anyway,
+// so under the 4xx-is-WARN rule each assistant session wrote a warning about
+// nothing into the operator's journal. Exactly this method, path and status:
+// any other 405 is a client using the API wrongly, and any other answer on
+// /mcp (a 401, a 403) is still worth a WARN.
+func expectedMCPRefusal(r *http.Request, status int) bool {
+	return status == http.StatusMethodNotAllowed && r.Method == http.MethodGet && r.URL.Path == MCPPath
 }
 
 // loggedPath is the path a request log line may carry: the ROUTE PATTERN it
