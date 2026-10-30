@@ -123,6 +123,11 @@ its first tagged release.
 
 ### Fixed
 
+- **An automod model reply without `abusive` or `confidence` is a failure, not
+  a pass.** Such a reply (`{}`, `{"No": null}`) used to read as "not abusive"
+  with no error, so a model that ignored the schema looked healthy and never
+  fired. It now fails open with an error in the model's failure count, as does
+  a confidence outside 0..1.
 - **The site no longer makes two different time-to-first-stream claims.** The
   home and download pages said about five minutes and the features page two,
   and neither was measured. Both figures are gone, and a guard keeps a step

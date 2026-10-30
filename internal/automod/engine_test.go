@@ -122,6 +122,83 @@ func TestModelFailsOpenOnTimeout(t *testing.T) {
 	}
 }
 
+// respondContent wraps a raw verdict string in a well-formed OpenAI reply, so a
+// test can send exactly the bytes a real model sent.
+func respondContent(content string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": content}},
+			},
+		})
+	}
+}
+
+// A reply that is valid JSON but not OUR JSON used to decode as abusive=false,
+// confidence=0: "not abusive", no error, no failure count. The first two cases
+// are verbatim replies from a spike against real safety models, both of which
+// looked like a healthy checker that simply never fired. Each must be a
+// reported failure -- through record(), so the operator's failure count and
+// LastError show it -- and must still fail open.
+func TestModelVerdictMissingAbusiveOrConfidenceIsAReportedFailureNotACleanPass(t *testing.T) {
+	cases := []struct{ name, content string }{
+		{"ShieldGemma's real reply", `{"No": null}`},
+		{"Granite Guardian's real reply", `{"assistant":"No"}`},
+		{"empty object", `{}`},
+		{"abusive without confidence", `{"abusive":true}`},
+		{"confidence without abusive", `{"confidence":0.9,"category":"harassment"}`},
+		{"abusive is null", `{"abusive":null,"confidence":0.9}`},
+		{"confidence is null", `{"abusive":true,"confidence":null}`},
+		{"abusive is not a bool", `{"abusive":"yes","confidence":0.9}`},
+		{"confidence above 1", `{"abusive":true,"confidence":95,"category":"harassment"}`},
+		{"confidence below 0", `{"abusive":false,"confidence":-0.5}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := modelServer(t, respondContent(c.content))
+			m := testModel(t, srv, nil)
+
+			findings, err := m.Check(context.Background(), "anything")
+			if err == nil {
+				t.Fatalf("%s was read as a clean verdict; the operator would see a checker that never fires", c.content)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("a malformed verdict produced findings: %+v", findings)
+			}
+			st := m.Stats()
+			if st.Failures != 1 || st.LastError == "" {
+				t.Fatalf("the failure did not reach the operator's stats: %+v", st)
+			}
+		})
+	}
+}
+
+// The other half: a verdict that carries both fields still works, including
+// one whose values ARE the zero values. Present-and-false is a real answer, and
+// a fix that treated zero as absent would turn every clean message into a
+// reported failure.
+func TestModelVerdictWithBothFieldsPresentIsReadEvenAtZeroValues(t *testing.T) {
+	srv := modelServer(t, respondContent(`{"abusive":false,"confidence":0}`))
+	m := testModel(t, srv, nil)
+	findings, err := m.Check(context.Background(), "hello")
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("a present, clean verdict was not read as clean: findings=%+v err=%v", findings, err)
+	}
+	if st := m.Stats(); st.Failures != 0 {
+		t.Fatalf("a clean verdict was counted as a failure: %+v", st)
+	}
+
+	srv2 := modelServer(t, respondContent(`{"abusive":true,"confidence":0.95,"category":"harassment","reason":"r"}`))
+	m2 := testModel(t, srv2, nil)
+	findings, err = m2.Check(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(findings) != 1 || findings[0].Confidence != 0.95 {
+		t.Fatalf("a valid abusive verdict did not act: %+v", findings)
+	}
+}
+
 // And through the engine, which is what a caller actually holds: an error must
 // leave the verdict empty so nothing is acted on.
 func TestEngineFailsOpenThroughToTheVerdict(t *testing.T) {
