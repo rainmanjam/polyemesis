@@ -25,6 +25,23 @@ import (
 //     input and silently pause itself
 //   - -loglevel      : warning keeps the log tail useful rather than a firehose
 func commonArgs() []string {
+	return append([]string{"-hide_banner", "-nostdin"}, logLevelArgs()...)
+}
+
+// commonArgsLive is commonArgs for a destination process, which takes runtime
+// commands on stdin (see supervisor.Spec.LiveCommands). It is identical except
+// that -nostdin is absent: with it, FFmpeg never reads its standard input, so a
+// volume command written there would be ignored. Stdin is then a live channel,
+// and FFmpeg also reads its interactive keys from it -- a stray `q` stops the
+// stream and `+`/`-` change the log level. Only the supervisor's serialised
+// command writer ever writes to that pipe, and it writes only validated
+// commands, so nothing can reach FFmpeg's key handler by accident.
+func commonArgsLive() []string {
+	return append([]string{"-hide_banner"}, logLevelArgs()...)
+}
+
+// logLevelArgs is the -loglevel pair every child gets.
+func logLevelArgs() []string {
 	lvl := "warning"
 	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
 	// reports its PID and PES parsing decisions -- which streams it saw, how
@@ -33,7 +50,7 @@ func commonArgs() []string {
 	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
 		lvl = v
 	}
-	return []string{"-hide_banner", "-nostdin", "-loglevel", lvl}
+	return []string{"-loglevel", lvl}
 }
 
 // progressArgs routes machine-readable stats to stdout, leaving stderr as a
@@ -1331,7 +1348,9 @@ func DestinationArgs(s DestSpec) []string {
 		s.AudioOutLabel = "aout"
 	}
 
-	args := commonArgs()
+	// No -nostdin: the destination takes live gain and mute on stdin. See
+	// commonArgsLive.
+	args := commonArgsLive()
 	args = append(args, progressArgs()...)
 	args = append(args,
 		"-fflags", "+genpts",
