@@ -50,6 +50,8 @@ import {
   destinationLiveBlock,
   levelOutcome,
   setMuted,
+  storedLevel,
+  LevelSequencer,
   trackLiveBlock,
   withLevel,
   type LevelChange,
@@ -210,6 +212,9 @@ export function RoutingPage() {
     outcome: LevelOutcome;
   } | null>(null);
   const liveSeq = useRef<Record<number, number>>({});
+  // Per destination AND track: answers for two tracks commute, so only a later
+  // request for the same track can supersede one.
+  const levelSeq = useRef(new LevelSequencer());
   // Refusals the stored row could not predict: a 409 keyed by the destination,
   // a 404 by "destination:track". Cleared by a save, which changes what the
   // server holds.
@@ -222,6 +227,17 @@ export function RoutingPage() {
   // either has the level merged in already or was not touched by it, and may
   // carry unsaved edits besides.
   const keepDraftFor = useRef<DestinationId | null>(null);
+
+  // The drafts as last rendered, for Save to compare after its awaits. A
+  // closure holds the values from the click, which is exactly what is compared
+  // AGAINST; this is the other side.
+  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null }>({
+    profile: null,
+    vod: null,
+  });
+  useEffect(() => {
+    draftRef.current = { profile, vod: vodProfile };
+  }, [profile, vodProfile]);
 
   // The live editor's latest compile and the draft it was compiled from. The
   // save bar compares it, levels masked, with the stored graph to say whether
@@ -390,6 +406,10 @@ export function RoutingPage() {
 
   const save = async () => {
     if (!selected || !profile) return;
+    // What Save sends. An edit made while the request is out replaces one of
+    // these objects, and is not in what the server now holds.
+    const sentProfile = profile;
+    const sentVod = vodProfile;
     setSaving(true);
     try {
       // Every optional field goes out explicitly, including the nulls: the
@@ -413,9 +433,20 @@ export function RoutingPage() {
             ? t("route.savedLive", { name: selected.name })
             : t("route.savedRestarting", { name: selected.name }),
       );
-      setDirty(false);
       setLiveRefusals({});
-      setList(await api.listDestinations());
+      const fresh = await api.listDestinations();
+      // Compared after the LAST await: an edit can land during the PUT or the
+      // list read. If the draft is still the one that was sent, the stored row
+      // is now the draft and the list write reseeds it. If it moved on, the
+      // reseed would throw the newer edit away, so it is skipped and the form
+      // stays dirty: those edits still need a Save.
+      const now = draftRef.current;
+      if (now.profile !== sentProfile || now.vod !== sentVod) {
+        keepDraftFor.current = selected.id;
+      } else {
+        setDirty(false);
+      }
+      setList(fresh);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
     } finally {
@@ -507,22 +538,34 @@ export function RoutingPage() {
   // server stores it in the destination's LIVE mix and reconciles, so a
   // level-only change reaches the running output without a restart, and the
   // answer says whether it did.
+  //
+  // `dest` is bound by the caller when the control was used, not read here: a
+  // gain is gathered for a moment before it is sent, and the operator may have
+  // switched destination meanwhile. The level belongs to the one it was set on.
   const applyLevel = useCallback(
-    async (track: number, change: LevelChange): Promise<void> => {
-      const dest = selectedIdRef.current;
-      if (dest == null) return;
+    async (dest: DestinationId, track: number, change: LevelChange): Promise<void> => {
       const seq = (liveSeq.current[dest] = (liveSeq.current[dest] ?? 0) + 1);
+      const key = `${dest}:${track}`;
+      const trackSeq = levelSeq.current.next(key);
       try {
         const res = await api.setTrackLevel(dest, track, change, editedSourceId);
+        // An answer older than one already shown for this track is dropped:
+        // the server serialises the requests, so the newer answer already
+        // carries this one's effect, and applying it now would put an old
+        // level back on screen.
+        if (!levelSeq.current.accept(key, trackSeq)) return;
+        // What the server STORED, not what was asked for. Merged per track
+        // rather than replaced wholesale, so answers for two tracks commute and
+        // the draft's unsaved edits on other fields survive.
+        const level = storedLevel(res, track, change);
         // Stored: the list must say so whatever else happens, or Discard and the
-        // next Save would put the old level back. Merged per track rather than
-        // replaced wholesale, so answers for two tracks commute.
+        // next Save would put the old level back.
         // The list write below must not reseed whichever draft is on screen: if
         // it is this destination's, the level is merged into it here; if the
         // operator has moved on, that destination's stored row did not change.
         keepDraftFor.current = selectedIdRef.current;
         if (selectedIdRef.current === dest) {
-          setProfile((p) => (p ? withLevel(p, track, change) : p));
+          setProfile((p) => (p ? withLevel(p, track, level) : p));
         }
         setList((prev) =>
           prev.map((row) =>
@@ -531,7 +574,7 @@ export function RoutingPage() {
                   ...row,
                   destination: {
                     ...row.destination,
-                    profile: withLevel(row.destination.profile, track, change),
+                    profile: withLevel(row.destination.profile, track, level),
                   },
                 }
               : row,
@@ -573,8 +616,8 @@ export function RoutingPage() {
         // The copy reason holds for every row and is shown once, above them.
         return { reason: t(key), inline: key !== "route.live.copyBlocked" };
       },
-      onMute: (track, muted) => applyLevel(track, { muted }),
-      onGain: (track, gain) => applyLevel(track, { gain }),
+      onMute: (track, muted) => applyLevel(storedRow.id, track, { muted }),
+      onGain: (track, gain) => applyLevel(storedRow.id, track, { gain }),
     };
   }, [storedRow, liveRefusals, applyLevel, t]);
 
@@ -2444,6 +2487,12 @@ function NumberField({
 function wireProfile(p: RoutingProfile): RoutingProfile {
   return {
     ...p,
+    // Every track's mute and every cell's polarity go out as an explicit
+    // boolean. An absent key is not "off" to a server that merges the arrays
+    // over the stored ones by position: a cell list re-sorted by an edit would
+    // hand one cell's stored `invert: true` to whichever cell now sits there.
+    tracks: p.tracks ? p.tracks.map((s) => ({ ...s, muted: s.muted === true })) : p.tracks,
+    matrix: p.matrix ? p.matrix.map((c) => ({ ...c, invert: c.invert === true })) : p.matrix,
     loudness: p.loudness ?? null,
     ducking: p.ducking ?? null,
     excludeRoles: p.excludeRoles?.length ? p.excludeRoles : null,

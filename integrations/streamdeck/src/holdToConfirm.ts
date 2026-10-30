@@ -21,6 +21,13 @@ export interface PressResult {
   phase: HoldPhase;
   impact?: StopImpact;
   error?: unknown;
+  /**
+   * This press is not the key's current one: a repeat while another press is loading or armed, or a
+   * load that answered after the key was released (and perhaps pressed again). `phase` is then the
+   * newer press's, and the caller must not paint from this result: it carries no count, and the face
+   * belongs to the newer press.
+   */
+  superseded?: true;
 }
 
 export class HoldToConfirm {
@@ -42,7 +49,7 @@ export class HoldToConfirm {
 
   /** Key down. Loads the impact, then arms the hold if the key is still down. */
   async press(loadImpact: () => Promise<StopImpact>): Promise<PressResult> {
-    if (this.phase === "loading" || this.phase === "arming") return { phase: this.phase };
+    if (this.phase === "loading" || this.phase === "arming") return { phase: this.phase, superseded: true };
     const gen = ++this.generation;
     this.set("loading");
 
@@ -50,12 +57,12 @@ export class HoldToConfirm {
     try {
       impact = await loadImpact();
     } catch (error) {
-      if (gen !== this.generation) return { phase: this.phase };
+      if (gen !== this.generation) return { phase: this.phase, superseded: true };
       this.set("refused");
       return { phase: "refused", error };
     }
     // Released while the count was in flight: do not arm a key nobody holds.
-    if (gen !== this.generation) return { phase: this.phase };
+    if (gen !== this.generation) return { phase: this.phase, superseded: true };
 
     this.set("arming");
     this.cancelTimer = this.schedule(() => this.fire(gen), this.holdMs);

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   carryMutes,
   destinationLiveBlock,
+  LevelSequencer,
+  storedLevel,
   levelOutcome,
   setMuted,
   trackLiveBlock,
@@ -123,5 +125,51 @@ describe("setMuted", () => {
 
   it("adds a track the selection lacks as disabled, so the cells still decide routing", () => {
     expect(setMuted(profile().tracks, 3, true)[2]).toEqual({ track: 3, enabled: false, gain: 1, muted: true });
+  });
+});
+
+describe("storedLevel: the level the server's answer holds", () => {
+  const answer = (tracks: RoutingProfile["tracks"]) =>
+    ({ destination: { profile: { ...profile(), tracks } } }) as unknown as { destination: Destination };
+
+  // MUTATION: return `sent` unconditionally. Observed: FAIL.
+  it("reads the track's stored gain and mute, not the request's", () => {
+    const res = answer([{ track: 0, enabled: true, gain: 0.9 }]);
+    expect(storedLevel(res, 0, { gain: 0.95 })).toEqual({ muted: false, gain: 0.9 });
+  });
+
+  it("says an unmute explicitly", () => {
+    const res = answer([{ track: 1, enabled: true, gain: 0.8 }]);
+    expect(storedLevel(res, 1, { muted: false })).toEqual({ muted: false, gain: 0.8 });
+  });
+
+  it("falls back to the request when the answer does not carry the track", () => {
+    expect(storedLevel(answer([]), 3, { gain: 0.5 })).toEqual({ gain: 0.5 });
+  });
+});
+
+describe("LevelSequencer: out-of-order answers", () => {
+  // MUTATION: make accept() always return true. Observed: FAIL.
+  it("drops an earlier answer that lands after a later one for the same key", () => {
+    const q = new LevelSequencer();
+    const first = q.next("7:0");
+    const second = q.next("7:0");
+    expect(q.accept("7:0", second)).toBe(true);
+    expect(q.accept("7:0", first)).toBe(false);
+  });
+
+  it("keys are independent, so answers for two tracks commute", () => {
+    const q = new LevelSequencer();
+    const a = q.next("7:0");
+    const b = q.next("7:1");
+    expect(q.accept("7:1", b)).toBe(true);
+    expect(q.accept("7:0", a)).toBe(true);
+  });
+
+  it("an earlier answer still lands when the later request never answers", () => {
+    const q = new LevelSequencer();
+    const first = q.next("7:0");
+    q.next("7:0"); // fails: never accepted
+    expect(q.accept("7:0", first)).toBe(true);
   });
 });

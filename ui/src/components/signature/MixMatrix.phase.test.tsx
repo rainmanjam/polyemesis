@@ -36,7 +36,9 @@ describe("MixMatrix polarity", () => {
       cells[1],
     ]);
     fireEvent.click(invertButtons()[1]);
-    expect(onChange).toHaveBeenLastCalledWith([cells[0], { track: 0, channel: 1, out: 1, gain: 0.5 }]);
+    // Cleared as an explicit false, never by dropping the key.
+    // MUTATION: un-invert by destructuring the key away. Observed: FAIL.
+    expect(onChange).toHaveBeenLastCalledWith([cells[0], { track: 0, channel: 1, out: 1, gain: 0.5, invert: false }]);
   });
 
   // MUTATION: rebuild the cell without carrying `invert` in setGain. Observed: FAIL.
@@ -47,6 +49,18 @@ describe("MixMatrix polarity", () => {
     fireEvent.change(input, { target: { value: "0.8" } });
     const next = onChange.mock.lastCall?.[0] as MatrixCell[];
     expect(next.find((c) => c.channel === 1)).toEqual({ track: 0, channel: 1, out: 1, gain: 0.8, invert: true });
+  });
+});
+
+describe("MixMatrix explicit un-invert", () => {
+  // MUTATION: carry only a true invert in setGain. Observed: FAIL.
+  it("a new gain keeps an explicit invert false", () => {
+    const onChange = vi.fn();
+    const off: MatrixCell[] = [{ track: 0, channel: 1, out: 1, gain: 0.5, invert: false }];
+    render(<MixMatrix tracks={tracks} cells={off} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Track 1 channel 2 to right"), { target: { value: "0.8" } });
+    const next = onChange.mock.lastCall?.[0] as MatrixCell[];
+    expect(next).toEqual([{ track: 0, channel: 1, out: 1, gain: 0.8, invert: false }]);
   });
 });
 

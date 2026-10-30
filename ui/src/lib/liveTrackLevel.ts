@@ -70,6 +70,44 @@ export function withLevel(profile: RoutingProfile, track: number, change: LevelC
   };
 }
 
+/** The level the server STORED for one track, read off its answer.
+ *
+ *  Not the request's own value: the server may hold something else (a clamp,
+ *  or another client's change that landed first), and the form must show what
+ *  is stored. Both fields go out explicit, so merging it cannot leave an old
+ *  mute behind. Falls back to the request only when the answer does not carry
+ *  the track, which a well-formed answer always does. */
+export function storedLevel(res: Pick<TrackLevelResult, "destination">, track: number, sent: LevelChange): LevelChange {
+  const row = (res.destination?.profile?.tracks ?? []).find((s) => s.track === track);
+  if (!row) return sent;
+  return { muted: row.muted === true, gain: row.gain };
+}
+
+/** Orders the answers of live level requests, per key.
+ *
+ *  Each request takes a number; an answer is accepted only when it is newer
+ *  than every answer already accepted for that key. A slower, earlier answer
+ *  that lands after a later one is dropped, so it cannot put an old level back
+ *  on screen. A later request that FAILS does not strand the earlier answer:
+ *  it was never accepted, so the earlier one still lands. */
+export class LevelSequencer {
+  private issued = new Map<string, number>();
+  private accepted = new Map<string, number>();
+
+  next(key: string): number {
+    const n = (this.issued.get(key) ?? 0) + 1;
+    this.issued.set(key, n);
+    return n;
+  }
+
+  /** True, and recorded, when `seq` is newer than any accepted answer for `key`. */
+  accept(key: string, seq: number): boolean {
+    if (seq <= (this.accepted.get(key) ?? 0)) return false;
+    this.accepted.set(key, seq);
+    return true;
+  }
+}
+
 /** What the operator is told after a live change. */
 export interface LevelOutcome {
   /** "quiet" when the level reached the running output; "warn" when it took,

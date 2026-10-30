@@ -156,6 +156,20 @@ export class Runtime {
   private readonly scopeErrors = new Map<string, ApiError>();
   private readonly surfaces = new Map<string, Surface>();
   private readonly holds = new Map<string, HoldToConfirm>();
+  /**
+   * Tap keys (mute, the gain dial's push, record) with a request out. A tap reads the state, then writes
+   * its opposite: two taps in flight at once both read the same state and write the same flip, so a
+   * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
+   */
+  private readonly tapping = new Set<string>();
+  /**
+   * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
+   * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
+   * an older ticket is not stored: a status tick that started before a dial's answer cannot put the old
+   * gain back, and a tick that started before a tap's own read cannot replace what the tap reads.
+   */
+  private levelsClock = 0;
+  private levelsAt = 0;
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
@@ -339,7 +353,7 @@ export class Runtime {
    */
   private async refreshLevels(): Promise<void> {
     try {
-      this.storeLevels(await this.client!.destinations());
+      await this.readLevels();
       this.destLevelsError = undefined;
     } catch (err) {
       // The old levels are not evidence of the present: a key must not show "unmuted" from them.
@@ -363,8 +377,22 @@ export class Runtime {
     }
   }
 
-  private storeLevels(list: DestinationLevels[]): void {
+  private storeLevels(list: DestinationLevels[], at: number): void {
     this.destLevels = new Map(list.map((d) => [d.id, d]));
+    this.levelsAt = at;
+  }
+
+  /**
+   * Reads every destination's stored levels and caches them, unless the cache already holds something
+   * newer than this read: a read that started later, or a level change answered after this one started.
+   * Ordered by when the read STARTED, not by when it answered, so a slow older read never wins.
+   */
+  private async readLevels(): Promise<void> {
+    const at = ++this.levelsClock;
+    const list = await this.client!.destinations();
+    // A cache dropped meanwhile (a failed read) holds nothing to keep, so it is refilled.
+    if (this.destLevels && at < this.levelsAt) return;
+    this.storeLevels(list, at);
   }
 
   /** The preset names, read once. A key shows the id until the list arrives. */
@@ -734,6 +762,8 @@ export class Runtime {
     const hold = this.holds.get(s.id);
     if (!hold) return;
     const result = await hold.press(load);
+    // A repeat, or a load that answered after a newer press: the face is the newer press's to paint.
+    if (result.superseded) return;
     if (result.phase === "refused") {
       await s.setTitle(stopTitle(undefined, this.locale));
       await s.showAlert();
@@ -758,7 +788,7 @@ export class Runtime {
     this.presetRefused.delete(id);
     this.armed.set(id, { presetId, sourceId: s.settings.sourceId });
     const result = await hold.press(async () => NO_COUNT);
-    if (result.phase === "arming") {
+    if (!result.superseded && result.phase === "arming") {
       await s.setState(KEY_STATE.held);
       await s.setTitle(
         titleFor(
@@ -771,6 +801,10 @@ export class Runtime {
 
   /** Key down on the record key. Reads the switch fresh, then flips it. Tap, not hold: see README. */
   async pressRecord(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipRecording(id));
+  }
+
+  private async flipRecording(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
@@ -830,6 +864,10 @@ export class Runtime {
    * is undone by the next tap and ends nothing.
    */
   async pressTrackMute(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipTrackMute(id));
+  }
+
+  private async flipTrackMute(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
@@ -847,7 +885,7 @@ export class Runtime {
   private async freshTarget(s: Surface): Promise<{ dest: DestinationLevels; level: TrackLevel } | undefined> {
     this.levelRefused.delete(s.id);
     try {
-      this.storeLevels(await this.client!.destinations());
+      await this.readLevels();
       this.destLevelsError = undefined;
     } catch {
       await s.showAlert();
@@ -937,6 +975,10 @@ export class Runtime {
 
   /** A push of the gain dial: mute or unmute the track. Mute applies on a matrix mix too. */
   async pushTrackGain(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipDialMute(id));
+  }
+
+  private async flipDialMute(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.dialNeedsAdmin(s))) return;
@@ -1005,7 +1047,10 @@ export class Runtime {
     try {
       const result = await this.client!.setTrackLevel(dest.id, track, change, s.settings.sourceId ?? dest.sourceId);
       this.levelRefused.delete(s.id);
-      if (result.destination && this.destLevels) this.destLevels.set(result.destination.id, result.destination);
+      if (result.destination && this.destLevels) {
+        this.destLevels.set(result.destination.id, result.destination);
+        this.levelsAt = ++this.levelsClock;
+      }
       return result;
     } catch (err) {
       if (err instanceof ApiError && err.kind === "http" && (err.status === 409 || err.status === 400)) {
@@ -1052,6 +1097,17 @@ export class Runtime {
   }
 
   // ---- helpers -----------------------------------------------------------
+
+  /** Runs a tap's read-then-write unless one is already out for this key; a tap meanwhile is ignored. */
+  private async oneTap(id: string, tap: () => Promise<void>): Promise<void> {
+    if (this.tapping.has(id)) return;
+    this.tapping.add(id);
+    try {
+      await tap();
+    } finally {
+      this.tapping.delete(id);
+    }
+  }
 
   /** Write keys need an admin token. The check is made BEFORE any request, so a read token never sends one. */
   private async requireAdmin(s: Surface): Promise<boolean> {

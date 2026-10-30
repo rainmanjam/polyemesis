@@ -56,7 +56,7 @@ export interface MatrixCell {
   out: number;
   gain: number;
   /** Polarity inverted (A15). A pan coefficient, so changing it restarts the
-   *  destination; omitted when false. */
+   *  destination. Sent as an explicit false when cleared, never dropped. */
   invert?: boolean;
 }
 

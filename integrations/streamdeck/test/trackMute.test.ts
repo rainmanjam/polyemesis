@@ -162,6 +162,60 @@ describe("track mute key: a press", () => {
     expect(JSON.parse(net.writes()[0]!.body!)).toEqual({ muted: false });
   });
 
+  // MUTATION: drop the in-flight check in oneTap. Observed: FAIL.
+  it("ignores a second tap while the first is out, so a double tap cannot end muted twice over", async () => {
+    let muted = false;
+    const row = () => dest({}, [{ track: 2, enabled: true, gain: 1, muted }]);
+    const { rt, net } = await keyOn(
+      routes({
+        "GET /api/v1/destinations": () => ({ status: 200, body: JSON.stringify([row()]) }),
+        [GAIN_ROUTE]: (req) => {
+          muted = (JSON.parse(req.body!) as { muted: boolean }).muted;
+          return { status: 200, body: JSON.stringify({ applied: "live", destination: row().destination }) };
+        },
+      }),
+    );
+    await Promise.all([rt.pressTrackMute("k"), rt.pressTrackMute("k")]);
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ muted: true }]);
+    // Once the first has answered, the next tap is taken.
+    await rt.pressTrackMute("k");
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ muted: true }, { muted: false }]);
+  });
+
+  // MUTATION: order level reads by when they answered (a version every store bumps). Observed: FAIL.
+  it("flips the tap's own fresh read even when an older tick's read answers after it started", async () => {
+    let muted = false;
+    let gated = false;
+    const gates: (() => void)[] = [];
+    const row = () => dest({}, [{ track: 2, enabled: true, gain: 1, muted }]);
+    const { rt, net } = await keyOn(
+      routes({
+        "GET /api/v1/destinations": (() => {
+          const body = JSON.stringify([row()]);
+          if (!gated) return { status: 200, body };
+          return new Promise((r) => gates.push(() => r({ status: 200, body })));
+        }) as unknown as Route,
+        [GAIN_ROUTE]: applied("live", false),
+      }),
+    );
+    gated = true;
+    // A tick's read snapshots the track unmuted...
+    const tick = rt.tick();
+    await settle();
+    // ...then the track is muted in the UI, and the operator taps to unmute it.
+    muted = true;
+    const tap = rt.pressTrackMute("k");
+    await settle();
+    expect(gates).toHaveLength(2);
+    // The older read answers first, then the tap's own.
+    gates[0]!();
+    await settle();
+    gates[1]!();
+    await tap;
+    await tick;
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ muted: false }]);
+  });
+
   it("shows a restart on its own face with the server's reason, and a tick does not paint over it", async () => {
     const reason = "the platform has no verified live path";
     // The install stores the mute, so the next tick's list says muted, as the real one would.
