@@ -209,3 +209,28 @@ func (e *Engine) ForgetDestinationLive(id int64) {
 	defer e.mu.Unlock()
 	delete(e.liveNotes, id)
 }
+
+// levelChangeText is DestinationLive as the one line the status carries.
+func (e *Engine) levelChangeText(id int64) string {
+	applied, reason, ok := e.DestinationLive(id)
+	switch {
+	case !ok:
+		return ""
+	case applied == liveRestart:
+		return "applied by restart: " + reason
+	case reason != "":
+		return "applied live: " + reason
+	default:
+		return "applied live"
+	}
+}
+
+// DestinationRunning reports whether a destination currently has a process the
+// live path could reach. The API uses it to tell "not running, stored for the
+// next start" apart from a restart.
+func (e *Engine) DestinationRunning(id int64) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	d := e.dests[id]
+	return d != nil && d.proc != nil
+}
