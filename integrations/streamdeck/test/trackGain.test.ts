@@ -117,7 +117,7 @@ describe("track gain dial: turning", () => {
     sched.fire(COALESCE_MS);
     await settle();
     expect(gains()).toEqual([{ gain: gainForDb(-59.5) }]);
-    expect(gains()[0].gain!).toBeLessThan(0.0011);
+    expect(gains()[0]!.gain!).toBeLessThan(0.0011);
   });
 
   it("sends the latest level once after a request in flight returns, not one per tick", async () => {
@@ -217,5 +217,24 @@ describe("track gain dial: push and touch", () => {
     sched.fireAll();
     await settle();
     expect(gains()).toEqual([{ gain: 1 }]);
+  });
+});
+
+describe("track gain dial: a double push", () => {
+  // MUTATION: call flipDialMute directly from pushTrackGain. Observed: FAIL.
+  it("ignores a second push while the first is out", async () => {
+    let muted = false;
+    const row = () => dest({}, { muted });
+    const { rt, gains } = await dialOn(
+      routes({
+        "GET /api/v1/destinations": () => ({ status: 200, body: JSON.stringify([row()]) }),
+        [GAIN_ROUTE]: (req) => {
+          muted = (JSON.parse(req.body!) as { muted: boolean }).muted;
+          return { status: 200, body: JSON.stringify({ applied: "live", destination: row().destination }) };
+        },
+      }),
+    );
+    await Promise.all([rt.pushTrackGain("d"), rt.pushTrackGain("d")]);
+    expect(gains()).toEqual([{ muted: true }]);
   });
 });

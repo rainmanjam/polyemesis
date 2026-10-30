@@ -162,6 +162,26 @@ describe("track mute key: a press", () => {
     expect(JSON.parse(net.writes()[0]!.body!)).toEqual({ muted: false });
   });
 
+  // MUTATION: drop the in-flight check in oneTap. Observed: FAIL.
+  it("ignores a second tap while the first is out, so a double tap cannot end muted twice over", async () => {
+    let muted = false;
+    const row = () => dest({}, [{ track: 2, enabled: true, gain: 1, muted }]);
+    const { rt, net } = await keyOn(
+      routes({
+        "GET /api/v1/destinations": () => ({ status: 200, body: JSON.stringify([row()]) }),
+        [GAIN_ROUTE]: (req) => {
+          muted = (JSON.parse(req.body!) as { muted: boolean }).muted;
+          return { status: 200, body: JSON.stringify({ applied: "live", destination: row().destination }) };
+        },
+      }),
+    );
+    await Promise.all([rt.pressTrackMute("k"), rt.pressTrackMute("k")]);
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ muted: true }]);
+    // Once the first has answered, the next tap is taken.
+    await rt.pressTrackMute("k");
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ muted: true }, { muted: false }]);
+  });
+
   it("shows a restart on its own face with the server's reason, and a tick does not paint over it", async () => {
     const reason = "the platform has no verified live path";
     // The install stores the mute, so the next tick's list says muted, as the real one would.

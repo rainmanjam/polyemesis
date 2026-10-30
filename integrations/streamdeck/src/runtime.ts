@@ -156,6 +156,12 @@ export class Runtime {
   private readonly scopeErrors = new Map<string, ApiError>();
   private readonly surfaces = new Map<string, Surface>();
   private readonly holds = new Map<string, HoldToConfirm>();
+  /**
+   * Tap keys (mute, the gain dial's push, record) with a request out. A tap reads the state, then writes
+   * its opposite: two taps in flight at once both read the same state and write the same flip, so a
+   * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
+   */
+  private readonly tapping = new Set<string>();
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
@@ -771,6 +777,10 @@ export class Runtime {
 
   /** Key down on the record key. Reads the switch fresh, then flips it. Tap, not hold: see README. */
   async pressRecord(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipRecording(id));
+  }
+
+  private async flipRecording(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
@@ -830,6 +840,10 @@ export class Runtime {
    * is undone by the next tap and ends nothing.
    */
   async pressTrackMute(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipTrackMute(id));
+  }
+
+  private async flipTrackMute(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
@@ -937,6 +951,10 @@ export class Runtime {
 
   /** A push of the gain dial: mute or unmute the track. Mute applies on a matrix mix too. */
   async pushTrackGain(id: string): Promise<void> {
+    await this.oneTap(id, () => this.flipDialMute(id));
+  }
+
+  private async flipDialMute(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.dialNeedsAdmin(s))) return;
@@ -1052,6 +1070,17 @@ export class Runtime {
   }
 
   // ---- helpers -----------------------------------------------------------
+
+  /** Runs a tap's read-then-write unless one is already out for this key; a tap meanwhile is ignored. */
+  private async oneTap(id: string, tap: () => Promise<void>): Promise<void> {
+    if (this.tapping.has(id)) return;
+    this.tapping.add(id);
+    try {
+      await tap();
+    } finally {
+      this.tapping.delete(id);
+    }
+  }
 
   /** Write keys need an admin token. The check is made BEFORE any request, so a read token never sends one. */
   private async requireAdmin(s: Surface): Promise<boolean> {

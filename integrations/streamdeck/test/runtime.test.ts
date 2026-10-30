@@ -778,6 +778,27 @@ describe("record key", () => {
     expect(net.sent.filter((r) => r.url.pathname === "/api/v1/recording")).toHaveLength(0);
   });
 
+  // MUTATION: call flipRecording directly from pressRecord. Observed: FAIL.
+  it("ignores a second tap while the first is out, so a double tap does not flip it twice the same way", async () => {
+    let enabled = false;
+    const state = () => ({ status: 200, body: JSON.stringify({ enabled, state: enabled ? "on" : "off", halted: false, installWide: true }) });
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/recording": state,
+      "POST /api/v1/recording": (req) => {
+        enabled = (JSON.parse(req.body!) as { enabled: boolean }).enabled;
+        return state();
+      },
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("r", "record");
+    rt.add(key);
+
+    await Promise.all([rt.pressRecord("r"), rt.pressRecord("r")]);
+    expect(net.writes().map((w) => JSON.parse(w.body!))).toEqual([{ enabled: true }]);
+  });
+
   it("shows an alert when the switch is refused", async () => {
     const { rt } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,
