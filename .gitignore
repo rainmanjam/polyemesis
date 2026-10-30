@@ -141,3 +141,6 @@ graphify-out/
 
 # /brag output (launch video renders and compositions)
 brag-output/
+
+# Python bytecode, e.g. from running integrations/obs/polyemesis_obs.py.
+__pycache__/

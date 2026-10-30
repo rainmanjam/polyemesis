@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -445,6 +446,12 @@ func TestTheOBSConfigurationIsValidatedAndTheAddressIsMaskedForReadTokens(t *tes
 		if !strings.Contains(string(body), want) {
 			t.Errorf("refusal %s lacks %q", body, want)
 		}
+	}
+	// No programme named: the default is resolved and stored as an id, so the
+	// destination on it is accepted rather than refused as "another programme".
+	body = o.putConfig(t, map[string]any{"enabled": true, "destinations": []int64{sel}}, http.StatusOK)
+	if !strings.Contains(string(body), fmt.Sprintf(`"sourceId":%d`, src)) {
+		t.Errorf("an omitted sourceId was not resolved to the default programme: %s", body)
 	}
 	// hasPassword cannot be set by a PUT.
 	body = o.putConfig(t, map[string]any{

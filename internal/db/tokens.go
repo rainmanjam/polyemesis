@@ -46,9 +46,10 @@ const (
 	ScopeAdmin = "admin"
 	// ScopeOBS reaches POST /api/v1/obs/events and nothing else (#16). It is
 	// the credential pasted into the OBS script, whose settings OBS stores in
-	// plain text in the scene collection's profile directory: whoever can read
-	// that file gets a token that can report "OBS started streaming" and can
-	// read nothing, change nothing and start nothing directly.
+	// plain text: whoever can read that file can make the OBS bridge do what
+	// it is configured to do -- start its destinations, stop them (ending
+	// YouTube broadcasts, if stopping is armed), apply scene rules -- and can
+	// read nothing and change nothing else.
 	ScopeOBS = "obs"
 )
 

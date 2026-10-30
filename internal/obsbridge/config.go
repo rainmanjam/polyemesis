@@ -73,7 +73,8 @@ type Config struct {
 	// SourceID is the programme the bridge drives. Every destination below must
 	// belong to it, which is the rule stop-all learned the hard way: a control
 	// that names a programme must not reach another programme's broadcasts.
-	// Nil means the install's default programme.
+	// A PUT that leaves it out while listing destinations is given the
+	// install's default programme, resolved to an id when it is stored.
 	SourceID *int64 `json:"sourceId"`
 	// Destinations are the ones OBS starts and stops, and the default target of
 	// every scene rule. A selection, never "all": see the package comment on

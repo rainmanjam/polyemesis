@@ -125,6 +125,15 @@ func (s *Server) handlePutOBS(w http.ResponseWriter, r *http.Request) {
 	// Output only. Stored as false and filled in on the way out, so a PUT that
 	// echoes a GET cannot claim a password exists.
 	cfg.HasPassword = false
+	// No programme named means the install's default, RESOLVED HERE and stored
+	// as an id. Left nil it would match only a destination with no programme,
+	// which every create now refuses to make, and a later change of default
+	// would silently move the bridge to another programme's destinations.
+	if cfg.SourceID == nil && len(cfg.Destinations) > 0 {
+		if id, err := s.defaultSourceID(); err == nil && id > 0 {
+			cfg.SourceID = &id
+		}
+	}
 	if probs := cfg.Problems(); len(probs) > 0 {
 		writeError(w, http.StatusBadRequest, strings.Join(probs, "; "))
 		return

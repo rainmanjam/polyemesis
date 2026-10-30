@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 |---|---|
 | `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
-| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text; whoever reads that file can report "OBS started streaming" and nothing more. See [OBS-BRIDGE.md](OBS-BRIDGE.md). |
+| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text. Whoever reads that file can make the OBS bridge do what it is configured to do: start its destinations, stop them (ending their YouTube broadcasts, if stopping is turned on) and apply scene rules. They can do nothing else. See [OBS-BRIDGE.md](OBS-BRIDGE.md). |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
 for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
@@ -174,7 +174,7 @@ encode per candidate encoder and rewrites the install's capability cache.
 `/hls/*`, the dashboard's preview playlist, is **mounted at the root, not under
 `/api/v1`**: `/hls/{source}/index.m3u8` for a given programme, and the bare
 `/hls/index.m3u8` as an alias for the default one. It is now **session-only** — no
-bearer of either scope. Requesting a playlist starts the on-demand preview encoder and
+bearer of any scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
@@ -535,7 +535,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
-| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
+| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of any scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
 | `GET` | `/levels` | Current audio levels, and `feed`: `none`, `live` or `stale` (see below) |
 | `GET` | `/source` | Probed track layout |

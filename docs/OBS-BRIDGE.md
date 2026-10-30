@@ -96,7 +96,10 @@ destinations yourself.
 
 OBS keeps script settings, the token included, in plain text in your scene
 collection's file. That is why the script takes an `obs` token and never an
-admin one.
+admin one. Whoever reads that file can still make the bridge do what you
+configured it to do: start your destinations, stop them, which ends their
+YouTube broadcasts if stopping is turned on, and apply scene rules. They can
+do nothing else.
 
 The script sends from a background thread, so a slow or unreachable polyemesis
 never freezes OBS. A failed report is retried twice and then given up, and the
