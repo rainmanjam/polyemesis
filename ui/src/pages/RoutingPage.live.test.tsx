@@ -91,8 +91,18 @@ let stored: Destination;
 let setTrackLevel: ReturnType<typeof vi.fn>;
 let updateDestination: ReturnType<typeof vi.fn>;
 
+/** A stand-in compiler: one named volume stage per enabled track, so a level
+ *  change moves only levels and a selection change moves the graph. */
+function compile(p: RoutingProfile): RoutingResult {
+  const on = p.tracks.filter((s) => s.enabled);
+  const legs = on.map(
+    (s) => `[0:a:${s.track}]pan=stereo|c0=c0|c1=c1,volume@trk${s.track}=volume=${s.muted ? 0 : s.gain}[a_t${s.track}]`,
+  );
+  return { ...compiled, filterComplex: legs.join(";"), tracks: on.map((s) => s.track) };
+}
+
 function rows(): DestinationWithRouting[] {
-  return [{ destination: structuredClone(stored), routing: compiled } as DestinationWithRouting];
+  return [{ destination: structuredClone(stored), routing: compile(stored.profile) } as DestinationWithRouting];
 }
 
 beforeEach(() => {
@@ -102,7 +112,9 @@ beforeEach(() => {
     presets: [{ id: "mix-a", name: "Mix A", description: "" }],
     defaults: { musicTrack: 0, micTrack: 2, surroundTrack: 0, cleanTrack: 1, language: "", musicPolicy: "" },
   } as unknown as Awaited<ReturnType<typeof api.listPresets>>);
-  vi.spyOn(api, "compileRouting").mockResolvedValue({ routing: compiled } as never);
+  vi.spyOn(api, "compileRouting").mockImplementation((async (p: RoutingProfile) => ({
+    routing: compile(p),
+  })) as never);
   vi.spyOn(api, "putAnnotations").mockResolvedValue(undefined as never);
   vi.spyOn(api, "applyPreset").mockResolvedValue({
     profile: {
@@ -302,5 +314,36 @@ describe("a stored mute survives every routing-page save path", () => {
     const sent = savedTracks();
     expect(sent.find((s) => s.track === 1)?.muted).toBe(true);
     expect(sent.find((s) => s.track === 2)?.muted).toBeUndefined();
+  });
+});
+
+describe("the save bar says what Save will do to a running destination", () => {
+  const bar = () => screen.getAllByRole("status").find((e) => /Saving|Only levels/.test(e.textContent ?? ""));
+
+  it("a structural change warns of a restart", async () => {
+    await renderPage();
+    // Let the stored mix's own compile land first, so a stale graph is on hand.
+    await waitFor(() => expect(api.compileRouting).toHaveBeenCalled());
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    // Before the new draft has compiled, the older compile must not be read as
+    // this draft's: the answer is the conservative one.
+    expect(bar()?.textContent).toMatch(/^Saving restarts Twitch/);
+    await waitFor(() => expect(bar()?.textContent).toMatch(/^Saving restarts Twitch/));
+  });
+
+  it("a level-only draft change says it applies live where supported", async () => {
+    // A 404 leaves track 1 on the draft slider, so its gain becomes a pending
+    // level-only edit for Save rather than a live call.
+    setTrackLevel.mockRejectedValueOnce(new ApiError(404, "not in the selection"));
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
+    await screen.findByTestId("live-block-0");
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    await waitFor(() =>
+      expect(bar()?.textContent).toMatch(/applies them to Twitch live, without a restart, where the server supports it/),
+    );
+    await save();
+    await waitFor(() => expect(savedTracks().find((x) => x.track === 0)?.gain).toBe(0.95));
   });
 });

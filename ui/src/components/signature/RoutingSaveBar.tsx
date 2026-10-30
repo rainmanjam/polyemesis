@@ -14,6 +14,10 @@ export interface RoutingSaveBarProps {
   /** An enabled destination restarts when saved, so the bar says so. Not the
    *  same as on air: a disabled destination saves without a restart. */
   restarts: boolean;
+  /** The pending change moves nothing but live volume levels (lib/saveImpact),
+   *  so an enabled destination takes it on its command channel instead of
+   *  restarting, on a server that supports that. */
+  levelOnly?: boolean;
   onSave: () => void;
   onDiscard: () => void;
 }
@@ -30,23 +34,27 @@ export function RoutingSaveBar({
   blocked,
   destinationName,
   restarts,
+  levelOnly = false,
   onSave,
   onDiscard,
 }: RoutingSaveBarProps) {
   const t = useT();
   if (!dirty) return null;
+  const warnRestart = restarts && !levelOnly;
 
   return (
     <div
       className={cn(
         "sticky bottom-0 z-20 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 shadow-sm",
-        restarts ? "border-warn bg-warn-dim" : "border-border bg-card",
+        warnRestart ? "border-warn bg-warn-dim" : "border-border bg-card",
       )}
     >
       <p role="status" className="min-w-0 flex-1 text-sm">
-        {restarts
+        {warnRestart
           ? t("routing.saveBar.restarts", { name: destinationName })
-          : t("routing.saveBar.changed", { name: destinationName })}
+          : restarts
+            ? t("routing.saveBar.appliesLive", { name: destinationName })
+            : t("routing.saveBar.changed", { name: destinationName })}
       </p>
       <div className="flex shrink-0 items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onDiscard} disabled={saving}>

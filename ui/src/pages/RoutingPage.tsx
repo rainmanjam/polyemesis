@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
+import { isLevelOnlySave } from "@/lib/saveImpact";
 import {
   carryMutes,
   destinationLiveBlock,
@@ -218,6 +219,19 @@ export function RoutingPage() {
   // carry unsaved edits besides.
   const keepDraftFor = useRef<DestinationId | null>(null);
 
+  // The live editor's latest compile and the draft it was compiled from. The
+  // save bar compares it, levels masked, with the stored graph to say whether
+  // Save restarts the destination or only moves levels (lib/saveImpact). A
+  // compile of an older draft is never used: identity with `profile` decides.
+  const [liveGraph, setLiveGraph] = useState<{
+    profile: RoutingProfile;
+    graph: string | null;
+  } | null>(null);
+  const noteLiveGraph = useCallback(
+    (p: RoutingProfile, graph: string | null) => setLiveGraph({ profile: p, graph }),
+    [],
+  );
+
   // ---- load destinations & presets ----
   useEffect(() => {
     let cancelled = false;
@@ -389,9 +403,11 @@ export function RoutingPage() {
         vodProfile: vodProfile ? wireProfile(vodProfile) : null,
       });
       toast.success(
-        selected.enabled
-          ? `Routing saved. "${selected.name}" is restarting with the new mix.`
-          : "Routing saved.",
+        !selected.enabled
+          ? t("route.saved")
+          : levelOnly
+            ? t("route.savedLive", { name: selected.name })
+            : t("route.savedRestarting", { name: selected.name }),
       );
       setDirty(false);
       setLiveRefusals({});
@@ -557,6 +573,19 @@ export function RoutingPage() {
       onGain: (track, gain) => applyLevel(track, { gain }),
     };
   }, [storedRow, liveRefusals, applyLevel, t]);
+
+  const storedRouting = useMemo(
+    () => list.find((r) => r.destination.id === selected?.id)?.routing ?? null,
+    [list, selected?.id],
+  );
+  // What Save will do to a running destination: a level-only change applies
+  // live where the server supports it; anything else restarts it.
+  const levelOnly = isLevelOnlySave({
+    storedGraph: storedRouting?.filterComplex,
+    draftGraph: liveGraph && liveGraph.profile === profile ? liveGraph.graph : null,
+    secondMixChanged:
+      JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
+  });
 
   const liveNotice = useMemo(() => {
     if (!storedRow) return null;
@@ -841,6 +870,7 @@ export function RoutingPage() {
               onPatch={patch}
               onApplyPreset={applyPreset}
               onCompileError={setLiveError}
+              onCompiledGraph={noteLiveGraph}
               allowAnnotating
               live={
                 liveRows && {
@@ -954,6 +984,7 @@ export function RoutingPage() {
         blocked={!!blockingError}
         destinationName={selected?.name ?? ""}
         restarts={!!selected?.enabled}
+        levelOnly={levelOnly}
         onSave={save}
         onDiscard={discardChanges}
       />
@@ -1027,6 +1058,7 @@ function ProfileEditor({
   allowAnnotating = false,
   footer,
   live,
+  onCompiledGraph,
 }: {
   /** Namespaces every DOM id this editor emits. Must differ between instances. */
   idPrefix: string;
@@ -1042,6 +1074,9 @@ function ProfileEditor({
    *  not. MUST be referentially stable — a raw setState function is ideal —
    *  because it is a dependency of the compile effect below. */
   onCompileError: (message: string) => void;
+  /** Called with each compile of `profile`: its graph, or null when it did not
+   *  compile. Must be referentially stable, like onCompileError. */
+  onCompiledGraph?: (profile: RoutingProfile, graph: string | null) => void;
   /** Track roles describe the SOURCE, so one editor owns the labelling UI and
    *  the other reads the result. Two buttons toggling one flag would look like
    *  two independent controls that mysteriously move together. */
@@ -1086,6 +1121,7 @@ function ProfileEditor({
           setCompiled(res.routing);
           setCompileError("");
           onCompileError("");
+          onCompiledGraph?.(profile, res.routing.filterComplex);
         })
         .catch((err) => {
           if (cancelled) return;
@@ -1093,13 +1129,14 @@ function ProfileEditor({
           setCompiled(null);
           setCompileError(msg);
           onCompileError(msg);
+          onCompiledGraph?.(profile, null);
         });
     }, 180);
     return () => {
       cancelled = true;
       window.clearTimeout(debounceRef.current);
     };
-  }, [profile, ctx.sourceId, t, onCompileError]);
+  }, [profile, ctx.sourceId, t, onCompileError, onCompiledGraph]);
 
   // An editor that unmounts — the second mix being switched off — must not
   // leave its last error behind, or the Save button stays disabled by a mix
