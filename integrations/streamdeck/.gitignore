@@ -1,0 +1,4 @@
+node_modules/
+com.polyemesis.streamdeck.sdPlugin/bin/
+*.streamDeckPlugin
+coverage/
