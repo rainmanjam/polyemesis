@@ -1696,5 +1696,9 @@
   "nav.group.content": "Konten",
   "nav.group.community": "Komunitas",
   "nav.group.operations": "Operasi",
-  "nav.group.settings": "Pengaturan"
+  "nav.group.settings": "Pengaturan",
+  "routing.saveBar.changed": "Perubahan rute yang belum disimpan untuk {name}. Tidak ada yang diterapkan sebelum Anda menyimpan.",
+  "routing.saveBar.discard": "Buang",
+  "routing.saveBar.save": "Simpan",
+  "routing.saveBar.restarts": "Menyimpan akan memulai ulang {name} dengan mix ini."
 }

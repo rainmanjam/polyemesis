@@ -1696,5 +1696,9 @@
   "nav.group.content": "Contenido",
   "nav.group.community": "Comunidad",
   "nav.group.operations": "Operaciones",
-  "nav.group.settings": "Ajustes"
+  "nav.group.settings": "Ajustes",
+  "routing.saveBar.changed": "Cambios de enrutamiento sin guardar para {name}. No se aplica nada hasta que guardes.",
+  "routing.saveBar.discard": "Descartar",
+  "routing.saveBar.save": "Guardar",
+  "routing.saveBar.restarts": "Guardar reinicia {name} con esta mezcla."
 }

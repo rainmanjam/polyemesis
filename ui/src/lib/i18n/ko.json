@@ -1696,5 +1696,9 @@
   "nav.group.content": "콘텐츠",
   "nav.group.community": "커뮤니티",
   "nav.group.operations": "운영",
-  "nav.group.settings": "설정"
+  "nav.group.settings": "설정",
+  "routing.saveBar.changed": "{name}의 라우팅 변경 사항이 저장되지 않았습니다. 저장하기 전에는 적용되지 않습니다.",
+  "routing.saveBar.discard": "취소",
+  "routing.saveBar.save": "저장",
+  "routing.saveBar.restarts": "저장하면 이 믹스로 {name}이(가) 다시 시작됩니다."
 }

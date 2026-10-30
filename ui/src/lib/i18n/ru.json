@@ -1696,5 +1696,9 @@
   "nav.group.content": "Контент",
   "nav.group.community": "Сообщество",
   "nav.group.operations": "Эксплуатация",
-  "nav.group.settings": "Настройки"
+  "nav.group.settings": "Настройки",
+  "routing.saveBar.changed": "Несохранённые изменения маршрутизации для {name}. Ничего не применяется, пока вы не сохраните.",
+  "routing.saveBar.discard": "Отменить",
+  "routing.saveBar.save": "Сохранить",
+  "routing.saveBar.restarts": "Сохранение перезапустит {name} с этим микшем."
 }

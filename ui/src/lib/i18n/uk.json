@@ -1696,5 +1696,9 @@
   "nav.group.content": "Контент",
   "nav.group.community": "Спільнота",
   "nav.group.operations": "Експлуатація",
-  "nav.group.settings": "Налаштування"
+  "nav.group.settings": "Налаштування",
+  "routing.saveBar.changed": "Незбережені зміни маршрутизації для {name}. Нічого не застосовується, доки ви не збережете.",
+  "routing.saveBar.discard": "Скасувати",
+  "routing.saveBar.save": "Зберегти",
+  "routing.saveBar.restarts": "Збереження перезапустить {name} з цим мікшем."
 }

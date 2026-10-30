@@ -1696,5 +1696,9 @@
   "nav.group.content": "İçerik",
   "nav.group.community": "Topluluk",
   "nav.group.operations": "İşletim",
-  "nav.group.settings": "Ayarlar"
+  "nav.group.settings": "Ayarlar",
+  "routing.saveBar.changed": "{name} için kaydedilmemiş yönlendirme değişiklikleri. Kaydedene kadar hiçbir şey uygulanmaz.",
+  "routing.saveBar.discard": "Vazgeç",
+  "routing.saveBar.save": "Kaydet",
+  "routing.saveBar.restarts": "Kaydetmek {name} öğesini bu miksle yeniden başlatır."
 }

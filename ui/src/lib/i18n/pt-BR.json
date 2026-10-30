@@ -1696,5 +1696,9 @@
   "nav.group.content": "Conteúdo",
   "nav.group.community": "Comunidade",
   "nav.group.operations": "Operações",
-  "nav.group.settings": "Configurações"
+  "nav.group.settings": "Configurações",
+  "routing.saveBar.changed": "Alterações de roteamento não salvas para {name}. Nada é aplicado até você salvar.",
+  "routing.saveBar.discard": "Descartar",
+  "routing.saveBar.save": "Salvar",
+  "routing.saveBar.restarts": "Salvar reinicia {name} com esta mixagem."
 }

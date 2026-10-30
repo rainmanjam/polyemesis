@@ -1696,5 +1696,9 @@
   "nav.group.content": "内容",
   "nav.group.community": "社区",
   "nav.group.operations": "运维",
-  "nav.group.settings": "设置"
+  "nav.group.settings": "设置",
+  "routing.saveBar.changed": "{name} 的路由更改尚未保存。保存前不会应用任何内容。",
+  "routing.saveBar.discard": "放弃",
+  "routing.saveBar.save": "保存",
+  "routing.saveBar.restarts": "保存会以此混音重新启动 {name}。"
 }

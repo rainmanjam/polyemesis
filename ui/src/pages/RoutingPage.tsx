@@ -33,12 +33,14 @@ import { PageHeader } from "@/components/AppLayout";
 import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { TrackRows } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
+import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
+import { storedMixes } from "@/lib/storedMixes";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -357,6 +359,24 @@ export function RoutingPage() {
     }
   };
 
+  // Throws away the pending edit and puts back what the server holds (A7). The
+  // same reads the destination-select effect does, so a discard and a fresh
+  // selection cannot disagree about what "stored" means.
+  const discardChanges = () => {
+    const found = list.find((d) => d.destination.id === selected?.id);
+    if (!found) return;
+    // A preset still in flight would land after this and re-dirty the form, so
+    // every outstanding apply is retired here, the same way a destination switch
+    // retires it (A7).
+    presetSeq.current = { live: presetSeq.current.live + 1, vod: presetSeq.current.vod + 1 };
+    const { profile: stored, vodProfile: storedVod } = storedMixes(found.destination);
+    setProfile(stored);
+    setVodProfile(storedVod);
+    vodEnabledRef.current = storedVod !== null;
+    stashedVod.current = null;
+    setDirty(false);
+  };
+
   // Shared by both mixes. `mix` says which profile asked, so an archive preset
   // can be dropped on the second mix without the first one moving — which is
   // most of the point of having a second mix at all.
@@ -540,7 +560,6 @@ export function RoutingPage() {
         subtitle={t("route.audioRoutingDesc")}
         actions={
           <>
-            {dirty && <Badge variant="warn">unsaved</Badge>}
             <Button size="sm" onClick={save} disabled={!dirty || saving || !!blockingError}>
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
               Save
@@ -708,6 +727,17 @@ export function RoutingPage() {
           </div>
         )}
       </div>
+
+      {/* ---------- pending change (A7) ---------- */}
+      <RoutingSaveBar
+        dirty={dirty}
+        saving={saving}
+        blocked={!!blockingError}
+        destinationName={selected?.name ?? ""}
+        restarts={!!selected?.enabled}
+        onSave={save}
+        onDiscard={discardChanges}
+      />
     </div>
   );
 }

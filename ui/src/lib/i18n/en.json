@@ -1696,5 +1696,9 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Operations",
-  "nav.group.settings": "Settings"
+  "nav.group.settings": "Settings",
+  "routing.saveBar.changed": "Unsaved routing changes for {name}. Nothing is applied until you save.",
+  "routing.saveBar.discard": "Discard",
+  "routing.saveBar.save": "Save",
+  "routing.saveBar.restarts": "Saving restarts {name} with this mix."
 }

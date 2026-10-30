@@ -1696,5 +1696,9 @@
   "nav.group.content": "Treści",
   "nav.group.community": "Społeczność",
   "nav.group.operations": "Operacje",
-  "nav.group.settings": "Ustawienia"
+  "nav.group.settings": "Ustawienia",
+  "routing.saveBar.changed": "Niezapisane zmiany routingu dla {name}. Nic nie zostanie zastosowane, dopóki nie zapiszesz.",
+  "routing.saveBar.discard": "Odrzuć",
+  "routing.saveBar.save": "Zapisz",
+  "routing.saveBar.restarts": "Zapisanie uruchomi ponownie {name} z tym miksem."
 }

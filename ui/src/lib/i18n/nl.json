@@ -1696,5 +1696,9 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Beheer",
-  "nav.group.settings": "Instellingen"
+  "nav.group.settings": "Instellingen",
+  "routing.saveBar.changed": "Niet-opgeslagen routingwijzigingen voor {name}. Er wordt niets toegepast tot je opslaat.",
+  "routing.saveBar.discard": "Weggooien",
+  "routing.saveBar.save": "Opslaan",
+  "routing.saveBar.restarts": "Opslaan start {name} opnieuw met deze mix."
 }

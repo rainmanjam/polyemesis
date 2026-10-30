@@ -1696,5 +1696,9 @@
   "nav.group.content": "Inhalt",
   "nav.group.community": "Community",
   "nav.group.operations": "Betrieb",
-  "nav.group.settings": "Einstellungen"
+  "nav.group.settings": "Einstellungen",
+  "routing.saveBar.changed": "Nicht gespeicherte Routing-Änderungen für {name}. Nichts wird übernommen, bis du speicherst.",
+  "routing.saveBar.discard": "Verwerfen",
+  "routing.saveBar.save": "Speichern",
+  "routing.saveBar.restarts": "Beim Speichern wird {name} mit diesem Mix neu gestartet."
 }
