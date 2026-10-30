@@ -29,6 +29,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
@@ -417,6 +418,16 @@ func run(h *hooks) error {
 	hub.SetDisplay(overlayGate)
 	go overlayGate.Run(ctx)
 
+	// The OBS bridge (#16). Built here and handed to the API server, which
+	// installs itself as the bridge's Actions: OBS reaches destinations only
+	// through the server's own start, stop and track-level code. Run dials
+	// obs-websocket when configured to and never returns an error -- OBS
+	// being closed is the normal state of an install between shows.
+	obsBridge := obsbridge.New(obsbridge.Options{
+		Log: log.With("component", "obs"), Pub: streamHub, Load: api.OBSLoader(store, box),
+	})
+	defer obsBridge.Close()
+
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
 		DiagLevel: diagSwitch,
@@ -427,6 +438,7 @@ func run(h *hooks) error {
 		Hooks:         hookd,
 		Stream:        streamHub,
 		OverlayGate:   overlayGate,
+		OBS:           obsBridge,
 		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
@@ -436,6 +448,10 @@ func run(h *hooks) error {
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
+	// After api.New, which is what installs the server as the bridge's
+	// Actions: a fact OBS reports before that would be recorded and acted on
+	// by nothing.
+	go obsBridge.Run(ctx)
 	go srv.RefreshLoop(ctx)
 	// Pre-announces scheduled Facebook broadcasts, so a show on a schedule has
 	// an event page before it starts. Best-effort by construction: it runs

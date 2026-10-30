@@ -178,6 +178,9 @@ real producer, to actually be emitted.
 | `chat.display` | overlay | no | A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows. |
 | `chat.undisplay` | overlay | no | Chat lines that were cleared for display are gone and must leave the screen. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
+| `obs.connection` | obs | yes | Polyemesis's link to obs-websocket connected, dropped, or was refused. |
+| `obs.stream` | obs | yes | OBS started or stopped streaming, as reported by obs-websocket or the OBS script. |
+| `obs.scene` | obs | yes | OBS switched its program scene; preset names the routing rule the scene triggers, if any. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
 ### Destinations
@@ -314,6 +317,30 @@ Replay treats a removed line differently for an overlay key: a `chat.display`
 that a later `chat.undisplay` removed is never replayed to an overlay, whatever
 `Last-Event-ID` it resumes from. An admin subscriber is replayed both events,
 in the order they happened.
+
+### OBS
+
+The `obs` topic is the [OBS bridge](OBS-BRIDGE.md): what OBS reported, by
+obs-websocket or by the OBS script, and whether polyemesis's own link to
+obs-websocket is up. None of these events carries the obs-websocket address or
+its password. A read token receives all three.
+
+- `obs.connection` is `{state, detail?}`. `state` is `off`, `connecting`,
+  `connected`, `unreachable`, `refused` or `incompatible`. `detail` is one of
+  polyemesis's own sentences, never an error from the network. The event fires
+  when the state changes, not on every reconnect attempt.
+- `obs.stream` is `{state, via, sync?, stopInSeconds?}`. `state` is `started`
+  or `stopped`, and `via` is `websocket` or `script`. `sync` marks a state read
+  after (re)connecting rather than a change OBS announced, and the bridge acts
+  on nothing marked `sync`. `stopInSeconds` is present on a stop that will stop
+  destinations, and gives the grace period.
+- `obs.scene` is `{scene, via, sync?, preset?}`. `preset` names the routing
+  preset the scene's rule applies.
+
+A fact reported twice is published once: by both ways in, or by a reconnect
+that finds OBS where it was. What the bridge then did to each destination is
+on `GET /api/v1/obs` under `status.lastActions`, and as the usual
+`destination.up` and `destination.down` events.
 
 ### Alerts
 

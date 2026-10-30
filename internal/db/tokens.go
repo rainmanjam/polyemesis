@@ -28,9 +28,13 @@ const tokenDisplayLength = len(TokenPrefix) + 8
 
 // Token scopes. What a token may do, as opposed to who it is.
 //
-// Two values rather than a permission per feature, because the enforcement has
-// to be a rule a reader can restate: ScopeRead is GET and HEAD, ScopeAdmin is
-// everything the signed-in operator can do. A model with a permission per route
+// Two broad values rather than a permission per feature, because the
+// enforcement has to be a rule a reader can restate: ScopeRead is GET and HEAD,
+// ScopeAdmin is everything the signed-in operator can do. ScopeOBS and the two
+// MCP scopes are the narrow exceptions, and they are narrow in the only
+// direction that keeps the rule restatable: each reaches ONE route and nothing
+// else, not even a read (see requireScope's obsScopePatterns, and
+// internal/api's authenticate for /mcp). A model with a permission per route
 // needs every one of the API's routes classified, and every route added
 // afterwards classified correctly by whoever adds it -- which is the same
 // remember-to-do-it failure #140 was.
@@ -55,6 +59,13 @@ const (
 	// MCP endpoint itself dispatched (see BaseScope).
 	ScopeMCPRead  = "mcp-read"
 	ScopeMCPAdmin = "mcp-admin"
+	// ScopeOBS reaches POST /api/v1/obs/events and nothing else (#16). It is
+	// the credential pasted into the OBS script, whose settings OBS stores in
+	// plain text: whoever can read that file can make the OBS bridge do what
+	// it is configured to do -- start its destinations, stop them (ending
+	// YouTube broadcasts, if stopping is armed), apply scene rules -- and can
+	// read nothing and change nothing else.
+	ScopeOBS = "obs"
 )
 
 // IsMCPScope reports whether s is one of the MCP-only scopes.
@@ -80,7 +91,7 @@ func BaseScope(s string) string {
 // operator asked for rather than a stronger one. That is the safe direction to
 // fail, and it is still worth refusing outright so nobody has to discover it.
 func ValidScope(s string) bool {
-	return s == ScopeRead || s == ScopeAdmin || IsMCPScope(s)
+	return s == ScopeRead || s == ScopeAdmin || s == ScopeOBS || IsMCPScope(s)
 }
 
 // APIToken is a long-lived credential for automation. It deliberately has no
@@ -137,8 +148,8 @@ func (d *DB) CreateAPIToken(name, scope string) (*APIToken, string, error) {
 		scope = ScopeRead
 	}
 	if !ValidScope(scope) {
-		return nil, "", fmt.Errorf("unknown token scope %q; use %q, %q, %q or %q",
-			scope, ScopeRead, ScopeAdmin, ScopeMCPRead, ScopeMCPAdmin)
+		return nil, "", fmt.Errorf("unknown token scope %q; use %q, %q, %q, %q or %q",
+			scope, ScopeRead, ScopeAdmin, ScopeOBS, ScopeMCPRead, ScopeMCPAdmin)
 	}
 
 	b := make([]byte, 32)

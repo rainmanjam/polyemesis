@@ -6,6 +6,7 @@ const labels = {
   pipeline: "Pipeline",
   platforms: "Platforms",
   overlays: "Overlays",
+  obs: "OBS bridge",
   security: "Security",
   danger: "Danger zone",
   debug: "Debug",
@@ -22,7 +23,7 @@ describe("searchSettings", () => {
   });
 
   it("returns every section whose name contains the query, in rail order", () => {
-    expect(searchSettings("i", labels)).toEqual(["ingest", "pipeline", "security"]);
+    expect(searchSettings("i", labels)).toEqual(["ingest", "pipeline", "obs", "security"]);
   });
 
   it("matches the translated label, so a non-English install searches in its own words", () => {
@@ -32,6 +33,6 @@ describe("searchSettings", () => {
   });
 
   it("keeps the rail order fixed: five sections, the Danger zone last, and Debug (on the System page) after it", () => {
-    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "security", "danger", "debug"]);
+    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "obs", "security", "danger", "debug"]);
   });
 });

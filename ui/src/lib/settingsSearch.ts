@@ -7,6 +7,7 @@ export const SETTINGS_TABS = [
   "pipeline",
   "platforms",
   "overlays",
+  "obs",
   "security",
   "danger",
   "debug",
@@ -116,6 +117,8 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "platforms", key: "set.clientId" },
   { tab: "platforms", key: "set.clientSecret" },
   { tab: "platforms", key: "set.connectedAccounts" },
+  // obs bridge (#16): its fields live in ObsBridgeSettings.tsx
+  { tab: "obs", key: "obs.title" },
   // security
   { tab: "security", key: "set.adminPassword" },
   { tab: "security", key: "set.currentPassword", card: "set.adminPassword", anchor: "cur-pw" },

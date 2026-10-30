@@ -1,0 +1,86 @@
+{
+  "note": "The polyemesis Streamer.bot pack: every action it ships, and the one REST call each makes. Polyemesis.cs implements exactly these; internal/api/streamerbot_pack_test.go replays each against the real router with a token of the scope named here, and checks Polyemesis.cs calls no path that is not listed. {destinationId} and {track} are Streamer.bot arguments; {source} is the optional polyemesisSource global.",
+  "actions": [
+    {
+      "name": "polyemesis: Go live (start all)",
+      "method": "Execute C# Method: StartAll",
+      "request": "POST",
+      "path": "/api/v1/destinations/start-all?source={source}",
+      "body": null,
+      "scope": "admin",
+      "description": "Starts every destination on the programme, paced two seconds apart. The same as Start all in the console."
+    },
+    {
+      "name": "polyemesis: Stop all",
+      "method": "Execute C# Method: StopAll",
+      "request": "POST",
+      "path": "/api/v1/destinations/stop-all?source={source}",
+      "body": {"confirm": true},
+      "scope": "admin",
+      "description": "Stops every destination on the programme. ENDS ANY LIVE YOUTUBE BROADCAST PERMANENTLY; starting again does not bring it back."
+    },
+    {
+      "name": "polyemesis: Start destination",
+      "method": "Execute C# Method: StartDestination",
+      "request": "POST",
+      "path": "/api/v1/destinations/{destinationId}/start",
+      "body": null,
+      "scope": "admin",
+      "description": "Starts one destination. Set the destinationId argument."
+    },
+    {
+      "name": "polyemesis: Stop destination",
+      "method": "Execute C# Method: StopDestination",
+      "request": "POST",
+      "path": "/api/v1/destinations/{destinationId}/stop",
+      "body": null,
+      "scope": "admin",
+      "description": "Stops one destination. Ends its YouTube broadcast if it has one."
+    },
+    {
+      "name": "polyemesis: Mute track",
+      "method": "Execute C# Method: MuteTrack",
+      "request": "POST",
+      "path": "/api/v1/destinations/{destinationId}/tracks/{track}/gain",
+      "body": {"muted": true},
+      "scope": "admin",
+      "description": "Mutes one audio track on one destination, live. track is 0-based: OBS track 1 is 0."
+    },
+    {
+      "name": "polyemesis: Unmute track",
+      "method": "Execute C# Method: UnmuteTrack",
+      "request": "POST",
+      "path": "/api/v1/destinations/{destinationId}/tracks/{track}/gain",
+      "body": {"muted": false},
+      "scope": "admin",
+      "description": "Unmutes one audio track on one destination, live."
+    },
+    {
+      "name": "polyemesis: Recording on",
+      "method": "Execute C# Method: RecordingOn",
+      "request": "POST",
+      "path": "/api/v1/recording",
+      "body": {"enabled": true},
+      "scope": "admin",
+      "description": "Turns the install's recording on."
+    },
+    {
+      "name": "polyemesis: Recording off",
+      "method": "Execute C# Method: RecordingOff",
+      "request": "POST",
+      "path": "/api/v1/recording",
+      "body": {"enabled": false},
+      "scope": "admin",
+      "description": "Turns the install's recording off."
+    },
+    {
+      "name": "polyemesis: Status to chat",
+      "method": "Execute C# Method: Status",
+      "request": "GET",
+      "path": "/api/v1/destinations",
+      "body": null,
+      "scope": "read",
+      "description": "Reads the destinations and sets %polyemesisLive% (how many are running) and %polyemesisSummary% for a following Send Message sub-action."
+    }
+  ]
+}

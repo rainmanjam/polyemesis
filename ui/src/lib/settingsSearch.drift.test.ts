@@ -34,6 +34,7 @@ const elsewhere = [
   // On the System page since A17, and still found by the settings search.
   ...keysIn(src("../components/DebugSettings.tsx"), ["CardTitle"]),
   ...keysIn(src("../components/DangerZone.tsx"), ["CardTitle"]),
+  ...keysIn(src("../components/ObsBridgeSettings.tsx"), ["CardTitle"]),
 ];
 
 describe("settings search index", () => {

@@ -52,6 +52,9 @@ const (
 	// TopicOverlay is the display projection of chat that an OBS overlay key
 	// may read: see DisplayLine and OverlayVisible.
 	TopicOverlay Topic = "overlay"
+	// TopicOBS is the OBS bridge (#16): what OBS told polyemesis, over
+	// obs-websocket or the OBS script, and whether the link is up.
+	TopicOBS Topic = "obs"
 )
 
 // Event types. The destination and ingest names are the webhook trigger names
@@ -78,6 +81,9 @@ const (
 	TypeChatUndisplay         Type = "chat.undisplay"
 	TypeAlert                 Type = "alert"
 	TypeStreamGap             Type = "stream.gap"
+	TypeOBSConnection         Type = "obs.connection"
+	TypeOBSStream             Type = "obs.stream"
+	TypeOBSScene              Type = "obs.scene"
 )
 
 // Access says whether a read-scoped API token receives a type. The zero value
@@ -174,6 +180,15 @@ var catalogue = []Spec{
 	// audit half of the alert catalogue is not on the timeline, and a stream
 	// that sent it would widen what a read token can see.
 	{TypeAlert, TopicAlert, Partly, "An operator alert fired or resolved.", alertOnTheTimeline},
+
+	// The OBS bridge (internal/obsbridge). What OBS reported, never what it was
+	// asked: none of these carries the obs-websocket address or its password,
+	// and the connection's detail is a fixed sentence chosen by polyemesis, not
+	// an error string from the network. Granted, because a read token already
+	// sees every destination these lead to start or stop.
+	{TypeOBSConnection, TopicOBS, Granted, "Polyemesis's link to obs-websocket connected, dropped, or was refused.", nil},
+	{TypeOBSStream, TopicOBS, Granted, "OBS started or stopped streaming, as reported by obs-websocket or the OBS script.", nil},
+	{TypeOBSScene, TopicOBS, Granted, "OBS switched its program scene; preset names the routing rule the scene triggers, if any.", nil},
 
 	// The stream's own bookkeeping. Carries no data from anywhere else.
 	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST.", nil},

@@ -45,6 +45,7 @@ Every token carries a scope, chosen when it is created:
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
+| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text. Whoever reads that file can make the OBS bridge do what it is configured to do: start its destinations, stop them (ending their YouTube broadcasts, if stopping is turned on) and apply scene rules. They can do nothing else. See [OBS-BRIDGE.md](OBS-BRIDGE.md). |
 
 An `mcp-` token is accepted at `POST /mcp` and nowhere else. Every route in this
 document, `/ws` and `/events` answer it exactly as they answer no token at all,
@@ -182,7 +183,7 @@ encode per candidate encoder and rewrites the install's capability cache.
 `/hls/*`, the dashboard's preview playlist, is **mounted at the root, not under
 `/api/v1`**: `/hls/{source}/index.m3u8` for a given programme, and the bare
 `/hls/index.m3u8` as an alias for the default one. It is now **session-only** — no
-bearer of either scope. Requesting a playlist starts the on-demand preview encoder and
+bearer of any scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
@@ -552,7 +553,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
-| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
+| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of any scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
 | `GET` | `/levels` | Current audio levels, and `feed`: `none`, `live` or `stale` (see below) |
 | `GET` | `/source` | Probed track layout |
@@ -651,6 +652,48 @@ Inter that ship embedded, plus anything you drop in `<data-directory>/fonts/`,
 with the built-in ones marked. The route exists so the UI offers what this
 install actually has rather than a hard-coded list a build or a data directory
 could contradict.
+
+### OBS bridge
+
+| Method | Path |
+|---|---|
+| `GET` `PUT` | `/obs` |
+| `PUT` | `/obs/password` |
+| `POST` | `/obs/events` |
+
+The OBS bridge starts and stops destinations when OBS starts and stops
+streaming, and applies a routing preset when OBS switches scene. Setup, and
+the two ways polyemesis learns about OBS, are in [OBS-BRIDGE.md](OBS-BRIDGE.md).
+
+`GET /obs` answers `{"config": {...}, "status": {...}}`. `config` is what `PUT
+/obs` stores: `enabled`, `connect`, `url`, `hasPassword`, `sourceId`,
+`destinations`, `startOnStream`, `stopOnStream`, `stopAcknowledged`,
+`stopGraceSeconds` and `scenes` (`[{scene, preset, opts?, destinations?}]`).
+`status` is the live state: the obs-websocket `connection` (`state` is `off`,
+`connecting`, `connected`, `unreachable`, `refused` or `incompatible`, with a
+`detail` sentence), whether OBS is `streaming` (`null` until something has
+said), the current `scene`, `stopPendingUntil` while a grace period runs, and
+the last ten `lastActions` with one row per destination. A read token may call
+it, and is sent `url` blanked.
+
+`PUT /obs` replaces the whole configuration; a field you leave out is off. It is
+refused with `400` when `stopOnStream` is set without `stopAcknowledged`. That
+is the same warning `POST /destinations/stop-all` gives: stopping a YouTube
+destination ends its broadcast for good. It is also refused when a destination
+does not exist or is on another programme than `sourceId`, when `url` is not
+`ws://` or `wss://`, or when `url` carries a user, a password or a query
+string. `hasPassword` cannot be set this way. Admin scope.
+
+`PUT /obs/password` with `{"password": "..."}` seals the obs-websocket
+password, as `/settings/mqtt-password` does for the broker. `GET /obs` never
+returns it, and an empty password clears it. Admin scope.
+
+`POST /obs/events` is how the OBS script reports a fact:
+`{"event": "stream.started"}`, `{"event": "stream.stopped"}` or `{"event":
+"scene.changed", "scene": "Just Chatting"}`. It answers `202` once the fact is
+accepted; what the bridge then did appears on `GET /obs` and as `obs.*` events
+on `/events`. It answers `409` while the bridge is switched off and `400` for
+anything else. An `obs` or `admin` token may call it.
 
 ### Sources
 

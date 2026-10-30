@@ -15,6 +15,8 @@ import type {
   TokenScope,
   McpAccess,
   McpLevel,
+  ObsConfig,
+  ObsResponse,
   AutomodMatrixView,
   AutomodModelStats,
   BitrateSample,
@@ -691,6 +693,13 @@ export const api = {
    *  time. An empty string CLEARS the stored password. */
   putMqttPassword: (password: string) =>
     put<{ hasPassword: boolean }>("/settings/mqtt-password", { password }),
+  /** The OBS bridge (#16): configuration and live status. */
+  getObs: () => get<ObsResponse>("/obs"),
+  /** Replaces the whole bridge configuration; a field left out is off. */
+  putObs: (cfg: ObsConfig) => put<ObsResponse>("/obs", cfg),
+  /** The obs-websocket password, write-only, for the reason
+   *  putMqttPassword is. An empty string clears it. */
+  putObsPassword: (password: string) => put<{ hasPassword: boolean }>("/obs/password", { password }),
   /** Per-item readiness for the configured playlist -- whether the upload
    *  behind each entry still exists and has what the selector needs to play
    *  it. Separate from getSettings() because settings only carries what the

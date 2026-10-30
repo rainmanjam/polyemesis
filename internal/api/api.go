@@ -39,6 +39,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -517,6 +518,9 @@ type Server struct {
 	// rotated or revoked (overlays.go).
 	overlayGate  *overlay.Gate
 	overlayKicks overlayKicker
+	// obs is the OBS bridge (#16). Optional: nil answers its routes with what
+	// is stored and refuses the script's POST with a 503.
+	obs *obsbridge.Bridge
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -701,6 +705,9 @@ type Options struct {
 	Stream *eventstream.Hub
 	// OverlayGate is the chat overlay's display gate. Optional.
 	OverlayGate *overlay.Gate
+	// OBS is the OBS bridge. Optional. New installs the server as the
+	// bridge's Actions, so the bridge acts through this server's own code.
+	OBS *obsbridge.Bridge
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -737,6 +744,7 @@ func New(o Options) *Server {
 		hooks:         o.Hooks,
 		stream:        o.Stream,
 		overlayGate:   o.OverlayGate,
+		obs:           o.OBS,
 		version:       o.Version,
 		diag:          o.Diag,
 		diagLevel:     o.DiagLevel,
@@ -791,6 +799,9 @@ func New(o Options) *Server {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
 		s.lifecycle.announce = s.announceBroadcastPhase
+	}
+	if s.obs != nil {
+		s.obs.SetActions(s.OBSActions())
 	}
 	return s
 }
@@ -1061,6 +1072,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Its own route because the password must never travel outward in
 			// the settings blob -- see handlePutMQTTPassword.
 			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
+
+			// The OBS bridge (#16). See obs.go. The configuration and its
+			// password are settings writes like the MQTT pair above, reachable
+			// by an admin token. /obs/events is the one route an "obs"-scoped
+			// token reaches (obsScopePatterns): the OBS script's way in.
+			r.Get("/obs", s.handleGetOBS)
+			r.Put("/obs", s.handlePutOBS)
+			r.Put("/obs/password", s.handlePutOBSPassword)
+			r.Post("/obs/events", s.handleOBSEvent)
 
 			r.Get("/tls", s.handleTLSStatus)
 			// What Let's Encrypt would need from this host, checked against
@@ -1998,6 +2018,15 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/chat/users":    true,
 }
 
+// obsScopePatterns is everything an "obs" token may reach: one route, keyed by
+// METHOD and chi pattern together so a GET on the same path is not smuggled in
+// by the POST's entry. ALLOWLIST, the failure mode of forgetting a route being
+// a 403 an operator notices. TestAnOBSTokenReachesOnlyTheOBSEventsRoute walks
+// the whole router to hold that.
+var obsScopePatterns = map[string]bool{
+	http.MethodPost + " /api/v1/obs/events": true,
+}
+
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has
 // settled who it is. It must run after requireAuth, which is what puts the
 // principal in the context.
@@ -2034,6 +2063,19 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 		}
 		if p.token == nil || p.token.Scope == db.ScopeAdmin {
 			next.ServeHTTP(w, r)
+			return
+		}
+		// THE OBS SCOPE IS DECIDED HERE AND NEVER FALLS THROUGH. Below this
+		// branch every non-admin scope is read, and read reaches every GET;
+		// an obs token must not, so it gets its own allowlist of one and a
+		// refusal for everything else, reads included.
+		if p.token.Scope == db.ScopeOBS {
+			if rc := chi.RouteContext(r.Context()); rc != nil && obsScopePatterns[r.Method+" "+rc.RoutePattern()] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusForbidden,
+				"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
 			return
 		}
 		// Anything that is not admin is treated as read-only, including a

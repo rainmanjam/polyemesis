@@ -157,6 +157,14 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 				lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
 				lits = append(lits, engine.AccountSecrets(accts)...)
 				lits = append(lits, engine.SettingsSecrets(set)...)
+				// The obs-websocket password (#16). Nothing logs it -- it is used
+				// once, inside obsbridge.AuthString -- and it is declared anyway,
+				// because "nothing logs it" is a claim about today's code and
+				// this set is what stands behind tomorrow's. Best effort: a
+				// password that cannot be read is one that cannot be logged.
+				if pw, err := s.store.GetOBSPassword(s.box); err == nil && pw != "" {
+					lits = append(lits, pw)
+				}
 				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
