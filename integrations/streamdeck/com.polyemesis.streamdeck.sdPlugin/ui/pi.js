@@ -11,6 +11,15 @@
   // arrive first, and the picker must show the SAVED choice, never silently the first preset.
   let savedPresetId = "";
   let presetList = null;
+  // The same for a track control's destination and track. The track is a 0-based index kept as a
+  // string, so "" (none chosen) is never confused with track 0.
+  let savedDestinationId = "";
+  let savedTrack = "";
+  let destinationList = null;
+
+  // The actions whose inspector picks a destination from a list and one of its tracks.
+  const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute"];
+  const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -60,8 +69,11 @@
     const payload = {};
     const source = Number($("sourceId").value);
     if (Number.isSafeInteger(source) && source > 0) payload.sourceId = source;
-    const dest = Number($("destinationId").value);
+    const dest = Number(isTrackAction() ? savedDestinationId : $("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
+    // Number("") is 0, which is a real track: an unchosen track saves nothing.
+    const track = savedTrack === "" ? NaN : Number(savedTrack);
+    if (isTrackAction() && Number.isSafeInteger(track) && track >= 0) payload.track = track;
     if ($("presetId").value) payload.presetId = $("presetId").value;
     savedPresetId = $("presetId").value;
     send({ event: "setSettings", context: actionContext, payload });
@@ -72,6 +84,77 @@
   // so a token typed but not yet saved cannot be what lists the presets.
   function requestPresets() {
     send({ action: actionType, event: "sendToPlugin", context: actionContext, payload: { type: "presets" } });
+  }
+
+  // The destinations come from the plugin, which reads the SAVED pairing, for the programme in the form.
+  function requestDestinations() {
+    const source = Number($("sourceId").value);
+    const payload = { type: "destinations" };
+    if (Number.isSafeInteger(source) && source > 0) payload.sourceId = source;
+    send({ action: actionType, event: "sendToPlugin", context: actionContext, payload });
+  }
+
+  function showDestinations(payload) {
+    const error = $("err-track");
+    if (payload.key) {
+      error.textContent = strings[payload.key] || strings["streamdeck.pi.destinationsFailed"] || "";
+      error.hidden = false;
+      renderDestinations();
+      return;
+    }
+    error.hidden = true;
+    destinationList = payload.destinations || [];
+    renderDestinations();
+  }
+
+  function option(value, label) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    return o;
+  }
+
+  // A picker that shows the SAVED choice whichever arrives first, the settings or the list, and keeps a
+  // saved choice the list no longer has visible and marked rather than silently choosing another.
+  function fillPicker(select, chooseKey, items, saved) {
+    select.replaceChildren(option("", strings[chooseKey] || ""));
+    (items || []).forEach((it) => select.appendChild(option(it.value, it.label)));
+    if (saved !== "" && items && !items.some((it) => it.value === saved)) {
+      select.appendChild(option(saved, (strings["streamdeck.pi.notListed"] || "{id}").replace("{id}", saved)));
+    } else if (saved !== "" && !items) {
+      select.appendChild(option(saved, saved));
+    }
+    select.value = saved;
+  }
+
+  function renderDestinations() {
+    const items = destinationList && destinationList.map((d) => ({ value: String(d.id), label: d.name }));
+    fillPicker($("trackDestination"), "streamdeck.pi.destinationChoose", items, savedDestinationId);
+    renderTracks();
+  }
+
+  function renderTracks() {
+    const dest = destinationList && destinationList.find((d) => String(d.id) === savedDestinationId);
+    const items = dest ? dest.tracks.map((tr) => ({ value: String(tr.track), label: tr.name })) : destinationList && [];
+    fillPicker($("track"), "streamdeck.pi.trackChoose", items, savedTrack);
+  }
+
+  function onDestinationChange() {
+    savedDestinationId = $("trackDestination").value;
+    // A track index means nothing on another destination's selection.
+    savedTrack = "";
+    renderTracks();
+    saveAction();
+  }
+
+  function onTrackChange() {
+    savedTrack = $("track").value;
+    saveAction();
+  }
+
+  function onSourceChange() {
+    saveAction();
+    if (isTrackAction()) requestDestinations();
   }
 
   function showPresets(payload) {
@@ -120,6 +203,11 @@
     if (typeof settings.destinationId === "number") $("destinationId").value = String(settings.destinationId);
     savedPresetId = typeof settings.presetId === "string" ? settings.presetId : "";
     renderPresets();
+    if (isTrackAction()) {
+      savedDestinationId = typeof settings.destinationId === "number" ? String(settings.destinationId) : "";
+      savedTrack = typeof settings.track === "number" ? String(settings.track) : "";
+      renderDestinations();
+    }
   }
 
   function runTest() {
@@ -163,6 +251,7 @@
       const payload = msg.payload || {};
       if (payload.type === "test") onTestResult(payload);
       else if (payload.type === "presets") showPresets(payload);
+      else if (payload.type === "destinations") showDestinations(payload);
     }
   }
 
@@ -174,6 +263,7 @@
     actionType = action.action;
     actionContext = action.context;
     $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination" && actionType !== "com.polyemesis.streamdeck.stop-destination";
+    $("block-track").hidden = !isTrackAction();
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
     // Recording is install-wide: the Record key takes no programme, so it shows no programme field.
@@ -184,10 +274,14 @@
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
       if (!$("block-preset").hidden) requestPresets();
+      if (isTrackAction()) requestDestinations();
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
-    ["sourceId", "destinationId"].forEach((f) => $(f).addEventListener("change", saveAction));
+    $("sourceId").addEventListener("change", onSourceChange);
+    $("destinationId").addEventListener("change", saveAction);
+    $("trackDestination").addEventListener("change", onDestinationChange);
+    $("track").addEventListener("change", onTrackChange);
     $("presetId").addEventListener("change", saveAction);
     $("test").addEventListener("click", runTest);
   };

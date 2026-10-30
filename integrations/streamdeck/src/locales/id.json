@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "Daftar preset tidak dapat dimuat.",
   "streamdeck.pi.presetChoose": "Pilih preset",
   "streamdeck.pi.presetMissing": "{id} (tidak ada lagi di instalasi ini)",
-  "streamdeck.pi.installWide": "Rekaman berlaku untuk seluruh instalasi: tombol ini mengubahnya untuk semua program."
+  "streamdeck.pi.installWide": "Rekaman berlaku untuk seluruh instalasi: tombol ini mengubahnya untuk semua program.",
+  "streamdeck.mute.muted": "BISU",
+  "streamdeck.mute.unmuted": "Suara aktif",
+  "streamdeck.mute.appliedLive": "Diterapkan langsung",
+  "streamdeck.mute.appliedRestart": "Diterapkan lewat mulai ulang",
+  "streamdeck.mute.unavailable": "Tidak tersedia",
+  "streamdeck.mute.copyAudio": "Audio diteruskan apa adanya",
+  "streamdeck.mute.noTrack": "Trek tidak di mix",
+  "streamdeck.track.numbered": "Trek {n}",
+  "streamdeck.pi.trackLabel": "Trek",
+  "streamdeck.pi.destinationChoose": "Pilih tujuan",
+  "streamdeck.pi.trackChoose": "Pilih trek",
+  "streamdeck.pi.destinationsFailed": "Daftar tujuan tidak dapat dimuat.",
+  "streamdeck.pi.notListed": "{id} (tidak lagi terdaftar)",
+  "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
+  "streamdeck.pi.destinationLabel": "Tujuan"
 }

@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "Impossibile caricare l'elenco dei preset.",
   "streamdeck.pi.presetChoose": "Scegli un preset",
   "streamdeck.pi.presetMissing": "{id} (non più presente in questa installazione)",
-  "streamdeck.pi.installWide": "La registrazione è per l'intera installazione: questo tasto la cambia per tutti i programmi."
+  "streamdeck.pi.installWide": "La registrazione è per l'intera installazione: questo tasto la cambia per tutti i programmi.",
+  "streamdeck.mute.muted": "MUTO",
+  "streamdeck.mute.unmuted": "Audio attivo",
+  "streamdeck.mute.appliedLive": "Applicato in diretta",
+  "streamdeck.mute.appliedRestart": "Applicato con riavvio",
+  "streamdeck.mute.unavailable": "Non disponibile",
+  "streamdeck.mute.copyAudio": "Audio passato invariato",
+  "streamdeck.mute.noTrack": "Traccia non nel mix",
+  "streamdeck.track.numbered": "Traccia {n}",
+  "streamdeck.pi.trackLabel": "Traccia",
+  "streamdeck.pi.destinationChoose": "Scegli una destinazione",
+  "streamdeck.pi.trackChoose": "Scegli una traccia",
+  "streamdeck.pi.destinationsFailed": "Impossibile caricare l'elenco delle destinazioni.",
+  "streamdeck.pi.notListed": "{id} (non più elencato)",
+  "streamdeck.pi.trackHint": "Una modifica si applica in diretta quando possibile. Altrimenti la destinazione si riavvia e gli spettatori vedono una riconnessione. Un server Windows si riavvia sempre.",
+  "streamdeck.pi.destinationLabel": "Destinazione"
 }

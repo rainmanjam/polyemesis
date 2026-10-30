@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "The preset list could not be loaded.",
   "streamdeck.pi.presetChoose": "Choose a preset",
   "streamdeck.pi.presetMissing": "{id} (no longer on this install)",
-  "streamdeck.pi.installWide": "Recording is install-wide: this key switches it for every programme."
+  "streamdeck.pi.installWide": "Recording is install-wide: this key switches it for every programme.",
+  "streamdeck.mute.muted": "MUTED",
+  "streamdeck.mute.unmuted": "Unmuted",
+  "streamdeck.mute.appliedLive": "Applied live",
+  "streamdeck.mute.appliedRestart": "Applied by restart",
+  "streamdeck.mute.unavailable": "Not available",
+  "streamdeck.mute.copyAudio": "Audio passes through",
+  "streamdeck.mute.noTrack": "Track not in mix",
+  "streamdeck.track.numbered": "Track {n}",
+  "streamdeck.pi.trackLabel": "Track",
+  "streamdeck.pi.destinationChoose": "Choose a destination",
+  "streamdeck.pi.trackChoose": "Choose a track",
+  "streamdeck.pi.destinationsFailed": "The destination list could not be loaded.",
+  "streamdeck.pi.notListed": "{id} (no longer listed)",
+  "streamdeck.pi.trackHint": "A change applies live when it can. Otherwise the destination restarts and viewers see a reconnect. A Windows server always restarts.",
+  "streamdeck.pi.destinationLabel": "Destination"
 }

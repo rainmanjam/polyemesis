@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "Die Voreinstellungsliste konnte nicht geladen werden.",
   "streamdeck.pi.presetChoose": "Voreinstellung wählen",
   "streamdeck.pi.presetMissing": "{id} (nicht mehr in dieser Installation)",
-  "streamdeck.pi.installWide": "Die Aufnahme gilt für die gesamte Installation: Diese Taste schaltet sie für alle Programme."
+  "streamdeck.pi.installWide": "Die Aufnahme gilt für die gesamte Installation: Diese Taste schaltet sie für alle Programme.",
+  "streamdeck.mute.muted": "STUMM",
+  "streamdeck.mute.unmuted": "Ton an",
+  "streamdeck.mute.appliedLive": "Live übernommen",
+  "streamdeck.mute.appliedRestart": "Per Neustart übernommen",
+  "streamdeck.mute.unavailable": "Nicht verfügbar",
+  "streamdeck.mute.copyAudio": "Audio wird durchgereicht",
+  "streamdeck.mute.noTrack": "Spur nicht im Mix",
+  "streamdeck.track.numbered": "Spur {n}",
+  "streamdeck.pi.trackLabel": "Spur",
+  "streamdeck.pi.destinationChoose": "Ziel wählen",
+  "streamdeck.pi.trackChoose": "Spur wählen",
+  "streamdeck.pi.destinationsFailed": "Die Zielliste konnte nicht geladen werden.",
+  "streamdeck.pi.notListed": "{id} (nicht mehr aufgeführt)",
+  "streamdeck.pi.trackHint": "Eine Änderung wird live übernommen, wenn möglich. Sonst startet das Ziel neu und die Zuschauer sehen eine Neuverbindung. Ein Windows-Server startet immer neu.",
+  "streamdeck.pi.destinationLabel": "Ziel"
 }

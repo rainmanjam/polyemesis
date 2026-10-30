@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "La liste des préréglages n'a pas pu être chargée.",
   "streamdeck.pi.presetChoose": "Choisir un préréglage",
   "streamdeck.pi.presetMissing": "{id} (n'existe plus sur cette installation)",
-  "streamdeck.pi.installWide": "L'enregistrement concerne toute l'installation : cette touche le change pour tous les programmes."
+  "streamdeck.pi.installWide": "L'enregistrement concerne toute l'installation : cette touche le change pour tous les programmes.",
+  "streamdeck.mute.muted": "MUET",
+  "streamdeck.mute.unmuted": "Son actif",
+  "streamdeck.mute.appliedLive": "Appliqué en direct",
+  "streamdeck.mute.appliedRestart": "Appliqué par redémarrage",
+  "streamdeck.mute.unavailable": "Indisponible",
+  "streamdeck.mute.copyAudio": "Audio transmis tel quel",
+  "streamdeck.mute.noTrack": "Piste hors du mixage",
+  "streamdeck.track.numbered": "Piste {n}",
+  "streamdeck.pi.trackLabel": "Piste",
+  "streamdeck.pi.destinationChoose": "Choisir une destination",
+  "streamdeck.pi.trackChoose": "Choisir une piste",
+  "streamdeck.pi.destinationsFailed": "La liste des destinations n'a pas pu être chargée.",
+  "streamdeck.pi.notListed": "{id} (n'est plus listé)",
+  "streamdeck.pi.trackHint": "Un changement s'applique en direct quand c'est possible. Sinon la destination redémarre et les spectateurs voient une reconnexion. Un serveur Windows redémarre toujours.",
+  "streamdeck.pi.destinationLabel": "Destination"
 }

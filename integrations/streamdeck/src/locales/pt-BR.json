@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "Não foi possível carregar a lista de predefinições.",
   "streamdeck.pi.presetChoose": "Escolha uma predefinição",
   "streamdeck.pi.presetMissing": "{id} (não existe mais nesta instalação)",
-  "streamdeck.pi.installWide": "A gravação é da instalação inteira: esta tecla a liga ou desliga para todos os programas."
+  "streamdeck.pi.installWide": "A gravação é da instalação inteira: esta tecla a liga ou desliga para todos os programas.",
+  "streamdeck.mute.muted": "MUDO",
+  "streamdeck.mute.unmuted": "Som ativo",
+  "streamdeck.mute.appliedLive": "Aplicado ao vivo",
+  "streamdeck.mute.appliedRestart": "Aplicado com reinício",
+  "streamdeck.mute.unavailable": "Indisponível",
+  "streamdeck.mute.copyAudio": "Áudio repassado sem mudança",
+  "streamdeck.mute.noTrack": "Faixa fora da mixagem",
+  "streamdeck.track.numbered": "Faixa {n}",
+  "streamdeck.pi.trackLabel": "Faixa",
+  "streamdeck.pi.destinationChoose": "Escolha um destino",
+  "streamdeck.pi.trackChoose": "Escolha uma faixa",
+  "streamdeck.pi.destinationsFailed": "Não foi possível carregar a lista de destinos.",
+  "streamdeck.pi.notListed": "{id} (não está mais na lista)",
+  "streamdeck.pi.trackHint": "Uma mudança é aplicada ao vivo quando possível. Senão o destino reinicia e os espectadores veem uma reconexão. Um servidor Windows sempre reinicia.",
+  "streamdeck.pi.destinationLabel": "Destino"
 }

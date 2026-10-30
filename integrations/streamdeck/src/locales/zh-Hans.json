@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "无法加载预设列表。",
   "streamdeck.pi.presetChoose": "选择预设",
   "streamdeck.pi.presetMissing": "{id}（此安装中已不存在）",
-  "streamdeck.pi.installWide": "录制对整个安装生效：此键会为所有节目切换录制。"
+  "streamdeck.pi.installWide": "录制对整个安装生效：此键会为所有节目切换录制。",
+  "streamdeck.mute.muted": "已静音",
+  "streamdeck.mute.unmuted": "未静音",
+  "streamdeck.mute.appliedLive": "已实时应用",
+  "streamdeck.mute.appliedRestart": "已通过重启应用",
+  "streamdeck.mute.unavailable": "不可用",
+  "streamdeck.mute.copyAudio": "音频原样直通",
+  "streamdeck.mute.noTrack": "音轨不在混音中",
+  "streamdeck.track.numbered": "音轨 {n}",
+  "streamdeck.pi.trackLabel": "音轨",
+  "streamdeck.pi.destinationChoose": "选择目标",
+  "streamdeck.pi.trackChoose": "选择音轨",
+  "streamdeck.pi.destinationsFailed": "无法加载目标列表。",
+  "streamdeck.pi.notListed": "{id}（已不在列表中）",
+  "streamdeck.pi.trackHint": "可以时，更改会实时生效。否则目标会重启，观众会看到重新连接。Windows 服务器总是重启。",
+  "streamdeck.pi.destinationLabel": "目标"
 }

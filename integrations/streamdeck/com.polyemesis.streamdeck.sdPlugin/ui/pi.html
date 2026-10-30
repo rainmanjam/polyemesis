@@ -40,6 +40,15 @@
     <input id="destinationId" type="number" min="1" step="1">
   </section>
 
+  <section class="block" id="block-track" hidden>
+    <label for="trackDestination" data-i18n="streamdeck.pi.destinationLabel"></label>
+    <select id="trackDestination"></select>
+    <label for="track" data-i18n="streamdeck.pi.trackLabel"></label>
+    <select id="track"></select>
+    <p class="hint" data-i18n="streamdeck.pi.trackHint"></p>
+    <p id="err-track" class="error" hidden></p>
+  </section>
+
   <section class="block" id="block-preset" hidden>
     <label for="presetId" data-i18n="streamdeck.pi.presetLabel"></label>
     <select id="presetId"></select>

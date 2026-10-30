@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "Ön ayar listesi yüklenemedi.",
   "streamdeck.pi.presetChoose": "Bir ön ayar seçin",
   "streamdeck.pi.presetMissing": "{id} (artık bu kurulumda yok)",
-  "streamdeck.pi.installWide": "Kayıt kurulumun tamamı için geçerlidir: bu tuş tüm programlar için açıp kapatır."
+  "streamdeck.pi.installWide": "Kayıt kurulumun tamamı için geçerlidir: bu tuş tüm programlar için açıp kapatır.",
+  "streamdeck.mute.muted": "SESSİZ",
+  "streamdeck.mute.unmuted": "Ses açık",
+  "streamdeck.mute.appliedLive": "Canlı uygulandı",
+  "streamdeck.mute.appliedRestart": "Yeniden başlatmayla uygulandı",
+  "streamdeck.mute.unavailable": "Kullanılamaz",
+  "streamdeck.mute.copyAudio": "Ses olduğu gibi aktarılır",
+  "streamdeck.mute.noTrack": "Parça mikste yok",
+  "streamdeck.track.numbered": "Parça {n}",
+  "streamdeck.pi.trackLabel": "Parça",
+  "streamdeck.pi.destinationChoose": "Hedef seçin",
+  "streamdeck.pi.trackChoose": "Parça seçin",
+  "streamdeck.pi.destinationsFailed": "Hedef listesi yüklenemedi.",
+  "streamdeck.pi.notListed": "{id} (artık listede değil)",
+  "streamdeck.pi.trackHint": "Değişiklik mümkünse canlı uygulanır. Değilse hedef yeniden başlar ve izleyiciler yeniden bağlanma görür. Windows sunucusu her zaman yeniden başlatır.",
+  "streamdeck.pi.destinationLabel": "Hedef"
 }

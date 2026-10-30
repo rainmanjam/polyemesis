@@ -54,5 +54,20 @@
   "streamdeck.pi.presetsFailed": "プリセット一覧を読み込めませんでした。",
   "streamdeck.pi.presetChoose": "プリセットを選択",
   "streamdeck.pi.presetMissing": "{id}（このインストールにはもうありません）",
-  "streamdeck.pi.installWide": "録画はインストール全体に適用されます。このキーはすべてのプログラムの録画を切り替えます。"
+  "streamdeck.pi.installWide": "録画はインストール全体に適用されます。このキーはすべてのプログラムの録画を切り替えます。",
+  "streamdeck.mute.muted": "ミュート中",
+  "streamdeck.mute.unmuted": "ミュート解除",
+  "streamdeck.mute.appliedLive": "ライブで適用",
+  "streamdeck.mute.appliedRestart": "再起動で適用",
+  "streamdeck.mute.unavailable": "利用不可",
+  "streamdeck.mute.copyAudio": "音声はそのまま転送",
+  "streamdeck.mute.noTrack": "ミックスにないトラック",
+  "streamdeck.track.numbered": "トラック {n}",
+  "streamdeck.pi.trackLabel": "トラック",
+  "streamdeck.pi.destinationChoose": "配信先を選択",
+  "streamdeck.pi.trackChoose": "トラックを選択",
+  "streamdeck.pi.destinationsFailed": "配信先の一覧を読み込めませんでした。",
+  "streamdeck.pi.notListed": "{id}（一覧にありません）",
+  "streamdeck.pi.trackHint": "変更は可能ならライブで適用されます。そうでなければ配信先が再起動し、視聴者には再接続が見えます。Windows サーバーは常に再起動します。",
+  "streamdeck.pi.destinationLabel": "配信先"
 }

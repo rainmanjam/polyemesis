@@ -15,7 +15,7 @@ import { ApiError, PolyemesisClient } from "./api.js";
 import { ConfigError, keySettings, parseServerUrl, type GlobalSettings, type KeySettings } from "./config.js";
 import { localeFor } from "./i18n.js";
 import type { StreamDeckKey } from "./keys.js";
-import { Runtime, authKeyFor, clientFor, type Surface, type SurfaceKind } from "./runtime.js";
+import { Runtime, authKeyFor, clientFor, destinationChoices, type DestinationChoice, type Surface, type SurfaceKind } from "./runtime.js";
 import { nodeTransport } from "./transport.js";
 
 // The Stream Deck adapter. Each action forwards its events to the Runtime,
@@ -23,6 +23,8 @@ import { nodeTransport } from "./transport.js";
 // tests cover what it calls.
 
 const PLUGIN = "com.polyemesis.streamdeck";
+/** The actions whose inspector picks a destination and one of its tracks. */
+const TRACK_ACTIONS = [`${PLUGIN}.track-mute`];
 // Status refreshes every couple of seconds; dials poll /levels five times a second.
 // The server answers levels with its own freshness verdict, so the dial needs no
 // faster clock than this to show NO FEED within about a window of silence.
@@ -53,6 +55,14 @@ function applyGlobals(raw: Record<string, unknown>): void {
   // (or none). Send it a fresh list now, so pairing first and picking second works without a reopen.
   if (streamDeck.ui.action?.manifestId === `${PLUGIN}.preset`) {
     void presetList().then((list) => streamDeck.ui.sendToPropertyInspector(list));
+  }
+  // The same for a track picker, which lists the destinations of the programme the key is bound to.
+  const open = streamDeck.ui.action;
+  if (open && TRACK_ACTIONS.includes(open.manifestId)) {
+    void open
+      .getSettings()
+      .then((settings) => destinationList(keySettings(settings as Record<string, unknown>).sourceId))
+      .then((list) => streamDeck.ui.sendToPropertyInspector(list));
   }
 }
 
@@ -181,6 +191,15 @@ export class FailoverKey extends PolyAction {
   }
 }
 
+@action({ UUID: `${PLUGIN}.track-mute` })
+export class TrackMuteKey extends PolyAction {
+  readonly kind = "trackMute" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressTrackMute(ev.action.id);
+  }
+}
+
 @action({ UUID: `${PLUGIN}.meter` })
 export class MeterDial extends PolyAction {
   readonly kind = "meter" as const;
@@ -206,6 +225,7 @@ streamDeck.actions.registerAction(new StopDestinationKey());
 streamDeck.actions.registerAction(new RecordKey());
 streamDeck.actions.registerAction(new PresetKey());
 streamDeck.actions.registerAction(new FailoverKey());
+streamDeck.actions.registerAction(new TrackMuteKey());
 streamDeck.actions.registerAction(new MeterDial());
 
 streamDeck.settings.onDidReceiveGlobalSettings((ev: DidReceiveGlobalSettingsEvent<JsonObject>) => {
@@ -215,7 +235,7 @@ streamDeck.settings.onDidReceiveGlobalSettings((ev: DidReceiveGlobalSettingsEven
 streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>) => {
   // The inspector's labels come from a catalog it ships itself (ui/strings.js), so
   // the only message it sends is a connection check on the values it is showing.
-  const msg = ev.payload as { type?: unknown; url?: unknown; token?: unknown; caPem?: unknown };
+  const msg = ev.payload as { type?: unknown; url?: unknown; token?: unknown; caPem?: unknown; sourceId?: unknown };
   if (msg.type === "test") {
     const result = await testConnection({ url: text(msg.url), token: text(msg.token), caPem: text(msg.caPem) });
     await streamDeck.ui.sendToPropertyInspector({ type: "test", ...result });
@@ -223,8 +243,25 @@ streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>
     // The preset picker reads the saved pairing, never the inspector's form: a token typed but not saved
     // must not be what lists the presets.
     await streamDeck.ui.sendToPropertyInspector(await presetList());
+  } else if (msg.type === "destinations") {
+    // The same rule as the presets: the saved pairing lists them, never the inspector's form.
+    await streamDeck.ui.sendToPropertyInspector(await destinationList(keySettings({ sourceId: msg.sourceId }).sourceId));
   }
 });
+
+/** The destinations and tracks for a track picker, or the key that says why they could not be listed. */
+async function destinationList(
+  sourceId: number | undefined,
+): Promise<{ type: "destinations"; destinations?: DestinationChoice[]; key?: StreamDeckKey }> {
+  try {
+    const client = clientFor(savedGlobals, nodeTransport);
+    return { type: "destinations", destinations: await destinationChoices(client, sourceId, rt().language) };
+  } catch (err) {
+    if (err instanceof ConfigError) return { type: "destinations", key: err.key as StreamDeckKey };
+    if (err instanceof ApiError) return { type: "destinations", key: authKeyFor(err) };
+    return { type: "destinations", key: "streamdeck.pi.destinationsFailed" as StreamDeckKey };
+  }
+}
 
 /** The routing presets for the inspector's picker, or the key that says why they could not be listed. */
 async function presetList(): Promise<{ type: "presets"; presets?: { id: string; name: string }[]; key?: StreamDeckKey }> {

@@ -105,7 +105,7 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination"],
+      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination", "track-mute"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
   });
@@ -122,8 +122,11 @@ describe("manifest", () => {
     expect(stop.SupportedInMultiActions).toBe(false);
   });
 
-  it("ships no track-mute action, because the engine has no live mute API", () => {
-    expect(manifest.Actions.some((a) => /mute/i.test(a.UUID))).toBe(false);
+  it("ships track mute as a key that paints its own faces, now that the server mutes live (I4)", () => {
+    const mute = manifest.Actions.find((a) => a.UUID.endsWith(".track-mute"))!;
+    expect(mute.Controllers).toEqual(["Keypad"]);
+    expect(mute.States[KEY_STATE.muted]!.Image).toBe("imgs/keys/track-mute/muted");
+    expect(mute.States[KEY_STATE.restarted]!.Image).toBe("imgs/keys/track-mute/restarted");
   });
 });
 
