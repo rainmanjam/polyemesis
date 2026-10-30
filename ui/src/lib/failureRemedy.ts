@@ -35,7 +35,13 @@ export function remedyFor(cause: FailureCause): Remedy {
 }
 
 /** The Monitoring page's FFmpeg log, filtered to one process. The fragment is
- *  the log card's id, so the link lands on the log rather than the page top. */
-export function processLogHref(process: string): string {
-  return `/monitoring?process=${encodeURIComponent(process)}#process-log`;
+ *  the log card's id, so the link lands on the log rather than the page top.
+ *
+ *  `programme` is the programme the process belongs to, when the caller knows
+ *  it. Process names are per programme -- every programme's ingest is named
+ *  "ingest" -- so a link from install-wide history has to say which one, and
+ *  Monitoring switches to it before showing the log (A13). */
+export function processLogHref(process: string, programme?: number | null): string {
+  const p = programme == null ? "" : `programme=${encodeURIComponent(String(programme))}&`;
+  return `/monitoring?${p}process=${encodeURIComponent(process)}#process-log`;
 }

@@ -494,7 +494,9 @@ function TileRemedy({
 export function MonitoringPage() {
   const stateLabel = useStateLabel();
   const t = useT();
-  const { system, bitrate, logs, status, clearLogs, programme, programmeKnown } = useLiveData();
+  const {
+    system, bitrate, logs, status, clearLogs, programme, programmeKnown, programmes, selectProgramme,
+  } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
   // ?process=<name> opens the log on one process: the "Show log" links on a
@@ -510,6 +512,28 @@ export function MonitoringPage() {
     setLinkedSeen(linked);
     if (linked) setFilter(linked);
   }
+  // ?programme=<id> switches to that programme first (A13). Process names are
+  // per programme -- every programme's ingest is "ingest" -- so a timeline row
+  // about another programme's ingest needs this to open the right log rather
+  // than this programme's log under the same name.
+  //
+  // APPLIED ONCE PER LINK, not held. The parameter stays in the URL after the
+  // switch, and an operator who then picks another programme in the switcher
+  // must not be dragged back by it. Waits for programmeKnown: before the list
+  // is read, selectProgramme ignores an id it has not seen and the link would
+  // be lost. An id the server does not list is ignored the same way.
+  const linkKey = searchParams.toString();
+  const appliedLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!programmeKnown || appliedLink.current === linkKey) return;
+    appliedLink.current = linkKey;
+    const raw = searchParams.get("programme");
+    if (!raw || !/^\d+$/.test(raw)) return;
+    const wanted = Number(raw);
+    if (wanted !== programme && programmes.some((p) => p.id === wanted)) {
+      selectProgramme(wanted);
+    }
+  }, [linkKey, searchParams, programmeKnown, programme, programmes, selectProgramme]);
   const logCardRef = useRef<HTMLDivElement>(null);
   // Lands on the log, filtered to one process. Used by the in-page "Show log"
   // controls; a link from another page arrives with #process-log instead.
@@ -517,11 +541,14 @@ export function MonitoringPage() {
     setFilter(process);
     logCardRef.current?.scrollIntoView({ block: "start" });
   }, []);
+  // Keyed on the whole query, not on `linked`: two timeline rows about two
+  // programmes' ingests carry the same process name, so the second click
+  // changes only ?programme= and must still land on the log.
   useEffect(() => {
     if (linked && window.location.hash === "#process-log") {
       logCardRef.current?.scrollIntoView({ block: "start" });
     }
-  }, [linked]);
+  }, [linked, linkKey]);
   const [follow, setFollow] = useState(true);
   // Errors is the default view: a healthy stream writes little, so the lines
   // worth reading first are the failures.
@@ -832,7 +859,7 @@ export function MonitoringPage() {
 
       <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <div className="mb-3">
-        <MonitorTimeline programme={programme} />
+        <MonitorTimeline />
       </div>
 
       {/* ---------- processes ---------- */}

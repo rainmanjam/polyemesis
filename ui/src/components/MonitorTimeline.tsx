@@ -42,14 +42,7 @@ function timelineFamily(type: string): Family {
 /** The stream's history, newest first: failovers, restarts and outages. An
  *  empty list says so, and a failed read says so, so nobody reads a broken
  *  fetch as a quiet stream. */
-export function MonitorTimeline({
-  programme = null,
-}: {
-  /** The programme the page is showing. The log a "Show log" link opens is
-   *  that programme's, so a row about another programme gets no link. Null is
-   *  "not narrowed", and every row's link is offered. */
-  programme?: number | null;
-} = {}) {
+export function MonitorTimeline() {
   const t = useT();
   const [rows, setRows] = useState<TimelineRow[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -128,13 +121,15 @@ export function MonitorTimeline({
                     <span className="break-words">{row.title}</span>
                     {row.detail && <span className="break-words text-muted-foreground">{row.detail}</span>}
                     {/* A13: the slice of log behind this row, one click away.
-                        Lands on the FFmpeg log on this same page, filtered to
-                        the process. Not offered where the server names no
-                        single process: a dead link is worse than none. */}
-                    {row.process &&
-                      (programme === null || row.sourceId == null || row.sourceId === programme) && (
+                        Lands on the FFmpeg log, filtered to the process and
+                        switched to the programme it belongs to -- every
+                        programme has an "ingest", so the programme is what
+                        makes it the right log. Not offered where the server
+                        names no single process: a dead link is worse than
+                        none. */}
+                    {row.process && (
                       <Link
-                        to={processLogHref(row.process)}
+                        to={processLogHref(row.process, row.sourceId)}
                         aria-label={`${t("reason.action.log")}: ${row.title}`}
                         className="self-start text-muted-foreground underline underline-offset-2 hover:text-foreground"
                       >

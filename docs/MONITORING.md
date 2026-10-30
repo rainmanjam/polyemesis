@@ -722,11 +722,12 @@ know.
 A script reads the same rows from `GET /api/v1/timeline?limit=N`
 ([API.md](API.md)). A read token is enough.
 
-A row about a destination or an ingest in the programme you are viewing has a
-**Show log** link. It opens the FFmpeg log on the same page, filtered to that
-process. Rows about another programme have no link, because the log is per
-programme and every programme has an `ingest`.
-`/monitoring?process=<name>` opens it the same way from anywhere. Rows written
+A row about a destination or an ingest has a **Show log** link. It opens the
+FFmpeg log on the same page, filtered to that process, in the programme the row
+is about. The log is per programme and every programme has an `ingest`, so a
+row about another programme's ingest switches the page to that programme
+first. `/monitoring?programme=<id>&process=<name>` opens it the same way from
+anywhere; without `programme=` it opens the programme you are viewing. Rows written
 before this release have no link, because the subject was not stored then.
 
 A `destination.down` row says why the destination failed, as in

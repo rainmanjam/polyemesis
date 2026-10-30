@@ -96,18 +96,21 @@ describe("MonitorTimeline", () => {
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 
-  /* The timeline is install-wide; the log a link opens is the programme being
-   * viewed. Every programme has an "ingest", so a row about another
-   * programme's ingest must not open this one's. */
-  it("offers Show log only on rows about the programme being viewed", async () => {
+  /* The timeline is install-wide and the log is per programme, and every
+   * programme has an "ingest". A row about another programme's ingest used to
+   * get no link at all, for fear of opening this one's. It now gets one that
+   * names its programme, and Monitoring switches to it (A13). */
+  it("links every ingest row to its own programme's log, including another programme's", async () => {
     listTimeline.mockResolvedValue([
       { id: 5, at: "2026-10-30T10:00:00Z", type: "ingest.lost", severity: "critical",
         title: "Ingest lost: Vertical", process: "ingest", sourceId: 2 },
       { id: 4, at: "2026-10-30T09:00:00Z", type: "ingest.lost", severity: "critical",
         title: "Ingest lost: Main", process: "ingest", sourceId: 1 },
     ]);
-    render(<MemoryRouter><MonitorTimeline programme={1} /></MemoryRouter>);
-    await screen.findByRole("link", { name: "Show log: Ingest lost: Main" });
-    expect(screen.queryByRole("link", { name: "Show log: Ingest lost: Vertical" })).toBeNull();
+    render(<MemoryRouter><MonitorTimeline /></MemoryRouter>);
+    const other = await screen.findByRole("link", { name: "Show log: Ingest lost: Vertical" });
+    expect(other.getAttribute("href")).toBe("/monitoring?programme=2&process=ingest#process-log");
+    const own = screen.getByRole("link", { name: "Show log: Ingest lost: Main" });
+    expect(own.getAttribute("href")).toBe("/monitoring?programme=1&process=ingest#process-log");
   });
 });

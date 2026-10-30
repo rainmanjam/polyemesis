@@ -254,6 +254,10 @@ its first tagged release.
 
 ### Fixed
 
+- **Show log works on timeline rows about another programme.** Every
+  programme's ingest is named `ingest`, so these rows had no link. The link now
+  names the row's programme, and Monitoring switches to that programme before
+  it opens the log. `/monitoring?programme=<id>` does the same from anywhere.
 - **Connecting an MCP client no longer writes a warning to the log.** Every
   client sends `GET /mcp` as it connects, and the stateless server answers it
   with the `405` the spec calls for. That answer is now logged at debug. Every

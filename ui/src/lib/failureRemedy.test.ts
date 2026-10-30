@@ -49,5 +49,7 @@ describe("remedyFor", () => {
 describe("processLogHref", () => {
   it("deep-links the Monitoring log, filtered to one process", () => {
     expect(processLogHref("dest:3")).toBe("/monitoring?process=dest%3A3#process-log");
+    expect(processLogHref("ingest", 2)).toBe("/monitoring?programme=2&process=ingest#process-log");
+    expect(processLogHref("ingest", null)).toBe("/monitoring?process=ingest#process-log");
   });
 });
