@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "撤销清除",
   "routing.matrix.stateOff": "关",
   "routing.meters.peakReset": "重置峰值",
+  "routing.meters.peakResetFor": "重置 {channel} 的峰值",
   "routing.meters.notSet": "未设置",
   "routing.meters.setTarget": "设置目标",
   "routing.meters.autoZoom": "自动缩放",

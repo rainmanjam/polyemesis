@@ -256,3 +256,12 @@ describe("A16: numeric peak and Auto zoom", () => {
     expect(rects.some((r) => r.x === x && r.w === 1)).toBe(true);
   });
 });
+
+describe("A16 follow-up: each reset control names its channel", () => {
+  it("names the reset for each channel, so L and R can be told apart", () => {
+    render(<AudioMeter rms={[-20, -21]} peak={[-6, -7]} labels={["L", "R"]} />);
+    tick(16);
+    expect(screen.getByRole("button", { name: "Reset peak hold for L" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset peak hold for R" })).toBeTruthy();
+  });
+});

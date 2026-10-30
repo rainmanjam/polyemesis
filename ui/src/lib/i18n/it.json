@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Annulla cancellazione",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Azzera il picco",
+  "routing.meters.peakResetFor": "Azzera il picco di {channel}",
   "routing.meters.notSet": "Non impostato",
   "routing.meters.setTarget": "Imposta obiettivo",
   "routing.meters.autoZoom": "Zoom automatico",

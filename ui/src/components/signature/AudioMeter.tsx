@@ -391,7 +391,11 @@ export function AudioMeter({
               resetRef.current = true;
             }}
             title={t("routing.meters.peakReset")}
-            aria-label={t("routing.meters.peakReset")}
+            aria-label={
+              labels?.[i]
+                ? t("routing.meters.peakResetFor", { channel: labels[i] })
+                : t("routing.meters.peakReset")
+            }
             className="tnum flex items-center justify-end whitespace-nowrap font-mono text-xs leading-none text-muted-foreground hover:text-foreground"
             style={{ height: barHeight, minWidth: "4.5rem" }}
           />
@@ -415,6 +419,9 @@ export function MeterScale({ className, range }: { className?: string; range?: D
   const marks = [-60, -50, -40, -30, -20, -14, -12, -6, 0].filter(
     (m) => m >= r.minDb && m <= r.maxDb,
   );
+  // -12 and -14 sit 2 dB apart: about 3% of the ruler, so their 9px numbers collide.
+  // The streaming reference keeps its number; -12 keeps its tick on the bar.
+  const showNumber = (m: number) => !(m === -12 && marks.includes(STREAMING_REFERENCE_DB));
   const isBreak = (m: number) => ZONE_BREAKS.includes(m);
   return (
     <div className={cn("relative h-4 w-full select-none", className)}>
@@ -434,7 +441,7 @@ export function MeterScale({ className, range }: { className?: string; range?: D
             }}
             title={m === STREAMING_REFERENCE_DB ? t("routing.meters.streamingMark") : undefined}
           >
-            {m}
+            {showNumber(m) ? m : null}
           </div>
         );
       })}

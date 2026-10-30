@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Undo clear",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Reset peak hold",
+  "routing.meters.peakResetFor": "Reset peak hold for {channel}",
   "routing.meters.notSet": "Not set",
   "routing.meters.setTarget": "Set target",
   "routing.meters.autoZoom": "Auto zoom",

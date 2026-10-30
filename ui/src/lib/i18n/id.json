@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Batalkan hapus",
   "routing.matrix.stateOff": "mati",
   "routing.meters.peakReset": "Atur ulang puncak",
+  "routing.meters.peakResetFor": "Atur ulang puncak {channel}",
   "routing.meters.notSet": "Belum diatur",
   "routing.meters.setTarget": "Atur target",
   "routing.meters.autoZoom": "Zoom otomatis",

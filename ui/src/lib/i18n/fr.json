@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Annuler l'effacement",
   "routing.matrix.stateOff": "désactivé",
   "routing.meters.peakReset": "Réinitialiser le pic",
+  "routing.meters.peakResetFor": "Réinitialiser le pic de {channel}",
   "routing.meters.notSet": "Non défini",
   "routing.meters.setTarget": "Définir la cible",
   "routing.meters.autoZoom": "Zoom auto",

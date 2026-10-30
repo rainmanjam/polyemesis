@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Temizlemeyi geri al",
   "routing.matrix.stateOff": "kapalı",
   "routing.meters.peakReset": "Tepe değerini sıfırla",
+  "routing.meters.peakResetFor": "{channel} için tepe değerini sıfırla",
   "routing.meters.notSet": "Ayarlanmadı",
   "routing.meters.setTarget": "Hedef ayarla",
   "routing.meters.autoZoom": "Otomatik yakınlaştırma",

@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "지우기 취소",
   "routing.matrix.stateOff": "끔",
   "routing.meters.peakReset": "피크 초기화",
+  "routing.meters.peakResetFor": "{channel} 피크 초기화",
   "routing.meters.notSet": "설정 안 됨",
   "routing.meters.setTarget": "목표 설정",
   "routing.meters.autoZoom": "자동 확대/축소",

@@ -1703,6 +1703,7 @@
   "routing.matrix.undoClear": "Скасувати очищення",
   "routing.matrix.stateOff": "вимк.",
   "routing.meters.peakReset": "Скинути пік",
+  "routing.meters.peakResetFor": "Скинути пік для {channel}",
   "routing.meters.notSet": "Не задано",
   "routing.meters.setTarget": "Задати ціль",
   "routing.meters.autoZoom": "Авто-масштаб",
