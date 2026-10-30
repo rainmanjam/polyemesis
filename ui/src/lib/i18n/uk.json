@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Скасувати очищення",
   "routing.matrix.invertCell": "Інвертувати полярність: {cell}",
   "routing.matrix.inverted": "інв.",
+  "routing.matrix.muteOnSave": "Вимкнення звуку, задане тут, застосується після збереження. Щоб вимкнути одразу, скористайтеся простим видом.",
   "routing.matrix.stateOff": "вимк.",
   "routing.meters.peakReset": "Скинути пік",
   "routing.meters.peakResetFor": "Скинути пік для {channel}",

@@ -48,6 +48,10 @@ export function outputState(
   feed: LoudnessFeed | null,
   destinationId: number,
   now: number,
+  /** When, on THIS browser's clock, the report last changed. Staleness is
+   *  judged on one clock: comparing the server's `at` with the browser's time
+   *  would call every reading stale, or a dead one live, on a skewed clock. */
+  changedAt: number,
 ): OutputState {
   if (!feed || feed.enabled === false) return { kind: "off" };
   const report = feed.reports.find((r) => r.destinationId === destinationId);
@@ -55,13 +59,17 @@ export function outputState(
   if (report.error) return { kind: "error", error: report.error };
   // meters.Starting has measured nothing yet: no programme time has passed.
   if (report.seconds <= 0) return { kind: "starting" };
-  const at = Date.parse(report.at);
-  if (!Number.isFinite(at) || now - at > OUTPUT_STALE_MS) return { kind: "stale", report };
+  if (now - changedAt > OUTPUT_STALE_MS) return { kind: "stale", report };
   return { kind: "live", report };
 }
 
 /** The loudest ingest peak among the tracks this destination actually sends
  *  (routed and not muted), or null when nothing is metering them. */
+/** What identifies one analyser frame: a new frame moves `at` and `seconds`. */
+export function reportKey(r: Pick<OutputReport, "at" | "seconds">): string {
+  return `${r.at}|${r.seconds}`;
+}
+
 export function sourcePeak(peaks: number[][] | null | undefined, tracks: number[]): number | null {
   let best: number | null = null;
   for (const t of tracks) {

@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Undo clear",
   "routing.matrix.invertCell": "Invert polarity: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "A mute set here waits for Save. For an instant mute, use the Simple view.",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Reset peak hold",
   "routing.meters.peakResetFor": "Reset peak hold for {channel}",

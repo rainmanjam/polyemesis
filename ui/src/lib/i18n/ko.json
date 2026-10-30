@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "지우기 취소",
   "routing.matrix.invertCell": "극성 반전: {cell}",
   "routing.matrix.inverted": "반전",
+  "routing.matrix.muteOnSave": "여기서 설정한 음소거는 저장할 때 적용됩니다. 즉시 음소거하려면 단순 보기를 사용하세요.",
   "routing.matrix.stateOff": "끔",
   "routing.meters.peakReset": "피크 초기화",
   "routing.meters.peakResetFor": "{channel} 피크 초기화",

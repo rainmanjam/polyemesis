@@ -43,7 +43,7 @@ import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
 import { isLevelOnlySave } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
-import { outputState, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
+import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
 import { OutputStrip } from "@/components/signature/OutputStrip";
 import {
   carryMutes,
@@ -589,6 +589,8 @@ export function RoutingPage() {
     draftGraph: liveGraph && liveGraph.profile === profile ? liveGraph.graph : null,
     secondMixChanged:
       JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
+    storedProfile: storedRow?.profile,
+    draftProfile: profile,
   });
 
   // ---- A10: the destination's output, measured after routing ----
@@ -600,6 +602,10 @@ export function RoutingPage() {
   // its last reading as live.
   const [loudFeed, setLoudFeed] = useState<LoudnessFeed | null>(null);
   const [loudNow, setLoudNow] = useState(() => Date.now());
+  // Per destination: the last frame seen and when, on this browser's clock, it
+  // arrived. Staleness is judged against this, never the server's `at`, so a
+  // skewed clock cannot make every reading stale or a dead one live.
+  const [loudSeen, setLoudSeen] = useState<Record<number, { key: string; at: number }>>({});
   const loudSourceId = selected?.sourceId ?? null;
   const hasSelection = selected !== null;
   useEffect(() => {
@@ -610,8 +616,18 @@ export function RoutingPage() {
         .loudness<LoudnessFeed>(loudSourceId)
         .then((f) => {
           if (cancelled) return;
+          const now = Date.now();
           setLoudFeed(f);
-          setLoudNow(Date.now());
+          setLoudNow(now);
+          setLoudSeen((prev) => {
+            const next: Record<number, { key: string; at: number }> = {};
+            for (const r of f.reports ?? []) {
+              const key = reportKey(r);
+              const was = prev[r.destinationId];
+              next[r.destinationId] = was && was.key === key ? was : { key, at: now };
+            }
+            return next;
+          });
         })
         .catch(() => {
           if (!cancelled) setLoudNow(Date.now());
@@ -911,7 +927,10 @@ export function RoutingPage() {
         {/* ---------- editor ---------- */}
         {selected && profile && (
           <div className="flex flex-col gap-3">
-            <OutputStrip state={outputState(loudFeed, selected.id, loudNow)} source={stripSource} />
+            <OutputStrip
+              state={outputState(loudFeed, selected.id, loudNow, loudSeen[selected.id]?.at ?? 0)}
+              source={stripSource}
+            />
             <ProfileEditor
               idPrefix="live"
               ctx={ctx}

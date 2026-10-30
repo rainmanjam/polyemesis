@@ -265,6 +265,11 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
         </table>
       </div>
 
+      {/* The matrix's mute is a draft edit, unlike the Simple view's, which
+          applies at once through the live route. Said, so a muted header is
+          not mistaken for audio already off air. */}
+      {onMute && <p className="text-sm text-muted-foreground">{t("routing.matrix.muteOnSave")}</p>}
+
       <MatrixQuickFills tracks={tracks} onApply={onChange} />
     </div>
   );

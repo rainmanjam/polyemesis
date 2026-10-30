@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "クリアを元に戻す",
   "routing.matrix.invertCell": "極性を反転: {cell}",
   "routing.matrix.inverted": "反転",
+  "routing.matrix.muteOnSave": "ここで設定したミュートは保存するまで適用されません。すぐにミュートするにはシンプル表示を使ってください。",
   "routing.matrix.stateOff": "オフ",
   "routing.meters.peakReset": "ピークをリセット",
   "routing.meters.peakResetFor": "{channel} のピークをリセット",

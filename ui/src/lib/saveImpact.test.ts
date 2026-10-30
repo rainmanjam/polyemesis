@@ -41,3 +41,56 @@ describe("isLevelOnlySave", () => {
     ).toBe(false);
   });
 });
+
+describe("isLevelOnlySave also compares the profiles", () => {
+  const prof = (over: Record<string, unknown> = {}) => ({
+    mode: "simple",
+    tracks: [
+      { track: 0, enabled: true, gain: 1 },
+      { track: 1, enabled: true, gain: 1, muted: false },
+    ],
+    delayMs: 0,
+    loudness: null,
+    ...over,
+  });
+  const g = graph("1", "1");
+
+  it("a gain or mute alone is level-only", () => {
+    const draft = prof({
+      tracks: [
+        { track: 0, enabled: true, gain: 0.5 },
+        { track: 1, enabled: true, gain: 1, muted: true },
+      ],
+    });
+    expect(
+      isLevelOnlySave({ storedGraph: g, draftGraph: g, secondMixChanged: false, storedProfile: prof(), draftProfile: draft }),
+    ).toBe(true);
+  });
+
+  // A negative delay holds the VIDEO back in the output arguments; the audio
+  // graph does not move, so the graph check alone would call it live.
+  // MUTATION: drop the profile comparison. Observed: FAIL.
+  it("a negative delay restarts though the audio graph is unchanged", () => {
+    expect(
+      isLevelOnlySave({
+        storedGraph: g,
+        draftGraph: g,
+        secondMixChanged: false,
+        storedProfile: prof({ delayMs: -100 }),
+        draftProfile: prof({ delayMs: -200 }),
+      }),
+    ).toBe(false);
+  });
+
+  it("null, absent and empty read alike", () => {
+    expect(
+      isLevelOnlySave({
+        storedGraph: g,
+        draftGraph: g,
+        secondMixChanged: false,
+        storedProfile: prof({ excludeRoles: null }),
+        draftProfile: prof({ excludeRoles: [], loudness: undefined }),
+      }),
+    ).toBe(true);
+  });
+});

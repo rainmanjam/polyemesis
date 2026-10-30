@@ -331,7 +331,10 @@ export function TrackRows({
                   min={liveOk ? LIVE_MIN_GAIN : 0}
                   max={2}
                   step={0.05}
-                  disabled={!sel.enabled || rowBusy}
+                  // Not disabled while a level is in flight: disabling the
+                  // focused control would drop keyboard focus to the page. The
+                  // server serialises the requests.
+                  disabled={!sel.enabled}
                   onValueChange={([v]) =>
                     liveOk
                       ? setDrag((d) => ({ ...d, [t.index]: v }))
@@ -368,9 +371,16 @@ export function TrackRows({
                     { n: t.index + 1 },
                   )}
                   title={block?.reason}
-                  disabled={!!block || rowBusy}
-                  className={cn(sel.muted && "text-warn")}
-                  onClick={() => settle(t.index, live.onMute(t.index, !sel.muted))}
+                  disabled={!!block}
+                  // Busy is announced, not enforced by `disabled`, which would
+                  // drop keyboard focus mid-request; a press while busy is ignored.
+                  aria-disabled={rowBusy || undefined}
+                  aria-busy={rowBusy || undefined}
+                  className={cn(sel.muted && "text-warn", rowBusy && "opacity-60")}
+                  onClick={() => {
+                    if (rowBusy) return;
+                    settle(t.index, live.onMute(t.index, !sel.muted));
+                  }}
                 >
                   {sel.muted ? <VolumeX /> : <Volume2 />}
                   {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}

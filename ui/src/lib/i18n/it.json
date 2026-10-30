@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Annulla cancellazione",
   "routing.matrix.invertCell": "Inverti polarità: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "Un silenziamento impostato qui attende Salva. Per silenziare subito, usa la vista semplice.",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Azzera il picco",
   "routing.meters.peakResetFor": "Azzera il picco di {channel}",

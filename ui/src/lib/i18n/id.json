@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Batalkan hapus",
   "routing.matrix.invertCell": "Balik polaritas: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "Bisu yang diatur di sini menunggu Simpan. Untuk bisu seketika, gunakan tampilan sederhana.",
   "routing.matrix.stateOff": "mati",
   "routing.meters.peakReset": "Atur ulang puncak",
   "routing.meters.peakResetFor": "Atur ulang puncak {channel}",

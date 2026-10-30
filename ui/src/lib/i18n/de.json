@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Leeren rückgängig machen",
   "routing.matrix.invertCell": "Polarität umkehren: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "Eine hier gesetzte Stummschaltung wartet auf Speichern. Für sofortiges Stummschalten die einfache Ansicht verwenden.",
   "routing.matrix.stateOff": "aus",
   "routing.meters.peakReset": "Spitzenwert zurücksetzen",
   "routing.meters.peakResetFor": "Spitzenwert für {channel} zurücksetzen",

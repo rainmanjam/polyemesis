@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Cofnij czyszczenie",
   "routing.matrix.invertCell": "Odwróć polaryzację: {cell}",
   "routing.matrix.inverted": "odwr.",
+  "routing.matrix.muteOnSave": "Wyciszenie ustawione tutaj czeka na Zapisz. Aby wyciszyć od razu, użyj widoku prostego.",
   "routing.matrix.stateOff": "wył.",
   "routing.meters.peakReset": "Zresetuj szczyt",
   "routing.meters.peakResetFor": "Zresetuj szczyt dla {channel}",

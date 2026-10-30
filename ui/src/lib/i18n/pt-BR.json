@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Desfazer limpeza",
   "routing.matrix.invertCell": "Inverter polaridade: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "Um silêncio definido aqui espera Salvar. Para silenciar na hora, use a visão simples.",
   "routing.matrix.stateOff": "desligado",
   "routing.meters.peakReset": "Redefinir pico",
   "routing.meters.peakResetFor": "Redefinir pico de {channel}",

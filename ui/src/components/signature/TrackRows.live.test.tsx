@@ -121,3 +121,21 @@ describe("TrackRows live mute and gain", () => {
     }
   });
 });
+
+describe("TrackRows live controls keep keyboard focus while a request is in flight", () => {
+  it("a pressed Mute stays focusable and ignores a second press until the answer", async () => {
+    let finish: () => void = () => {};
+    const l = live({ onMute: vi.fn(() => new Promise<void>((r) => (finish = r))) });
+    renderRows(l);
+    const btn = screen.getByRole("button", { name: "Mute track 1" }) as HTMLButtonElement;
+    btn.focus();
+    await act(async () => fireEvent.click(btn));
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(btn);
+    await act(async () => fireEvent.click(btn));
+    expect(l.onMute).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    expect(btn.getAttribute("aria-disabled")).toBeNull();
+  });
+});

@@ -1764,6 +1764,7 @@
   "routing.matrix.undoClear": "Wissen ongedaan maken",
   "routing.matrix.invertCell": "Polariteit omkeren: {cell}",
   "routing.matrix.inverted": "inv",
+  "routing.matrix.muteOnSave": "Een demping die hier is ingesteld wacht op Opslaan. Gebruik de eenvoudige weergave om direct te dempen.",
   "routing.matrix.stateOff": "uit",
   "routing.meters.peakReset": "Piek resetten",
   "routing.meters.peakResetFor": "Piek resetten voor {channel}",
