@@ -1168,6 +1168,13 @@ export interface SourceView extends Source {
     lossPackets: number;
     retransPackets: number;
   };
+  /** Uplink for a source on the RTMP listener, when a publisher is connected.
+   *  TCP has no RTT or loss to report, so only who and since are here. */
+  rtmpLink?: {
+    peer: string;
+    since: string;
+    bytesIn: number;
+  };
   /** Whether an engine actually came up. A source whose port was already taken
    *  is stored but not running, and that is the answer to "why is nothing
    *  arriving". */
