@@ -78,7 +78,7 @@ func runMCPProxy(ctx context.Context, args []string, stdin io.ReadCloser, stdout
 		fmt.Fprintln(stderr, "polyemesis mcp: no API token: set POLYEMESIS_TOKEN or pass -token-file")
 		return 2
 	}
-	client, err := mcpHTTPClient(token, *caFile)
+	client, err := mcpHTTPClient(endpoint, token, *caFile)
 	if err != nil {
 		fmt.Fprintf(stderr, "polyemesis mcp: %v\n", err)
 		return 2
@@ -107,9 +107,7 @@ func mcpEndpointURL(raw string) (string, error) {
 	switch u.Scheme {
 	case "https":
 	case "http":
-		host := u.Hostname()
-		ip := net.ParseIP(host)
-		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		if !isLoopbackHost(u.Hostname()) {
 			return "", errors.New("refusing http:// to a remote host: the API token would cross the network in clear; use https://")
 		}
 	default:
@@ -122,9 +120,22 @@ func mcpEndpointURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// mcpHTTPClient is an HTTP client that sends the token and, when caFile is
-// given, trusts that CA in addition to the system roots.
-func mcpHTTPClient(token, caFile string) (*http.Client, error) {
+// mcpHTTPClient is an HTTP client that sends the token to the endpoint and
+// nowhere else, and, when caFile is given, trusts that CA in addition to the
+// system roots.
+//
+// It FOLLOWS NO REDIRECT. A bearer token attached by a RoundTripper rides on
+// every request the client makes, including the one a 3xx sends it to, so a
+// server (or anything in front of it) that redirected would be handed the
+// token for whatever host it named. /mcp never needs a redirect; one is
+// refused as an error the relay reports. The transport also checks each
+// request's scheme and host against the endpoint before attaching the token,
+// so the guarantee does not rest on CheckRedirect alone.
+func mcpHTTPClient(endpoint, token, caFile string) (*http.Client, error) {
+	ep, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	if caFile != "" {
 		pem, err := os.ReadFile(caFile)
@@ -142,19 +153,39 @@ func mcpHTTPClient(token, caFile string) (*http.Client, error) {
 	}
 	return &http.Client{
 		Timeout:   5 * time.Minute, // go_live paces starts and can take a while
-		Transport: tokenTransport{token: token, base: base},
+		Transport: tokenTransport{token: token, scheme: ep.Scheme, host: ep.Host, base: base},
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("the server answered with a redirect to %s; the MCP endpoint never redirects, so it was not followed", req.URL.Redacted())
+		},
 	}, nil
 }
 
+// tokenTransport attaches the token to requests for the endpoint's own scheme
+// and host only.
 type tokenTransport struct {
-	token string
-	base  http.RoundTripper
+	token, scheme, host string
+	base                http.RoundTripper
 }
 
 func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Scheme != t.scheme || r.URL.Host != t.host {
+		return nil, fmt.Errorf("refusing to send the API token to %s://%s; it is only for %s://%s",
+			r.URL.Scheme, r.URL.Host, t.scheme, t.host)
+	}
+	if r.URL.Scheme == "http" && !isLoopbackHost(r.URL.Hostname()) {
+		return nil, errors.New("refusing to send the API token over plain http to a remote host")
+	}
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(r)
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // relayMCP pumps messages between stdio and the server until stdin closes.

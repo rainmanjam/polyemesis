@@ -55,7 +55,9 @@ type mcpTool struct {
 	// destructive marks the stop family and anything that interrupts output.
 	destructive bool
 	idempotent  bool
-	// stopping marks the tools whose mcp.action event is a warning.
+	// stopping marks the tools whose every call ends something, so their
+	// mcp.action event is a warning. A tool that only SOMETIMES stops
+	// (recording off, a scheduled stop) sets mcpCtx.stopping per call instead.
 	stopping bool
 	props    map[string]any
 	required []string
@@ -108,6 +110,8 @@ type mcpCtx struct {
 	target  string
 	outcome string
 	wrote   bool
+	// stopping is set by a tool whose call ends something this time.
+	stopping bool
 }
 
 // mcpRESTError is a REST answer of 400 or above.
@@ -167,15 +171,71 @@ func (c *mcpCtx) call(method, path string, q url.Values, body any) (any, error) 
 // result renders v as the tool's answer. Every answer is re-encoded by
 // encoding/json (which escapes < and >) and swept for credential literals.
 func (c *mcpCtx) result(v any, untrusted bool) (*mcp.CallToolResult, error) {
-	b, err := json.Marshal(mcpStripCredentialFields(v))
+	b, err := c.encode(v)
 	if err != nil {
 		return nil, err
 	}
-	text := mcpScrub(string(b), c.s.mcpSecrets())
+	text := string(b)
 	if untrusted {
 		text = mcpUntrustedNote + "\n" + mcpUntrustedOpen + "\n" + text + "\n" + mcpUntrustedClose
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil
+}
+
+// encode is the one way a value becomes tool output: normalised to a decoded
+// JSON tree, credential-named fields stripped, every string leaf (and key)
+// scrubbed of stored credential literals, and only THEN marshalled.
+//
+// The order is the point. Scrubbing the marshalled text instead would compare
+// a secret against its JSON-ESCAPED spelling: a key holding '&', '<', '>', a
+// quote, a backslash or a control character is written by encoding/json as
+// \u0026, \u003c, \" and so on, the literal no longer matches, and the
+// credential goes out escaped but whole. On the decoded leaves the secret is
+// spelled exactly as it is stored. TestTheScrubCatchesASecretThatJSONWouldEscape
+// holds this.
+func (c *mcpCtx) encode(v any) ([]byte, error) {
+	tree, err := mcpNormalise(v)
+	if err != nil {
+		return nil, err
+	}
+	tree = mcpScrubTree(mcpStripCredentialFields(tree), c.s.mcpSecrets())
+	return json.Marshal(tree)
+}
+
+// mcpNormalise turns any Go value into the decoded-JSON shape (maps, slices,
+// strings, json.Number) the strip and the scrub walk.
+func mcpNormalise(v any) (any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// mcpScrubTree scrubs every string leaf and every object key.
+func mcpScrubTree(v any, secrets []string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			out[mcpScrub(k, secrets)] = mcpScrubTree(val, secrets)
+		}
+		return out
+	case []any:
+		for i := range x {
+			x[i] = mcpScrubTree(x[i], secrets)
+		}
+		return x
+	case string:
+		return mcpScrub(x, secrets)
+	}
+	return v
 }
 
 // mcpCredentialFields are JSON keys whose VALUE is a credential, or carries
@@ -230,15 +290,16 @@ func mcpStripCredentialFields(v any) any {
 // refusal is a tool answer that says nothing was done, with what an agent
 // should show its user before trying again.
 func (c *mcpCtx) refusal(msg string, detail any) (*mcp.CallToolResult, error) {
-	text := msg
+	// The message is plain text and scrubbed as such; the detail goes through
+	// encode, which scrubs it BEFORE it is escaped.
+	text := mcpScrub(msg, c.s.mcpSecrets())
 	if detail != nil {
-		b, err := json.Marshal(mcpStripCredentialFields(detail))
+		b, err := c.encode(detail)
 		if err != nil {
 			return nil, err
 		}
 		text += "\n" + string(b)
 	}
-	text = mcpScrub(text, c.s.mcpSecrets())
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil
 }
 
@@ -266,7 +327,7 @@ func (s *Server) mcpToolHandler(root http.Handler, t mcpTool) mcp.ToolHandler {
 			if err != nil && outcome == "" {
 				outcome = "failed"
 			}
-			s.publishAudit(auditMCPAction(t.name, outer.tokenName, c.target, outcome, outer.address, t.stopping))
+			s.publishAudit(auditMCPAction(t.name, outer.tokenName, c.target, outcome, outer.address, t.stopping || c.stopping))
 		}
 		if err != nil {
 			// A refusal from REST or a bad argument is a tool result the agent
@@ -962,7 +1023,7 @@ func mcpCatalogue() []mcpTool {
 			run:      runApplyPreset,
 		},
 		{
-			name: "set_recording", title: "Recording on or off", tier: mcpWrite, idempotent: true, stopping: true,
+			name: "set_recording", title: "Recording on or off", tier: mcpWrite, destructive: true, idempotent: true,
 			description: "Turn recording on or off. Turning it off ends the recording in progress, so that needs confirm:true; without it, answers with the recorder's state.",
 			props:       map[string]any{"enabled": map[string]any{"type": "boolean"}, "confirm": schemaConfirm},
 			required:    []string{"enabled"},
@@ -978,6 +1039,7 @@ func mcpCatalogue() []mcpTool {
 					return nil, argErr("enabled is required")
 				}
 				c.target = "recording"
+				c.stopping = !*a.Enabled
 				if !*a.Enabled && !a.Confirm {
 					st, err := c.call(http.MethodGet, "/recording", nil, nil)
 					if err != nil {
@@ -1058,7 +1120,7 @@ func mcpCatalogue() []mcpTool {
 			},
 		},
 		{
-			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite,
+			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite, destructive: true,
 			description: "Schedule destinations to start or stop: once at a time, or daily/weekly at a time of day in a time zone. A scheduled stop ends live YouTube broadcasts when it runs, so it needs confirm:true.",
 			props: map[string]any{
 				"name":           map[string]any{"type": "string", "minLength": 1, "maxLength": 100},
@@ -1318,7 +1380,8 @@ func runSchedule(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 		}
 		body["runAt"] = at
 	}
-	c.target = fmt.Sprintf("%s %s schedule %q", a.Kind, a.Action, a.Name)
+	c.target = fmt.Sprintf("%s %s schedule", a.Kind, a.Action)
+	c.stopping = a.Action == "stop"
 	if a.Action == "stop" && !a.Confirm {
 		return c.refusal("Not done: a scheduled stop ends live YouTube broadcasts on these destinations when it runs, "+
 			"and they cannot return to live. Confirm with the user, then call again with confirm:true.",

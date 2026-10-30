@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -208,6 +209,153 @@ func TestMCPEndpointURLAppendsTheMCPPathOnce(t *testing.T) {
 		}
 	}
 }
+
+// A redirect is never followed, and the token never reaches the host it
+// names. Server A answers /mcp with a 307 to server B; B records every
+// Authorization header it is sent. The relay must answer the client's request
+// with an error and B must have seen no token -- the shape of a token leaked to
+// whatever a compromised proxy redirects to.
+//
+// Mutation: drop CheckRedirect and the host check in tokenTransport. Observed
+// FAIL (B received "Bearer pk_test_relay_token_...").
+func TestTheStdioRelayFollowsNoRedirectAndNeverSendsTheTokenElsewhere(t *testing.T) {
+	var mu sync.Mutex
+	var seenByB []string
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenByB = append(seenByB, r.Header.Get("Authorization"))
+		mu.Unlock()
+		http.Error(w, "no", http.StatusUnauthorized)
+	}))
+	defer b.Close()
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, b.URL+"/mcp", http.StatusTemporaryRedirect)
+	}))
+	defer a.Close()
+
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	var stderr bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		runMCPProxy(ctx, []string{"-url", a.URL}, inR, outW, &stderr,
+			func(k string) string { return map[string]string{"POLYEMESIS_TOKEN": relayTestToken}[k] })
+		_ = outW.Close()
+		close(done)
+	}()
+	go func() {
+		_, _ = io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}`+"\n")
+	}()
+	line := make([]byte, 4096)
+	n, _ := outR.Read(line)
+	if !strings.Contains(string(line[:n]), `"error"`) {
+		t.Fatalf("a redirected request was answered with %q, want a JSON-RPC error", line[:n])
+	}
+	_ = inW.Close()
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	for _, h := range seenByB {
+		if h != "" {
+			t.Fatalf("the redirect target received an Authorization header: %q", h)
+		}
+	}
+}
+
+func TestTheTokenTransportRefusesAnyOtherHostAndPlainHTTPToARemoteHost(t *testing.T) {
+	var got []string
+	base := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = append(got, r.URL.Host+"="+r.Header.Get("Authorization"))
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("")), Header: http.Header{}}, nil
+	})
+	tt := tokenTransport{token: "tok", scheme: "https", host: "pe.example", base: base}
+	for _, u := range []string{"https://evil.example/mcp", "http://pe.example/mcp", "https://pe.example:444/mcp"} {
+		req, _ := http.NewRequest(http.MethodPost, u, nil)
+		if _, err := tt.RoundTrip(req); err == nil {
+			t.Errorf("the token transport sent a request to %s", u)
+		}
+	}
+	plain := tokenTransport{token: "tok", scheme: "http", host: "pe.example", base: base}
+	req, _ := http.NewRequest(http.MethodPost, "http://pe.example/mcp", nil)
+	if _, err := plain.RoundTrip(req); err == nil {
+		t.Error("the token transport sent the token over plain http to a remote host")
+	}
+	req, _ = http.NewRequest(http.MethodPost, "https://pe.example/mcp", nil)
+	if _, err := tt.RoundTrip(req); err != nil {
+		t.Fatalf("the endpoint itself was refused: %v", err)
+	}
+	if len(got) != 1 || got[0] != "pe.example=Bearer tok" {
+		t.Fatalf("requests that reached the network: %v", got)
+	}
+}
+
+// An older client: Claude Desktop may negotiate 2025-11-25, whose messages
+// carry no protocol version in _meta, so a raw relay never learns it from the
+// message. Driven as raw newline JSON (not the SDK client, which always speaks
+// the newest version) through the whole lifecycle, against the real stateless
+// SDK handler polyemesis serves.
+func TestTheStdioRelayWorksForAClientSpeaking2025_11_25(t *testing.T) {
+	ts := relayTestServer(t)
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	var stderr bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		runMCPProxy(ctx, []string{"-url", ts.URL}, inR, outW, &stderr,
+			func(k string) string { return map[string]string{"POLYEMESIS_TOKEN": relayTestToken}[k] })
+		_ = outW.Close()
+		close(done)
+	}()
+	lines := bufio.NewScanner(outR)
+	lines.Buffer(make([]byte, 1<<20), 1<<20)
+	read := func() string {
+		got := make(chan string, 1)
+		go func() {
+			if lines.Scan() {
+				got <- lines.Text()
+			} else {
+				got <- ""
+			}
+		}()
+		select {
+		case l := <-got:
+			return l
+		case <-time.After(15 * time.Second):
+			t.Fatalf("the relay answered nothing (stderr %s)", stderr.String())
+			return ""
+		}
+	}
+	send := func(msg string) {
+		if _, err := io.WriteString(inW, msg+"\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"desktop","version":"1"}}}`)
+	if l := read(); !strings.Contains(l, `"protocolVersion":"2025-11-25"`) {
+		t.Fatalf("initialize answered %s", l)
+	}
+	send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	send(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if l := read(); !strings.Contains(l, `"id":2`) || !strings.Contains(l, `"echo"`) {
+		t.Fatalf("tools/list answered %s", l)
+	}
+	send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{}}}`)
+	if l := read(); !strings.Contains(l, `"id":3`) || !strings.Contains(l, "auth=Bearer "+relayTestToken) {
+		t.Fatalf("tools/call answered %s", l)
+	}
+	_ = inW.Close()
+	cancel()
+	<-done
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type nopWriteCloser struct{ bytes.Buffer }
 

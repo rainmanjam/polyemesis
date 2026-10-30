@@ -485,10 +485,15 @@ func TestAReadToolPublishesNoAuditEvent(t *testing.T) {
 // The positive control is in the same test: the admin's REST GET of
 // /destinations carries the key, so the fixture demonstrably holds it.
 //
-// Mutation: make credentialsWithheld ignore mcpCallKey. Observed FAIL
-// (get_destination and list_destinations carry the masked view's keys? no --
-// they carry sentinelDestKey and sentinelIcecastPwd). Mutation: return text
-// unscrubbed from result. Observed FAIL (search_chat carries sentinelDestKey).
+// THE LAYERS ARE REDUNDANT ON PURPOSE, so a mutation of one of them does not
+// necessarily fail this test. Observed:
+//   - credentialsWithheld ignoring mcpCallKey: this test still PASSES, because
+//     the field strip and the literal scrub catch every planted key. That layer
+//     is killed by TestTheMCPMarkerMasksSerialisationButLeavesTheTokensScopeAlone.
+//   - the literal scrub removed: FAIL here (search_chat carries sentinelDestKey;
+//     no read-safe view applies to chat text).
+//   - the field strip removed: still passes here; killed by
+//     TestTheCredentialFieldStripReplacesKeysAtAnyDepthAndLeavesEmptyOnesAlone.
 func TestNoMCPToolOrResourceReturnsACredentialToAnyToken(t *testing.T) {
 	rig := newMCPRig(t)
 	if _, err := rig.store.AppendChatMessages([]db.ChatMessage{{
@@ -607,6 +612,56 @@ func TestTheCredentialFieldStripReplacesKeysAtAnyDepthAndLeavesEmptyOnesAlone(t 
 	}
 }
 
+// A stored credential that encoding/json would ESCAPE is still caught. The
+// literal scrub used to run over the marshalled text, where '&' is \u0026,
+// '<' is \u003c and '"' is \" -- so this key went out escaped but whole, and
+// any JSON parser on the far side would have read it back verbatim. The key is
+// planted on a destination (so the scrub knows it) and quoted by a viewer in
+// chat (where no read-safe view applies), then looked for in every spelling:
+// raw, JSON-escaped, and in the decoded payload.
+//
+// Mutation: scrub after json.Marshal (the old order). Observed FAIL.
+func TestTheScrubCatchesASecretThatJSONWouldEscape(t *testing.T) {
+	rig := newMCPRig(t)
+	const secret = `SENTINEL&<"amp-9f3a>key`
+	d, err := rig.store.GetDestination(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.StreamKey = secret
+	if _, err := rig.store.UpdateDestination(d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.store.AppendChatMessages([]db.ChatMessage{{
+		Platform: "twitch", AuthorID: "viewer-2", AuthorName: "viewer", MessageID: "esc1",
+		Text: "leaked: " + secret, At: time.Now(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	cs := mcpClient(t, rig.h, rig.admin)
+	escaped, _ := json.Marshal(secret)
+	spellings := []string{secret, strings.Trim(string(escaped), `"`), "SENTINEL\u0026"}
+	for _, call := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"search_chat", map[string]any{"query": "leaked"}},
+		{"get_chat_user", map[string]any{"platform": "twitch", "authorId": "viewer-2"}},
+		{"get_destination", map[string]any{"destinationId": 1}},
+		{"stop_destination", map[string]any{"destinationId": 1}},
+	} {
+		text, _ := callText(t, cs, call.tool, call.args)
+		for _, sp := range spellings {
+			if strings.Contains(text, sp) {
+				t.Errorf("%s returned the secret spelled %q:\n%s", call.tool, sp, text)
+			}
+		}
+		if call.tool == "search_chat" && !strings.Contains(text, "leaked: [redacted]") {
+			t.Errorf("search_chat did not return the planted message scrubbed, so nothing was tested:\n%s", text)
+		}
+	}
+}
+
 // The MCP marker changes what is SERIALISED, never what is PERMITTED, and only
 // for the dispatched request: the same admin token over REST still gets its
 // keys, and isReadScopedToken still calls it admin.
@@ -635,9 +690,11 @@ func TestTheMCPMarkerMasksSerialisationButLeavesTheTokensScopeAlone(t *testing.T
 // (no mcp.action event, the expert route never reached).
 //
 // Mutation: drop DisallowUnknownFields from decodeArgs. Observed FAIL
-// ("extraInputArgs" accepted). Mutation: drop the presetName check. Observed
-// FAIL (the traversal reached the preset allowlist, which is still a refusal
-// but not "invalid arguments" -- and the second line held).
+// ("extraInputArgs" accepted). Mutation: drop the presetName pattern check.
+// This test still PASSES -- the preset allowlist behind it refuses the same
+// values with the same "invalid arguments" wording -- so that mutation is
+// killed by TestAPatternInvalidPresetIsRefusedBeforeAnyRequestIsMade, which
+// watches what reaches the router.
 func TestHostileToolArgumentsAreRefusedBeforeAnythingIsDispatched(t *testing.T) {
 	rig := newMCPRig(t)
 	cs := mcpClient(t, rig.h, rig.admin)
@@ -675,6 +732,59 @@ func TestHostileToolArgumentsAreRefusedBeforeAnythingIsDispatched(t *testing.T) 
 	}
 	if evs := rig.mcpEvents(); len(evs) != 0 {
 		t.Fatalf("hostile arguments dispatched writes: %+v", evs)
+	}
+}
+
+// A preset name that fails the pattern is refused before ANY request is made,
+// not merely refused: no GET /routing/presets, no GET /destinations/{id}. The
+// allowlist is the second line; this pins the first.
+//
+// Mutation: drop the presetName pattern check. Observed FAIL (GET
+// /api/v1/routing/presets was dispatched).
+func TestAPatternInvalidPresetIsRefusedBeforeAnyRequestIsMade(t *testing.T) {
+	rig := newMCPRig(t)
+	var seen []string
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		rig.h.ServeHTTP(w, r)
+	})
+	mux := http.NewServeMux()
+	mux.Handle(MCPPath, rig.s.requireAuth(rig.s.requireToken(rig.s.mcpEndpoint(root))))
+	mux.Handle("/", rig.h)
+	cs := mcpClient(t, mux, rig.admin)
+	for _, preset := range []string{"x/../../destinations/1/expert", "-/option", "UPPER", "a b"} {
+		text, isErr := callText(t, cs, "apply_routing_preset", map[string]any{"destinationId": 1, "preset": preset})
+		if !isErr || !strings.Contains(text, "invalid arguments") {
+			t.Errorf("preset %q answered (isError=%v): %s", preset, isErr, text)
+		}
+	}
+	if len(seen) != 0 {
+		t.Fatalf("pattern-invalid presets dispatched %v", seen)
+	}
+}
+
+// The audit severity follows what THIS call did: turning recording on is
+// info, turning it off is a warning; a scheduled start is info, a scheduled
+// stop a warning.
+func TestTheAuditSeverityOfAToolThatSometimesStopsFollowsTheCall(t *testing.T) {
+	cases := []struct {
+		tool string
+		args map[string]any
+		want alerts.Severity
+	}{
+		{"set_recording", map[string]any{"enabled": true}, alerts.SeverityInfo},
+		{"set_recording", map[string]any{"enabled": false, "confirm": true}, alerts.SeverityWarning},
+		{"schedule_broadcast", mcpSampleArgs()["schedule_broadcast"], alerts.SeverityInfo},
+		{"schedule_broadcast", map[string]any{"name": "end", "action": "stop", "kind": "daily",
+			"destinationIds": []int{1}, "tz": "UTC", "atMinutes": 60, "confirm": true}, alerts.SeverityWarning},
+	}
+	for _, c := range cases {
+		rig := newMCPRig(t)
+		callText(t, mcpClient(t, rig.h, rig.admin), c.tool, c.args)
+		evs := rig.mcpEvents()
+		if len(evs) != 1 || evs[0].Severity != c.want {
+			t.Errorf("%s %v audited %+v, want one %s event", c.tool, c.args, evs, c.want)
+		}
 	}
 }
 
