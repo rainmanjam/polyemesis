@@ -3404,6 +3404,86 @@ export interface AutomodModel {
   timeoutForBan?: number;
   minConfidence: number;
   instruction: string;
+  /** "jev" or "openai". A block stored before there was a choice reads back
+   *  as "openai", which is the only protocol there was. */
+  protocol?: AutomodProtocol;
+  /** A preset ID from GET /automod/matrix's `presets`. The server reads the
+   *  preset's JSON mode, reasoning setting and flag-only lock from its own
+   *  table by this ID. */
+  preset?: string;
+  /** Model category -> action. A category not named gets `action`. Read from
+   *  the primary only; the secondary applies the primary's table. */
+  categoryActions?: Record<string, AutomodAction>;
+  /** Derived: this checker's current connection has passed Test. A value
+   *  sent back is ignored. */
+  tested?: boolean;
+}
+
+/** The wire protocol a model checker speaks. */
+export type AutomodProtocol = "jev" | "openai";
+
+/** One of the two model checkers. */
+export type AutomodSlot = "primary" | "secondary";
+
+/** Where a preset sends the messages it is asked about. */
+export type AutomodPrivacy = "local" | "hosted_us" | "relay" | "unknown";
+
+/** A provider preset, served by GET /automod/matrix. */
+export interface AutomodPreset {
+  id: string;
+  protocol: AutomodProtocol;
+  /** The provider's own name: a brand, not translated. */
+  name: string;
+  endpoint: string;
+  model: string;
+  jsonMode?: string;
+  reasoningEffort?: string;
+  compact?: boolean;
+  privacy: AutomodPrivacy;
+  /** Local presets are flag-only, whatever the category table says. */
+  local: boolean;
+}
+
+/** One canned message's outcome in a Test run. */
+export interface AutomodTestCase {
+  case: "harmless" | "abusive" | "spam";
+  ok: boolean;
+  flagged: boolean;
+  action?: AutomodAction;
+  category?: string;
+  confidence?: number;
+  latencyMs: number;
+  error?: string;
+}
+
+/** What POST /automod/test answers. */
+export interface AutomodTestResult {
+  passed: boolean;
+  problem?: "error" | "harmless_flagged" | "abusive_missed";
+  cases: AutomodTestCase[];
+  checker: AutomodSlot;
+  /** True when this connection may now be enabled. */
+  tested: boolean;
+  /** A typed key passed for an address that is not the saved one: it is
+   *  held, and becomes this checker's key when that address is saved. */
+  keyPending?: boolean;
+}
+
+/** The connection a Test button sends: what is on screen, saved or not. The
+ *  key is not in it -- the server uses the checker's sealed one. */
+export interface AutomodTestRequest {
+  /** Only when testing an address that is not the saved one: the server sends
+   *  a checker's sealed key nowhere but the endpoint it was saved for. A typed
+   *  key that passes is sealed for the checker. */
+  key?: string;
+  checker: AutomodSlot;
+  protocol: AutomodProtocol;
+  preset: string;
+  endpoint: string;
+  model: string;
+  timeoutSeconds: number;
+  minConfidence: number;
+  instruction: string;
 }
 
 export interface AutomodSettings {
@@ -3413,7 +3493,11 @@ export interface AutomodSettings {
   on?: Record<string, boolean>;
   rules?: AutomodRule[];
   history: AutomodHistory;
+  /** The PRIMARY model checker, and the policy both checkers share. */
   model: AutomodModel;
+  /** The optional fallback, asked only when the primary could not answer.
+   *  Optional here so a document from an older server still types. */
+  secondary?: AutomodModel;
 }
 
 /** What the operator sees about model spend and health. */
@@ -3423,6 +3507,16 @@ export interface AutomodModelStats {
   failures: number;
   lastError?: string;
   lastCallAt?: string;
+  /** The rest is set by servers with two model checkers. The top-level
+   *  counters above are the primary's. */
+  protocol?: AutomodProtocol;
+  preset?: string;
+  decisions?: number;
+  primary?: AutomodModelStats;
+  secondary?: AutomodModelStats;
+  fallbacks?: number;
+  failedOpen?: number;
+  lastDecidedBy?: AutomodSlot;
 }
 
 /** The server-rendered matrix. Rows, columns and availability all come from the
@@ -3436,6 +3530,10 @@ export interface AutomodMatrixView {
   actions: AutomodAction[];
   checkers: AutomodChecker[];
   platforms: string[];
+  /** The model-checker vocabulary. Optional so an older server still types. */
+  protocols?: AutomodProtocol[];
+  presets?: AutomodPreset[];
+  modelCategories?: string[];
 }
 
 // ------------------------------------------------- lifecycle webhooks

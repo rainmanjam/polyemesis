@@ -14,7 +14,7 @@ import (
 type Engine struct {
 	rules   *RuleSet
 	history *History
-	model   *Model
+	model   *Chain
 	matrix  Matrix
 	caps    Capabilities
 }
@@ -22,11 +22,23 @@ type Engine struct {
 // New returns an engine. Any checker may be nil, and a nil one simply
 // contributes nothing -- an operator with no rules configured and the model off
 // still gets the history detectors, which is the useful default.
-func New(matrix Matrix, caps Capabilities, rules *RuleSet, history *History, model *Model) *Engine {
+//
+// model is a *Chain when two checkers are configured. A single connector (a
+// *Model or a *Jev) is accepted too, and is the primary of a chain with no
+// secondary -- which is exactly what the engine was before there were two.
+func New(matrix Matrix, caps Capabilities, rules *RuleSet, history *History, model ModelChecker) *Engine {
 	if caps == nil {
 		caps = PlatformCaps{}
 	}
-	return &Engine{rules: rules, history: history, model: model, matrix: matrix, caps: caps}
+	var chain *Chain
+	switch m := model.(type) {
+	case nil:
+	case *Chain:
+		chain = m
+	default:
+		chain = NewChain(m, nil)
+	}
+	return &Engine{rules: rules, history: history, model: chain, matrix: matrix, caps: caps}
 }
 
 // CheckFast runs only the free, deterministic checkers.
@@ -55,13 +67,16 @@ func (e *Engine) CheckModel(ctx context.Context, p db.Platform, text string) (Ve
 	if e == nil {
 		return Verdict{}, nil
 	}
-	findings, err := e.model.Check(ctx, text)
+	// The secondary is asked inside Decide, and only when the primary failed.
+	findings, by, err := e.model.Decide(ctx, text)
 	if err != nil {
-		// Fail open. The verdict is empty, so nothing is acted on, and the
-		// caller flags the message for a human instead.
+		// Fail open. Both checkers failed (or the only one did), the verdict
+		// is empty, so nothing is acted on, and the caller says so out loud.
 		return Verdict{}, err
 	}
-	return e.decide(p, findings), nil
+	v := e.decide(p, findings)
+	v.DecidedBy = by
+	return v, nil
 }
 
 // decide splits findings into what was found and what the matrix permits.
@@ -100,5 +115,5 @@ func (e *Engine) ModelStats() ModelStats {
 // model at all, rather than queueing every message and discovering inside the
 // connector that there is nothing to ask.
 func (e *Engine) ModelEnabled() bool {
-	return e != nil && e.model != nil && e.model.cfg.Enabled
+	return e != nil && e.model.Enabled()
 }

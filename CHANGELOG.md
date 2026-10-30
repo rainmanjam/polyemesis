@@ -97,6 +97,40 @@ its first tagged release.
   [docs/LINK-HEALTH.md](docs/LINK-HEALTH.md#chat-commands).
 - **Live link stats on the source card.** An SRT publisher now shows its
   bitrate and its loss over the last second or so.
+- **Automod: two model checkers, with automatic fallback.** The primary
+  defaults to a typed-decision moderation model on the **Jev** protocol:
+  hosted TypeSafe Jev (`jev-1.14.0`), or a local Jev-compatible model such as
+  `laya` on Ollama. An optional **fallback** speaks the OpenAI-compatible
+  protocol. It is asked only when the primary times out, errors, gives a reply
+  it cannot read, runs out of budget or is rate-limited. A message passes
+  unchecked only when both fail. See
+  [docs/AUTOMOD.md](docs/AUTOMOD.md#the-model-tier).
+  - **Presets:** OpenAI, Cerebras, Groq, OpenRouter, Ollama and Custom on the
+    OpenAI-compatible side; TypeSafe Jev, Ollama (laya) and Custom on the Jev
+    side. Each preset carries its JSON mode (strict `json_schema` where the
+    provider enforces it), its reasoning setting (`reasoning_effort: "none"`
+    for Cerebras), and a privacy line on the card that says where messages
+    go.
+  - **Separate settings:** each checker has its own key (bring your own;
+    polyemesis ships none), budget, timeout and counters.
+  - **Test first:** a checker can't be switched on until its **Test** button
+    has passed three made-up messages. The server enforces this.
+  - **Keys stay bound:** every key is bound to the endpoint it was entered
+    for, and is never sent anywhere else. Moving the address clears the key
+    unless you tested the new address with its key.
+  - **Jev gating:** the confidence floor applies to Jev's probability that
+    the message breaks your rule. Between 0.5 and the floor, a message is only
+    flagged.
+  - **Per-category actions:** harassment, hate speech, threats, sexual
+    content, spam and other each get their own action. Every category starts
+    on flag; the card suggests spam → delete and timeouts for the rest.
+  - **Local presets are flag-only.** The card warns that CPU-only hosts will
+    probably miss the timeout.
+  - **Who decided:** the card, the moderation log and `chat.moderation` events
+    (`decidedBy`) say which checker made each decision.
+  - **Upgrades:** a model block saved before this is read as
+    OpenAI-compatible with a custom address, so existing setups keep working
+    unchanged. The single model action carries over to every category.
 
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
@@ -408,6 +442,10 @@ its first tagged release.
   retransmissions the listener had sent, which a receive-only listener never
   does. It now counts the retransmitted packets received.
 
+- **Automod no longer pays the model for a message a rule already removed.**
+  While the model checker was on, every non-empty message was sent to it,
+  including ones the free checkers had just deleted. Those answers could change
+  nothing. Messages the free checkers only flag are still sent.
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now
   names the row's programme, and Monitoring switches to that programme before

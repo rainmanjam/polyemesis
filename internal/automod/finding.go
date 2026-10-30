@@ -39,8 +39,17 @@ type Finding struct {
 	// RuleID names the rule, when a rule produced this.
 	RuleID int64 `json:"ruleId,omitempty"`
 	// Confidence is only meaningful for the model checker, which is the only
-	// one that is not deterministic.
+	// one that is not deterministic. For a Jev checker it is the probability
+	// that the message breaks the operator's rule.
 	Confidence float64 `json:"confidence,omitempty"`
+	// DecidedBy is which model checker answered: the primary, or the
+	// secondary because the primary could not. Empty for the rules and history
+	// checkers. Added rather than folded into Checker, so the matrix's single
+	// "model" column -- and every stored cell -- stays as it was.
+	DecidedBy Slot `json:"decidedBy,omitempty"`
+	// Provider is the preset ID of the checker that answered (jev, cerebras,
+	// ollama, ...).
+	Provider string `json:"provider,omitempty"`
 }
 
 // PlatformReason is the only text this package will let out to a third party.
@@ -75,6 +84,10 @@ type Verdict struct {
 	// Act is the subset the matrix allows to happen automatically. Empty is the
 	// normal case on a fresh install, and it is not a failure.
 	Act []Finding `json:"act"`
+	// DecidedBy is which model checker answered, set on a model verdict even
+	// when it found nothing -- "the secondary looked and it was fine" is
+	// still worth knowing when the primary is down.
+	DecidedBy Slot `json:"decidedBy,omitempty"`
 }
 
 // Flagged reports whether anything at all was found, which is what puts a

@@ -14,10 +14,19 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
-// The model checker: an external API, asked only about what the first two
-// checkers could not settle.
+// The model checker: an external API, asked about a message the free checkers
+// did not already remove.
+//
+// That sentence used to read "asked only about what the first two checkers
+// could not settle", and it was not true: internal/chat queued EVERY non-empty
+// message for the model whenever it was enabled, including one a rule had
+// just deleted -- a paid call whose answer could change nothing. The Hub now
+// skips the model for a message the fast verdict removes (see
+// internal/chat.checkAutomod). A message the fast checkers only FLAGGED is
+// still asked about, because a flag removes nothing and the model may want to.
 //
 // Three properties matter more than the classification itself, and all three
 // are about what happens when the API is having a bad day:
@@ -61,6 +70,11 @@ type ModelConfig struct {
 	// APIKey is held encrypted at rest in the existing secretbox, alongside the
 	// OAuth tokens, and is never returned by the API or written to a log.
 	APIKey string `json:"-"`
+	// KeyBinding is the endpoint APIKey was issued for, as
+	// db.NormalizeEndpoint writes it. The key is sent ONLY when Endpoint
+	// normalises to exactly this; anything else is a hard error before any
+	// connection is made. See internal/db/automod_binding.go.
+	KeyBinding string `json:"-"`
 	// Timeout bounds one call. Short on purpose: a verdict that arrives after
 	// the moment has passed is worth nothing, and the fail-open path is not a
 	// failure state.
@@ -81,6 +95,20 @@ type ModelConfig struct {
 	// because "what counts as abuse here" is a property of a community and not
 	// something this product can decide for them.
 	Instruction string `json:"instruction"`
+
+	// Preset is the provider preset's ID, recorded on every finding so the
+	// review queue can say which provider answered. See provider.go.
+	Preset string `json:"preset,omitempty"`
+	// JSONMode is the response_format sent. Empty means json_object, which is
+	// what this connector always sent before presets existed.
+	JSONMode JSONMode `json:"jsonMode,omitempty"`
+	// ReasoningEffort is sent as reasoning_effort when non-empty.
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	// FlagOnly forces every finding to ActionFlag. Set for local presets.
+	FlagOnly bool `json:"flagOnly,omitempty"`
+	// CategoryActions is the operator's per-category table. A category it
+	// does not name gets Action. See categoryAction.
+	CategoryActions map[Category]Action `json:"categoryActions,omitempty"`
 }
 
 // DefaultModelConfig is off, with a conservative ceiling if switched on.
@@ -98,12 +126,36 @@ func DefaultModelConfig() ModelConfig {
 }
 
 // ModelStats is what the operator sees about spend and health.
+//
+// The top-level counters are the PRIMARY checker's, which is what they always
+// were -- a client written before there were two checkers keeps reading the
+// one it knew about. Primary and Secondary carry each checker's own counters,
+// and Fallbacks / FailedOpen say how often the second one was needed and how
+// often neither could answer.
 type ModelStats struct {
 	CallsThisHour int       `json:"callsThisHour"`
 	Ceiling       int       `json:"ceiling"`
 	Failures      int       `json:"failures"`
 	LastError     string    `json:"lastError,omitempty"`
 	LastCallAt    time.Time `json:"lastCallAt,omitzero"`
+
+	// Protocol and Preset say what this checker is.
+	Protocol Protocol `json:"protocol,omitempty"`
+	Preset   string   `json:"preset,omitempty"`
+	// Decisions counts the messages this checker answered -- clean or not --
+	// as opposed to Failures, the ones it could not.
+	Decisions int `json:"decisions"`
+
+	// Set on the engine's aggregate only.
+	Primary   *ModelStats `json:"primary,omitempty"`
+	Secondary *ModelStats `json:"secondary,omitempty"`
+	// Fallbacks counts messages the primary could not answer and the
+	// secondary did.
+	Fallbacks int `json:"fallbacks"`
+	// FailedOpen counts messages neither checker could answer, which passed.
+	FailedOpen int `json:"failedOpen"`
+	// LastDecidedBy is the checker that answered the most recent message.
+	LastDecidedBy Slot `json:"lastDecidedBy,omitempty"`
 }
 
 // Model is the connector.
@@ -137,9 +189,38 @@ func NewModel(cfg ModelConfig, budget *Budget) *Model {
 	return &Model{
 		cfg:    cfg,
 		budget: budget,
-		client: &http.Client{Timeout: cfg.Timeout},
+		client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: refuseRedirect},
 		now:    time.Now,
 	}
+}
+
+// errKeyNotBound is the refusal to send a key to an endpoint it was not issued
+// for. Fixed text: it reaches LastError and the log.
+var errKeyNotBound = errors.New("the stored key was issued for a different endpoint, so it was not sent; " +
+	"enter the key again for this endpoint, or run Test with it")
+
+// keyBound is the runtime half of the key binding: the last check before a key
+// leaves the process. Whatever built this connector -- a settings save racing
+// a key change, a stale engine, a future caller nobody reviewed -- a key goes
+// only to the endpoint it is bound to.
+func keyBound(endpoint, binding string) error {
+	if want := db.NormalizeEndpoint(endpoint); want == "" || want != binding {
+		return errKeyNotBound
+	}
+	return nil
+}
+
+// refuseRedirect stops a connector following a redirect, for both protocols.
+//
+// The request carries the operator's key in its Authorization header, and
+// net/http keeps that header on a redirect to the same host -- any port, any
+// path -- so an endpoint that answers 307 to somewhere else on its host is
+// handed the key a second time, for a destination nobody configured. The
+// pattern internal/multitrack's refuseRedirect already uses for a platform
+// credential: ErrUseLastResponse hands back the 3xx, the status check reports
+// it, and nothing follows the Location header.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // modelVerdict is what the model is asked to return. A tiny fixed schema rather
@@ -218,7 +299,8 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	}
 	return []Finding{{
 		Checker:        CheckerModel,
-		Action:         m.cfg.Action,
+		Action:         categoryAction(m.cfg.Action, m.cfg.CategoryActions, m.cfg.FlagOnly, cat),
+		Provider:       m.cfg.Preset,
 		TimeoutSeconds: m.cfg.TimeoutSeconds,
 		Confidence:     v.Confidence,
 		Category:       cat,
@@ -261,6 +343,10 @@ func modelNote(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// Enabled reports whether this connector will make calls. Nil-safe, like
+// Check, because the engine is handed a nil one whenever the checker is off.
+func (m *Model) Enabled() bool { return m != nil && m.cfg.Enabled }
 
 // reserve takes one call from the hourly budget, or reports that it cannot.
 func (m *Model) reserve() bool {
@@ -305,6 +391,8 @@ func (m *Model) Stats() ModelStats {
 		Failures:      m.failures,
 		LastError:     m.lastErr,
 		LastCallAt:    m.lastCall,
+		Protocol:      ProtocolOpenAI,
+		Preset:        m.cfg.Preset,
 	}
 }
 
@@ -318,10 +406,14 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 			{"role": "system", "content": m.systemPrompt()},
 			{"role": "user", "content": text},
 		},
-		"temperature": 0,
-		"response_format": map[string]string{
-			"type": "json_object",
-		},
+		"temperature":     0,
+		"response_format": m.responseFormat(),
+	}
+	// Only when the preset names one. An endpoint that does not know the
+	// parameter may refuse the whole request over it, and the Custom preset
+	// promises nothing about the endpoint.
+	if m.cfg.ReasoningEffort != "" {
+		body["reasoning_effort"] = m.cfg.ReasoningEffort
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -334,6 +426,9 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.cfg.APIKey != "" {
+		if err := keyBound(m.cfg.Endpoint, m.cfg.KeyBinding); err != nil {
+			return modelVerdict{}, err
+		}
 		req.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
 	}
 
@@ -434,6 +529,41 @@ func redactEndpoint(err error) error {
 	// said only "the request failed" would trade one silent failure for
 	// another.
 	return &url.Error{Op: ue.Op, URL: alerts.RedactURL(ue.URL), Err: ue.Err}
+}
+
+// responseFormat is the response_format for the preset's JSON mode.
+//
+// json_schema is STRICT and closed: the provider decodes against it, so a
+// reply cannot omit abusive or confidence, and category is an enum generated
+// from ModelCategories() -- the same list the prompt names and the parse
+// accepts. The parse still runs; a schema is a provider's promise, and the
+// presence check below is ours.
+func (m *Model) responseFormat() map[string]any {
+	if m.cfg.JSONMode != JSONModeSchema {
+		return map[string]any{"type": "json_object"}
+	}
+	cats := make([]string, 0, len(ModelCategories()))
+	for _, c := range ModelCategories() {
+		cats = append(cats, string(c))
+	}
+	return map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   "moderation_verdict",
+			"strict": true,
+			"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"abusive":    map[string]any{"type": "boolean"},
+					"confidence": map[string]any{"type": "number"},
+					"category":   map[string]any{"type": "string", "enum": cats},
+					"reason":     map[string]any{"type": "string"},
+				},
+				"required":             []string{"abusive", "confidence", "category", "reason"},
+				"additionalProperties": false,
+			},
+		},
+	}
 }
 
 // systemPrompt asks for the schema. Asking is rung zero -- ParseModelCategory

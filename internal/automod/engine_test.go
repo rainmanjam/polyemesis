@@ -52,6 +52,11 @@ func testModel(t *testing.T, srv *httptest.Server, tweak func(*ModelConfig)) *Mo
 	if tweak != nil {
 		tweak(&cfg)
 	}
+	// A test key is issued for the endpoint under test unless the test says
+	// otherwise -- the binding is tested on its own, below.
+	if cfg.KeyBinding == "" {
+		cfg.KeyBinding = db.NormalizeEndpoint(cfg.Endpoint)
+	}
 	return NewModel(cfg, NewBudget())
 }
 

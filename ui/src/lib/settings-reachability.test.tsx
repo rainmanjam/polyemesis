@@ -843,6 +843,10 @@ const NOT_A_VALUE: Record<string, string> = {
     'a sparse set keyed "platform/action/checker"; every cell of the matrix writes into it, and there is no leaf to give a value to',
   version:
     "a branded SettingsVersion the server assigns and no page can mint: the version of the document the page read, sent back so a save from a stale read is refused (409) instead of reverting somebody else's change. Never a control",
+  "automod.model.categoryActions":
+    "a sparse map keyed by model category; the per-category selects on the model card (automod-category-<name>) write into it, and an absent key means the default action",
+  "automod.secondary.categoryActions":
+    "not read: the fallback checker applies the primary's category table (db.AutomodSettings.Secondary)",
   "playout.sourceId":
     "a branded SourceId, edited by PlayoutPage's ProgrammeCard Select whose options are the live source list plus 'default'. The walk cannot mint a SourceId that is in that domain, so it cannot fingerprint the control -- but the control exists and #774 is what added it. This is the Select-domain limit this file's header names, not a missing control",
 };
@@ -854,6 +858,18 @@ const NOT_A_CONTROL: Record<string, string> = {
     "read-only. The password is never returned by any API; it is set through the separate mq-pw field and PUT /settings/mqtt-password, and this flag only reports that one is stored",
   "automod.model.hasApiKey":
     "read-only, same shape as mqtt.hasPassword -- the key has its own endpoint and is never in the settings blob",
+  "automod.model.tested":
+    "derived on the way out from the Test pass table; a value sent back is ignored. The Test button is what changes it",
+  "automod.secondary.tested":
+    "derived on the way out from the Test pass table, same as automod.model.tested",
+  "automod.secondary.hasApiKey":
+    "read-only, same shape as automod.model.hasApiKey -- the fallback's key has its own row and is set through PUT /settings/automod-key with checker=secondary",
+  "automod.secondary.action":
+    "not read: the fallback checker applies the primary's actions, so the card has one action table, not two",
+  "automod.secondary.timeoutForBan":
+    "not read: the fallback checker applies the primary's viewer-silence duration",
+  "automod.secondary.instruction":
+    "not read: both checkers are asked with the primary's instruction",
   "automod.rules[].id":
     "server-assigned. A rule's identity is not something an operator types",
 };
@@ -904,6 +920,15 @@ const BOUND_BUT_UNMEASURABLE: Array<{
     boundAt: {
       file: "src/pages/PlayoutPage.tsx",
       needle: 'value={v.renditionId == null ? "source" : String(v.renditionId)}',
+    },
+  },
+  {
+    path: "automod.secondary.enabled",
+    why:
+      "a Switch locked until the fallback checker's Test has passed for the connection on screen (the server refuses the save otherwise), so a fixture with no Test run cannot move it",
+    boundAt: {
+      file: "src/components/AutomodModelChecker.tsx",
+      needle: "onCheckedChange={(v) => onPatch({ enabled: v })}",
     },
   },
   {
@@ -975,6 +1000,8 @@ async function walkEveryScreen(leaves: Leaf[]): Promise<Walk> {
   const identities = new Set<string>();
 
   const allBooleans = new Set(leaves.filter((l) => l.kind === "boolean").map((l) => l.path));
+  /** Each screen's `differs`, kept for the one-leaf pass after the loop. */
+  const differsOn: Array<{ name: string; differs: (paths: string[]) => Promise<boolean> }> = [];
 
   for (const screen of SCREENS) {
     /** Anything the fingerprint can claim from one render. */
@@ -1036,6 +1063,7 @@ async function walkEveryScreen(leaves: Leaf[]): Promise<Walk> {
     // pruned as unbound. Whether that happens depended only on which half of a
     // split the id landed in, so adding unrelated leaves anywhere above it
     // (degraded-link failover's thresholds, #6) moved it and failed the file.
+    differsOn.push({ name: screen.name, differs });
     const bound = await hunt([...unreached.keys()].filter((p) => !(p in NOT_A_CONTROL)));
     for (const path of bound) {
       reached.set(path, `${screen.name} (probe)`);
@@ -1052,6 +1080,26 @@ async function walkEveryScreen(leaves: Leaf[]): Promise<Walk> {
         const doc = document_(leaves, new Set());
         put(doc, path, choice);
         harvest(await shoot(screen, doc), `value, ${path}=${choice}`);
+      }
+    }
+  }
+
+  // ONE LEAF AT A TIME, for what group testing pruned. The hunt assumes that a
+  // set holding a bound leaf moves a control, and that is not always so: a set
+  // can also hold a leaf that hides the card the bound control lives on, and
+  // then the bound leaf's change is invisible and the whole set is dropped.
+  // Which leaves share a set depends only on how many leaves precede them, so
+  // merging branches that each added settings (Wave 2: #6's thresholds, #21's
+  // fallback checker) dropped automod.secondary.protocol from a set it had
+  // passed in on #21 alone. Asking about each survivor alone, on each screen,
+  // makes the verdict independent of leaf order; the survivors are few, so the
+  // extra renders are too.
+  for (const path of [...unreached.keys()].filter((p) => !(p in NOT_A_CONTROL))) {
+    for (const { name, differs } of differsOn) {
+      if (await differs([path])) {
+        reached.set(path, `${name} (probe, alone)`);
+        unreached.delete(path);
+        break;
       }
     }
   }

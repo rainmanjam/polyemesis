@@ -1756,8 +1756,19 @@ type AutomodSettings struct {
 	Rules []AutomodRule `json:"rules,omitempty"`
 	// History bounds the sequence detectors.
 	History AutomodHistory `json:"history"`
-	// Model configures the optional external checker.
+	// Model configures the optional external checker -- the PRIMARY one.
+	// Its name predates there being two, and it keeps it: renaming it would
+	// strand every stored blob and every API client.
+	//
+	// It also carries what both checkers share: the Instruction, the legacy
+	// single Action, TimeoutForBan and the per-category action table. The
+	// secondary is a second connection to ask, not a second policy.
 	Model AutomodModel `json:"model"`
+	// Secondary is the OpenAI-compatible fallback (by default), asked about a
+	// message only when the primary could not answer it. Its Instruction,
+	// Action, TimeoutForBan and CategoryActions are not read: the primary's
+	// apply to both.
+	Secondary AutomodModel `json:"secondary"`
 }
 
 // UnmarshalJSON makes a sent matrix REPLACE the stored one instead of merging
@@ -1795,9 +1806,28 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		PlatformEnabled json.RawMessage `json:"platformEnabled"`
 		On              json.RawMessage `json:"on"`
 		Rules           json.RawMessage `json:"rules"`
+		Model           json.RawMessage `json:"model"`
+		Secondary       json.RawMessage `json:"secondary"`
 	}
 	if err := json.Unmarshal(b, &sent); err != nil {
 		return err
+	}
+	// The category table is a sparse map with the same merge trap as On: a
+	// category the client set back to "use the default" by leaving it out
+	// would otherwise keep its stored action.
+	modelSent, err := sentModelKeys(sent.Model)
+	if err != nil {
+		return err
+	}
+	if modelSent.categoryActions {
+		a.Model.CategoryActions = nil
+	}
+	secondarySent, err := sentModelKeys(sent.Secondary)
+	if err != nil {
+		return err
+	}
+	if secondarySent.categoryActions {
+		a.Secondary.CategoryActions = nil
 	}
 	if len(sent.PlatformEnabled) > 0 {
 		a.PlatformEnabled = nil
@@ -1812,7 +1842,51 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 	if len(sent.Rules) > 0 {
 		a.Rules = nil
 	}
-	return json.Unmarshal(b, (*plain)(a))
+	if err := json.Unmarshal(b, (*plain)(a)); err != nil {
+		return err
+	}
+	// A MODEL BLOCK WITHOUT A PROTOCOL WAS WRITTEN BEFORE THERE WAS A CHOICE,
+	// and the only protocol there was is OpenAI-compatible.
+	//
+	// Without this, a pre-#21 blob decoded over DefaultSettings inherits the
+	// new default protocol, Jev. An operator whose checker was pointed at
+	// OpenAI would have their endpoint sent Jev-shaped bodies and fail every
+	// message open; one whose endpoint was blank would have the default Jev
+	// endpoint handed their OpenAI key. Decided by the ABSENCE of the key in
+	// what was decoded, not by comparing values, so an operator who chooses
+	// Jev and saves is never re-read as OpenAI. The preset becomes Custom:
+	// json_object, no reasoning setting, not local -- byte for byte the request
+	// the connector made before presets existed.
+	if len(sent.Model) > 0 && string(sent.Model) != "null" && !modelSent.protocol {
+		a.Model.Protocol = AutomodProtocolOpenAI
+		a.Model.Preset = "custom"
+	}
+	return nil
+}
+
+// AutomodProtocolJev and AutomodProtocolOpenAI mirror automod.ProtocolJev and
+// automod.ProtocolOpenAI, which this package cannot import (automod imports
+// db). internal/api holds the two in step with a test.
+const (
+	AutomodProtocolJev    = "jev"
+	AutomodProtocolOpenAI = "openai"
+)
+
+// sentModelKeyset is which keys a sent model object named.
+type sentModelKeyset struct{ protocol, categoryActions bool }
+
+func sentModelKeys(raw json.RawMessage) (sentModelKeyset, error) {
+	var k sentModelKeyset
+	if len(raw) == 0 || string(raw) == "null" {
+		return k, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return k, err
+	}
+	_, k.protocol = m["protocol"]
+	_, k.categoryActions = m["categoryActions"]
+	return k, nil
 }
 
 // CheckAutomodFields refuses a SENT automod object that names a field this
@@ -1889,6 +1963,25 @@ type AutomodModel struct {
 	TimeoutForBan   int     `json:"timeoutForBan,omitempty"`
 	MinConfidence   float64 `json:"minConfidence"`
 	Instruction     string  `json:"instruction"`
+
+	// Protocol is "jev" or "openai". See AutomodSettings.UnmarshalJSON for
+	// what a stored block without one means.
+	Protocol string `json:"protocol"`
+	// Preset is an internal/automod preset ID. It decides the JSON mode, the
+	// reasoning setting and the local flag-only lock -- read from the preset
+	// table by the server, never from this document.
+	Preset string `json:"preset"`
+	// CategoryActions maps a model category (spam, harassment, hate_speech,
+	// threat, sexual_content, other) to the action a finding in it asks for.
+	// A category not named here gets Action, which is flag by default. Read
+	// from the primary only.
+	CategoryActions map[string]string `json:"categoryActions,omitempty"`
+	// Tested reports that this checker's current connection -- protocol,
+	// preset, endpoint, model and key -- has passed the Test button. DERIVED,
+	// like HasAPIKey: filled on the way out to the settings page, and a value
+	// a client sends is ignored. Enabling a checker that has not passed is
+	// refused by the settings handler.
+	Tested bool `json:"tested"`
 }
 
 // ChatSettings bounds the stored chat scrollback.
@@ -2271,14 +2364,36 @@ func DefaultSettings() Settings {
 				RetainPerAuthor:       24,
 				IdleEvictionSeconds:   600,
 			},
+			// The primary defaults to the Jev protocol on TypeSafe's hosted
+			// endpoint, pinned to a version. Off, and with no key: polyemesis
+			// ships with no account anywhere, and every operator brings their
+			// own. The strings mirror internal/automod's preset table, held in
+			// step by a test in internal/api.
 			Model: AutomodModel{
 				Enabled:         false,
-				Model:           "gpt-4o-mini",
+				Protocol:        AutomodProtocolJev,
+				Preset:          "jev",
+				Endpoint:        "https://api.typesafe.ai/v1/systemone",
+				Model:           "jev-1.14.0",
 				TimeoutSeconds:  4,
 				MaxCallsPerHour: 500,
 				Action:          "flag",
 				MinConfidence:   0.8,
 				Instruction:     "Flag harassment, threats, slurs and targeted abuse. Ordinary criticism, banter and strong language are not abuse.",
+			},
+			// The optional fallback: OpenAI-compatible, on the preset the
+			// spike measured best among them (Cerebras qwen-3.8, 0/165 false
+			// positives with a strict schema and reasoning off).
+			Secondary: AutomodModel{
+				Enabled:         false,
+				Protocol:        AutomodProtocolOpenAI,
+				Preset:          "cerebras",
+				Endpoint:        "https://api.cerebras.ai/v1/chat/completions",
+				Model:           "qwen-3.8-27b",
+				TimeoutSeconds:  4,
+				MaxCallsPerHour: 500,
+				Action:          "flag",
+				MinConfidence:   0.8,
 			},
 		},
 	}
@@ -2315,11 +2430,21 @@ func (s Settings) Validate() error {
 	// automod page carries a zero here and is not misconfigured, it is
 	// unconfigured, and refusing every unrelated settings save over a field
 	// nobody has touched is its own defect.
-	if s.Automod.Model.Enabled {
-		if c := s.Automod.Model.MinConfidence; c < 0.01 || c > 1 {
-			add("automod confidence floor %v is outside 0.01-1 (the model reports "+
-				"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
-				"anything above 1 stops it acting at all)", c)
+	for _, m := range []struct {
+		name string
+		cfg  AutomodModel
+	}{{"", s.Automod.Model}, {"secondary ", s.Automod.Secondary}} {
+		if m.cfg.Enabled {
+			if c := m.cfg.MinConfidence; c < 0.01 || c > 1 {
+				add("automod %sconfidence floor %v is outside 0.01-1 (the model reports "+
+					"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
+					"anything above 1 stops it acting at all)", m.name, c)
+			}
+		}
+		// Unconditional: a protocol saved while the checker is off is the
+		// one it wakes up with.
+		if p := m.cfg.Protocol; p != "" && p != AutomodProtocolJev && p != AutomodProtocolOpenAI {
+			add("automod %sprotocol %q is not jev or openai", m.name, p)
 		}
 	}
 	// Empty is deliberately accepted as "the default": a client that has never
@@ -2398,6 +2523,7 @@ func (s Settings) Validate() error {
 		credentialField{"failover.backup.pull.url", s.Failover.Backup.Pull.URL},
 		credentialField{"mqtt.brokerUrl", s.MQTT.BrokerURL},
 		credentialField{"automod.model.endpoint", s.Automod.Model.Endpoint},
+		credentialField{"automod.secondary.endpoint", s.Automod.Secondary.Endpoint},
 	)...)
 
 	if len(probs) > 0 {
@@ -2596,10 +2722,35 @@ func (d *DB) PutSettings(s Settings) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(
+	// ONE TRANSACTION with the automod key re-binding: a write that moves a
+	// model checker's endpoint must not commit while that checker's key is
+	// still bound to the old one, and a key that cannot be cleared must stop
+	// the write rather than be logged and left. See automod_binding.go.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	before := mergeBaseSettings()
+	var raw string
+	switch err := tx.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw); {
+	case err == nil:
+		if before, err = decodeStoredSettings(raw); err != nil {
+			return err
+		}
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO settings (id, json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
-		string(b))
-	return err
+		string(b)); err != nil {
+		return err
+	}
+	if err := rebindAutomodKeysTx(tx, before, s); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // srtPassphraseUnreserved is the alphabet an SRT passphrase may use.

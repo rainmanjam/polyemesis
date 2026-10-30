@@ -138,7 +138,12 @@ func (h *Hub) checkAutomod(m Message) {
 	}
 
 	v := s.mod.CheckFast(m.Platform, m.Author.ID, m.Text)
-	askModel := s.mod.ModelEnabled() && m.Text != ""
+	// NOT for a message the fast verdict removes. It used to be every
+	// non-empty message while the model was on, including one a rule had just
+	// deleted: a paid call -- against the hourly ceiling every other message
+	// shares -- whose answer could change nothing. A fast verdict that only
+	// FLAGS removes nothing, so that message is still asked about.
+	askModel := s.mod.ModelEnabled() && m.Text != "" && !removes(v)
 
 	// The overlay is told BEFORE anything is queued, so neither an action the
 	// fast verdict permits nor the model's answer can reach the sink ahead of
@@ -245,11 +250,20 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		// moderation is degraded.
 		h.log.Warn("automod model check failed; the message passes",
 			"platform", job.platform, "err", err)
+		// err names each checker that failed. The endpoint inside it has
+		// been through redactEndpoint, and no response body is ever in it.
 		// It passes on the overlay too: the console is showing it, and an
 		// overlay that went silent whenever the model endpoint did would be a
 		// second, invisible outage.
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 		return
+	}
+	if v.DecidedBy == automod.SlotSecondary {
+		// The primary could not answer and the secondary did. Info, not Warn:
+		// moderation is working, which is the point of having a secondary --
+		// but an operator reading the log should be able to see it happening.
+		h.log.Info("automod primary checker could not answer; the secondary decided",
+			"platform", job.platform)
 	}
 	// Judged before the actions are queued, for the ordering reason in
 	// checkAutomod.
@@ -272,6 +286,7 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		h.log.Info("automod model finding",
 			"platform", job.platform, "action", f.Action,
 			"confidence", f.Confidence, "category", f.Category,
+			"decidedBy", f.DecidedBy, "provider", f.Provider,
 			"reason", f.Reason, "modelNote", f.Note)
 	}
 }
@@ -297,6 +312,9 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 	// Every action below is announced as automod's, not an operator's: the
 	// same Delete/Hide/Ban path a human takes, told who is taking it.
 	ctx = WithActor(ctx, ActorAutomod)
+	// And which model checker decided, so the moderation event -- the audit
+	// record -- can say. Empty for the rules and history checkers.
+	ctx = withDecidedBy(ctx, string(job.finding.DecidedBy))
 
 	// PlatformReason, NEVER finding.Reason.
 	//
@@ -355,6 +373,7 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 	h.log.Info("automod acted",
 		"platform", job.platform, "action", job.finding.Action,
 		"checker", job.finding.Checker, "category", job.finding.Category,
+		"decidedBy", job.finding.DecidedBy, "provider", job.finding.Provider,
 		"reason", job.finding.Reason, "sentReason", reason)
 }
 

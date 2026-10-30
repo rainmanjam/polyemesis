@@ -232,6 +232,10 @@ func (s *Server) handlePutOBSPassword(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("OBS bridge: cannot reload after a password change", "err", err)
 		}
 	}
+	// A password set while debug recording is on is a literal the
+	// recording's scrub set has never held; rebuild it now, as an automod key
+	// does (automod.go).
+	s.refreshDiagSecrets()
 	// Only the section name travels; see handlePutMQTTPassword.
 	s.publishAudit(auditSettingsChanged([]string{"obs"}, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, map[string]bool{"hasPassword": req.Password != ""})

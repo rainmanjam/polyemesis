@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -53,6 +56,13 @@ func (s *Server) handleAutomodMatrix(w http.ResponseWriter, r *http.Request) {
 		"actions":   automod.Actions,
 		"checkers":  automod.Checkers,
 		"platforms": automod.Platforms,
+		// And the model-checker vocabulary, for the same reason: the preset
+		// table carries each provider's privacy class and the local
+		// flag-only lock, and a UI copy of it could disagree with the one the
+		// server enforces.
+		"protocols":       automod.Protocols,
+		"presets":         automod.Presets(),
+		"modelCategories": automod.ModelCategories(),
 	})
 }
 
@@ -86,23 +96,34 @@ func (s *Server) automodStats() automod.ModelStats {
 	return m.ModelStats()
 }
 
-// handlePutAutomodKey sets or clears the model API key.
+// handlePutAutomodKey sets or clears a model checker's API key.
 //
 // Its own endpoint, exactly like handlePutMQTTPassword: the key is sealed and
 // never appears in the settings blob, so it cannot be returned by GET /settings
 // and cannot reach a log through one.
+//
+// `checker` picks which: "primary" (or absent, which is what every client
+// written before there were two sends) or "secondary". Each is sealed in its
+// own row, and setting either forgets that checker's Test pass -- see
+// db.PutAutomodKeyFor.
 func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Key string `json:"key"`
+		Key     string `json:"key"`
+		Checker string `json:"checker"`
 	}
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	slot, ok := parseSlot(req.Checker)
+	if !ok {
+		writeError(w, http.StatusBadRequest, `checker must be "primary" or "secondary"`)
 		return
 	}
 	// An empty key clears the row, which is how the model checker is turned off
 	// without leaving a credential behind. Sealing happens in the store, the
 	// same shape as the MQTT broker password.
 	key := strings.TrimSpace(req.Key)
-	if err := s.store.PutAutomodKey(s.box, key); err != nil {
+	if err := s.store.PutAutomodKeyFor(s.box, string(slot), key); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -119,11 +140,139 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("automod key stored, but settings could not be re-read to "+
 			"rebuild the model checker; it will pick the key up on restart", "err", err)
 	} else {
-		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget)
+		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget)
 	}
 
+	// A key set while debug recording is on is a literal the recording's
+	// scrub set has never held. Rebuild it now rather than at the next toggle.
+	s.refreshDiagSecrets()
+
 	s.publishAudit(auditSettingsChanged([]string{"automod"}, s.clientIP(r)))
-	writeJSON(w, http.StatusOK, map[string]any{"hasApiKey": key != ""})
+	writeJSON(w, http.StatusOK, map[string]any{"hasApiKey": key != "", "checker": slot})
+}
+
+// parseSlot reads a checker name from a request. Empty means the primary.
+func parseSlot(v string) (automod.Slot, bool) {
+	switch automod.Slot(v) {
+	case "", automod.SlotPrimary:
+		return automod.SlotPrimary, true
+	case automod.SlotSecondary:
+		return automod.SlotSecondary, true
+	}
+	return "", false
+}
+
+// slotSettings is one checker's stored block.
+func slotSettings(a db.AutomodSettings, slot automod.Slot) db.AutomodModel {
+	if slot == automod.SlotSecondary {
+		return a.Secondary
+	}
+	return a.Model
+}
+
+// protocolOf is a stored block's protocol. Anything but "jev" is the
+// OpenAI-compatible connector, which is what an empty protocol has always
+// meant (db.AutomodSettings.UnmarshalJSON).
+func protocolOf(m db.AutomodModel) automod.Protocol {
+	if m.Protocol == db.AutomodProtocolJev {
+		return automod.ProtocolJev
+	}
+	return automod.ProtocolOpenAI
+}
+
+// checkerFingerprint identifies a checker's CONNECTION: protocol, preset,
+// endpoint and model. A Test pass is bound to it, so changing any of the four
+// -- pointing a tested checker somewhere new -- needs a new test. The key is
+// not in it; setting a key deletes the pass instead (db.PutAutomodKeyFor), so
+// no digest of a credential is ever stored.
+func checkerFingerprint(m db.AutomodModel) string {
+	h := sha256.New()
+	for _, part := range []string{string(protocolOf(m)), m.Preset, strings.TrimSpace(m.Endpoint), strings.TrimSpace(m.Model)} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:24]
+}
+
+// checkerTested reports whether a checker's stored connection has a matching
+// Test pass.
+func (s *Server) checkerTested(slot automod.Slot, m db.AutomodModel) bool {
+	fp, err := s.store.AutomodTestPass(string(slot))
+	return err == nil && fp != "" && fp == checkerFingerprint(m)
+}
+
+// newlyEnabledUntested refuses a save that turns a model checker ON -- or
+// moves an enabled one to a new connection -- without a Test pass for exactly
+// that connection.
+//
+// SERVER-SIDE, because the console's disabled switch is only a courtesy: every
+// field of the settings document is writable through PUT /settings, so a
+// rule only the UI kept is a rule any API client skips. The pass lives in its
+// own table for the same reason.
+//
+// Scoped to a CHANGE, like newlyArmedOnUnconfigured: an install upgrading with
+// a checker already enabled was enabled under the old rules, and refusing
+// every unrelated save until somebody found the Test button would be its own
+// outage. Switching a checker off is never refused.
+func newlyEnabledUntested(stored, sent db.AutomodSettings, pass func(slot string) (string, error)) error {
+	var bad []string
+	for _, slot := range []automod.Slot{automod.SlotPrimary, automod.SlotSecondary} {
+		was, now := slotSettings(stored, slot), slotSettings(sent, slot)
+		if !now.Enabled {
+			continue
+		}
+		fp := checkerFingerprint(now)
+		if was.Enabled && checkerFingerprint(was) == fp {
+			continue
+		}
+		got, err := pass(string(slot))
+		if err != nil {
+			return err
+		}
+		if got != fp {
+			bad = append(bad, string(slot))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return badRequestError{"automod: run Test on the " + strings.Join(bad, " and ") +
+		" model checker with this protocol, preset, endpoint, model and key before enabling it"}
+}
+
+// automodProviderProblems refuses a preset that is not this protocol's, and a
+// category table naming a category the model cannot answer with or an action
+// this build does not know. Here rather than in Settings.Validate because the
+// vocabularies live in internal/automod, which db cannot import.
+func automodProviderProblems(a db.AutomodSettings) error {
+	var probs []string
+	for _, slot := range []automod.Slot{automod.SlotPrimary, automod.SlotSecondary} {
+		m := slotSettings(a, slot)
+		if m.Preset == "" {
+			continue
+		}
+		p, ok := automod.PresetByID(m.Preset)
+		if !ok || p.Protocol != protocolOf(m) {
+			probs = append(probs, fmt.Sprintf("%s preset %q is not a %s preset", slot, m.Preset, protocolOf(m)))
+		}
+	}
+	keys := make([]string, 0, len(a.Model.CategoryActions))
+	for k := range a.Model.CategoryActions {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, ok := automod.ParseModelCategory(k); !ok {
+			probs = append(probs, fmt.Sprintf("category %q is not one the model answers with", k))
+		}
+		if !automod.KnownActions(automod.Action(a.Model.CategoryActions[k])) {
+			probs = append(probs, fmt.Sprintf("category %q asks for unknown action %q", k, a.Model.CategoryActions[k]))
+		}
+	}
+	if len(probs) == 0 {
+		return nil
+	}
+	return badRequestError{"automod: " + strings.Join(probs, "; ")}
 }
 
 // matrixFromSettings converts the stored shape into the engine's.
@@ -184,15 +333,20 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 		}
 		return false, "no enabled rule is written"
 	case automod.CheckerModel:
-		if !a.Model.Enabled {
+		// EITHER checker makes the column live: the matrix has one model
+		// column, and a secondary running alone (its primary switched off)
+		// still decides. See automod.Chain.
+		if !a.Model.Enabled && !a.Secondary.Enabled {
 			return false, "the model checker is switched off"
 		}
 		// modelConfigFrom copies an empty endpoint over the default, so the
 		// checker is built and every call is a POST to "" that fails open.
-		if strings.TrimSpace(a.Model.Endpoint) == "" {
-			return false, "the model checker has no endpoint"
+		for _, m := range []db.AutomodModel{a.Model, a.Secondary} {
+			if m.Enabled && strings.TrimSpace(m.Endpoint) != "" {
+				return true, ""
+			}
 		}
-		return true, ""
+		return false, "the model checker has no endpoint"
 	}
 	// History is built from DefaultHistoryLimits on every save and is never
 	// nil. A checker this build does not know is dropped by matrixFromSettings
@@ -342,12 +496,29 @@ func historyFromSettings(a db.AutomodSettings) automod.HistoryLimits {
 // through this function, which is a written promise that saving it takes
 // effect.
 func modelConfigFrom(a db.AutomodSettings) (automod.ModelConfig, error) {
+	return modelConfigFor(a.Model, a.Model)
+}
+
+// modelConfigFor is modelConfigFrom for either checker. conn is the checker's
+// own block -- endpoint, model, budget, timeout, floor, preset -- and shared is
+// the primary's, which carries the policy both checkers apply: the
+// Instruction, the legacy Action, TimeoutForBan and the category table.
+func modelConfigFor(conn, shared db.AutomodModel) (automod.ModelConfig, error) {
 	var confidenceProblem error
 	cfg := automod.DefaultModelConfig()
 	cfg.Enabled = true
-	cfg.Endpoint = a.Model.Endpoint
-	cfg.Model = a.Model.Model
-	cfg.MaxCallsPerHour = a.Model.MaxCallsPerHour
+	cfg.Endpoint = conn.Endpoint
+	cfg.Model = conn.Model
+	cfg.MaxCallsPerHour = conn.MaxCallsPerHour
+	// The preset's wire details, from the server's table by ID -- never from
+	// the document, so a client cannot unlock a local preset's flag-only
+	// lock or send a JSON mode the preset does not have.
+	preset := automod.ResolvePreset(automod.ProtocolOpenAI, conn.Preset)
+	cfg.Preset = preset.ID
+	cfg.JSONMode = preset.JSONMode
+	cfg.ReasoningEffort = preset.ReasoningEffort
+	cfg.FlagOnly = preset.Local
+	cfg.CategoryActions = categoryActionsFrom(shared)
 	// PARSED, NOT COPIED, and the compiler now insists. This line used to be a
 	// bare assignment sitting directly above a neighbour that DID carry a
 	// `> 0` guard -- the hazard understood on one line and not the one above
@@ -356,28 +527,116 @@ func modelConfigFrom(a db.AutomodSettings) (automod.ModelConfig, error) {
 	// above every verdict the model can return and silently retired the
 	// checker. Out of range keeps DefaultModelConfig's 0.8, which is a floor
 	// that works, rather than either failure.
-	if c, err := automod.ParseConfidence(a.Model.MinConfidence); err == nil {
+	if c, err := automod.ParseConfidence(conn.MinConfidence); err == nil {
 		cfg.MinConfidence = c
 	} else {
 		confidenceProblem = err
 	}
-	cfg.Instruction = a.Model.Instruction
-	if a.Model.TimeoutSeconds > 0 {
-		cfg.Timeout = time.Duration(a.Model.TimeoutSeconds) * time.Second
+	cfg.Instruction = shared.Instruction
+	if conn.TimeoutSeconds > 0 {
+		cfg.Timeout = time.Duration(conn.TimeoutSeconds) * time.Second
 	}
 	// Left at DefaultModelConfig's value when unset rather than zeroed: zero is
 	// a PERMANENT ban at every adapter, which is the same trap the rule path
 	// carried until it was fixed alongside this.
-	if a.Model.TimeoutForBan > 0 {
-		cfg.TimeoutSeconds = a.Model.TimeoutForBan
+	if shared.TimeoutForBan > 0 {
+		cfg.TimeoutSeconds = shared.TimeoutForBan
 	}
-	if automod.KnownActions(automod.Action(a.Model.Action)) {
-		cfg.Action = automod.Action(a.Model.Action)
+	if automod.KnownActions(automod.Action(shared.Action)) {
+		cfg.Action = automod.Action(shared.Action)
 	}
 	return cfg, confidenceProblem
 }
 
-func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings, budget *automod.Budget) {
+// jevConfigFor is modelConfigFor for a Jev-protocol checker. The same split
+// between the checker's own connection and the shared policy, read through
+// modelConfigFor so the two connectors cannot come to different conclusions
+// about a floor, a timeout or an action.
+func jevConfigFor(conn, shared db.AutomodModel) (automod.JevConfig, error) {
+	m, err := modelConfigFor(conn, shared)
+	preset := automod.ResolvePreset(automod.ProtocolJev, conn.Preset)
+	return automod.JevConfig{
+		Enabled:         true,
+		Endpoint:        m.Endpoint,
+		Model:           m.Model,
+		Timeout:         m.Timeout,
+		MaxCallsPerHour: m.MaxCallsPerHour,
+		Action:          m.Action,
+		TimeoutSeconds:  m.TimeoutSeconds,
+		MinConfidence:   m.MinConfidence,
+		Instruction:     m.Instruction,
+		Preset:          preset.ID,
+		Compact:         preset.Compact,
+		FlagOnly:        preset.Local,
+		CategoryActions: m.CategoryActions,
+	}, err
+}
+
+// categoryActionsFrom parses the stored table, dropping anything this build
+// does not recognise rather than guessing at it. The settings handler refuses
+// such entries on save (automodProviderProblems); this is for a blob written
+// by a newer version.
+func categoryActionsFrom(shared db.AutomodModel) map[automod.Category]automod.Action {
+	if len(shared.CategoryActions) == 0 {
+		return nil
+	}
+	out := map[automod.Category]automod.Action{}
+	for k, v := range shared.CategoryActions {
+		c, ok := automod.ParseModelCategory(k)
+		if ok && automod.KnownActions(automod.Action(v)) {
+			out[c] = automod.Action(v)
+		}
+	}
+	return out
+}
+
+// buildChecker is one slot's connector, or nil when it is switched off.
+func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
+	slot automod.Slot, budget *automod.Budget) automod.ModelChecker {
+	conn := slotSettings(a, slot)
+	if !conn.Enabled {
+		return nil
+	}
+	key, binding, err := store.GetAutomodKeyBound(box, string(slot))
+	if err != nil {
+		// Fail open, consistent with the connector itself: a key that cannot
+		// be read means this checker cannot run, not that chat stops.
+		log.Warn("automod model key unreadable; this checker will fail open", "checker", slot, "err", err)
+	}
+	return newChecker(conn, a.Model, key, binding, budget, func(err error) {
+		// Named loudly rather than swallowed, for the same reason a rule that
+		// does not compile is: a confidence floor an operator set and this
+		// server ignored is a moderation posture they believe they have. The
+		// checker runs on the default rather than not at all.
+		log.Error("automod model confidence floor rejected; using the default", "checker", slot, "err", err)
+	})
+}
+
+// newChecker builds the connector a block's protocol asks for.
+//
+// binding is the endpoint key was issued for. The connector sends the key only
+// to that endpoint, so a settings document and a key read a moment apart --
+// with a save moving the endpoint in between -- cannot pair the old key with
+// the new address: the call is refused instead.
+func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
+	if protocolOf(conn) == automod.ProtocolJev {
+		cfg, err := jevConfigFor(conn, shared)
+		if err != nil && onFloorErr != nil {
+			onFloorErr(err)
+		}
+		cfg.APIKey, cfg.KeyBinding = key, binding
+		return automod.NewJev(cfg, budget)
+	}
+	cfg, err := modelConfigFor(conn, shared)
+	if err != nil && onFloorErr != nil {
+		onFloorErr(err)
+	}
+	cfg.APIKey, cfg.KeyBinding = key, binding
+	return automod.NewModel(cfg, budget)
+}
+
+func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
+	budget, secondaryBudget *automod.Budget) {
 	if hub == nil {
 		return
 	}
@@ -396,27 +655,14 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		rules = nil
 	}
 
-	var model *automod.Model
-	if a.Model.Enabled {
-		cfg, err := modelConfigFrom(a)
-		if err != nil {
-			// Named loudly rather than swallowed, for the same reason a rule
-			// that does not compile is: a confidence floor an operator set and
-			// this server ignored is a moderation posture they believe they
-			// have. The checker runs on the default rather than not at all.
-			log.Error("automod model confidence floor rejected; using the default", "err", err)
-		}
-		if key, err := store.GetAutomodKey(box); err == nil {
-			cfg.APIKey = key
-		} else {
-			// Fail open, consistent with the connector itself: a key that
-			// cannot be read means the model checker cannot run, not that chat
-			// stops.
-			log.Warn("automod model key unreadable; the model checker will fail open", "err", err)
-		}
-		// The SAME budget every time this runs. Rebuilding the connector on a
-		// settings save is correct; refilling its hourly allowance was not.
-		model = automod.NewModel(cfg, budget)
+	// Two connectors, each with its OWN budget -- the same budget every time
+	// this runs, because rebuilding a connector on a settings save is correct
+	// and refilling its hourly allowance was not. See automod.Budget.
+	primary := buildChecker(store, box, log, a, automod.SlotPrimary, budget)
+	secondary := buildChecker(store, box, log, a, automod.SlotSecondary, secondaryBudget)
+	var model automod.ModelChecker
+	if primary != nil || secondary != nil {
+		model = automod.NewChain(primary, secondary)
 	}
 
 	engine := automod.New(

@@ -1068,10 +1068,11 @@ partial file behind.
 |---|---|
 | `GET` | `/automod/matrix` |
 | `GET` | `/automod/stats` |
+| `POST` | `/automod/test` |
 
 Automod's *configuration* lives inside `/settings` — the matrix, the rules and
-the model options all round-trip through that blob. Only two things need routes
-of their own.
+the model options all round-trip through that blob. Only a few things need
+routes of their own.
 
 `GET /automod/matrix` renders every cell with an `available` flag and, where it
 is false, a `reason`. **Availability is derived from what each platform can
@@ -1082,7 +1083,18 @@ a client builds its table from the server's list rather than a second copy free
 to drift.
 
 `GET /automod/stats` reports model spend and health — calls this hour against
-the ceiling, failures, and the last error.
+the ceiling, failures, and the last error. The top-level numbers are the
+primary model checker's; `primary` and `secondary` carry each checker's own,
+with `fallbacks`, `failedOpen` and `lastDecidedBy` beside them.
+
+`POST /automod/test` is the Test button. It sends three synthetic messages to
+the connection in the body (`checker`, `protocol`, `preset`, `endpoint`,
+`model`, `timeoutSeconds`, `minConfidence`, `instruction`) and, on a pass,
+records the pass a checker needs before it can be enabled. **Session only**: no
+API token can run it. The stored key is sent only to the endpoint it is bound
+to; to test another address, put its key in `key`. `PUT /settings/automod-key`
+takes `{"key", "checker"}`, where `checker` is `primary` (the default) or
+`secondary`. See [AUTOMOD.md](AUTOMOD.md#the-model-tier).
 
 A `PUT /settings` that arms a cell whose checker is not configured (no enabled
 rule, or the model off or without an endpoint) is a 400 that names the cell.

@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"errors"
-	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
@@ -19,21 +18,11 @@ import (
 // PutAutomodKey seals and stores the model API key. An empty key clears the
 // row, which is how an operator turns the model checker off without leaving a
 // credential behind.
+//
+// It is the primary's PutAutomodKeyFor, and like it binds the key to the
+// endpoint stored at that moment -- see automod_binding.go.
 func (d *DB) PutAutomodKey(box *secrets.Box, key string) error {
-	if key == "" {
-		_, err := d.sql.Exec(`DELETE FROM automod_creds WHERE id = 1`)
-		return err
-	}
-	enc, err := box.Seal(key)
-	if err != nil {
-		return err
-	}
-	_, err = d.sql.Exec(`INSERT INTO automod_creds (id, key_enc, updated_at)
-		VALUES (1,?,?)
-		ON CONFLICT(id) DO UPDATE SET key_enc=excluded.key_enc,
-			updated_at=excluded.updated_at`,
-		enc, time.Now().Unix())
-	return err
+	return d.PutAutomodKeyFor(box, "primary", key)
 }
 
 // GetAutomodKey returns the plaintext key, or "" when none is set.
