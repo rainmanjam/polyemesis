@@ -57,6 +57,14 @@ if grep -q '\$[A-Za-z_{]' "$work/dashboard_rules.yml"; then
   exit 1
 fi
 
+# The image runs promtool as `nobody`, and mktemp -d makes a 0700 directory
+# owned by whoever ran this script. On a Linux runner the bind mount keeps
+# those modes, so promtool could not even stat its own input ("stat alerts.yml:
+# permission denied") and the job failed before checking anything. Docker
+# Desktop maps ownership on a laptop, which is why it passed there and only
+# there. World-readable is fine: these are the repository's own public files.
+chmod -R a+rX "$work"
+
 promtool() {
   docker run --rm -v "$work:/r:ro" -w /r --entrypoint promtool "$PROM_IMAGE" "$@"
 }

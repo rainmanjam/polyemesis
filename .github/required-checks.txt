@@ -102,3 +102,18 @@ workflow lint
 # docs page and a manifest row and would have deployed a broken site on main if
 # the row had been forgotten.
 build web/ and publish to Cloudflare Pages
+
+# prometheus rules
+#
+# Added 2026-10-30. promtool checks that deploy/prometheus/alerts.yml parses,
+# that its unit tests in alerts_test.yml pass, and that every query on the
+# shipped Grafana dashboard parses as PromQL. It has no `needs: changes` and no
+# `if:`, so the name is answered on every pull request.
+#
+# Promoting it found that it had never worked on a runner: the script mounted a
+# 0700 mktemp directory into an image that runs as `nobody`, so promtool failed
+# on `stat alerts.yml: permission denied` before checking a rule. It passed on a
+# laptop, where Docker Desktop maps ownership, and was red-but-mergeable on CI --
+# which is the advisory-check gap the entries above describe, in its plainest
+# form. scripts/promtool-check.sh now makes the directory readable first.
+prometheus rules
