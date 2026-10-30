@@ -2586,10 +2586,35 @@ func (d *DB) PutSettings(s Settings) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(
+	// ONE TRANSACTION with the automod key re-binding: a write that moves a
+	// model checker's endpoint must not commit while that checker's key is
+	// still bound to the old one, and a key that cannot be cleared must stop
+	// the write rather than be logged and left. See automod_binding.go.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	before := mergeBaseSettings()
+	var raw string
+	switch err := tx.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw); {
+	case err == nil:
+		if before, err = decodeStoredSettings(raw); err != nil {
+			return err
+		}
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO settings (id, json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
-		string(b))
-	return err
+		string(b)); err != nil {
+		return err
+	}
+	if err := rebindAutomodKeysTx(tx, before, s); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // srtPassphraseUnreserved is the alphabet an SRT passphrase may use.

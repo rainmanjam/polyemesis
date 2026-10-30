@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // jevAnswer is what a fake Jev endpoint replies with. Fields left at zero are
@@ -56,6 +58,9 @@ func testJev(srv *httptest.Server, tweak func(*JevConfig)) *Jev {
 	}
 	if tweak != nil {
 		tweak(&cfg)
+	}
+	if cfg.KeyBinding == "" {
+		cfg.KeyBinding = db.NormalizeEndpoint(cfg.Endpoint)
 	}
 	return NewJev(cfg, NewBudget())
 }

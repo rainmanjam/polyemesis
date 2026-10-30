@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // jevLiveKeyEnv names the variable an operator sets to run the one test here
@@ -29,6 +31,7 @@ func TestJevLiveProbeAgainstTheHostedService(t *testing.T) {
 	p, _ := PresetByID("jev")
 	j := NewJev(JevConfig{
 		Enabled: true, Endpoint: p.Endpoint, Model: p.Model, APIKey: key,
+		KeyBinding: db.NormalizeEndpoint(p.Endpoint),
 		// Longer than the production 4 s, because the first call after idle
 		// opens a cold TLS connection (2.1 s measured) and this test makes
 		// only three.

@@ -67,7 +67,9 @@ type JevConfig struct {
 	Endpoint string `json:"endpoint"`
 	Model    string `json:"model"`
 	// APIKey is sealed at rest and never serialised.
-	APIKey          string        `json:"-"`
+	APIKey string `json:"-"`
+	// KeyBinding: see ModelConfig.KeyBinding.
+	KeyBinding      string        `json:"-"`
 	Timeout         time.Duration `json:"timeout"`
 	MaxCallsPerHour int           `json:"maxCallsPerHour"`
 	Action          Action        `json:"action"`
@@ -347,6 +349,9 @@ func (j *Jev) ask(ctx context.Context, text string) (JevVerdict, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if j.cfg.APIKey != "" {
+		if err := keyBound(j.cfg.Endpoint, j.cfg.KeyBinding); err != nil {
+			return JevVerdict{}, err
+		}
 		req.Header.Set("Authorization", "Bearer "+j.cfg.APIKey)
 	}
 	resp, err := j.client.Do(req)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // The model checker: an external API, asked about a message the free checkers
@@ -69,6 +70,11 @@ type ModelConfig struct {
 	// APIKey is held encrypted at rest in the existing secretbox, alongside the
 	// OAuth tokens, and is never returned by the API or written to a log.
 	APIKey string `json:"-"`
+	// KeyBinding is the endpoint APIKey was issued for, as
+	// db.NormalizeEndpoint writes it. The key is sent ONLY when Endpoint
+	// normalises to exactly this; anything else is a hard error before any
+	// connection is made. See internal/db/automod_binding.go.
+	KeyBinding string `json:"-"`
 	// Timeout bounds one call. Short on purpose: a verdict that arrives after
 	// the moment has passed is worth nothing, and the fail-open path is not a
 	// failure state.
@@ -186,6 +192,22 @@ func NewModel(cfg ModelConfig, budget *Budget) *Model {
 		client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: refuseRedirect},
 		now:    time.Now,
 	}
+}
+
+// errKeyNotBound is the refusal to send a key to an endpoint it was not issued
+// for. Fixed text: it reaches LastError and the log.
+var errKeyNotBound = errors.New("the stored key was issued for a different endpoint, so it was not sent; " +
+	"enter the key again for this endpoint, or run Test with it")
+
+// keyBound is the runtime half of the key binding: the last check before a key
+// leaves the process. Whatever built this connector -- a settings save racing
+// a key change, a stale engine, a future caller nobody reviewed -- a key goes
+// only to the endpoint it is bound to.
+func keyBound(endpoint, binding string) error {
+	if want := db.NormalizeEndpoint(endpoint); want == "" || want != binding {
+		return errKeyNotBound
+	}
+	return nil
 }
 
 // refuseRedirect stops a connector following a redirect, for both protocols.
@@ -404,6 +426,9 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.cfg.APIKey != "" {
+		if err := keyBound(m.cfg.Endpoint, m.cfg.KeyBinding); err != nil {
+			return modelVerdict{}, err
+		}
 		req.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
 	}
 

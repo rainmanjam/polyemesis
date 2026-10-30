@@ -240,6 +240,9 @@ func (s *Server) diagSecretLiterals() ([]string, error) {
 		if k, err := s.store.GetAutomodKeyFor(s.box, slot); err == nil && k != "" {
 			lits = append(lits, k)
 		}
+		if k, err := s.store.GetAutomodPendingKey(s.box, slot); err == nil && k != "" {
+			lits = append(lits, k)
+		}
 	}
 	return lits, nil
 }

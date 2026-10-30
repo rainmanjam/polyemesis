@@ -5,9 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -599,13 +597,13 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 	if !conn.Enabled {
 		return nil
 	}
-	key, err := store.GetAutomodKeyFor(box, string(slot))
+	key, binding, err := store.GetAutomodKeyBound(box, string(slot))
 	if err != nil {
 		// Fail open, consistent with the connector itself: a key that cannot
 		// be read means this checker cannot run, not that chat stops.
 		log.Warn("automod model key unreadable; this checker will fail open", "checker", slot, "err", err)
 	}
-	return newChecker(conn, a.Model, key, budget, func(err error) {
+	return newChecker(conn, a.Model, key, binding, budget, func(err error) {
 		// Named loudly rather than swallowed, for the same reason a rule that
 		// does not compile is: a confidence floor an operator set and this
 		// server ignored is a moderation posture they believe they have. The
@@ -615,20 +613,25 @@ func buildChecker(store *db.DB, box *secrets.Box, log *slog.Logger, a db.Automod
 }
 
 // newChecker builds the connector a block's protocol asks for.
-func newChecker(conn, shared db.AutomodModel, key string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
+//
+// binding is the endpoint key was issued for. The connector sends the key only
+// to that endpoint, so a settings document and a key read a moment apart --
+// with a save moving the endpoint in between -- cannot pair the old key with
+// the new address: the call is refused instead.
+func newChecker(conn, shared db.AutomodModel, key, binding string, budget *automod.Budget, onFloorErr func(error)) automod.ModelChecker {
 	if protocolOf(conn) == automod.ProtocolJev {
 		cfg, err := jevConfigFor(conn, shared)
 		if err != nil && onFloorErr != nil {
 			onFloorErr(err)
 		}
-		cfg.APIKey = key
+		cfg.APIKey, cfg.KeyBinding = key, binding
 		return automod.NewJev(cfg, budget)
 	}
 	cfg, err := modelConfigFor(conn, shared)
 	if err != nil && onFloorErr != nil {
 		onFloorErr(err)
 	}
-	cfg.APIKey = key
+	cfg.APIKey, cfg.KeyBinding = key, binding
 	return automod.NewModel(cfg, budget)
 }
 
@@ -670,68 +673,4 @@ func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logge
 		model,
 	)
 	hub.SetModerator(engine)
-}
-
-// normalizeEndpoint is the form two endpoints are compared in before a stored
-// key may be sent to one of them: scheme and host lower-cased, the scheme's
-// default port made explicit, the path cleaned of a trailing slash, the query
-// kept exactly. Userinfo and a fragment make an endpoint unmatchable -- a key
-// is never sent to an address that carries credentials of its own or that is
-// spelled two ways. "" means "matches nothing".
-func normalizeEndpoint(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.User != nil || u.Fragment != "" || u.Host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return ""
-	}
-	host, port := strings.ToLower(u.Hostname()), u.Port()
-	if port == "" {
-		port = map[string]string{"http": "80", "https": "443"}[scheme]
-	}
-	path := strings.TrimRight(u.EscapedPath(), "/")
-	return scheme + "://" + net.JoinHostPort(host, port) + path + "?" + u.RawQuery
-}
-
-// keyMayGoTo reports whether a slot's STORED key may be sent to endpoint: only
-// the endpoint stored for that slot, the one the operator gave the key for.
-//
-// Not "or a preset's fixed endpoint" either, though that would be a host the
-// caller did not choose: an OpenAI key sent to Cerebras because somebody
-// clicked a different preset and pressed Test is still a credential handed to
-// a party it was not issued for. Anything else would let whoever can reach the
-// Test button aim the operator's key at a host of their choosing -- the one
-// way a sealed key could be read back out. A Test against any other address
-// must carry its key in the request.
-func keyMayGoTo(stored db.AutomodModel, endpoint string) bool {
-	want := normalizeEndpoint(endpoint)
-	return want != "" && want == normalizeEndpoint(stored.Endpoint)
-}
-
-// endpointMovedSlots is the checkers whose endpoint a save changed AND whose
-// sealed key was not given for the new one. Their key is cleared rather than
-// carried to the new address.
-//
-// "Given for the new one" has exactly one proof: a Test pass for the new
-// connection. A pass is forgotten whenever the key changes
-// (db.PutAutomodKeyFor), so a pass bound to the new connection means the key
-// sealed NOW is the key a person in a session sent to the new endpoint --
-// either typed for it, or the stored key for an endpoint that was already
-// this one. That is the flow the console takes (type an address and its key,
-// Test, Save), and it must not end with the key it just sealed wiped.
-func endpointMovedSlots(stored, sent db.AutomodSettings, pass func(slot string) (string, error)) []automod.Slot {
-	var out []automod.Slot
-	for _, slot := range []automod.Slot{automod.SlotPrimary, automod.SlotSecondary} {
-		now := slotSettings(sent, slot)
-		if normalizeEndpoint(slotSettings(stored, slot).Endpoint) == normalizeEndpoint(now.Endpoint) {
-			continue
-		}
-		if fp, err := pass(string(slot)); err == nil && fp != "" && fp == checkerFingerprint(now) {
-			continue
-		}
-		out = append(out, slot)
-	}
-	return out
 }

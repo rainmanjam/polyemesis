@@ -17,13 +17,17 @@ import (
 // connection, and making the operator save an untested checker first would
 // mean storing exactly the thing the test exists to stop.
 //
-// THE KEY. The checker's sealed key is used only when Endpoint is the
-// endpoint already stored for that checker (keyMayGoTo). For any other
+// THE KEY. The checker's sealed key is used only when Endpoint normalises to
+// the endpoint THAT KEY IS BOUND TO -- the binding stored with the key, not the
+// settings document, which a concurrent save can be changing. For any other
 // address the request must carry the key itself -- the operator re-enters it
 // -- because otherwise this route would send a sealed secret to wherever the
-// caller pointed it, which is reading the secret back out by another name. A
-// key that passes is sealed for the checker, together with the pass, so the
-// operator does not have to type it twice.
+// caller pointed it, which is reading the secret back out by another name.
+//
+// A typed key that passes is kept: as the checker's key when the address IS
+// its saved endpoint, otherwise as a PENDING key bound to the tested address,
+// adopted only by a settings save that moves the checker to exactly that
+// address (db.SealTestedAutomodKey, db.rebindAutomodKeysTx).
 type automodTestRequest struct {
 	Key            string  `json:"key"`
 	Checker        string  `json:"checker"`
@@ -46,6 +50,10 @@ type automodTestResponse struct {
 	Checker automod.Slot `json:"checker"`
 	// Tested is true when this connection may now be enabled.
 	Tested bool `json:"tested"`
+	// KeyPending is true when a typed key passed for an address that is not
+	// the saved one: it is held, and becomes the checker's key when the
+	// settings are saved with exactly this address.
+	KeyPending bool `json:"keyPending,omitempty"`
 }
 
 // handleAutomodTest runs the three canned probe lines against one checker's
@@ -79,8 +87,7 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	// HOSTILE INPUT, even from an admin: an absolute http(s) URL and nothing
 	// else. Private addresses are allowed on purpose -- see ModelConfig.Endpoint
 	// for why a local model is the recommended deployment, not an SSRF.
-	u, err := url.Parse(strings.TrimSpace(req.Endpoint))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if u, err := url.Parse(strings.TrimSpace(req.Endpoint)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		writeError(w, http.StatusBadRequest, "endpoint must be an absolute http or https URL")
 		return
 	}
@@ -125,29 +132,30 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Instruction) != "" {
 		shared.Instruction = req.Instruction
 	}
+	target := db.NormalizeEndpoint(req.Endpoint)
+	if target == "" {
+		writeError(w, http.StatusBadRequest, "endpoint must not carry credentials or a fragment")
+		return
+	}
 	key := strings.TrimSpace(req.Key)
+	binding := target
 	supplied := key != ""
 	if !supplied {
-		has, err := s.store.HasAutomodKeyFor(string(slot))
-		if err != nil {
-			writeStoreError(w, err)
+		var err error
+		if key, binding, err = s.store.GetAutomodKeyBound(s.box, string(slot)); err != nil {
+			writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
 			return
 		}
-		if has {
-			if !keyMayGoTo(slotSettings(settings.Automod, slot), req.Endpoint) {
-				writeError(w, http.StatusBadRequest,
-					"the stored key was given for the saved endpoint; enter the key for this endpoint to test it")
-				return
-			}
-			if key, err = s.store.GetAutomodKeyFor(s.box, string(slot)); err != nil {
-				writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
-				return
-			}
+		if key != "" && binding != target {
+			writeError(w, http.StatusBadRequest,
+				"the stored key was given for the saved endpoint; enter the key for this endpoint to test it")
+			return
 		}
 	}
 	// No budget: a spent hourly allowance must not make a working endpoint
 	// look broken, and the per-checker lock above bounds what a test costs.
-	checker := newChecker(conn, shared, key, nil, nil)
+	// The binding goes in too, so the connector itself refuses a mismatch.
+	checker := newChecker(conn, shared, key, binding, nil, nil)
 
 	ctx, cancel := context.WithTimeout(r.Context(),
 		time.Duration(len(automod.ProbeCases)*(automodTestMaxTimeout+1))*time.Second)
@@ -157,13 +165,15 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	out := automodTestResponse{ProbeResult: res, Checker: slot}
 	if res.Passed {
 		// A key that was typed for this test is the key this pass is for, so
-		// it is sealed now -- BEFORE the pass, because setting a key forgets
-		// the checker's pass (db.PutAutomodKeyFor).
+		// it is kept -- bound to the tested address, as the checker's key or
+		// as a pending one. See the request type.
 		if supplied {
-			if err := s.store.PutAutomodKeyFor(s.box, string(slot), key); err != nil {
+			pending, err := s.store.SealTestedAutomodKey(s.box, string(slot), key, target)
+			if err != nil {
 				writeStoreError(w, err)
 				return
 			}
+			out.KeyPending = pending
 		}
 		if err := s.store.PutAutomodTestPass(string(slot), checkerFingerprint(conn)); err != nil {
 			writeStoreError(w, err)

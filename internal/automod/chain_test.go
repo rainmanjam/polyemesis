@@ -3,6 +3,7 @@ package automod
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -224,5 +225,35 @@ func TestNeitherConnectorFollowsARedirectWithTheKey(t *testing.T) {
 	}
 	if leaked.Load() != 0 {
 		t.Fatalf("the redirect was followed %d times", leaked.Load())
+	}
+}
+
+// THE RUNTIME BINDING. A connector holding a key bound to one endpoint and
+// configured to call another refuses before connecting: the far end is never
+// reached and never sees the key, and the refusal is a failure -- the message
+// fails open, and with a secondary configured, falls back.
+func TestAConnectorRefusesToSendAKeyBoundToAnotherEndpoint(t *testing.T) {
+	key := "bound-" + strings.Repeat("y", 10)
+	var reached atomic.Int32
+	srv := modelServer(t, func(w http.ResponseWriter, r *http.Request) { reached.Add(1) })
+	elsewhere := db.NormalizeEndpoint("https://the-endpoint-the-key-was-for.example/v1")
+	for name, mc := range map[string]ModelChecker{
+		"openai": testModel(t, srv, func(c *ModelConfig) { c.APIKey, c.KeyBinding = key, elsewhere }),
+		"jev":    testJev(srv, func(c *JevConfig) { c.APIKey, c.KeyBinding = key, elsewhere }),
+	} {
+		_, err := mc.Check(context.Background(), "x")
+		if !errors.Is(err, errKeyNotBound) {
+			t.Errorf("%s: err = %v, want errKeyNotBound", name, err)
+		}
+		if mc.Stats().Failures != 1 {
+			t.Errorf("%s: the refusal was not counted as a failure", name)
+		}
+	}
+	if reached.Load() != 0 {
+		t.Fatalf("the unbound endpoint was called %d times", reached.Load())
+	}
+	// No key at all is not a binding question: a local model needs none.
+	if _, err := testModel(t, srv, func(c *ModelConfig) { c.KeyBinding = elsewhere }).Check(context.Background(), "x"); errors.Is(err, errKeyNotBound) {
+		t.Fatal("a keyless call was refused over a binding")
 	}
 }

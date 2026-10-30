@@ -185,18 +185,31 @@ CREATE TABLE IF NOT EXISTS mqtt_creds (
 -- The automod model's API key, sealed. Same reasoning as mqtt_creds above: a
 -- key in the settings blob is a key returned by GET /settings.
 CREATE TABLE IF NOT EXISTS automod_creds (
-    id         INTEGER PRIMARY KEY CHECK (id = 1),
-    key_enc    BLOB NOT NULL,           -- secretbox sealed
-    updated_at INTEGER NOT NULL
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    updated_at  INTEGER NOT NULL,
+    endpoint_fp TEXT                     -- the endpoint this key may be sent to; see automod_binding.go
 );
 
 -- The SECONDARY automod model checker's API key, sealed. A table of its own
 -- because automod_creds is a CHECK (id = 1) singleton, and widening that check
 -- is a table rebuild on every install for a column that already works.
 CREATE TABLE IF NOT EXISTS automod_secondary_creds (
-    id         INTEGER PRIMARY KEY CHECK (id = 1),
-    key_enc    BLOB NOT NULL,           -- secretbox sealed
-    updated_at INTEGER NOT NULL
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    updated_at  INTEGER NOT NULL,
+    endpoint_fp TEXT                     -- the endpoint this key may be sent to
+);
+
+-- A key typed for a Test against an address that is NOT the checker's saved
+-- endpoint. Held here, bound to that address, and never sent anywhere else;
+-- adopted only when a settings write moves the checker to exactly that
+-- address, in the same transaction (db.rebindAutomodKeysTx).
+CREATE TABLE IF NOT EXISTS automod_pending_creds (
+    slot        TEXT PRIMARY KEY CHECK (slot IN ('primary', 'secondary')),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    endpoint_fp TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
 );
 
 -- Which connection each automod model checker last passed the Test button

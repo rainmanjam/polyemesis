@@ -1650,11 +1650,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// the stored one exist at once.
 	var storedIngest db.IngestSettings
 	ingestRefused := false
-	// Model checkers whose endpoint this save moved: their sealed key is
-	// cleared once the save has taken. See endpointMovedSlots.
-	var automodKeysToClear []automod.Slot
 	settings, err := s.store.UpdateSettings(func(settings *db.Settings) error {
-		automodKeysToClear = nil
 		// The merge base for ingest is the SOURCE, not the blob -- before
 		// anything below snapshots "what was stored". See
 		// overlayDefaultSourceIngest: with the blob as the base, a client that
@@ -1799,7 +1795,6 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := newlyEnabledUntested(storedAutomod, settings.Automod, s.store.AutomodTestPass); err != nil {
 			return err
 		}
-		automodKeysToClear = endpointMovedSlots(storedAutomod, settings.Automod, s.store.AutomodTestPass)
 		// Derived on the way out, never stored: whatever a client sent for
 		// these is not a fact about this server.
 		settings.Automod.Model.Tested = false
@@ -1910,18 +1905,6 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeStoreError(w, err)
 		return
-	}
-	// A key was given for an endpoint. Moving the endpoint must not carry the
-	// key to the new host -- that would make "edit a URL" a way to read a
-	// sealed secret out -- so the key is cleared and has to be entered again
-	// for the new one. Straight after the save took and before any later
-	// step can return early, so a stored endpoint is never left beside the old
-	// endpoint's key.
-	for _, slot := range automodKeysToClear {
-		if err := s.store.PutAutomodKeyFor(s.box, string(slot), ""); err != nil {
-			s.log.Error("automod endpoint changed but its stored key could not be cleared",
-				"checker", slot, "err", err)
-		}
 	}
 	// Raised here rather than at the end of the handler: the document is stored
 	// by this point, so every remaining exit -- a source update that fails, a

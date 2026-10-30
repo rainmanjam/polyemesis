@@ -217,10 +217,15 @@ func TestApplyAutomodBuildsBothCheckersAndKeepsTheirBudgets(t *testing.T) {
 	store := dbtest.OpenCheap(t)
 	box, _ := secrets.New(bytes.Repeat([]byte{0x2a}, 32))
 	fake, auths := smartOpenAI(t)
+	doc := db.DefaultSettings()
+	doc.Automod.Model.Enabled, doc.Automod.Model.Endpoint = true, "http://127.0.0.1:1/unreachable"
+	doc.Automod.Secondary.Enabled, doc.Automod.Secondary.Endpoint, doc.Automod.Secondary.Preset = true, fake.URL, "custom"
+	if err := store.PutSettings(doc); err != nil {
+		t.Fatal(err)
+	}
+	// Set AFTER the endpoint is stored, so it is bound to it.
 	store.PutAutomodKeyFor(box, db.AutomodSlotSecondary, fakeKey("sec"))
-	a := db.DefaultSettings().Automod
-	a.Model.Enabled, a.Model.Endpoint = true, "http://127.0.0.1:1/unreachable"
-	a.Secondary.Enabled, a.Secondary.Endpoint, a.Secondary.Preset = true, fake.URL, "custom"
+	a := doc.Automod
 	pb, sb := automod.NewBudget(), automod.NewBudget()
 	hub := newTestHub(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -369,7 +374,8 @@ func TestTheStoredKeyReachesOnlyTheEndpointItWasStoredFor(t *testing.T) {
 	typed := fakeKey("typed")
 	b := testBody(other.URL)
 	b["key"] = typed
-	send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK)
+	var res automodTestResponse
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK), &res)
 	for _, a := range *otherAuth {
 		if a != "Bearer "+typed {
 			t.Fatalf("the other endpoint was sent %q", a)
@@ -378,12 +384,25 @@ func TestTheStoredKeyReachesOnlyTheEndpointItWasStoredFor(t *testing.T) {
 	if len(*otherAuth) == 0 {
 		t.Fatal("the typed key was never used")
 	}
-	// It passed, so the typed key is now the checker's key -- with its pass.
-	if got, _ := store.GetAutomodKeyFor(boxK(t), db.AutomodSlotSecondary); got != typed {
-		t.Fatalf("the passing typed key was not sealed")
+	// It passed for an address that is NOT saved, so it is held PENDING:
+	// the checker's key is still the sealed one, bound to the saved address.
+	if !res.KeyPending {
+		t.Fatalf("a typed key for an unsaved address was not held pending: %+v", res)
+	}
+	if got, binding, _ := store.GetAutomodKeyBound(boxK(t), db.AutomodSlotSecondary); got != sealed ||
+		binding != db.NormalizeEndpoint(stored.URL) {
+		t.Fatalf("the checker's key changed before the address was saved: binding %q", binding)
+	}
+	// Saving exactly that address adopts it, bound to it, with its pass.
+	putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) {
+		m["protocol"], m["preset"], m["endpoint"], m["model"] = "openai", "custom", other.URL, "fake-model"
+	})
+	if got, binding, _ := store.GetAutomodKeyBound(boxK(t), db.AutomodSlotSecondary); got != typed ||
+		binding != db.NormalizeEndpoint(other.URL) {
+		t.Fatalf("saving the tested address did not adopt its key: binding %q", binding)
 	}
 	if fp, _ := store.AutomodTestPass(db.AutomodSlotSecondary); fp == "" {
-		t.Fatal("sealing the typed key lost the pass it earned")
+		t.Fatal("adopting the typed key lost the pass it earned")
 	}
 }
 
@@ -444,4 +463,51 @@ func boxK(t *testing.T) *secrets.Box {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A SAVE AND A TEST RACING CANNOT PAIR THE OLD KEY WITH THE NEW ENDPOINT. Each
+// round seals a key for endpoint A, then at the same moment moves the checker
+// to endpoint B and runs Test against B without a key. Whatever order they
+// land in, B must never be sent A's key: the Test checks the key's own binding
+// (not the settings document a concurrent save is rewriting), the connector
+// checks it again before sending, and the save clears the key in the same
+// transaction as the move.
+func TestAConcurrentSaveAndTestCannotSendTheOldKeyToTheNewEndpoint(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	a, _ := smartOpenAI(t)
+	b, bAuth := smartOpenAI(t)
+	sealed := fakeKey("for-a")
+	for round := 0; round < 15; round++ {
+		putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) {
+			m["protocol"], m["preset"], m["endpoint"] = "openai", "custom", a.URL
+		})
+		send(t, h, sign, http.MethodPut, "/api/v1/settings/automod-key",
+			map[string]any{"checker": "secondary", "key": sealed}, http.StatusOK)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			var doc map[string]any
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/settings", nil)
+			sign(r)
+			json.Unmarshal(do(t, h, r).Body.Bytes(), &doc)
+			doc["automod"].(map[string]any)["secondary"].(map[string]any)["endpoint"] = b.URL
+			put := jsonRequest(t, http.MethodPut, "/api/v1/settings", doc)
+			sign(put)
+			do(t, h, put)
+		}()
+		go func() {
+			defer wg.Done()
+			r := jsonRequest(t, http.MethodPost, "/api/v1/automod/test", testBody(b.URL))
+			sign(r)
+			do(t, h, r)
+		}()
+		wg.Wait()
+	}
+	for _, got := range *bAuth {
+		if got == "Bearer "+sealed {
+			t.Fatal("endpoint B was sent the key sealed for endpoint A")
+		}
+	}
 }
