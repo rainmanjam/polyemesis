@@ -44,7 +44,10 @@ const dest = (over: Partial<DestStatus> = {}): DestStatus =>
     ...over,
   }) as DestStatus;
 
-function draw(over: Partial<DestStatus>, handlers: { onRestart?: () => void; onRefreshKey?: () => void } = {}) {
+function draw(
+  over: Partial<DestStatus>,
+  handlers: { onRestart?: () => void; onRefreshKey?: () => void; onEdit?: () => void } = {},
+) {
   const noop = () => {};
   return render(
     <MemoryRouter>
@@ -53,7 +56,7 @@ function draw(over: Partial<DestStatus>, handlers: { onRestart?: () => void; onR
         onStart={noop}
         onStop={noop}
         onRestart={handlers.onRestart ?? noop}
-        onEdit={noop}
+        onEdit={handlers.onEdit ?? noop}
         onDelete={noop}
         onRefreshKey={handlers.onRefreshKey ?? noop}
         onMoveEarlier={noop}
@@ -114,5 +117,29 @@ describe("the destination card names why a destination is failing", () => {
     draw({});
     expect(screen.queryByTestId("card-failure-reason")).toBeNull();
     expect(screen.getByText(/exit status 251/)).toBeTruthy();
+  });
+});
+
+/* A9: the reason comes with its remedy, and the remedy with the one control
+ * that carries it out. */
+describe("the failure reason on the card carries its remedy", () => {
+  it("a refused key says what to check and opens the destination's settings", () => {
+    const onEdit = vi.fn();
+    draw({ reason: reason() }, { onEdit });
+    const row = screen.getByTestId("card-failure-reason");
+    expect(row.textContent).toContain("Check the stream key in the platform's dashboard");
+    fireEvent.click(screen.getByRole("button", { name: "Edit destination" }));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cause that clears by itself links to the destination's own log", () => {
+    draw({ reason: reason({ cause: "timeout" }) });
+    const link = screen.getByRole("link", { name: "Show log" });
+    expect(link.getAttribute("href")).toBe("/monitoring?process=dest%3A1#process-log");
+  });
+
+  it("a refused codec links to the renditions page", () => {
+    draw({ reason: reason({ cause: "codec_rejected" }) });
+    expect(screen.getByRole("link", { name: "Renditions" }).getAttribute("href")).toBe("/renditions");
   });
 });

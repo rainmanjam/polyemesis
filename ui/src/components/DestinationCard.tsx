@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { StatusReason } from "@/components/signature/StatusReason";
+import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
@@ -400,6 +401,16 @@ export function DestinationCard({
             </div>
             {reason.held && (
               <p className="text-[11px]">{t("reason.held", { count: reason.rejections ?? 0 })}</p>
+            )}
+            {/* A9: what to do about it, and the control that does it. A
+                rotated key already has its own one-click fix below, so the
+                generic advice would only compete with it. */}
+            {!reason.keyChanged && (
+              <FailureRemedy
+                cause={reason.cause}
+                process={dest.process?.name ?? `dest:${dest.id}`}
+                onEdit={onEdit}
+              />
             )}
             {(reason.held || reason.keyChanged) && (
               <div className="flex flex-wrap gap-1.5">

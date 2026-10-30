@@ -28,6 +28,8 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
+import { FailureRemedy } from "@/components/signature/FailureRemedy";
+import { Link, useSearchParams } from "react-router";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -459,13 +461,67 @@ export function ExpertPanel() {
   );
 }
 
+/** A9 on a stat tile: shown only while the tile is in its warn tone, so a
+ *  healthy page carries no advice nobody needs. One sentence and one control,
+ *  a link to where it is fixed or a jump to the log. */
+function TileRemedy({
+  text,
+  label,
+  to,
+  onClick,
+}: {
+  text: string;
+  label: string;
+  to?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-micro text-warn">
+      <span>{text}</span>
+      {to ? (
+        <Link to={to} className="underline underline-offset-2 hover:text-foreground">
+          {label}
+        </Link>
+      ) : (
+        <button type="button" onClick={onClick} className="underline underline-offset-2 hover:text-foreground">
+          {label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function MonitoringPage() {
   const stateLabel = useStateLabel();
   const t = useT();
   const { system, bitrate, logs, status, clearLogs, programme, programmeKnown } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const [history, setHistory] = useState<LogLine[]>([]);
-  const [filter, setFilter] = useState("all");
+  // ?process=<name> opens the log on one process: the "Show log" links on a
+  // destination card and on a timeline row land here (A9, A13). Followed on
+  // every change of the parameter, not only on mount, so a second link
+  // clicked while the page is open still re-filters -- adjusted during
+  // render, React's pattern for state that follows a prop.
+  const [searchParams] = useSearchParams();
+  const linked = searchParams.get("process");
+  const [filter, setFilter] = useState(linked ?? "all");
+  const [linkedSeen, setLinkedSeen] = useState(linked);
+  if (linked !== linkedSeen) {
+    setLinkedSeen(linked);
+    if (linked) setFilter(linked);
+  }
+  const logCardRef = useRef<HTMLDivElement>(null);
+  // Lands on the log, filtered to one process. Used by the in-page "Show log"
+  // controls; a link from another page arrives with #process-log instead.
+  const showLog = useCallback((process: string) => {
+    setFilter(process);
+    logCardRef.current?.scrollIntoView({ block: "start" });
+  }, []);
+  useEffect(() => {
+    if (linked && window.location.hash === "#process-log") {
+      logCardRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [linked]);
   const [follow, setFollow] = useState(true);
   // Errors is the default view: a healthy stream writes little, so the lines
   // worth reading first are the failures.
@@ -634,6 +690,9 @@ export function MonitoringPage() {
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
+            {(system?.cpuPercent ?? 0) > 85 && (
+              <TileRemedy text={t("mon.remedy.cpu")} to="/renditions" label={t("reason.action.renditions")} />
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -648,6 +707,9 @@ export function MonitoringPage() {
               {bytes(system?.procMemBytes ?? 0)}
               <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
+            {(system?.memPercent ?? 0) > 90 && (
+              <TileRemedy text={t("mon.remedy.memory")} to="/renditions" label={t("reason.action.renditions")} />
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -673,6 +735,13 @@ export function MonitoringPage() {
               {t("mon.relayDropsNote")}
               <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
+            {(status?.relay.dropped ?? 0) > 0 && (
+              <TileRemedy
+                text={t("mon.remedy.relayDrops")}
+                onClick={() => logCardRef.current?.scrollIntoView({ block: "start" })}
+                label={t("reason.action.log")}
+              />
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -690,6 +759,9 @@ export function MonitoringPage() {
               })}
               <InfoHint body="mon.ingestLoss.hint" title="mon.ingestLoss" className="ml-1" />
             </div>
+            {(status?.relay.lossPercent ?? 0) > 0 && (
+              <TileRemedy text={t("mon.remedy.ingestLoss")} to="/sources" label={t("mon.action.sources")} />
+            )}
           </CardContent>
         </Card>
       </div>
@@ -815,10 +887,24 @@ export function MonitoringPage() {
                       {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
                     </div>
                   ) : null}
-                  {p.lastError && (
-                    <div className="mt-1 line-clamp-2 break-words text-micro text-down">
-                      {p.lastError}
+                  {/* #20 + A9: the classified cause, what to do about it, and the
+                      process's own log one click away. The raw lastError stays
+                      for an unclassified failure. */}
+                  {p.reason ? (
+                    <div className="mt-1 flex flex-col gap-1 text-micro text-down">
+                      <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
+                      <FailureRemedy
+                        cause={p.reason.cause}
+                        process={p.name}
+                        onShowLog={() => showLog(p.name)}
+                      />
                     </div>
+                  ) : (
+                    p.lastError && (
+                      <div className="mt-1 line-clamp-2 break-words text-micro text-down">
+                        {p.lastError}
+                      </div>
+                    )
                   )}
                   <details className="mt-1">
                     <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
@@ -835,7 +921,7 @@ export function MonitoringPage() {
         </Card>
 
         {/* ---------- log tail ---------- */}
-        <Card className="flex min-h-0 flex-col">
+        <Card id="process-log" ref={logCardRef} className="flex min-h-0 flex-col scroll-mt-3">
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
@@ -879,6 +965,15 @@ export function MonitoringPage() {
                     window: verdictState.windowSec,
                   })}
             </p>
+            {/* A9: the verdict names a process, so it offers that process's
+                log -- outside the status line, which is read as one sentence. */}
+            {verdictState.kind === "errors" && filter !== verdictState.process && (
+              <div>
+                <Button size="sm" variant="outline" onClick={() => showLog(verdictState.process)}>
+                  {t("monitor.showProcessLog", { process: verdictState.process })}
+                </Button>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex gap-1">
                 {(

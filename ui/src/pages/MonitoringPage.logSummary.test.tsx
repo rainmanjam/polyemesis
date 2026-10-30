@@ -2,6 +2,7 @@
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* The FFmpeg log used to open on every line, Follow on, so a real decode
  * failure sat underneath a wall of identical red lines. The log now opens on
@@ -61,27 +62,27 @@ afterEach(() => cleanup());
 
 describe("FFmpeg log panel", () => {
   it("opens on the errors view with identical lines folded into a count", () => {
-    render(<MonitoringPage />);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
     expect(screen.getByText("×5")).toBeTruthy();
     expect(screen.queryByText("level ceiling warning")).toBeNull();
   });
 
   it("states a one-line verdict naming the process with the errors", () => {
-    render(<MonitoringPage />);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
     expect(screen.getByRole("status").textContent).toBe(
       "preview: 5 errors in the last 60 s",
     );
   });
 
   it("keeps the raw stream behind Show raw output", () => {
-    render(<MonitoringPage />);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
     expect(screen.queryByText("level ceiling warning")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show raw output" }));
     expect(screen.getByText("level ceiling warning")).toBeTruthy();
   });
 
   it("narrows the view with the search box", () => {
-    render(<MonitoringPage />);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "All" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search log" }), {
       target: { value: "ceiling" },
