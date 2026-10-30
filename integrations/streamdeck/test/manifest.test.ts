@@ -23,6 +23,9 @@ const manifest = JSON.parse(readFileSync(join(PLUGIN, "manifest.json"), "utf8"))
     Controllers: string[];
     PropertyInspectorPath: string;
     States: { Image: string }[];
+    DisableAutomaticStates?: boolean;
+    UserTitleEnabled?: boolean;
+    SupportedInMultiActions?: boolean;
   }[];
 };
 
@@ -92,6 +95,18 @@ describe("manifest", () => {
       ["destination", "failover", "go-live", "meter", "stop-all"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
+  });
+
+  it("stops Stream Deck advancing key states and overriding titles, because the plugin paints them", () => {
+    for (const a of manifest.Actions.filter((x) => x.Controllers.includes("Keypad"))) {
+      expect(a.DisableAutomaticStates, a.UUID).toBe(true);
+      expect(a.UserTitleEnabled, a.UUID).toBe(false);
+    }
+  });
+
+  it("keeps stop-all out of multi-actions, where its hold could not complete", () => {
+    const stop = manifest.Actions.find((a) => a.UUID.endsWith(".stop-all"))!;
+    expect(stop.SupportedInMultiActions).toBe(false);
   });
 
   it("ships no track-mute action, because the engine has no live mute API", () => {
