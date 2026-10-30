@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Adicionar destino",
   "addDest.titleEdit": "Editar destino",
   "addDest.description": "Escolha para onde este programa vai. Áudio e vídeo usam configurações padrão adequadas, então normalmente basta a plataforma e a chave dela. Abra as seções de áudio e vídeo só se quiser alterá-las.",
-  "addDest.howToGetKey": "Como obter esta chave"
+  "addDest.howToGetKey": "Como obter esta chave",
+  "addDest.connectWithCode": "Conectar com um código",
+  "addDest.ipOriginNote": "Esta página é aberta por endereço IP. As plataformas geralmente não conseguem redirecionar você de volta a um endereço que não conhecem, então o login por redirecionamento pode falhar. Conecte com um código, se oferecido."
 }

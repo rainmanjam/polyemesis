@@ -61,3 +61,19 @@ export function platformConnectControls(
   controls.push("removeCredentials");
   return controls;
 }
+
+/** Whether a browser hostname is a bare IP address rather than a name.
+ *
+ *  A platform's sign-in redirects back to an address it has registered, and a
+ *  raw IP is one it usually has not. The browser can see that much; it cannot
+ *  see a self-signed certificate, so nothing here claims to. Hostnames are never
+ *  IP literals, even when they contain digits. */
+export function isIpLiteralHost(host: string): boolean {
+  let h = host.trim();
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  if (h === "") return false;
+  // A colon is only legal in an IPv6 literal inside a hostname position.
+  if (h.includes(":")) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  return m !== null && m.slice(1).every((o) => Number(o) <= 255);
+}

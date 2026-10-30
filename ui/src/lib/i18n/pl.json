@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Dodaj cel",
   "addDest.titleEdit": "Edytuj cel",
   "addDest.description": "Wybierz, dokąd trafia ten program. Dźwięk i obraz mają sensowne ustawienia domyślne, więc zwykle wystarczy platforma i jej klucz. Otwórz sekcje dźwięku i obrazu tylko wtedy, gdy chcesz je zmienić.",
-  "addDest.howToGetKey": "Jak uzyskać ten klucz"
+  "addDest.howToGetKey": "Jak uzyskać ten klucz",
+  "addDest.connectWithCode": "Połącz kodem",
+  "addDest.ipOriginNote": "Ta strona jest otwarta pod adresem IP. Platformy zwykle nie mogą odesłać Cię pod adres, którego nie znają, więc logowanie przez przekierowanie może się nie udać. Połącz kodem, jeśli jest dostępny."
 }

@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Añadir destino",
   "addDest.titleEdit": "Editar destino",
   "addDest.description": "Elige a dónde va este programa. El audio y el vídeo usan valores sensatos por defecto, así que normalmente solo necesitas la plataforma y su clave. Abre las secciones de audio y vídeo solo si quieres cambiarlas.",
-  "addDest.howToGetKey": "Cómo obtener esta clave"
+  "addDest.howToGetKey": "Cómo obtener esta clave",
+  "addDest.connectWithCode": "Conectar con un código",
+  "addDest.ipOriginNote": "Esta página se abre por dirección IP. Las plataformas suelen no poder devolverte a una dirección que no conocen, así que el inicio de sesión por redirección puede fallar. Conéctate con un código si se ofrece."
 }

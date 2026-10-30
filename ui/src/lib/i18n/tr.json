@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Hedef ekle",
   "addDest.titleEdit": "Hedefi düzenle",
   "addDest.description": "Bu programın nereye gideceğini seçin. Ses ve video makul varsayılan ayarları kullanır, bu yüzden genellikle yalnızca platform ve yayın anahtarı yeterlidir. Ses ve video bölümlerini yalnızca değiştirmek istediğinizde açın.",
-  "addDest.howToGetKey": "Bu anahtar nasıl alınır"
+  "addDest.howToGetKey": "Bu anahtar nasıl alınır",
+  "addDest.connectWithCode": "Kodla bağlan",
+  "addDest.ipOriginNote": "Bu sayfa bir IP adresiyle açıldı. Platformlar genellikle tanımadıkları bir adrese geri yönlendiremez, bu yüzden yönlendirmeli oturum açma başarısız olabilir. Sunuluyorsa kodla bağlanın."
 }

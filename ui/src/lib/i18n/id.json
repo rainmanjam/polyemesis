@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Tambah tujuan",
   "addDest.titleEdit": "Edit tujuan",
   "addDest.description": "Pilih tujuan program ini. Audio dan video memakai pengaturan standar yang wajar, jadi biasanya Anda hanya perlu platform dan kuncinya. Buka bagian audio dan video hanya jika ingin mengubahnya.",
-  "addDest.howToGetKey": "Cara mendapatkan kunci ini"
+  "addDest.howToGetKey": "Cara mendapatkan kunci ini",
+  "addDest.connectWithCode": "Hubungkan dengan kode",
+  "addDest.ipOriginNote": "Halaman ini dibuka lewat alamat IP. Platform biasanya tidak bisa mengarahkan Anda kembali ke alamat yang tidak mereka kenal, jadi masuk lewat pengalihan bisa gagal. Hubungkan dengan kode jika tersedia."
 }

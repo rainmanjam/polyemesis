@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Ziel hinzufügen",
   "addDest.titleEdit": "Ziel bearbeiten",
   "addDest.description": "Wählen Sie, wohin dieses Programm geht. Audio und Video nutzen sinnvolle Standardeinstellungen, meist brauchen Sie nur die Plattform und ihren Schlüssel. Öffnen Sie die Abschnitte für Audio und Video nur, wenn Sie sie ändern möchten.",
-  "addDest.howToGetKey": "So erhalten Sie diesen Schlüssel"
+  "addDest.howToGetKey": "So erhalten Sie diesen Schlüssel",
+  "addDest.connectWithCode": "Mit einem Code verbinden",
+  "addDest.ipOriginNote": "Diese Seite wird über eine IP-Adresse geöffnet. Plattformen können Sie oft nicht zu einer unbekannten Adresse zurückschicken, daher kann die Anmeldung per Weiterleitung fehlschlagen. Verbinden Sie sich mit einem Code, falls angeboten."
 }

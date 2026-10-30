@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronsUpDown, ExternalLink, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import {
@@ -33,6 +33,8 @@ import {
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
+import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
+import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
 import {
   failedRead,
   mayClaim,
@@ -67,6 +69,7 @@ import type {
   PlatformAccount,
   Rendition,
   PlatformPresetInfo,
+  SetupGuide,
   ServiceInfo,
   RenditionView,
   SourceView,
@@ -684,6 +687,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // it. The arrays below are derived with rowsOf, so every consumer that only
   // wants rows is unchanged; mayClaim guards the two places that say something.
   const [accountsRead, setAccountsRead] = useState<ReadState<PlatformAccount[]>>(pendingRead);
+  // The setup guides say which platforms can sign in with a code instead of
+  // a redirect. Only those get the in-place code path.
+  const [guidesRead, setGuidesRead] = useState<ReadState<SetupGuide[]>>(pendingRead);
+  const [deviceOpen, setDeviceOpen] = useState(false);
   const accounts = rowsOf(accountsRead);
   const [renditionId, setRenditionId] = useState<string>(PASSTHROUGH);
   // RenditionView, not Rendition. The view carries `destinations` and
@@ -749,12 +756,22 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   const [variantFps, setVariantFps] = useState("");
   const [variantErr, setVariantErr] = useState("");
 
-  useEffect(() => {
-    if (!open) return;
+  // Re-read after an account is connected in place, so the picker shows it
+  // without the dialog being closed and its half-filled form lost.
+  const reloadAccounts = useCallback(() => {
     api
       .listAccounts()
       .then((r) => setAccountsRead(okRead(r)))
       .catch(() => setAccountsRead(failedRead()));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    reloadAccounts();
+    api
+      .platformGuides()
+      .then((r) => setGuidesRead(okRead(r)))
+      .catch(() => setGuidesRead(failedRead()));
     api
       .listRenditions()
       .then((r) => setRenditionsRead(okRead(r)))
@@ -848,6 +865,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     () => (caps?.connect ? accounts.filter((a) => String(a.platform) === caps.connect) : []),
     [accounts, caps],
   );
+  // Only a platform whose setup guide says it has a device flow can be
+  // connected from inside this form without a redirect back to this origin.
+  const deviceCodeOK =
+    caps?.connect !== undefined &&
+    rowsOf(guidesRead).some((g) => g.platform === caps.connect && platformSupportsDeviceCode(g));
+  // A bare IP origin cannot be a registered redirect target on most platforms.
+  // Read from the browser: a self-signed certificate on a name is not visible
+  // here, and the dialog does not claim that it is.
+  const ipOrigin = typeof window !== "undefined" && isIpLiteralHost(window.location.hostname);
   // Whether the connected Facebook account publishes to a PAGE rather than a
   // profile, which decides whether an audience setting means anything at all.
   //
@@ -1351,11 +1377,22 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               ) : !mayClaim(accountsRead) ? (
                 <p className="text-sm text-muted-foreground">Checking for a linked account…</p>
               ) : (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={api.connectUrl(caps.connect)}>
-                    <ExternalLink /> Connect {caps.name} account
-                  </a>
-                </Button>
+                <div className="flex flex-col gap-1.5">
+                  {/* The code path first where the platform has one: it stays
+                      on this page, so the form is kept. The redirect is the
+                      fallback, and it leaves the form. */}
+                  {deviceCodeOK && (
+                    <Button size="sm" onClick={() => setDeviceOpen(true)}>
+                      {t("addDest.connectWithCode")}
+                    </Button>
+                  )}
+                  {ipOrigin && <p className="text-sm text-muted-foreground">{t("addDest.ipOriginNote")}</p>}
+                  <Button variant={deviceCodeOK ? "outline" : "default"} size="sm" asChild>
+                    <a href={api.connectUrl(caps.connect)}>
+                      <ExternalLink /> Connect {caps.name} account
+                    </a>
+                  </Button>
+                </div>
               )}
               {/* The mixed case, spelled out. Kick's sign-in is worth having on
                   its own merits — chat, moderation, metadata, viewer count —
@@ -2493,6 +2530,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             {editing ? "Save" : "Create"}
           </Button>
         </DialogFooter>
+        {deviceCodeOK && caps?.connect && (
+          <DeviceCodeDialog
+            platform={caps.connect}
+            platformName={caps.name}
+            open={deviceOpen}
+            onOpenChange={setDeviceOpen}
+            onConnected={reloadAccounts}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

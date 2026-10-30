@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Aggiungi destinazione",
   "addDest.titleEdit": "Modifica destinazione",
   "addDest.description": "Scegli dove va questo programma. Audio e video usano impostazioni predefinite sensate, quindi di solito basta la piattaforma e la sua chiave. Apri le sezioni audio e video solo se vuoi modificarle.",
-  "addDest.howToGetKey": "Come ottenere questa chiave"
+  "addDest.howToGetKey": "Come ottenere questa chiave",
+  "addDest.connectWithCode": "Collega con un codice",
+  "addDest.ipOriginNote": "Questa pagina è aperta tramite indirizzo IP. Le piattaforme di solito non possono rimandarti a un indirizzo che non conoscono, quindi l'accesso con reindirizzamento potrebbe non riuscire. Collega con un codice se disponibile."
 }

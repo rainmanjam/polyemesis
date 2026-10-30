@@ -1705,5 +1705,7 @@
   "addDest.titleAdd": "Add destination",
   "addDest.titleEdit": "Edit destination",
   "addDest.description": "Choose where this programme goes. Audio and video default to sensible settings, so you usually only need the platform and its key. Open the audio and video sections only if you need to change them.",
-  "addDest.howToGetKey": "How to get this key"
+  "addDest.howToGetKey": "How to get this key",
+  "addDest.connectWithCode": "Connect with a code",
+  "addDest.ipOriginNote": "This page is opened by IP address. Platforms usually cannot send you back to an address they do not know, so the redirect sign-in may fail. Connect with a code if it is offered."
 }
