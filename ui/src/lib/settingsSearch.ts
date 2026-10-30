@@ -183,11 +183,32 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** Finds the label or card title whose text starts with `text`, inside the
+ *  open settings panel. */
+function findByText(root: ParentNode, text: string): HTMLElement | null {
+  const want = text.trim();
+  if (want === "") return null;
+  const candidates = root.querySelectorAll<HTMLElement>(
+    "[role=tabpanel] label, [role=tabpanel] [data-slot=card-title]",
+  );
+  for (const el of candidates) {
+    if ((el.textContent ?? "").trim().startsWith(want)) return el;
+  }
+  return null;
+}
+
 /** Brings a search hit into view once its section is on screen: focuses the
- *  field when it has a control, otherwise scrolls to the label or card title
- *  carrying its text. Returns whether anything was found, so the caller can
- *  try again after the tab's panel has mounted. */
-export function revealSettingsHit(hit: Pick<SettingsHit, "anchor" | "label">, root: ParentNode = document): boolean {
+ *  field when it has a control, otherwise scrolls to the label carrying its
+ *  text. When the field is not rendered -- it sits behind a switch that is off,
+ *  such as the MQTT fields before MQTT is enabled -- it lands on the field's
+ *  card instead, so a result never opens a tab and then does nothing. Field and
+ *  card mount together, so the card is only chosen when the field is absent.
+ *  Returns whether anything was found, so the caller can try again after the
+ *  tab's panel has mounted. */
+export function revealSettingsHit(
+  hit: Pick<SettingsHit, "anchor" | "label"> & { context?: string },
+  root: ParentNode = document,
+): boolean {
   let target: HTMLElement | null = null;
   if (hit.anchor) {
     const el = root.querySelector<HTMLElement>(`#${CSS.escape(hit.anchor)}`);
@@ -198,14 +219,7 @@ export function revealSettingsHit(hit: Pick<SettingsHit, "anchor" | "label">, ro
     }
   }
   if (!target) {
-    const want = hit.label.trim();
-    const candidates = root.querySelectorAll<HTMLElement>("[role=tabpanel] label, [role=tabpanel] [data-slot=card-title]");
-    for (const el of candidates) {
-      if ((el.textContent ?? "").trim().startsWith(want)) {
-        target = el;
-        break;
-      }
-    }
+    target = findByText(root, hit.label) ?? (hit.context ? findByText(root, hit.context) : null);
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
   }
   if (!target) return false;
