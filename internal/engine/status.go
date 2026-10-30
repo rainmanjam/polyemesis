@@ -108,6 +108,14 @@ type DestStatus struct {
 	// Reporting the process without this flag would be the opposite lie: a
 	// destination on its way out would look ordinarily live.
 	Transitioning bool `json:"transitioning,omitempty"`
+	// Delay is this destination's broadcast delay buffer (#11), nil when it
+	// has no delay or is not running. Its Phase says whether it is filling,
+	// on air, or playing its tail out after a stop -- a draining destination
+	// is disabled in the database and still publishing, and this is the only
+	// field that says so. DelaySeconds is the configured value, set whenever
+	// the row has one, so a stopped card can still say "Delayed 30 s".
+	Delay        *DelayStatus `json:"delay,omitempty"`
+	DelaySeconds int          `json:"delaySeconds,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -393,6 +401,12 @@ func (e *Engine) Status() Status {
 	for id, d := range e.retiring {
 		retiring[id] = d
 	}
+	// Same lock, same reason: a destination moves from e.dests to e.draining
+	// under it, and must be in one or the other.
+	draining := make(map[int64]*destination, len(e.draining))
+	for id, d := range e.draining {
+		draining[id] = d
+	}
 	source := e.sourceInfoLocked()
 	// Under the same lock as e.ingest, so the mode and the child are one
 	// instant: a mode change swaps both inside reconcileIngest.
@@ -464,8 +478,9 @@ func (e *Engine) Status() Status {
 			ds := DestStatus{
 				ID: row.ID, Name: row.Name, Kind: row.Kind,
 				Platform: row.Platform, Enabled: row.Enabled,
-				RenditionID: row.RenditionID,
-				SourceID:    row.SourceID,
+				RenditionID:  row.RenditionID,
+				SourceID:     row.SourceID,
+				DelaySeconds: row.DelaySeconds,
 			}
 			if row.RenditionID != nil {
 				ds.RenditionName = names[*row.RenditionID]
@@ -508,6 +523,18 @@ func (e *Engine) Status() Status {
 				ds.Warnings = live.compiled.Warnings
 				ds.Error = live.err
 				ds.Process = procStatus(live.proc)
+				ds.Delay = delayStatusOf(live.delay)
+			} else if dr := draining[row.ID]; dr != nil {
+				// Stopped, and still publishing its delayed tail. The process is
+				// reported as it is, Delay.Phase says why, and the dashboard
+				// offers Stop now.
+				ds.Summary = dr.compiled.Summary
+				ds.Tracks = dr.compiled.Tracks
+				ds.FilterComplex = dr.compiled.FilterComplex
+				ds.Normalization = dr.compiled.Normalization
+				ds.Process = procStatus(dr.proc)
+				ds.BackupProcess = procStatus(dr.backup)
+				ds.Delay = delayStatusOf(dr.delay)
 			} else if going := retiring[row.ID]; going != nil {
 				// Left the running set, child not yet confirmed dead. Report the
 				// process it still has, and say plainly that it is on its way
@@ -582,6 +609,9 @@ func (e *Engine) Status() Status {
 				ds.Reason.KeyChanged = e.keyChanged(row)
 			}
 			if w := stallWarning(ds); w != "" {
+				ds.Warnings = append(slices.Clip(ds.Warnings), w)
+			}
+			if w := delayWarning(ds.Delay); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
 			st.Destinations = append(st.Destinations, ds)

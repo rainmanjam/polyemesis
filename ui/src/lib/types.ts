@@ -271,6 +271,9 @@ export interface Destination {
   /** Reconnect policy. Always present in a server response and empty for a
    *  destination that has not opted in. */
   resilience?: DestResilience;
+  /** Broadcast delay in seconds, 0 to 900 (#11). Absent or 0 is off. Changing
+   *  it while live restarts this destination. */
+  delaySeconds?: number;
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;

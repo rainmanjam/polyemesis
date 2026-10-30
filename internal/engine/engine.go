@@ -226,6 +226,11 @@ type Engine struct {
 	// from e.dests by then -- that is the whole problem -- so there is nothing
 	// left to carry a flag.
 	retiring map[int64]*destination
+	// draining holds stopped destinations whose broadcast delay is still
+	// playing its tail out (#11), keyed by id and guarded by e.mu. Like
+	// retiring, a separate map because the entry has left e.dests; unlike it,
+	// for up to fifteen minutes, so Status, Stop now and shutdown all look here.
+	draining map[int64]*destination
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -667,6 +672,12 @@ type destination struct {
 	// because the two have different causes: the pair can be refused with no
 	// negotiation attempted at all.
 	vodDropped string
+
+	// delay is this destination's broadcast delay (#11), nil when it has none.
+	// When set, the FFmpeg and the backup read delay.hub, and hub above stays
+	// the UPSTREAM hub the line reads -- which is what keepDestination compares,
+	// so a replaced upstream re-points the line instead of restarting it.
+	delay *destDelay
 }
 
 // rendition is one running shared video encode.
@@ -734,6 +745,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		loud:       map[int64]*loudnessMon{},
 		rolledOver: map[int64]string{},
 		retiring:   map[int64]*destination{},
+		draining:   map[int64]*destination{},
 		loudStore:  meters.NewStore(),
 		playProcs:  map[string]*supervisor.Process{},
 		// Promoted fields cannot be set in a composite literal; the placeholder
@@ -1102,9 +1114,18 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	e.selMu.Lock()
 	e.mu.Lock()
 	e.stopped = true
-	dests := make([]*destination, 0, len(e.dests))
+	dests := make([]*destination, 0, len(e.dests)+len(e.draining))
 	for _, d := range e.dests {
 		dests = append(dests, d)
+	}
+	// Destinations still playing their delayed tail out are cut: a shutdown
+	// cannot wait up to fifteen minutes, and left running they would be
+	// FFmpegs publishing to a platform that nothing could find or stop. Taken
+	// out of the map here, under the lock, so the drain goroutine finds them
+	// gone and leaves the teardown to this path.
+	for id, d := range e.draining {
+		dests = append(dests, d)
+		delete(e.draining, id)
 	}
 	rends := make([]*rendition, 0, len(e.rends))
 	for _, r := range e.rends {
@@ -5400,7 +5421,13 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 	}
 	for _, d := range st.Destinations {
 		ds := alerts.DestState{
-			ID: d.ID, Name: d.Name, Enabled: d.Enabled,
+			// A stopped destination playing its delayed tail out is still on
+			// the air, so it is still ENABLED to every watcher until the tail
+			// ends: the down edge -- and the YouTube end it triggers -- waits
+			// for the last delayed second. See delayStillPublishing.
+			ID: d.ID, Name: d.Name, Enabled: d.Enabled || delayStillPublishing(d),
+			// Filling its delay: enabled, not running, and not down either.
+			Buffering: delayHoldsBack(d),
 			// A destination whose graph would not compile has no process at
 			// all, and that is as down as a failed one.
 			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,

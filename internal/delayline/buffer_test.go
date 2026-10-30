@@ -62,7 +62,7 @@ func TestFifteenMinutesAtTwentyMegabitsStaysInsideTheRAMAndDiskBoundsAndComesOut
 	// Fill the delay, then run two minutes past it so the steady state --
 	// spilling at the tail while reading back at the head -- is exercised.
 	total := uint64((MaxDelay + 2*time.Minute) / step)
-	var next uint64                    // the next sequence number expected out
+	var next uint64 // the next sequence number expected out
 	var out [][]byte
 	maxSpill := 0
 	for seq := range total {
