@@ -53,6 +53,23 @@ export interface StopImpact {
   youtubeBroadcasts: number;
 }
 
+/** GET /api/v1/recording. Install-wide: one switch for every programme. */
+export type RecordingStateWord = "off" | "recording" | "not_running" | "halted_disk";
+
+export interface RecordingState {
+  enabled: boolean;
+  state: RecordingStateWord;
+  halted: boolean;
+  reason?: string;
+  installWide: boolean;
+}
+
+/** One entry of GET /api/v1/routing/presets. Only what a key needs. */
+export interface PresetSummary {
+  id: string;
+  name: string;
+}
+
 export interface ConnectionInfo {
   name: string;
   prefix: string;
