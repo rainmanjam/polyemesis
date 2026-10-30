@@ -49,6 +49,7 @@ type managerSettingsProbe struct {
 	attempts  int
 	hooks     *hooks.Dispatcher
 	lifecycle LifecycleObserver
+	keys      KeyChecker
 	// gate is not pushed by any SetX -- NewManager builds it -- so it is read
 	// back off the manager rather than created here. What is asserted is
 	// that every engine holds the SAME one, which is the whole of its job.
@@ -65,6 +66,7 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 		hooks: hooks.NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)),
 			hooks.SourceFunc(func() ([]hooks.Hook, error) { return nil, nil })),
 		lifecycle: &stubLifecycle{},
+		keys:      &stubKeyChecker{release: make(chan struct{})},
 	}
 	m.SetTranscriber(p.tw, p.modelsDir, func(name string, args []string) (string, []string) {
 		return p.niceMark, args
@@ -72,6 +74,7 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 	m.SetAlertRetry(p.attempts)
 	m.SetHooks(p.hooks)
 	m.SetLifecycle(p.lifecycle)
+	m.SetKeyChecker(p.keys)
 	p.gate = m.engineSettingsSnapshot().alertGate
 	if p.gate == nil {
 		t.Fatal("NewManager built no install alert gate, so every engine would " +
@@ -92,8 +95,13 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	eng.mu.RLock()
 	whisper, dir, nice := eng.whisper, eng.whisperDir, eng.whisperNice
 	attempts, hookd, lifecycle := eng.alertAttempts, eng.hooks, eng.lifecycle
-	gate := eng.alertGate
+	gate, keys := eng.alertGate, eng.keyChecker
 	eng.mu.RUnlock()
+
+	if keys != p.keys {
+		t.Errorf("%s: key checker = %v, want the API's: this programme's refused "+
+			"destinations would never be told their platform rotated the key", what, keys)
+	}
 
 	if gate != p.gate {
 		t.Errorf("%s: alert gate = %p, want the manager's %p: this programme "+
@@ -277,7 +285,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"alertAttempts", "alertGate", "hooks", "lifecycle", "modelsDir", "nice", "tw"}
+	covered := []string{"alertAttempts", "alertGate", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())

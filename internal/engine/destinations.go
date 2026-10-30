@@ -687,6 +687,14 @@ func (e *Engine) retunePolicy(p *supervisor.Process, row *db.Destination, want s
 	if p.Status().State != supervisor.StateFailed || !moreForgiving(before, want) {
 		return
 	}
+	// A HELD output is not revived by a policy change. It was not out of
+	// restarts; it was refused, quickly and repeatedly, for a reason a more
+	// patient retry curve cannot fix -- and a settings save touches every
+	// destination, so reviving here would let saving an unrelated setting
+	// lift a hold the operator never asked to lift. Retry is the door.
+	if r := p.Status().Reason; r != nil && r.Held {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
 	p.Restart(ctx)
@@ -1050,6 +1058,9 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		MinBackoff:  destPolicy(row).MinBackoff,
 		MaxBackoff:  destPolicy(row).MaxBackoff,
 		MaxRestarts: destPolicy(row).MaxRestarts,
+		// Stop retrying a key or codec the platform keeps refusing; see
+		// destHoldAfterQuickRejections. Retry (RestartDestination) lifts it.
+		HoldAfterQuickRejections: destHoldAfterQuickRejections,
 		// Spaced out so going live does not spawn every destination in the
 		// same tick. First spawn only -- a reconnect is never delayed.
 		StartDelay: startDelay,
@@ -1439,9 +1450,12 @@ func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec strin
 		MinBackoff:   destPolicy(d.row).MinBackoff,
 		MaxBackoff:   destPolicy(d.row).MaxBackoff,
 		MaxRestarts:  destPolicy(d.row).MaxRestarts,
-		OnLog:        e.onLog,
-		OnState:      e.onState,
-		LogSink:      logSink{e},
+		// The backup publishes the same key to the same platform, so it is
+		// refused for the same reason and held by the same rule.
+		HoldAfterQuickRejections: destHoldAfterQuickRejections,
+		OnLog:                    e.onLog,
+		OnState:                  e.onState,
+		LogSink:                  logSink{e},
 		// The redundant output stops on the same quiet feed as its primary.
 		WakeOnStop: relayWaker(hub, sub),
 	})

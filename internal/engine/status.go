@@ -17,6 +17,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/relay"
@@ -56,6 +57,17 @@ type DestStatus struct {
 	// ("nothing arriving is not a destination stalling"). Decided here, once,
 	// so the card's warning and polyemesis_destination_up cannot disagree.
 	Stalled bool `json:"stalled,omitempty"`
+	// Reason is WHY this destination is failing, or delivering too slowly,
+	// classified from FFmpeg's stderr and timing (internal/failreason): a
+	// cause code, the stderr line it rests on (scrubbed), whether the
+	// supervisor has held the destination after repeated quick rejections, and
+	// whether the connected platform account reports a different stream key.
+	// See destinationReason. Nil while nothing is wrong.
+	//
+	// The same value, under the same JSON names, is what MQTT, webhooks,
+	// alerts and the Stream Deck plugin carry, and what the events API (#17)
+	// is to publish.
+	Reason *failreason.Reason `json:"reason,omitempty"`
 	// StopWarning is set when the LAST stop of this destination ended on Stop's
 	// deadline arm: SIGKILL issued, not waited for, the child possibly still
 	// running and still publishing.
@@ -554,6 +566,12 @@ func (e *Engine) Status() Status {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
 			ds.Stalled = destinationStalled(ds.Process, ingestConfigured, sourceLive)
+			if ds.Reason = destinationReason(ds.Process, ingestConfigured, sourceLive, time.Now()); ds.Reason != nil &&
+				ds.Reason.Cause == failreason.KeyRejected {
+				// Only for a refused key: that is the one failure a rotated key
+				// explains, and the check costs a platform API call.
+				ds.Reason.KeyChanged = e.keyChanged(row)
+			}
 			if w := stallWarning(ds); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}

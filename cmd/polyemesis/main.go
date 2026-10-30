@@ -424,6 +424,9 @@ func run(h *hooks) error {
 	// reconciles, and every broadcast on the box sits in "testing" for ever.
 	eng.SetLifecycle(srv.Lifecycle())
 	go srv.LifecycleLoop(ctx)
+	// The stream-key cross-check behind "YouTube's key changed — click to
+	// update". Read-only against the platform; see internal/api/keycheck.go.
+	eng.SetKeyChecker(srv.KeyChecker())
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line

@@ -390,7 +390,14 @@ type Engine struct {
 	// An interface rather than a concrete type because the implementation lives
 	// in internal/api, which imports this package. Nil on an engine assembled
 	// field by field, which is how the tests build one; every use is nil-safe.
-	lifecycle  LifecycleObserver
+	lifecycle LifecycleObserver
+	// keyChecker answers "has the platform rotated this destination's key?"
+	// for a destination whose publish was refused. Under e.mu; nil means no
+	// cross-check, which is what an engine built field by field has. The
+	// answers are cached in keyChecks, under keyMu. See failreason.go.
+	keyChecker KeyChecker
+	keyMu      sync.Mutex
+	keyChecks  map[int64]*keyCheckState
 	alertWatch *alerts.Watcher
 	// alertGate is SHARED across every engine, like hooks, and handed in by
 	// the manager: it is what lets one engine speak for the install on the
@@ -5365,6 +5372,9 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
 			Platform: string(d.Platform),
 			Error:    d.Error,
+			// The classified failure, for the down alert's text (and so the
+			// timeline) and the webhook's cause.
+			Reason: d.Reason,
 		}
 		// FFmpeg has been reporting all three of these once a second per
 		// destination since -progress was wired up, and nothing has ever read

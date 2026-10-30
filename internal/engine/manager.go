@@ -185,6 +185,7 @@ type engineSettings struct {
 	alertAttempts int
 	hooks         *hooks.Dispatcher
 	lifecycle     LifecycleObserver
+	keyChecker    KeyChecker
 	// alertGate is not a setting anybody saves: NewManager builds it once.
 	// It rides here anyway because this is the one path every engine is
 	// configured through, and an engine that missed it would publish its own
@@ -235,6 +236,7 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetAlertRetry(s.alertAttempts)
 	eng.SetHooks(s.hooks)
 	eng.SetLifecycle(s.lifecycle)
+	eng.SetKeyChecker(s.keyChecker)
 	eng.SetAlertGate(s.alertGate)
 }
 
@@ -1401,6 +1403,12 @@ func (m *Manager) SetHooks(d *hooks.Dispatcher) {
 // both reach the engines through applyEngineSettings.
 func (m *Manager) SetLifecycle(o LifecycleObserver) {
 	m.saveEngineSetting(func(s *engineSettings) { s.lifecycle = o })
+}
+
+// SetKeyChecker attaches the stream-key cross-check to every engine, now and to
+// any created later, through the same one path as SetLifecycle.
+func (m *Manager) SetKeyChecker(k KeyChecker) {
+	m.saveEngineSetting(func(s *engineSettings) { s.keyChecker = k })
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to
