@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { HooksCard } from "@/components/HooksCard";
+import { McpAccessCard } from "@/components/McpAccessCard";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
   Bell,
+  Bot,
   CalendarClock,
   Loader2,
   Webhook,
@@ -268,8 +270,17 @@ const errText = (err: unknown, fallback: string) =>
  *  Both halves are deliberately on one page — an operator setting up an
  *  unattended stream wants "tell me when it breaks" and "start it at seven"
  *  in the same sitting. */
+/** The tabs, so ?tab= can only name one that exists. */
+const AUTOMATION_TABS = ["alerts", "schedules", "hooks", "mcp"] as const;
+
 export function AutomationPage() {
   const t = useT();
+  // ?tab=mcp is where the System page's MCP status line and the docs point.
+  // Read once, from the location, for the first tab only.
+  const [initialTab] = useState(() => {
+    const linked = new URLSearchParams(window.location.search).get("tab") ?? "";
+    return (AUTOMATION_TABS as readonly string[]).includes(linked) ? linked : "alerts";
+  });
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [meta, setMeta] = useState<AlertsMeta | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -334,7 +345,7 @@ export function AutomationPage() {
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <Tabs defaultValue="alerts">
+        <Tabs defaultValue={initialTab}>
           <TabsList>
             <TabsTrigger value="alerts">
               <Bell className="h-3.5 w-3.5" /> {t("auto.tabAlerts")}
@@ -346,6 +357,12 @@ export function AutomationPage() {
                 and coalesces; a hook is for a script and must not. */}
             <TabsTrigger value="hooks">
               <Webhook className="h-3.5 w-3.5" /> {t("auto.tabWebhooks")}
+            </TabsTrigger>
+            {/* AI assistant access. Here rather than under Settings because it
+                is the same kind of thing as a webhook: a way for something
+                outside to act on this server, opted into per install. */}
+            <TabsTrigger value="mcp">
+              <Bot className="h-3.5 w-3.5" /> {t("auto.tabMcp")}
             </TabsTrigger>
           </TabsList>
 
@@ -409,6 +426,10 @@ export function AutomationPage() {
           </TabsContent>
           <TabsContent value="hooks">
             <HooksCard />
+          </TabsContent>
+
+          <TabsContent value="mcp">
+            <McpAccessCard />
           </TabsContent>
         </Tabs>
       )}

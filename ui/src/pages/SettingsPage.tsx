@@ -3202,6 +3202,14 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
   );
 }
 
+/** What each scope means, under the picker. */
+const SCOPE_HINT: Record<TokenScope, TranslationKey> = {
+  read: "set.tokenScopeReadHint",
+  admin: "set.tokenScopeAdminHint",
+  "mcp-read": "set.tokenScopeMcpReadHint",
+  "mcp-admin": "set.tokenScopeMcpAdminHint",
+};
+
 function ApiTokens() {
   const t = useT();
   // A ReadState, not an array. A failed GET /tokens used to be swallowed into
@@ -3296,6 +3304,9 @@ function ApiTokens() {
               <SelectContent>
                 <SelectItem value="read">{t("set.tokenScopeRead")}</SelectItem>
                 <SelectItem value="admin">{t("set.tokenScopeAdmin")}</SelectItem>
+                {/* MCP tokens work at /mcp and nowhere else; see McpAccessCard. */}
+                <SelectItem value="mcp-read">{t("set.tokenScopeMcpRead")}</SelectItem>
+                <SelectItem value="mcp-admin">{t("set.tokenScopeMcpAdmin")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -3304,7 +3315,7 @@ function ApiTokens() {
           </Button>
         </form>
         <span className="text-sm text-muted-foreground">
-          {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
+          {t(SCOPE_HINT[scope])}
         </span>
 
         {minted && (
@@ -3341,7 +3352,7 @@ function ApiTokens() {
                     {/* Admin is the one worth spotting in a list, so it is the
                         one that gets the loud variant. A read token is the
                         expected case and reads as ordinary. */}
-                    <Badge variant={tok.scope === "admin" ? "warn" : "outline"}>
+                    <Badge variant={tok.scope === "admin" || tok.scope === "mcp-admin" ? "warn" : "outline"}>
                       {tok.scope}
                     </Badge>
                   </div>

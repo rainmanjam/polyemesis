@@ -1752,7 +1752,22 @@ export interface StorageState {
  *  because narrowing a credential a running script is holding would break it
  *  without anyone being told.
  */
-export type TokenScope = "read" | "admin";
+export type TokenScope = "read" | "admin" | "mcp-read" | "mcp-admin";
+
+/** An MCP capability level. The tools in each are fixed by the server
+ *  (GET /mcp/access lists them); Content and Control are only ever reachable
+ *  with an `mcp-admin` token. */
+export type McpLevel = "read" | "content" | "control";
+
+/** The MCP switch and its levels (GET/PUT /api/v1/mcp/access, session-only).
+ *  `levels` is empty while `enabled` is false. */
+export interface McpAccess {
+  enabled: boolean;
+  levels: McpLevel[];
+  allLevels: McpLevel[];
+  tools: Partial<Record<McpLevel, string[]>>;
+  endpoint: string;
+}
 
 export interface ApiToken {
   id: number;

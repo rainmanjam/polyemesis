@@ -13,6 +13,8 @@ import type {
   AcmePreflight,
   ApiToken,
   TokenScope,
+  McpAccess,
+  McpLevel,
   AutomodMatrixView,
   AutomodModelStats,
   BitrateSample,
@@ -571,6 +573,12 @@ export const api = {
   createToken: (name: string, scope: TokenScope) =>
     post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
+
+  // --- AI assistant access (MCP) ---
+  // Session-only on the server: no API token can read or change these.
+  mcpAccess: () => get<McpAccess>("/mcp/access"),
+  setMcpAccess: (enabled: boolean, levels?: McpLevel[]) =>
+    put<McpAccess>("/mcp/access", levels ? { enabled, levels } : { enabled }),
 
   // --- chat overlays (session-only) ---
   listOverlays: () => get<OverlaysResponse>("/overlays"),
