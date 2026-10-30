@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Сохранить",
   "routing.matrix.undoClear": "Отменить очистку",
   "routing.matrix.stateOff": "выкл.",
+  "routing.meters.peakReset": "Сбросить пик",
+  "routing.meters.notSet": "Не задано",
+  "routing.meters.setTarget": "Задать цель",
+  "routing.meters.autoZoom": "Авто-масштаб",
+  "routing.meters.streamingMark": "эталон стриминга",
+  "routing.meters.clipMark": "порог клиппинга",
   "routing.saveBar.restarts": "Сохранение перезапустит {name} с этим микшем."
 }

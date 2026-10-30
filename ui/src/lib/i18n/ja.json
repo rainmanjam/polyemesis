@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "クリアを元に戻す",
   "routing.matrix.stateOff": "オフ",
+  "routing.meters.peakReset": "ピークをリセット",
+  "routing.meters.notSet": "未設定",
+  "routing.meters.setTarget": "目標を設定",
+  "routing.meters.autoZoom": "自動ズーム",
+  "routing.meters.streamingMark": "配信の基準",
+  "routing.meters.clipMark": "クリップのしきい値",
   "routing.saveBar.restarts": "保存すると、このミックスで {name} が再起動します。"
 }

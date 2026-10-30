@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Зберегти",
   "routing.matrix.undoClear": "Скасувати очищення",
   "routing.matrix.stateOff": "вимк.",
+  "routing.meters.peakReset": "Скинути пік",
+  "routing.meters.notSet": "Не задано",
+  "routing.meters.setTarget": "Задати ціль",
+  "routing.meters.autoZoom": "Авто-масштаб",
+  "routing.meters.streamingMark": "еталон стримінгу",
+  "routing.meters.clipMark": "поріг кліпування",
   "routing.saveBar.restarts": "Збереження перезапустить {name} з цим мікшем."
 }

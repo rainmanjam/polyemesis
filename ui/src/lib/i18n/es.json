@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Guardar",
   "routing.matrix.undoClear": "Deshacer borrado",
   "routing.matrix.stateOff": "apagado",
+  "routing.meters.peakReset": "Restablecer pico",
+  "routing.meters.notSet": "Sin definir",
+  "routing.meters.setTarget": "Definir objetivo",
+  "routing.meters.autoZoom": "Zoom automático",
+  "routing.meters.streamingMark": "referencia de streaming",
+  "routing.meters.clipMark": "umbral de clip",
   "routing.saveBar.restarts": "Guardar reinicia {name} con esta mezcla."
 }

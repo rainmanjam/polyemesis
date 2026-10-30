@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "撤销清除",
   "routing.matrix.stateOff": "关",
+  "routing.meters.peakReset": "重置峰值",
+  "routing.meters.notSet": "未设置",
+  "routing.meters.setTarget": "设置目标",
+  "routing.meters.autoZoom": "自动缩放",
+  "routing.meters.streamingMark": "直播参考线",
+  "routing.meters.clipMark": "削波阈值",
   "routing.saveBar.restarts": "保存会以此混音重新启动 {name}。"
 }

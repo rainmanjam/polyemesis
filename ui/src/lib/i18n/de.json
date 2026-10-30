@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Speichern",
   "routing.matrix.undoClear": "Leeren rückgängig machen",
   "routing.matrix.stateOff": "aus",
+  "routing.meters.peakReset": "Spitzenwert zurücksetzen",
+  "routing.meters.notSet": "Nicht festgelegt",
+  "routing.meters.setTarget": "Ziel festlegen",
+  "routing.meters.autoZoom": "Auto-Zoom",
+  "routing.meters.streamingMark": "Streaming-Referenz",
+  "routing.meters.clipMark": "Clipping-Schwelle",
   "routing.saveBar.restarts": "Beim Speichern wird {name} mit diesem Mix neu gestartet."
 }

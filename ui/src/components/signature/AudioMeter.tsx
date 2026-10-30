@@ -1,5 +1,13 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
+import {
+  dbFraction,
+  formatPeakDb,
+  FIXED_RANGE,
+  STREAMING_REFERENCE_DB,
+  type DbRange,
+} from "@/lib/meterScale";
 
 /* ===========================================================================
    Bespoke broadcast level meters.
@@ -28,8 +36,6 @@ import { cn } from "@/lib/utils";
    =========================================================================== */
 
 /** Meters span -60 dBFS to 0. Below -60 is inaudible in any practical mix. */
-const MIN_DB = -60;
-const MAX_DB = 0;
 
 /** Peak hold, then fall. A hold that never decays becomes a high-water mark
  *  for the session and stops being useful within a minute. */
@@ -40,10 +46,8 @@ const PEAK_FALL_DB_PER_SEC = 24;
 const CLIP_DB = -0.2;
 const CLIP_LATCH_MS = 1500;
 
-function dbToFraction(db: number): number {
-  if (db <= MIN_DB) return 0;
-  if (db >= MAX_DB) return 1;
-  return (db - MIN_DB) / (MAX_DB - MIN_DB);
+function dbToFraction(db: number, range: DbRange = FIXED_RANGE): number {
+  return dbFraction(db, range);
 }
 
 function cssVar(name: string, fallback: string): string {
@@ -90,14 +94,14 @@ const ZONE_BREAKS = [-18, -12, -6, -2];
 const HOT_DB = -6;
 
 /** Colour breaks at levels a mixer cares about, not at even fractions. */
-function buildGradient(ctx: CanvasRenderingContext2D, w: number, p: Palette) {
+function buildGradient(ctx: CanvasRenderingContext2D, w: number, p: Palette, r: DbRange) {
   const [quiet, mid, hot, clip] = ZONE_BREAKS;
   const g = ctx.createLinearGradient(0, 0, w, 0);
   g.addColorStop(0, p.low);
-  g.addColorStop(dbToFraction(quiet), p.low);
-  g.addColorStop(dbToFraction(mid), p.mid);
-  g.addColorStop(dbToFraction(hot), p.high);
-  g.addColorStop(dbToFraction(clip), p.peak);
+  g.addColorStop(dbToFraction(quiet, r), p.low);
+  g.addColorStop(dbToFraction(mid, r), p.mid);
+  g.addColorStop(dbToFraction(hot, r), p.high);
+  g.addColorStop(dbToFraction(clip, r), p.peak);
   g.addColorStop(1, p.peak);
   return g;
 }
@@ -145,6 +149,8 @@ export interface AudioMeterProps {
   /** Gap between bars. */
   barGap?: number;
   className?: string;
+  /** The dB span drawn. Auto zoom passes a narrower one; default is -60..0. */
+  range?: DbRange;
 }
 
 /** "has never clipped", and NOT 0. clipAt is compared against
@@ -167,9 +173,15 @@ export function AudioMeter({
   barHeight = 10,
   barGap = 3,
   className,
+  range,
 }: AudioMeterProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const clipRef = useRef<HTMLSpanElement>(null);
+  const t = useT();
+  const peakRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const resetRef = useRef(false);
+  const rangeRef = useRef<DbRange>(FIXED_RANGE);
+  rangeRef.current = range ?? FIXED_RANGE;
   // Latest values live in a ref so the animation loop never re-subscribes and
   // React re-renders do not restart the decay.
   const dataRef = useRef({ rms, peak });
@@ -192,6 +204,7 @@ export function AudioMeter({
       last = now;
 
       const p = paletteRef.current!;
+      const r = rangeRef.current;
       let clipping = false;
       const channels = dataRef.current.rms.length;
       const dpr = window.devicePixelRatio || 1;
@@ -209,15 +222,23 @@ export function AudioMeter({
       ctx.clearRect(0, 0, cssWidth, cssHeight);
 
       while (stateRef.current.length < channels) {
-        stateRef.current.push({ holdDb: MIN_DB, holdSetAt: 0, clipAt: NEVER });
+        stateRef.current.push({ holdDb: r.minDb, holdSetAt: 0, clipAt: NEVER });
       }
 
-      const gradient = buildGradient(ctx, cssWidth, p);
+      if (resetRef.current) {
+        resetRef.current = false;
+        for (const st of stateRef.current) {
+          st.holdDb = r.minDb;
+          st.holdSetAt = 0;
+        }
+      }
+
+      const gradient = buildGradient(ctx, cssWidth, p, r);
 
       for (let ch = 0; ch < channels; ch++) {
         const y = ch * (barHeight + barGap);
-        const rmsDb = dataRef.current.rms[ch] ?? MIN_DB;
-        const peakDb = dataRef.current.peak[ch] ?? MIN_DB;
+        const rmsDb = dataRef.current.rms[ch] ?? r.minDb;
+        const peakDb = dataRef.current.peak[ch] ?? r.minDb;
         const st = stateRef.current[ch];
 
         // Peak hold: jump up instantly, fall back on a timer.
@@ -225,9 +246,17 @@ export function AudioMeter({
           st.holdDb = peakDb;
           st.holdSetAt = now;
         } else if (now - st.holdSetAt > PEAK_HOLD_MS) {
-          st.holdDb = Math.max(MIN_DB, st.holdDb - PEAK_FALL_DB_PER_SEC * dt);
+          st.holdDb = Math.max(r.minDb, st.holdDb - PEAK_FALL_DB_PER_SEC * dt);
         }
         if (peakDb >= CLIP_DB) st.clipAt = now;
+
+        // A16: the held peak as a number, beside the bar, so the level can be
+        // read without estimating it off the geometry.
+        const readout = peakRefs.current[ch];
+        if (readout) {
+          const txt = formatPeakDb(st.holdDb);
+          if (readout.textContent !== txt) readout.textContent = txt;
+        }
 
         // trough
         ctx.fillStyle = p.bg;
@@ -235,20 +264,20 @@ export function AudioMeter({
 
         // scale ticks, drawn under the bar so a hot signal covers them
         ctx.fillStyle = p.grid;
-        for (const mark of [-50, -40, -30, -20, -12, -6, -3]) {
-          const x = Math.round(dbToFraction(mark) * cssWidth);
+        for (const mark of [-50, -40, -30, -20, -12, -6, -3].filter((m) => m > r.minDb)) {
+          const x = Math.round(dbToFraction(mark, r) * cssWidth);
           ctx.fillRect(x, y, 1, barHeight);
         }
 
         // RMS bar
-        const w = dbToFraction(rmsDb) * cssWidth;
+        const w = dbToFraction(rmsDb, r) * cssWidth;
         if (w > 0) {
           ctx.fillStyle = gradient;
           ctx.fillRect(0, y, w, barHeight);
           // TEXTURE, above the amber break. The hot end of the bar is now a
           // different surface as well as a different hue, so "too hot" reads
           // in greyscale.
-          const hotX = dbToFraction(HOT_DB) * cssWidth;
+          const hotX = dbToFraction(HOT_DB, r) * cssWidth;
           if (w > hotX) hatchHot(ctx, hotX, y, w - hotX, barHeight, p);
         }
 
@@ -260,7 +289,7 @@ export function AudioMeter({
         // against hue.
         ctx.fillStyle = p.hold;
         for (const mark of ZONE_BREAKS) {
-          const x = Math.round(dbToFraction(mark) * cssWidth);
+          const x = Math.round(dbToFraction(mark, r) * cssWidth);
           // Faint over the empty trough, firm over the lit bar. A mark that is
           // equally loud everywhere is four permanent white lines across a
           // meter that is usually quiet, which is the sort of decoration an eye
@@ -269,15 +298,20 @@ export function AudioMeter({
           ctx.globalAlpha = x < w ? 0.6 : 0.22;
           ctx.fillRect(x, y, 1, barHeight);
         }
+        // A16: the -14 streaming reference, drawn faint so it reads as a mark on
+        // the bar rather than a fifth zone break.
+        ctx.fillStyle = p.hold;
+        ctx.globalAlpha = 0.45;
+        ctx.fillRect(Math.round(dbToFraction(STREAMING_REFERENCE_DB, r) * cssWidth), y, 1, barHeight);
         ctx.globalAlpha = 1;
 
         // peak-hold tick. Wider once it is at or past clip: at that point the
         // tick is the thing being read, and thickness says so without relying
         // on it having gone red.
-        if (st.holdDb > MIN_DB) {
+        if (st.holdDb > r.minDb) {
           const clipped = st.holdDb >= CLIP_DB;
           const tickW = clipped ? 3 : 2;
-          const px = Math.min(cssWidth - tickW, dbToFraction(st.holdDb) * cssWidth);
+          const px = Math.min(cssWidth - tickW, dbToFraction(st.holdDb, r) * cssWidth);
           ctx.fillStyle = clipped ? p.peak : p.hold;
           ctx.fillRect(px, y, tickW, barHeight);
         }
@@ -345,6 +379,24 @@ export function AudioMeter({
           CLIP
         </span>
       </div>
+      <div className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
+        {rms.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            ref={(el) => {
+              peakRefs.current[i] = el;
+            }}
+            onClick={() => {
+              resetRef.current = true;
+            }}
+            title={t("routing.meters.peakReset")}
+            aria-label={t("routing.meters.peakReset")}
+            className="tnum flex items-center justify-end whitespace-nowrap font-mono text-xs leading-none text-muted-foreground hover:text-foreground"
+            style={{ height: barHeight, minWidth: "4.5rem" }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -355,13 +407,19 @@ export function AudioMeter({
  *  A zone break gets a brighter number and a tick, because the marks the bar
  *  itself now carries are useless if nothing overhead says what level they
  *  stand at — position is only a channel once it has a legend. */
-export function MeterScale({ className }: { className?: string }) {
-  const marks = [-60, -50, -40, -30, -20, -12, -6, 0];
+export function MeterScale({ className, range }: { className?: string; range?: DbRange }) {
+  const t = useT();
+  const r = range ?? FIXED_RANGE;
+  // A16: the -14 streaming reference is labelled, so the ruler carries the one
+  // number a streaming operator aims at. Marks outside the range are not drawn.
+  const marks = [-60, -50, -40, -30, -20, -14, -12, -6, 0].filter(
+    (m) => m >= r.minDb && m <= r.maxDb,
+  );
   const isBreak = (m: number) => ZONE_BREAKS.includes(m);
   return (
     <div className={cn("relative h-4 w-full select-none", className)}>
       {marks.map((m) => {
-        const left = dbToFraction(m) * 100;
+        const left = dbToFraction(m, r) * 100;
         return (
           <div
             key={m}
@@ -372,8 +430,9 @@ export function MeterScale({ className }: { className?: string }) {
             style={{
               left: `${left}%`,
               transform:
-                m === MIN_DB ? "translateX(0)" : m === MAX_DB ? "translateX(-100%)" : "translateX(-50%)",
+                m === r.minDb ? "translateX(0)" : m === r.maxDb ? "translateX(-100%)" : "translateX(-50%)",
             }}
+            title={m === STREAMING_REFERENCE_DB ? t("routing.meters.streamingMark") : undefined}
           >
             {m}
           </div>
@@ -389,7 +448,7 @@ export function MeterScale({ className }: { className?: string }) {
           key={`break${m}`}
           aria-hidden
           className="absolute bottom-0 h-1.5 w-px bg-border-strong"
-          style={{ left: `${dbToFraction(m) * 100}%` }}
+          style={{ left: `${dbToFraction(m, r) * 100}%` }}
         />
       ))}
     </div>

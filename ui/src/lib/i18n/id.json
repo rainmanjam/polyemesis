@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Simpan",
   "routing.matrix.undoClear": "Batalkan hapus",
   "routing.matrix.stateOff": "mati",
+  "routing.meters.peakReset": "Atur ulang puncak",
+  "routing.meters.notSet": "Belum diatur",
+  "routing.meters.setTarget": "Atur target",
+  "routing.meters.autoZoom": "Zoom otomatis",
+  "routing.meters.streamingMark": "referensi streaming",
+  "routing.meters.clipMark": "ambang clip",
   "routing.saveBar.restarts": "Menyimpan akan memulai ulang {name} dengan mix ini."
 }

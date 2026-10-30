@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Zapisz",
   "routing.matrix.undoClear": "Cofnij czyszczenie",
   "routing.matrix.stateOff": "wył.",
+  "routing.meters.peakReset": "Zresetuj szczyt",
+  "routing.meters.notSet": "Nie ustawiono",
+  "routing.meters.setTarget": "Ustaw cel",
+  "routing.meters.autoZoom": "Auto zoom",
+  "routing.meters.streamingMark": "odniesienie streamingu",
+  "routing.meters.clipMark": "próg przesterowania",
   "routing.saveBar.restarts": "Zapisanie uruchomi ponownie {name} z tym miksem."
 }

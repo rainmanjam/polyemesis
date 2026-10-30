@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Enregistrer",
   "routing.matrix.undoClear": "Annuler l'effacement",
   "routing.matrix.stateOff": "désactivé",
+  "routing.meters.peakReset": "Réinitialiser le pic",
+  "routing.meters.notSet": "Non défini",
+  "routing.meters.setTarget": "Définir la cible",
+  "routing.meters.autoZoom": "Zoom auto",
+  "routing.meters.streamingMark": "référence streaming",
+  "routing.meters.clipMark": "seuil d’écrêtage",
   "routing.saveBar.restarts": "L'enregistrement redémarre {name} avec ce mix."
 }

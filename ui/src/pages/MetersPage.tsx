@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Link } from "react-router";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -12,6 +14,7 @@ import { useLiveData, useSourceTracks, useStaleTracker } from "@/hooks/useLiveDa
 import { autoApi } from "@/lib/autoApi";
 import { db } from "@/lib/format";
 import { loudnessMeasured } from "@/lib/meterFacts";
+import { autoZoomRange, FIXED_RANGE, type DbRange } from "@/lib/meterScale";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -115,6 +118,12 @@ export function MetersPage() {
      A CONTROL: the page cannot state a setting it has not been told, so the
      switch is indeterminate until the first read answers. */
   const [monitorOn, setMonitorOn] = useState<boolean | null>(null);
+  /* A16: Auto zoom narrows the track meters to the loudest peak on the page, so
+     a quiet source is not squeezed into the bottom of -60..0. Off by default:
+     the fixed scale is the one every operator can compare across sessions. */
+  const [autoZoom, setAutoZoom] = useState(false);
+  const loudestPeak = Math.max(-100, ...(levels?.peak ?? []).flat());
+  const span: DbRange = autoZoom ? autoZoomRange(loudestPeak) : FIXED_RANGE;
   /* True from the operator's click until the server has answered. A poll
      already in flight carries the state from BEFORE the click, and letting it
      land flips the switch back under their finger. */
@@ -288,6 +297,7 @@ export function MetersPage() {
                 key={rep.destinationId}
                 report={rep}
                 truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
+                integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
               />
             ))
           )}
@@ -324,6 +334,17 @@ export function MetersPage() {
           </span>
         </div>
       )}
+
+      <div className="mb-2 flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          aria-pressed={autoZoom}
+          onClick={() => setAutoZoom((z) => !z)}
+        >
+          {t("routing.meters.autoZoom")}
+        </Button>
+      </div>
 
       <div className="grid gap-3 xl:grid-cols-2">
         {tracks.map((track) => {
@@ -378,11 +399,12 @@ export function MetersPage() {
                       labels={labels}
                       barHeight={12}
                       barGap={3}
+                      range={span}
                     />
                     {/* The scale sits under the bars and is indented to match
                         the label gutter, so ticks line up with the meters. */}
                     <div className="pl-[calc(1.25rem+0.5rem)]">
-                      <MeterScale />
+                      <MeterScale range={span} />
                     </div>
                     <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 pl-[calc(1.25rem+0.5rem)] sm:grid-cols-3">
                       {labels.map((l, i) => (
@@ -425,12 +447,18 @@ export function MetersPage() {
 export function ComplianceRow({
   report,
   truePeakFailOverDb,
+  integrationSeconds = 20,
 }: {
   report: LoudnessReport;
   truePeakFailOverDb: number;
+  integrationSeconds?: number;
 }) {
+  const t = useT();
   const tone = VERDICT_TONE[report.verdict] ?? "idle";
   const targeted = report.target.source !== "none";
+  /* A16: no target reads "Not set" with a way to set one, not UNKNOWN, which
+     looked like a tab that was broken. */
+  const notSet = !report.error && !targeted && report.verdict === "unknown";
   /* Nothing has gone through the analyser yet: every float is still at its
      zero value, and zero is the loudest reading on both of these scales. */
   const measured = loudnessMeasured(report);
@@ -444,8 +472,18 @@ export function ComplianceRow({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px]">{report.destination}</span>
         <Badge variant={toneBadge[tone]} title={report.reason}>
-          {report.error ? "analyser failed" : report.verdict}
+          {report.error ? "analyser failed" : notSet ? t("routing.meters.notSet") : report.verdict}
         </Badge>
+        {notSet && (
+          <Button asChild variant="outline" size="sm" className="h-6 px-2 text-xs">
+            <Link
+              to={`/routing/${report.destinationId}`}
+              title={t("meters.integratedNote", { seconds: integrationSeconds })}
+            >
+              {t("routing.meters.setTarget")}
+            </Link>
+          </Button>
+        )}
         {targeted && (
           <span className="text-[10px] text-muted-foreground" title={report.target.reason}>
             target {report.target.lufs.toFixed(0)} LUFS ±{report.target.toleranceLu.toFixed(0)} LU,

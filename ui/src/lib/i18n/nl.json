@@ -1702,5 +1702,11 @@
   "routing.saveBar.save": "Opslaan",
   "routing.matrix.undoClear": "Wissen ongedaan maken",
   "routing.matrix.stateOff": "uit",
+  "routing.meters.peakReset": "Piek resetten",
+  "routing.meters.notSet": "Niet ingesteld",
+  "routing.meters.setTarget": "Doel instellen",
+  "routing.meters.autoZoom": "Automatische zoom",
+  "routing.meters.streamingMark": "streamingreferentie",
+  "routing.meters.clipMark": "cliplimiet",
   "routing.saveBar.restarts": "Opslaan start {name} opnieuw met deze mix."
 }
