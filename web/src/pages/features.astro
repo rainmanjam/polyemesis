@@ -247,6 +247,58 @@ for (const name of new Set(sections.map((s) => s.shot))) {
     (await getImage({ src: shotOf(name), format: "webp", width: 2880 })).src,
   );
 }
+
+/* THE ROOMS, AS DATA (S6). Each has the same shape: what it is, and a small
+ * table of which track goes where. The tables are the picture; the prose only
+ * says why the room exists. Track numbers are the source's own, per room, so
+ * no two rooms have to share a layout. */
+const rooms = [
+  {
+    title: "Two languages, one camera",
+    body: "The floor mic on one track, the interpreter on another. Each language channel takes its own track, and both get the same video from one upload. A third language is a checkbox and another destination, not another encoder.",
+    routes: [
+      ["track 1 · floor mic", "English channel"],
+      ["track 2 · interpreter", "Spanish channel"],
+    ],
+    note: "Churches, conferences and any event with more than one language on one stream.",
+  },
+  {
+    title: "An archive that differs from the broadcast",
+    body: "The live broadcast carries the music bed. A second mix, built from the same ingest, leaves it out for the recording or a file destination. One upload, one video encode.",
+    routes: [
+      ["the mix with the music bed", "live broadcast"],
+      ["the mix without it", "archive, or the Twitch VOD track"],
+    ],
+    note: "The Twitch route needs a GPU and is Twitch-only.",
+    link: { href: "/twitch-vod-track", text: "What that involves →" },
+  },
+  {
+    title: "Vertical and horizontal, at once",
+    body: "A 16:9 composition and a 9:16 one are two programmes, not one cropped from the other. Run both from one install, each with its own ingest, destinations and mix.",
+    routes: [
+      ["16:9 programme", "horizontal destinations"],
+      ["9:16 programme", "vertical destinations"],
+    ],
+  },
+  {
+    title: "Home and away, one ingest",
+    body: "Home commentary on one track, away commentary on another, the game's own audio on a third. The home feed and the away feed each take their commentary; the clean league feed takes only the game.",
+    routes: [
+      ["track 1 · home commentary", "home feed"],
+      ["track 2 · away commentary", "away feed"],
+      ["track 3 · game audio", "clean league feed"],
+    ],
+  },
+  {
+    title: "Esports, game and casters",
+    body: "The game on one track and the casters on another. The main broadcast gets both, and a platform that wants no commentary gets the game alone, from the same ingest.",
+    routes: [
+      ["track 1 · game audio", "clean game feed"],
+      ["track 2 · casters", "casters channel"],
+      ["tracks 1 + 2", "main broadcast"],
+    ],
+  },
+];
 ---
 
 <Base
@@ -392,39 +444,35 @@ for (const name of new Set(sections.map((s) => s.shot))) {
     <div class="wrap">
       <p class="eyebrow">Who it is for</p>
       <h2 class="mt-3 text-balance text-3xl font-medium">
-        Three rooms where one mix is the thing that does not work.
+        Five rooms where one mix is the thing that does not work.
       </h2>
-      <div class="mt-8 grid gap-8 md:grid-cols-3">
-        <div>
-          <h3 class="font-medium">Two languages, one camera</h3>
-          <p class="mt-3 text-sm leading-relaxed text-muted">
-            The floor mic on track 1, the interpreter on track 2. The English
-            channel gets one, the Spanish channel gets the other, and both get
-            the same video from the same upload. Adding a third language is a
-            checkbox and another destination, not another encoder.
-          </p>
-        </div>
-        <div>
-          <h3 class="font-medium">The archive that differs from the broadcast</h3>
-          <p class="mt-3 text-sm leading-relaxed text-muted">
-            The live broadcast carries the music bed. A second mix, built from
-            the same ingest, leaves it out — for a recording, a file
-            destination, or Twitch's VOD track. One upload, one video encode.
-          </p>
-          <p class="mt-2 text-sm leading-relaxed text-subtle">
-            The Twitch route needs a GPU, and is Twitch-only.
-            <a href="/twitch-vod-track" class="text-primary underline-offset-4 hover:underline">What that involves →</a>
-          </p>
-        </div>
-        <div>
-          <h3 class="font-medium">Vertical and horizontal, at once</h3>
-          <p class="mt-3 text-sm leading-relaxed text-muted">
-            A 16:9 composition and a 9:16 one are two programmes, not one
-            cropped from the other — which is exactly the case sources were
-            built for. Run both from one install, each with its own ingest,
-            destinations and mixes.
-          </p>
-        </div>
+      <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {
+          rooms.map((r) => (
+            <article class="card flex flex-col p-6">
+              <h3 class="font-medium">{r.title}</h3>
+              <p class="mt-3 text-sm leading-relaxed text-muted">{r.body}</p>
+              <ul
+                data-room-routing
+                aria-label={`Routing for ${r.title}`}
+                class="mt-5 divide-y divide-line rounded-token border border-line font-mono text-[12px]"
+              >
+                {r.routes.map(([track, dest]) => (
+                  <li class="flex flex-wrap justify-between gap-x-3 px-3 py-2">
+                    <span class="text-fg">{track}</span>
+                    <span class="text-muted">→ {dest}</span>
+                  </li>
+                ))}
+              </ul>
+              {r.note && <p class="mt-3 text-sm text-subtle">{r.note}</p>}
+              {r.link && (
+                <p class="mt-2 text-sm">
+                  <a href={r.link.href} class="text-primary underline-offset-4 hover:underline">{r.link.text}</a>
+                </p>
+              )}
+            </article>
+          ))
+        }
       </div>
     </div>
   </section>

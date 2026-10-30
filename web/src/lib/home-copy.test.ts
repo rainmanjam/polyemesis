@@ -167,3 +167,28 @@ describe("the home trust line (S4)", () => {
     expect(source).toMatch(/Read the source →/);
   });
 });
+
+/* THE USE-CASE ROOMS (S6). Each room names the tracks and where each one goes,
+ * as a small diagram rather than prose alone. Sports and esports are added
+ * because they are real routing cases the product already supports. No
+ * dedicated pages are built: features.astro explains why, and that stays. */
+describe("the features page rooms (S6)", () => {
+  const features = pages("features.astro");
+
+  it("gives each of the five rooms its own routing table", () => {
+    // The rooms are one data array rendered by a map, so the count is the
+    // array's, and the markup must render that array as a table per room.
+    const data = features.slice(features.indexOf("const rooms = ["), features.indexOf("\n];", features.indexOf("const rooms = [")));
+    expect((data.match(/title: "/g) ?? []).length).toBe(5);
+    expect(features).toMatch(/data-room-routing/);
+  });
+
+  it("adds the sports and esports rooms", () => {
+    expect(features).toMatch(/Home and away/);
+    expect(features).toMatch(/Esports|esports/);
+  });
+
+  it("keeps the no-dedicated-pages decision in the source", () => {
+    expect(features).toMatch(/PROSE, NOT PAGES/);
+  });
+});
