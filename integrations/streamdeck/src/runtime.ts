@@ -1,6 +1,7 @@
 import { ApiError, PolyemesisClient, type Transport } from "./api.js";
 import { ConfigError, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
+import type { StreamDeckKey } from "./keys.js";
 import { destinationFace, failoverFace, type KeyFace } from "./keyFace.js";
 import { HoldToConfirm, type Scheduler } from "./holdToConfirm.js";
 import { LevelsFeed, meterFace } from "./levelsFeed.js";
@@ -25,6 +26,12 @@ export interface Surface {
   showAlert(): Promise<void>;
   showOk(): Promise<void>;
   setFeedback(payload: { title: string; value: string; indicator: number }): Promise<void>;
+}
+
+/** The translated message for a failed connection check. The server's own words travel separately. */
+export function authKeyFor(err: ApiError): StreamDeckKey {
+  if (err.kind === "unauthorized") return "streamdeck.auth.refused";
+  return "streamdeck.auth.unreachable";
 }
 
 /** Builds the client for a pairing. Throws ConfigError when the pairing is incomplete. */
@@ -189,8 +196,7 @@ export class Runtime {
   private unavailableFace(): KeyFace {
     if (!this.client) return { tone: "idle", label: "streamdeck.auth.notPaired" };
     const err = this.connectionError;
-    if (err?.kind === "unauthorized") return { tone: "error", label: "streamdeck.auth.refused" };
-    return { tone: "error", label: "streamdeck.auth.unreachable", detail: err?.message };
+    return { tone: "error", label: err ? authKeyFor(err) : "streamdeck.auth.unreachable", detail: err?.message };
   }
 
   private async paintFace(s: Surface, face: KeyFace): Promise<void> {

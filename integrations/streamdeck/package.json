@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@elgato/streamdeck": "3.0.4",
+    "@elgato/utils": "0.6.2",
     "ws": "8.22.0"
   },
   "devDependencies": {

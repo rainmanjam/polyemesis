@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Transport, TransportRequest, TransportResponse } from "../src/api.js";
-import { Runtime, type Surface, type SurfaceKind } from "../src/runtime.js";
+import { ApiError } from "../src/api.js";
+import { Runtime, authKeyFor, type Surface, type SurfaceKind } from "../src/runtime.js";
 import { KEY_STATE } from "../src/render.js";
 import type { StatusPayload } from "../src/model.js";
 
@@ -267,7 +268,7 @@ describe("pairing states", () => {
     rt.add(key);
     await rt.tick();
     expect(key.states.at(-1)).toBe(KEY_STATE.error);
-    expect(key.titles.at(-1)).toBe("Token refused");
+    expect(key.titles.at(-1)).toMatch(/^Token refused\n/);
   });
 
   it("paints Unreachable, not a guess about state, when the host does not answer", async () => {
@@ -327,5 +328,13 @@ describe("dial meter", () => {
     rt.ingestFrame({ peak: [[-30]], rms: [[-30]] });
     await rt.tick();
     expect(dial.feedback.at(-1)).toMatchObject({ value: "-30 dB", indicator: 50 });
+  });
+});
+
+describe("authKeyFor", () => {
+  it("names a refused token as refused, and everything else as unreachable", () => {
+    expect(authKeyFor(new ApiError("unauthorized", 401, "x"))).toBe("streamdeck.auth.refused");
+    expect(authKeyFor(new ApiError("unreachable", undefined, "x"))).toBe("streamdeck.auth.unreachable");
+    expect(authKeyFor(new ApiError("untrusted", undefined, "x"))).toBe("streamdeck.auth.unreachable");
   });
 });

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src ws://127.0.0.1:* ws://localhost:*">
+  <title>polyemesis</title>
+  <link rel="stylesheet" href="pi.css">
+</head>
+<body>
+  <!-- No text is written in this page. Every label arrives from the plugin in
+       the Stream Deck app's language (see pi.js), so there is no English to
+       fall back to. -->
+  <section class="block">
+    <label for="url" data-i18n="streamdeck.pi.url"></label>
+    <input id="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://">
+    <p id="err-url" class="error" hidden></p>
+  </section>
+
+  <section class="block">
+    <label for="token" data-i18n="streamdeck.pi.token"></label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <p id="err-token" class="error" hidden></p>
+  </section>
+
+  <section class="block">
+    <label for="caPem" data-i18n="streamdeck.pi.ca"></label>
+    <textarea id="caPem" rows="3" spellcheck="false"></textarea>
+    <p class="hint" data-i18n="streamdeck.pi.caHint"></p>
+  </section>
+
+  <section class="block" id="block-source">
+    <label for="sourceId" data-i18n="streamdeck.pi.sourceId"></label>
+    <input id="sourceId" type="number" min="1" step="1">
+    <p class="hint" data-i18n="streamdeck.pi.sourceHint"></p>
+  </section>
+
+  <section class="block" id="block-destination" hidden>
+    <label for="destinationId" data-i18n="streamdeck.pi.destinationId"></label>
+    <input id="destinationId" type="number" min="1" step="1">
+  </section>
+
+  <section class="block">
+    <button id="test" type="button" data-i18n="streamdeck.pi.test"></button>
+    <p id="result" class="result" role="status" aria-live="polite"></p>
+    <p id="admin-warning" class="warning" hidden></p>
+  </section>
+
+  <script src="pi.js"></script>
+</body>
+</html>
