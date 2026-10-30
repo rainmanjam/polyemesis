@@ -229,3 +229,58 @@ func TestOnlyTheCommandWriterTouchesTheStdinPipe(t *testing.T) {
 		t.Errorf("the stdin pipe is referenced outside the command writer:\n%s", strings.Join(offenders, "\n"))
 	}
 }
+
+// A reply counts only when it is the whole stderr line FFmpeg prints. A line
+// that merely contains the text (stream metadata, a title, an error echoing
+// input) must not be read as an acknowledgement.
+func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
+	good := []string{
+		"Command reply for stream 0: ret:0 res:",
+		"Command reply for stream 0: ret:0",
+		"Command reply for stream 1: ret:-78 res:",
+	}
+	for _, line := range good {
+		if _, ret, ok := parseReply(line); !ok {
+			t.Errorf("a genuine reply was not recognised: %q (ret %d)", line, ret)
+		}
+	}
+	bad := []string{
+		"title: Command reply for stream 0: ret:0 res:",
+		"[warning] Command reply for stream 0: ret:0 res:",
+		"Command reply for stream 0: ret:0 injected text",
+		"x Command reply for stream 0: ret:0",
+		"Command reply for stream 0: ret:0\nq",
+		"Command reply for stream x: ret:0",
+	}
+	for _, line := range bad {
+		if _, _, ok := parseReply(line); ok {
+			t.Errorf("a non-reply line was taken as an acknowledgement: %q", line)
+		}
+	}
+}
+
+// Binding to the spawn: a reply that arrives for an earlier run must not reach
+// the waiter of the current one, and an earlier run's teardown must not clear
+// the current run's command channel.
+func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
+	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/true", LiveCommands: true})
+	old := &liveRun{replies: make(chan int, 4)}
+	cur := &liveRun{replies: make(chan int, 4)}
+	p.live = cur
+
+	deliverReply(old, "Command reply for stream 0: ret:0 res:")
+	select {
+	case ret := <-cur.replies:
+		t.Fatalf("a reply from the previous run (ret %d) acknowledged the current run's command", ret)
+	default:
+	}
+
+	p.clearLive(old)
+	if p.live != cur {
+		t.Fatal("tearing down an earlier run cleared the current run's command channel")
+	}
+	p.clearLive(cur)
+	if p.live != nil {
+		t.Fatal("the current run's own teardown did not clear its channel")
+	}
+}

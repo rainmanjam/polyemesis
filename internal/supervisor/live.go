@@ -45,8 +45,25 @@ var (
 	errLiveTimeout = errors.New("ffmpeg did not acknowledge the command in time")
 )
 
-// liveReplyRE picks the return code out of FFmpeg's reply line.
-var liveReplyRE = regexp.MustCompile(`Command reply for stream \d+: ret:(-?\d+)`)
+// liveReplyRE matches FFmpeg's reply as the WHOLE stderr line. Anchored at both
+// ends: stderr can echo text an operator or a stream controls (metadata, titles),
+// and a line that merely contains the words is not an acknowledgement.
+var liveReplyRE = regexp.MustCompile(`^Command reply for stream (\d+): ret:(-?\d+)(?: res:.*)?$`)
+
+// parseReply reads one stderr line. It reports the stream index and return code
+// of a genuine reply, and ok=false for any other line.
+func parseReply(line string) (stream, ret int, ok bool) {
+	m := liveReplyRE.FindStringSubmatch(line)
+	if m == nil {
+		return 0, 0, false
+	}
+	stream, err1 := strconv.Atoi(m[1])
+	ret, err2 := strconv.Atoi(m[2])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return stream, ret, true
+}
 
 // liveInstanceRE is the only target a command may name: a volume filter
 // instance. The rest of the grammar is fixed, so there is nothing else to name.
@@ -156,21 +173,16 @@ func (p *Process) SetVolume(instance string, level float64) error {
 	return nil
 }
 
-// deliverReply routes a reply line from the stderr scanner to the current run's
+// deliverReply routes a reply line from ONE spawn's stderr scanner to THAT
+// spawn's run. The run is bound by the scanner that reads it, not looked up on
+// the Process, so a reply from an earlier spawn cannot reach a later run's
 // waiter. It never blocks: the scanner is the only reader of stderr.
-func (p *Process) deliverReply(line string) {
-	m := liveReplyRE.FindStringSubmatch(line)
-	if m == nil {
-		return
-	}
-	ret, err := strconv.Atoi(m[1])
-	if err != nil {
-		return
-	}
-	p.liveMu.Lock()
-	run := p.live
-	p.liveMu.Unlock()
+func deliverReply(run *liveRun, line string) {
 	if run == nil {
+		return
+	}
+	_, ret, ok := parseReply(line)
+	if !ok {
 		return
 	}
 	select {
@@ -179,11 +191,13 @@ func (p *Process) deliverReply(line string) {
 	}
 }
 
-// clearLive detaches the command channel at exit. Done before exited is closed,
-// so a caller that arrives after the reap is refused rather than writing to a
-// closed pipe.
-func (p *Process) clearLive() {
+// clearLive detaches run's command channel at its exit, but only if it is still
+// the current one. Done before exited is closed, so a caller that arrives after
+// the reap is refused rather than writing to a closed pipe.
+func (p *Process) clearLive(run *liveRun) {
 	p.liveMu.Lock()
-	p.live = nil
+	if p.live == run {
+		p.live = nil
+	}
 	p.liveMu.Unlock()
 }

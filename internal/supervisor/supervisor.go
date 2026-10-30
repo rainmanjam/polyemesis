@@ -1098,11 +1098,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.exited = exited
 	p.signalled = false
 	p.cmdMu.Unlock()
+	// This spawn's command channel. Kept in a local as well as on the Process so
+	// this spawn's stderr scanner and teardown act on THIS run only.
+	var liveCur *liveRun
 	if liveStdin != nil {
-		// A new run, so a reply or a poisoned state from an earlier spawn cannot
-		// carry over to this one.
+		liveCur = &liveRun{stdin: liveStdin, replies: make(chan int, 4), exited: exited}
 		p.liveMu.Lock()
-		p.live = &liveRun{stdin: liveStdin, replies: make(chan int, 4), exited: exited}
+		p.live = liveCur
 		p.liveMu.Unlock()
 	}
 
@@ -1200,9 +1202,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 			if line == "" {
 				continue
 			}
-			if liveStdin != nil && strings.Contains(line, "Command reply for stream") {
-				p.deliverReply(line)
-			}
+			deliverReply(liveCur, line)
 			level := classify(line)
 			p.appendLog(line, level)
 			if level == "error" || level == "fatal" {
@@ -1223,9 +1223,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// enrol after cmd.Start(); deliberately NOT in the drain below, which waits
 	// on descendants this process never started and can outlive the child.
 	childcensus.Discharge(cmd.Process.Pid)
-	if liveStdin != nil {
-		p.clearLive()
-	}
+	p.clearLive(liveCur)
 	// Announce the reap before the drain, because that is what terminate()'s
 	// escalation is asking about: a child that has been reaped needs no SIGKILL,
 	// whether or not its grandchild is still writing.
