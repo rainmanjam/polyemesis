@@ -178,7 +178,7 @@ level and is unaffected by any level.
 
 What it does **not** cover: anything that changes the command line. A muxer,
 encoder, output URL, stream mapping, track added or removed, a normaliser that
-flips, or a matrix cell gain all still restart the destination. A gain edit that
+flips, a matrix cell gain or a matrix cell's polarity all still restart the destination. A gain edit that
 crosses the normaliser's threshold is structural and restarts for the same reason.
 
 The earlier conclusion, that FFmpeg cannot be reconfigured in flight, held for

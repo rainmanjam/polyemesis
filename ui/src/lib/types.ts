@@ -55,6 +55,9 @@ export interface MatrixCell {
   /** 0 = left, 1 = right */
   out: number;
   gain: number;
+  /** Polarity inverted (A15). A pan coefficient, so changing it restarts the
+   *  destination; omitted when false. */
+  invert?: boolean;
 }
 
 // ------------------------------------------------------------- track roles
@@ -791,6 +794,10 @@ export interface DestStatus {
    *  so cannot say this. It arrives in every status snapshot, not only on the
    *  POST response, which is why the card can render it with no API change. */
   stopWarning?: string;
+  /** How the most recent per-track gain or mute change took effect (I4):
+   *  "applied live", "applied live: <reason>" or "applied by restart: <reason>".
+   *  Absent until a level change has been recorded for this destination. */
+  levelChange?: string;
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;

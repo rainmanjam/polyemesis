@@ -189,6 +189,11 @@ type Cell struct {
 	Channel int     `json:"channel"` // 0-based channel within that track
 	Out     int     `json:"out"`     // OutL | OutR
 	Gain    float64 `json:"gain"`    // 0.0 .. MaxGain
+	// Invert flips the polarity of this channel's contribution (A15). It is
+	// rendered as a negative pan coefficient, so it is structural: changing it
+	// restarts the destination, unlike a level. Matrix mode only; omitted when
+	// false so a profile that never uses it stores and compiles as before.
+	Invert bool `json:"invert,omitempty"`
 }
 
 // Loudness is a destination's programme-loudness target.

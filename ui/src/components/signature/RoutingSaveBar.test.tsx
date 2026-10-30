@@ -44,6 +44,22 @@ describe("RoutingSaveBar", () => {
     expect(text.toLowerCase()).toContain("restart");
   });
 
+  it("says a level-only change applies live where supported, not that it restarts", () => {
+    // Since I4 a gain or mute change is applied on the running process's
+    // command channel. Warning of a restart there overstates the cost; a
+    // Windows server still restarts, so the wording is "where supported".
+    const { container } = render(<RoutingSaveBar {...base} restarts levelOnly />);
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("YouTube main");
+    expect(text).toMatch(/live, without a restart, where the server supports it/);
+    expect(container.firstElementChild?.className).not.toMatch(/border-warn/);
+  });
+
+  it("still warns of a restart for a structural change", () => {
+    render(<RoutingSaveBar {...base} restarts levelOnly={false} />);
+    expect(screen.getByRole("status").textContent).toMatch(/^Saving restarts/);
+  });
+
   it("does not claim a restart for a destination that is disabled", () => {
     render(<RoutingSaveBar {...base} restarts={false} />);
     expect(screen.getByRole("status").textContent?.toLowerCase()).not.toContain("restart");

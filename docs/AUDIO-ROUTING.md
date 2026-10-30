@@ -41,6 +41,12 @@ from 0.0 to 2.0.
 This subsumes simple mode and additionally lets you take only the rear channels
 of a 5.1 track, pan a mono mic hard left, or swap channels.
 
+A cell can also invert its channel's polarity (`"invert": true` on the cell, the
+Ø toggle in the grid). It is rendered as a negative `pan` coefficient, so like
+any cell change it restarts the destination. A destination that copies its audio
+refuses it. Each track header also carries a mute: a mute is the track's level,
+not a cell, so it leaves the drawn routing alone.
+
 ## Two mixes to one destination
 
 > **EXPERIMENTAL — on Twitch, no broadcast has ever been published through a key
