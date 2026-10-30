@@ -1726,6 +1726,8 @@
   "golive.colSource": "Sumber",
   "golive.colReadiness": "Kesiapan",
   "golive.colProgress": "Progres",
+  "golive.colAudio": "Audio",
+  "golive.allSources": "Semua sumber",
   "golive.stopYoutube": "{count} di antaranya adalah siaran YouTube, yang berakhir selamanya.",
   "firstRun.title": "Siapkan siaran ini",
   "firstRun.progress": "{done} dari {total} selesai",

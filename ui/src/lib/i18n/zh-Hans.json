@@ -1726,6 +1726,8 @@
   "golive.colSource": "源",
   "golive.colReadiness": "就绪状态",
   "golive.colProgress": "进度",
+  "golive.colAudio": "音频",
+  "golive.allSources": "所有来源",
   "golive.stopYoutube": "其中 {count} 个是 YouTube 直播，将永久结束。",
   "firstRun.title": "设置此直播",
   "firstRun.progress": "已完成 {done}/{total}",

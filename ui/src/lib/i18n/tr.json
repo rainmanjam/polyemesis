@@ -1726,6 +1726,8 @@
   "golive.colSource": "Kaynak",
   "golive.colReadiness": "Hazırlık",
   "golive.colProgress": "İlerleme",
+  "golive.colAudio": "Ses",
+  "golive.allSources": "Tüm kaynaklar",
   "golive.stopYoutube": "Bunların {count} tanesi kalıcı olarak sona erecek YouTube yayınıdır.",
   "firstRun.title": "Bu yayını kurun",
   "firstRun.progress": "{total} adımın {done} tanesi tamam",

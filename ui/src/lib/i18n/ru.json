@@ -1726,6 +1726,8 @@
   "golive.colSource": "Источник",
   "golive.colReadiness": "Готовность",
   "golive.colProgress": "Ход",
+  "golive.colAudio": "Звук",
+  "golive.allSources": "Все источники",
   "golive.stopYoutube": "{count} из них — трансляции YouTube, которые завершатся окончательно.",
   "firstRun.title": "Настройка трансляции",
   "firstRun.progress": "Готово: {done} из {total}",

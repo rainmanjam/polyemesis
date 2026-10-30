@@ -1726,6 +1726,8 @@
   "golive.colSource": "Fuente",
   "golive.colReadiness": "Preparación",
   "golive.colProgress": "Progreso",
+  "golive.colAudio": "Audio",
+  "golive.allSources": "Todas las fuentes",
   "golive.stopYoutube": "{count} de estos son transmisiones de YouTube, que terminan para siempre.",
   "firstRun.title": "Configura este stream",
   "firstRun.progress": "{done} de {total} hechos",

@@ -1726,6 +1726,8 @@
   "golive.colSource": "ソース",
   "golive.colReadiness": "準備状況",
   "golive.colProgress": "進行状況",
+  "golive.colAudio": "音声",
+  "golive.allSources": "すべてのソース",
   "golive.stopYoutube": "このうち {count} 件は YouTube 配信で、終了すると再開できません。",
   "firstRun.title": "この配信をセットアップ",
   "firstRun.progress": "{total} 件中 {done} 件完了",

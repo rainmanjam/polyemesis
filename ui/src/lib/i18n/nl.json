@@ -1726,6 +1726,8 @@
   "golive.colSource": "Bron",
   "golive.colReadiness": "Gereedheid",
   "golive.colProgress": "Voortgang",
+  "golive.colAudio": "Audio",
+  "golive.allSources": "Alle bronnen",
   "golive.stopYoutube": "{count} hiervan zijn YouTube-uitzendingen, die definitief eindigen.",
   "firstRun.title": "Deze stream instellen",
   "firstRun.progress": "{done} van {total} klaar",

@@ -1726,6 +1726,8 @@
   "golive.colSource": "소스",
   "golive.colReadiness": "준비 상태",
   "golive.colProgress": "진행 상황",
+  "golive.colAudio": "오디오",
+  "golive.allSources": "모든 소스",
   "golive.stopYoutube": "이 중 {count}건은 YouTube 방송이며 한번 끝나면 되돌릴 수 없습니다.",
   "firstRun.title": "이 스트림 설정",
   "firstRun.progress": "{total}개 중 {done}개 완료",
