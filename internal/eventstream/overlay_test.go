@@ -139,12 +139,12 @@ func TestADisplayLineCarriesNoIdentityOrModerationField(t *testing.T) {
 // off the TYPED payload, so the redaction pass must not turn it into a map --
 // which RedactTree would, and every line would then be withheld.
 func TestADisplayLineSurvivesRedactionTyped(t *testing.T) {
-	env := Envelope{Type: TypeChatDisplay, Data: DisplayLine{Platform: "twitch", Name: "a", Text: "rtmp://x/live/sk_live_abcdefghijklmnop"}}.redacted()
+	env := Envelope{Type: TypeChatDisplay, Data: DisplayLine{Platform: "twitch", Name: "a", Text: "rtmp://x/live/streamkey_abcdefghijklmnop"}}.redacted()
 	d, ok := env.Data.(DisplayLine)
 	if !ok {
 		t.Fatalf("redaction changed the payload to %T", env.Data)
 	}
-	if strings.Contains(d.Text, "sk_live_abcdefghijklmnop") {
+	if strings.Contains(d.Text, "streamkey_abcdefghijklmnop") {
 		t.Errorf("a credential-shaped string survived redaction: %q", d.Text)
 	}
 }

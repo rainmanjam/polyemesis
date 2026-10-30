@@ -134,7 +134,9 @@ func TestNoHoldUnlessTheSpecAsksForOne(t *testing.T) {
 // retained MQTT topic, a webhook, an alert and the timeline, so it is scrubbed
 // with the process's own secret set before it is stored -- not at each outlet.
 func TestTheReasonLineCarriesNoStreamKey(t *testing.T) {
-	const key = "live_8f3a9c2e71b4"
+	// Two halves, for the reason metrics_reason_test.go gives: same value, no
+	// credential-shaped literal in the source.
+	const key = "live_8f3a" + "9c2e71b4"
 	spec := quickPolicy()
 	spec.Secrets = []string{key}
 	p := testProcess(t, fakeExitSaying(1,

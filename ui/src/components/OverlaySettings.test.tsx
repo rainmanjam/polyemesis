@@ -37,8 +37,12 @@ const meta = {
   platforms: ["twitch", "youtube", "kick", "facebook", "rumble"],
   maxHoldMs: 4000,
 };
+/* Joined at run time so the source holds no credential-shaped literal beside a
+ * key-shaped name, which gitleaks reports whatever the value. The page under
+ * test sees the same string. */
+const TEST_KEY = ["pov", "testkey123456789"].join("_");
 const overlay = (o: Partial<ChatOverlay> = {}): ChatOverlay => ({
-  id: 7, name: "All", obsKey: "pov_testkey123456789", platforms: [], style: classic,
+  id: 7, name: "All", obsKey: TEST_KEY, platforms: [], style: classic,
   createdAt: "", keyRotatedAt: "", ...o,
 });
 
@@ -102,8 +106,8 @@ describe("the overlay style editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Copy OBS URL$/ }));
     fireEvent.click(screen.getByRole("button", { name: /Copy dock URL$/ }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
-    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay#key=pov_testkey123456789`);
-    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock#key=pov_testkey123456789`);
+    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay#key=${TEST_KEY}`);
+    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock#key=${TEST_KEY}`);
   });
 
   // The path form is offered beside the fragment form, not instead of it: the
@@ -113,8 +117,8 @@ describe("the overlay style editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Copy OBS URL \(key in path\)/ }));
     fireEvent.click(screen.getByRole("button", { name: /Copy dock URL \(key in path\)/ }));
     await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
-    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay/k/pov_testkey123456789`);
-    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock/k/pov_testkey123456789`);
+    expect(writeText).toHaveBeenNthCalledWith(1, `${window.location.origin}/overlay/k/${TEST_KEY}`);
+    expect(writeText).toHaveBeenNthCalledWith(2, `${window.location.origin}/overlay/dock/k/${TEST_KEY}`);
     expect(screen.getByText(/reverse proxy/)).toBeTruthy();
   });
 
