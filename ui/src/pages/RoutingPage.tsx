@@ -65,7 +65,13 @@ import {
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
 import { toneForState } from "@/lib/signal";
-import { presetOptsFromRoles, presetPicks } from "@/lib/presetTrackDefaults";
+import {
+  layoutTrackIndices,
+  presetOptsFromRoles,
+  presetPicks,
+  roleLayoutFor,
+  type RoleLayout,
+} from "@/lib/presetTrackDefaults";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -181,6 +187,10 @@ export function RoutingPage() {
   // annotation can move them. See lib/presetTrackDefaults.ts.
   const [presetPicked, setPresetPicked] = useState<Partial<PresetOpts>>({});
   const [annotations, setAnnotations] = useState<TrackAnnotation[]>([]);
+  // The programme `annotations` was seeded from, so the preset role defaults
+  // can tell whether it describes the destination being edited. See
+  // roleLayoutFor.
+  const [annotationsFrom, setAnnotationsFrom] = useState<number | null>(null);
   const [annotating, setAnnotating] = useState(false);
   // Whether the server accepted an annotation write. Null means "not tried
   // yet"; false means this build cannot store them and the editor keeps them
@@ -298,6 +308,7 @@ export function RoutingPage() {
   useEffect(() => {
     if (annotationsSeeded.current || !source) return;
     annotationsSeeded.current = true;
+    setAnnotationsFrom(source.id);
     if (source.annotations?.length) {
       setAnnotations(source.annotations);
       setAnnotationsStored(true);
@@ -517,19 +528,43 @@ export function RoutingPage() {
   // red error — with Save disabled underneath them — until the editor's own
   // debounce came round 180 ms and a round trip later. The editor still owns
   // `compiled`; this only lets it stop showing an answer it knows is out of date.
+  // The edited destination's programme's own layout, read when the editor
+  // moves to a destination on a programme it has not read. The page's
+  // annotations and tracks are the header programme's; a preset is applied
+  // against the destination's (#497), so its role defaults must be too.
+  const [destLayout, setDestLayout] = useState<RoleLayout | null>(null);
+  useEffect(() => {
+    if (editedSourceId === null) return;
+    let cancelled = false;
+    api
+      .source(editedSourceId)
+      .then((s) => {
+        if (cancelled) return;
+        setDestLayout({
+          sourceId: editedSourceId,
+          annotations: s.annotations ?? [],
+          tracks: layoutTrackIndices(s.tracks),
+        });
+      })
+      // No layout, no role defaults: the server's slots stand. A failed read
+      // is not worth a toast on a page that works without it.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [editedSourceId]);
   // What each preset picker shows and a preset is applied with: the server's
-  // defaults, replaced by the track annotated with the picker's role, with the
-  // operator's own picks over both. lib/presetTrackDefaults.ts.
-  const shownPresetOpts = useMemo(
-    () =>
-      presetOptsFromRoles(
-        presetOpts,
-        annotations,
-        tracks.map((tr) => tr.index),
-        presetPicked,
-      ),
-    [presetOpts, annotations, tracks, presetPicked],
-  );
+  // defaults, replaced by the track annotated with the picker's role ON THE
+  // EDITED DESTINATION'S PROGRAMME, with the operator's own picks over both.
+  // lib/presetTrackDefaults.ts.
+  const shownPresetOpts = useMemo(() => {
+    const local: RoleLayout | null =
+      source && annotationsFrom === source.id
+        ? { sourceId: source.id, annotations, tracks: tracks.map((tr) => tr.index) }
+        : null;
+    const roles = roleLayoutFor(editedSourceId, local, destLayout);
+    return presetOptsFromRoles(presetOpts, roles.annotations, roles.tracks, presetPicked);
+  }, [presetOpts, annotations, annotationsFrom, source, tracks, editedSourceId, destLayout, presetPicked]);
   // PresetRow's setter, recording whatever the edit changed as a pick.
   const pickPresetOpts = useCallback(
     (update: (o: PresetOpts) => PresetOpts) => {

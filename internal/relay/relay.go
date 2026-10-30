@@ -98,7 +98,14 @@ type Hub struct {
 	// lastRx is when the last datagram came through, in UnixNano. Wake reads it
 	// to tell a feed that has gone quiet from one that is still delivering --
 	// and a delivering feed wakes its readers by itself.
-	lastRx          atomic.Int64
+	lastRx atomic.Int64
+	// arrivingSince is when the stream now arriving began, in UnixNano: the
+	// first datagram after a silence longer than receivingGap. Written only in
+	// measure, under deliverMu; Stats reads it. See Stats.ReceivingSec.
+	arrivingSince atomic.Int64
+	// now is the clock the arrival tracking reads. Nil is time.Now; tests in
+	// this package wind their own so a gap can pass without sleeping it.
+	now             func() time.Time
 	tsPackets       atomic.Uint64
 	tsLost          atomic.Uint64
 	discontinuities atomic.Uint64
@@ -371,6 +378,36 @@ type Stats struct {
 	TSLost          uint64   `json:"tsLost"`
 	Discontinuities uint64   `json:"discontinuities"`
 	LossPercent     float64  `json:"lossPercent"`
+	// ReceivingSec is how long the stream now arriving has been arriving, and
+	// absent (0) while nothing is.
+	//
+	// It is the ingest uptime for a push on the shared SRT listener, which has
+	// no ingest process to time: srtserver hands datagrams straight to this hub
+	// (engine.reconcileIngest returns early for SRT), so status.ingest is nil
+	// and the dashboard's uptime read "—" over a healthy broadcast. Every byte
+	// of every ingest mode passes through measure, so this is the one clock
+	// that sees a push stream start and stop.
+	//
+	// Seconds rather than a timestamp, like supervisor.Status.UptimeSec, so the
+	// browser's clock never enters into it. A silence longer than receivingGap
+	// ends the stream; the next datagram starts a new one from zero, as a
+	// restarted ingest process would.
+	ReceivingSec float64 `json:"receivingSec,omitempty"`
+}
+
+// receivingGap is how long the hub may hear nothing before the stream it was
+// timing counts as gone. The same three seconds srtserver.StaleAfter allows a
+// quiet publisher before another may take its slot: shorter than that, a
+// network blip would reset an uptime the operator is watching; longer, and a
+// disconnected encoder would keep a running uptime on the card.
+const receivingGap = 3 * time.Second
+
+// clock is the arrival tracking's notion of now. See Hub.now.
+func (h *Hub) clock() time.Time {
+	if h.now != nil {
+		return h.now()
+	}
+	return time.Now()
 }
 
 // Stats returns a throughput snapshot.
@@ -390,6 +427,12 @@ func (h *Hub) Stats() Stats {
 	}
 	if sent := tsPackets + tsLost; sent > 0 {
 		s.LossPercent = 100 * float64(tsLost) / float64(sent)
+	}
+	if last := h.lastRx.Load(); last != 0 {
+		now := h.clock().UnixNano()
+		if time.Duration(now-last) <= receivingGap {
+			s.ReceivingSec = time.Duration(now - h.arrivingSince.Load()).Seconds()
+		}
 	}
 	return s
 }
@@ -484,7 +527,14 @@ func (h *Hub) Deliver(pkt []byte) {
 }
 
 func (h *Hub) measure(dgram []byte) {
-	h.lastRx.Store(time.Now().UnixNano())
+	// Under deliverMu, so this is the only writer of either stamp. The start is
+	// stored before lastRx moves, so Stats never pairs a fresh lastRx with the
+	// previous stream's start.
+	now := h.clock().UnixNano()
+	if prev := h.lastRx.Load(); prev == 0 || time.Duration(now-prev) > receivingGap {
+		h.arrivingSince.Store(now)
+	}
+	h.lastRx.Store(now)
 	h.pes.learn(dgram)
 	packets, discos, lost := h.cc.inspect(dgram)
 	if packets == 0 {

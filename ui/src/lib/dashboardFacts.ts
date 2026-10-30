@@ -1,4 +1,4 @@
-import type { SourceInfo, Status } from "./types";
+import type { ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
 
 /* What the dashboard is allowed to assert, as plain functions.
  *
@@ -264,4 +264,32 @@ export function programmeIngestLive(
 ): boolean {
   if (sourceCount === null || sourceCount <= 1) return seriesLive;
   return scopedSource?.probed === true && (programmeKbps ?? 0) > 0;
+}
+
+/** The ingest uptime the Ingest card and the header print, in seconds, or null
+ *  for "—".
+ *
+ *  A push on the shared SRT listener has NO ingest process: srtserver hands
+ *  datagrams straight to the programme's relay hub (engine.reconcileIngest
+ *  returns early for SRT), so `status.ingest` is null and the card read "—"
+ *  for the whole of a healthy broadcast. The hub sees every byte of every
+ *  ingest mode and reports how long the current stream has been arriving
+ *  (`relay.receivingSec`, relay.Stats.ReceivingSec), which is the uptime.
+ *
+ *  The process is preferred where it has one, as ingestBitrateKbps prefers its
+ *  bitrate: it is measured at the ingest itself. A child that has not stamped
+ *  its first media reports 0, and then the hub, which has seen the bytes,
+ *  answers. The relay figure is gated on `live` -- the programme-scoped
+ *  verdict -- so the card cannot print "Offline" beside a running uptime. A
+ *  running process with nothing arriving keeps the reading it always had. */
+export function ingestUptimeSec(
+  ingest: Pick<ProcessStatus, "state" | "uptimeSec"> | null | undefined,
+  relay: Pick<RelayStats, "receivingSec"> | null | undefined,
+  live: boolean,
+): number | null {
+  const running = ingest?.state === "running";
+  if (running && ingest.uptimeSec > 0) return ingest.uptimeSec;
+  const arriving = relay?.receivingSec;
+  if (live && arriving !== undefined && arriving > 0) return arriving;
+  return running ? ingest.uptimeSec : null;
 }

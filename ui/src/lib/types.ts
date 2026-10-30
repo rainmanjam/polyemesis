@@ -1002,6 +1002,11 @@ export interface RelayStats {
   tsLost: number;
   discontinuities: number;
   lossPercent: number;
+  /** How long the stream now arriving at this programme's hub has been
+   *  arriving, in seconds. Absent while nothing is, and on a server that
+   *  predates it. Mirrors relay.Stats.ReceivingSec: the ingest uptime of a push
+   *  on the shared SRT listener, which has no ingest process to time. */
+  receivingSec?: number;
 }
 
 export interface Status {

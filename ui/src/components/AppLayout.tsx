@@ -55,7 +55,9 @@ import {
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
-import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { useLiveData } from "@/hooks/useLiveData";
+import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
+import { ingestUptimeSec } from "@/lib/dashboardFacts";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
 import { duration, kbps } from "@/lib/format";
@@ -113,7 +115,7 @@ export function AppLayout({
   username: string;
   onSignOut: () => void;
 }) {
-  const { status, connected, frameError, programme } = useLiveData();
+  const { status, connected, frameError, sourceCount } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
 
@@ -185,7 +187,13 @@ export function AppLayout({
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileOpen]);
 
-  const ingest = status?.ingest;
+  // THE SELECTED PROGRAMME'S INGEST, read the way the dashboard's Ingest card
+  // reads it. The status socket is install-wide and the `stats` bitrate series
+  // names no programme, so this chip -- beside the switcher that picks the
+  // programme -- went live on another programme's encoder and printed its
+  // uptime. See useProgrammeIngest.
+  const { snapshot, live: ingestLive } = useProgrammeIngest(sourceCount);
+  const ingest = snapshot?.ingest;
   // BYTES ARRIVING, not a process running.
   //
   // useIngestLive is the app's one definition of "a broadcast is going out",
@@ -199,14 +207,15 @@ export function AppLayout({
   // chrome. A committed screenshot showed it beside three live destinations.
   //
   // The process is still consulted for the bitrate below, where it exists.
-  const ingestLive = useIngestLive();
+  // `ingestLive` above is useIngestLive narrowed to the selected programme.
   // The standby carrying the show is not "offline", whatever the primary is
   // doing; see backupOnAir.
-  // The status socket is install-wide, so a snapshot can belong to another
-  // programme; only trust its failover tier when it is the selected one (the
-  // same scoping Dashboard applies).
-  const failoverIsOurs = programme == null || status?.source?.id === programme;
-  const onBackup = failoverIsOurs && backupOnAir(status?.failover);
+  // The selected programme's own frame, so another programme's failover tier
+  // never speaks for this one (the same scoping Dashboard applies).
+  const onBackup = backupOnAir(snapshot?.failover);
+  // The process's uptime where there is one; for a push on the shared SRT
+  // listener, which has none, how long its stream has been arriving.
+  const uptime = ingestUptimeSec(ingest, snapshot?.relay, ingestLive);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
   const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
   const liveCount =
@@ -311,9 +320,9 @@ export function AppLayout({
               {t("chrome.liveCount", { count: liveCount })}
             </Badge>
           )}
-          {ingest?.state === "running" && (
+          {uptime !== null && (
             <span className="tnum hidden font-mono text-tiny text-muted-foreground sm:inline">
-              {duration(ingest.uptimeSec)}
+              {duration(uptime)}
             </span>
           )}
           {/* Socket health matters: a disconnected UI showing stale numbers is
