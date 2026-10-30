@@ -323,6 +323,26 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
+	"GET /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"POST /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"GET /api/v1/polls/export": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"GET /api/v1/polls/{id}": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"POST /api/v1/polls/{id}/end": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
 	"GET /api/v1/events": "the events hub is not wired into this fixture (Options.Stream " +
 		"is nil), so the route answers 503 at once. That is about the BUILD, not a source: " +
 		"in production main wires the hub unconditionally, and with no source the stream " +
