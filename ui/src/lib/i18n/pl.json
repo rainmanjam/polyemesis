@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} z nich jest włączone i zostanie od razu uruchomione ponownie na wideo źródłowym. Żadne nie zostanie usunięte, a ich routing audio pozostaje bez zmian.",
   "i18nSweep.enabledMany": "Włączone są {count} z nich i zostaną od razu uruchomione ponownie na wideo źródłowym. Żadne nie zostanie usunięte, a ich routing audio pozostaje bez zmian.",
   "i18nSweep.resultsEmpty": "Wyniki pojawią się tutaj, po jednym wierszu na platformę.",
-  "i18nSweep.matrixOut": "Wyjście"
+  "i18nSweep.matrixOut": "Wyjście",
+  "dash.stopCountLoading": "Liczenie transmisji YouTube, które to zatrzymanie zakończy…",
+  "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie."
 }

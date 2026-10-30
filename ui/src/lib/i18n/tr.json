@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "Bunlardan {count} tanesi etkin ve kaynak videoda hemen yeniden başlayacak. Hiçbiri silinmeyecek ve ses yönlendirmeleri değişmeyecek.",
   "i18nSweep.enabledMany": "Bunlardan {count} tanesi etkin ve kaynak videoda hemen yeniden başlayacak. Hiçbiri silinmeyecek ve ses yönlendirmeleri değişmeyecek.",
   "i18nSweep.resultsEmpty": "Sonuçlar burada görünür, her platform için bir satır.",
-  "i18nSweep.matrixOut": "Çıkış"
+  "i18nSweep.matrixOut": "Çıkış",
+  "dash.stopCountLoading": "Bu durdurmanın sonlandıracağı YouTube yayınları sayılıyor…",
+  "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin."
 }

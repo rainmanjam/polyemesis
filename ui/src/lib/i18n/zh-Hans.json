@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "其中 {count} 个已启用，将立即在源视频上重新开始。不会删除任何一个，它们的音频路由也保持不变。",
   "i18nSweep.enabledMany": "其中 {count} 个已启用，将立即在源视频上重新开始。不会删除任何一个，它们的音频路由也保持不变。",
   "i18nSweep.resultsEmpty": "结果会显示在这里，每个平台一行。",
-  "i18nSweep.matrixOut": "输出"
+  "i18nSweep.matrixOut": "输出",
+  "dash.stopCountLoading": "正在统计此次停止将结束的 YouTube 直播…",
+  "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。"
 }

@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} of them is enabled and will restart immediately on the source video. None of them is deleted, and their audio routing is untouched.",
   "i18nSweep.enabledMany": "{count} of them are enabled and will restart immediately on the source video. None of them is deleted, and their audio routing is untouched.",
   "i18nSweep.resultsEmpty": "Results appear here, one row per platform.",
-  "i18nSweep.matrixOut": "Out"
+  "i18nSweep.matrixOut": "Out",
+  "dash.stopCountLoading": "Counting the YouTube broadcasts this stop would end…",
+  "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again."
 }

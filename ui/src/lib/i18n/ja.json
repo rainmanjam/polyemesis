@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "そのうち {count} 件が有効で、ソース映像で直ちに再開されます。削除されるものはなく、音声ルーティングも変わりません。",
   "i18nSweep.enabledMany": "そのうち {count} 件が有効で、ソース映像で直ちに再開されます。削除されるものはなく、音声ルーティングも変わりません。",
   "i18nSweep.resultsEmpty": "結果はここに表示され、プラットフォームごとに 1 行ずつ並びます。",
-  "i18nSweep.matrixOut": "出力"
+  "i18nSweep.matrixOut": "出力",
+  "dash.stopCountLoading": "このストップで終了する YouTube 配信を数えています…",
+  "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。"
 }

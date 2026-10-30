@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} davon ist aktiviert und wird sofort auf dem Quellvideo neu gestartet. Keines davon wird gelöscht, und ihr Audio-Routing bleibt unverändert.",
   "i18nSweep.enabledMany": "{count} davon sind aktiviert und werden sofort auf dem Quellvideo neu gestartet. Keines davon wird gelöscht, und ihr Audio-Routing bleibt unverändert.",
   "i18nSweep.resultsEmpty": "Ergebnisse erscheinen hier, eine Zeile pro Plattform.",
-  "i18nSweep.matrixOut": "Aus"
+  "i18nSweep.matrixOut": "Aus",
+  "dash.stopCountLoading": "Die YouTube-Übertragungen, die dieser Stopp beenden würde, werden gezählt…",
+  "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen."
 }

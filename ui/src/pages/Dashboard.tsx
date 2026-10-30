@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -669,8 +669,35 @@ function BulkDestinationControl({
   // The sheet's rows, frozen when it opens. See GoLiveSheet.
   const [sheetRows, setSheetRows] = useState<GoLiveRow[] | null>(null);
   const confirmStopAll = useConfirm<true>();
+  // The Stop dialog's count comes from the server, the same answer the stop is judged by. It is
+  // fetched fresh each time the dialog opens, and until it arrives the dialog cannot be confirmed:
+  // a stop whose count is unknown is a stop the operator did not see.
+  type StopCountState =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ready"; youtube: number }
+    | { status: "failed"; message: string };
+  const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
+  const stopCountSeq = useRef(0);
   const count = destinations.length;
+  // The Go live sheet still counts YouTube broadcasts locally for its own warning.
   const youtube = youtubeBroadcastsAtRisk(destinations);
+
+  const openStopAll = () => {
+    const seq = ++stopCountSeq.current;
+    setStopCount({ status: "loading" });
+    confirmStopAll.ask(true);
+    api.stopImpact().then(
+      (impact) => {
+        if (seq === stopCountSeq.current) setStopCount({ status: "ready", youtube: impact.youtubeBroadcasts });
+      },
+      (err: unknown) => {
+        if (seq === stopCountSeq.current) {
+          setStopCount({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+        }
+      },
+    );
+  };
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -706,10 +733,15 @@ function BulkDestinationControl({
 
   if (count === 0) return null;
 
+  const consequence = t("dash.stopAllConsequence", { count: String(count) });
   const stopDescription =
-    youtube > 0
-      ? `${t("dash.stopAllConsequence", { count: String(count) })} ${t("golive.stopYoutube", { count: youtube })}`
-      : t("dash.stopAllConsequence", { count: String(count) });
+    stopCount.status === "loading" || stopCount.status === "idle"
+      ? t("dash.stopCountLoading")
+      : stopCount.status === "failed"
+        ? `${t("dash.stopCountFailed")} ${stopCount.message}`
+        : stopCount.youtube > 0
+          ? `${consequence} ${t("golive.stopYoutube", { count: stopCount.youtube })}`
+          : consequence;
 
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
@@ -727,7 +759,7 @@ function BulkDestinationControl({
           size="sm"
           variant="outline"
           disabled={busy}
-          onClick={() => confirmStopAll.ask(true)}
+          onClick={openStopAll}
         >
           <Square /> {busy ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
@@ -793,6 +825,7 @@ function BulkDestinationControl({
         title={t("dash.stopAllTitle", { count })}
         description={stopDescription}
         confirmLabel={t("dash.stopAll")}
+        confirmDisabled={stopCount.status !== "ready"}
         onConfirm={() => stopAll()}
       />
     </div>
