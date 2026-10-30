@@ -54,5 +54,21 @@
   "streamdeck.pi.presetsFailed": "No se pudo cargar la lista de preajustes.",
   "streamdeck.pi.presetChoose": "Elige un preajuste",
   "streamdeck.pi.presetMissing": "{id} (ya no está en esta instalación)",
-  "streamdeck.pi.installWide": "La grabación es para toda la instalación: esta tecla la activa o desactiva para todos los programas."
+  "streamdeck.pi.installWide": "La grabación es para toda la instalación: esta tecla la activa o desactiva para todos los programas.",
+  "streamdeck.mute.muted": "SILENCIADO",
+  "streamdeck.mute.unmuted": "Con sonido",
+  "streamdeck.mute.appliedLive": "Aplicado en directo",
+  "streamdeck.mute.appliedRestart": "Aplicado con reinicio",
+  "streamdeck.mute.unavailable": "No disponible",
+  "streamdeck.mute.copyAudio": "El audio pasa sin cambios",
+  "streamdeck.mute.noTrack": "Pista fuera de la mezcla",
+  "streamdeck.track.numbered": "Pista {n}",
+  "streamdeck.pi.trackLabel": "Pista",
+  "streamdeck.pi.destinationChoose": "Elige un destino",
+  "streamdeck.pi.trackChoose": "Elige una pista",
+  "streamdeck.pi.destinationsFailed": "No se pudo cargar la lista de destinos.",
+  "streamdeck.pi.notListed": "{id} (ya no aparece)",
+  "streamdeck.pi.trackHint": "Un cambio se aplica en directo cuando es posible. Si no, el destino se reinicia y los espectadores ven una reconexión. Un servidor Windows siempre reinicia.",
+  "streamdeck.pi.destinationLabel": "Destino",
+  "streamdeck.gain.matrix": "matriz: usa la UI"
 }

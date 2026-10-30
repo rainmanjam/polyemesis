@@ -54,5 +54,21 @@
   "streamdeck.pi.presetsFailed": "De presetlijst kon niet worden geladen.",
   "streamdeck.pi.presetChoose": "Kies een preset",
   "streamdeck.pi.presetMissing": "{id} (niet meer op deze installatie)",
-  "streamdeck.pi.installWide": "Opname geldt voor de hele installatie: deze toets schakelt het voor elk programma."
+  "streamdeck.pi.installWide": "Opname geldt voor de hele installatie: deze toets schakelt het voor elk programma.",
+  "streamdeck.mute.muted": "GEDEMPT",
+  "streamdeck.mute.unmuted": "Geluid aan",
+  "streamdeck.mute.appliedLive": "Live toegepast",
+  "streamdeck.mute.appliedRestart": "Toegepast via herstart",
+  "streamdeck.mute.unavailable": "Niet beschikbaar",
+  "streamdeck.mute.copyAudio": "Audio ongewijzigd doorgegeven",
+  "streamdeck.mute.noTrack": "Spoor niet in mix",
+  "streamdeck.track.numbered": "Spoor {n}",
+  "streamdeck.pi.trackLabel": "Spoor",
+  "streamdeck.pi.destinationChoose": "Kies een bestemming",
+  "streamdeck.pi.trackChoose": "Kies een spoor",
+  "streamdeck.pi.destinationsFailed": "De lijst met bestemmingen kon niet worden geladen.",
+  "streamdeck.pi.notListed": "{id} (niet meer vermeld)",
+  "streamdeck.pi.trackHint": "Een wijziging wordt live toegepast als dat kan. Anders herstart de bestemming en zien kijkers een herverbinding. Een Windows-server herstart altijd.",
+  "streamdeck.pi.destinationLabel": "Bestemming",
+  "streamdeck.gain.matrix": "matrix: gebruik UI"
 }

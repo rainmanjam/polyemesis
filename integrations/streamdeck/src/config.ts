@@ -27,6 +27,8 @@ export interface KeySettings {
   destinationId?: number;
   /** A routing preset id from GET /routing/presets. Not a secret: it is safe in action settings. */
   presetId?: string;
+  /** A 0-based ingest track index, for the track mute key and the gain dial. Track 0 is a real track. */
+  track?: number;
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -62,11 +64,22 @@ export function positiveId(raw: unknown): number | undefined {
   return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * A track index is a non-negative integer: track 0 is the first track, so positiveId would lose it.
+ * An empty string is NOT zero (Number("") is 0), so an unchosen picker saves no track at all.
+ */
+export function trackIndex(raw: unknown): number | undefined {
+  if (typeof raw === "string" && raw.trim() === "") return undefined;
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
+}
+
 export function keySettings(raw: Record<string, unknown> | undefined): KeySettings {
   const preset = typeof raw?.presetId === "string" ? raw.presetId.trim() : "";
   return {
     sourceId: positiveId(raw?.sourceId),
     destinationId: positiveId(raw?.destinationId),
     presetId: preset === "" ? undefined : preset,
+    track: trackIndex(raw?.track),
   };
 }

@@ -63,12 +63,23 @@ function loadInspector(action: string) {
   const ids = [
     "url", "token", "caPem", "sourceId", "destinationId", "presetId", "err-preset", "result",
     "admin-warning", "test", "block-source", "block-destination", "block-preset", "block-install-wide",
+    "block-track", "trackDestination", "track", "err-track",
   ];
-  const els = Object.fromEntries(ids.map((id) => [id, element(id, id === "presetId")]));
+  const selects = ["presetId", "trackDestination", "track"];
+  const els = Object.fromEntries(ids.map((id) => [id, element(id, selects.includes(id))]));
   const sent: unknown[] = [];
   let socket: { onopen?: () => void; onmessage?: (m: { data: string }) => void; readyState: number; send(s: string): void };
   const window: Record<string, unknown> = {
-    POLYEMESIS_STRINGS: { en: { "streamdeck.pi.presetChoose": "Choose a preset", "streamdeck.pi.presetMissing": "{id} (gone)" } },
+    POLYEMESIS_STRINGS: {
+      en: {
+        "streamdeck.pi.presetChoose": "Choose a preset",
+        "streamdeck.pi.presetMissing": "{id} (gone)",
+        "streamdeck.pi.destinationChoose": "Choose a destination",
+        "streamdeck.pi.trackChoose": "Choose a track",
+        "streamdeck.pi.notListed": "{id} (not listed)",
+        "streamdeck.pi.destinationsFailed": "No list",
+      },
+    },
   };
   const context = {
     window,
@@ -93,7 +104,8 @@ function loadInspector(action: string) {
   );
   socket!.onopen!();
   const receive = (event: string, payload: unknown) => socket!.onmessage!({ data: JSON.stringify({ event, payload }) });
-  return { els, sent, receive };
+  const change = (id: string) => els[id]!.listeners.change!.forEach((fn) => fn());
+  return { els, sent, receive, change };
 }
 
 const LIST = { type: "presets", presets: [{ id: "music", name: "Music" }, { id: "talk", name: "Talk" }] };
@@ -140,5 +152,97 @@ describe("inspector preset picker", () => {
     expect(record.els["block-install-wide"]!.hidden).toBe(false);
     const preset = loadInspector("com.polyemesis.streamdeck.preset");
     expect(preset.els["block-source"]!.hidden).toBe(false);
+  });
+});
+
+const MUTE = "com.polyemesis.streamdeck.track-mute";
+const GAIN = "com.polyemesis.streamdeck.track-gain";
+const DESTS = {
+  type: "destinations",
+  destinations: [
+    { id: 5, name: "Twitch", tracks: [{ track: 0, name: "Main" }, { track: 2, name: "Guest mic" }] },
+    { id: 6, name: "YouTube", tracks: [{ track: 1, name: "Track 2" }] },
+  ],
+};
+const settingsSent = (sent: unknown[]) =>
+  sent.filter((m) => (m as { event?: string }).event === "setSettings").map((m) => (m as { payload: unknown }).payload);
+
+describe("inspector track picker", () => {
+  it("shows only the track block on a track key, and asks for the key's programme's destinations once its settings arrive", () => {
+    const { els, sent, receive } = loadInspector(MUTE);
+    expect(els["block-track"]!.hidden).toBe(false);
+    expect(els["block-destination"]!.hidden).toBe(true);
+    expect(els["block-source"]!.hidden).toBe(false);
+    // Not before: the form does not hold the programme yet, and the list would be every programme's.
+    expect(sent.some((m) => (m as { payload?: { type?: string } }).payload?.type === "destinations")).toBe(false);
+    receive("didReceiveSettings", { settings: { sourceId: 7 } });
+    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations", sourceId: 7 } }));
+    receive("sendToPropertyInspector", DESTS);
+    expect(els.trackDestination!.children.map((c) => c.textContent)).toEqual(["Choose a destination", "Twitch", "YouTube"]);
+  });
+
+  it("shows the saved destination and track 0 when the settings arrive before the list", () => {
+    const { els, receive } = loadInspector(MUTE);
+    receive("didReceiveSettings", { settings: { destinationId: 5, track: 0 } });
+    receive("sendToPropertyInspector", DESTS);
+    expect(els.trackDestination!.value).toBe("5");
+    expect(els.track!.value).toBe("0");
+    expect(els.track!.children.map((c) => c.textContent)).toEqual(["Choose a track", "Main", "Guest mic"]);
+  });
+
+  it("shows the saved destination and track when the list arrives first", () => {
+    const { els, receive } = loadInspector(MUTE);
+    receive("sendToPropertyInspector", DESTS);
+    receive("didReceiveSettings", { settings: { destinationId: 5, track: 2 } });
+    expect(els.trackDestination!.value).toBe("5");
+    expect(els.track!.value).toBe("2");
+  });
+
+  it("keeps a saved track the destination no longer selects, marked, instead of choosing another", () => {
+    const { els, receive } = loadInspector(MUTE);
+    receive("didReceiveSettings", { settings: { destinationId: 5, track: 4 } });
+    receive("sendToPropertyInspector", DESTS);
+    expect(els.track!.value).toBe("4");
+    expect(els.track!.children.at(-1)!.textContent).toBe("4 (not listed)");
+  });
+
+  it("saves track 0 as 0, saves no track when none is chosen, and clears the track on a new destination", () => {
+    const { els, sent, receive, change } = loadInspector(MUTE);
+    receive("sendToPropertyInspector", DESTS);
+    receive("didReceiveSettings", { settings: { sourceId: 7 } });
+    els.trackDestination!.value = "5";
+    change("trackDestination");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 5 });
+    els.track!.value = "0";
+    change("track");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 5, track: 0 });
+    els.trackDestination!.value = "6";
+    change("trackDestination");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 6 });
+  });
+
+  it("asks again for the new programme's destinations when the programme changes", () => {
+    const { els, sent, change } = loadInspector(MUTE);
+    els.sourceId!.value = "8";
+    change("sourceId");
+    expect(sent.at(-1)).toMatchObject({ event: "sendToPlugin", payload: { type: "destinations", sourceId: 8 } });
+  });
+
+  it("says why when the list could not be loaded", () => {
+    const { els, receive } = loadInspector(MUTE);
+    receive("sendToPropertyInspector", { type: "destinations", key: "streamdeck.pi.destinationsFailed" });
+    expect(els["err-track"]!.hidden).toBe(false);
+    expect(els["err-track"]!.textContent).toBe("No list");
+  });
+
+  it("shows the same pickers on the gain dial", () => {
+    const { els, sent, receive } = loadInspector(GAIN);
+    expect(els["block-track"]!.hidden).toBe(false);
+    receive("didReceiveSettings", { settings: {} });
+    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations" } }));
+  });
+
+  it("does not show the track block on other keys", () => {
+    expect(loadInspector("com.polyemesis.streamdeck.destination").els["block-track"]!.hidden).toBe(true);
   });
 });

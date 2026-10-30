@@ -58,6 +58,14 @@ const KEY_COLOURS = {
   halted: [150, 36, 84],
   // A write key on a read token. Muted violet: not a fault, not a state of the stream.
   needsAdmin: [86, 74, 128],
+  // A muted track. The error red, because a muted track is silent on air; the crossed speaker
+  // (not the action glyph) is what tells it from "unreachable" at a glance.
+  muted: [197, 48, 48],
+  // A level that reached the output by a RESTART: the viewer saw a reconnect. Burnt orange, its
+  // own colour, so it is never read as the amber of an ordinary warning.
+  restarted: [190, 96, 26],
+  // The control cannot apply here (audio copy, a matrix mix). Grey: nothing is wrong with the stream.
+  unavailable: [74, 79, 90],
 };
 
 // ---- shapes, in unit coordinates (0..1 across the icon) -------------------
@@ -214,10 +222,33 @@ const GLYPH = {
   ),
 };
 
+// A loudspeaker: a box and its cone, on the left half, so a mark beside it reads as its sound.
+const SPEAKER = any(
+  inRoundRect(0.1, 0.38, 0.32, 0.62, 0.03),
+  inTriangle([
+    [0.26, 0.38],
+    [0.52, 0.16],
+    [0.52, 0.84],
+  ]),
+  inTriangle([
+    [0.26, 0.38],
+    [0.26, 0.62],
+    [0.52, 0.84],
+  ]),
+);
+// Track mute: the speaker with its sound.
+GLYPH["track-mute"] = any(SPEAKER, inArc(0.54, 0.5, 0.16, 0.08, 50, 130), inArc(0.54, 0.5, 0.32, 0.08, 50, 130));
+// Track gain: a knob with its pointer, inside a travel arc.
+GLYPH["track-gain"] = any(
+  minus(inCircle(0.5, 0.54, 0.26), inCapsule(0.5, 0.54, 0.66, 0.38, 0.08)),
+  inArc(0.5, 0.54, 0.4, 0.07, 0, 135),
+  inArc(0.5, 0.54, 0.4, 0.07, 225, 360),
+);
+
 // The category and plugin marks: a ring with a centre dot, the broadcast emblem.
 const EMBLEM = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.11));
 
-// Status marks that replace the action glyph on two faces, so the face says the state, not the action.
+// Status marks that replace the action glyph on some faces, so the face says the state, not the action.
 const STATUS_GLYPH = {
   // HALTED: DISK -- a drive, with its slot and activity light cut out.
   halted: minus(
@@ -235,6 +266,19 @@ const STATUS_GLYPH = {
       any(inCircle(0.5, 0.64, 0.07), inCapsule(0.5, 0.64, 0.5, 0.78, 0.06)),
     ),
   ),
+  // Muted -- the speaker, crossed out.
+  muted: any(SPEAKER, inCapsule(0.62, 0.36, 0.9, 0.64, 0.09), inCapsule(0.62, 0.64, 0.9, 0.36, 0.09)),
+  // Applied by restart -- a circular arrow, the reconnect the viewer saw.
+  restarted: any(
+    inArc(0.5, 0.52, 0.28, 0.1, 60, 360),
+    inTriangle([
+      [0.5, 0.1],
+      [0.5, 0.38],
+      [0.68, 0.24],
+    ]),
+  ),
+  // Not available here -- a circle with a bar through it.
+  unavailable: any(inRing(0.5, 0.5, 0.3, 0.1), inCapsule(0.3, 0.3, 0.7, 0.7, 0.1)),
 };
 
 // ---- png -----------------------------------------------------------------
@@ -286,13 +330,14 @@ function write(rel, size, paint) {
 
 // ---- the set -------------------------------------------------------------
 
-// Each key action has its own set of eight state faces, in KEY_STATE order (src/render.ts).
+// Each key action has its own set of state faces, one per KEY_STATE entry, in its order (src/render.ts).
 // A face is the state tile with the action's glyph as a badge in the top-left corner, clear
-// of the centred title text. The halted and needs-admin faces carry a status mark instead
-// (a drive, a padlock), so those two states are faces of their own and never the generic
-// error or warn tile. Only the record key ever shows halted; every key has the face so the
-// state indices line up across actions.
-const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover"];
+// of the centred title text. The halted, needs-admin, muted, restarted and unavailable faces
+// carry a status mark instead (a drive, a padlock, a crossed speaker, a circular arrow, a
+// barred circle), so those states are faces of their own and never the generic error or warn
+// tile. Only the record key ever shows halted, and only the track mute key shows the last
+// three; every key has every face so the state indices line up across actions.
+const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
 function badged(base, shape) {

@@ -11,9 +11,23 @@ import type { StreamDeckKey } from "./keys.js";
  * The colour family a key is drawn in. Green means live and nothing else.
  * "halted" is the Record key's HALTED: DISK face, its own image so an unreachable
  * install (error) can never be mistaken for a full disk. "needsAdmin" is a write
- * key on a read token: its own lock face, not the generic warn tile.
+ * key on a read token: its own lock face, not the generic warn tile. The last three are the
+ * track mute key's: a muted track (a crossed speaker, so it is never read as "unreachable"), a
+ * level that reached the output by a restart (the viewer saw a reconnect), and a control that
+ * cannot apply to this destination.
  */
-export type KeyTone = "live" | "warn" | "error" | "idle" | "held" | "unbound" | "halted" | "needsAdmin";
+export type KeyTone =
+  | "live"
+  | "warn"
+  | "error"
+  | "idle"
+  | "held"
+  | "unbound"
+  | "halted"
+  | "needsAdmin"
+  | "muted"
+  | "restarted"
+  | "unavailable";
 
 export interface KeyFace {
   tone: KeyTone;

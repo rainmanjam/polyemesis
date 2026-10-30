@@ -54,5 +54,21 @@
   "streamdeck.pi.presetsFailed": "Не удалось загрузить список пресетов.",
   "streamdeck.pi.presetChoose": "Выберите пресет",
   "streamdeck.pi.presetMissing": "{id} (больше нет в этой установке)",
-  "streamdeck.pi.installWide": "Запись общая для установки: эта клавиша переключает её для всех программ."
+  "streamdeck.pi.installWide": "Запись общая для установки: эта клавиша переключает её для всех программ.",
+  "streamdeck.mute.muted": "ЗВУК ВЫКЛ",
+  "streamdeck.mute.unmuted": "Звук вкл",
+  "streamdeck.mute.appliedLive": "Применено вживую",
+  "streamdeck.mute.appliedRestart": "Применено перезапуском",
+  "streamdeck.mute.unavailable": "Недоступно",
+  "streamdeck.mute.copyAudio": "Звук передаётся без изменений",
+  "streamdeck.mute.noTrack": "Дорожки нет в миксе",
+  "streamdeck.track.numbered": "Дорожка {n}",
+  "streamdeck.pi.trackLabel": "Дорожка",
+  "streamdeck.pi.destinationChoose": "Выберите назначение",
+  "streamdeck.pi.trackChoose": "Выберите дорожку",
+  "streamdeck.pi.destinationsFailed": "Не удалось загрузить список назначений.",
+  "streamdeck.pi.notListed": "{id} (больше нет в списке)",
+  "streamdeck.pi.trackHint": "Изменение применяется вживую, когда это возможно. Иначе назначение перезапускается, и зрители видят переподключение. Сервер Windows всегда перезапускается.",
+  "streamdeck.pi.destinationLabel": "Назначение",
+  "streamdeck.gain.matrix": "матрица: через UI"
 }

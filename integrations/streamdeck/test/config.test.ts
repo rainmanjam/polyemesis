@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConfigError, keySettings, parseServerUrl, positiveId, requireToken } from "../src/config.js";
+import { ConfigError, keySettings, parseServerUrl, positiveId, requireToken, trackIndex } from "../src/config.js";
 
 describe("parseServerUrl", () => {
   it("accepts https for any host", () => {
@@ -46,5 +46,23 @@ describe("positiveId", () => {
   it("reads both key settings and leaves the unset ones undefined", () => {
     expect(keySettings({ sourceId: "3" })).toEqual({ sourceId: 3, destinationId: undefined });
     expect(keySettings(undefined)).toEqual({ sourceId: undefined, destinationId: undefined });
+  });
+});
+
+describe("trackIndex", () => {
+  it("keeps track 0, the first track, which a positive id would drop", () => {
+    expect(trackIndex(0)).toBe(0);
+    expect(trackIndex("0")).toBe(0);
+    expect(trackIndex("3")).toBe(3);
+    expect(keySettings({ track: 0 }).track).toBe(0);
+  });
+
+  it("saves no track for an unchosen picker, a negative or a fraction", () => {
+    expect(trackIndex("")).toBeUndefined();
+    expect(trackIndex("  ")).toBeUndefined();
+    expect(trackIndex(-1)).toBeUndefined();
+    expect(trackIndex(1.5)).toBeUndefined();
+    expect(trackIndex(null)).toBeUndefined();
+    expect(keySettings({}).track).toBeUndefined();
   });
 });

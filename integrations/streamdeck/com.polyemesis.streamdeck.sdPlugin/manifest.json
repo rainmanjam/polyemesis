@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
   "Name": "polyemesis",
-  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover and dial meters for a polyemesis install.",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
@@ -60,6 +60,15 @@
         },
         {
           "Image": "imgs/keys/destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/destination/muted"
+        },
+        {
+          "Image": "imgs/keys/destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/destination/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -98,6 +107,15 @@
         },
         {
           "Image": "imgs/keys/go-live/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/go-live/muted"
+        },
+        {
+          "Image": "imgs/keys/go-live/restarted"
+        },
+        {
+          "Image": "imgs/keys/go-live/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -136,6 +154,15 @@
         },
         {
           "Image": "imgs/keys/stop-all/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-all/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -175,6 +202,15 @@
         },
         {
           "Image": "imgs/keys/failover/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/failover/muted"
+        },
+        {
+          "Image": "imgs/keys/failover/restarted"
+        },
+        {
+          "Image": "imgs/keys/failover/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -213,6 +249,15 @@
         },
         {
           "Image": "imgs/keys/stop-destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -252,6 +297,15 @@
         },
         {
           "Image": "imgs/keys/record/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/record/muted"
+        },
+        {
+          "Image": "imgs/keys/record/restarted"
+        },
+        {
+          "Image": "imgs/keys/record/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -290,11 +344,90 @@
         },
         {
           "Image": "imgs/keys/preset/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/preset/muted"
+        },
+        {
+          "Image": "imgs/keys/preset/restarted"
+        },
+        {
+          "Image": "imgs/keys/preset/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false,
       "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.track-mute",
+      "Name": "Mute track",
+      "Tooltip": "Mutes or unmutes one audio track on one destination. Applies live when the server can, otherwise by a restart the viewers see. Needs an admin token.",
+      "Icon": "imgs/actions/track-mute",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/track-mute/idle"
+        },
+        {
+          "Image": "imgs/keys/track-mute/live"
+        },
+        {
+          "Image": "imgs/keys/track-mute/warn"
+        },
+        {
+          "Image": "imgs/keys/track-mute/error"
+        },
+        {
+          "Image": "imgs/keys/track-mute/held"
+        },
+        {
+          "Image": "imgs/keys/track-mute/unbound"
+        },
+        {
+          "Image": "imgs/keys/track-mute/halted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/track-mute/muted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/restarted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.track-gain",
+      "Name": "Track gain",
+      "Tooltip": "One audio track's gain on one destination, in 0.5 dB steps. Push to mute, touch for 0 dB. Applies live when the server can, otherwise by a restart. Needs an admin token.",
+      "Icon": "imgs/actions/track-gain",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Gain, 0.5 dB a step",
+          "Push": "Mute / unmute",
+          "Touch": "Reset to 0 dB"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/track-gain"
+        }
+      ]
     },
     {
       "UUID": "com.polyemesis.streamdeck.meter",

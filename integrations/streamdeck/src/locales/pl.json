@@ -54,5 +54,21 @@
   "streamdeck.pi.presetsFailed": "Nie udało się wczytać listy ustawień.",
   "streamdeck.pi.presetChoose": "Wybierz preset",
   "streamdeck.pi.presetMissing": "{id} (nie ma go już w tej instalacji)",
-  "streamdeck.pi.installWide": "Nagrywanie dotyczy całej instalacji: ten przycisk przełącza je dla wszystkich programów."
+  "streamdeck.pi.installWide": "Nagrywanie dotyczy całej instalacji: ten przycisk przełącza je dla wszystkich programów.",
+  "streamdeck.mute.muted": "WYCISZONE",
+  "streamdeck.mute.unmuted": "Dźwięk włączony",
+  "streamdeck.mute.appliedLive": "Zastosowano na żywo",
+  "streamdeck.mute.appliedRestart": "Zastosowano przez restart",
+  "streamdeck.mute.unavailable": "Niedostępne",
+  "streamdeck.mute.copyAudio": "Dźwięk przekazywany bez zmian",
+  "streamdeck.mute.noTrack": "Ścieżka poza miksem",
+  "streamdeck.track.numbered": "Ścieżka {n}",
+  "streamdeck.pi.trackLabel": "Ścieżka",
+  "streamdeck.pi.destinationChoose": "Wybierz miejsce docelowe",
+  "streamdeck.pi.trackChoose": "Wybierz ścieżkę",
+  "streamdeck.pi.destinationsFailed": "Nie udało się wczytać listy miejsc docelowych.",
+  "streamdeck.pi.notListed": "{id} (już nie na liście)",
+  "streamdeck.pi.trackHint": "Zmiana jest stosowana na żywo, gdy to możliwe. W przeciwnym razie miejsce docelowe się restartuje, a widzowie widzą ponowne połączenie. Serwer Windows zawsze się restartuje.",
+  "streamdeck.pi.destinationLabel": "Miejsce docelowe",
+  "streamdeck.gain.matrix": "macierz: użyj UI"
 }

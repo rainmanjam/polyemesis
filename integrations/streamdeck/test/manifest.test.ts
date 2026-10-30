@@ -68,10 +68,12 @@ describe("manifest", () => {
   // Each key action has its own face set: imgs/keys/<action>/<state>, with the action's own glyph.
   const shortName = (uuid: string) => uuid.replace(`${manifest.UUID}.`, "");
 
-  it("gives every key action the same eight states, in KEY_STATE order, from its own face set", () => {
+  it("gives every key action the same states, in KEY_STATE order, from its own face set", () => {
     const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
     expect(keys.length).toBeGreaterThan(0);
-    const expected = ["idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin"];
+    const expected = [
+      "idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin", "muted", "restarted", "unavailable",
+    ];
     expect(Object.keys(KEY_STATE)).toEqual(expected);
     for (const a of keys) {
       // The device draws States[index]; the runtime sends KEY_STATE[tone] as index.
@@ -103,9 +105,10 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination"],
+      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
+    expect(manifest.Actions.find((a) => a.UUID.endsWith(".track-gain"))!.Controllers).toEqual(["Encoder"]);
   });
 
   it("stops Stream Deck advancing key states and overriding titles, because the plugin paints them", () => {
@@ -120,8 +123,19 @@ describe("manifest", () => {
     expect(stop.SupportedInMultiActions).toBe(false);
   });
 
-  it("ships no track-mute action, because the engine has no live mute API", () => {
-    expect(manifest.Actions.some((a) => /mute/i.test(a.UUID))).toBe(false);
+  it("tells the user what the gain dial's rotate, push and touch do", () => {
+    const dial = manifest.Actions.find((a) => a.UUID.endsWith(".track-gain")) as unknown as {
+      Encoder: { layout: string; TriggerDescription: Record<string, string> };
+    };
+    expect(dial.Encoder.layout).toBe("$B1");
+    expect(Object.keys(dial.Encoder.TriggerDescription).sort()).toEqual(["Push", "Rotate", "Touch"]);
+  });
+
+  it("ships track mute as a key that paints its own faces, now that the server mutes live (I4)", () => {
+    const mute = manifest.Actions.find((a) => a.UUID.endsWith(".track-mute"))!;
+    expect(mute.Controllers).toEqual(["Keypad"]);
+    expect(mute.States[KEY_STATE.muted]!.Image).toBe("imgs/keys/track-mute/muted");
+    expect(mute.States[KEY_STATE.restarted]!.Image).toBe("imgs/keys/track-mute/restarted");
   });
 });
 

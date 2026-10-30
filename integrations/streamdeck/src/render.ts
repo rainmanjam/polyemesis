@@ -1,8 +1,8 @@
 import type { KeyFace, KeyTone } from "./keyFace.js";
 import { t } from "./i18n.js";
 
-// What a key shows. The manifest declares eight states per key action, in this
-// order, each with its own image (the colour family). The state index is the only thing
+// What a key shows. The manifest declares one state per entry here for every key
+// action, in this order, each with its own image (the colour family). The state index is the only thing
 // the device draws, so the order here and the order in manifest.json must
 // match. test/manifest.test.ts enforces that.
 
@@ -15,6 +15,9 @@ export const KEY_STATE = {
   unbound: 5,
   halted: 6,
   needsAdmin: 7,
+  muted: 8,
+  restarted: 9,
+  unavailable: 10,
 } as const satisfies Record<KeyTone, number>;
 
 export function stateFor(tone: KeyTone): number {
