@@ -356,6 +356,8 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-dim: var(--primary-dim);
+  /* Registered for small link text (B2): --primary-bright on --card is 7.13:1. */
+  --color-primary-bright: var(--primary-bright);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
