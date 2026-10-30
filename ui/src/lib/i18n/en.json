@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Unsaved routing changes for {name}. Nothing is applied until you save.",
   "routing.saveBar.discard": "Discard",
   "routing.saveBar.save": "Save",
+  "routing.matrix.undoClear": "Undo clear",
   "routing.saveBar.restarts": "Saving restarts {name} with this mix."
 }

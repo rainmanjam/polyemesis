@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Несохранённые изменения маршрутизации для {name}. Ничего не применяется, пока вы не сохраните.",
   "routing.saveBar.discard": "Отменить",
   "routing.saveBar.save": "Сохранить",
+  "routing.matrix.undoClear": "Отменить очистку",
   "routing.saveBar.restarts": "Сохранение перезапустит {name} с этим микшем."
 }

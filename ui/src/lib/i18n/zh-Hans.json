@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "{name} 的路由更改尚未保存。保存前不会应用任何内容。",
   "routing.saveBar.discard": "放弃",
   "routing.saveBar.save": "保存",
+  "routing.matrix.undoClear": "撤销清除",
   "routing.saveBar.restarts": "保存会以此混音重新启动 {name}。"
 }

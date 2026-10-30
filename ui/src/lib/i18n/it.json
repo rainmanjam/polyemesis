@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Modifiche al routing non salvate per {name}. Nulla viene applicato finché non salvi.",
   "routing.saveBar.discard": "Scarta",
   "routing.saveBar.save": "Salva",
+  "routing.matrix.undoClear": "Annulla cancellazione",
   "routing.saveBar.restarts": "Salvando, {name} viene riavviato con questo mix."
 }

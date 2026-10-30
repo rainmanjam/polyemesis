@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Nicht gespeicherte Routing-Änderungen für {name}. Nichts wird übernommen, bis du speicherst.",
   "routing.saveBar.discard": "Verwerfen",
   "routing.saveBar.save": "Speichern",
+  "routing.matrix.undoClear": "Leeren rückgängig machen",
   "routing.saveBar.restarts": "Beim Speichern wird {name} mit diesem Mix neu gestartet."
 }

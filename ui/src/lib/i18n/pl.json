@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Niezapisane zmiany routingu dla {name}. Nic nie zostanie zastosowane, dopóki nie zapiszesz.",
   "routing.saveBar.discard": "Odrzuć",
   "routing.saveBar.save": "Zapisz",
+  "routing.matrix.undoClear": "Cofnij czyszczenie",
   "routing.saveBar.restarts": "Zapisanie uruchomi ponownie {name} z tym miksem."
 }

@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Alterações de roteamento não salvas para {name}. Nada é aplicado até você salvar.",
   "routing.saveBar.discard": "Descartar",
   "routing.saveBar.save": "Salvar",
+  "routing.matrix.undoClear": "Desfazer limpeza",
   "routing.saveBar.restarts": "Salvar reinicia {name} com esta mixagem."
 }

@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "{name} için kaydedilmemiş yönlendirme değişiklikleri. Kaydedene kadar hiçbir şey uygulanmaz.",
   "routing.saveBar.discard": "Vazgeç",
   "routing.saveBar.save": "Kaydet",
+  "routing.matrix.undoClear": "Temizlemeyi geri al",
   "routing.saveBar.restarts": "Kaydetmek {name} öğesini bu miksle yeniden başlatır."
 }

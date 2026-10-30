@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { channelLabels } from "@/lib/channels";
 import type { MatrixCell, SourceTrack } from "@/lib/types";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, Undo2 } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 /* ===========================================================================
    Advanced mode: the full mix matrix.
@@ -39,6 +40,15 @@ interface MixMatrixProps {
 }
 
 export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
+  const t = useT();
+  /** What the last Clear removed, and the empty list it handed back. Undo is
+   *  offered only while `cells` is still that very list: an edit, a preset, a
+   *  discard or a switch to another destination all replace it, and then the
+   *  offer is gone rather than writing old cells over new ones (A14). */
+  const [cleared, setCleared] = useState<{ removed: MatrixCell[]; now: MatrixCell[] } | null>(
+    null,
+  );
+  const undoAvailable = cleared !== null && cells === cleared.now;
   /** Fast lookup keyed by track/channel/out. */
   const index = useMemo(() => {
     const m = new Map<string, number>();
@@ -57,10 +67,21 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
     // That keeps the saved profile and the generated filter minimal.
     const next = clamped > 0 ? [...without, { track, channel, out, gain: clamped }] : without;
     next.sort((a, b) => a.track - b.track || a.out - b.out || a.channel - b.channel);
+    setCleared(null);
     onChange(next);
   };
 
-  const clearAll = () => onChange([]);
+  const clearAll = () => {
+    const empty: MatrixCell[] = [];
+    if (cells.length > 0) setCleared({ removed: cells, now: empty });
+    onChange(empty);
+  };
+
+  const undoClear = () => {
+    if (!cleared || !undoAvailable) return;
+    onChange(cleared.removed);
+    setCleared(null);
+  };
 
   const totalCols = tracks.reduce((n, t) => n + t.channels, 0);
 
@@ -100,9 +121,16 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
           {totalCols} source channel{totalCols === 1 ? "" : "s"} → 2 output channels.
           Gain 0–2 per cell; 0 removes the connection.
         </div>
-        <Button variant="ghost" size="sm" onClick={clearAll}>
-          <RotateCcw /> Clear
-        </Button>
+        <div className="flex items-center gap-1">
+          {undoAvailable && (
+            <Button variant="ghost" size="sm" onClick={undoClear}>
+              <Undo2 /> {t("routing.matrix.undoClear")}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={clearAll}>
+            <RotateCcw /> Clear
+          </Button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">

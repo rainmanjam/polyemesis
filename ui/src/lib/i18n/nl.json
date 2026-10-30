@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Niet-opgeslagen routingwijzigingen voor {name}. Er wordt niets toegepast tot je opslaat.",
   "routing.saveBar.discard": "Weggooien",
   "routing.saveBar.save": "Opslaan",
+  "routing.matrix.undoClear": "Wissen ongedaan maken",
   "routing.saveBar.restarts": "Opslaan start {name} opnieuw met deze mix."
 }

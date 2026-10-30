@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Modifications de routage non enregistrées pour {name}. Rien n'est appliqué avant l'enregistrement.",
   "routing.saveBar.discard": "Annuler",
   "routing.saveBar.save": "Enregistrer",
+  "routing.matrix.undoClear": "Annuler l'effacement",
   "routing.saveBar.restarts": "L'enregistrement redémarre {name} avec ce mix."
 }

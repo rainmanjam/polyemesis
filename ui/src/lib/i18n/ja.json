@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "{name} のルーティング変更は未保存です。保存するまで適用されません。",
   "routing.saveBar.discard": "破棄",
   "routing.saveBar.save": "保存",
+  "routing.matrix.undoClear": "クリアを元に戻す",
   "routing.saveBar.restarts": "保存すると、このミックスで {name} が再起動します。"
 }

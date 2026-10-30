@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Cambios de enrutamiento sin guardar para {name}. No se aplica nada hasta que guardes.",
   "routing.saveBar.discard": "Descartar",
   "routing.saveBar.save": "Guardar",
+  "routing.matrix.undoClear": "Deshacer borrado",
   "routing.saveBar.restarts": "Guardar reinicia {name} con esta mezcla."
 }

@@ -1700,5 +1700,6 @@
   "routing.saveBar.changed": "Perubahan rute yang belum disimpan untuk {name}. Tidak ada yang diterapkan sebelum Anda menyimpan.",
   "routing.saveBar.discard": "Buang",
   "routing.saveBar.save": "Simpan",
+  "routing.matrix.undoClear": "Batalkan hapus",
   "routing.saveBar.restarts": "Menyimpan akan memulai ulang {name} dengan mix ini."
 }
