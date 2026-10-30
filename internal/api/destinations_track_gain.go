@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -48,9 +49,20 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.trackGainMu.Lock()
+	defer s.trackGainMu.Unlock()
+
 	row, err := s.store.GetDestination(id)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	// A copy destination forwards its audio untouched: there is no volume stage
+	// for a level to reach. Storing it and answering success would tell a
+	// controller the track is muted while its sound keeps flowing.
+	if row.Audio.Copy && row.Kind != db.DestAudio {
+		writeError(w, http.StatusConflict, "this destination passes its audio through unchanged, "+
+			"so a track level cannot apply to it; turn off audio copy to mix and mute tracks")
 		return
 	}
 	idx := -1
@@ -76,32 +88,47 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	if body.Gain != nil {
 		row.Profile.Tracks[idx].Gain = *body.Gain
 	}
-	// Forget the last outcome so a stale note is never reported for this change.
-	s.eng().ForgetDestinationLive(id)
+	changed := row.Profile.Tracks[idx] != before
+
+	// THE OWNING ENGINE, as handleRestartDestination explains: s.eng() is the
+	// default programme's, which has never heard of another programme's
+	// destination and would report on nothing. nil when the programme has no
+	// running engine; the change is still stored for when it does.
+	eng := s.engineForSource(row.SourceID)
+	if eng != nil {
+		// Forget the last outcome so a stale note is never reported for this change.
+		eng.ForgetDestinationLive(id)
+	}
 
 	// Persist first. Everything below reads the stored profile, so a restart
-	// triggered by the reconcile rebuilds with this level.
+	// triggered by the reconcile, or any later one, rebuilds with this level.
 	updated, err := s.store.UpdateDestination(row)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if rw := s.reconcileNow("the track level"); rw != "" {
-		writeError(w, http.StatusInternalServerError, rw)
-		return
-	}
+	rw := s.reconcileNow("the track level")
 
-	applied, reason, noted := s.eng().DestinationLive(id)
-	if !noted {
-		if row.Profile.Tracks[idx] == before {
-			applied, reason = "live", "no change to apply"
-		} else {
-			applied, reason = "restart", "this change alters the command line, so the destination was restarted"
-		}
+	applied, reason := "", ""
+	noted := false
+	if eng != nil {
+		applied, reason, noted = eng.DestinationLive(id)
+	}
+	switch {
+	case noted:
+	case !changed:
+		applied, reason = "live", "no change to apply"
+	case eng == nil || !eng.DestinationRunning(id):
+		applied, reason = "restart", "the destination is not running; the level is stored and takes effect when it starts"
+	default:
+		applied, reason = "restart", "this change alters more than a level, so the destination was restarted"
 	}
 	resp := map[string]any{"applied": applied, "destination": updated}
 	if reason != "" {
 		resp["reason"] = reason
 	}
-	writeJSON(w, http.StatusOK, resp)
+	// The change is stored whether or not the reconcile succeeded; a failed one
+	// is reported the way every other mutation reports it (#709), not as a 500
+	// that would read as "nothing happened".
+	writeMutation(w, http.StatusOK, rw, resp)
 }
