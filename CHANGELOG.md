@@ -8,7 +8,135 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **A destination's per-track gain and mute apply to the running stream.** A
+  level change used to be an argv change, so it replaced the destination's
+  FFmpeg process and dropped that platform's connection. Each mixed track now
+  has a named `volume@trk<N>` stage, a destination's FFmpeg takes commands on
+  stdin, and a level-only change is sent there instead. FFmpeg's reply must be
+  a whole stderr line with `ret:0`. A refusal, a 2 s timeout, or a Windows host
+  (where the channel is not verified) falls back to a restart, and the reason
+  is reported. Mute sets the level to zero and keeps the track in the graph, so
+  it is live in matrix mode as well. A matrix cell's gain, a track added or
+  removed, and a change that flips the loudness normaliser still restart. The
+  new `POST /api/v1/destinations/{id}/tracks/{track}/gain` answers
+  `applied: "live"` or `applied: "restart"` with a `reason`, and the
+  destination's status carries the same outcome as `levelChange`.
+  [HOT-RELOAD.md](docs/HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel)
+
+- **A Stream Deck plugin, in `integrations/streamdeck`.** Destination state,
+  Go live, hold-to-stop for every destination or one, the install-wide Record
+  switch, routing presets and failover on keys, and the audio meters on a
+  Stream Deck+ dial. It pairs with an API token: a read token shows state, and
+  a key that would change something says it needs an admin token instead of
+  failing. A stop key shows how many YouTube broadcasts the stop would end and
+  refuses when that count cannot be loaded. The plugin is built from source;
+  no packaged release is published yet.
+  [STREAM-DECK.md](docs/STREAM-DECK.md)
+
+- **A stream timeline on the Monitoring page.** Failovers, a destination going
+  down, recovering, falling behind and catching up, and the ingest being lost
+  and recovered are kept in the database, newest first, at most 1000 rows for
+  30 days. They were raised as alerts and then lost unless a webhook kept them.
+  `GET /api/v1/timeline` serves them. A stream ending is not on the timeline,
+  because the backend raises no such event.
+
+- **Routes for pairing and for a stop preview.** `GET /api/v1/auth/connection`
+  says which token made the request, its scope, and whether it is admin, and
+  Settings gains a Test connection panel that uses it.
+  `GET /api/v1/destinations/stop-impact` counts the destinations a stop would
+  touch and the YouTube broadcasts it would end for good, for a programme or,
+  with `?destination=`, for one destination. The Stop all dialog now reads its
+  count from it instead of counting the rows on screen.
+
+- **An install-wide recording switch.** `GET` and `POST /api/v1/recording`
+  read and set `recording.enabled` alone, and report `off`, `recording`,
+  `not_running`, or `halted_disk` with the reason when the free-space floor has
+  stopped the recorder. A change is audited like a settings save.
+
+- **`GET /api/v1/levels` says whether its reading is current.** A `feed` field
+  reads `none`, `live` or `stale`, so a meter can show that it has no feed
+  rather than holding the last bar.
+
+- **A Go live sheet in place of Start all.** It lists each destination as Ready
+  or Blocked, with the YouTube count a later stop would end, and one confirm
+  that names how many it will start. Starts go one at a time, two seconds
+  apart, through the same path as a card's own Start, and a refusal shows on
+  its row as it happens.
+
+- **First-run and setup help in the app.** The dashboard shows a checklist
+  derived from live state (source, encoder pointed at the ingest, signal,
+  destination, go live) that reopens if a source or encoder is lost. A source
+  card shows its ingest as a protocol and port and says Waiting for encoder or
+  Signal detected. Where a platform has a device flow and developer
+  credentials are stored, the add-destination form offers Connect with a code
+  without leaving the form.
+
+- **Routing and meters.** An Overview tab shows destinations against tracks,
+  with an amber cell where a music track reaches a VOD mix. Matrix cells carry a
+  state chip and a dB label. Clear in the mix matrix can be undone. A sticky
+  bar names the destination while an edit is unsaved. Meters print their held
+  peak, offer Auto zoom, draw the -14 reference, and show Not set with a Set
+  target action where no loudness target exists. A track whose meter feed drops
+  keeps its last measured peak and when it was taken.
+
+- **Monitoring and status.** The dashboard has one health verdict line, held
+  back while a backup, playlist or slate is on air. Failover is a full-width
+  banner with the time on air. The FFmpeg log opens on its errors, with repeats
+  collapsed and the raw output one click away. A destination's problem rows
+  name the reason, the failing step and the as-of time.
+
+- **Navigation and Settings.** The navigation is grouped into five labelled
+  sections. Settings has a left section rail and a search box that matches
+  section names.
+
+- **On the site:** a home-page strip comparing self-hosting with Restream's
+  hosted plans, dated to its evidence file; a GitHub star count and latest
+  release read at build time, left out when the read fails; and a routing
+  table for each use case, with sports and esports added.
+
+### Changed
+
+- **Deploying this release restarts every running destination once.** The
+  destination argv changed: each mixed track gained its named `volume@` stage,
+  and `-nostdin` is gone from destination processes everywhere except Windows.
+  Every destination's restart signature therefore moves on the first reconcile
+  after the upgrade, and each one restarts once. Plan the upgrade for a time
+  when no stream is live.
+
+- **Stdin is a command channel for destination processes.** Only the
+  supervisor's serialised writer writes to it, and only validated
+  `volume@<name> -1 volume <level>` lines. Every other child keeps `-nostdin`.
+
+- **Text contrast and size on configuration surfaces.** Enabled text no longer
+  uses the subtle foreground (about 3.1:1 on a card); it uses the muted one
+  (about 5.8:1). Labels and values on six configuration surfaces move from
+  9–11 px to the 12 px step.
+
+- **The site's hero leads with the outcome and a copy-first install action.**
+  The install command and a Copy button come first and the quickstart becomes a
+  text link, which reverses the earlier docs-first order. The CSS drawing is
+  replaced by a crop of the real routing screen.
+
+### Fixed
+
+- **The site no longer makes two different time-to-first-stream claims.** The
+  home and download pages said about five minutes and the features page two,
+  and neither was measured. Both figures are gone, and a guard keeps a step
+  count the quickstart does not match from coming back.
+
+- **Destructive dialogs and the Go live card are translated.** Their labels and
+  consequence text were bare English in a fifteen-locale app. They now go
+  through the catalogue, and a test fails on a bare JSX label in pages and
+  components.
+
+- **Japanese, Korean and Simplified Chinese text has a font to fall back to.**
+  IBM Plex Sans has no kana, Hangul or Han glyphs. Per-language rules now name
+  the platform's own CJK faces after it.
+
+- **A track's role chip no longer wraps into its meter.** The label column is
+  bounded and the chip truncates, with its full name on hover.
 
 ## [0.11.0] — 2026-09-24
 
