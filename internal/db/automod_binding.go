@@ -267,12 +267,6 @@ func (d *DB) AutomodTestPass(slot string) (string, error) {
 	return fp, err
 }
 
-// ClearAutomodTestPass forgets a checker's pass.
-func (d *DB) ClearAutomodTestPass(slot string) error {
-	_, err := d.sql.Exec(`DELETE FROM automod_checker_tests WHERE slot = ?`, normSlot(slot))
-	return err
-}
-
 // rebindAutomodKeysTx keeps each checker's key bound to its endpoint across a
 // settings write, inside that write's transaction. For a checker whose
 // endpoint moved: a pending key bound to exactly the new endpoint is adopted;
