@@ -1,8 +1,9 @@
 # Stream Deck
 
 polyemesis has a plugin for the Elgato Stream Deck. Its keys show what each
-destination is doing and start or stop destinations, and a Stream Deck+ dial
-shows the audio meters. It talks to the install over the
+destination is doing, start or stop destinations, and mute one track on one
+destination. On a Stream Deck+, dials show the audio meters and set a track's
+gain. It talks to the install over the
 [REST API](API.md) with a token you paste in, and it runs no media itself.
 
 The plugin's source, and the notes for working on it, are in
@@ -25,8 +26,10 @@ The plugin's source, and the notes for working on it, are in
   on any model.
 - **A polyemesis install from this release or later.** The plugin relies on
   `GET /api/v1/auth/connection`, `GET /api/v1/destinations/stop-impact`,
-  `GET` and `POST /api/v1/recording`, and the `feed` field on
-  `GET /api/v1/levels`. An older install does not have them, and Test
+  `GET` and `POST /api/v1/recording`, the `feed` field on
+  `GET /api/v1/levels`, and, for the Mute track key and Track gain dial,
+  `POST /api/v1/destinations/{id}/tracks/{track}/gain` along with the
+  `GET /api/v1/destinations` and `GET /api/v1/source` reads. An older install does not have them, and Test
   connection fails against it.
 - **HTTPS to the install**, unless the plugin runs on the same machine. The
   plugin refuses a plain `http://` address for any host but `localhost`,

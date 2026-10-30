@@ -27,8 +27,10 @@ its first tagged release.
 
 - **A Stream Deck plugin, in `integrations/streamdeck`.** Destination state,
   Go live, hold-to-stop for every destination or one, the install-wide Record
-  switch, routing presets and failover on keys, and the audio meters on a
-  Stream Deck+ dial. It pairs with an API token: a read token shows state, and
+  switch, routing presets, failover and a Mute track key on keys, and on a
+  Stream Deck+ the audio meters and a Track gain dial (0.5 dB a step, push to
+  mute, touch for 0 dB). Each mute or gain change says whether it applied live
+  or by a restart, and why. It pairs with an API token: a read token shows state, and
   a key that would change something says it needs an admin token instead of
   failing. A stop key shows how many YouTube broadcasts the stop would end and
   refuses when that count cannot be loaded. The plugin is built from source;

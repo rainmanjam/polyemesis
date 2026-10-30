@@ -85,9 +85,10 @@ hot. One upload, one video encode, different audio per platform.
 - **A Stream Deck plugin.** Keys show each destination's state and start it,
   go live, hold to stop one destination or all of them (with a count of the
   YouTube broadcasts the stop would end), switch recording, apply a routing
-  preset and hand failover back to automatic; a Stream Deck+ dial shows the
-  meters. A read token shows state; the keys that change something need an
-  admin token.
+  preset, hand failover back to automatic, and mute one track on one
+  destination. On a Stream Deck+, one dial shows the meters and another sets a
+  track's gain. A read token shows state; the controls that change something
+  need an admin token.
   [→ STREAM-DECK.md](docs/STREAM-DECK.md)
 - **Lifecycle webhooks** — a signed POST the moment the stream starts or stops,
   or a destination goes up or down. One delivery per transition, in order, so a
