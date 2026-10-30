@@ -1127,7 +1127,10 @@ export function RoutingPage() {
 
       <PresetReviewDialog
         review={presetReview}
-        presetName={presets.find((p) => p.id === presetReview?.presetId)?.name ?? ""}
+        presetName={(() => {
+          const p = presets.find((x) => x.id === presetReview?.presetId);
+          return p ? presetText(t, p).name : "";
+        })()}
         destinationName={selected?.name ?? ""}
         live={!!selected?.enabled}
       />
@@ -1741,6 +1744,24 @@ function SecondMixCard({
  *  internal/routing/presets.go's. */
 const STARTER_PRESETS: readonly string[] = ["everything", "no-music", "mic-only"];
 
+/** The built-in mix presets' names and descriptions in the catalogue. The
+ *  server sends English (internal/routing/presets.go); a preset it adds that
+ *  is not listed here, and every platform preset, shows as sent. */
+const PRESET_TEXT: Record<string, { name: TranslationKey; description: TranslationKey }> = {
+  everything: { name: "route.preset.everything", description: "route.preset.everythingDesc" },
+  "no-music": { name: "route.preset.noMusic", description: "route.preset.noMusicDesc" },
+  "mic-only": { name: "route.preset.micOnly", description: "route.preset.micOnlyDesc" },
+  "surround-downmix": { name: "route.preset.surround", description: "route.preset.surroundDesc" },
+  "commentary-language": { name: "route.preset.commentary", description: "route.preset.commentaryDesc" },
+  "clean-feed": { name: "route.preset.cleanFeed", description: "route.preset.cleanFeedDesc" },
+  "except-music": { name: "route.preset.exceptMusic", description: "route.preset.exceptMusicDesc" },
+};
+
+function presetText(t: Translator, p: Preset): { name: string; description: string } {
+  const k = PRESET_TEXT[p.id];
+  return k ? { name: t(k.name), description: t(k.description) } : { name: p.name, description: p.description };
+}
+
 interface PresetRowProps {
   presets: Preset[];
   opts: PresetOpts;
@@ -1768,9 +1789,9 @@ function PresetRow({
             size="sm"
             className="justify-start"
             onClick={() => onApply(p.id)}
-            title={p.description}
+            title={presetText(t, p).description}
           >
-            {p.name}
+            {presetText(t, p).name}
           </Button>
           {p.policy?.exclude && (
             <Badge variant="warn" className="w-fit">

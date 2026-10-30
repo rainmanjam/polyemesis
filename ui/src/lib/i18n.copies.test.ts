@@ -37,6 +37,7 @@ const SAME_EVERYWHERE = new Set<string>([
   "route.lufsBroadcast", // "EBU R128 broadcast": a standard's name
   "route.normalizeLoudnorm", // "Loudness (EBU R128)"
   "dash.tagsPlaceholder", // example tags typed as the platform will show them
+  "route.preset.surround", // "5.1 → stereo": a channel layout, where the locale keeps "stereo"
 ]);
 
 const LOCALES: Record<string, Record<string, string>> = {
