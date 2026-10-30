@@ -20,7 +20,8 @@ function keysIn(body: string, tags: string[]): Set<string> {
   const out = new Set<string>();
   const re = new RegExp(`<(${tags.join("|")})\\b[^>]*>([\\s\\S]{0,300}?)</\\1>`, "g");
   for (const m of body.matchAll(re)) {
-    const key = /t\("([^"]+)"/.exec(m[2])?.[1];
+    // The element's own text, not a badge inside it: the key must open it.
+    const key = /^\s*\{t\("([^"]+)"/.exec(m[2])?.[1];
     if (key) out.add(key);
   }
   return out;

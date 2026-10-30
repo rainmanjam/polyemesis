@@ -47,6 +47,13 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "pipeline", key: "set.goingLive" },
   { tab: "pipeline", key: "set.stagger", card: "set.goingLive", anchor: "dest-stagger" },
   { tab: "pipeline", key: "set.ebTitle" },
+  // The GPU rows repeat per GPU, so they are found by text, which lands on the first.
+  { tab: "pipeline", key: "automod.modelName", card: "set.ebTitle" },
+  { tab: "pipeline", key: "i18nSweep.gpuVendor", card: "set.ebTitle" },
+  { tab: "pipeline", key: "i18nSweep.gpuDriver", card: "set.ebTitle" },
+  { tab: "pipeline", key: "i18nSweep.gpuDeviceId", card: "set.ebTitle" },
+  { tab: "pipeline", key: "i18nSweep.gpuVram", card: "set.ebTitle" },
+  { tab: "pipeline", key: "i18nSweep.gpuShared", card: "set.ebTitle" },
   { tab: "pipeline", key: "set.chatHistory" },
   { tab: "pipeline", key: "set.chatHours", card: "set.chatHistory", anchor: "chat-hours" },
   { tab: "pipeline", key: "set.chatKeep", card: "set.chatHistory", anchor: "chat-keep" },

@@ -106,6 +106,10 @@ const FRAGMENTS = [
   "could not be understood and was dropped",
   "length helps more than symbols",
   "This password protects the admin UI",
+  "MQTT settings saved",
+  "Expert mode — extra FFmpeg arguments",
+  "consecutive failed refreshes",
+  "Download CA certificate",
 ];
 
 /* Bare single-word labels cannot be fragments: "Cancel" is a substring of
