@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { barFor, DB_MAX, DB_MIN, DB_STEP, formatDb, gainForDb, gainToDb, MAX_GAIN, stepDb } from "../src/trackLevel.js";
+import { barFor, DB_MAX, DB_MIN, DB_STEP, dbToGain, formatDb, gainForDb, gainToDb, MAX_GAIN, stepDb } from "../src/trackLevel.js";
 
 describe("the dial's step", () => {
   it("moves 0.5 dB a tick, both ways, from unity", () => {
@@ -30,7 +30,17 @@ describe("the dial's step", () => {
     expect(stepDb(top, 1)).toBe(top);
     expect(stepDb(top, -1)).toBe(DB_MAX);
     expect(stepDb(-60, -1)).toBe(-60);
-    expect(stepDb(-60, 1)).toBe(DB_MIN);
+  });
+
+  // MUTATION: clamp the step to DB_MIN regardless of the level (the old clampDb). Observed: FAIL.
+  it("steps a level below the dial's floor from where it is, not up to the floor", () => {
+    // gain 0.001 is -60 dB: one tick up is -59.5, never a 20 dB jump to -40.
+    expect(stepDb(gainToDb(0.001), 1)).toBeCloseTo(-59.5, 9);
+    expect(stepDb(-60, 1)).toBe(-59.5);
+    expect(stepDb(-60.2, 1)).toBe(-60);
+    expect(stepDb(-60, 3)).toBe(-58.5);
+    // A turn down from below the floor still goes nowhere.
+    expect(stepDb(-60, -1)).toBe(-60);
   });
 
   it("does nothing for no ticks", () => {
@@ -46,6 +56,12 @@ describe("the gain sent", () => {
       expect(g).toBeGreaterThan(0);
       expect(g).toBeLessThanOrEqual(MAX_GAIN);
     }
+  });
+
+  // MUTATION: raise the level to DB_MIN before converting. Observed: FAIL.
+  it("sends a level below the dial's floor as that level", () => {
+    expect(gainForDb(-59.5)).toBeCloseTo(dbToGain(-59.5), 6);
+    expect(gainForDb(-59.5)).toBeLessThan(dbToGain(DB_MIN));
   });
 
   it("is clamped even when asked for more than the dial allows", () => {

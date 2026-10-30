@@ -50,17 +50,29 @@ export function stepDb(fromDb: number, ticks: number): number {
   // A value within a hair of a grid point is on it: 20*log10 of a stored float is rarely exact.
   const onGrid = Math.abs(steps - Math.round(steps)) < 1e-6;
   const base = onGrid ? Math.round(steps) : ticks > 0 ? Math.floor(steps) : Math.ceil(steps);
-  const next = clampDb((base + ticks) * DB_STEP);
+  // The floor is the dial's, or the level itself when it is already below it: a track
+  // stored at -60 dB (set in the UI, or over the API) moves 0.5 dB a tick from -60, not
+  // 20 dB in one tick to -40. Minus infinity (a stored gain of 0) has nowhere to step
+  // from, so its first tick up lands on the dial's floor.
+  const floor = Number.isFinite(fromDb) ? Math.min(DB_MIN, fromDb) : DB_MIN;
+  const next = Math.min(DB_MAX, Math.max(floor, (base + ticks) * DB_STEP));
   // A level already past an end (the server allows +6.02 dB, and any level above zero) is
   // left where it is by a turn towards that end. The clamp must never move it backwards.
   if ((ticks > 0 && next < fromDb) || (ticks < 0 && next > fromDb)) return fromDb;
   return next;
 }
 
-/** The linear gain to send for a dial level. Never above MAX_GAIN, never zero. */
+/** The smallest gain sent: the server refuses zero, and toFixed(6) rounds a very low level to it. */
+const MIN_SENT_GAIN = 0.000001;
+
+/**
+ * The linear gain to send for a dial level. Never above MAX_GAIN, never zero. Not raised to
+ * DB_MIN: a level below the dial's floor is one stepDb reached from a stored level already
+ * there, and raising it would send the 20 dB jump the step just avoided.
+ */
 export function gainForDb(db: number): number {
-  const gain = dbToGain(clampDb(db));
-  return Math.min(MAX_GAIN, Number(gain.toFixed(6)));
+  const gain = dbToGain(Math.min(DB_MAX, db));
+  return Math.min(MAX_GAIN, Math.max(MIN_SENT_GAIN, Number(gain.toFixed(6))));
 }
 
 /** The dial's bar, 0..100, for a level in dB: the dial's own range, linear in dB. */

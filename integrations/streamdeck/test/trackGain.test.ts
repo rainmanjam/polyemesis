@@ -107,6 +107,19 @@ describe("track gain dial: turning", () => {
     expect(gains()).toEqual([{ gain: gainForDb(5) }]);
   });
 
+  // MUTATION: restore the DB_MIN clamp in stepDb. Observed: FAIL.
+  it("turns a track stored below the dial's floor up 0.5 dB, not 20 dB to the floor", async () => {
+    const { rt, dial, sched, gains } = await dialOn(
+      routes({ "GET /api/v1/destinations": json(200, [dest({}, { gain: 0.001 })]) }),
+    );
+    await rt.rotateTrackGain("d", 1);
+    expect(dial.feedback.at(-1)!.value).toBe("-59.5 dB");
+    sched.fire(COALESCE_MS);
+    await settle();
+    expect(gains()).toEqual([{ gain: gainForDb(-59.5) }]);
+    expect(gains()[0].gain!).toBeLessThan(0.0011);
+  });
+
   it("sends the latest level once after a request in flight returns, not one per tick", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
