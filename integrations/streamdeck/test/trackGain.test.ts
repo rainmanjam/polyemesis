@@ -238,3 +238,38 @@ describe("track gain dial: a double push", () => {
     expect(gains()).toEqual([{ muted: true }]);
   });
 });
+
+describe("track gain dial: a status tick older than the dial's answer", () => {
+  // MUTATION: store every read in readLevels (drop the version check). Observed: FAIL.
+  it("does not put the old gain back on the dial", async () => {
+    let gain = 1;
+    let slow = false;
+    let gate!: () => void;
+    const row = () => dest({}, { gain });
+    const { rt, dial, sched } = await dialOn(
+      routes({
+        "GET /api/v1/destinations": (() => {
+          const body = JSON.stringify([row()]);
+          if (!slow) return { status: 200, body };
+          // Read now, answered later: the tick's snapshot predates the dial's change.
+          return new Promise((r) => (gate = () => r({ status: 200, body })));
+        }) as unknown as Route,
+        [GAIN_ROUTE]: (req) => {
+          gain = (JSON.parse(req.body!) as { gain: number }).gain;
+          return { status: 200, body: JSON.stringify({ applied: "live", destination: row().destination }) };
+        },
+      }),
+    );
+    slow = true;
+    const tick = rt.tick();
+    await settle();
+    await rt.rotateTrackGain("d", 2);
+    sched.fire(COALESCE_MS);
+    await settle();
+    expect(gain).toBe(gainForDb(1));
+    expect(dial.feedback.at(-1)!.value).toBe("+1.0 dB");
+    gate();
+    await tick;
+    expect(dial.feedback.at(-1)!.value).toBe("+1.0 dB");
+  });
+});

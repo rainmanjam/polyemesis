@@ -178,6 +178,53 @@ describe("stop-all hold-to-confirm", () => {
     expect(net.writes()).toHaveLength(0);
   });
 
+  // MUTATION: drop the `superseded` return in armStop. Observed: FAIL.
+  it("a repeated key-down while armed leaves the count on the face", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": impact,
+      "POST /api/v1/destinations/stop-all": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const stop = surface("s", "stopAll", { sourceId: 7 });
+    rt.add(stop);
+
+    await rt.pressStopDown("s");
+    await rt.pressStopDown("s");
+    expect(stop.titles.at(-1)).toContain("2 YouTube will end");
+  });
+
+  it("a count that answers after a release and a new press does not repaint the new press's face", async () => {
+    let first = true;
+    let answerFirst!: () => void;
+    const slowThenFast = (() => {
+      if (!first) return { status: 200, body: JSON.stringify({ destinations: 3, youtubeBroadcasts: 2 }) };
+      first = false;
+      return new Promise((r) => (answerFirst = () => r({ status: 200, body: JSON.stringify({ destinations: 1, youtubeBroadcasts: 0 }) })));
+    }) as unknown as Route;
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": slowThenFast,
+      "POST /api/v1/destinations/stop-all": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const stop = surface("s", "stopAll", { sourceId: 7 });
+    rt.add(stop);
+
+    const stale = rt.pressStopDown("s");
+    await new Promise((r) => setTimeout(r, 0));
+    await rt.pressHoldUp("s");
+    await rt.pressStopDown("s");
+    expect(stop.titles.at(-1)).toContain("2 YouTube will end");
+    const titles = stop.titles.length;
+    answerFirst();
+    await stale;
+    expect(stop.titles.length).toBe(titles);
+    expect(stop.titles.at(-1)).toContain("2 YouTube will end");
+  });
+
   it("sends no stop when the key is released before the hold completes", async () => {
     const { rt, net, sched } = runtimeFor({
       "GET /api/v1/auth/connection": ADMIN,

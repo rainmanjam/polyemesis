@@ -94,6 +94,19 @@ describe("HoldToConfirm", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  // MUTATION: drop `superseded` from the repeat return. Observed: FAIL.
+  it("marks a repeat and a late load as superseded, so the caller does not paint from them", async () => {
+    const { hold } = setup();
+    expect((await hold.press(resolved(IMPACT))).superseded).toBeUndefined();
+    expect(await hold.press(resolved(IMPACT))).toEqual({ phase: "arming", superseded: true });
+    hold.release();
+    let answer!: (v: StopImpact) => void;
+    const late = hold.press(() => new Promise<StopImpact>((resolve) => (answer = resolve)));
+    hold.release();
+    answer(IMPACT);
+    expect((await late).superseded).toBe(true);
+  });
+
   it("can be pressed again after a cancelled hold", async () => {
     const { clock, onConfirm, hold } = setup();
     await hold.press(resolved(IMPACT));

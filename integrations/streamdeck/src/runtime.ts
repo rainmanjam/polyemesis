@@ -162,6 +162,8 @@ export class Runtime {
    * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
    */
   private readonly tapping = new Set<string>();
+  /** Bumped on every write to destLevels, so a read that started before a write cannot overwrite it. */
+  private levelsVersion = 0;
   private readonly statuses = new Map<string, StatusPayload>();
   private readonly levels = new Map<string, LevelsReading | { error: true }>();
   private readonly lastMeterPaint = new Map<string, string>();
@@ -345,7 +347,7 @@ export class Runtime {
    */
   private async refreshLevels(): Promise<void> {
     try {
-      this.storeLevels(await this.client!.destinations());
+      await this.readLevels();
       this.destLevelsError = undefined;
     } catch (err) {
       // The old levels are not evidence of the present: a key must not show "unmuted" from them.
@@ -371,6 +373,20 @@ export class Runtime {
 
   private storeLevels(list: DestinationLevels[]): void {
     this.destLevels = new Map(list.map((d) => [d.id, d]));
+    this.levelsVersion++;
+  }
+
+  /**
+   * Reads every destination's stored levels and caches them, unless the cache was written while the
+   * read was out. A write meanwhile (a level change's answer, or another read) is newer than this read,
+   * and a status tick that started before a dial's answer must not put the old gain back on the dial.
+   */
+  private async readLevels(): Promise<void> {
+    const version = this.levelsVersion;
+    const list = await this.client!.destinations();
+    // Skipped only when a newer write is there to keep: a cache dropped meanwhile is refilled.
+    if (version !== this.levelsVersion && this.destLevels) return;
+    this.storeLevels(list);
   }
 
   /** The preset names, read once. A key shows the id until the list arrives. */
@@ -740,6 +756,8 @@ export class Runtime {
     const hold = this.holds.get(s.id);
     if (!hold) return;
     const result = await hold.press(load);
+    // A repeat, or a load that answered after a newer press: the face is the newer press's to paint.
+    if (result.superseded) return;
     if (result.phase === "refused") {
       await s.setTitle(stopTitle(undefined, this.locale));
       await s.showAlert();
@@ -764,7 +782,7 @@ export class Runtime {
     this.presetRefused.delete(id);
     this.armed.set(id, { presetId, sourceId: s.settings.sourceId });
     const result = await hold.press(async () => NO_COUNT);
-    if (result.phase === "arming") {
+    if (!result.superseded && result.phase === "arming") {
       await s.setState(KEY_STATE.held);
       await s.setTitle(
         titleFor(
@@ -861,7 +879,7 @@ export class Runtime {
   private async freshTarget(s: Surface): Promise<{ dest: DestinationLevels; level: TrackLevel } | undefined> {
     this.levelRefused.delete(s.id);
     try {
-      this.storeLevels(await this.client!.destinations());
+      await this.readLevels();
       this.destLevelsError = undefined;
     } catch {
       await s.showAlert();
@@ -1023,7 +1041,10 @@ export class Runtime {
     try {
       const result = await this.client!.setTrackLevel(dest.id, track, change, s.settings.sourceId ?? dest.sourceId);
       this.levelRefused.delete(s.id);
-      if (result.destination && this.destLevels) this.destLevels.set(result.destination.id, result.destination);
+      if (result.destination && this.destLevels) {
+        this.destLevels.set(result.destination.id, result.destination);
+        this.levelsVersion++;
+      }
       return result;
     } catch (err) {
       if (err instanceof ApiError && err.kind === "http" && (err.status === 409 || err.status === 400)) {
