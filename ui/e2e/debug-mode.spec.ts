@@ -35,9 +35,11 @@ import { watchConsole } from "./console";
  *  list on Automation, it is not in the document at all -- so a test that only
  *  navigated would find nothing and be unable to say why. */
 async function openDebugTab(page: Page) {
-  await page.goto("/settings");
+  // Debug moved from a Settings tab to the System page (A17). The old address
+  // still lands there, which this exercises on the way.
+  await page.goto("/settings?tab=debug");
   await expect(page.locator("nav")).toBeVisible();
-  await page.getByRole("tab", { name: /debug/i }).click();
+  await expect(page).toHaveURL(/\/system$/);
   await expect(page.getByRole("switch", { name: /record server activity/i })).toBeVisible();
 }
 
