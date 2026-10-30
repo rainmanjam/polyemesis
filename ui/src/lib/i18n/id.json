@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Peringatan",
   "timeline.severityInfo": "Info",
   "settings.search": "Cari pengaturan",
-  "settings.noMatches": "Tidak ada pengaturan yang cocok."
+  "settings.noMatches": "Tidak ada pengaturan yang cocok.",
+  "pairing.title": "Uji token pairing",
+  "pairing.hint": "Tempel token untuk melihat nama, cakupan, dan apa yang boleh dilakukannya. Tidak ada yang berubah di instalasi, tetapi pengecekan dihitung sebagai pemakaian token, seperti permintaan lain.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Uji koneksi",
+  "pairing.testing": "Menguji…",
+  "pairing.result": "{name} · {scope} · awalan {prefix}…",
+  "pairing.scopeRead": "baca",
+  "pairing.scopeAdmin": "admin",
+  "pairing.scopeSession": "sesi",
+  "pairing.adminWarning": "Ini token admin. Token ini dapat mengubah apa saja, termasuk menghentikan tujuan. Jika plugin ini hanya menampilkan status atau level, berikan token baca saja.",
+  "pairing.refused": "Instalasi menolak token ini. Mungkin salah ketik atau sudah dicabut.",
+  "pairing.unreachable": "Instalasi tidak dapat dihubungi. Periksa alamatnya lalu coba lagi.",
+  "pairing.failed": "Instalasi menjawab, tetapi jawabannya tidak dapat dipakai."
 }

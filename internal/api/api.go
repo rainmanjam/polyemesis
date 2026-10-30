@@ -829,6 +829,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
+			// Test connection for a pairing client: what this token is and may do.
+			// See connection_check.go.
+			r.Get("/auth/connection", s.handleConnectionCheck)
 
 			// The onboarding tour's "have I already been offered this".
 			//
@@ -1041,6 +1044,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// header before touching them, because "stop all" ends every
 			// YouTube broadcast on the install and that is not visible from
 			// here.
+			// Read-only preview of what stop and stop-all would end. Reads the
+			// recorded phase and makes no platform call. See destinations_stop_impact.go.
+			r.With(s.requireSource).Get("/destinations/stop-impact", s.handleStopImpact)
 			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
 			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
 			r.Get("/destinations/{id}", s.handleGetDestination)

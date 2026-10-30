@@ -153,7 +153,8 @@ jobs:
   # JavaScript dependencies.
   #
   # A MATRIX OVER EVERY LOCKFILE, because it used to name one directory and this
-  # repository has two. web/ -- the documentation site, 342 KB of
+  # repository has three. integrations/streamdeck is the Stream Deck plugin,
+  # whose lockfile ships inside the plugin an operator installs. web/ -- the documentation site, 342 KB of
   # package-lock.json -- was audited by nothing: not here, not by Dependabot
   # (.github/dependabot.yml listed / and /ui), not by anything. It is a static
   # site, so nothing it depends on reaches a server this project runs; what it
@@ -177,7 +178,7 @@ jobs:
       # Both answers are wanted when both are red.
       fail-fast: false
       matrix:
-        project: [ui, web]
+        project: [ui, web, integrations/streamdeck]
     # NO working-directory, NO setup-node, NO `npm ci`. osv-scanner reads the
     # lockfile as a FILE; it does not need node, a registry, or an installed
     # tree. Dropping the install removes the step that took 58 seconds on a good

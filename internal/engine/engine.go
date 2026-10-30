@@ -4828,6 +4828,15 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 
 // Levels returns the most recent metering frame, or an empty one and the zero
 // time when there is no engine to have measured anything. See Engine.Status.
+// MeterInterval is the metering throttle the engine is applying, or zero before
+// one has been set. It is the same value that gates the levels WebSocket frames.
+func (e *Engine) MeterInterval() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return time.Duration(e.meterInterval.Load())
+}
+
 func (e *Engine) Levels() (ffmpeg.Levels, time.Time) {
 	if e == nil {
 		return ffmpeg.Levels{}, time.Time{}

@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Warning",
   "timeline.severityInfo": "Info",
   "settings.search": "Search settings",
-  "settings.noMatches": "No settings match."
+  "settings.noMatches": "No settings match.",
+  "pairing.title": "Test a pairing token",
+  "pairing.hint": "Paste a token to see its name, scope and what it may do. Nothing on the install changes, but the check counts as a use of the token, like any request.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Test connection",
+  "pairing.testing": "Testing…",
+  "pairing.result": "{name} · {scope} · prefix {prefix}…",
+  "pairing.scopeRead": "read",
+  "pairing.scopeAdmin": "admin",
+  "pairing.scopeSession": "session",
+  "pairing.adminWarning": "This is an admin token. It can change anything, including stopping destinations. If this plugin only shows status or meters, give it a read token instead.",
+  "pairing.refused": "The install refused this token. It may be mistyped or revoked.",
+  "pairing.unreachable": "Could not reach the install. Check the address and try again.",
+  "pairing.failed": "The install answered, but not with a usable answer."
 }

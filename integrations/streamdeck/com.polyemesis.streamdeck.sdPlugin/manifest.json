@@ -1,0 +1,178 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "com.polyemesis.streamdeck",
+  "Name": "polyemesis",
+  "Description": "Destination state, go live, stop with confirmation, failover and dial meters for a polyemesis install.",
+  "Author": "polyemesis",
+  "Version": "0.1.0.0",
+  "Icon": "imgs/plugin-icon",
+  "Category": "polyemesis",
+  "CategoryIcon": "imgs/category-icon",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "24"
+  },
+  "Actions": [
+    {
+      "UUID": "com.polyemesis.streamdeck.destination",
+      "Name": "Destination",
+      "Tooltip": "One destination's live state. Tap to start it when it is off.",
+      "Icon": "imgs/actions/destination",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.go-live",
+      "Name": "Go live",
+      "Tooltip": "Start every destination on this programme. Needs an admin token.",
+      "Icon": "imgs/actions/go-live",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.stop-all",
+      "Name": "Stop all",
+      "Tooltip": "Hold to stop every destination on this programme. Stopping ends YouTube broadcasts. Needs an admin token.",
+      "Icon": "imgs/actions/stop-all",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.failover",
+      "Name": "Failover",
+      "Tooltip": "Which source is on air. Tap to hand control back to automatic. Needs an admin token.",
+      "Icon": "imgs/actions/failover",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.meter",
+      "Name": "Meter",
+      "Tooltip": "The loudest channel on this install's meters. Shows NO FEED when the install is not sending levels.",
+      "Icon": "imgs/actions/meter",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1"
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/meter"
+        }
+      ]
+    }
+  ]
+}

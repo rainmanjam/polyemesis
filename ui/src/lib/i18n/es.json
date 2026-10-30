@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Advertencia",
   "timeline.severityInfo": "Info",
   "settings.search": "Buscar en los ajustes",
-  "settings.noMatches": "Ningún ajuste coincide."
+  "settings.noMatches": "Ningún ajuste coincide.",
+  "pairing.title": "Probar un token de emparejamiento",
+  "pairing.hint": "Pega un token para ver su nombre, su alcance y lo que puede hacer. No cambia nada en la instalación, pero la prueba cuenta como un uso del token, como cualquier petición.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Probar conexión",
+  "pairing.testing": "Probando…",
+  "pairing.result": "{name} · {scope} · prefijo {prefix}…",
+  "pairing.scopeRead": "lectura",
+  "pairing.scopeAdmin": "administrador",
+  "pairing.scopeSession": "sesión",
+  "pairing.adminWarning": "Es un token de administrador. Puede cambiar cualquier cosa, incluido detener destinos. Si este plugin solo muestra estado o niveles, usa mejor un token de lectura.",
+  "pairing.refused": "La instalación rechazó este token. Puede estar mal escrito o revocado.",
+  "pairing.unreachable": "No se pudo contactar con la instalación. Revisa la dirección e inténtalo de nuevo.",
+  "pairing.failed": "La instalación respondió, pero sin una respuesta utilizable."
 }

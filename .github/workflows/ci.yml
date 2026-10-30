@@ -1796,6 +1796,44 @@ jobs:
             exit 1
           fi
 
+  # The Stream Deck plugin, integrations/streamdeck. Typecheck, unit tests and
+  # the bundle. Gated like `ui`: the job always reports, and every STEP reads the
+  # `changes` output. A job-level `if:` here would be the outage the `changes`
+  # comment describes. Not a required check; add it to the ruleset deliberately.
+  streamdeck:
+    name: streamdeck typecheck, test, build
+    permissions:
+      contents: read
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: integrations/streamdeck
+    steps:
+      - name: Documentation-only change, so this job did no work
+        if: needs.changes.outputs.code != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "::notice title=streamdeck typecheck, test, build::this check did no work -- every changed path was documentation. See the 'which changes' job."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.code == 'true'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        if: needs.changes.outputs.code == 'true'
+        with:
+          # Matches the manifest's Nodejs.Version: the plugin runs on Node 24.
+          node-version: 24
+          cache: npm
+          cache-dependency-path: integrations/streamdeck/package-lock.json
+      - if: needs.changes.outputs.code == 'true'
+        run: npm ci --ignore-scripts
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run typecheck
+      - if: needs.changes.outputs.code == 'true'
+        run: npm test
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run build
+
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #
   # An invalid workflow file does not fail a job -- it prevents the job from

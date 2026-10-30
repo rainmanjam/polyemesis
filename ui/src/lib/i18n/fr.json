@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Avertissement",
   "timeline.severityInfo": "Info",
   "settings.search": "Rechercher dans les réglages",
-  "settings.noMatches": "Aucun réglage ne correspond."
+  "settings.noMatches": "Aucun réglage ne correspond.",
+  "pairing.title": "Tester un jeton d'appairage",
+  "pairing.hint": "Collez un jeton pour voir son nom, son niveau d'accès et ce qu'il permet. Rien ne change sur l'installation, mais le test compte comme une utilisation du jeton, comme toute requête.",
+  "pairing.tokenLabel": "Jeton",
+  "pairing.test": "Tester la connexion",
+  "pairing.testing": "Test en cours…",
+  "pairing.result": "{name} · {scope} · préfixe {prefix}…",
+  "pairing.scopeRead": "lecture",
+  "pairing.scopeAdmin": "administrateur",
+  "pairing.scopeSession": "session",
+  "pairing.adminWarning": "C'est un jeton administrateur. Il peut tout modifier, y compris arrêter des destinations. Si ce plugin n'affiche que l'état ou les niveaux, utilisez plutôt un jeton de lecture.",
+  "pairing.refused": "L'installation a refusé ce jeton. Il est peut-être mal saisi ou révoqué.",
+  "pairing.unreachable": "Impossible de joindre l'installation. Vérifiez l'adresse et réessayez.",
+  "pairing.failed": "L'installation a répondu, mais sans réponse exploitable."
 }

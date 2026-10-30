@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Waarschuwing",
   "timeline.severityInfo": "Info",
   "settings.search": "Instellingen doorzoeken",
-  "settings.noMatches": "Geen instellingen gevonden."
+  "settings.noMatches": "Geen instellingen gevonden.",
+  "pairing.title": "Een koppelingstoken testen",
+  "pairing.hint": "Plak een token om de naam, het bereik en wat het mag te zien. Er verandert niets op de installatie, maar de controle telt als gebruik van het token, zoals elk verzoek.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Verbinding testen",
+  "pairing.testing": "Testen…",
+  "pairing.result": "{name} · {scope} · prefix {prefix}…",
+  "pairing.scopeRead": "lezen",
+  "pairing.scopeAdmin": "beheer",
+  "pairing.scopeSession": "sessie",
+  "pairing.adminWarning": "Dit is een beheertoken. Het kan alles wijzigen, ook bestemmingen stoppen. Als deze plugin alleen status of niveaus toont, gebruik dan een leestoken.",
+  "pairing.refused": "De installatie heeft dit token geweigerd. Het is mogelijk verkeerd getypt of ingetrokken.",
+  "pairing.unreachable": "De installatie is niet bereikbaar. Controleer het adres en probeer het opnieuw.",
+  "pairing.failed": "De installatie antwoordde, maar niet met een bruikbaar antwoord."
 }

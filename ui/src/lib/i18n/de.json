@@ -1810,5 +1810,18 @@
   "timeline.severityWarning": "Warnung",
   "timeline.severityInfo": "Info",
   "settings.search": "Einstellungen durchsuchen",
-  "settings.noMatches": "Keine Einstellungen gefunden."
+  "settings.noMatches": "Keine Einstellungen gefunden.",
+  "pairing.title": "Pairing-Token testen",
+  "pairing.hint": "Füge ein Token ein, um Name, Berechtigung und Umfang zu sehen. Auf dem Gerät ändert sich nichts, die Prüfung zählt aber wie jede Anfrage als Nutzung des Tokens.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Verbindung testen",
+  "pairing.testing": "Wird getestet…",
+  "pairing.result": "{name} · Zugriff {scope} · Präfix {prefix}…",
+  "pairing.scopeRead": "Lesen",
+  "pairing.scopeAdmin": "Admin",
+  "pairing.scopeSession": "Sitzung",
+  "pairing.adminWarning": "Dies ist ein Admin-Token. Es kann alles ändern, auch Ziele stoppen. Wenn dieses Plugin nur Status oder Pegel anzeigt, nutze stattdessen ein Lese-Token.",
+  "pairing.refused": "Das Gerät hat dieses Token abgelehnt. Es ist möglicherweise falsch eingegeben oder widerrufen.",
+  "pairing.unreachable": "Das Gerät ist nicht erreichbar. Prüfe die Adresse und versuche es erneut.",
+  "pairing.failed": "Das Gerät hat geantwortet, aber nicht mit einer brauchbaren Antwort."
 }

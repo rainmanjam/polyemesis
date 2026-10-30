@@ -1,0 +1,30 @@
+{
+  "name": "polyemesis-streamdeck",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Elgato Stream Deck plugin for a polyemesis install: destination state keys, go live, stop with confirmation, failover and dial meters.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "3.0.4",
+    "@elgato/utils": "0.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@vitest/coverage-v8": "5.0.5",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  },
+  "overrides": {
+    "zod": "4.6.6"
+  }
+}
