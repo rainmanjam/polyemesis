@@ -122,9 +122,10 @@ func (s *Server) handleSetRecording(w http.ResponseWriter, r *http.Request) {
 	if changed {
 		s.publishAudit(auditSettingsChanged([]string{"recording"}, s.clientIP(r)))
 	}
-	if rw := s.reconcileNow("the recording"); rw != "" {
-		writeError(w, http.StatusInternalServerError, rw)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.recordingStateFor(enabled))
+	// The switch is stored whether or not the reconcile succeeds, so a failed
+	// one is a warning on the 200, as every other mutation reports it (#709).
+	// A 500 here read as "nothing happened" -- and a Stream Deck key pressed
+	// again on the strength of it would toggle the setting back.
+	rw := s.reconcileNow("the recording")
+	writeMutation(w, http.StatusOK, rw, s.recordingStateFor(enabled))
 }
