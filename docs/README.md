@@ -7,7 +7,7 @@ deliberately does not do, and how to get it running. These are the details.
 
 | Document | For |
 |---|---|
-| [QUICKSTART.md](QUICKSTART.md) | First stream in about five minutes |
+| [QUICKSTART.md](QUICKSTART.md) | Install, add a source and a destination, then stream |
 | [INSTALL.md](INSTALL.md) | Per-platform installation, including what to do when your distro's FFmpeg is too old |
 | [CONFIGURATION.md](CONFIGURATION.md) | `config.yaml`, flags, and — more usefully — *which* settings live in a file and which live in the UI |
 | [HOT-RELOAD.md](HOT-RELOAD.md) | Which settings drop a connection when you change them mid-stream, and which do not |

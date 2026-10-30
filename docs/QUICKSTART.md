@@ -1,6 +1,7 @@
 # Quickstart
 
-From nothing to a stream going out of polyemesis, in about five minutes.
+From nothing to a stream going out of polyemesis: install, add a source and a
+destination, then stream.
 
 This is the impatient path. [INSTALL.md](INSTALL.md) has the careful version for
 each platform, and the [README](../README.md) explains what everything means.

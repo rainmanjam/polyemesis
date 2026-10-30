@@ -636,7 +636,7 @@ command: ["-addr", ":8080", "-data", "/data", "-log", "debug"]
 ## See also
 
 - [INSTALL.md](INSTALL.md) — getting it running on each platform
-- [QUICKSTART.md](QUICKSTART.md) — first stream in about five minutes
+- [QUICKSTART.md](QUICKSTART.md) — from install to a first stream
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — when it is running but wrong
 - [TLS.md](TLS.md) — the long version: how `auto` resolves, worked configurations
   for all five deployments, trusting the self-signed CA, and reverse proxies

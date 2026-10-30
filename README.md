@@ -195,8 +195,8 @@ make build            # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis -data ./data
 ```
 
-Then follow [docs/QUICKSTART.md](docs/QUICKSTART.md) — first stream in about
-five minutes. Per-platform installation, service files and the GPU images are in
+Then follow [docs/QUICKSTART.md](docs/QUICKSTART.md), from install to a first
+stream. Per-platform installation, service files and the GPU images are in
 [docs/INSTALL.md](docs/INSTALL.md).
 
 ### Requirements
@@ -244,7 +244,7 @@ most:
 
 | | |
 |---|---|
-| [Quickstart](docs/QUICKSTART.md) | First stream in about five minutes |
+| [Quickstart](docs/QUICKSTART.md) | Install, add a source and a destination, then stream |
 | [Install](docs/INSTALL.md) | Per-platform, including a too-old FFmpeg |
 | [OBS setup](docs/OBS.md) | Multitrack over SRT, step by step |
 | [Stream Deck](docs/STREAM-DECK.md) | The plugin: install, pairing, each key |
