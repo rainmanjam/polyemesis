@@ -10,6 +10,27 @@ its first tagged release.
 
 ### Added
 
+- **OBS bridge: go live and stop when OBS does.** Polyemesis now hears
+  about OBS in one of two ways. It can connect to obs-websocket 5 on your LAN
+  or over Tailscale: the password is stored sealed, the link reconnects on its
+  own, and its state shows in Settings. Or the new OBS Python script
+  (`integrations/obs`) can post to `POST /api/v1/obs/events` when polyemesis
+  cannot reach OBS. When OBS starts streaming, the destinations you picked
+  start. When it stops, they stop too, if you have turned that on. Turning it
+  on asks you to accept that stopping ends a YouTube broadcast for good, and
+  you can set a grace period that a quick restart of OBS cancels. A dropped
+  connection or OBS reconnecting never stops anything. Scene rules map an OBS
+  scene to a routing preset. A switch is applied as live track mutes and never
+  restarts a destination; anything that would need a restart is skipped, and
+  the status says why. New `obs` token scope: it reaches
+  `POST /api/v1/obs/events` and nothing else. New events `obs.connection`,
+  `obs.stream` and `obs.scene`. See [docs/OBS-BRIDGE.md](docs/OBS-BRIDGE.md).
+- **Streamer.bot actions.** `integrations/streamerbot` adds actions that call
+  the REST API with a token you keep in a Streamer.bot global: go live, stop
+  all, start or stop a destination, mute or unmute a track, recording on or
+  off, and a status line. Mix It Up can make the same calls from
+  `actions.json`. It is source plus setup steps, not an import string. See
+  [integrations/streamerbot/README.md](integrations/streamerbot/README.md).
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends

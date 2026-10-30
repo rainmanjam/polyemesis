@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 |---|---|
 | `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
-| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text; whoever reads that file can report "OBS started streaming" and nothing more. See [OBS.md](OBS.md). |
+| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text; whoever reads that file can report "OBS started streaming" and nothing more. See [OBS-BRIDGE.md](OBS-BRIDGE.md). |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
 for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
@@ -643,7 +643,7 @@ could contradict.
 
 The OBS bridge starts and stops destinations when OBS starts and stops
 streaming, and applies a routing preset when OBS switches scene. Setup, and
-the two ways polyemesis learns about OBS, are in [OBS.md](OBS.md).
+the two ways polyemesis learns about OBS, are in [OBS-BRIDGE.md](OBS-BRIDGE.md).
 
 `GET /obs` answers `{"config": {...}, "status": {...}}`. `config` is what `PUT
 /obs` stores: `enabled`, `connect`, `url`, `hasPassword`, `sourceId`,

@@ -222,6 +222,8 @@ const DOCS_BY_SECTION = {
       "GET /api/v1/events streams destination, ingest, failover, go-live, recording, chat and alert events as SSE, with replay. Event catalogue and examples."],
     ["MCP.md", "MCP server: connect an AI assistant",
       "POST /mcp lets Claude Desktop, Claude Code or any MCP client read status and failure causes, and with an admin token start, stop and go live. Tools, scopes, confirmations, setup."],
+    ["OBS-BRIDGE.md", "OBS and Streamer.bot: go live when OBS does",
+      "Start and stop destinations when OBS starts and stops streaming, and switch routing presets per scene, over obs-websocket or the OBS script. Streamer.bot actions."],
     ["MQTT.md", "MQTT telemetry and Home Assistant",
       "Retained state on an MQTT 5.0 broker, so a consumer that was offline still gets the current answer. The topic tree, the payloads, and Home Assistant."],
     ["API.md", "HTTP API reference — polyemesis /api/v1",

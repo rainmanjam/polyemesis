@@ -10,7 +10,7 @@ it has already been told, but it is one more thing to configure.
 
 Install: OBS, Tools, Scripts, Python Settings (point it at a Python 3
 install), then + and choose this file. Fill in the polyemesis address and an
-API token with the "obs" scope. See docs/OBS.md.
+API token with the "obs" scope. See docs/OBS-BRIDGE.md.
 
 THE TOKEN IS STORED IN PLAIN TEXT. OBS keeps script settings in the scene
 collection's JSON file. That is why the token this script asks for is an "obs"

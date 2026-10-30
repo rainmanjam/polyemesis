@@ -188,7 +188,7 @@ var catalogue = []Spec{
 	// sees every destination these lead to start or stop.
 	{TypeOBSConnection, TopicOBS, Granted, "Polyemesis's link to obs-websocket connected, dropped, or was refused.", nil},
 	{TypeOBSStream, TopicOBS, Granted, "OBS started or stopped streaming, as reported by obs-websocket or the OBS script.", nil},
-	{TypeOBSScene, TopicOBS, Granted, "OBS switched its program scene, and what the scene's routing rule did about it.", nil},
+	{TypeOBSScene, TopicOBS, Granted, "OBS switched its program scene; preset names the routing rule the scene triggers, if any.", nil},
 
 	// The stream's own bookkeeping. Carries no data from anywhere else.
 	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST.", nil},

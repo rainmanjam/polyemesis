@@ -20,6 +20,7 @@ deliberately does not do, and how to get it running. These are the details.
 |---|---|
 | [OBS.md](OBS.md) | Multitrack over SRT step by step, and the two configurations that are not it |
 | [STREAM-DECK.md](STREAM-DECK.md) | The Stream Deck plugin: install, pairing with a read or admin token, each key, and what its faces mean |
+| [OBS-BRIDGE.md](OBS-BRIDGE.md) | OBS driving polyemesis: go live and stop with OBS, scene routing rules, over obs-websocket or the OBS script; the Streamer.bot pack |
 | [AUDIO-ROUTING.md](AUDIO-ROUTING.md) | Simple mode, the mix matrix, clip protection, loudness and delay |
 | [RENDITIONS.md](RENDITIONS.md) | Shared video encodes, ref counting, presets and hardware encoders |
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |
