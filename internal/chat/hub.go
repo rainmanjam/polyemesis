@@ -95,6 +95,9 @@ type Hub struct {
 	automod    *automodState
 	automodGen uint64
 
+	// display is the on-screen overlay's sink (see display.go), or nil.
+	display DisplaySink
+
 	store     Store
 	bus       Publisher
 	log       *slog.Logger
@@ -489,6 +492,7 @@ func (h *Hub) retract(r *runner, messageID string) {
 	h.publishRetraction(Retraction{
 		Platform: r.platform, Account: r.account, MessageIDs: []string{messageID},
 	})
+	h.retractDisplay(r.platform, r.account, []string{messageID})
 }
 
 // retractUser removes every message from one author, or -- with an empty
@@ -523,6 +527,7 @@ func (h *Hub) retractUser(r *runner, authorID string) {
 		h.publishRetraction(Retraction{
 			Platform: r.platform, Account: r.account, MessageIDs: ids,
 		})
+		h.retractDisplay(r.platform, r.account, ids)
 	}
 }
 

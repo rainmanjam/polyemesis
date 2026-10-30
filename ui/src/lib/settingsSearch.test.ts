@@ -5,6 +5,7 @@ const labels = {
   ingest: "Ingest",
   pipeline: "Pipeline",
   platforms: "Platforms",
+  overlays: "Overlays",
   security: "Security",
   debug: "Debug",
 } as const;
@@ -30,6 +31,6 @@ describe("searchSettings", () => {
   });
 
   it("keeps the rail order fixed and covers the five sections the page has", () => {
-    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "security", "debug"]);
+    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "security", "debug"]);
   });
 });

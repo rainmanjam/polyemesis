@@ -9,6 +9,7 @@ const labels = {
   ingest: "Ingest",
   pipeline: "Pipeline",
   platforms: "Platforms",
+  overlays: "Overlays",
   security: "Security",
   debug: "Debug",
 } as const;

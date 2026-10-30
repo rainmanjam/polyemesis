@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 52,
-  "counterpartlessExcusedCeiling": 30,
+  "excusedCeiling": 56,
+  "counterpartlessExcusedCeiling": 31,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
@@ -12,10 +12,10 @@
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 237,
+    "methodPatternPairs": 247,
     "swept": 67,
-    "excused": 52,
-    "denied": 118,
+    "excused": 56,
+    "denied": 124,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -786,6 +786,54 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/overlay/config",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/overlay/events",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/overlays",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/overlays",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/overlays/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/overlays/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/overlays/{id}/key",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/overlays/{id}/key",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/platforms/accounts",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1261,6 +1309,18 @@
     {
       "method": "POST",
       "pattern": "/mcp",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/dock",
       "coverage": "excused",
       "zeroSource": "unguarded"
     },
@@ -2162,6 +2222,38 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/overlay/config",
+      "scope": "route",
+      "why": "unauthenticated by necessity: an OBS browser source has no session, and the overlay key in X-Overlay-Key is the whole credential. Without it every principal, read token included, gets the same 401.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "overlayConfig"
+    },
+    {
+      "route": "GET /api/v1/overlay/events",
+      "scope": "route",
+      "why": "the overlay's display stream (SSE), keyed by X-Overlay-Key alone. Without the key every principal gets the same 401; with it the stream never ends, so the body sweep cannot read it and the counterpart does.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "overlayDisplayStream"
+    },
+    {
+      "route": "GET /api/v1/overlays",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
       "route": "GET /api/v1/platforms/accounts/{id}/stats",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2263,6 +2355,28 @@
         "status": 403
       },
       "counterpart": "sourcePreviewManifest"
+    },
+    {
+      "route": "GET /overlay",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/dock",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
     },
     {
       "route": "GET /playout/*",

@@ -37,6 +37,25 @@ its first tagged release.
   - Every write is a new `mcp.action` audit event, "Action via MCP (token
     name)", naming the tool, target and outcome.
   - Viewer analytics is not a tool yet; it comes with #4.
+- **Chat overlay and OBS dock.** One chat overlay for every connected platform,
+  as an OBS browser source (`/overlay`), and a denser dock (`/overlay/dock`).
+  Both are display-only. Set them up under **Settings → Chat overlays**.
+  - Each overlay has its own platform filter, so a scene sent to Twitch can
+    show only Twitch chat. The filter is applied on the server.
+  - Four style presets (classic, bubbles, bold outline, compact strip) with
+    font, size, colours, background opacity, fade time and line count, a live
+    preview, and **Copy OBS URL**.
+  - A message appears only after automod has judged it. With the model
+    checker on, a message waits up to 4 seconds for its verdict and is left
+    off the overlay if none arrives. Hidden, deleted and automod-blocked
+    messages never appear, and a message removed after it was shown leaves
+    the screen at once. Lines carry no user IDs, accounts or moderation data.
+  - Each overlay has a display-only key, in the URL fragment so it never
+    reaches server or proxy logs. The key reads that overlay's config and
+    display stream and nothing else. Rotating or revoking it in Settings ends
+    open overlays within seconds.
+  - New event types `chat.display` and `chat.undisplay` (topic `overlay`) on
+    `GET /api/v1/events`. See [docs/OVERLAY.md](docs/OVERLAY.md).
 - **Real-time events API.** `GET /api/v1/events` streams what is happening as
   Server-Sent Events, in the same envelope as webhooks: destinations going up,
   down, held, restarted or changing level (live or by restart), the ingest,
