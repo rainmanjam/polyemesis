@@ -675,7 +675,7 @@ function BulkDestinationControl({
   type StopCountState =
     | { status: "idle" }
     | { status: "loading" }
-    | { status: "ready"; youtube: number }
+    | { status: "ready"; youtube: number; destinations: number }
     | { status: "failed"; message: string };
   const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
   const stopCountSeq = useRef(0);
@@ -689,7 +689,13 @@ function BulkDestinationControl({
     confirmStopAll.ask(true);
     api.stopImpact().then(
       (impact) => {
-        if (seq === stopCountSeq.current) setStopCount({ status: "ready", youtube: impact.youtubeBroadcasts });
+        if (seq === stopCountSeq.current) {
+          setStopCount({
+            status: "ready",
+            youtube: impact.youtubeBroadcasts,
+            destinations: impact.destinations,
+          });
+        }
       },
       (err: unknown) => {
         if (seq === stopCountSeq.current) {
@@ -733,7 +739,10 @@ function BulkDestinationControl({
 
   if (count === 0) return null;
 
-  const consequence = t("dash.stopAllConsequence", { count: String(count) });
+  // Once the server has answered, the dialog names the server's destination count: that is the set a
+  // stop-all touches, and the one the stop is judged by. Until then, the count on screen stands in.
+  const shownCount = stopCount.status === "ready" ? stopCount.destinations : count;
+  const consequence = t("dash.stopAllConsequence", { count: String(shownCount) });
   const stopDescription =
     stopCount.status === "loading" || stopCount.status === "idle"
       ? t("dash.stopCountLoading")
@@ -822,7 +831,7 @@ function BulkDestinationControl({
         // in the title and the description; a subject box would have shown
         // the verb "Stop all".
         subject={{ unnamed: true }}
-        title={t("dash.stopAllTitle", { count })}
+        title={t("dash.stopAllTitle", { count: shownCount })}
         description={stopDescription}
         confirmLabel={t("dash.stopAll")}
         confirmDisabled={stopCount.status !== "ready"}
