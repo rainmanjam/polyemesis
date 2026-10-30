@@ -13,8 +13,8 @@ import (
 // errLiveUnavailable rather than write anywhere. This is the Windows half of
 // live_unix_test.go, which covers the pipe that exists everywhere else.
 //
-// MUTATION: drop the `runtime.GOOS != "windows"` guard in runOnce. Observed
-// (by reading, on a Windows runner): the child gets a pipe and SetVolume blocks
+// MUTATION: drop the `runtime.GOOS != "windows"` guard in runOnce. Not run
+// locally (this file only compiles off Windows). Expected: the child gets a pipe and SetVolume blocks
 // for the reply timeout or writes into the fake's stdin, never answering
 // errLiveUnavailable.
 func TestOnWindowsSetVolumeIsRefusedEvenWhenOptedIn(t *testing.T) {

@@ -15,8 +15,8 @@ import (
 // tear the destination down for the next start to build with the new level, and
 // the operator is told it was a restart and that the platform is the reason.
 //
-// MUTATION: make liveGainsSupported return true. Observed (by reading, on a
-// Windows runner): the apply reaches a process with no pipe, fails as
+// MUTATION: make liveGainsSupported return true. Not run locally (this
+// file only compiles off Windows). Expected: the apply reaches a process with no pipe, fails as
 // unavailable rather than unverified, and the reason no longer names the
 // platform.
 func TestOnWindowsALevelOnlyChangeRestartsAndSaysWhy(t *testing.T) {
