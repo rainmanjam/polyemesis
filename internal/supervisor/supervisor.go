@@ -1102,7 +1102,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// this spawn's stderr scanner and teardown act on THIS run only.
 	var liveCur *liveRun
 	if liveStdin != nil {
-		liveCur = &liveRun{stdin: liveStdin, replies: make(chan int, 4), exited: exited}
+		liveCur = &liveRun{stdin: liveStdin, replies: make(chan liveReply, 4), exited: exited}
 		p.liveMu.Lock()
 		p.live = liveCur
 		p.liveMu.Unlock()

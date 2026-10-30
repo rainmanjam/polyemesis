@@ -220,6 +220,11 @@ func TestOnlyTheCommandWriterTouchesTheStdinPipe(t *testing.T) {
 					if ok && sel.Sel.Name == "stdin" && !allowed[fn.Name.Name] {
 						offenders = append(offenders, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
 					}
+					// The pipe is created in one place. cmd.Stdin / cmd.StdinPipe
+					// anywhere else would be a second way into FFmpeg's keys.
+					if ok && (sel.Sel.Name == "Stdin" || sel.Sel.Name == "StdinPipe") && fn.Name.Name != "runOnce" {
+						offenders = append(offenders, fset.Position(sel.Pos()).String()+" ("+sel.Sel.Name+") in "+fn.Name.Name)
+					}
 					return true
 				})
 			}
@@ -264,14 +269,14 @@ func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
 // the current run's command channel.
 func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/true", LiveCommands: true})
-	old := &liveRun{replies: make(chan int, 4)}
-	cur := &liveRun{replies: make(chan int, 4)}
+	old := &liveRun{replies: make(chan liveReply, 4)}
+	cur := &liveRun{replies: make(chan liveReply, 4)}
 	p.live = cur
 
 	deliverReply(old, "Command reply for stream 0: ret:0 res:")
 	select {
-	case ret := <-cur.replies:
-		t.Fatalf("a reply from the previous run (ret %d) acknowledged the current run's command", ret)
+	case rep := <-cur.replies:
+		t.Fatalf("a reply from the previous run (ret %d) acknowledged the current run's command", rep.ret)
 	default:
 	}
 
@@ -282,5 +287,115 @@ func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	p.clearLive(cur)
 	if p.live != nil {
 		t.Fatal("the current run's own teardown did not clear its channel")
+	}
+}
+
+// THE STREAM INDEX IS CHECKED, not just parsed. FFmpeg sends a `c` command to
+// every filter graph and prints one reply per graph, numbered by graph. A
+// destination has exactly one, its -filter_complex, which is graph 0. A reply
+// numbered anything else means a second graph answered, so which reply is ours
+// is ambiguous, and an ambiguous answer is a refusal: the caller restarts.
+//
+// MUTATION: in send, drop the `rep.stream != liveGraphIndex` arm. Observed:
+// FAIL, a stream-1 ret:0 was taken as success.
+func TestAReplyFromAnotherGraphIsNotAnAcknowledgement(t *testing.T) {
+	withReplyTimeout(t, 500*time.Millisecond)
+	script := `read line; echo "Command reply for stream 1: ret:0 res:" >&2; while read l; do :; done`
+	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/sh", Args: []string{"-c", script}, LiveCommands: true})
+	p.Start()
+	defer func() { _ = p.Stop(t.Context()) }()
+	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
+
+	if err := p.SetVolume("volume@trk0", 0.5); err == nil {
+		t.Fatal("a reply from filter graph 1 acknowledged a command meant for graph 0")
+	}
+	// And the run is spent: whatever graph 0 says later cannot be trusted to
+	// belong to the next command.
+	if err := p.SetVolume("volume@trk0", 0.6); err != errLiveUnavailable {
+		t.Fatalf("after an ambiguous reply SetVolume = %v, want errLiveUnavailable", err)
+	}
+}
+
+// FFmpeg reads the target with %63[^ ]. A longer name would be cut at 63 bytes
+// and the rest read as the time, so it is refused before it is written.
+func TestVolumeLineRefusesATargetFFmpegWouldTruncate(t *testing.T) {
+	long := "volume@" + strings.Repeat("a", 57) // 64 bytes
+	if line, err := volumeLine(long, 1); err == nil {
+		t.Errorf("a 64-byte target was accepted: %q", line)
+	}
+	ok := "volume@" + strings.Repeat("a", 56) // 63 bytes
+	if _, err := volumeLine(ok, 1); err != nil {
+		t.Errorf("a 63-byte target was refused: %v", err)
+	}
+}
+
+// A nil process (a destination with no child yet) refuses rather than panics,
+// so the engine falls back to a restart.
+func TestSetVolumeOnANilProcessIsRefused(t *testing.T) {
+	var p *Process
+	if err := p.SetVolume("volume@trk0", 1); err != errLiveUnavailable {
+		t.Fatalf("nil SetVolume = %v, want errLiveUnavailable", err)
+	}
+}
+
+// THE BINDING GUARD. A reply must reach the run whose scanner read it, never
+// "whatever run the Process holds now". In the supervise loop a later spawn
+// only starts after the earlier one's stderr is drained, so the crossing cannot
+// be staged from outside; what CAN happen is a restart racing an unwinding
+// predecessor (see the cmd compare-and-clear in runOnce), and that is the case
+// this binding exists for. Since the race is not reproducible on demand, the
+// rule is pinned structurally: the Process's `live` field is read only by
+// SetVolume (to find the run to write to) and clearLive (compare-and-clear),
+// and runOnce only ever assigns it. A scanner that looked the run up on the
+// Process would have to read the field, and would fail this test.
+//
+// MUTATION: in runOnce, `deliverReply(liveCur, line)` ->
+// `p.liveMu.Lock(); cur := p.live; p.liveMu.Unlock(); deliverReply(cur, line)`.
+// Observed: FAIL, "p.live is read in runOnce".
+func TestOnlySetVolumeAndClearLiveReadTheCurrentRun(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readers := map[string]bool{"SetVolume": true, "clearLive": true}
+	var offenders []string
+	for _, pkg := range pkgs {
+		for _, f := range pkg.Files {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					continue
+				}
+				// Selectors that are the left-hand side of an assignment are writes.
+				writes := map[*ast.SelectorExpr]bool{}
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if as, ok := n.(*ast.AssignStmt); ok {
+						for _, l := range as.Lhs {
+							if sel, ok := l.(*ast.SelectorExpr); ok {
+								writes[sel] = true
+							}
+						}
+					}
+					return true
+				})
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					sel, ok := n.(*ast.SelectorExpr)
+					if !ok || sel.Sel.Name != "live" || writes[sel] {
+						return true
+					}
+					if !readers[fn.Name.Name] {
+						offenders = append(offenders, "p.live is read in "+fn.Name.Name+" at "+fset.Position(sel.Pos()).String())
+					}
+					return true
+				})
+			}
+		}
+	}
+	if len(offenders) > 0 {
+		t.Errorf("the current run is looked up outside SetVolume/clearLive, so a reply could be routed to a run that did not produce it:\n%s",
+			strings.Join(offenders, "\n"))
 	}
 }

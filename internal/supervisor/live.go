@@ -26,14 +26,20 @@ import (
 //     trusted to belong to the next command, so the run accepts no more and the
 //     caller must restart it.
 //   - A new run gets a new liveRun, so a reply from a previous run cannot reach
-//     the current one.
+//     the current one. The scanner delivers to its own run; only SetVolume and
+//     clearLive read the Process's current run
+//     (TestOnlySetVolumeAndClearLiveReadTheCurrentRun).
+//   - A reply counts only as a whole, anchored line from filter graph 0. A reply
+//     from another graph makes the outcome ambiguous and poisons the run.
 
-// liveReplyTimeout bounds the wait for FFmpeg's reply. FFmpeg acts on a
-// command when its transcode loop next reaches the keyboard check, which runs
-// on the order of the stats period (0.5 s by default here). Two seconds is four
-// of those, enough to be sure a slow loop is not mistaken for a dead one, and
-// short enough that a stuck command does not hold the destination's control
-// path for long. The integration test measures the real latency.
+// liveReplyTimeout bounds the wait for FFmpeg's reply. FFmpeg's main loop polls
+// stdin for a key at most every 100 ms (check_keyboard_interaction), reads the
+// rest of a `c` line at once, and hands the command to the filter graph's
+// thread, which prints the reply when it next runs. Measured on FFmpeg 9.0.2
+// the reply arrives 11 to 71 ms after the write. Two seconds is roughly twenty
+// key polls and about thirty times the worst observed latency: long enough
+// that a loaded machine is not mistaken for a refusal, short enough that a
+// stuck command does not hold the destination's control path for long.
 var liveReplyTimeout = 2 * time.Second
 
 var (
@@ -49,6 +55,19 @@ var (
 // ends: stderr can echo text an operator or a stream controls (metadata, titles),
 // and a line that merely contains the words is not an acknowledgement.
 var liveReplyRE = regexp.MustCompile(`^Command reply for stream (\d+): ret:(-?\d+)(?: res:.*)?$`)
+
+// liveGraphIndex is the filter graph a destination's volume stages live in.
+// FFmpeg numbers a reply by graph, not by output stream, and a destination has
+// one graph, its -filter_complex, which FFmpeg creates first: index 0. (Video
+// is stream-copied, so no implicit simple graph exists for it.) A reply from
+// any other index means a second graph answered the same command, and which
+// answer is ours is then ambiguous.
+const liveGraphIndex = 0
+
+// liveReply is one parsed reply, as the scanner hands it to the waiter.
+type liveReply struct {
+	stream, ret int
+}
 
 // parseReply reads one stderr line. It reports the stream index and return code
 // of a genuine reply, and ok=false for any other line.
@@ -69,6 +88,10 @@ func parseReply(line string) (stream, ret int, ok bool) {
 // instance. The rest of the grammar is fixed, so there is nothing else to name.
 var liveInstanceRE = regexp.MustCompile(`^volume@[A-Za-z0-9_]+$`)
 
+// maxLiveTarget is the longest target FFmpeg reads whole: it scans the target
+// with %63[^ ], so a longer one would be cut and its tail read as the time.
+const maxLiveTarget = 63
+
 // maxLiveLevel bounds a volume level. The profile validator caps per-cell gain
 // well below this; the bound here only refuses a value no profile could have.
 const maxLiveLevel = 100
@@ -82,6 +105,9 @@ func volumeLine(instance string, level float64) (string, error) {
 	if !liveInstanceRE.MatchString(instance) {
 		return "", fmt.Errorf("live command target %q is not a volume instance", instance)
 	}
+	if len(instance) > maxLiveTarget {
+		return "", fmt.Errorf("live command target %q is longer than FFmpeg reads (%d bytes)", instance, maxLiveTarget)
+	}
 	if math.IsNaN(level) || math.IsInf(level, 0) {
 		return "", fmt.Errorf("live command level %v is not finite", level)
 	}
@@ -94,10 +120,10 @@ func volumeLine(instance string, level float64) (string, error) {
 // liveRun is the command channel of one spawn of a process.
 type liveRun struct {
 	stdin io.WriteCloser
-	// replies carries the ret values the stderr scanner dispatches. Buffered and
+	// replies carries the replies the stderr scanner dispatches. Buffered and
 	// filled without blocking, so a reply nobody is waiting for can never stall
 	// the scanner, which is also the reader that keeps FFmpeg's stderr moving.
-	replies chan int
+	replies chan liveReply
 	// exited is closed when the child is reaped, so a waiter does not sit out the
 	// full timeout for a process that has already gone.
 	exited chan struct{}
@@ -107,7 +133,9 @@ type liveRun struct {
 }
 
 // send writes one command and waits for its reply. It is the ONLY method that
-// writes to the pipe, and the caller must hold the process's liveWriteMu.
+// writes to the pipe, and the caller must hold the process's liveWriteMu. It
+// returns the ret of graph 0's reply; a reply from any other graph poisons the
+// run and is an error (see liveGraphIndex).
 func (r *liveRun) send(line string) (int, error) {
 	if r.poisoned {
 		return 0, errLiveUnavailable
@@ -133,8 +161,12 @@ func (r *liveRun) send(line string) (int, error) {
 	timer := time.NewTimer(liveReplyTimeout)
 	defer timer.Stop()
 	select {
-	case ret := <-r.replies:
-		return ret, nil
+	case rep := <-r.replies:
+		if rep.stream != liveGraphIndex {
+			r.poisoned = true
+			return 0, fmt.Errorf("ffmpeg answered from filter graph %d, not %d: more than one graph took the command, so its outcome is ambiguous", rep.stream, liveGraphIndex)
+		}
+		return rep.ret, nil
 	case <-r.exited:
 		r.poisoned = true
 		return 0, errLiveUnavailable
@@ -150,6 +182,9 @@ func (r *liveRun) send(line string) (int, error) {
 // by the next spawn instead. The stored profile is what a restart rebuilds
 // from, so a restart never brings back a stale level.
 func (p *Process) SetVolume(instance string, level float64) error {
+	if p == nil {
+		return errLiveUnavailable
+	}
 	line, err := volumeLine(instance, level)
 	if err != nil {
 		return err
@@ -181,12 +216,12 @@ func deliverReply(run *liveRun, line string) {
 	if run == nil {
 		return
 	}
-	_, ret, ok := parseReply(line)
+	stream, ret, ok := parseReply(line)
 	if !ok {
 		return
 	}
 	select {
-	case run.replies <- ret:
+	case run.replies <- liveReply{stream: stream, ret: ret}:
 	default:
 	}
 }
