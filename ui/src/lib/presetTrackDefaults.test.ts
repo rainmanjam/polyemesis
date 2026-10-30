@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { presetOptsFromRoles, presetPicks } from "./presetTrackDefaults";
+import {
+  layoutTrackIndices,
+  presetOptsFromRoles,
+  presetPicks,
+  roleLayoutFor,
+  type RoleLayout,
+} from "./presetTrackDefaults";
 import type { PresetOpts, TrackAnnotation } from "./types";
 
 /* The routing presets' track pickers default from what the operator said each
@@ -94,9 +100,45 @@ const routing = () => readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "
 describe("RoutingPage, wired to the role defaults", () => {
   it("hands the pickers and the apply call the role-derived options", () => {
     const src = routing();
-    expect(src).toMatch(/presetOptsFromRoles\(\s*presetOpts,\s*annotations,/);
+    // The roles are the EDITED DESTINATION'S programme's, not the header's.
+    expect(src).toMatch(/roleLayoutFor\(editedSourceId,/);
+    expect(src).toMatch(/presetOptsFromRoles\(presetOpts, roles\.annotations, roles\.tracks,/);
     expect(src).toContain("api.applyPreset(presetId, shownPresetOpts, editedSourceId)");
     expect(src).toContain("presetOpts: shownPresetOpts,");
     expect(src).toContain("setPresetOpts: pickPresetOpts,");
+  });
+});
+
+/* Whose roles the pickers open on. The edited destination's programme, never
+ * the header's: a preset is applied against the destination's programme. */
+describe("roleLayoutFor", () => {
+  const studioA: RoleLayout = { sourceId: 1, annotations: [{ track: 1, role: "music" }], tracks: [0, 1, 2, 3] };
+  const studioB: RoleLayout = { sourceId: 2, annotations: [{ track: 3, role: "music" }], tracks: [0, 1, 2, 3] };
+
+  it("reads the destination's own programme when the page holds another", () => {
+    expect(roleLayoutFor(2, studioA, studioB)).toBe(studioB);
+  });
+
+  it("prefers the page's layout when it describes the destination's programme", () => {
+    const typed: RoleLayout = { ...studioB, annotations: [{ track: 2, role: "music" }] };
+    expect(roleLayoutFor(2, typed, studioB)).toBe(typed);
+  });
+
+  it("has no roles at all, rather than another programme's, until that layout is read", () => {
+    expect(roleLayoutFor(2, studioA, null)).toEqual({ annotations: [], tracks: [] });
+    expect(roleLayoutFor(2, studioA, studioA)).toEqual({ annotations: [], tracks: [] });
+  });
+
+  it("keeps the page's layout for a legacy destination with no programme", () => {
+    expect(roleLayoutFor(null, studioA, studioB)).toBe(studioA);
+    expect(roleLayoutFor(null, null, studioB)).toEqual({ annotations: [], tracks: [] });
+  });
+});
+
+describe("layoutTrackIndices", () => {
+  it("lists a measured layout's indices and the six-track placeholder before a probe", () => {
+    expect(layoutTrackIndices([{ index: 0 }, { index: 2 }])).toEqual([0, 2]);
+    expect(layoutTrackIndices(null)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(layoutTrackIndices([])).toEqual([0, 1, 2, 3, 4, 5]);
   });
 });

@@ -47,7 +47,9 @@ describe("ingest liveness", () => {
     for (const file of tsxFiles(join(ROOT, "ui/src"))) {
       const src = readFileSync(file, "utf8");
       if (!src.includes("stateLabel(ingest?.state)")) continue;
-      if (!src.includes("useIngestLive(")) {
+      // useProgrammeIngest is useIngestLive narrowed to the selected
+      // programme, and calls it; the last test below pins that call.
+      if (!src.includes("useIngestLive(") && !src.includes("useProgrammeIngest(")) {
         offenders.push(file.slice(ROOT.length));
       }
     }
@@ -56,6 +58,11 @@ describe("ingest liveness", () => {
       "these files label the ingest from status.ingest alone, which reads " +
         "Offline on a healthy SRT install -- use useIngestLive (see #514)",
     ).toEqual([]);
+  });
+
+  it("is still decided by useIngestLive when a page reads it through useProgrammeIngest", () => {
+    const hook = readFileSync(join(ROOT, "ui/src/hooks/useProgrammeIngest.ts"), "utf8");
+    expect(hook).toContain("useIngestLive(");
   });
 
   it("still finds the call sites it is meant to guard", () => {
