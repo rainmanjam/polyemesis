@@ -1,0 +1,178 @@
+# Unit tests for alerts.yml. Run with:
+#   promtool test rules deploy/prometheus/alerts_test.yml
+# (docker run --rm -v "$PWD/deploy/prometheus:/r" --entrypoint promtool \
+#    prom/prometheus:v3.15.0 test rules /r/alerts_test.yml)
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  # A refused key while the programme is live: down, with the cause and the
+  # hold in the description.
+  - interval: 15s
+    input_series:
+      - series: 'polyemesis_ingest_bitrate_bits_per_second{instance="pe",job="polyemesis",id="1",name="Main"}'
+        values: '6000000x20'
+      - series: 'polyemesis_destination_info{instance="pe",job="polyemesis",id="7",name="YouTube",kind="rtmp",platform="youtube",source_id="1"}'
+        values: '1x20'
+      - series: 'polyemesis_destination_up{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_enabled{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '1x20'
+      - series: 'polyemesis_destination_failure_reason{instance="pe",job="polyemesis",id="7",name="YouTube",cause="key_rejected"}'
+        values: '1x20'
+      - series: 'polyemesis_destination_failure_reason{instance="pe",job="polyemesis",id="7",name="YouTube",cause="timeout"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_held{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PolyemesisDestinationDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PolyemesisDestinationDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: pe
+              job: polyemesis
+              id: "7"
+              name: YouTube
+            exp_annotations:
+              summary: 'Destination "YouTube" is enabled and not delivering'
+              description: >-
+                Its programme's ingest is receiving, but destination YouTube
+                (id 7) has not been delivering for 2 minutes.
+                Cause: key_rejected.
+                Held: yes -- press Retry on its card once the cause is fixed.
+
+  # Between shows: nothing arriving, every destination idle. Not an outage.
+  - interval: 15s
+    input_series:
+      - series: 'polyemesis_ingest_bitrate_bits_per_second{instance="pe",job="polyemesis",id="1",name="Main"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_info{instance="pe",job="polyemesis",id="7",name="YouTube",kind="rtmp",platform="youtube",source_id="1"}'
+        values: '1x20'
+      - series: 'polyemesis_destination_up{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_enabled{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PolyemesisDestinationDown
+        exp_alerts: []
+
+  # Destination ids and programme ids are different things: programme 7 being
+  # live says nothing about destination 7, whose programme (1) is idle.
+  - interval: 15s
+    input_series:
+      - series: 'polyemesis_ingest_bitrate_bits_per_second{instance="pe",job="polyemesis",id="7",name="Other"}'
+        values: '6000000x20'
+      - series: 'polyemesis_ingest_bitrate_bits_per_second{instance="pe",job="polyemesis",id="1",name="Main"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_info{instance="pe",job="polyemesis",id="7",name="YouTube",kind="rtmp",platform="youtube",source_id="1"}'
+        values: '1x20'
+      - series: 'polyemesis_destination_up{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '0x20'
+      - series: 'polyemesis_destination_enabled{instance="pe",job="polyemesis",id="7",name="YouTube"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: PolyemesisDestinationDown
+        exp_alerts: []
+
+  # A programme with no engine, and one whose ingest failed. A listener waiting
+  # for its encoder (running, no bitrate) is neither.
+  - interval: 15s
+    input_series:
+      - series: 'polyemesis_source_engine_up{instance="pe",job="polyemesis",id="1",name="Main"}'
+        values: '0x10'
+      - series: 'polyemesis_source_engine_up{instance="pe",job="polyemesis",id="2",name="Studio B"}'
+        values: '1x10'
+      - series: 'polyemesis_ingest_state{instance="pe",job="polyemesis",id="2",name="Studio B",state="failed"}'
+        values: '1x10'
+      - series: 'polyemesis_source_engine_up{instance="pe",job="polyemesis",id="3",name="Waiting"}'
+        values: '1x10'
+      - series: 'polyemesis_ingest_state{instance="pe",job="polyemesis",id="3",name="Waiting",state="failed"}'
+        values: '0x10'
+      - series: 'polyemesis_ingest_bitrate_bits_per_second{instance="pe",job="polyemesis",id="3",name="Waiting"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PolyemesisIngestDown
+        exp_alerts:
+          - exp_labels: {severity: critical, instance: pe, job: polyemesis, id: "1", name: Main}
+            exp_annotations:
+              summary: 'Programme "Main" cannot receive its stream'
+              description: >-
+                Programme Main (id 1) has no running engine,
+                or its ingest process has failed and stopped retrying. Nothing an encoder
+                sends to it is being received. Check the server log and the programme's
+                ingest settings.
+          - exp_labels: {severity: critical, instance: pe, job: polyemesis, id: "2", name: Studio B, state: failed}
+            exp_annotations:
+              summary: 'Programme "Studio B" cannot receive its stream'
+              description: >-
+                Programme Studio B (id 2) has no running engine,
+                or its ingest process has failed and stopped retrying. Nothing an encoder
+                sends to it is being received. Check the server log and the programme's
+                ingest settings.
+
+  # 1.5 GiB free of a 1 TiB volume: under the 2 GiB floor though far over 5%...
+  # and 40 GiB of 1 TiB: under 5%. 100 GiB of 1 TiB: fine.
+  - interval: 1m
+    input_series:
+      - series: 'polyemesis_recording_free_bytes{instance="a",job="polyemesis"}'
+        values: '1610612736x10'
+      - series: 'polyemesis_recording_total_bytes{instance="a",job="polyemesis"}'
+        values: '1099511627776x10'
+      - series: 'polyemesis_recording_free_bytes{instance="b",job="polyemesis"}'
+        values: '42949672960x10'
+      - series: 'polyemesis_recording_total_bytes{instance="b",job="polyemesis"}'
+        values: '1099511627776x10'
+      - series: 'polyemesis_recording_free_bytes{instance="c",job="polyemesis"}'
+        values: '107374182400x10'
+      - series: 'polyemesis_recording_total_bytes{instance="c",job="polyemesis"}'
+        values: '1099511627776x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: PolyemesisRecordingDiskLow
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: a, job: polyemesis}
+            exp_annotations:
+              summary: Recording volume is nearly full
+              description: >-
+                1.5GiB
+                free on the volume holding the recordings directory. Delete or move
+                recordings, or lower retention.
+          - exp_labels: {severity: warning, instance: b, job: polyemesis}
+            exp_annotations:
+              summary: Recording volume is nearly full
+              description: >-
+                40GiB
+                free on the volume holding the recordings directory. Delete or move
+                recordings, or lower retention.
+
+  # Eight restarts in fifteen minutes is a storm; the cause rides along.
+  - interval: 1m
+    input_series:
+      - series: 'polyemesis_destination_restarts_total{instance="pe",job="polyemesis",id="4",name="Twitch"}'
+        values: '0 1 2 3 4 5 6 7 8 8 8 8 8 8 8 8'
+      - series: 'polyemesis_destination_failure_reason{instance="pe",job="polyemesis",id="4",name="Twitch",cause="connection_refused"}'
+        values: '1x15'
+      - series: 'polyemesis_ingest_restarts_total{instance="pe",job="polyemesis",id="1",name="Main"}'
+        values: '0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PolyemesisDestinationRestartStorm
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: pe, job: polyemesis, id: "4", name: Twitch}
+            exp_annotations:
+              summary: 'Destination "Twitch" is restarting repeatedly'
+              description: >-
+                8 restarts in 15 minutes.
+                Last cause: connection_refused.
+      - eval_time: 15m
+        alertname: PolyemesisIngestRestartStorm
+        exp_alerts: []

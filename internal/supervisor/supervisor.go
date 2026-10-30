@@ -309,6 +309,12 @@ type Status struct {
 	// was arriving at the time.
 	Rate      float64 `json:"-"`
 	RateKnown bool    `json:"-"`
+	// Failures is how many runs of this process have ended in a classified
+	// failure, by cause, since the process was created -- the same lifetime as
+	// Restarts. NOT JSON: it feeds polyemesis_destination_failures_total and
+	// nothing else, so the status, MQTT and event payloads are unchanged. A
+	// copy, so a reader can never race noteExit. Nil until the first failure.
+	Failures map[failreason.Cause]int `json:"-"`
 }
 
 // RateWindow is how much recent history Status.Rate is measured over. Long
@@ -365,6 +371,9 @@ type Process struct {
 	// reason is the classified failure of the most recent run; see
 	// Status.Reason. Its Line is already scrubbed.
 	reason *failreason.Reason
+	// failures counts every classified failed run by cause, for the life of
+	// this Process; see Status.Failures.
+	failures map[failreason.Cause]int
 	// rate is this run's recent progress, oldest first, for Status.Rate.
 	// Reset on every respawn with mediaAt.
 	rate []rateSample
@@ -1419,6 +1428,10 @@ func (p *Process) noteExit(tail []string, err error, ranFor time.Duration, quick
 	r.Line = p.scrub(r.Line)
 	r.At = time.Now()
 	p.reason = &r
+	if p.failures == nil {
+		p.failures = map[failreason.Cause]int{}
+	}
+	p.failures[r.Cause]++
 	return &r
 }
 
@@ -1830,6 +1843,12 @@ func (p *Process) Status() Status {
 	if p.reason != nil {
 		r := *p.reason
 		st.Reason = &r
+	}
+	if len(p.failures) > 0 {
+		st.Failures = make(map[failreason.Cause]int, len(p.failures))
+		for c, n := range p.failures {
+			st.Failures[c] = n
+		}
 	}
 	if p.state == StateRunning {
 		st.Rate, st.RateKnown = p.rateLocked(time.Now())

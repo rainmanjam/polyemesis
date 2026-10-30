@@ -737,7 +737,8 @@ under the same name:
   timeline);
 - the `cause`, `held` and `keyChanged` fields of a webhook;
 - the `cause`, `held` and `causeDetail` fields of the MQTT destination topic;
-- the Stream Deck destination key.
+- the Stream Deck destination key;
+- the Prometheus scrape, as the three families below.
 
 | `cause` | What it means | How it is recognised |
 |---|---|---|
@@ -756,6 +757,43 @@ unconfigured path and a refused key print identical stderr. An ingest that
 silently drops a codec it cannot carry prints only `Broken pipe`. The fixtures
 and their README in `internal/failreason/testdata` record what was captured,
 and how.
+
+### On the scrape
+
+Three families carry the cause. Each is labelled `id` and `name` like every
+other destination series, plus `cause` where it says which:
+
+- `polyemesis_destination_failure_reason{cause}` — a gauge, 1 for the cause the
+  destination is failing with now and 0 for the other eight. All nine are 0
+  while nothing is wrong. It follows the destination's `reason` in
+  `/api/v1/status`, including `upload_too_slow` on a destination that is still
+  running.
+- `polyemesis_destination_held` — 1 while the destination is held (below).
+- `polyemesis_destination_failures_total{cause}` — a counter of failed runs by
+  cause, since the destination's process was created. It resets with
+  `polyemesis_destination_restarts_total`, which `increase()` handles.
+
+**Every cause is emitted for every destination, at 0 until it happens.** That
+is not padding. A refused key is held after three refusals that can all land
+inside one 15-second scrape; a series that first appeared at 3 would have no
+earlier sample, and `increase()` over it would read 0 — the one failure the
+counter exists to show.
+
+**Only the code is a label, never FFmpeg's line.** The line that explains a
+refused key is the line that carries the publish URL, and a label is copied into
+every Prometheus and Grafana that scrapes this. `cause` is always one of the
+nine codes in the table above, so the families add at most nine series per
+destination each.
+
+```promql
+polyemesis_destination_failure_reason == 1                 # who is failing, and why
+polyemesis_destination_held == 1                           # waiting for Retry
+sum by (cause) (increase(polyemesis_destination_failures_total[1h]))
+```
+
+The shipped Grafana dashboard draws all three, and the shipped
+`PolyemesisDestinationDown` rule names the cause in its description — see
+[GRAFANA.md](GRAFANA.md).
 
 ### Held after three quick rejections
 
@@ -850,6 +888,8 @@ Full route reference: [API.md](API.md).
 
 ## See also
 
+- [GRAFANA.md](GRAFANA.md) — the shipped Grafana dashboard, Prometheus alert
+  rules, and a compose file that runs both pre-provisioned
 - [HOOKS.md](HOOKS.md) — the machine-readable counterpart to the alerts above:
   one signed delivery per transition, never coalesced, for a script rather than
   a person

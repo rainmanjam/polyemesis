@@ -204,3 +204,47 @@ func TestTheRateIsUnknownUntilThereIsAWindowToMeasure(t *testing.T) {
 		t.Fatal("a rate was reported from one second of history")
 	}
 }
+
+// TestEveryFailedRunIsCountedUnderItsCause is what feeds
+// polyemesis_destination_failures_total: three refusals before the hold are
+// three key_rejected failures, the count survives the hold and the retry, and
+// it is a copy -- mutating one status does not reach the next.
+func TestEveryFailedRunIsCountedUnderItsCause(t *testing.T) {
+	spec := quickPolicy()
+	spec.HoldAfterQuickRejections = 3
+	p := testProcess(t, fakeExitSaying(1, refusedKeyLine), spec)
+	if got := p.Status().Failures; got != nil {
+		t.Fatalf("failures before anything ran = %v, want nil", got)
+	}
+	p.Start()
+	waitFor(t, "the destination to be held", func() bool {
+		r := p.Status().Reason
+		return r != nil && r.Held
+	})
+	st := p.Status()
+	if got := st.Failures[failreason.KeyRejected]; got != 3 {
+		t.Fatalf("key_rejected failures = %d, want 3 (%v)", got, st.Failures)
+	}
+	if len(st.Failures) != 1 {
+		t.Fatalf("failures = %v, want key_rejected alone", st.Failures)
+	}
+	st.Failures[failreason.KeyRejected] = 99
+	if got := p.Status().Failures[failreason.KeyRejected]; got != 3 {
+		t.Fatalf("a caller's copy reached the process: %d", got)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p.Restart(ctx)
+	waitFor(t, "the second hold", func() bool {
+		return p.Status().Failures[failreason.KeyRejected] >= 6
+	})
+	// Not JSON: the status payload, MQTT and #17 events are unchanged.
+	b, err := json.Marshal(p.Status())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(b)), "failures") {
+		t.Fatalf("Failures leaked into the status JSON: %s", b)
+	}
+}
