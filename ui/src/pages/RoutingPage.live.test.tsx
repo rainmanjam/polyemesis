@@ -261,6 +261,41 @@ describe("live mute on the routing page", () => {
   });
 });
 
+describe("an edit made while Save is out", () => {
+  // MUTATION: always reseed (drop the draftRef comparison in save). Observed: FAIL.
+  it("is kept, and the form stays dirty, when the save answers", async () => {
+    let finish: () => void = () => {};
+    updateDestination.mockImplementation(
+      () => new Promise((r) => (finish = () => r({ destination: stored, routing: compiled }))),
+    );
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await save();
+    expect(updateDestination).toHaveBeenCalledTimes(1);
+    // The operator keeps working while the PUT is out: track 3 back out.
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    // The server stores what was sent: track 3 in.
+    stored.profile.tracks.push({ track: 2, enabled: true, gain: 1 });
+    await act(async () => finish());
+    await waitFor(() => expect(api.listDestinations).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+    expect(screen.getByLabelText("Include track 3").getAttribute("data-state")).toBe("unchecked");
+  });
+
+  it("an untouched draft is reseeded from the stored row and Save goes quiet", async () => {
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    updateDestination.mockImplementation(async (_id: number, body: { profile: RoutingProfile }) => {
+      stored.profile = structuredClone(body.profile);
+      return { destination: stored, routing: compiled };
+    });
+    await save();
+    await waitFor(() => expect(api.listDestinations).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(saveButton().disabled).toBe(true));
+    expect(screen.getByLabelText("Include track 3").getAttribute("data-state")).toBe("checked");
+  });
+});
+
 describe("a live level shows what the server stored", () => {
   // MUTATION: merge `change` instead of storedLevel(res, ...) in applyLevel. Observed: FAIL.
   it("merges the answer's stored gain, not the request's own value", async () => {

@@ -228,6 +228,17 @@ export function RoutingPage() {
   // carry unsaved edits besides.
   const keepDraftFor = useRef<DestinationId | null>(null);
 
+  // The drafts as last rendered, for Save to compare after its awaits. A
+  // closure holds the values from the click, which is exactly what is compared
+  // AGAINST; this is the other side.
+  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null }>({
+    profile: null,
+    vod: null,
+  });
+  useEffect(() => {
+    draftRef.current = { profile, vod: vodProfile };
+  }, [profile, vodProfile]);
+
   // The live editor's latest compile and the draft it was compiled from. The
   // save bar compares it, levels masked, with the stored graph to say whether
   // Save restarts the destination or only moves levels (lib/saveImpact). A
@@ -395,6 +406,10 @@ export function RoutingPage() {
 
   const save = async () => {
     if (!selected || !profile) return;
+    // What Save sends. An edit made while the request is out replaces one of
+    // these objects, and is not in what the server now holds.
+    const sentProfile = profile;
+    const sentVod = vodProfile;
     setSaving(true);
     try {
       // Every optional field goes out explicitly, including the nulls: the
@@ -418,9 +433,20 @@ export function RoutingPage() {
             ? t("route.savedLive", { name: selected.name })
             : t("route.savedRestarting", { name: selected.name }),
       );
-      setDirty(false);
       setLiveRefusals({});
-      setList(await api.listDestinations());
+      const fresh = await api.listDestinations();
+      // Compared after the LAST await: an edit can land during the PUT or the
+      // list read. If the draft is still the one that was sent, the stored row
+      // is now the draft and the list write reseeds it. If it moved on, the
+      // reseed would throw the newer edit away, so it is skipped and the form
+      // stays dirty: those edits still need a Save.
+      const now = draftRef.current;
+      if (now.profile !== sentProfile || now.vod !== sentVod) {
+        keepDraftFor.current = selected.id;
+      } else {
+        setDirty(false);
+      }
+      setList(fresh);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
     } finally {
