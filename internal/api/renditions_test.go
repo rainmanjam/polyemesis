@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -133,7 +134,7 @@ func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.H
 	o.Version = "test"
 	s := New(o)
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 	return s, h, store, login(t, h)
 }
 
@@ -142,13 +143,38 @@ func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.H
 // A few tests need the Server itself rather than its handler -- to ask where
 // the stems directory is, or what the data directory resolved to -- and those
 // answers must come from the SAME instance under test, not from a second one
-// built with the same config. Package tests do not run in parallel, so the last
-// one built is the one the caller just asked for.
+// built with the same config.
+//
+// "The last one built" was the whole lookup while every test in this package
+// ran sequentially. It is not any more: the parallel set (parallel_test.go)
+// builds servers concurrently, and the last one built is then somebody else's.
+// So every constructor also records its server against the handler it returned
+// (setTestServer), and serverUnderTest looks the handler up first. The
+// sequential tests that read lastTestServer directly are unaffected: a
+// parallel test does not start until every sequential one has finished.
 var lastTestServer *Server
 
+var (
+	testServersMu sync.Mutex
+	testServers   = map[http.Handler]*Server{}
+)
+
+// setTestServer records s as the server behind h, and as the last one built.
+func setTestServer(s *Server, h http.Handler) {
+	testServersMu.Lock()
+	defer testServersMu.Unlock()
+	testServers[h] = s
+	lastTestServer = s
+}
+
 // serverUnderTest returns the Server behind a handler from renditionServer.
-func serverUnderTest(t *testing.T, _ http.Handler) *Server {
+func serverUnderTest(t *testing.T, h http.Handler) *Server {
 	t.Helper()
+	testServersMu.Lock()
+	defer testServersMu.Unlock()
+	if s, ok := testServers[h]; ok {
+		return s
+	}
 	if lastTestServer == nil {
 		t.Fatal("no test server has been built")
 	}

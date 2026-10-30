@@ -466,7 +466,7 @@ func enginelessServer(t *testing.T, rows func(*testing.T, *db.DB)) (*Server, htt
 	t.Cleanup(s.chat.Close)
 
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 	if s.eng() != nil {
 		t.Fatal("the fixture came up with an engine, so nothing walked through it would " +
 			"be testing an install with no programme")

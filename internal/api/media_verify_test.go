@@ -89,6 +89,9 @@ func TestVerifyingTwiceAsksOnce(t *testing.T) {
 // this product has no other way to create, and one that would then be read as
 // the verdict for a file named `.probe-<name>`.
 func TestOnlyANameTheLibraryListsCanBeReChecked(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	cases := []struct {
 		name   string
 		path   string

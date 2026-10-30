@@ -221,6 +221,9 @@ func TestAReadTokenIsListedOnlyTheReadToolsAndAnAdminTokenEveryTool(t *testing.T
 // answers 403 and the tool reports it -- but this test asserts the call never
 // produced an mcp.action event as the read token, and it did.
 func TestEveryWriteAndContentToolIsRefusedToAReadTokenAndReachesTheHandlerForAnAdmin(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	samples := mcpSampleArgs()
 	for _, name := range append(append([]string{}, mcpWantContentTools...), mcpWantWriteTools...) {
 		t.Run(name, func(t *testing.T) {
@@ -360,6 +363,9 @@ func TestARevokedTokenStopsWorkingOnItsNextToolCall(t *testing.T) {
 // Mutation: make destAction ignore Confirm. Observed FAIL (stop_destination
 // stopped the destination and an mcp.action event was published).
 func TestStopToolsAndGoLiveDoNothingWithoutConfirmAndAnswerWithTheImpact(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	cases := []struct {
 		tool string
 		args map[string]any
@@ -559,6 +565,9 @@ func TestNoMCPToolOrResourceReturnsACredentialToAnyToken(t *testing.T) {
 // the keys in. Each tool on a fresh planted rig, with its confirmation given,
 // and each confirmation PREVIEW too, since those quote stop impact and rows.
 func TestNoMCPWriteToolAnswerOrPreviewCarriesACredential(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	samples := mcpSampleArgs()
 	for _, name := range mcpWantWriteTools {
 		t.Run(name, func(t *testing.T) {
@@ -804,6 +813,9 @@ func TestAPatternInvalidPresetIsRefusedBeforeAnyRequestIsMade(t *testing.T) {
 // info, turning it off is a warning; a scheduled start is info, a scheduled
 // stop a warning.
 func TestTheAuditSeverityOfAToolThatSometimesStopsFollowsTheCall(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	cases := []struct {
 		tool string
 		args map[string]any
@@ -829,6 +841,9 @@ func TestTheAuditSeverityOfAToolThatSometimesStopsFollowsTheCall(t *testing.T) {
 // fixed paths are checked by serving every write tool and recording every
 // dispatched pattern.
 func TestNoMCPToolDispatchesToAnExpertOrPreviewRoute(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	rig := newMCPRig(t)
 	var seen []string
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

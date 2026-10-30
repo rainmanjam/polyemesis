@@ -195,6 +195,9 @@ var pullSpellings = []pullSpelling{{
 // the engine's own -i construction and then through all three consumers of the
 // upload gate.
 func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	const (
 		unchecked = "unchecked-abcd1234.ts"
 		checked   = "checked-abcd1234.ts"
@@ -377,6 +380,9 @@ func TestEverySpellingOfOneInputArgumentGetsOneVerdict(t *testing.T) {
 // naming an already-unchecked upload is now refused: store the URL while the
 // upload is verified, downgrade the verdict underneath, then read the listing.
 func TestEverySpellingIsReportedOnTheSourceListing(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	const name = "inherited-abcd1234.ts"
 
 	for _, sp := range pullSpellings {

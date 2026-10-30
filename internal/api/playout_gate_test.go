@@ -79,7 +79,7 @@ func playoutOriginServer(t *testing.T, set db.PlayoutSettings, pub playoutPublis
 		Engine: eng, Events: bus, Version: "test",
 	})
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 
 	if _, err := s.playoutStore().save(pub); err != nil {
 		t.Fatalf("save publish config: %v", err)

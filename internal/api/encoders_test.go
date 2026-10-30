@@ -84,6 +84,9 @@ func getEncoders(t *testing.T, tools *ffmpeg.Tools, query string) encoderListRes
 // h264_vaapi and h264_amf on a box with no GPU at all, and the old endpoint
 // reported that list as capability.
 func TestEncoderListReportsTheTestEncodeNotTheBuildList(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	stockLinuxBuild := []string{
 		string(db.EncoderX264), string(db.EncoderX265),
 		string(db.EncoderNVENCH264), string(db.EncoderNVENCHEVC),
