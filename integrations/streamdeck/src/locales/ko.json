@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "투표 질문",
   "streamdeck.pi.pollOptions": "선택지, 한 줄에 하나 (2~6개)",
   "streamdeck.pi.pollDuration": "시간 (초)",
-  "streamdeck.pi.pollHint": "누르면 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다."
+  "streamdeck.pi.pollHint": "누르면 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다.",
+  "streamdeck.issue.restartStorm": "재연결 중 ×{count}",
+  "streamdeck.issue.droppingFrames": "프레임 손실",
+  "streamdeck.issue.platformPoor": "{platform}: 나쁨",
+  "streamdeck.issue.reconnectAccount": "계정 다시 연결",
+  "streamdeck.issue.accountExpiring": "계정 만료 임박",
+  "streamdeck.issue.sourceBackup": "백업 소스 사용 중",
+  "streamdeck.issue.sourcePlaylist": "플레이리스트 사용 중",
+  "streamdeck.issue.sourceSlate": "슬레이트 사용 중",
+  "streamdeck.issue.sourceDegraded": "소스 품질 저하",
+  "streamdeck.pi.issues": "현재 문제",
+  "streamdeck.pi.noIssues": "이 대상에 보고된 문제가 없습니다."
 }

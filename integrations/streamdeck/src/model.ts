@@ -58,6 +58,29 @@ export interface DestStatus {
   /** The live delay buffer. phase "draining" is a STOPPED destination still on
    *  the air with its buffered tail. */
   delay?: { seconds: number; phase: "buffering" | "on-air" | "draining"; drainRemainingSeconds?: number } | null;
+  /** Respawns in the last 15 minutes, present only when more than five: the
+   *  server's restart-storm verdict, the PolyemesisDestinationRestartStorm threshold. */
+  restartStorm?: number;
+  /** Frames dropped over the last few seconds, present only when the server
+   *  judges it at least one percent of the frames output. */
+  droppingFrames?: number;
+  /** The connected account's health, present only when it is not ok. The state
+   *  word only: the server keeps the refresh error off this read-scope payload. */
+  accountHealth?: AccountHealthState;
+  /** The platform's own verdict on the stream, present only while it is poor. */
+  platformHealth?: PlatformHealth | null;
+}
+
+export type AccountHealthState = "expiring" | "refreshFailing" | "expired";
+
+/** DestStatus.platformHealth (internal/engine/destsignals.go). */
+export interface PlatformHealth {
+  /** The platform's id, e.g. "youtube". */
+  platform: string;
+  /** The platform's word, verbatim: YouTube's good, ok, bad or noData. */
+  status: string;
+  /** The platform's codes for its error-severity issues. */
+  issues?: string[];
 }
 
 export interface HoldStatus {
@@ -68,7 +91,11 @@ export interface HoldStatus {
 export interface StatusPayload {
   destinations?: DestStatus[];
   destinationHold?: HoldStatus | null;
+  /** The failover of the programme this status was scoped to: source.id's. */
   failover?: FailoverStatus | null;
+  /** The programme the scoped parts of this answer (failover) describe. The
+   *  destination list is install-wide, so this is what places a failover. */
+  source?: { id: number } | null;
 }
 
 export type SourceKind = "" | "primary" | "backup" | "playlist" | "slate";

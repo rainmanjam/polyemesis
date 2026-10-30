@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Вопрос опроса",
   "streamdeck.pi.pollOptions": "Варианты, по одному на строку (от 2 до 6)",
   "streamdeck.pi.pollDuration": "Длительность (секунды)",
-  "streamdeck.pi.pollHint": "Нажмите, чтобы начать опрос во всех чатах. Пока он идёт, клавиша показывает голоса и оставшееся время; удерживайте её, чтобы завершить раньше."
+  "streamdeck.pi.pollHint": "Нажмите, чтобы начать опрос во всех чатах. Пока он идёт, клавиша показывает голоса и оставшееся время; удерживайте её, чтобы завершить раньше.",
+  "streamdeck.issue.restartStorm": "Переподключение ×{count}",
+  "streamdeck.issue.droppingFrames": "Пропуск кадров",
+  "streamdeck.issue.platformPoor": "{platform}: плохо",
+  "streamdeck.issue.reconnectAccount": "Переподключите аккаунт",
+  "streamdeck.issue.accountExpiring": "Аккаунт истекает",
+  "streamdeck.issue.sourceBackup": "На резервном источнике",
+  "streamdeck.issue.sourcePlaylist": "На плейлисте",
+  "streamdeck.issue.sourceSlate": "На заставке",
+  "streamdeck.issue.sourceDegraded": "Источник ухудшен",
+  "streamdeck.pi.issues": "Текущие проблемы",
+  "streamdeck.pi.noIssues": "Для этого назначения ничего не сообщается."
 }

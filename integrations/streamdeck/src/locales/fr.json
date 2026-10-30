@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Question du sondage",
   "streamdeck.pi.pollOptions": "Choix, un par ligne (2 à 6)",
   "streamdeck.pi.pollDuration": "Durée (secondes)",
-  "streamdeck.pi.pollHint": "Appuyez pour lancer le sondage dans tous les chats. Pendant qu'il tourne, la touche affiche les votes et le temps restant ; maintenez-la pour le terminer plus tôt."
+  "streamdeck.pi.pollHint": "Appuyez pour lancer le sondage dans tous les chats. Pendant qu'il tourne, la touche affiche les votes et le temps restant ; maintenez-la pour le terminer plus tôt.",
+  "streamdeck.issue.restartStorm": "Reconnexion ×{count}",
+  "streamdeck.issue.droppingFrames": "Images perdues",
+  "streamdeck.issue.platformPoor": "{platform} : mauvais",
+  "streamdeck.issue.reconnectAccount": "Reconnecter le compte",
+  "streamdeck.issue.accountExpiring": "Compte bientôt expiré",
+  "streamdeck.issue.sourceBackup": "Sur la source de secours",
+  "streamdeck.issue.sourcePlaylist": "Sur la playlist",
+  "streamdeck.issue.sourceSlate": "Sur le carton",
+  "streamdeck.issue.sourceDegraded": "Source dégradée",
+  "streamdeck.pi.issues": "Problèmes en cours",
+  "streamdeck.pi.noIssues": "Rien à signaler pour cette destination."
 }

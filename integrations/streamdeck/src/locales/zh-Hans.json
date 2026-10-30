@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "投票问题",
   "streamdeck.pi.pollOptions": "选项，每行一个 (2 到 6 个)",
   "streamdeck.pi.pollDuration": "时长 (秒)",
-  "streamdeck.pi.pollHint": "按下即可在所有聊天中开始投票。进行中按键会显示票数和剩余时间；长按可提前结束。"
+  "streamdeck.pi.pollHint": "按下即可在所有聊天中开始投票。进行中按键会显示票数和剩余时间；长按可提前结束。",
+  "streamdeck.issue.restartStorm": "重新连接中 ×{count}",
+  "streamdeck.issue.droppingFrames": "正在丢帧",
+  "streamdeck.issue.platformPoor": "{platform}：较差",
+  "streamdeck.issue.reconnectAccount": "重新连接账号",
+  "streamdeck.issue.accountExpiring": "账号即将过期",
+  "streamdeck.issue.sourceBackup": "正在使用备用源",
+  "streamdeck.issue.sourcePlaylist": "正在播放列表",
+  "streamdeck.issue.sourceSlate": "正在垫片",
+  "streamdeck.issue.sourceDegraded": "源质量下降",
+  "streamdeck.pi.issues": "当前问题",
+  "streamdeck.pi.noIssues": "此目标没有报告任何问题。"
 }

@@ -43,6 +43,18 @@ describe("destinationFace: the broadcast delay", () => {
     expect(face).toMatchObject({ tone: "warn", label: "streamdeck.state.draining" });
   });
 
+  // The delay marker and the issue list meet on one face: a delayed key with an
+  // open issue still says it is delayed, beneath the issue and its "+N".
+  it("keeps the marker on a delayed key whose face is an issue, with the +N badge", () => {
+    const face = destinationFace(
+      base({ delay: { seconds: 30, phase: "on-air" }, accountHealth: "expired", restartStorm: 8 }),
+      undefined,
+      null,
+    );
+    expect(face).toMatchObject({ tone: "error", reason: "streamdeck.issue.reconnectAccount", more: 1, delaySeconds: 30 });
+    expect(titleFor(face, "en").split("\n").at(-1)).toBe("Delay 30s");
+  });
+
   it("adds no marker to a destination with no delay", () => {
     const face = destinationFace(base({ delaySeconds: undefined }), undefined, null);
     expect(face.delaySeconds).toBeUndefined();

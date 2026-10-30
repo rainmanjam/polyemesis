@@ -112,7 +112,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu, healthMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
@@ -422,7 +422,15 @@ type Engine struct {
 	keyChecker KeyChecker
 	keyMu      sync.Mutex
 	keyChecks  map[int64]*keyCheckState
-	alertWatch *alerts.Watcher
+	// accountHealthReader and platformHealthChecker feed DestStatus's
+	// AccountHealth and PlatformHealth. Both set by the manager, both nil-safe;
+	// the platform readings are cached in healthChecks, under healthMu. See
+	// destsignals.go.
+	accountHealthReader   AccountHealthReader
+	platformHealthChecker PlatformHealthChecker
+	healthMu              sync.Mutex
+	healthChecks          map[int64]*healthCheckState
+	alertWatch            *alerts.Watcher
 	// alertGate is SHARED across every engine, like hooks, and handed in by
 	// the manager: it is what lets one engine speak for the install on the
 	// recording volume, which every engine measures. Under e.mu; nil on an

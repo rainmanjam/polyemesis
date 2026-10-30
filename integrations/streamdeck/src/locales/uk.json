@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Питання опитування",
   "streamdeck.pi.pollOptions": "Варіанти, по одному в рядку (від 2 до 6)",
   "streamdeck.pi.pollDuration": "Тривалість (секунди)",
-  "streamdeck.pi.pollHint": "Натисніть, щоб почати опитування в усіх чатах. Поки воно триває, клавіша показує голоси й залишок часу; утримуйте її, щоб завершити раніше."
+  "streamdeck.pi.pollHint": "Натисніть, щоб почати опитування в усіх чатах. Поки воно триває, клавіша показує голоси й залишок часу; утримуйте її, щоб завершити раніше.",
+  "streamdeck.issue.restartStorm": "Перепідключення ×{count}",
+  "streamdeck.issue.droppingFrames": "Пропуск кадрів",
+  "streamdeck.issue.platformPoor": "{platform}: погано",
+  "streamdeck.issue.reconnectAccount": "Перепідключіть акаунт",
+  "streamdeck.issue.accountExpiring": "Акаунт спливає",
+  "streamdeck.issue.sourceBackup": "На резервному джерелі",
+  "streamdeck.issue.sourcePlaylist": "На плейлисті",
+  "streamdeck.issue.sourceSlate": "На заставці",
+  "streamdeck.issue.sourceDegraded": "Джерело погіршене",
+  "streamdeck.pi.issues": "Поточні проблеми",
+  "streamdeck.pi.noIssues": "Для цього призначення нічого не повідомлено."
 }

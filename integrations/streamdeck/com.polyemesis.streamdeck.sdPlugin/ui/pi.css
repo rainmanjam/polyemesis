@@ -14,3 +14,5 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .result.ok { color: #1f9d55; }
 .result.bad { color: #c53030; }
 [hidden] { display: none !important; }
+.issues { margin: 4px 0 0; padding-left: 18px; }
+.issues li { margin: 2px 0; }

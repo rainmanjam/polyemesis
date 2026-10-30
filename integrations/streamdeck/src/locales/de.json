@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Umfragefrage",
   "streamdeck.pi.pollOptions": "Optionen, eine pro Zeile (2 bis 6)",
   "streamdeck.pi.pollDuration": "Dauer (Sekunden)",
-  "streamdeck.pi.pollHint": "Drücken, um die Umfrage in jedem Chat zu starten. Während sie läuft, zeigt die Taste Stimmen und Restzeit; halten, um sie vorzeitig zu beenden."
+  "streamdeck.pi.pollHint": "Drücken, um die Umfrage in jedem Chat zu starten. Während sie läuft, zeigt die Taste Stimmen und Restzeit; halten, um sie vorzeitig zu beenden.",
+  "streamdeck.issue.restartStorm": "Verbindet neu ×{count}",
+  "streamdeck.issue.droppingFrames": "Verwirft Frames",
+  "streamdeck.issue.platformPoor": "{platform}: schlecht",
+  "streamdeck.issue.reconnectAccount": "Konto neu verbinden",
+  "streamdeck.issue.accountExpiring": "Konto läuft ab",
+  "streamdeck.issue.sourceBackup": "Auf Backup-Quelle",
+  "streamdeck.issue.sourcePlaylist": "Auf Playlist",
+  "streamdeck.issue.sourceSlate": "Auf Slate",
+  "streamdeck.issue.sourceDegraded": "Quelle beeinträchtigt",
+  "streamdeck.pi.issues": "Aktuelle Probleme",
+  "streamdeck.pi.noIssues": "Für dieses Ziel wird nichts gemeldet."
 }

@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Vraag van de peiling",
   "streamdeck.pi.pollOptions": "Opties, één per regel (2 tot 6)",
   "streamdeck.pi.pollDuration": "Duur (seconden)",
-  "streamdeck.pi.pollHint": "Druk om de peiling in elke chat te starten. Zolang hij loopt, toont de toets de stemmen en de resterende tijd; houd hem vast om eerder te stoppen."
+  "streamdeck.pi.pollHint": "Druk om de peiling in elke chat te starten. Zolang hij loopt, toont de toets de stemmen en de resterende tijd; houd hem vast om eerder te stoppen.",
+  "streamdeck.issue.restartStorm": "Opnieuw verbinden ×{count}",
+  "streamdeck.issue.droppingFrames": "Verliest frames",
+  "streamdeck.issue.platformPoor": "{platform}: slecht",
+  "streamdeck.issue.reconnectAccount": "Account opnieuw koppelen",
+  "streamdeck.issue.accountExpiring": "Account verloopt",
+  "streamdeck.issue.sourceBackup": "Op back-upbron",
+  "streamdeck.issue.sourcePlaylist": "Op playlist",
+  "streamdeck.issue.sourceSlate": "Op slate",
+  "streamdeck.issue.sourceDegraded": "Bron verslechterd",
+  "streamdeck.pi.issues": "Huidige problemen",
+  "streamdeck.pi.noIssues": "Niets gemeld voor deze bestemming."
 }

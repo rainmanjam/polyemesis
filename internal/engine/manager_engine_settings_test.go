@@ -52,6 +52,8 @@ type managerSettingsProbe struct {
 	stream    *eventstream.Hub
 	lifecycle LifecycleObserver
 	keys      KeyChecker
+	accounts  AccountHealthReader
+	platforms PlatformHealthChecker
 	// gate is not pushed by any SetX -- NewManager builds it -- so it is read
 	// back off the manager rather than created here. What is asserted is
 	// that every engine holds the SAME one, which is the whole of its job.
@@ -70,6 +72,8 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 		stream:    eventstream.NewHub(),
 		lifecycle: &stubLifecycle{},
 		keys:      &stubKeyChecker{release: make(chan struct{})},
+		accounts:  &accountHealthProbe{},
+		platforms: &stubPlatformHealth{release: make(chan struct{})},
 	}
 	m.SetTranscriber(p.tw, p.modelsDir, func(name string, args []string) (string, []string) {
 		return p.niceMark, args
@@ -79,6 +83,8 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 	m.SetStream(p.stream)
 	m.SetLifecycle(p.lifecycle)
 	m.SetKeyChecker(p.keys)
+	m.SetAccountHealth(p.accounts)
+	m.SetPlatformHealth(p.platforms)
 	p.gate = m.engineSettingsSnapshot().alertGate
 	if p.gate == nil {
 		t.Fatal("NewManager built no install alert gate, so every engine would " +
@@ -100,7 +106,17 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	whisper, dir, nice := eng.whisper, eng.whisperDir, eng.whisperNice
 	attempts, hookd, lifecycle := eng.alertAttempts, eng.hooks, eng.lifecycle
 	gate, keys, stream := eng.alertGate, eng.keyChecker, eng.stream
+	accounts, platforms := eng.accountHealthReader, eng.platformHealthChecker
 	eng.mu.RUnlock()
+
+	if accounts != p.accounts {
+		t.Errorf("%s: account health reader = %v, want the API's: this programme's "+
+			"destinations would never say their account needs reconnecting", what, accounts)
+	}
+	if platforms != p.platforms {
+		t.Errorf("%s: platform health reader = %v, want the API's: this programme's "+
+			"YouTube destinations would never show YouTube's own verdict", what, platforms)
+	}
 
 	if stream != p.stream {
 		t.Errorf("%s: events hub = %p, want the shared %p: this programme's "+
@@ -294,7 +310,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"alertAttempts", "alertGate", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "stream", "tw"}
+	covered := []string{"accountHealth", "alertAttempts", "alertGate", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "platHealth", "stream", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())
@@ -316,3 +332,9 @@ func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
 			got, covered)
 	}
 }
+
+// accountHealthProbe is a comparable AccountHealthReader, so the sync test can
+// check the engine holds the SAME one the manager was given.
+type accountHealthProbe struct{}
+
+func (*accountHealthProbe) AccountHealth(int64) string { return "" }

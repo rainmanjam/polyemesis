@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Pytanie ankiety",
   "streamdeck.pi.pollOptions": "Opcje, jedna w wierszu (od 2 do 6)",
   "streamdeck.pi.pollDuration": "Czas trwania (sekundy)",
-  "streamdeck.pi.pollHint": "Naciśnij, by rozpocząć ankietę na każdym czacie. W trakcie klawisz pokazuje głosy i pozostały czas; przytrzymaj go, by zakończyć ją wcześniej."
+  "streamdeck.pi.pollHint": "Naciśnij, by rozpocząć ankietę na każdym czacie. W trakcie klawisz pokazuje głosy i pozostały czas; przytrzymaj go, by zakończyć ją wcześniej.",
+  "streamdeck.issue.restartStorm": "Ponowne łączenie ×{count}",
+  "streamdeck.issue.droppingFrames": "Gubi klatki",
+  "streamdeck.issue.platformPoor": "{platform}: słabo",
+  "streamdeck.issue.reconnectAccount": "Połącz konto ponownie",
+  "streamdeck.issue.accountExpiring": "Konto wkrótce wygaśnie",
+  "streamdeck.issue.sourceBackup": "Na źródle zapasowym",
+  "streamdeck.issue.sourcePlaylist": "Na playliście",
+  "streamdeck.issue.sourceSlate": "Na planszy",
+  "streamdeck.issue.sourceDegraded": "Źródło pogorszone",
+  "streamdeck.pi.issues": "Bieżące problemy",
+  "streamdeck.pi.noIssues": "Brak zgłoszeń dla tego miejsca docelowego."
 }

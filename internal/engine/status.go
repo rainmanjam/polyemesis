@@ -174,6 +174,24 @@ type DestStatus struct {
 	// what was configured, and the operator's fix is a toggle rather than a
 	// repair.
 	VODAudioDropped string `json:"vodAudioDropped,omitempty"`
+	// RestartStorm is how many times this destination was respawned in the
+	// last 15 minutes, present only when that is more than five: the
+	// threshold of PolyemesisDestinationRestartStorm, so the key and the alert
+	// agree. Process.Restarts is the lifetime count and cannot say "now".
+	RestartStorm int `json:"restartStorm,omitempty"`
+	// DroppingFrames is how many frames FFmpeg dropped over the last
+	// supervisor.RateWindow, present only when that is at least one percent of
+	// the frames it output. Process.Progress.DropFrames is cumulative for the
+	// run, so a burst at its start would otherwise read as dropping for ever.
+	DroppingFrames int64 `json:"droppingFrames,omitempty"`
+	// AccountHealth is the connected account's health state -- "expiring",
+	// "refreshFailing" or "expired" -- and absent while it is "ok" or the
+	// destination has no account. THE WORD ONLY: the refresh error stays on
+	// GET /platforms/accounts, because this payload is read-scope.
+	AccountHealth string `json:"accountHealth,omitempty"`
+	// PlatformHealth is the platform's own verdict on the stream, present only
+	// while it is poor. YouTube only: Twitch has no stream-health API.
+	PlatformHealth *PlatformHealth `json:"platformHealth,omitempty"`
 }
 
 // DivergenceStatus is one advisory note about the negotiated configuration.
@@ -444,8 +462,13 @@ func (e *Engine) Status() Status {
 	st.ingestConfigured = configured
 
 	names := make(map[int64]string, len(st.Renditions))
+	// The shared encodes' processes, for DroppingFrames: a destination fed by
+	// a rendition copies its video, so the frames are dropped (if anywhere)
+	// in the rendition's encoder, not in the destination's own FFmpeg.
+	rendProc := make(map[int64]*supervisor.Status, len(st.Renditions))
 	for _, r := range st.Renditions {
 		names[r.ID] = r.Name
+		rendProc[r.ID] = r.Process
 	}
 
 	// Indexed once instead of scanned twice per row. destByID is linear, and it
@@ -608,6 +631,16 @@ func (e *Engine) Status() Status {
 				// explains, and the check costs a platform API call.
 				ds.Reason.KeyChanged = e.keyChanged(row)
 			}
+			// The Stream Deck's signals (destsignals.go). Additive fields, each
+			// absent while there is nothing to say.
+			ds.RestartStorm = destinationRestartStorm(ds.Process)
+			var rend *supervisor.Status
+			if row.RenditionID != nil {
+				rend = rendProc[*row.RenditionID]
+			}
+			ds.DroppingFrames = droppingFramesFor(ds.Process, rend, st.ingestConfigured, sourceLive)
+			ds.AccountHealth = e.accountHealth(row)
+			ds.PlatformHealth = e.platformHealth(row, ds.Process)
 			if w := stallWarning(ds); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}

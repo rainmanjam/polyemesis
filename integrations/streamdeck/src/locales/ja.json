@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "投票の質問",
   "streamdeck.pi.pollOptions": "選択肢 (1行に1つ、2〜6個)",
   "streamdeck.pi.pollDuration": "時間 (秒)",
-  "streamdeck.pi.pollHint": "押すとすべてのチャットで投票を開始します。実行中はキーに票数と残り時間が表示され、長押しで早めに終了できます。"
+  "streamdeck.pi.pollHint": "押すとすべてのチャットで投票を開始します。実行中はキーに票数と残り時間が表示され、長押しで早めに終了できます。",
+  "streamdeck.issue.restartStorm": "再接続中 ×{count}",
+  "streamdeck.issue.droppingFrames": "フレーム欠落",
+  "streamdeck.issue.platformPoor": "{platform}: 不良",
+  "streamdeck.issue.reconnectAccount": "アカウントを再接続",
+  "streamdeck.issue.accountExpiring": "アカウント期限切れ間近",
+  "streamdeck.issue.sourceBackup": "バックアップ入力に切替",
+  "streamdeck.issue.sourcePlaylist": "プレイリストに切替",
+  "streamdeck.issue.sourceSlate": "スレートに切替",
+  "streamdeck.issue.sourceDegraded": "入力品質低下",
+  "streamdeck.pi.issues": "現在の問題",
+  "streamdeck.pi.noIssues": "この配信先に報告はありません。"
 }

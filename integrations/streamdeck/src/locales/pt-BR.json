@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Pergunta da enquete",
   "streamdeck.pi.pollOptions": "Opções, uma por linha (2 a 6)",
   "streamdeck.pi.pollDuration": "Duração (segundos)",
-  "streamdeck.pi.pollHint": "Pressione para iniciar a enquete em todos os chats. Enquanto ela roda, a tecla mostra os votos e o tempo restante; segure para encerrá-la antes."
+  "streamdeck.pi.pollHint": "Pressione para iniciar a enquete em todos os chats. Enquanto ela roda, a tecla mostra os votos e o tempo restante; segure para encerrá-la antes.",
+  "streamdeck.issue.restartStorm": "Reconectando ×{count}",
+  "streamdeck.issue.droppingFrames": "Perdendo quadros",
+  "streamdeck.issue.platformPoor": "{platform}: ruim",
+  "streamdeck.issue.reconnectAccount": "Reconectar conta",
+  "streamdeck.issue.accountExpiring": "Conta expirando",
+  "streamdeck.issue.sourceBackup": "Na fonte de backup",
+  "streamdeck.issue.sourcePlaylist": "Na playlist",
+  "streamdeck.issue.sourceSlate": "No slate",
+  "streamdeck.issue.sourceDegraded": "Fonte degradada",
+  "streamdeck.pi.issues": "Problemas atuais",
+  "streamdeck.pi.noIssues": "Nada relatado para este destino."
 }

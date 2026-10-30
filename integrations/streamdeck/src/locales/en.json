@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Poll question",
   "streamdeck.pi.pollOptions": "Options, one per line (2 to 6)",
   "streamdeck.pi.pollDuration": "Duration (seconds)",
-  "streamdeck.pi.pollHint": "Press to start the poll in every chat. While it runs, the key shows the votes and time left; hold it to end the poll early."
+  "streamdeck.pi.pollHint": "Press to start the poll in every chat. While it runs, the key shows the votes and time left; hold it to end the poll early.",
+  "streamdeck.issue.restartStorm": "Reconnecting ×{count}",
+  "streamdeck.issue.droppingFrames": "Dropping frames",
+  "streamdeck.issue.platformPoor": "{platform}: poor",
+  "streamdeck.issue.reconnectAccount": "Reconnect account",
+  "streamdeck.issue.accountExpiring": "Account expiring",
+  "streamdeck.issue.sourceBackup": "On backup source",
+  "streamdeck.issue.sourcePlaylist": "On playlist",
+  "streamdeck.issue.sourceSlate": "On slate",
+  "streamdeck.issue.sourceDegraded": "Source degraded",
+  "streamdeck.pi.issues": "Current issues",
+  "streamdeck.pi.noIssues": "Nothing reported for this destination."
 }

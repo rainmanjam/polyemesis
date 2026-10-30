@@ -94,5 +94,16 @@
   "streamdeck.pi.pollQuestion": "Anket sorusu",
   "streamdeck.pi.pollOptions": "Seçenekler, her satıra bir tane (2 ile 6 arası)",
   "streamdeck.pi.pollDuration": "Süre (saniye)",
-  "streamdeck.pi.pollHint": "Anketi her sohbette başlatmak için basın. Sürerken tuş oyları ve kalan süreyi gösterir; erken bitirmek için basılı tutun."
+  "streamdeck.pi.pollHint": "Anketi her sohbette başlatmak için basın. Sürerken tuş oyları ve kalan süreyi gösterir; erken bitirmek için basılı tutun.",
+  "streamdeck.issue.restartStorm": "Yeniden bağlanıyor ×{count}",
+  "streamdeck.issue.droppingFrames": "Kare kaybı",
+  "streamdeck.issue.platformPoor": "{platform}: zayıf",
+  "streamdeck.issue.reconnectAccount": "Hesabı yeniden bağla",
+  "streamdeck.issue.accountExpiring": "Hesap süresi doluyor",
+  "streamdeck.issue.sourceBackup": "Yedek kaynakta",
+  "streamdeck.issue.sourcePlaylist": "Listede",
+  "streamdeck.issue.sourceSlate": "Slate'te",
+  "streamdeck.issue.sourceDegraded": "Kaynak bozuk",
+  "streamdeck.pi.issues": "Mevcut sorunlar",
+  "streamdeck.pi.noIssues": "Bu hedef için bildirilen bir şey yok."
 }

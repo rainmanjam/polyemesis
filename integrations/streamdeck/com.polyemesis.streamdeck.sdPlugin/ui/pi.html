@@ -67,6 +67,15 @@
     <p class="hint" data-i18n="streamdeck.pi.pollHint"></p>
   </section>
 
+  <!-- A destination key shows one issue and a "+N" badge; a key cannot be
+       hovered, so every current issue is listed here. Filled by pi.js with
+       textContent only: the lines carry server words. -->
+  <section class="block" id="block-issues" hidden>
+    <label data-i18n="streamdeck.pi.issues">Current issues</label>
+    <ul id="issues" class="issues"></ul>
+    <p id="issues-empty" class="hint" hidden></p>
+  </section>
+
   <section class="block" id="block-install-wide" hidden>
     <p class="hint" data-i18n="streamdeck.pi.installWide"></p>
   </section>
