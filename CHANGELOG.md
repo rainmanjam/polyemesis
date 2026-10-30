@@ -254,6 +254,12 @@ its first tagged release.
 
 ### Changed
 
+- **The site banner and comparison blurbs lead with what polyemesis does.** The
+  bar on every page now reads "Free and open source (MIT). One stream in, every
+  platform out, each with its own mix." and links to /features. The comparison
+  card on the home page, the docs index and `docs/COMPARISON.md` describe the
+  page as how polyemesis compares with the other tools. The comparison page's
+  content is unchanged.
 - **Twitch sign-in now uses PKCE.** Connecting a Twitch account sends an S256
   `code_challenge`, and the token exchange sends the matching `code_verifier`
   along with the client secret. A leaked authorization code is no use to anyone
