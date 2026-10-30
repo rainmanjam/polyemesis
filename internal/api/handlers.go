@@ -1098,7 +1098,10 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	levels, at := eng.Levels()
-	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at})
+	// feed says whether this reading is current, so a dial can show NO FEED
+	// rather than a frozen bar. See levels_feed.go.
+	feed := levelsFeedState(at, time.Now(), eng.MeterInterval())
+	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at, "feed": feed})
 }
 
 // handleMetrics renders the Prometheus exposition.
