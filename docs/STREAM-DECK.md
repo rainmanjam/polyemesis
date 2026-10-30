@@ -175,7 +175,7 @@ judge freshness itself. It draws what `feed` says: `none` before any reading,
 | **Not paired** | No server address or token saved | Open any polyemesis action's settings and pair it |
 | **Token refused** | The install answered `401`: the token is wrong, revoked or expired | Mint a new token in Settings and paste it. A refused token is not retried on its own |
 | **Unreachable** | Nothing answered within 5 seconds, or a status read failed | Check the address and the network. The plugin retries every 2 seconds, and a key never keeps a green face while the install is down |
-| **Unreachable** right after pairing an `https://` address | The certificate is not trusted | Paste the install's CA, as in [A self-signed certificate](#a-self-signed-certificate) |
+| **Unreachable**, and Test connection adds "the server's certificate is not trusted; paste the install's CA" | The install's certificate is signed by a CA the plugin does not trust | Paste the install's CA, as in [A self-signed certificate](#a-self-signed-certificate) |
 | **Needs admin token** (a padlock, on violet) | The key changes something and the token is `read` | Pair with an admin token, or keep the read token and use the key for state only |
 | "Use https:// for the server" | A plain `http://` address for a host other than this machine | Use the install's `https://` address |
 | **Not found** or **Other programme** on a Destination key | The Destination ID or Programme ID does not match the install | Correct the IDs in the key's settings |
