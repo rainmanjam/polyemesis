@@ -204,7 +204,14 @@ export function DestinationCard({
         {/* --- identity + state --- */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <StatusDot tone={tone} />
+            {/* The badge beside this names the state in words and carries the same
+                tone, so the dot repeated it. Kept only for a stopped card, where the
+                badge is an outline and the dot is the one mark of its tone. */}
+            {!dest.enabled && (
+              <span data-testid="card-status-dot">
+                <StatusDot tone={tone} />
+              </span>
+            )}
             <div className="min-w-0">
               <div className="truncate text-[13px] font-semibold leading-tight">{dest.name}</div>
               <div className="font-mono text-[10px] leading-tight text-muted-foreground">
@@ -295,7 +302,16 @@ export function DestinationCard({
         </div>
 
         {/* --- performance --- */}
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {/* Bitrate and uptime lead. They are the two figures an operator reads to
+            know a destination is up and moving.
+
+            THE COUNTERS ARE SECONDARY, not removed. Restarts, dropped, duplicated
+            and speed are the evidence when something is wrong, and they keep the
+            same gating and dash-not-zero rules they had (#787): cumulative over a
+            run, so they are shown only while the encoder is measuring. What
+            changed is the weight. A zero is muted and a non-zero warn, and the row
+            sits quietly beneath the primary pair instead of matching it. */}
+        <div className="grid grid-cols-2 gap-2">
           <Stat
             labelKey="dest.bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
@@ -306,22 +322,11 @@ export function DestinationCard({
             value={running ? duration(dest.process?.uptimeSec ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
-          {/* A DASH IS NOT A ZERO, and these two were the only cells in this
-              grid not obeying the rule its own comment states four lines down.
-
-              Restarts: with no process there is no restart count. `?? 0` said
-              "this destination has restarted zero times" about a destination
-              nobody has reported on — the same reassuring number a healthy
-              never-restarted run produces, so the one reading that would send
-              somebody looking is indistinguishable from the one that says
-              nothing at all.
-
-              Dropped: this is CUMULATIVE OVER A RUN, so a finished run's total
-              stays on screen after the encoder is gone and reads as a live
-              count. "Dropped 0" beside a stopped destination is the worse half:
-              it claims a clean run for a stream nothing is measuring. Gated on
-              `running` like Bitrate, Uptime and Speed beside it, so every cell
-              in the row now answers the same question the same way. */}
+        </div>
+        <div
+          data-testid="card-secondary-stats"
+          className="grid grid-cols-4 gap-2 border-t border-border pt-2"
+        >
           <Stat
             labelKey="dest.restarts"
             value={dest.process ? (dest.process.restarts ?? 0) : "—"}
@@ -332,23 +337,11 @@ export function DestinationCard({
             value={running && progress ? (progress.dropFrames ?? 0) : "—"}
             tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
           />
-          {/* #787: dupFrames has existed on Progress since types.ts:729 and
-              docs/MONITORING.md promises it beside Dropped ("The same numbers
-              are on each destination's card, live") -- nothing here ever read
-              it. Same gating and dash-not-zero rule as Dropped right above:
-              cumulative over a run, so it stays on screen after the encoder
-              is gone, and "0" from a destination nothing is measuring would
-              read as a clean run rather than as unmeasured. */}
           <Stat
             labelKey="dest.duplicated"
             value={running && progress ? (progress.dupFrames ?? 0) : "—"}
             tone={running && (progress?.dupFrames ?? 0) > 0 ? "warn" : "muted"}
           />
-          {/* Almost every destination here is a passthrough, so there is barely
-              any encoding work to be slow at — a speed under 1 means FFmpeg is
-              blocking on the write to the platform. Zero is "no progress block
-              yet" rather than stopped, which is why it renders as a dash and
-              not as a failure. */}
           <Stat
             labelKey="dest.speed"
             value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
