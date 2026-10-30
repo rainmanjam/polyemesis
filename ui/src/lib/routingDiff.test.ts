@@ -55,7 +55,7 @@ describe("routingChanges (A7)", () => {
     // No stored profile: simple mode, auto normaliser, no rows. A draft that
     // matches those defaults changes nothing but the tracks it turns on, and
     // a sample rate is not reported for a profile that never existed.
-    const draft: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] };
+    const draft = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] } as RoutingProfile;
     expect(routingChanges({ stored: null, draft })).toEqual([{ kind: "trackAdded", track: 0 }]);
     expect(routingChanges({ stored: undefined, draft: { ...draft, mode: "matrix" } }).map((c) => c.kind)).toEqual([
       "trackAdded",
@@ -71,7 +71,8 @@ describe("routingChanges (A7)", () => {
   });
 
   it("reads a missing gain as unity and a missing mute as unmuted", () => {
-    const stored: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] };
+    // No gain at all, as an older stored profile has it.
+    const stored = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] } as RoutingProfile;
     const same: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true, gain: 1, muted: false }] };
     expect(routingChanges({ stored, draft: same })).toEqual([]);
     const quieter: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true, gain: 0.5 }] };
