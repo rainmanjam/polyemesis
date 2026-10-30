@@ -136,8 +136,11 @@ func TestTheDocsListExactlyTheCatalogue(t *testing.T) {
 	// The deferred section exists, names the three items, and lists NOTHING
 	// that is catalogued: a type moves out of it in the same change that
 	// catalogues it.
-	coming := docSection(t, doc, "## Coming with #14, #4 and #6")
-	for _, item := range []string{"#14", "#4", "#6"} {
+	// #6 left this section when degraded-link failover shipped: its degraded:
+	// reason rides on failover.switched, which is catalogued and has an
+	// emission test driving a real trip through the selector sweep.
+	coming := docSection(t, doc, "## Coming with #14 and #4")
+	for _, item := range []string{"#14", "#4"} {
 		if !strings.Contains(coming, item) {
 			t.Errorf("the deferred section does not mention %s", item)
 		}

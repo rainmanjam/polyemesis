@@ -657,6 +657,76 @@ type FailoverSettings struct {
 	// its own top-level section, because it is one more answer to the same
 	// question the slate answers -- what feeds the hub when nothing else does.
 	Playlist PlaylistSettings `json:"playlist"`
+	// Degraded is link-health failover (#6): leave a primary that is still
+	// delivering, but delivering badly, instead of waiting for it to stop.
+	Degraded DegradedSettings `json:"degraded"`
+}
+
+// DegradedSettings are a programme's link-health thresholds.
+//
+// Each threshold is independent and 0 switches it off, so an operator can
+// fail over on bitrate alone -- which is the one every ingest mode can measure.
+// RTT and loss come from the SRT protocol's own statistics and are only
+// evaluated for an SRT (or SRTLA-bonded) primary; for RTMP and pull they never
+// trip, and they never read as zero either.
+//
+// A breach has to persist for SustainSeconds before it counts, and a tripped
+// link has to read healthy for the same SustainSeconds before it clears. The
+// second half is the hysteresis: the slate and playlist branches return to a
+// primary at once, without consulting the return mode, so a link hovering at a
+// threshold would otherwise flap the broadcast between the two every sweep.
+type DegradedSettings struct {
+	Enabled bool `json:"enabled"`
+	// MinBitrateKbps trips when the primary delivers less than this.
+	MinBitrateKbps int `json:"minBitrateKbps"`
+	// MaxRTTMs trips when the SRT round-trip time rises above this.
+	MaxRTTMs int `json:"maxRttMs"`
+	// MaxLossPercent trips when the share of SRT packets reported missing over
+	// the last sample interval rises above this.
+	MaxLossPercent float64 `json:"maxLossPercent"`
+	// SustainSeconds is how long a breach, or a recovery, must last. 0 means
+	// DefaultDegradedSustainSeconds, so a row saved before #6 existed -- which
+	// carries a zero here -- is not a validation error on its next save.
+	SustainSeconds int `json:"sustainSeconds"`
+}
+
+// Degraded-link bounds.
+const (
+	DefaultDegradedSustainSeconds = 5
+	MaxDegradedSustainSeconds     = 300
+	MaxDegradedBitrateKbps        = 200_000
+	MaxDegradedRTTMs              = 10_000
+)
+
+// Sustain is SustainSeconds with the zero value resolved.
+func (d DegradedSettings) Sustain() int {
+	if d.SustainSeconds <= 0 {
+		return DefaultDegradedSustainSeconds
+	}
+	return d.SustainSeconds
+}
+
+func (d DegradedSettings) problems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+	if v := d.MinBitrateKbps; v < 0 || v > MaxDegradedBitrateKbps {
+		add("degraded-link bitrate threshold %d kbps out of range (0-%d)", v, MaxDegradedBitrateKbps)
+	}
+	if v := d.MaxRTTMs; v < 0 || v > MaxDegradedRTTMs {
+		add("degraded-link RTT threshold %d ms out of range (0-%d)", v, MaxDegradedRTTMs)
+	}
+	// NaN fails both comparisons, so it is refused by name rather than let
+	// through as "in range".
+	if v := d.MaxLossPercent; v != v || v < 0 || v > 100 {
+		add("degraded-link loss threshold %v%% out of range (0-100)", v)
+	}
+	if v := d.SustainSeconds; v < 0 || v > MaxDegradedSustainSeconds {
+		add("degraded-link sustain time %ds out of range (0-%d)", v, MaxDegradedSustainSeconds)
+	}
+	if d.Enabled && d.MinBitrateKbps == 0 && d.MaxRTTMs == 0 && d.MaxLossPercent == 0 {
+		add("degraded-link failover is on but every threshold is off; set at least one")
+	}
+	return probs
 }
 
 // SlateImageProblem reports why the configured still cannot be used, or nil.
@@ -793,6 +863,7 @@ func (f FailoverSettings) problems(primary IngestSettings) []string {
 	if t := f.ReturnStableSeconds; t < 0 || t > MaxFailoverReturnStable {
 		add("failover return delay %ds out of range (0-%d)", t, MaxFailoverReturnStable)
 	}
+	probs = append(probs, f.Degraded.problems()...)
 
 	b := f.Backup
 	switch b.Mode {
@@ -2030,6 +2101,16 @@ func DefaultSettings() Settings {
 			GraceSeconds:        5,
 			Return:              FailoverReturnManual,
 			ReturnStableSeconds: 30,
+			// Off, like the rest of the tier, with thresholds already filled in
+			// so switching it on is one tick: 800 kbps is where a 720p30 picture
+			// visibly falls apart, and the RTT and loss figures are the ones
+			// IRL cellular links cross when they are about to drop.
+			Degraded: DegradedSettings{
+				MinBitrateKbps: 800,
+				MaxRTTMs:       1500,
+				MaxLossPercent: 15,
+				SustainSeconds: DefaultDegradedSustainSeconds,
+			},
 			Backup: BackupIngestSettings{
 				Enabled: false,
 				Mode:    IngestSRT,

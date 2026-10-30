@@ -36,13 +36,13 @@ func TestAllTriggersExcludesTest(t *testing.T) {
 				"the subscription filter, not appear in it")
 		}
 	}
-	// Seven since destination.held joined it; six since destination.rolledover. The number is asserted rather
+	// Eight since failover.switched joined it (#6); seven since destination.held; six since destination.rolledover. The number is asserted rather
 	// than derived for this test's original reason -- a test that asks
 	// AllTriggers what is in AllTriggers cannot fail -- and raising it is the
 	// step that makes somebody go and write the docs row. It worked: this
 	// failing is what sent the docs row below back to be written.
-	if len(AllTriggers()) != 7 {
-		t.Fatalf("AllTriggers has %d entries, want 7 -- add the new one to this "+
+	if len(AllTriggers()) != 8 {
+		t.Fatalf("AllTriggers has %d entries, want 8 -- add the new one to this "+
 			"test and to the docs before shipping it", len(AllTriggers()))
 	}
 }

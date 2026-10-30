@@ -556,6 +556,14 @@ type Engine struct {
 	// safe on that same basis: reconcileSelector runs synchronously on the
 	// test's own goroutine and starts no goroutine that reads decideFn.
 	decideFn func(sourceChoice) (sourceKind, string)
+	// linkProbe reports the SRT layer's view of one of this programme's
+	// publishers -- RTT and interval loss -- for degraded-link failover (#6).
+	// The shared SRT listener lives on the Manager, not here, so the Manager
+	// hands this in before Start; nil (an engine built outside a manager, or a
+	// test) means no link statistics, which is exactly an RTMP primary's case:
+	// RTT and loss thresholds never trip and bitrate is still measured from the
+	// hub. Set before anything concurrent exists and never written again.
+	linkProbe func(sourceID int64, backup bool) (linkHealth, bool)
 	// previewSeen is the last playlist request and previewAt the last start
 	// attempt; together they drive on-demand start and idle stop.
 	previewSeen time.Time

@@ -175,6 +175,10 @@ func (e *Engine) streamFailover(st *FailoverStatus) {
 			"backupLive":    st.BackupLive,
 			"backupEnabled": st.BackupEnabled,
 			"slateEnabled":  st.SlateEnabled,
+			// The degraded-link detail (#6), "" when the link is healthy. Reason
+			// already starts "degraded: " when the link caused the switch; this
+			// is the structured half, so a consumer need not parse the sentence.
+			"degraded": st.Degraded,
 		},
 	})
 }

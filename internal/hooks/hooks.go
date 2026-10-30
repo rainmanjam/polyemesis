@@ -110,6 +110,16 @@ const (
 	// destination.held is this same edge converted, so the two surfaces cannot
 	// disagree about when, or say it twice.
 	TriggerDestinationHeld Trigger = "destination.held"
+	// TriggerFailoverSwitched fires when a programme's source selector puts a
+	// different source on air: primary, backup, playlist or slate. Reason is
+	// the selector's own sentence, and a switch caused by degraded-link
+	// failover (#6) starts it "degraded: " followed by what was measured --
+	// "bitrate 640 kbps below 800 kbps for 5s" -- so a script can tell a
+	// link that is breaking up from an encoder that went away.
+	//
+	// The same switch is the alert failover.switched and the events stream's
+	// failover.switched; one fact, one name, on every surface.
+	TriggerFailoverSwitched Trigger = "failover.switched"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -138,6 +148,10 @@ func AllTriggers() []Trigger {
 		// hold now arrives as a destination.held after the destination.down it
 		// used to arrive folded into.
 		TriggerDestinationHeld,
+		// APPENDED, a fourth time, for the same two reasons. An install with
+		// failover off never sends it; one with failover on and an empty
+		// Triggers list starts receiving every switch on upgrade.
+		TriggerFailoverSwitched,
 	}
 }
 

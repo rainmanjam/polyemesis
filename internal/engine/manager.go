@@ -548,6 +548,11 @@ func (m *Manager) Sync() error {
 			m.log.Error("cannot build engine for source", "source", id, "err", err)
 			continue
 		}
+		// The SRT link probe for degraded-link failover (#6). Before Start,
+		// because the selector sweep that reads it starts there; it reads the
+		// listener through the manager on every call, so a rebind on a port
+		// change is picked up without re-wiring any engine.
+		eng.linkProbe = m.srtLinkHealth
 		// Before Start, and through the ONE function every save also goes
 		// through: a setting this path forgot would work on every engine the
 		// operator already had and silently not on the one they just added.
@@ -1033,6 +1038,24 @@ func (m *Manager) SRTLinks() []srtserver.LinkStats {
 		return nil
 	}
 	return srv.Stats()
+}
+
+// srtLinkHealth is one publisher's RTT and interval loss from the shared SRT
+// listener, for an engine's degraded-link monitor. False when the listener is
+// down or that slot has nobody publishing over SRT -- which is also every RTMP
+// and pull primary, and is what makes their RTT and loss thresholds inert.
+func (m *Manager) srtLinkHealth(sourceID int64, backup bool) (linkHealth, bool) {
+	m.mu.RLock()
+	srv := m.srt
+	m.mu.RUnlock()
+	if srv == nil {
+		return linkHealth{}, false
+	}
+	l, ok := srv.Link(sourceID, backup)
+	if !ok {
+		return linkHealth{}, false
+	}
+	return linkHealth{rttMs: l.RTTMs, lossPct: l.LossPercent}, true
 }
 
 // RTMPLinks reports the live publishers on the shared RTMP listener.
