@@ -236,7 +236,7 @@ const features = [
               announcement bar (components/Announce.astro), which is the first
               line of every page — so it is said once, at the top, rather than
               twice on the page a reader is least likely to have scrolled. */}
-          <p class="mt-3 text-sm text-subtle">First stream in about five minutes.</p>
+          <p class="mt-3 text-sm text-subtle">Three steps: run the container, open the admin screen, point OBS at it.</p>
         </div>
       </div>
 
@@ -294,7 +294,13 @@ const features = [
           polyemesis ingests once and lets you pick, per destination, which
           tracks get summed into the stereo feed that destination receives.
           YouTube gets the clean mix. Your local archive keeps everything. Your
-          Discord restream keeps the mic hot. On Twitch it goes one step further — the broadcast can carry the music bed while a separate archive track leaves it out, from the same upload. That last one is Twitch Enhanced Broadcasting, and it <strong>needs a supported GPU</strong>: Twitch refuses to negotiate it otherwise, so on a headless server the destination publishes to the ordinary ingest instead and says so.
+          Discord restream keeps the mic hot.
+        </p>
+        <p class="text-sm leading-relaxed text-subtle">
+          Twitch can also carry the music bed while a separate archive track
+          leaves it out, from the same upload. That route is Twitch-only and has
+          its own requirements, covered on the
+          <a href="/twitch-vod-track" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">Twitch track page</a>.
         </p>
       </div>
     </div>
@@ -319,11 +325,8 @@ const features = [
           destination, after routing, on the programme that destination
           actually receives.
         </p>
-        <p class="mt-3 text-pretty text-sm leading-relaxed text-subtle">
-          This capture is a different source from the example above: track 1 is
-          the host mic, track 2 the music bed, track 3 the co-host. So Twitch's
-          <span class="font-mono">01&nbsp;+&nbsp;03</span> is the mix with the
-          music left out, and it reads quieter for exactly that reason.
+        <p class="mt-3 text-sm text-subtle">
+          Track layout in this capture: 1 host mic, 2 music bed, 3 co-host.
         </p>
       </div>
 
@@ -485,7 +488,7 @@ const features = [
         <div class="mt-9 grid gap-px overflow-hidden rounded-token border border-line bg-line text-left sm:grid-cols-3">
           {
             [
-              ["/docs/quickstart", "Quickstart", "QUICKSTART.md", "First stream in about five minutes."],
+              ["/docs/quickstart", "Quickstart", "QUICKSTART.md", "The three steps from install to a first stream."],
               ["/docs/install", "Install", "INSTALL.md", "Per-platform, including a too-old FFmpeg."],
               ["/comparison", "Comparison", "COMPARISON.md", "An honest comparison, including the parts where polyemesis loses."],
             ].map(([href, title, file, blurb]) => (
