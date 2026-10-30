@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "选择协议",
   "sources.waitingForEncoder": "等待编码器",
   "sources.waitingForEncoderBody": "将编码器指向下方地址并开始推流。收到第一帧后会变为“已检测到信号”。",
+  "sources.waitingStuck": "一分钟后仍无信号？",
+  "sources.waitingTroubleshoot": "故障排除：输入始终未上线",
   "sources.signalDetected": "已检测到信号",
   "sources.signalDetectedBody": "已有编码器连接到此来源。",
   "addDest.titleAdd": "添加目的地",

@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Elige el protocolo",
   "sources.waitingForEncoder": "Esperando al codificador",
   "sources.waitingForEncoderBody": "Apunta el codificador a la dirección de abajo e inícialo. Cambiará a «Señal detectada» con el primer fotograma.",
+  "sources.waitingStuck": "¿Sigue sin llegar nada tras un minuto?",
+  "sources.waitingTroubleshoot": "Solución de problemas: la entrada nunca se activa",
   "sources.signalDetected": "Señal detectada",
   "sources.signalDetectedBody": "Hay un codificador conectado a esta fuente.",
   "addDest.titleAdd": "Añadir destino",

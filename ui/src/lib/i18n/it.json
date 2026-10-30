@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Scegli il protocollo",
   "sources.waitingForEncoder": "In attesa dell'encoder",
   "sources.waitingForEncoderBody": "Punta l'encoder sull'indirizzo qui sotto, poi avvialo. Diventa «Segnale rilevato» al primo fotogramma.",
+  "sources.waitingStuck": "Ancora niente dopo un minuto?",
+  "sources.waitingTroubleshoot": "Risoluzione dei problemi: l’ingest non va mai in diretta",
   "sources.signalDetected": "Segnale rilevato",
   "sources.signalDetectedBody": "Un encoder è collegato a questa sorgente.",
   "addDest.titleAdd": "Aggiungi destinazione",

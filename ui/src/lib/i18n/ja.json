@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "プロトコルを選択",
   "sources.waitingForEncoder": "エンコーダーを待機中",
   "sources.waitingForEncoderBody": "エンコーダーを下のアドレスに向けて開始してください。最初のフレームで「信号を検出」に変わります。",
+  "sources.waitingStuck": "1 分経っても何も届きませんか？",
+  "sources.waitingTroubleshoot": "トラブルシューティング：取り込みがライブにならない",
   "sources.signalDetected": "信号を検出",
   "sources.signalDetectedBody": "このソースにエンコーダーが接続されています。",
   "addDest.titleAdd": "送信先を追加",

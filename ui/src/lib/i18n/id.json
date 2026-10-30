@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Pilih protokol",
   "sources.waitingForEncoder": "Menunggu encoder",
   "sources.waitingForEncoderBody": "Arahkan encoder ke alamat di bawah, lalu mulai. Ini berubah menjadi «Sinyal terdeteksi» pada frame pertama.",
+  "sources.waitingStuck": "Masih belum ada setelah satu menit?",
+  "sources.waitingTroubleshoot": "Pemecahan masalah: ingest tidak pernah aktif",
   "sources.signalDetected": "Sinyal terdeteksi",
   "sources.signalDetectedBody": "Sebuah encoder terhubung ke sumber ini.",
   "addDest.titleAdd": "Tambah tujuan",

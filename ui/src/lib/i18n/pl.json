@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Wybierz protokół",
   "sources.waitingForEncoder": "Oczekiwanie na enkoder",
   "sources.waitingForEncoderBody": "Skieruj enkoder na adres poniżej i uruchom go. Po pierwszej klatce zmieni się na „Wykryto sygnał”.",
+  "sources.waitingStuck": "Po minucie nadal nic?",
+  "sources.waitingTroubleshoot": "Rozwiązywanie problemów: wejście nigdy nie startuje",
   "sources.signalDetected": "Wykryto sygnał",
   "sources.signalDetectedBody": "Enkoder jest połączony z tym źródłem.",
   "addDest.titleAdd": "Dodaj cel",

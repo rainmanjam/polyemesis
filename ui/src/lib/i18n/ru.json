@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Выберите протокол",
   "sources.waitingForEncoder": "Ожидание энкодера",
   "sources.waitingForEncoderBody": "Направьте энкодер на адрес ниже и запустите его. Как только придёт первый кадр, статус сменится на «Сигнал обнаружен».",
+  "sources.waitingStuck": "Прошла минута, а сигнала всё нет?",
+  "sources.waitingTroubleshoot": "Устранение неполадок: приём так и не выходит в эфир",
   "sources.signalDetected": "Сигнал обнаружен",
   "sources.signalDetectedBody": "К этому источнику подключён энкодер.",
   "addDest.titleAdd": "Добавить назначение",

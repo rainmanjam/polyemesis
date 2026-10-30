@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Kies protocol",
   "sources.waitingForEncoder": "Wachten op encoder",
   "sources.waitingForEncoderBody": "Richt de encoder op het adres hieronder en start hem. Bij het eerste beeld verandert dit in «Signaal gedetecteerd».",
+  "sources.waitingStuck": "Na een minuut nog steeds niets?",
+  "sources.waitingTroubleshoot": "Probleemoplossing: de ingest gaat nooit live",
   "sources.signalDetected": "Signaal gedetecteerd",
   "sources.signalDetectedBody": "Er is een encoder met deze bron verbonden.",
   "addDest.titleAdd": "Bestemming toevoegen",

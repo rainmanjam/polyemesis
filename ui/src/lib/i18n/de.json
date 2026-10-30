@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Protokoll wählen",
   "sources.waitingForEncoder": "Warte auf Encoder",
   "sources.waitingForEncoderBody": "Richte den Encoder auf die Adresse unten und starte ihn. Beim ersten Frame wechselt dies zu „Signal erkannt“.",
+  "sources.waitingStuck": "Nach einer Minute immer noch nichts?",
+  "sources.waitingTroubleshoot": "Fehlerbehebung: Die Zuspielung geht nie live",
   "sources.signalDetected": "Signal erkannt",
   "sources.signalDetectedBody": "Ein Encoder ist mit dieser Quelle verbunden.",
   "addDest.titleAdd": "Ziel hinzufügen",

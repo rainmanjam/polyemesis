@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Protokol seçin",
   "sources.waitingForEncoder": "Kodlayıcı bekleniyor",
   "sources.waitingForEncoderBody": "Kodlayıcıyı aşağıdaki adrese yönlendirin ve başlatın. İlk karede «Sinyal algılandı» durumuna geçer.",
+  "sources.waitingStuck": "Bir dakika geçti, hâlâ bir şey yok mu?",
+  "sources.waitingTroubleshoot": "Sorun giderme: giriş hiç yayına geçmiyor",
   "sources.signalDetected": "Sinyal algılandı",
   "sources.signalDetectedBody": "Bu kaynağa bir kodlayıcı bağlı.",
   "addDest.titleAdd": "Hedef ekle",

@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Choisir le protocole",
   "sources.waitingForEncoder": "En attente de l'encodeur",
   "sources.waitingForEncoderBody": "Dirigez l'encodeur vers l'adresse ci-dessous, puis lancez-le. Cela passe à « Signal détecté » à la première image.",
+  "sources.waitingStuck": "Toujours rien après une minute ?",
+  "sources.waitingTroubleshoot": "Dépannage : l’entrée ne passe jamais en direct",
   "sources.signalDetected": "Signal détecté",
   "sources.signalDetectedBody": "Un encodeur est connecté à cette source.",
   "addDest.titleAdd": "Ajouter une destination",

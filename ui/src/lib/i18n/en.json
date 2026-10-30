@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "Choose protocol",
   "sources.waitingForEncoder": "Waiting for encoder",
   "sources.waitingForEncoderBody": "Point the encoder at the address below, then start it. This changes to Signal detected on the first frame.",
+  "sources.waitingStuck": "Still nothing after a minute?",
+  "sources.waitingTroubleshoot": "Troubleshooting: the ingest never goes live",
   "sources.signalDetected": "Signal detected",
   "sources.signalDetectedBody": "An encoder is connected to this source.",
   "addDest.titleAdd": "Add destination",

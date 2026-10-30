@@ -1755,6 +1755,8 @@
   "sources.ingestPlaceholder": "프로토콜 선택",
   "sources.waitingForEncoder": "인코더 대기 중",
   "sources.waitingForEncoderBody": "인코더를 아래 주소로 향하게 한 뒤 시작하세요. 첫 프레임이 들어오면 '신호 감지됨'으로 바뀝니다.",
+  "sources.waitingStuck": "1분이 지나도 아무것도 없나요?",
+  "sources.waitingTroubleshoot": "문제 해결: 수신이 라이브가 되지 않음",
   "sources.signalDetected": "신호 감지됨",
   "sources.signalDetectedBody": "이 소스에 인코더가 연결되어 있습니다.",
   "addDest.titleAdd": "대상 추가",
