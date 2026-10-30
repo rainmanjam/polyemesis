@@ -37,7 +37,7 @@ import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { musicRailMark } from "@/lib/musicRail";
+import { musicRailMark, musicRailReason } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import {
   DEFAULT_DUCK_ATTACK_MS,
@@ -561,6 +561,8 @@ export function RoutingPage() {
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
               // A word, not a colour. See lib/musicRail.ts.
               const mark = musicRailMark(guarded, pol?.exclude ?? false);
+              // The reason behind the word, on hover and to a screen reader (B1).
+              const markReason = musicRailReason(guarded, pol?.exclude ?? false);
               return (
                 <button
                   key={d.id}
@@ -575,6 +577,7 @@ export function RoutingPage() {
                     <span className="truncate">{d.name}</span>
                     {mark && (
                       <span
+                        title={markReason ? t(markReason) : undefined}
                         className={cn(
                           "ml-auto flex shrink-0 items-center gap-1 text-sm",
                           mark.tone === "warn" ? "text-warn" : "text-muted-foreground",

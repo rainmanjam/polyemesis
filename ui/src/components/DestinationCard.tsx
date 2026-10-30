@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
@@ -362,16 +363,32 @@ export function DestinationCard({
         </div>
 
         {/* --- problems --- */}
+        {/* B1: every problem row names its reason, the failing step and the
+            as-of time. The step is the destination's output, because these
+            errors belong to the output process; the server does not yet send
+            when a reading was taken, so the as-of line says so. */}
         {dest.error && (
-          <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+          <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="break-words">{dest.error}</span>
+            <StatusReason
+              reason={dest.error}
+              step={t("foundation.status.step.destination", {
+                platform: PLATFORM_LABEL[dest.platform] ?? dest.platform,
+              })}
+              asOf={null}
+            />
           </div>
         )}
         {!dest.error && dest.process?.lastError && state !== "running" && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="line-clamp-2 break-words">{dest.process.lastError}</span>
+            <StatusReason
+              reason={dest.process.lastError}
+              step={t("foundation.status.step.destination", {
+                platform: PLATFORM_LABEL[dest.platform] ?? dest.platform,
+              })}
+              asOf={null}
+            />
           </div>
         )}
         {/* THE STOP THAT WAS NOT CONFIRMED.
@@ -387,9 +404,9 @@ export function DestinationCard({
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
         {dest.stopWarning && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="break-words">{dest.stopWarning}</span>
+            <StatusReason reason={dest.stopWarning} step={t("foundation.status.step.stop")} asOf={null} />
           </div>
         )}
         {warnings.map((w) => (

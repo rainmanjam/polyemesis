@@ -1683,5 +1683,13 @@
   "tour.routingNav.body": "Une destination sans profil de routage est de la simple rediffusion, ce que fait n'importe quel autre outil. Un profil décide quelles pistes audio entrantes atteignent quelle destination et comment elles sont mélangées : un micro de commentaire qui atténue un fond musical pour une plateforme, la musique entièrement écartée pour une autre, chacune avec sa propre cible de sonie. Cela se règle par destination, de sorte qu'un même flux entrant peut sortir sous la forme de plusieurs programmes différents.",
   "tour.routingNav.title": "Le routage, c'est la partie qui n'est pas de la rediffusion",
   "tour.sourcesNav.body": "Une source est un flux entrant, et cette page est l'endroit où vivent son adresse de publication et son jeton. install.sh les a affichés une seule fois, à son exécution ; si ce terminal a été fermé, c'est ici qu'on les retrouve. Chaque source porte son propre jeton, de sorte que plusieurs encodeurs peuvent diffuser vers une même installation en restant distincts.",
-  "tour.sourcesNav.title": "Sources : là où un encodeur se connecte"
+  "tour.sourcesNav.title": "Sources : là où un encodeur se connecte",
+  "foundation.status.step": "Étape en échec : {step}",
+  "foundation.status.stepUnknown": "Étape en échec non signalée",
+  "foundation.status.asOf": "Au {time}",
+  "foundation.status.asOfUnknown": "Heure de cette mesure non enregistrée",
+  "foundation.status.step.destination": "Sortie vers {platform}",
+  "foundation.status.step.stop": "Demande d'arrêt",
+  "foundation.route.noMusicReason": "Le profil de cette destination exclut la piste musicale de son mixage.",
+  "foundation.route.musicOnReason": "La politique musicale de la plateforme demande l'absence de musique, mais le profil de cette destination la transmet."
 }

@@ -27,3 +27,14 @@ export function musicRailMark(guarded: boolean, policyExcludes: boolean): MusicM
   if (policyExcludes) return { label: "route.railMusicOn", tone: "warn" };
   return null;
 }
+
+/** The sentence behind a rail mark, for its hover title and screen readers.
+ *
+ *  A word tells an operator what the destination does; this says why, in the
+ *  profile's own terms, so "no music" never stands alone with nothing behind it
+ *  (B1). Null exactly when musicRailMark is null. */
+export function musicRailReason(guarded: boolean, policyExcludes: boolean): TranslationKey | null {
+  if (guarded) return "foundation.route.noMusicReason";
+  if (policyExcludes) return "foundation.route.musicOnReason";
+  return null;
+}

@@ -1683,5 +1683,13 @@
   "tour.routingNav.body": "Ein Ziel ohne Routing-Profil ist einfaches Weiterleiten, wie es jedes andere Werkzeug auch kann. Ein Profil entscheidet, welche eingehenden Audiospuren welches Ziel erreichen und wie sie gemischt werden: ein Kommentarmikrofon, das für eine Plattform das Musikbett absenkt, während die Musik für eine andere ganz wegbleibt, jeweils mit eigenem Lautheitsziel. Das wird pro Ziel eingestellt, sodass ein eingehender Feed als mehrere unterschiedliche Programme hinausgeht.",
   "tour.routingNav.title": "Routing ist der Teil, der kein Weiterleiten ist",
   "tour.sourcesNav.body": "Eine Quelle ist ein eingehender Feed, und auf dieser Seite stehen ihre Publish-Adresse und ihr Token. install.sh hat beides beim Ausführen genau einmal ausgegeben; wenn das Terminal geschlossen wurde, sind sie hier wiederzufinden. Jede Quelle hat ihr eigenes Token, sodass mehrere Encoder auf eine Installation senden und trotzdem getrennt bleiben.",
-  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet"
+  "tour.sourcesNav.title": "Quellen: wo ein Encoder sich verbindet",
+  "foundation.status.step": "Fehlgeschlagener Schritt: {step}",
+  "foundation.status.stepUnknown": "Fehlgeschlagener Schritt nicht gemeldet",
+  "foundation.status.asOf": "Stand {time}",
+  "foundation.status.asOfUnknown": "Zeitpunkt dieser Messung nicht erfasst",
+  "foundation.status.step.destination": "Ausgabe an {platform}",
+  "foundation.status.step.stop": "Stopp-Anfrage",
+  "foundation.route.noMusicReason": "Das Profil dieses Ziels lässt den Musikkanal aus seinem Mix heraus.",
+  "foundation.route.musicOnReason": "Die Musikrichtlinie der Plattform verlangt keine Musik, das Profil dieses Ziels sendet sie aber."
 }
