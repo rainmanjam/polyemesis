@@ -242,15 +242,20 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
 # in that one file, in the commit range that still contains it. Declared with
 # its id and allowlist only, which EXTENDS the default rule rather than
 # replacing its pattern.
+#
+# Wave 2's poll redaction test (a9b64e90) added a second invented string,
+# `sk_live_qrstuvwxyzabcdef`, in the same file; 74623682 now builds it at run
+# time, but a9b64e90 is in the range scan. Same file, same treatment.
 [[rules]]
 id = "stripe-access-token"
 
   [[rules.allowlists]]
-  description = "the overlay redaction test's made-up Stripe-shaped string"
+  description = "the overlay redaction tests' made-up Stripe-shaped strings"
   condition = "AND"
   regexTarget = "match"
   regexes = [
     '''sk_live_abcdefghijklmnop''',
+    '''sk_live_qrstuvwxyzabcdef''',
   ]
   paths = [
     '''internal/eventstream/overlay_test\.go''',
