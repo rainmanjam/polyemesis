@@ -111,6 +111,22 @@ request the operator did not make, and polyemesis is routinely run on an
 isolated broadcast LAN where such a request does not fail fast — it hangs for
 the connect timeout and then renders in Times.
 
+The console also ships a second, smaller file per family,
+`ibm-plex-sans-ext.woff2` and `jetbrains-mono-ext.woff2`, loaded under the same
+family names with a `unicode-range`: Latin Extended-A/B and Additional,
+combining marks, Cyrillic, arrows and a few currency signs. Without them a
+Polish, Turkish, Russian or Ukrainian label rendered each accented or Cyrillic
+letter in a system face. The browser fetches them only on a page that uses one
+of those characters. They are app-only: the base files stay byte-identical
+with the website's, which has no locale that needs them. Rebuild with
+`scripts/fonts/build-ext-subset.py` (instructions at its top).
+
+Japanese, Korean and Simplified Chinese have no self-hosted face: both
+`--font-sans` and `--font-mono` name the operating system's own CJK faces after
+Plex and JetBrains Mono under `:root:lang(…)`. A CJK subset worth shipping is
+several megabytes per script, and every desktop OS an operator runs the
+console on carries one.
+
 The website also carries **Space Grotesk** for marketing headlines. The console
 has no display type — its largest step is `--text-display`, a 28px page title —
 so it does not ship that third file.
