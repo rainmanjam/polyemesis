@@ -282,6 +282,25 @@ describe("an edit made while Save is out", () => {
     expect(screen.getByLabelText("Include track 3").getAttribute("data-state")).toBe("unchecked");
   });
 
+  // MUTATION: compare only the live mix in save. Observed: FAIL.
+  it("is kept on the second mix too", async () => {
+    stored = dest({ vodProfile: storedProfile() } as Partial<Destination>);
+    let finish: () => void = () => {};
+    updateDestination.mockImplementation(
+      () => new Promise((r) => (finish = () => r({ destination: stored, routing: compiled }))),
+    );
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getAllByLabelText("Include track 3")[0]));
+    await save();
+    // An edit to the SECOND mix while the PUT is out.
+    await act(async () => fireEvent.click(screen.getAllByLabelText("Include track 3")[1]));
+    stored.profile.tracks.push({ track: 2, enabled: true, gain: 1 });
+    await act(async () => finish());
+    await waitFor(() => expect(api.listDestinations).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(saveButton().disabled).toBe(false));
+    expect(screen.getAllByLabelText("Include track 3")[1].getAttribute("data-state")).toBe("checked");
+  });
+
   it("an untouched draft is reseeded from the stored row and Save goes quiet", async () => {
     await renderPage();
     await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
