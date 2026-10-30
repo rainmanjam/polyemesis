@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 import { SourceCard } from "./SourcesPage";
 import type { Settings, SourceView } from "@/lib/types";
@@ -41,9 +42,11 @@ const source = (over: Partial<SourceView> = {}): SourceView =>
 
 const noop = () => {};
 
-function draw(over: Partial<SourceView>) {
+function draw(over: Partial<SourceView>, previewOn = false) {
   return render(
-    <SourceCard source={source(over)} busy={false} onPatch={noop} onRotate={noop} onDelete={noop} />,
+    <MemoryRouter>
+      <SourceCard source={source(over)} busy={false} onPatch={noop} onRotate={noop} onDelete={noop} previewOn={previewOn} />
+    </MemoryRouter>,
   );
 }
 
@@ -89,5 +92,19 @@ describe("SourceCard ingest state", () => {
   it("says nothing about a disabled source's encoder", () => {
     draw({ enabled: false, publishing: false });
     expect(screen.queryByText("Waiting for encoder")).toBeNull();
+  });
+});
+
+describe("SourceCard receiving thumbnail (A2)", () => {
+  it("shows a live thumbnail of the feed when the preview is on", () => {
+    draw({ publishing: true, running: true } as Partial<SourceView>, true);
+    expect(screen.getByTestId("source-thumbnail")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Add destination" })).toBeTruthy();
+  });
+
+  it("says how to get one when the preview is off", () => {
+    draw({ publishing: true, running: true } as Partial<SourceView>, false);
+    expect(screen.queryByTestId("source-thumbnail")).toBeNull();
+    expect(screen.getByText(/Turn on the preview/)).toBeTruthy();
   });
 });

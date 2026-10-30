@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   Activity,
@@ -59,6 +60,12 @@ import { publishRows } from "@/lib/publish-url";
 import { ingestPhase, ingestSummary } from "@/lib/sourceIngest";
 import type { Source, SourceId, SourceView } from "@/lib/types";
 
+// hls.js is only needed once a card shows a receiving feed (A2), so it is
+// fetched then, the same way the Dashboard loads it.
+const PreviewPlayer = lazy(() =>
+  import("@/components/PreviewPlayer").then((m) => ({ default: m.PreviewPlayer })),
+);
+
 /* ===========================================================================
    Sources: one ingested programme each.
 
@@ -104,6 +111,17 @@ export function SourcesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Whether the preview encoder is switched on (Settings → Pipeline). A card
+  // only offers a thumbnail when there is one to fetch; a failed read is
+  // treated as off, which shows the line saying how to turn it on.
+  const [previewOn, setPreviewOn] = useState(false);
+  useEffect(() => {
+    api.getSettings().then(
+      (s) => setPreviewOn(!!s.preview?.enabled),
+      () => setPreviewOn(false),
+    );
+  }, []);
 
   const create = async () => {
     const name = newName.trim();
@@ -265,6 +283,7 @@ export function SourcesPage() {
               onPatch={(c) => patch(s, c)}
               onRotate={() => setRotating(s)}
               onDelete={() => setDeleting(s)}
+              previewOn={previewOn}
             />
           ))}
         </div>
@@ -349,12 +368,15 @@ export function SourceCard({
   onPatch,
   onRotate,
   onDelete,
+  previewOn = false,
 }: {
   source: SourceView;
   busy: boolean;
   onPatch: (changes: Partial<Source>) => void;
   onRotate: () => void;
   onDelete: () => void;
+  /** The preview encoder is on, so a receiving card can show a thumbnail. */
+  previewOn?: boolean;
 }) {
   const t = useT();
   // A LOCAL DRAFT, not a per-field commit.
@@ -599,10 +621,33 @@ export function SourceCard({
             role="status"
             className="flex items-start gap-3 rounded-md border border-live/30 bg-live-dim/20 px-3 py-2"
           >
-            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
-            <div className="min-w-0">
+            {/* WHAT IS ARRIVING, not only that something is (A2). A small live
+                picture of this source's own feed, so the operator can see it is
+                the right camera before adding a destination. Muted, and only
+                while the card is in the receiving state. */}
+            {previewOn ? (
+              <div className="w-36 shrink-0 overflow-hidden rounded border border-border" data-testid="source-thumbnail">
+                <Suspense fallback={<div className="aspect-video bg-muted" />}>
+                  <PreviewPlayer
+                    active
+                    sourceId={source.id}
+                    outputLive
+                    ingestLive
+                  />
+                </Suspense>
+              </div>
+            ) : (
+              <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
+            )}
+            <div className="flex min-w-0 flex-col gap-1">
               <p className="text-[12px] font-semibold text-live">{t("sources.signalDetected")}</p>
               <p className="text-[12px] text-muted-foreground">{t("sources.signalDetectedBody")}</p>
+              {!previewOn && (
+                <p className="text-[12px] text-muted-foreground">{t("sources.thumbnailOff")}</p>
+              )}
+              <Button size="sm" variant="outline" className="w-fit" asChild>
+                <Link to="/">{t("firstRun.addDestination")}</Link>
+              </Button>
             </div>
           </div>
         )}

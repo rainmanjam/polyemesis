@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Alimenta {count} destinos",
   "rend.saveRestartsOne": "Salvar reinicia esta codificação e, com ela, o {count} destino ativado acima. O roteamento de áudio dele não é alterado.",
   "rend.saveRestartsMany": "Salvar reinicia esta codificação e, com ela, os {count} destinos ativados acima. O roteamento de áudio deles não é alterado.",
-  "dash.rolledOverTo": "A gravação continuou em {file} — o arquivo configurado já tinha imagens e nunca é sobrescrito."
+  "dash.rolledOverTo": "A gravação continuou em {file} — o arquivo configurado já tinha imagens e nunca é sobrescrito.",
+  "sources.thumbnailOff": "Ative a pré-visualização em Configurações → Pipeline para ver aqui uma miniatura deste sinal."
 }

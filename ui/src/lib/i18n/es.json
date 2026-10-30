@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Alimenta a {count} destinos",
   "rend.saveRestartsOne": "Guardar reinicia esta codificación y, con ella, el {count} destino activado de arriba. Su enrutamiento de audio no se toca.",
   "rend.saveRestartsMany": "Guardar reinicia esta codificación y, con ella, los {count} destinos activados de arriba. Su enrutamiento de audio no se toca.",
-  "dash.rolledOverTo": "La grabación continuó en {file}: el archivo configurado ya contenía material y nunca se sobrescribe."
+  "dash.rolledOverTo": "La grabación continuó en {file}: el archivo configurado ya contenía material y nunca se sobrescribe.",
+  "sources.thumbnailOff": "Activa la vista previa en Ajustes → Cadena de proceso para ver aquí una miniatura de esta señal."
 }

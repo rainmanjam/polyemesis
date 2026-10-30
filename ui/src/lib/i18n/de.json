@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Versorgt {count} Ziele",
   "rend.saveRestartsOne": "Speichern startet diese Kodierung neu und mit ihr das {count} aktivierte Ziel oben. Dessen Audio-Routing bleibt unberührt.",
   "rend.saveRestartsMany": "Speichern startet diese Kodierung neu und mit ihr die {count} aktivierten Ziele oben. Deren Audio-Routing bleibt unberührt.",
-  "dash.rolledOverTo": "Aufnahme wurde in {file} fortgesetzt – die konfigurierte Datei enthielt bereits Material und wird nie überschrieben."
+  "dash.rolledOverTo": "Aufnahme wurde in {file} fortgesetzt – die konfigurierte Datei enthielt bereits Material und wird nie überschrieben.",
+  "sources.thumbnailOff": "Aktiviere die Vorschau unter Einstellungen → Verarbeitungskette, um hier ein Vorschaubild dieses Signals zu sehen."
 }

@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Memasok {count} tujuan",
   "rend.saveRestartsOne": "Menyimpan akan memulai ulang pengodean ini, beserta {count} tujuan aktif di atas. Routing audionya tidak diubah.",
   "rend.saveRestartsMany": "Menyimpan akan memulai ulang pengodean ini, beserta {count} tujuan aktif di atas. Routing audionya tidak diubah.",
-  "dash.rolledOverTo": "Rekaman dilanjutkan di {file} — berkas yang dikonfigurasi sudah berisi rekaman dan tidak pernah ditimpa."
+  "dash.rolledOverTo": "Rekaman dilanjutkan di {file} — berkas yang dikonfigurasi sudah berisi rekaman dan tidak pernah ditimpa.",
+  "sources.thumbnailOff": "Aktifkan pratinjau di Pengaturan → Alur pemrosesan untuk melihat gambar kecil feed ini di sini."
 }

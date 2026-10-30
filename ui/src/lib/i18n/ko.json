@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "공급 대상: {count}개",
   "rend.saveRestartsOne": "저장하면 이 인코딩과 함께 위의 활성 대상 {count}개가 다시 시작됩니다. 오디오 라우팅은 그대로입니다.",
   "rend.saveRestartsMany": "저장하면 이 인코딩과 함께 위의 활성 대상 {count}개가 다시 시작됩니다. 오디오 라우팅은 그대로입니다.",
-  "dash.rolledOverTo": "녹화가 {file}에 이어서 저장되었습니다. 설정한 파일에는 이미 영상이 있었으며 절대 덮어쓰지 않습니다."
+  "dash.rolledOverTo": "녹화가 {file}에 이어서 저장되었습니다. 설정한 파일에는 이미 영상이 있었으며 절대 덮어쓰지 않습니다.",
+  "sources.thumbnailOff": "설정 → 파이프라인에서 미리 보기를 켜면 여기에 이 피드의 썸네일이 표시됩니다."
 }

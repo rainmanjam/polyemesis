@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "供给 {count} 个推流目标",
   "rend.saveRestartsOne": "保存会重启此编码，连同上方 {count} 个已启用的推流目标。它们的音频路由不受影响。",
   "rend.saveRestartsMany": "保存会重启此编码，连同上方 {count} 个已启用的推流目标。它们的音频路由不受影响。",
-  "dash.rolledOverTo": "录制已在 {file} 中继续——配置的文件里已有素材，且永远不会被覆盖。"
+  "dash.rolledOverTo": "录制已在 {file} 中继续——配置的文件里已有素材，且永远不会被覆盖。",
+  "sources.thumbnailOff": "在“设置 → 处理链路”中开启预览，即可在此看到该信号的缩略图。"
 }

@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Feeds {count} destinations",
   "rend.saveRestartsOne": "Saving restarts this encode, and with it the {count} enabled destination above. Their audio routing is untouched.",
   "rend.saveRestartsMany": "Saving restarts this encode, and with it the {count} enabled destinations above. Their audio routing is untouched.",
-  "dash.rolledOverTo": "Recording continued in {file} — the configured file already held footage and is never overwritten."
+  "dash.rolledOverTo": "Recording continued in {file} — the configured file already held footage and is never overwritten.",
+  "sources.thumbnailOff": "Turn on the preview in Settings → Pipeline to see a thumbnail of this feed here."
 }

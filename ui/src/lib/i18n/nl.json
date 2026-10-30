@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Voedt {count} bestemmingen",
   "rend.saveRestartsOne": "Opslaan herstart deze codering, en daarmee de {count} ingeschakelde bestemming hierboven. Haar audiorouting blijft onaangeroerd.",
   "rend.saveRestartsMany": "Opslaan herstart deze codering, en daarmee de {count} ingeschakelde bestemmingen hierboven. Hun audiorouting blijft onaangeroerd.",
-  "dash.rolledOverTo": "Opname ging verder in {file} — het ingestelde bestand bevatte al beelden en wordt nooit overschreven."
+  "dash.rolledOverTo": "Opname ging verder in {file} — het ingestelde bestand bevatte al beelden en wordt nooit overschreven.",
+  "sources.thumbnailOff": "Zet de voorvertoning aan in Instellingen → Verwerkingsketen om hier een miniatuur van deze feed te zien."
 }

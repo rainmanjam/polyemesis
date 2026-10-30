@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Alimente {count} destinations",
   "rend.saveRestartsOne": "L'enregistrement redémarre cet encodage, et avec lui la {count} destination activée ci-dessus. Son routage audio reste intact.",
   "rend.saveRestartsMany": "L'enregistrement redémarre cet encodage, et avec lui les {count} destinations activées ci-dessus. Leur routage audio reste intact.",
-  "dash.rolledOverTo": "L'enregistrement s'est poursuivi dans {file} — le fichier configuré contenait déjà des images et n'est jamais écrasé."
+  "dash.rolledOverTo": "L'enregistrement s'est poursuivi dans {file} — le fichier configuré contenait déjà des images et n'est jamais écrasé.",
+  "sources.thumbnailOff": "Activez l'aperçu dans Paramètres → Chaîne de traitement pour voir ici une vignette de ce flux."
 }

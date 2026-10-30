@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Alimenta {count} destinazioni",
   "rend.saveRestartsOne": "Il salvataggio riavvia questa codifica e con essa la {count} destinazione attiva qui sopra. Il suo routing audio resta intatto.",
   "rend.saveRestartsMany": "Il salvataggio riavvia questa codifica e con essa le {count} destinazioni attive qui sopra. Il loro routing audio resta intatto.",
-  "dash.rolledOverTo": "La registrazione è proseguita in {file}: il file configurato conteneva già del girato e non viene mai sovrascritto."
+  "dash.rolledOverTo": "La registrazione è proseguita in {file}: il file configurato conteneva già del girato e non viene mai sovrascritto.",
+  "sources.thumbnailOff": "Attiva l'anteprima in Impostazioni → Catena di elaborazione per vedere qui una miniatura di questo flusso."
 }

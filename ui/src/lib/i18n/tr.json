@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "{count} hedefi besler",
   "rend.saveRestartsOne": "Kaydetmek bu kodlamayı ve onunla birlikte yukarıdaki {count} etkin hedefi yeniden başlatır. Ses yönlendirmesine dokunulmaz.",
   "rend.saveRestartsMany": "Kaydetmek bu kodlamayı ve onunla birlikte yukarıdaki {count} etkin hedefi yeniden başlatır. Ses yönlendirmelerine dokunulmaz.",
-  "dash.rolledOverTo": "Kayıt {file} dosyasında devam etti — yapılandırılan dosyada zaten görüntü vardı ve asla üzerine yazılmaz."
+  "dash.rolledOverTo": "Kayıt {file} dosyasında devam etti — yapılandırılan dosyada zaten görüntü vardı ve asla üzerine yazılmaz.",
+  "sources.thumbnailOff": "Bu akışın küçük resmini burada görmek için Ayarlar → İşlem hattı altında önizlemeyi açın."
 }

@@ -2470,5 +2470,6 @@
   "rend.feedsDestinationsMany": "Zasila celów: {count}",
   "rend.saveRestartsOne": "Zapisanie uruchomi ponownie to kodowanie, a wraz z nim włączone cele powyżej ({count}). Ich routing audio pozostaje nietknięty.",
   "rend.saveRestartsMany": "Zapisanie uruchomi ponownie to kodowanie, a wraz z nim włączone cele powyżej ({count}). Ich routing audio pozostaje nietknięty.",
-  "dash.rolledOverTo": "Nagrywanie kontynuowano w {file} — skonfigurowany plik zawierał już materiał i nigdy nie jest nadpisywany."
+  "dash.rolledOverTo": "Nagrywanie kontynuowano w {file} — skonfigurowany plik zawierał już materiał i nigdy nie jest nadpisywany.",
+  "sources.thumbnailOff": "Włącz podgląd w Ustawienia → Tor przetwarzania, aby zobaczyć tu miniaturę tego sygnału."
 }
