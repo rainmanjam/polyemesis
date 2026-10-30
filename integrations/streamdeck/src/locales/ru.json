@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Не удалось загрузить список назначений.",
   "streamdeck.pi.notListed": "{id} (больше нет в списке)",
   "streamdeck.pi.trackHint": "Изменение применяется вживую, когда это возможно. Иначе назначение перезапускается, и зрители видят переподключение. Сервер Windows всегда перезапускается.",
-  "streamdeck.pi.destinationLabel": "Назначение"
+  "streamdeck.pi.destinationLabel": "Назначение",
+  "streamdeck.gain.matrix": "матрица: через UI"
 }

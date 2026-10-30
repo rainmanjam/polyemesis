@@ -156,6 +156,7 @@ describe("inspector preset picker", () => {
 });
 
 const MUTE = "com.polyemesis.streamdeck.track-mute";
+const GAIN = "com.polyemesis.streamdeck.track-gain";
 const DESTS = {
   type: "destinations",
   destinations: [
@@ -229,6 +230,12 @@ describe("inspector track picker", () => {
     receive("sendToPropertyInspector", { type: "destinations", key: "streamdeck.pi.destinationsFailed" });
     expect(els["err-track"]!.hidden).toBe(false);
     expect(els["err-track"]!.textContent).toBe("No list");
+  });
+
+  it("shows the same pickers on the gain dial", () => {
+    const { els, sent } = loadInspector(GAIN);
+    expect(els["block-track"]!.hidden).toBe(false);
+    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations" } }));
   });
 
   it("does not show the track block on other keys", () => {

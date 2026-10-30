@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Nie udało się wczytać listy miejsc docelowych.",
   "streamdeck.pi.notListed": "{id} (już nie na liście)",
   "streamdeck.pi.trackHint": "Zmiana jest stosowana na żywo, gdy to możliwe. W przeciwnym razie miejsce docelowe się restartuje, a widzowie widzą ponowne połączenie. Serwer Windows zawsze się restartuje.",
-  "streamdeck.pi.destinationLabel": "Miejsce docelowe"
+  "streamdeck.pi.destinationLabel": "Miejsce docelowe",
+  "streamdeck.gain.matrix": "macierz: użyj UI"
 }

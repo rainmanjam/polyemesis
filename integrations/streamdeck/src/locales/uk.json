@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Не вдалося завантажити список призначень.",
   "streamdeck.pi.notListed": "{id} (більше немає в списку)",
   "streamdeck.pi.trackHint": "Зміна застосовується наживо, коли це можливо. Інакше призначення перезапускається, і глядачі бачать перепідключення. Сервер Windows завжди перезапускається.",
-  "streamdeck.pi.destinationLabel": "Призначення"
+  "streamdeck.pi.destinationLabel": "Призначення",
+  "streamdeck.gain.matrix": "матриця: через UI"
 }

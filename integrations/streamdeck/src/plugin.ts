@@ -3,10 +3,13 @@ import streamDeck, {
   SingletonAction,
   type Action,
   type DidReceiveGlobalSettingsEvent,
+  type DialDownEvent,
+  type DialRotateEvent,
   type DidReceiveSettingsEvent,
   type KeyDownEvent,
   type KeyUpEvent,
   type SendToPluginEvent,
+  type TouchTapEvent,
   type WillAppearEvent,
   type WillDisappearEvent,
 } from "@elgato/streamdeck";
@@ -24,7 +27,7 @@ import { nodeTransport } from "./transport.js";
 
 const PLUGIN = "com.polyemesis.streamdeck";
 /** The actions whose inspector picks a destination and one of its tracks. */
-const TRACK_ACTIONS = [`${PLUGIN}.track-mute`];
+const TRACK_ACTIONS = [`${PLUGIN}.track-mute`, `${PLUGIN}.track-gain`];
 // Status refreshes every couple of seconds; dials poll /levels five times a second.
 // The server answers levels with its own freshness verdict, so the dial needs no
 // faster clock than this to show NO FEED within about a window of silence.
@@ -200,6 +203,23 @@ export class TrackMuteKey extends PolyAction {
   }
 }
 
+@action({ UUID: `${PLUGIN}.track-gain` })
+export class TrackGainDial extends PolyAction {
+  readonly kind = "trackGain" as const;
+
+  override onDialRotate(ev: DialRotateEvent): Promise<void> {
+    return rt().rotateTrackGain(ev.action.id, ev.payload.ticks);
+  }
+
+  override onDialDown(ev: DialDownEvent): Promise<void> {
+    return rt().pushTrackGain(ev.action.id);
+  }
+
+  override onTouchTap(ev: TouchTapEvent): Promise<void> {
+    return rt().touchTrackGain(ev.action.id);
+  }
+}
+
 @action({ UUID: `${PLUGIN}.meter` })
 export class MeterDial extends PolyAction {
   readonly kind = "meter" as const;
@@ -226,6 +246,7 @@ streamDeck.actions.registerAction(new RecordKey());
 streamDeck.actions.registerAction(new PresetKey());
 streamDeck.actions.registerAction(new FailoverKey());
 streamDeck.actions.registerAction(new TrackMuteKey());
+streamDeck.actions.registerAction(new TrackGainDial());
 streamDeck.actions.registerAction(new MeterDial());
 
 streamDeck.settings.onDidReceiveGlobalSettings((ev: DidReceiveGlobalSettingsEvent<JsonObject>) => {

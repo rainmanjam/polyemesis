@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "无法加载目标列表。",
   "streamdeck.pi.notListed": "{id}（已不在列表中）",
   "streamdeck.pi.trackHint": "可以时，更改会实时生效。否则目标会重启，观众会看到重新连接。Windows 服务器总是重启。",
-  "streamdeck.pi.destinationLabel": "目标"
+  "streamdeck.pi.destinationLabel": "目标",
+  "streamdeck.gain.matrix": "矩阵：请用界面"
 }

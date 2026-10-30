@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Impossibile caricare l'elenco delle destinazioni.",
   "streamdeck.pi.notListed": "{id} (non più elencato)",
   "streamdeck.pi.trackHint": "Una modifica si applica in diretta quando possibile. Altrimenti la destinazione si riavvia e gli spettatori vedono una riconnessione. Un server Windows si riavvia sempre.",
-  "streamdeck.pi.destinationLabel": "Destinazione"
+  "streamdeck.pi.destinationLabel": "Destinazione",
+  "streamdeck.gain.matrix": "matrice: usa la UI"
 }

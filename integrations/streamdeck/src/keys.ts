@@ -39,6 +39,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.mute.copyAudio",
   "streamdeck.mute.noTrack",
   "streamdeck.track.numbered",
+  "streamdeck.gain.matrix",
   "streamdeck.meter.noFeed",
   "streamdeck.meter.quiet",
   "streamdeck.auth.connected",

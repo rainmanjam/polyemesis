@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "配信先の一覧を読み込めませんでした。",
   "streamdeck.pi.notListed": "{id}（一覧にありません）",
   "streamdeck.pi.trackHint": "変更は可能ならライブで適用されます。そうでなければ配信先が再起動し、視聴者には再接続が見えます。Windows サーバーは常に再起動します。",
-  "streamdeck.pi.destinationLabel": "配信先"
+  "streamdeck.pi.destinationLabel": "配信先",
+  "streamdeck.gain.matrix": "マトリクス: UIで操作"
 }

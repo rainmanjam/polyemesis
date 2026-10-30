@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Daftar tujuan tidak dapat dimuat.",
   "streamdeck.pi.notListed": "{id} (tidak lagi terdaftar)",
   "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
-  "streamdeck.pi.destinationLabel": "Tujuan"
+  "streamdeck.pi.destinationLabel": "Tujuan",
+  "streamdeck.gain.matrix": "matriks: pakai UI"
 }

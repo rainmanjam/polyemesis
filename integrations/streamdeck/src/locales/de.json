@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Die Zielliste konnte nicht geladen werden.",
   "streamdeck.pi.notListed": "{id} (nicht mehr aufgeführt)",
   "streamdeck.pi.trackHint": "Eine Änderung wird live übernommen, wenn möglich. Sonst startet das Ziel neu und die Zuschauer sehen eine Neuverbindung. Ein Windows-Server startet immer neu.",
-  "streamdeck.pi.destinationLabel": "Ziel"
+  "streamdeck.pi.destinationLabel": "Ziel",
+  "streamdeck.gain.matrix": "Matrix: UI nutzen"
 }

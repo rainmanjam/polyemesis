@@ -15,7 +15,8 @@ import type {
   TrackLevel,
   TrackLevelResult,
 } from "./model.js";
-import { KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
+import { clip, KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
+import { barFor, formatDb, gainForDb, gainToDb, stepDb } from "./trackLevel.js";
 import { nodeTransport } from "./transport.js";
 
 // The plugin's brain. It owns pairing, the status cache, admin gating and what
@@ -37,7 +38,8 @@ export type SurfaceKind =
   | "record"
   | "preset"
   | "meter"
-  | "trackMute";
+  | "trackMute"
+  | "trackGain";
 
 /** Kinds that confirm by a held press. A stop ends broadcasts for good; a preset can restart destinations. */
 const HELD_KINDS: readonly SurfaceKind[] = ["stopAll", "stopOne", "preset"];
@@ -121,8 +123,24 @@ export const HOLD_MS = 1500;
 /** How long a key shows how a level change applied (live, or by restart) before its own face returns. */
 export const FLASH_MS = 3000;
 
+/**
+ * How long the gain dial gathers ticks before it sends. A spin of a second sends about four requests,
+ * not one per detent; the server serialises them anyway, so more would only queue behind each other.
+ */
+export const COALESCE_MS = 250;
+
 /** Kinds that read the install's stored track levels, not a programme's /status. */
-const LEVEL_KINDS: readonly SurfaceKind[] = ["trackMute"];
+const LEVEL_KINDS: readonly SurfaceKind[] = ["trackMute", "trackGain"];
+
+/** A gain dial's turn in progress. */
+interface DialTurn {
+  /** Where the turns so far have taken the level, in dB. Shown at once; cleared once the server has it. */
+  targetDb?: number;
+  /** The pending send, while ticks are being gathered. */
+  cancel?: () => void;
+  /** A request is out. A turn meanwhile waits for it, then the latest level is sent. */
+  inFlight: boolean;
+}
 
 /** The destination and track a track-level control acts on, or the face that says why it cannot. */
 type TrackTarget = { dest: DestinationLevels; level: TrackLevel } | { face: KeyFace };
@@ -166,6 +184,10 @@ export class Runtime {
   private readonly flashes = new Map<string, () => void>();
   /** A track control the server refused (409, 400, 404), with its words. Cleared by the next press. */
   private readonly levelRefused = new Map<string, KeyFace>();
+  /** Each gain dial's turn in progress. */
+  private readonly turns = new Map<string, DialTurn>();
+  /** What a gain dial says for FLASH_MS instead of its level: how a change applied, or needs admin. */
+  private readonly dialNotices = new Map<string, string>();
 
   constructor(
     private readonly locale: string,
@@ -196,6 +218,9 @@ export class Runtime {
     this.levelRefused.clear();
     for (const cancel of this.flashes.values()) cancel();
     this.flashes.clear();
+    this.dialNotices.clear();
+    for (const turn of this.turns.values()) turn.cancel?.();
+    this.turns.clear();
     this.client = undefined;
     try {
       this.client = clientFor(globals, this.makeTransport);
@@ -257,6 +282,9 @@ export class Runtime {
     this.flashes.get(id)?.();
     this.flashes.delete(id);
     this.levelRefused.delete(id);
+    this.dialNotices.delete(id);
+    this.turns.get(id)?.cancel?.();
+    this.turns.delete(id);
   }
 
   // ---- status clock ------------------------------------------------------
@@ -421,6 +449,10 @@ export class Runtime {
       if (s.kind === "meter") continue;
       if (this.holds.has(s.id) && this.holdInProgress(s.id)) continue;
       if (this.flashes.has(s.id)) continue;
+      if (s.kind === "trackGain") {
+        await this.paintGainDial(s);
+        continue;
+      }
       await this.paintFace(s, this.faceFor(s));
     }
   }
@@ -541,6 +573,65 @@ export class Runtime {
     return target.level.muted
       ? { tone: "muted", label: "streamdeck.mute.muted", detail }
       : { tone: "live", label: "streamdeck.mute.unmuted", detail };
+  }
+
+  /**
+   * The gain dial's touch strip: the destination and track, the level in dB and a bar. A turn in progress
+   * is shown at once, and the status tick does not overwrite it. NO FEED when the stored levels cannot be
+   * read; "matrix: use UI" on a matrix mix, whose gain is per cell.
+   */
+  private gainDialFeedback(s: Surface): { title: string; value: string; indicator: number } {
+    const blank = (value: string) => ({ title: "", value, indicator: 0 });
+    if (!this.client) return blank(t(this.locale, "streamdeck.auth.notPaired"));
+    if (this.connectionError || !this.connection || this.destLevelsError || !this.destLevels) {
+      return blank(t(this.locale, "streamdeck.meter.noFeed"));
+    }
+    const target = this.trackTarget(s, this.destLevels);
+    if ("face" in target) return blank(t(this.locale, target.face.label));
+    const title = clip(`${target.dest.name} · ${this.trackName(s, target.level.track)}`, 24);
+    const notice = this.dialNotices.get(s.id);
+    const refused = this.levelRefused.get(s.id);
+    const muted = t(this.locale, "streamdeck.mute.muted");
+    if (notice !== undefined) return { title, value: notice, indicator: 0 };
+    if (refused) return { title, value: t(this.locale, refused.label), indicator: 0 };
+    if (target.dest.copyAudio) return { title, value: t(this.locale, "streamdeck.mute.unavailable"), indicator: 0 };
+    if (target.dest.matrix) {
+      return { title, value: target.level.muted ? muted : t(this.locale, "streamdeck.gain.matrix"), indicator: 0 };
+    }
+    const db = this.turns.get(s.id)?.targetDb ?? gainToDb(target.level.gain);
+    const level = formatDb(db);
+    return { title, value: target.level.muted ? `${muted} · ${level}` : level, indicator: barFor(db) };
+  }
+
+  private async paintGainDial(s: Surface): Promise<void> {
+    const payload = this.gainDialFeedback(s);
+    // As the meters do: send only a change, so the 2 s tick does not re-send a steady strip.
+    const signature = JSON.stringify(payload);
+    if (this.lastMeterPaint.get(s.id) === signature) return;
+    this.lastMeterPaint.set(s.id, signature);
+    await s.setFeedback(payload);
+  }
+
+  /** Shows a word on a gain dial for FLASH_MS, then its level again. */
+  private async noticeOnDial(s: Surface, text: string): Promise<void> {
+    this.dialNotices.set(s.id, text);
+    this.flashes.get(s.id)?.();
+    await this.paintGainDial(s);
+    this.flashes.set(
+      s.id,
+      this.schedule(() => {
+        this.flashes.delete(s.id);
+        this.dialNotices.delete(s.id);
+        const current = this.surfaces.get(s.id);
+        if (current) void this.paintGainDial(current);
+      }, FLASH_MS),
+    );
+  }
+
+  private clearDialNotice(id: string): void {
+    this.flashes.get(id)?.();
+    this.flashes.delete(id);
+    this.dialNotices.delete(id);
   }
 
   private adminGated(label: StreamDeckKey): KeyFace {
@@ -742,28 +833,162 @@ export class Runtime {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
-    this.levelRefused.delete(id);
+    const target = await this.freshTarget(s);
+    if (!target) return;
+    const result = await this.sendLevel(s, target.dest, target.level.track, { muted: !target.level.muted });
+    if (result) await this.flashApplied(s, result);
+  }
+
+  /**
+   * A mute toggle reads the stored levels FRESH, so it flips what the install has now, not what the last
+   * tick saw. Undefined (after an alert) when the read fails, the target is missing, or the destination
+   * passes its audio through: refused here, so a control never reports a mute the audio does not have.
+   */
+  private async freshTarget(s: Surface): Promise<{ dest: DestinationLevels; level: TrackLevel } | undefined> {
+    this.levelRefused.delete(s.id);
     try {
-      this.storeLevels(await this.client.destinations());
+      this.storeLevels(await this.client!.destinations());
       this.destLevelsError = undefined;
     } catch {
       await s.showAlert();
-      return;
+      return undefined;
     }
     const target = this.trackTarget(s, this.destLevels!);
-    if ("face" in target) {
-      await this.paintFace(s, target.face);
+    if ("face" in target || target.dest.copyAudio) {
+      await this.repaintTrackControl(s);
       await s.showAlert();
-      return;
+      return undefined;
     }
-    // No level stage to reach: refused here, so the key never reports a mute the audio does not have.
-    if (target.dest.copyAudio) {
-      await this.paintFace(s, this.trackMuteFace(s));
+    return target;
+  }
+
+  private async repaintTrackControl(s: Surface): Promise<void> {
+    if (s.kind === "trackGain") await this.paintGainDial(s);
+    else await this.paintFace(s, this.trackMuteFace(s));
+  }
+
+  /** The admin gate for the gain dial: nothing is sent, and the strip says why. */
+  private async dialNeedsAdmin(s: Surface): Promise<boolean> {
+    if (this.isAdmin) return true;
+    await this.noticeOnDial(s, t(this.locale, "streamdeck.auth.needsAdmin"));
+    await s.showAlert();
+    return false;
+  }
+
+  /**
+   * The cached target a gain change may go to: a track in the selection, on a destination that mixes its
+   * audio and is not a matrix mix (the server refuses a track gain there). Undefined after an alert.
+   */
+  private async gainTarget(s: Surface): Promise<{ dest: DestinationLevels; level: TrackLevel } | undefined> {
+    this.levelRefused.delete(s.id);
+    const target = this.destLevels ? this.trackTarget(s, this.destLevels) : undefined;
+    if (!target || "face" in target || target.dest.copyAudio || target.dest.matrix) {
+      await this.paintGainDial(s);
       await s.showAlert();
-      return;
+      return undefined;
     }
+    return target;
+  }
+
+  private turnFor(id: string): DialTurn {
+    let turn = this.turns.get(id);
+    if (!turn) this.turns.set(id, (turn = { inFlight: false }));
+    return turn;
+  }
+
+  /**
+   * A turn of the gain dial: 0.5 dB a tick, clamped. The level moves on the strip at once; the request
+   * goes COALESCE_MS later, carrying wherever the turns have got to by then, so a fast spin sends a few
+   * requests, not one per tick.
+   */
+  async rotateTrackGain(id: string, ticks: number): Promise<void> {
+    const s = this.surfaces.get(id);
+    if (!s || !this.client) return;
+    if (!(await this.dialNeedsAdmin(s))) return;
+    const target = await this.gainTarget(s);
+    if (!target) return;
+    this.clearDialNotice(id);
+    const turn = this.turnFor(id);
+    const from = turn.targetDb ?? gainToDb(target.level.gain);
+    const next = stepDb(from, ticks);
+    if (next === from) return;
+    turn.targetDb = next;
+    await this.paintGainDial(s);
+    turn.cancel ??= this.schedule(() => {
+      turn.cancel = undefined;
+      void this.flushGain(id);
+    }, COALESCE_MS);
+  }
+
+  /** A touch on the strip: back to unity (0 dB) at once, replacing any turn not yet sent. */
+  async touchTrackGain(id: string): Promise<void> {
+    const s = this.surfaces.get(id);
+    if (!s || !this.client) return;
+    if (!(await this.dialNeedsAdmin(s))) return;
+    if (!(await this.gainTarget(s))) return;
+    this.clearDialNotice(id);
+    const turn = this.turnFor(id);
+    turn.cancel?.();
+    turn.cancel = undefined;
+    turn.targetDb = 0;
+    await this.paintGainDial(s);
+    await this.flushGain(id);
+  }
+
+  /** A push of the gain dial: mute or unmute the track. Mute applies on a matrix mix too. */
+  async pushTrackGain(id: string): Promise<void> {
+    const s = this.surfaces.get(id);
+    if (!s || !this.client) return;
+    if (!(await this.dialNeedsAdmin(s))) return;
+    const target = await this.freshTarget(s);
+    if (!target) return;
+    this.clearDialNotice(id);
     const result = await this.sendLevel(s, target.dest, target.level.track, { muted: !target.level.muted });
-    if (result) await this.flashApplied(s, result);
+    if (result) await this.noticeApplied(s, result);
+    else await this.paintGainDial(s);
+  }
+
+  /**
+   * Sends the level the turns have reached. One request at a time: if one is out, its return sends the
+   * latest level, once. A refusal or a failure drops the turn, and the strip goes back to the stored level.
+   */
+  private async flushGain(id: string): Promise<void> {
+    const s = this.surfaces.get(id);
+    const turn = this.turns.get(id);
+    if (!s || !turn || turn.targetDb === undefined || turn.inFlight) return;
+    const target = this.destLevels ? this.trackTarget(s, this.destLevels) : undefined;
+    if (!target || "face" in target) {
+      turn.targetDb = undefined;
+      await this.paintGainDial(s);
+      return;
+    }
+    const db = turn.targetDb;
+    turn.inFlight = true;
+    const result = await this.sendLevel(s, target.dest, target.level.track, { gain: gainForDb(db) });
+    turn.inFlight = false;
+    if (!result) {
+      turn.cancel?.();
+      this.turns.delete(id);
+      await this.paintGainDial(s);
+      return;
+    }
+    if (turn.targetDb !== db) {
+      // Turned again while this was out: send where it is now, after the same gathering window.
+      turn.cancel ??= this.schedule(() => {
+        turn.cancel = undefined;
+        void this.flushGain(id);
+      }, COALESCE_MS);
+      return;
+    }
+    this.turns.delete(id);
+    // A live change on every step would flash on every turn; a restart is shown, because the viewer saw it.
+    if (result.applied === "restart") await this.noticeApplied(s, result);
+    else await this.paintGainDial(s);
+  }
+
+  private async noticeApplied(s: Surface, result: TrackLevelResult): Promise<void> {
+    const label = result.applied === "restart" ? "streamdeck.mute.appliedRestart" : "streamdeck.mute.appliedLive";
+    await this.noticeOnDial(s, t(this.locale, label));
   }
 
   /**
@@ -788,7 +1013,7 @@ export class Runtime {
       } else if (err instanceof ApiError && err.kind === "http" && err.status === 404) {
         this.levelRefused.set(s.id, { tone: "unbound", label: "streamdeck.mute.noTrack", detail: err.message });
       }
-      if (this.levelRefused.has(s.id) && s.kind === "trackMute") await this.paintFace(s, this.trackMuteFace(s));
+      if (this.levelRefused.has(s.id)) await this.repaintTrackControl(s);
       await s.showAlert();
       return undefined;
     }

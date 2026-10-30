@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "The destination list could not be loaded.",
   "streamdeck.pi.notListed": "{id} (no longer listed)",
   "streamdeck.pi.trackHint": "A change applies live when it can. Otherwise the destination restarts and viewers see a reconnect. A Windows server always restarts.",
-  "streamdeck.pi.destinationLabel": "Destination"
+  "streamdeck.pi.destinationLabel": "Destination",
+  "streamdeck.gain.matrix": "matrix: use UI"
 }

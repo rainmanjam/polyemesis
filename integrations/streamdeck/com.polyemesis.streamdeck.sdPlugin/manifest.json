@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
   "Name": "polyemesis",
-  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and dial meters for a polyemesis install.",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
@@ -405,6 +405,29 @@
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.track-gain",
+      "Name": "Track gain",
+      "Tooltip": "One audio track's gain on one destination, in 0.5 dB steps. Push to mute, touch for 0 dB. Applies live when the server can, otherwise by a restart. Needs an admin token.",
+      "Icon": "imgs/actions/track-gain",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Gain, 0.5 dB a step",
+          "Push": "Mute / unmute",
+          "Touch": "Reset to 0 dB"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/track-gain"
+        }
+      ]
     },
     {
       "UUID": "com.polyemesis.streamdeck.meter",

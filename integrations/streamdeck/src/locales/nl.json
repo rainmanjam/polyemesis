@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "De lijst met bestemmingen kon niet worden geladen.",
   "streamdeck.pi.notListed": "{id} (niet meer vermeld)",
   "streamdeck.pi.trackHint": "Een wijziging wordt live toegepast als dat kan. Anders herstart de bestemming en zien kijkers een herverbinding. Een Windows-server herstart altijd.",
-  "streamdeck.pi.destinationLabel": "Bestemming"
+  "streamdeck.pi.destinationLabel": "Bestemming",
+  "streamdeck.gain.matrix": "matrix: gebruik UI"
 }

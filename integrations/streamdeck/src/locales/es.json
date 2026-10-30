@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "No se pudo cargar la lista de destinos.",
   "streamdeck.pi.notListed": "{id} (ya no aparece)",
   "streamdeck.pi.trackHint": "Un cambio se aplica en directo cuando es posible. Si no, el destino se reinicia y los espectadores ven una reconexión. Un servidor Windows siempre reinicia.",
-  "streamdeck.pi.destinationLabel": "Destino"
+  "streamdeck.pi.destinationLabel": "Destino",
+  "streamdeck.gain.matrix": "matriz: usa la UI"
 }

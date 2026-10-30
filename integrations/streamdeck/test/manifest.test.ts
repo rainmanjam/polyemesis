@@ -105,9 +105,10 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination", "track-mute"],
+      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
+    expect(manifest.Actions.find((a) => a.UUID.endsWith(".track-gain"))!.Controllers).toEqual(["Encoder"]);
   });
 
   it("stops Stream Deck advancing key states and overriding titles, because the plugin paints them", () => {
@@ -120,6 +121,14 @@ describe("manifest", () => {
   it("keeps stop-all out of multi-actions, where its hold could not complete", () => {
     const stop = manifest.Actions.find((a) => a.UUID.endsWith(".stop-all"))!;
     expect(stop.SupportedInMultiActions).toBe(false);
+  });
+
+  it("tells the user what the gain dial's rotate, push and touch do", () => {
+    const dial = manifest.Actions.find((a) => a.UUID.endsWith(".track-gain")) as unknown as {
+      Encoder: { layout: string; TriggerDescription: Record<string, string> };
+    };
+    expect(dial.Encoder.layout).toBe("$B1");
+    expect(Object.keys(dial.Encoder.TriggerDescription).sort()).toEqual(["Push", "Rotate", "Touch"]);
   });
 
   it("ships track mute as a key that paints its own faces, now that the server mutes live (I4)", () => {

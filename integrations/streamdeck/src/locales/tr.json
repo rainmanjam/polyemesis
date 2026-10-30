@@ -69,5 +69,6 @@
   "streamdeck.pi.destinationsFailed": "Hedef listesi yüklenemedi.",
   "streamdeck.pi.notListed": "{id} (artık listede değil)",
   "streamdeck.pi.trackHint": "Değişiklik mümkünse canlı uygulanır. Değilse hedef yeniden başlar ve izleyiciler yeniden bağlanma görür. Windows sunucusu her zaman yeniden başlatır.",
-  "streamdeck.pi.destinationLabel": "Hedef"
+  "streamdeck.pi.destinationLabel": "Hedef",
+  "streamdeck.gain.matrix": "matris: UI kullanın"
 }

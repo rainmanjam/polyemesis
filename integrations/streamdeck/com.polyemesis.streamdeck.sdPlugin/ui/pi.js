@@ -18,7 +18,7 @@
   let destinationList = null;
 
   // The actions whose inspector picks a destination from a list and one of its tracks.
-  const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute"];
+  const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
   const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
 
   const $ = (id) => document.getElementById(id);
