@@ -33,6 +33,7 @@ import { AutomodConfig } from "@/components/AutomodConfig";
 import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
+import { OverlaySettings } from "@/components/OverlaySettings";
 import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -345,6 +346,7 @@ export function SettingsPage() {
           ingest: t("set.ingest"),
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
+          overlays: t("set.tabOverlays"),
           security: t("set.tabSecurity"),
           danger: t("danger.title"),
           debug: t("set.tabDebug"),
@@ -366,6 +368,10 @@ export function SettingsPage() {
           <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
+          {/* Chat overlays for OBS. Its own section rather than a card under
+              Platforms: it mints credentials, and it is where an operator goes
+              to rotate one. */}
+          <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
           {/* Last, set apart and in the down tone (A17): the section that only
               holds what cannot be undone. Debug, which used to sit here, is on
@@ -426,6 +432,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="platforms">
           <PlatformSettings />
+        </TabsContent>
+        <TabsContent value="overlays">
+          <OverlaySettings />
         </TabsContent>
         <TabsContent value="security">
           <SecuritySettings system={system} />
@@ -3193,6 +3202,14 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
   );
 }
 
+/** What each scope means, under the picker. */
+const SCOPE_HINT: Record<TokenScope, TranslationKey> = {
+  read: "set.tokenScopeReadHint",
+  admin: "set.tokenScopeAdminHint",
+  "mcp-read": "set.tokenScopeMcpReadHint",
+  "mcp-admin": "set.tokenScopeMcpAdminHint",
+};
+
 function ApiTokens() {
   const t = useT();
   // A ReadState, not an array. A failed GET /tokens used to be swallowed into
@@ -3287,6 +3304,9 @@ function ApiTokens() {
               <SelectContent>
                 <SelectItem value="read">{t("set.tokenScopeRead")}</SelectItem>
                 <SelectItem value="admin">{t("set.tokenScopeAdmin")}</SelectItem>
+                {/* MCP tokens work at /mcp and nowhere else; see McpAccessCard. */}
+                <SelectItem value="mcp-read">{t("set.tokenScopeMcpRead")}</SelectItem>
+                <SelectItem value="mcp-admin">{t("set.tokenScopeMcpAdmin")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -3295,7 +3315,7 @@ function ApiTokens() {
           </Button>
         </form>
         <span className="text-sm text-muted-foreground">
-          {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
+          {t(SCOPE_HINT[scope])}
         </span>
 
         {minted && (
@@ -3332,7 +3352,7 @@ function ApiTokens() {
                     {/* Admin is the one worth spotting in a list, so it is the
                         one that gets the loud variant. A read token is the
                         expected case and reads as ordinary. */}
-                    <Badge variant={tok.scope === "admin" ? "warn" : "outline"}>
+                    <Badge variant={tok.scope === "admin" || tok.scope === "mcp-admin" ? "warn" : "outline"}>
                       {tok.scope}
                     </Badge>
                   </div>

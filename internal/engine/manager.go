@@ -12,6 +12,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/recording"
@@ -184,7 +185,9 @@ type engineSettings struct {
 	nice          func(name string, args []string) (string, []string)
 	alertAttempts int
 	hooks         *hooks.Dispatcher
+	stream        *eventstream.Hub
 	lifecycle     LifecycleObserver
+	keyChecker    KeyChecker
 	// alertGate is not a setting anybody saves: NewManager builds it once.
 	// It rides here anyway because this is the one path every engine is
 	// configured through, and an engine that missed it would publish its own
@@ -234,7 +237,9 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetTranscriber(s.tw, s.modelsDir, s.nice)
 	eng.SetAlertRetry(s.alertAttempts)
 	eng.SetHooks(s.hooks)
+	eng.SetStream(s.stream)
 	eng.SetLifecycle(s.lifecycle)
+	eng.SetKeyChecker(s.keyChecker)
 	eng.SetAlertGate(s.alertGate)
 }
 
@@ -1396,11 +1401,23 @@ func (m *Manager) SetHooks(d *hooks.Dispatcher) {
 	m.saveEngineSetting(func(s *engineSettings) { s.hooks = d })
 }
 
+// SetStream attaches the real-time events hub to every engine, now and to any
+// created later, through the same one path as SetHooks.
+func (m *Manager) SetStream(h *eventstream.Hub) {
+	m.saveEngineSetting(func(s *engineSettings) { s.stream = h })
+}
+
 // SetLifecycle attaches the broadcast-lifecycle coordinator to every engine, now
 // and to any created later. There is no separate Sync half to remember any more:
 // both reach the engines through applyEngineSettings.
 func (m *Manager) SetLifecycle(o LifecycleObserver) {
 	m.saveEngineSetting(func(s *engineSettings) { s.lifecycle = o })
+}
+
+// SetKeyChecker attaches the stream-key cross-check to every engine, now and to
+// any created later, through the same one path as SetLifecycle.
+func (m *Manager) SetKeyChecker(k KeyChecker) {
+	m.saveEngineSetting(func(s *engineSettings) { s.keyChecker = k })
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to

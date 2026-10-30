@@ -116,6 +116,9 @@ type Watcher struct {
 	// names remembers what a destination was called, so a row that disappears
 	// between two snapshots can still be identified in the event that says so.
 	names map[int64]DestinationRef
+	// held is whether destination.held has been announced for the current
+	// hold, per destination.
+	held map[int64]bool
 }
 
 // NewWatcher creates a watcher for one source.
@@ -126,6 +129,7 @@ func NewWatcher(src SourceRef, cfg WatchConfig) *Watcher {
 		dest:    map[int64]*edgeState{},
 		lastOut: map[int64]int64{},
 		names:   map[int64]DestinationRef{},
+		held:    map[int64]bool{},
 	}
 }
 
@@ -231,9 +235,45 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 				// the lifecycle coordinator) reads as a crash.
 				reason = "stalled"
 			}
-			out = append(out, Event{
+			ev := Event{
 				Trigger: TriggerDestinationDown, At: now, Source: w.src,
 				Destination: &ref, Reason: reason, Error: d.Error,
+			}
+			// Only for a failure. A disabled destination is the operator's
+			// decision, and a cause left over from its last failed run would
+			// tell a script that the disable was a key rejection.
+			if r := d.Reason; r != nil && d.Enabled {
+				ev.Cause, ev.Held, ev.KeyChanged = r.Cause, r.Held, r.KeyChanged
+			}
+			out = append(out, ev)
+		}
+
+		// HELD: once per hold, and never ahead of the down. A destination this
+		// watcher still calls ON has its down dwell running, and a "held" now
+		// would reach a script that still believes it is delivering; so the
+		// hold waits, and follows the down in the sweep that emits it (st.on is
+		// already false there, so the order is down, then held). One that was
+		// never ON -- a bad key from the first attempt -- has no down coming,
+		// and is announced at once. A disabled destination is not held,
+		// whatever reason it is still carrying, by the rule the down applies to
+		// its cause fields just above.
+		//
+		// Moved here from the events stream's watcher, which derived it on its
+		// own when no webhook carried it. One derivation is what keeps the two
+		// surfaces from saying it twice.
+		isHeld := d.Enabled && d.Reason != nil && d.Reason.Held
+		switch {
+		case !isHeld:
+			w.held[d.ID] = false
+		case !w.held[d.ID] && !st.on:
+			w.held[d.ID] = true
+			r := d.Reason
+			out = append(out, Event{
+				Trigger: TriggerDestinationHeld, At: now, Source: w.src,
+				Destination: &ref,
+				Reason:      "held after repeated quick rejections; press Retry when it is fixed",
+				Error:       d.Error,
+				Cause:       r.Cause, Held: true, KeyChanged: r.KeyChanged,
 			})
 		}
 	}
@@ -259,6 +299,7 @@ func (w *Watcher) watchDestinations(s alerts.Snapshot, now time.Time) []Event {
 		delete(w.dest, id)
 		delete(w.lastOut, id)
 		delete(w.names, id)
+		delete(w.held, id)
 	}
 	return out
 }

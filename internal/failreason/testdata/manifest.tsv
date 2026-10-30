@@ -1,0 +1,19 @@
+fixture	exit	ran_ms	command
+rtmp-onpublish-403	251	516	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-nginx/live/badkey
+rtmp-auth-failed	255	2394	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-mediamtx/secured?user=publisher&pass=wrongpass
+srt-wrong-passphrase	251	2570	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f mpegts srt://pe-w1-mediamtx:8890?streamid=publish:secured:publisher:wrongpass
+icecast-401	8	292	ffmpeg -vn -c:a libmp3lame -b:a 128k -t 15 -content_type audio/mpeg -f mp3 icecast://source:wrongpass@pe-w1-nginx:8000/live.mp3
+rtmp-unknown-app	251	311	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-nginx/noapp/goodkey
+rtmp-unconfigured-path	251	422	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-mediamtx/notconfigured
+srt-unconfigured-path	251	290	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f mpegts srt://pe-w1-mediamtx:8890?streamid=publish:notconfigured
+icecast-503	8	286	ffmpeg -vn -c:a libmp3lame -b:a 128k -t 15 -content_type audio/mpeg -f mp3 icecast://source:goodpass@pe-w1-nginx:8001/live.mp3
+rtmp-already-publishing	255	500	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-nginx/live/goodheld
+rtmp-dns-unresolvable	251	279	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-no-such-ingest.invalid/live/goodkey
+rtmp-connection-refused	145	262	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmp://pe-w1-nginx:1936/live/goodkey
+rtmp-silent-ingest-timeout	146	5495	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -rw_timeout 5000000 -f flv rtmp://pe-w1-blackhole:1935/live/goodkey
+rtmps-to-plain-port	152	303	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -f flv rtmps://pe-w1-nginx:1935/live/goodkey
+rtmps-untrusted-cert	251	286	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 15 -tls_verify 1 -f flv rtmps://pe-w1-mediamtx:1936/open
+flv-mpeg2-refused	218	492	ffmpeg -c:v mpeg2video -c:a aac -t 15 -f flv rtmp://pe-w1-nginx/live/goodkey
+rtmp-flv1-dropped	224	441	ffmpeg -c:v flv1 -c:a aac -t 15 -f flv rtmp://pe-w1-mediamtx/open
+rtmp-throttled-upload	255	64429	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -b:v 900k -t 18 -rw_timeout 5000000 -f flv rtmp://pe-w1-nginx/live/goodslow
+rtmp-accepted	0	4016	ffmpeg -c:v libx264 -preset ultrafast -tune zerolatency -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -t 4 -f flv rtmp://pe-w1-nginx/live/goodkey

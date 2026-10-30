@@ -26,8 +26,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -39,6 +41,16 @@ import (
 var version = "dev"
 
 func main() {
+	// `polyemesis mcp` is a client, not a server: it relays MCP over stdio to a
+	// running server's /mcp endpoint (see mcp_proxy.go). Dispatched before
+	// anything else -- no config, no service handshake, no flag.Parse of the
+	// server's flags -- and nothing but JSON-RPC may reach stdout.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code := runMCPProxy(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
+		stop()
+		os.Exit(code)
+	}
 	// Windows may have been started by the Service Control Manager, which needs
 	// its own handshake before any work begins. Everywhere else, and on a
 	// Windows console, runService reports "not mine" and we run interactively.
@@ -388,6 +400,23 @@ func run(h *hooks) error {
 	go hookd.Run(ctx)
 	eng.SetHooks(hookd)
 
+	// The real-time events API (GET /api/v1/events). One hub for the whole
+	// process, like the webhook dispatcher and for the same reason: an event id
+	// and a replay ring belong to the install, not to one programme. Engines
+	// publish their edges, alerts and recorder/failover/level changes into it;
+	// the chat family arrives from the bus, where the chat hub already puts it.
+	streamHub := eventstream.NewHub()
+	go eventstream.BridgeBus(ctx, bus, streamHub)
+	eng.SetStream(streamHub)
+	// The chat overlay's display gate: holds each chat message until automod
+	// has judged it, then publishes the display projection (chat.display) into
+	// the same hub. Fed directly by the chat hub, not through the bus, because
+	// the bus drops for a slow subscriber and a dropped retraction would leave
+	// a removed message on stream. See internal/overlay.
+	overlayGate := overlay.New(streamHub)
+	hub.SetDisplay(overlayGate)
+	go overlayGate.Run(ctx)
+
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
 		DiagLevel: diagSwitch,
@@ -396,6 +425,8 @@ func run(h *hooks) error {
 		Chat:          hub,
 		AutomodBudget: automodBudget,
 		Hooks:         hookd,
+		Stream:        streamHub,
+		OverlayGate:   overlayGate,
 		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
@@ -424,6 +455,9 @@ func run(h *hooks) error {
 	// reconciles, and every broadcast on the box sits in "testing" for ever.
 	eng.SetLifecycle(srv.Lifecycle())
 	go srv.LifecycleLoop(ctx)
+	// The stream-key cross-check behind "YouTube's key changed — click to
+	// update". Read-only against the platform; see internal/api/keycheck.go.
+	eng.SetKeyChecker(srv.KeyChecker())
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line
@@ -431,6 +465,8 @@ func run(h *hooks) error {
 	if n := srv.StartChat(ctx); n > 0 {
 		log.Info("chat connected", "platforms", n)
 	}
+	// A no-op except in an e2echat test build (e2echat_on.go).
+	startE2EChat(ctx, hub, log)
 
 	httpServer := &http.Server{
 		Addr:      cfg.Addr,

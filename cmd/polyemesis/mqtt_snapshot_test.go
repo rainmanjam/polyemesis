@@ -7,6 +7,10 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/relay"
+	"github.com/rainmanjam/polyemesis/internal/stats"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // fakeMQTTEngine is an mqttEngine whose destination statuses the test chooses.
@@ -32,12 +36,24 @@ type fakeMQTTEngine struct {
 	// or a test fixture that produces no destinations at all -- cannot pass by
 	// accident.
 	scrubbed int
+
+	// live is what IngestLive answers, and mon what Monitor returns: the
+	// bitrate-based "is anything arriving" every other surface reads.
+	live bool
+	mon  *stats.Monitor
 }
 
 func (f *fakeMQTTEngine) SourceID() int64       { return f.id }
 func (f *fakeMQTTEngine) SourceName() string    { return f.name }
 func (f *fakeMQTTEngine) Settings() db.Settings { return db.Settings{} }
 func (f *fakeMQTTEngine) Status() engine.Status { return f.status }
+func (f *fakeMQTTEngine) IngestLive() bool      { return f.live }
+func (f *fakeMQTTEngine) Monitor() *stats.Monitor {
+	if f.mon == nil {
+		return stats.NewMonitor(nil)
+	}
+	return f.mon
+}
 func (f *fakeMQTTEngine) ScrubDestinationText(id int64, text string) string {
 	f.scrubbed++
 	if text == "" {
@@ -168,5 +184,80 @@ func TestSnapshotCarriesTheOrdinaryFields(t *testing.T) {
 	if d.Error != "" {
 		t.Errorf("DestState.Error = %q for a destination with no error; a bare mask on a "+
 			"healthy destination reads as a fault", d.Error)
+	}
+}
+
+// TestTheRetainedDestTopicCarriesTheCauseScrubbed is the MQTT outlet of #20.
+// The cause code and the held flag reach the retained topic, and the FFmpeg
+// line behind them goes through the same sink scrub as Error -- it is the same
+// stderr, and the line that explains a refused key is the line that prints the
+// key. The supervisor scrubbed it already; this pins that the sink does not
+// rely on that.
+func TestTheRetainedDestTopicCarriesTheCauseScrubbed(t *testing.T) {
+	const streamKey = "SENTINEL-mqtt-cause-51ab0e"
+	fake := &fakeMQTTEngine{
+		id: 7, name: "Main programme",
+		dests: map[int64]string{42: streamKey},
+		status: engine.Status{
+			Destinations: []engine.DestStatus{{
+				ID: 42, Name: "twitch", Kind: db.DestRTMP, Platform: db.PlatformTwitch, Enabled: true,
+				Reason: &failreason.Reason{
+					Cause: failreason.KeyRejected, Held: true,
+					Line: "Error opening output rtmp://live.example/app/" + streamKey + ": I/O error",
+				},
+			}},
+		},
+	}
+	r := &mqttRunner{version: "test", engines: func() []mqttEngine { return []mqttEngine{fake} }}
+	snap := r.snapshot()
+	if len(snap.Sources) != 1 || len(snap.Sources[0].Dests) != 1 {
+		t.Fatalf("snapshot = %#v, want one destination", snap.Sources)
+	}
+	d := snap.Sources[0].Dests[0]
+	if d.Cause != "key_rejected" || !d.Held {
+		t.Errorf("cause=%q held=%v, want key_rejected and held", d.Cause, d.Held)
+	}
+	if strings.Contains(d.CauseDetail, streamKey) || !strings.Contains(d.CauseDetail, "I/O error") {
+		t.Errorf("causeDetail = %q: want the diagnostic kept and the key gone", d.CauseDetail)
+	}
+}
+
+// LIVE IS WHETHER ANYTHING IS ARRIVING, as its own comment always said, and
+// was not. It read "the relay has ever received a byte AND the ingest process
+// is running", which got both kinds of push ingest wrong:
+//
+//   - an SRT source has no ingest process at all (the shared listener feeds its
+//     hub directly), so it read live=false while its encoder was pushing;
+//   - RxBytes is a running total, so an RTMP source whose child waits on the
+//     listener between shows read live=true long after the show ended.
+//
+// It is now Engine.IngestLive, the bitrate-based answer the dashboard, the
+// webhooks and the alert watcher already use.
+func TestMQTTLiveIsWhetherTheStreamIsArriving(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		f    *fakeMQTTEngine
+		want bool
+	}{
+		{"srt source receiving: no ingest process", &fakeMQTTEngine{
+			id: 1, name: "srt", live: true,
+			status: engine.Status{Relay: relay.Stats{RxBytes: 1 << 20}},
+		}, true},
+		{"rtmp source after the show: child waiting, bytes from earlier", &fakeMQTTEngine{
+			id: 2, name: "rtmp", live: false,
+			status: engine.Status{
+				Ingest: &supervisor.Status{State: supervisor.StateRunning},
+				Relay:  relay.Stats{RxBytes: 1 << 20},
+			},
+		}, false},
+	} {
+		r := &mqttRunner{version: "test", engines: func() []mqttEngine { return []mqttEngine{tc.f} }}
+		snap := r.snapshot()
+		if got := snap.Sources[0].State.Live; got != tc.want {
+			t.Errorf("%s: Live = %v, want %v", tc.name, got, tc.want)
+		}
+		if tc.want && snap.Host.SourcesLive != 1 {
+			t.Errorf("%s: Host.SourcesLive = %d, want 1", tc.name, snap.Host.SourcesLive)
+		}
 	}
 }

@@ -1,0 +1,5 @@
+[tcp @ 0xffff9a1b09b0] Failed to resolve hostname pe-w1-no-such-ingest.invalid: Name does not resolve
+[rtmp @ 0xffff9a1b0910] Cannot open connection tcp://pe-w1-no-such-ingest.invalid:1935?tcp_nodelay=0
+[out#0/flv @ 0xffff9d658e60] Error opening output rtmp://pe-w1-no-such-ingest.invalid/live/goodkey: I/O error
+Error opening output file rtmp://pe-w1-no-such-ingest.invalid/live/goodkey.
+Error opening output files: I/O error

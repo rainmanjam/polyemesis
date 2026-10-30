@@ -856,6 +856,7 @@ function BulkDestinationControl({
         live={destinations}
         youtubeAtRisk={youtube}
         onStart={(id) => api.startDestination(id).then(() => undefined)}
+        onRetry={(id) => api.restartDestination(id).then(() => undefined)}
         onFinished={onFinished}
       />
 

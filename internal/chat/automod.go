@@ -132,16 +132,31 @@ func (h *Hub) checkAutomod(m Message) {
 	s := h.automod
 	h.mu.Unlock()
 	if s == nil {
+		// No automod: nothing will judge it, so nothing need be waited for.
+		h.offerDisplay(m, DisplayClear)
 		return
 	}
 
 	v := s.mod.CheckFast(m.Platform, m.Author.ID, m.Text)
+	askModel := s.mod.ModelEnabled() && m.Text != ""
+
+	// The overlay is told BEFORE anything is queued, so neither an action the
+	// fast verdict permits nor the model's answer can reach the sink ahead of
+	// the message it is about.
+	switch {
+	case removes(v):
+		h.offerDisplay(m, DisplayBlocked)
+	case askModel:
+		h.offerDisplay(m, DisplayPending)
+	default:
+		h.offerDisplay(m, DisplayClear)
+	}
 	h.recordAutomod(s, m, v)
 
 	// The model runs off the read loop, on the worker, so a slow endpoint
 	// cannot stall chat. Queued through the same bounded channel as an action,
 	// so a raid cannot spawn a goroutine per message either.
-	if s.mod.ModelEnabled() && m.Text != "" {
+	if askModel {
 		h.enqueueAutomod(s, automodJob{
 			gen: s.gen, platform: m.Platform, account: m.Account,
 			msgID: m.ID, authorID: m.Author.ID,
@@ -230,7 +245,18 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		// moderation is degraded.
 		h.log.Warn("automod model check failed; the message passes",
 			"platform", job.platform, "err", err)
+		// It passes on the overlay too: the console is showing it, and an
+		// overlay that went silent whenever the model endpoint did would be a
+		// second, invisible outage.
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 		return
+	}
+	// Judged before the actions are queued, for the ordering reason in
+	// checkAutomod.
+	if removes(v) {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
+	} else {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
 	}
 	for _, f := range v.Act {
 		h.enqueueAutomod(s, automodJob{
@@ -268,6 +294,9 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 	// generation also abandons an action already in flight.
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	// Every action below is announced as automod's, not an operator's: the
+	// same Delete/Hide/Ban path a human takes, told who is taking it.
+	ctx = WithActor(ctx, ActorAutomod)
 
 	// PlatformReason, NEVER finding.Reason.
 	//
@@ -286,7 +315,7 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 		// Already recorded by the caller. Nothing to send.
 		return
 	case automod.ActionHideLocal:
-		err = h.HideLocally(job.platform, job.account, job.msgID)
+		err = h.hideLocally(ctx, job.platform, job.account, job.msgID)
 	case automod.ActionHide:
 		err = h.Hide(ctx, job.platform, job.account, job.msgID, true)
 	case automod.ActionDelete:

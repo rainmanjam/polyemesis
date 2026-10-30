@@ -77,6 +77,17 @@ const (
 	// reload its scrollback to be correct again, which is what the REST history
 	// endpoint is for.
 	TypeChatRetract Type = "chatRetract"
+	// TypeChatModeration says a moderation action was taken -- a delete, a
+	// hide, a ban, a timeout, an unban -- and by whom: an operator or automod.
+	//
+	// SEPARATE FROM TypeChatRetract, because they are different facts. A
+	// retraction is what the pane must remove, and it also arrives when a
+	// platform deletes something on its own; this is the action itself, which
+	// is what an audit trail or a moderation dashboard is written against, and
+	// an unban retracts nothing at all. It names the viewer the action was
+	// taken against, so it is chat content in the sense the read scope is
+	// refused.
+	TypeChatModeration Type = "chatModeration"
 )
 
 // AllTypes is every Type declared above, in declaration order.
@@ -95,7 +106,7 @@ func AllTypes() []Type {
 	return []Type{
 		TypeStatus, TypeLevels, TypeLog, TypeStats, TypeSource,
 		TypeRecordings, TypeLoudness, TypeClips, TypeCaption,
-		TypeChat, TypeChatState, TypeChatRetract,
+		TypeChat, TypeChatState, TypeChatRetract, TypeChatModeration,
 	}
 }
 

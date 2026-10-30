@@ -1,0 +1,4 @@
+[http @ 0xffff90d20d90] HTTP error 401 Unauthorized
+[out#0/mp3 @ 0xffff94715e60] Error opening output icecast://source:wrongpass@pe-w1-nginx:8000/live.mp3: Server returned 401 Unauthorized (authorization failed)
+Error opening output file icecast://source:wrongpass@pe-w1-nginx:8000/live.mp3.
+Error opening output files: Server returned 401 Unauthorized (authorization failed)

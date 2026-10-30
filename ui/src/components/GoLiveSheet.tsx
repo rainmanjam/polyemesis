@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -41,6 +42,7 @@ export function GoLiveSheet({
   live,
   youtubeAtRisk,
   onStart,
+  onRetry,
   onFinished,
   paceMs = 2000,
 }: Readonly<{
@@ -52,6 +54,10 @@ export function GoLiveSheet({
   live: readonly DestStatus[];
   youtubeAtRisk: number;
   onStart: (id: DestinationId) => Promise<void>;
+  /** Revives a destination whose PROCESS failed -- held after quick
+   *  rejections, or out of restarts. The card's Retry, the same restart. A
+   *  start would be a no-op on a destination that is already enabled. */
+  onRetry: (id: DestinationId) => Promise<void>;
   onFinished: () => void;
   /** Gap between starts. The server paces its own bulk start at two seconds. */
   paceMs?: number;
@@ -100,6 +106,36 @@ export function GoLiveSheet({
   const progress = scoped.map((r) => ({ row: r, p: progressOf(r) }));
   const count = (p: Progress) => progress.filter((x) => x.p === p).length;
   const readyNow = planStarts(scoped).filter((r) => !liveOf(r.id as unknown as number)?.enabled);
+
+  // A3: one click, on the row that failed, through the door that does
+  // something. A refused START never made a process, so it is started again;
+  // a failed PROCESS is restarted, which is what lifts a #20 hold.
+  const [retrying, setRetrying] = useState<Set<number>>(new Set());
+  const retry = async (id: number) => {
+    setRetrying((prev) => new Set(prev).add(id));
+    const refusedStart = errors.has(id);
+    setErrors((prev) => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    try {
+      if (refusedStart) {
+        setAttempted((prev) => new Set(prev).add(id));
+        await onStart(id as unknown as DestinationId);
+      } else {
+        await onRetry(id as unknown as DestinationId);
+      }
+    } catch (e) {
+      setErrors((prev) => new Map(prev).set(id, e instanceof Error ? e.message : String(e)));
+    } finally {
+      setRetrying((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
 
   const go = async () => {
     setRunning(true);
@@ -195,6 +231,31 @@ export function GoLiveSheet({
                     step={t("foundation.status.step.destination", { platform: row.platform })}
                     asOf={null}
                   />
+                )}
+                {/* The classified cause (#20) of a process that failed after
+                    it started, which the start request itself never sees. */}
+                {p === "failed" &&
+                  !errors.has(row.id as unknown as number) &&
+                  liveOf(row.id as unknown as number)?.reason && (
+                    <StatusReason
+                      className="text-xs"
+                      reason={t(`reason.cause.${liveOf(row.id as unknown as number)!.reason!.cause}`)}
+                      step={t("foundation.status.step.destination", { platform: row.platform })}
+                      asOf={liveOf(row.id as unknown as number)!.reason!.at}
+                    />
+                  )}
+                {p === "failed" && (
+                  <span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={running || retrying.has(row.id as unknown as number)}
+                      aria-label={t("reason.retryNamed", { name: row.name })}
+                      onClick={() => void retry(row.id as unknown as number)}
+                    >
+                      <RefreshCw /> {t("reason.retry")}
+                    </Button>
+                  </span>
                 )}
               </span>
             </div>

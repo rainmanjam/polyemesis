@@ -54,7 +54,7 @@ import (
 // isReadScopedToken reports whether this request's principal is a bearer token
 // that is not admin -- the one principal any of this applies to.
 //
-// The same predicate as readScopeCannotSeePublishTokens, under the name that
+// What readScopeCannotSeePublishTokens used to be exactly, under the name that
 // says what it TESTS rather than what its first caller did with the answer. It
 // is used where the consequence is not about publish tokens at all: the
 // hardware re-detect gate on GET /encoders, for one, which is about spawning
@@ -63,8 +63,15 @@ import (
 // Anything that is not admin counts, including a scope string this build does
 // not recognise. A value from a newer schema or a hand-edited row must narrow
 // what a credential can do, never widen it.
+//
+// It no longer delegates to readScopeCannotSeePublishTokens, because that one
+// now also answers true for a request an MCP tool dispatched (#12), and the
+// callers here ask about the TOKEN -- whether to spawn an encoder probe, which
+// events to send -- not about what may be serialised. An admin token behind
+// MCP is still an admin token to them.
 func isReadScopedToken(r *http.Request) bool {
-	return readScopeCannotSeePublishTokens(r)
+	p, ok := principalFrom(r.Context())
+	return ok && p.token != nil && p.token.Scope != db.ScopeAdmin
 }
 
 // maskURL masks the credential parts of a URL, leaving an empty string empty.

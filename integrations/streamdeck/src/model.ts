@@ -11,6 +11,30 @@ export interface ProcessStatus {
   nextRetryIn?: number;
 }
 
+/** The classified causes (internal/failreason). The same codes reach MQTT,
+ *  webhooks and alerts. */
+export type FailureCause =
+  | "key_rejected"
+  | "platform_not_ready"
+  | "dns"
+  | "connection_refused"
+  | "timeout"
+  | "tls"
+  | "codec_rejected"
+  | "upload_too_slow"
+  | "unknown";
+
+/** DestStatus.reason: only the fields a key face reads. */
+export interface FailureReason {
+  cause: FailureCause;
+  /** The FFmpeg line, scrubbed by the server. Shown only for "unknown". */
+  line?: string;
+  /** Retrying has stopped after repeated quick rejections. */
+  held?: boolean;
+  /** The connected account reports a different stream key. */
+  keyChanged?: boolean;
+}
+
 export interface DestStatus {
   id: number;
   name: string;
@@ -27,6 +51,8 @@ export interface DestStatus {
   stopWarning?: string;
   /** A reconcile is in flight; the process may be briefly absent. */
   transitioning?: boolean;
+  /** Why it is failing, or delivering too slowly. Absent while nothing is wrong. */
+  reason?: FailureReason | null;
 }
 
 export interface HoldStatus {

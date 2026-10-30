@@ -1,0 +1,6 @@
+[flv @ 0xffff9eb831a0] Video codec mpeg2video not compatible with flv
+[out#0/flv @ 0xffff9de7be60] Could not write header (incorrect codec parameters ?): Function not implemented
+[vf#0:0 @ 0xffffa132e550] Error sending frames to consumers: Function not implemented
+[vf#0:0 @ 0xffffa132e550] Task finished with error code: -38 (Function not implemented)
+[vf#0:0 @ 0xffffa132e550] Terminating thread with return code -38 (Function not implemented)
+[out#0/flv @ 0xffff9de7be60] Nothing was written into output file, because at least one of its streams received no packets.

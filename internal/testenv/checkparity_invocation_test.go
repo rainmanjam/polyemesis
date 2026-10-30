@@ -6,7 +6,7 @@ package testenv
 // scripts/check_parity_test.go compares `make check` against ci.yml by matching
 // command names: its rule for the Go suite is the regular expression
 // `\bgo test\b`. The Makefile said `go test ./...`; CI says
-// `POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...`. Both contain the
+// `POLYEMESIS_LEDGER=strict go test -race -timeout 25m ./...`. Both contain the
 // substring, so the guard was green, and its own failure text told anybody who
 // tripped it that "CI runs it with -race under POLYEMESIS_LEDGER=strict" -- a
 // true sentence about a property the guard did not check.
@@ -152,7 +152,7 @@ func invocationFindGoTest(cmds []string) string {
 }
 
 // invocationParts splits a command into its leading NAME=VALUE assignments and
-// its flags. Flag VALUES are kept attached (`-timeout 20m` is one token), so a
+// its flags. Flag VALUES are kept attached (`-timeout 25m` is one token), so a
 // local run at a longer deadline than CI's is a difference this can see.
 func invocationParts(cmd string) (env, flags []string) {
 	fields := strings.Fields(cmd)
@@ -165,7 +165,7 @@ func invocationParts(cmd string) (env, flags []string) {
 		if !strings.HasPrefix(f, "-") {
 			continue
 		}
-		// `-timeout 20m` -- a flag whose value is the next field.
+		// `-timeout 25m` -- a flag whose value is the next field.
 		if !strings.Contains(f, "=") && i+1 < len(fields) && !strings.HasPrefix(fields[i+1], "-") && !strings.HasPrefix(fields[i+1], "./") {
 			f += " " + fields[i+1]
 			i++

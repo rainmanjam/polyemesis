@@ -103,7 +103,7 @@ func managerServer(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *b
 		Engine: eng, Events: bus, Version: "test",
 	})
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 
 	if s.probeBin != "" {
 		t.Fatalf("the fixture set probeBin to %q; this test exists to exercise the path "+
@@ -309,7 +309,7 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 		Engine: eng, Events: bus, Version: "test",
 	})
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 
 	auth := login(t, h)
 	var buf bytes.Buffer

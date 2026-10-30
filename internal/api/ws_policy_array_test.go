@@ -15,7 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
-// TestRedactJSONTreeDoesNotLeakAnArgvHeader is the #162 half of redactJSONTree.
+// TestRedactJSONTreeDoesNotLeakAnArgvHeader is the #162 half of alerts.RedactJSONTree (formerly redactJSONTree here).
 //
 // An array of strings in a payload is an argv, and an argv is where a
 // credential arrives SPLIT. alerts.Redact's grammar is `label SEP value`, so

@@ -1,4 +1,4 @@
-import type { DestStatus, FailoverStatus, HoldStatus, SourceKind } from "./model.js";
+import type { DestStatus, FailoverStatus, FailureCause, HoldStatus, SourceKind } from "./model.js";
 import type { StreamDeckKey } from "./keys.js";
 
 // THE FACE NEVER LIES. Every key shows what the server last said, and when the
@@ -32,6 +32,9 @@ export type KeyTone =
 export interface KeyFace {
   tone: KeyTone;
   label: StreamDeckKey;
+  /** The server's classified cause, as a catalogue key. A translation of the
+   *  server's code, not an inference made here. */
+  reason?: StreamDeckKey;
   /** Server words, passed through unchanged. Never invented here. */
   detail?: string;
   /** A second, independent problem worth a badge, e.g. a dead backup. */
@@ -67,21 +70,41 @@ export function destinationFace(
     return withWarning({ tone: "warn", label: "streamdeck.state.starting" }, warn);
   }
 
+  // The server's classified cause (#20). A key known to this plugin replaces
+  // the raw FFmpeg tail, which on 72 px is a clipped exit status; an unknown
+  // cause, or a code newer than this plugin, keeps the server's own words.
+  const why = reasonFor(dest);
+
   switch (proc.state) {
     case "running":
       if (dest.stalled) {
         return withWarning({ tone: "warn", label: "streamdeck.state.stalled" }, warn);
       }
+      // A slow upload does not exit, so it is the one cause shown on a running
+      // destination. Live, in the warn colour: it IS on air, badly.
+      if (why.reason === "streamdeck.reason.upload_too_slow") {
+        return withWarning({ tone: "warn", label: "streamdeck.state.live", reason: why.reason }, warn);
+      }
       return withWarning({ tone: "live", label: "streamdeck.state.live" }, warn);
     case "starting":
       return withWarning({ tone: "warn", label: "streamdeck.state.starting" }, warn);
     case "reconnecting":
-      return withWarning({ tone: "warn", label: "streamdeck.state.reconnecting", detail: proc.lastError }, warn);
-    case "failed":
-      // The reason is the process's own last error. It is shown verbatim
-      // because the server has no structured "key rejected" code to map to.
       return withWarning(
-        { tone: "error", label: "streamdeck.state.failed", detail: proc.lastError || dest.error },
+        { tone: "warn", label: "streamdeck.state.reconnecting", ...(why.known ? why : { detail: why.detail ?? proc.lastError }) },
+        warn,
+      );
+    case "failed":
+      // Held is its own tile: the server has stopped retrying, and only a
+      // Retry from the console will change what this key shows.
+      if (dest.reason?.held) {
+        return withWarning({ tone: "held", label: "streamdeck.state.held", ...withoutKnown(why) }, warn);
+      }
+      return withWarning(
+        {
+          tone: "error",
+          label: "streamdeck.state.failed",
+          ...(why.known ? withoutKnown(why) : { detail: why.detail ?? (proc.lastError || dest.error) }),
+        },
         warn,
       );
     case "stopped":
@@ -91,6 +114,46 @@ export function destinationFace(
       }
       return withWarning({ tone: "idle", label: "streamdeck.state.off" }, warn);
   }
+}
+
+const REASON_LABEL: Record<FailureCause, StreamDeckKey> = {
+  key_rejected: "streamdeck.reason.key_rejected",
+  platform_not_ready: "streamdeck.reason.platform_not_ready",
+  dns: "streamdeck.reason.dns",
+  connection_refused: "streamdeck.reason.connection_refused",
+  timeout: "streamdeck.reason.timeout",
+  tls: "streamdeck.reason.tls",
+  codec_rejected: "streamdeck.reason.codec_rejected",
+  upload_too_slow: "streamdeck.reason.upload_too_slow",
+  unknown: "streamdeck.reason.unknown",
+};
+
+interface Why {
+  /** The cause is one this plugin has a label for. */
+  known: boolean;
+  reason?: StreamDeckKey;
+  detail?: string;
+}
+
+/** The server's reason as a face fragment. A rotated key outranks the cause it
+ *  explains, because it names the fix. "unknown" keeps the server's line. */
+function reasonFor(dest: DestStatus): Why {
+  const r = dest.reason;
+  if (!r) return { known: false };
+  const label = Object.hasOwn(REASON_LABEL, r.cause) ? REASON_LABEL[r.cause] : undefined;
+  if (!label) return { known: false, detail: r.line };
+  return {
+    known: true,
+    reason: r.keyChanged ? "streamdeck.reason.keyChanged" : label,
+    detail: r.cause === "unknown" ? r.line : undefined,
+  };
+}
+
+function withoutKnown(why: Why): Pick<KeyFace, "reason" | "detail"> {
+  const out: Pick<KeyFace, "reason" | "detail"> = {};
+  if (why.reason) out.reason = why.reason;
+  if (why.detail) out.detail = why.detail;
+  return out;
 }
 
 /** The one warning a destination key can carry, in priority order. */

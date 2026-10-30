@@ -34,10 +34,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -506,6 +508,16 @@ type Server struct {
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
 
+	// stream is the real-time events hub behind GET /events. Optional: nil
+	// answers 503 there, and every publish through it is nil-safe.
+	stream *eventstream.Hub
+
+	// overlayGate is the chat overlay's display gate, read for its counters
+	// only. Optional. overlayKicks ends open overlay streams when a key is
+	// rotated or revoked (overlays.go).
+	overlayGate  *overlay.Gate
+	overlayKicks overlayKicker
+
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
 	// how several tests in this package build one.
@@ -685,6 +697,11 @@ type Options struct {
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
 
+	// Stream is the real-time events hub (GET /events). Optional.
+	Stream *eventstream.Hub
+	// OverlayGate is the chat overlay's display gate. Optional.
+	OverlayGate *overlay.Gate
+
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
 	// refused, never opened. See auth.PrepareSetupCode.
@@ -718,6 +735,8 @@ func New(o Options) *Server {
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
 		hooks:         o.Hooks,
+		stream:        o.Stream,
+		overlayGate:   o.OverlayGate,
 		version:       o.Version,
 		diag:          o.Diag,
 		diagLevel:     o.DiagLevel,
@@ -771,6 +790,7 @@ func New(o Options) *Server {
 	if o.DB != nil {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
+		s.lifecycle.announce = s.announceBroadcastPhase
 	}
 	return s
 }
@@ -806,6 +826,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// Applies to the embedded UI and the HLS preview as well as the API, which
 	// is the point: the CSP only protects the pages the browser renders.
 	r.Use(securityHeaders(s.cfg.ResolvedTLSMode(), s.cfg.TLS.HSTS))
+	// After the logger and the headers, so a switched-off /mcp is logged and
+	// headed exactly as an unknown path is; before routing, so it covers every
+	// method. See mcp_access.go. notFound is filled in at the bottom of this
+	// function, where the router's own not-found handler is chosen.
+	var notFound http.Handler
+	r.Use(s.mcpGate(&notFound))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// --- unauthenticated ---
@@ -891,6 +917,20 @@ func (s *Server) registerRoutes(r chi.Router) {
 				r.Get("/auth/tokens", s.handleListAPITokens)
 				r.Post("/auth/tokens", s.handleCreateAPIToken)
 				r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+				// Chat overlays. Session-only for the reason tokens are: each
+				// overlay carries a credential, and minting, reading back or
+				// rotating one is the operator's business, not automation's.
+				r.Get("/overlays", s.handleListOverlays)
+				r.Post("/overlays", s.handleCreateOverlay)
+				r.Put("/overlays/{id}", s.handleUpdateOverlay)
+				r.Delete("/overlays/{id}", s.handleDeleteOverlay)
+				r.Post("/overlays/{id}/key", s.handleRotateOverlayKey)
+				r.Delete("/overlays/{id}/key", s.handleRevokeOverlayKey)
+				// AI assistant access (MCP). Session-only so that no API
+				// token -- an admin one included -- can switch MCP on for
+				// itself. See mcp_access.go.
+				r.Get("/mcp/access", s.handleGetMCPAccess)
+				r.Put("/mcp/access", s.handlePutMCPAccess)
 
 				// The password. handleChangePassword already demands the
 				// CURRENT password, so a token alone could never have changed
@@ -1288,6 +1328,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
 			r.Get("/timeline", s.handleListTimeline)
+			// The real-time events API (SSE). In this group, not beside /ws,
+			// because it needs nothing /ws is carved out for: EventSource sends
+			// the cookie on an ordinary GET, which requireCSRF lets through,
+			// and curl sends a bearer token. A read token is welcome; what it is
+			// sent is decided per event by the catalogue (internal/eventstream).
+			r.Get("/events", s.handleEvents)
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)
@@ -1406,6 +1452,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// compares it before doing anything else. See chat_wiring.go.
 		r.HandleFunc("/chat/kick/{secret}", s.handleKickChatWebhook)
 
+		// The chat overlay's two reads. Outside every auth group because the
+		// overlay key is not an API credential and requireAuth must never
+		// learn to accept one; each handler resolves the key itself and
+		// answers 401 for anything else. See overlays.go.
+		r.Get("/overlay/config", s.handleOverlayConfig)
+		r.Get("/overlay/events", s.handleOverlayEvents)
+
 		// The WebSocket does its own auth; the browser cannot set headers on
 		// the upgrade request, so CSRF middleware would reject it.
 		r.Group(func(r chi.Router) {
@@ -1485,6 +1538,22 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// "is this stream public" is a setting an operator flips at runtime and a
 	// route table is built once at startup. Both handlers refuse unless playout
 	// is explicitly enabled; see the access rules at the top of playout.go.
+	// The MCP server (#12). Outside /api/v1 because the path is what an MCP
+	// client is configured with, and "/mcp" is what every guide tells people
+	// to type. A bearer token only (requireToken), scope applied per tool by
+	// the REST routes the tools dispatch to -- see mcp.go. POST only: the
+	// transport is stateless, so there is no GET stream or DELETE to serve, and
+	// chi answers those with 405 as the spec allows.
+	//
+	// root is THIS router: a tool's request is served on the same middleware
+	// and routes as one from curl.
+	root := http.Handler(r)
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requireToken)
+		r.Post(MCPPath, s.mcpEndpoint(root).ServeHTTP)
+	})
+
 	r.Handle(PlayoutPrefix+"*", s.playoutHandler())
 	// The player page. It resolves to the same SPA bundle as the admin UI but
 	// through its own route, so the frame-blocking headers can be relaxed for
@@ -1492,9 +1561,22 @@ func (s *Server) registerRoutes(r chi.Router) {
 	watch := s.watchHandler()
 	r.Handle(WatchPath, watch)
 	r.Handle(WatchPath+"/*", watch)
+	// The chat overlay and its dock: the SPA, sessionless, GET only. Explicit
+	// patterns rather than a wildcard, so the access log records the pattern.
+	ovPage := s.overlayPageHandler()
+	r.Get(OverlayPath, ovPage)
+	r.Get(OverlayPath+"/dock", ovPage)
+	// The path-key forms, for an OBS that drops the URL fragment. The handler
+	// never reads {key}: the page does, from location.pathname, and sends it as
+	// OverlayKeyHeader like the fragment form. Registered as patterns so the
+	// access log records "/overlay/k/{key}" -- the key never reaches a log line
+	// on a request that matched.
+	r.Get(OverlayPath+OverlayKeyPath+"{key}", ovPage)
+	r.Get(OverlayPath+"/dock"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)
+		notFound = h
 	} else {
 		s.log.Error("embedded UI unavailable", "err", err)
 	}
@@ -1539,15 +1621,32 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			return
 		}
 		level := slog.LevelDebug
-		if ww.Status() >= 500 {
+		switch {
+		case ww.Status() >= 500:
 			level = slog.LevelError
-		} else if ww.Status() >= 400 {
+		case expectedMCPRefusal(r, ww.Status()):
+			// Debug, not WARN. See expectedMCPRefusal.
+		case ww.Status() >= 400:
 			level = slog.LevelWarn
 		}
 		s.log.Log(r.Context(), level, "http",
 			"method", r.Method, "path", loggedPath(r),
 			"status", ww.Status(), "dur", time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// expectedMCPRefusal reports whether a 4xx is the one an MCP client asks for
+// on every connect: GET /mcp, answered 405.
+//
+// The streamable HTTP transport lets a client open a GET stream for messages
+// the server starts, and the spec has a server that offers none answer 405.
+// This one is stateless and never offers one, and every client tries anyway,
+// so under the 4xx-is-WARN rule each assistant session wrote a warning about
+// nothing into the operator's journal. Exactly this method, path and status:
+// any other 405 is a client using the API wrongly, and any other answer on
+// /mcp (a 401, a 403) is still worth a WARN.
+func expectedMCPRefusal(r *http.Request, status int) bool {
+	return status == http.StatusMethodNotAllowed && r.Method == http.MethodGet && r.URL.Path == MCPPath
 }
 
 // loggedPath is the path a request log line may carry: the ROUTE PATTERN it
@@ -1567,11 +1666,12 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 func loggedPath(r *http.Request) string {
 	rc := chi.RouteContext(r.Context())
 	if rc == nil {
-		return r.URL.Path
+		return redactOverlayKeys(r.URL.Path)
 	}
 	p := rc.RoutePattern()
 	if p == "" || strings.HasSuffix(p, "*") {
-		return r.URL.Path
+		// The raw path, minus any overlay key somebody pasted into it.
+		return redactOverlayKeys(r.URL.Path)
 	}
 	return p
 }
@@ -1702,6 +1802,27 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 		tok, err := s.store.LookupAPIToken(raw)
 		if err != nil {
 			return nil, auth.ErrUnauthorized
+		}
+		// AN MCP TOKEN IS A CREDENTIAL FOR /mcp AND NOWHERE ELSE. On any other
+		// route it is exactly as good as no token -- the same 401 an unknown
+		// one gets -- so an assistant's token cannot be replayed against the
+		// REST API, the WebSocket or the events stream.
+		//
+		// The one exception is a request the MCP endpoint itself built to run
+		// a tool (mcpDispatch). It carries mcpCallKey in its context, which no
+		// client can set: context values do not cross the network. That
+		// request acts with the token's BASE tier, and this is the only place
+		// the base tier is applied -- every scope check downstream compares
+		// against db.ScopeAdmin and sees an ordinary read or admin token.
+		if db.IsMCPScope(tok.Scope) {
+			if _, dispatched := mcpCallFrom(r.Context()); dispatched {
+				base := *tok
+				base.Scope = db.BaseScope(tok.Scope)
+				return &principal{token: &base}, nil
+			}
+			if r.URL.Path != MCPPath {
+				return nil, auth.ErrUnauthorized
+			}
 		}
 		return &principal{token: tok}, nil
 	}

@@ -10,6 +10,160 @@ its first tagged release.
 
 ### Added
 
+- **`destination.held`: page on the stops that won't fix themselves.** When
+  polyemesis stops retrying a destination after repeated quick rejections, it
+  now raises a `destination.held` alert (`critical`, on the timeline) and sends
+  a `destination.held` webhook. Both fire once per hold, not on every check.
+  Both are subscribable in the alert-rule and webhook pickers. The events
+  stream's existing `destination.held` is now the same edge, so it is never
+  announced twice. Before this, a hold appeared only as `held` inside
+  `destination.down`, which is unchanged. A rule or hook whose event list is
+  empty means "everything", so it starts receiving these on upgrade. See
+  [docs/MONITORING.md](docs/MONITORING.md) and [docs/HOOKS.md](docs/HOOKS.md).
+- **Chat overlay URLs with the key in the path.** Some OBS browser sources drop
+  the part of a URL after `#`, where the overlay key is, and the overlay stays
+  empty. `/overlay/k/{key}` and `/overlay/dock/k/{key}` serve the same pages,
+  and Settings offers them under **Copy OBS URL (key in path)**. The `#` form
+  stays the default, because a reverse proxy logs paths. Polyemesis's own log
+  never records the key, and the pages send `Referrer-Policy: no-referrer`. See
+  [docs/OVERLAY.md](docs/OVERLAY.md#the-key-in-the-path).
+- **MCP server, off until you turn it on.** `POST /mcp` lets Claude Desktop,
+  Claude Code or any Model Context Protocol client read what is on air and, if
+  you allow it, act on it. Setup, with config examples, is in
+  [docs/MCP.md](docs/MCP.md).
+  - Opt-in in three layers. A switch under **Automation → AI assistants** is
+    off on new and upgraded installs, and while it is off every method on
+    `/mcp` answers the `404` an unknown endpoint gets. Under the switch are
+    three levels: Read, Content (chat and transcripts) and Control (every
+    write tool). The first enable turns on Read only. Only a signed-in
+    operator can change these; no API token can, an admin one included. Every
+    change is audited, and turning on Control is `critical`.
+  - Streamable HTTP, stateless, on the official Go SDK (v1.8.0; protocol
+    `2026-07-28` back to `2024-11-05`). `polyemesis mcp -url ...` relays stdio
+    to it for clients that only start local servers. The token comes from
+    `POLYEMESIS_TOKEN` or a file, never the command line.
+  - Authenticated with MCP tokens: the new `mcp-read` and `mcp-admin` scopes.
+    `/mcp` refuses every other API token, and an MCP token works nowhere but
+    `/mcp`. A browser session is refused. An `mcp-read` token reaches the Read
+    level: 9 tools for status, destinations and their failure causes, sources
+    and link stats, routing presets, levels, recordings, timeline and alerts,
+    and stop impact. An `mcp-admin` token reaches every level that is on,
+    adding chat and transcript search, the chat user card, and 11 write tools:
+    start, stop, retry, go live, stop all, mute and gain, apply a routing
+    preset, recording on/off, failover switch, create a clip, and schedule a
+    start or stop.
+  - Every tool is a call to the HTTP API with the caller's own token at its
+    base tier, so scopes, `?source=` and the API's own checks apply unchanged.
+  - Stop tools, go live, retry, routing presets, recording off and scheduled
+    stops do nothing without `confirm: true`, and answer with what they would
+    do: what a stop ends, whether a retry interrupts a live output or lifts a
+    hold, and which tracks a preset changes and whether it restarts the
+    destination. Write tools carry MCP destructive hints.
+  - No tool returns a credential, to any token. Requests made for MCP get the
+    read-safe views, and every answer is checked against every stored
+    credential.
+  - Chat and transcript text is fenced as untrusted viewer content. Arguments
+    are checked strictly, and none can choose the route a tool calls.
+  - Every write is a new `mcp.action` audit event, "Action via MCP (token
+    name)", naming the tool, target and outcome.
+  - Viewer analytics is not a tool yet; it comes with #4.
+- **Chat overlay and OBS dock.** One chat overlay for every connected platform,
+  as an OBS browser source (`/overlay`), and a denser dock (`/overlay/dock`).
+  Both are display-only. Set them up under **Settings → Chat overlays**.
+  - Each overlay has its own platform filter, so a scene sent to Twitch can
+    show only Twitch chat. The filter is applied on the server.
+  - Four style presets (classic, bubbles, bold outline, compact strip) with
+    font, size, colours, background opacity, fade time and line count, a live
+    preview, and **Copy OBS URL**.
+  - A message appears only after automod has judged it. With the model
+    checker on, a message waits up to 4 seconds for its verdict and is left
+    off the overlay if none arrives. Hidden, deleted and automod-blocked
+    messages never appear, and a message removed after it was shown leaves
+    the screen at once. Lines carry no user IDs, accounts or moderation data.
+  - Each overlay has a display-only key, in the URL fragment so it never
+    reaches server or proxy logs. The key reads that overlay's config and
+    display stream and nothing else. Rotating or revoking it in Settings ends
+    open overlays within seconds.
+  - New event types `chat.display` and `chat.undisplay` (topic `overlay`) on
+    `GET /api/v1/events`. See [docs/OVERLAY.md](docs/OVERLAY.md).
+- **Real-time events API.** `GET /api/v1/events` streams what is happening as
+  Server-Sent Events, in the same envelope as webhooks: destinations going up,
+  down, held, restarted or changing level (live or by restart), the ingest,
+  failover switches, a platform broadcast going live or ending, the recorder
+  starting and stopping, chat messages, retractions and moderation actions,
+  and operator alerts. A destination's events carry the classified `cause`,
+  `held`, `keyChanged` and the whole failure reason.
+  - Authenticated like the rest of the API: a bearer token or the session
+    cookie, never a token in the URL. A `read` token gets everything except
+    chat and the audit alerts that are not on the timeline.
+  - Every event is numbered. A client that reconnects with `Last-Event-ID` is
+    replayed what it missed, for up to 5 minutes, or told `stream.gap`.
+  - A client that falls 256 events behind is disconnected, not silently
+    skipped, and resumes from the replay. A heartbeat every 15 seconds keeps
+    proxies from cutting a quiet stream. Revoking a token, or changing the
+    password, ends an open stream.
+  - Webhook redaction applies to every event before it is sent or held for
+    replay.
+  - `?topics=` filters by family.
+  - curl, browser, Node and Python examples are in
+    [docs/EVENTS.md](docs/EVENTS.md). Polls, viewer samples and the failover
+    degraded reason are listed there as coming with #14, #4 and #6.
+- **A Grafana dashboard and Prometheus alert rules, shipped.**
+  `deploy/grafana/polyemesis.json` (Grafana 10 or later) has a **Programme**
+  picker and rows for overview, ingest, destinations, host and recording, plus
+  a placeholder row for viewers and playback quality. The destinations row
+  shows why each failing destination is failing, whether it is held, and
+  failures by cause. `deploy/prometheus/alerts.yml` adds destination down
+  (naming the cause), ingest down, recording disk low, and restart storms.
+  `deploy/monitoring/` runs Prometheus and Grafana with both pre-provisioned.
+  A CI test fails if the dashboard or the rules query a metric the server does
+  not export. [GRAFANA.md](docs/GRAFANA.md)
+- **Failure causes on the Prometheus scrape.** Three new families, each
+  labelled `id` and `name`:
+  - `polyemesis_destination_failure_reason{cause}`: 1 for the current cause;
+  - `polyemesis_destination_held`;
+  - `polyemesis_destination_failures_total{cause}`: failed runs by cause.
+
+  `cause` is always one of the nine published codes, never FFmpeg's text.
+  Every cause is emitted at 0, so `increase()` sees the first failure.
+  [MONITORING.md](docs/MONITORING.md#on-the-scrape)
+
+- **Why a destination is failing.** When a destination fails, polyemesis
+  reads the end of FFmpeg's stderr and the timing of the run, and names the
+  cause. The causes are `key_rejected`, `platform_not_ready`, `dns`,
+  `connection_refused`, `timeout`, `tls`, `codec_rejected`, `upload_too_slow`
+  and `unknown`. For `unknown`, the card shows FFmpeg's raw last line.
+  - The destination card shows the cause in place of the raw line.
+  - `GET /api/v1/status` carries it as the destination's `reason`.
+  - The `destination.down` alert text and its timeline row include it, and the
+    alert gains `cause`, `reason` and `detail` fields.
+  - Webhooks gain `cause`, `held` and `keyChanged` fields.
+  - The MQTT destination topic gains `cause`, `held` and `causeDetail`, plus a
+    `<name> failure` discovery sensor.
+  - The Stream Deck key shows the cause.
+
+  After 3 quick key or codec refusals in a row, a destination is **held**: it
+  stops retrying until somebody presses **Retry**. Network causes keep the
+  normal backoff. For a destination linked to a connected YouTube or Twitch
+  account, a refused key starts a read-only check of the account's current
+  keys. If the stored key is not among them, the card offers "YouTube's key
+  changed — click to update". The fixtures are real FFmpeg 8.1.3 stderr,
+  captured in Docker against local ingest servers.
+  [MONITORING.md](docs/MONITORING.md#why-a-destination-is-failing)
+
+- **A remedy beside every failure, and a way to its log.**
+  - A failed row in the Go live sheet has a **Retry** button. It starts a
+    refused start again, and it restarts a failed or held process.
+  - The destination card, Monitoring's process rows, the log summary and
+    any stat tile in its warning colour each say what to do. Each offers the
+    control that does it: edit the destination, the renditions page, the
+    sources page, or that process's log.
+  - Timeline rows about a destination or an ingest have a **Show log** link,
+    and `/monitoring?process=<name>` opens the FFmpeg log filtered to that
+    process.
+  - The timeline stores each row's subject in a new `subject` column, which
+    is added on upgrade. `GET /api/v1/timeline` rows gain `process`.
+
 - **A destination's per-track gain and mute apply to the running stream.** A
   level change used to be an argv change, so it replaced the destination's
   FFmpeg process and dropped that platform's connection. Each mixed track now
@@ -168,6 +322,45 @@ its first tagged release.
 
 ### Fixed
 
+- **Show log works on timeline rows about another programme.** Every
+  programme's ingest is named `ingest`, so these rows had no link. The link now
+  names the row's programme, and Monitoring switches to that programme before
+  it opens the log. `/monitoring?programme=<id>` does the same from anywhere.
+- **Connecting an MCP client no longer writes a warning to the log.** Every
+  client sends `GET /mcp` as it connects, and the stateless server answers it
+  with the `405` the spec calls for. That answer is now logged at debug. Every
+  other `405`, and any other refusal on `/mcp`, is still a warning.
+- **An SRT programme's healthy destinations no longer read as stalled after a
+  show.** An SRT source has no ingest process, because the shared SRT listener
+  feeds the programme directly, and the server took "no ingest process" to
+  mean "no ingest". So when the encoder disconnected, every running
+  destination was blamed for its own stopped output:
+  `polyemesis_destination_up` 0, `_stalled` 1 and a stall warning on its card,
+  and a `destination.down` with `reason: "stalled"` per destination on
+  webhooks and the events stream. A source that stops is now the ingest's
+  news for SRT as well as RTMP and pull. A destination that stops while its
+  source is still arriving is still reported as stalled.
+  - As a result, SRT sources now get the ingest events RTMP and pull sources
+    already had. These are the `ingest.lost` and `ingest.recovered` built-in
+    alerts, and the `ingest.published` and `ingest.disconnected` webhooks and
+    stream events. Like RTMP and pull, `ingest.lost` also fires once when
+    nothing has arrived 20 seconds after the server starts.
+
+- **An SRT programme's ingest metrics describe its listener.**
+  `polyemesis_ingest_up` was 0 and `polyemesis_ingest_state` was `stopped`
+  for every SRT programme, even while the stream was arriving, so the
+  `failed` half of `PolyemesisIngestDown` could never fire for one. They now
+  read the shared SRT listener: `running` while it is bound, `failed` when
+  the SRT port is configured and nothing is bound, and `stopped` when the port
+  is turned off or the source is disabled. MQTT's `live` is now whether the stream is arriving. It had
+  read `false` for SRT throughout, and `true` for RTMP from the first show
+  onwards. An SRT programme's MQTT bitrate is the relay's.
+
+- **CI runs the Prometheus rule tests.** A `prometheus rules` job runs
+  `promtool check rules` and `promtool test rules` on
+  `deploy/prometheus/alerts.yml`, and checks that every query on the Grafana
+  dashboard parses (`scripts/promtool-check.sh`, Prometheus 3.15.0 pinned by
+  digest).
 - **An SRT ingest on the shared listener shows its uptime.** It has no ingest
   process, so the dashboard's Ingest card and the header read "—" for the
   whole broadcast. Each programme's relay hub now reports how long its stream
@@ -196,6 +389,9 @@ its first tagged release.
   on the preview card and in Monitoring. A video decoder's lines are now logged
   as info until the process's first output frame, or for 8 s after the spawn
   when no frame count is reported. A decode error after that still counts.
+  Those warm-up lines are also never a destination's failure reason. A run
+  that died during warm-up had been shown one as its reason, on the card, in
+  alerts and in webhooks. A real failure printed after them still classifies.
 
 - **The meters and loudness processes show an uptime.** Their stdout is level
   data, so the supervisor never learned that media was flowing, and Monitoring

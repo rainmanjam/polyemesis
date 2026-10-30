@@ -662,7 +662,8 @@ Five things matter:
    request it makes goes to the other site's root. Use
    `polyemesis.example.com`, with `location /`.
 
-Also turn buffering off (`proxy_buffering off`) or the HLS preview will lag, and
+Also turn buffering off (`proxy_buffering off`) or the HLS preview will lag and
+the [events stream](EVENTS.md) will deliver nothing until a buffer fills, and
 set `client_max_body_size 0` so multi-gigabyte recording downloads work.
 
 If you want HSTS in this deployment, set it on the proxy. polyemesis will not

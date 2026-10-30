@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 )
 
 // SpecVersion is the envelope contract version. A receiver is written against
@@ -54,6 +55,23 @@ type Envelope struct {
 	Destination *DestinationRef `json:"destination,omitempty"`
 	Reason      string          `json:"reason,omitempty"`
 	Error       string          `json:"error,omitempty"`
+	// Cause is WHY a destination went down, as a code a script can switch on:
+	// key_rejected, platform_not_ready, dns, connection_refused, timeout, tls,
+	// codec_rejected, upload_too_slow or unknown (internal/failreason). The
+	// same name and values as the status JSON, MQTT and the alert payload.
+	//
+	// BESIDE Reason, NOT IN IT. Reason already means "stopped", "disabled",
+	// "removed" or "stalled", and scripts branch on those words; folding the
+	// cause into it would change a field's meaning, which SpecVersion says
+	// bumps the contract. Three new omitempty fields change nothing a receiver
+	// already reads.
+	Cause failreason.Cause `json:"cause,omitempty"`
+	// Held is set when polyemesis has stopped retrying after repeated quick
+	// rejections; nothing will happen until somebody presses Retry.
+	Held bool `json:"held,omitempty"`
+	// KeyChanged is set when the connected platform account reports a stream
+	// key different from the stored one.
+	KeyChanged bool `json:"keyChanged,omitempty"`
 }
 
 // Encode marshals an envelope. The bytes it returns are exactly what is signed

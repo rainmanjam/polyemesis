@@ -523,6 +523,9 @@ func (d *Dispatcher) deliver(ctx context.Context, w *worker, ev Event) {
 		Destination: ev.Destination,
 		Reason:      ev.Reason,
 		Error:       ev.Error,
+		Cause:       ev.Cause,
+		Held:        ev.Held,
+		KeyChanged:  ev.KeyChanged,
 	}
 	body, err := Encode(env)
 	if err != nil {
@@ -691,7 +694,7 @@ func (d *Dispatcher) Test(ctx context.Context, h Hook, tr Trigger) (TestResult, 
 		Source: SourceRef{ID: 0, Name: "test"},
 		Reason: "test delivery from polyemesis",
 	}
-	if tr == TriggerDestinationUp || tr == TriggerDestinationDown {
+	if tr == TriggerDestinationUp || tr == TriggerDestinationDown || tr == TriggerDestinationHeld {
 		env.Destination = &DestinationRef{ID: 0, Name: "Example destination", Platform: "custom"}
 	}
 	body, err := Encode(env)

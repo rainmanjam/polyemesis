@@ -70,6 +70,7 @@ func TestIsTimelineTypeCoversTheOperatorHistoryAndNothingElse(t *testing.T) {
 	for _, ty := range []Type{
 		TypeFailoverSwitched, TypeDestinationDown, TypeDestinationRecovered,
 		TypeIngestLost, TypeIngestRecovered, TypeDestinationFallingBehind, TypeDestinationCaughtUp,
+		TypeDestinationHeld,
 	} {
 		if !IsTimelineType(ty) {
 			t.Errorf("%s should be on the timeline", ty)

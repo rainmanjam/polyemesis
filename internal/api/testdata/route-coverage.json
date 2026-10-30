@@ -1,23 +1,23 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 50,
-  "counterpartlessExcusedCeiling": 30,
+  "excusedCeiling": 58,
+  "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
-  "shapeFloor": 27,
+  "shapeFloor": 29,
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 235,
+    "methodPatternPairs": 251,
     "swept": 67,
-    "excused": 50,
-    "denied": 118,
+    "excused": 58,
+    "denied": 126,
     "nonTrieProbes": 12,
-    "shapesEmitted": 27,
+    "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
@@ -468,6 +468,12 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/events",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/failover/playlist",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -714,6 +720,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/mcp/access",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/mcp/access",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/media",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -776,6 +794,54 @@
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/start",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/overlay/config",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/overlay/events",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/overlays",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/overlays",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/overlays/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/overlays/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/overlays/{id}/key",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/overlays/{id}/key",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -1250,6 +1316,36 @@
       "method": "HEAD",
       "pattern": "/hls/{source:[0-9]+}/*",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/mcp",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/dock",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/dock/k/{key}",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/k/{key}",
+      "coverage": "excused",
       "zeroSource": "unguarded"
     },
     {
@@ -2049,6 +2145,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/events",
+      "scope": "route",
+      "why": "a Server-Sent Events stream: the response never ends, so the body sweep cannot read it to completion any more than it can read /ws. The sweep's fixture wires no events hub, so the GET is a 503 at once, which is what the Want below observes; the counterpart opens a real stream as a read token.",
+      "want": {
+        "as": "read",
+        "status": 503
+      },
+      "counterpart": "eventStream"
+    },
+    {
       "route": "GET /api/v1/jobs",
       "scope": "route",
       "why": "503 without a job queue wired; the handler never reaches storage",
@@ -2099,6 +2205,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/mcp/access",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
       "route": "GET /api/v1/metadata/broadcast-window",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2131,6 +2247,38 @@
     },
     {
       "route": "GET /api/v1/oauth/{platform}/start",
+      "scope": "route",
+      "why": "session-only; no bearer of either scope reaches it",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/overlay/config",
+      "scope": "route",
+      "why": "unauthenticated by necessity: an OBS browser source has no session, and the overlay key in X-Overlay-Key is the whole credential. Without it every principal, read token included, gets the same 401.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "overlayConfig"
+    },
+    {
+      "route": "GET /api/v1/overlay/events",
+      "scope": "route",
+      "why": "the overlay's display stream (SSE), keyed by X-Overlay-Key alone. Without the key every principal gets the same 401; with it the stream never ends, so the body sweep cannot read it and the counterpart does.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "overlayDisplayStream"
+    },
+    {
+      "route": "GET /api/v1/overlays",
       "scope": "route",
       "why": "session-only; no bearer of either scope reaches it",
       "want": {
@@ -2243,6 +2391,50 @@
       "counterpart": "sourcePreviewManifest"
     },
     {
+      "route": "GET /overlay",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/dock",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/dock/k/{key}",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/k/{key}",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
       "route": "GET /playout/*",
       "scope": "route",
       "why": "the public media origin. A STREAMING response -- an HLS manifest and MPEG-TS segments -- which is the shape that escaped the sweep before, since a body scan reads none of it. Gated per request by authorizePlayout.",
@@ -2304,6 +2496,17 @@
         "anonMatchesRead": true
       },
       "counterpart": ""
+    },
+    {
+      "route": "POST /mcp",
+      "scope": "route",
+      "why": "the MCP endpoint (#12). MCP is off on a fresh install, and the sweep's fixture is one, so every caller gets the router's not-found answer -- the 404 an unknown endpoint gets, which is what the Want below observes and what keeps the route from being discoverable while it is off (mcp_access.go). Switched on, it takes only an MCP-scope token, and an MCP token is refused on every other route. Every tool is a dispatch of routes this ledger already classifies; the counterpart drives every read tool through a real MCP client as a read token against the planted fixture. The admin token's MCP output is held to the same absence by TestNoMCPToolOrResourceReturnsACredentialToAnyToken.",
+      "want": {
+        "as": "read",
+        "status": 404,
+        "anonMatchesRead": true
+      },
+      "counterpart": "mcpToolOutputs"
     }
   ],
   "shapes": [
@@ -2462,10 +2665,17 @@
     },
     {
       "shape": "sse",
-      "emitted": false,
-      "inspected": false,
-      "inspectedBy": "",
-      "note": "ABSENT: this API emits no server-sent events, and assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever appears in this package's source"
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectSSE",
+      "note": "the real-time events API. One catalogue row per eventstream.Type over a CLOSED table; an uncatalogued type is refused at Publish, and a Withheld type is never sent to a read scope, live or replayed"
+    },
+    {
+      "shape": "response-header/X-Accel-Buffering",
+      "emitted": true,
+      "inspected": true,
+      "inspectedBy": "api.inspectXAccelBufferingHeader",
+      "note": "`no`, on the event stream only: nginx buffers proxied responses by default, and a buffered stream delivers nothing until the buffer fills"
     },
     {
       "shape": "mqtt-retained-topic",

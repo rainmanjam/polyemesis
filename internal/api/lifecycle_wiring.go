@@ -19,6 +19,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/engine"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 )
 
@@ -128,7 +129,7 @@ func (s *Server) DrainLifecycleWithin(parent context.Context) {
 func (s *Server) escalateBroadcastFault(f lifecycleFault) {
 	s.publishAudit(auditBroadcastFault(f))
 
-	s.hooks.Publish(hooks.Event{
+	ev := hooks.Event{
 		Trigger: hooks.TriggerBroadcastFault,
 		Source:  hooks.SourceRef{ID: f.SourceID},
 		Destination: &hooks.DestinationRef{
@@ -139,6 +140,32 @@ func (s *Server) escalateBroadcastFault(f lifecycleFault) {
 		// the string somebody needs to find the thing in the platform's console;
 		// it carries no token and no stream key.
 		Reason: f.Detail + " (broadcast " + f.BroadcastID + ")",
+	}
+	s.hooks.Publish(ev)
+	// The fourth channel, and it cannot stop a stream either: the same edge,
+	// converted, redacted again by the hub.
+	s.stream.Publish(eventstream.FromHook(ev))
+}
+
+// announceBroadcastPhase is the lifecycle coordinator's go-live and stop, on
+// the events stream. Hub.Publish never blocks, which is the coordinator's
+// contract for announce.
+func (s *Server) announceBroadcastPhase(p broadcastPhase) {
+	t := eventstream.TypeBroadcastLive
+	if p.Ended {
+		t = eventstream.TypeBroadcastComplete
+	}
+	s.stream.Publish(eventstream.Envelope{
+		Type:   t,
+		Source: &hooks.SourceRef{ID: p.SourceID},
+		Destination: &hooks.DestinationRef{
+			ID: p.DestinationID, Name: p.Destination, Platform: p.Platform,
+		},
+		Data: map[string]any{
+			"broadcastId": p.BroadcastID,
+			"phase":       p.Phase,
+			"redundant":   p.Redundant,
+		},
 	})
 }
 

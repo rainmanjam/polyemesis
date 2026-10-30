@@ -41,7 +41,36 @@ const (
 	// ScopeAdmin is everything, which is what every token was before scopes
 	// existed.
 	ScopeAdmin = "admin"
+	// ScopeMCPRead and ScopeMCPAdmin are MCP tokens: they work at /mcp and
+	// nowhere else (internal/api's authenticate refuses them on every other
+	// route), and /mcp takes nothing else. The tier after the prefix is what
+	// the token may do THROUGH MCP: an mcp-read token reaches the Read level
+	// only; an mcp-admin token reaches whichever levels the MCP settings have
+	// switched on.
+	//
+	// Two scope values rather than a flag beside the scope, so that every
+	// existing permission check -- all of them compare against ScopeAdmin --
+	// fails closed on an MCP token with no change: "mcp-admin" is not
+	// "admin". The base tier is applied in exactly one place, for requests the
+	// MCP endpoint itself dispatched (see BaseScope).
+	ScopeMCPRead  = "mcp-read"
+	ScopeMCPAdmin = "mcp-admin"
 )
+
+// IsMCPScope reports whether s is one of the MCP-only scopes.
+func IsMCPScope(s string) bool { return s == ScopeMCPRead || s == ScopeMCPAdmin }
+
+// BaseScope is the REST tier an MCP scope acts with when the MCP endpoint
+// dispatches a tool's request, and s itself for every other scope.
+func BaseScope(s string) string {
+	switch s {
+	case ScopeMCPRead:
+		return ScopeRead
+	case ScopeMCPAdmin:
+		return ScopeAdmin
+	}
+	return s
+}
 
 // ValidScope reports whether s is a scope this build knows.
 //
@@ -50,7 +79,9 @@ const (
 // so a typo stored in the column would silently mint a weaker token than the
 // operator asked for rather than a stronger one. That is the safe direction to
 // fail, and it is still worth refusing outright so nobody has to discover it.
-func ValidScope(s string) bool { return s == ScopeRead || s == ScopeAdmin }
+func ValidScope(s string) bool {
+	return s == ScopeRead || s == ScopeAdmin || IsMCPScope(s)
+}
 
 // APIToken is a long-lived credential for automation. It deliberately has no
 // field for the secret: after creation the plaintext exists nowhere.
@@ -106,7 +137,8 @@ func (d *DB) CreateAPIToken(name, scope string) (*APIToken, string, error) {
 		scope = ScopeRead
 	}
 	if !ValidScope(scope) {
-		return nil, "", fmt.Errorf("unknown token scope %q; use %q or %q", scope, ScopeRead, ScopeAdmin)
+		return nil, "", fmt.Errorf("unknown token scope %q; use %q, %q, %q or %q",
+			scope, ScopeRead, ScopeAdmin, ScopeMCPRead, ScopeMCPAdmin)
 	}
 
 	b := make([]byte, 32)

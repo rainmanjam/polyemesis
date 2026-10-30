@@ -1,0 +1,4 @@
+[rtmp @ 0xffff936b5910] Server error: authentication failed
+[out#0/flv @ 0xffff96b5de60] Error opening output rtmp://pe-w1-mediamtx/secured?user=publisher&pass=wrongpass: Operation not permitted
+Error opening output file rtmp://pe-w1-mediamtx/secured?user=publisher&pass=wrongpass.
+Error opening output files: Operation not permitted

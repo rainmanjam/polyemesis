@@ -1,0 +1,6 @@
+10:08:01.266446/SRT:RcvQ:w1!W:SRT.cn: @801485432: processConnectResponse: rejecting per reception of a rejection HS response: ERROR:PEER
+10:08:01.266481/SRT:RcvQ:w1!W:SRT.cn: @801485432: processAsyncConnectRequest: REJECT reported from HS processing: Peer rejected connection - not processing further
+[srt @ 0xffff950d5910] Connection to srt://pe-w1-mediamtx:8890?streamid=publish:notconfigured failed: I/O error
+[out#0/mpegts @ 0xffff9857de60] Error opening output srt://pe-w1-mediamtx:8890?streamid=publish:notconfigured: I/O error
+Error opening output file srt://pe-w1-mediamtx:8890?streamid=publish:notconfigured.
+Error opening output files: I/O error

@@ -1,4 +1,4 @@
-import type { DestinationId, DestStatus, ProcessState, RenditionStatus, Status } from "./types";
+import type { DestinationId, DestStatus, FailureCause, ProcessState, RenditionStatus, Status } from "./types";
 import type { SignalTone } from "./signal";
 
 /* What the dashboard says FIRST, as plain functions.
@@ -68,6 +68,10 @@ export interface AttentionItem {
    *  the one status in the console that never translates. */
   state?: ProcessState;
   detail?: string;
+  /** The server's classified cause (#20), for a destination that is failing.
+   *  A classification the server made, not one made here, so it does not
+   *  break the rule above; the component translates it. */
+  cause?: FailureCause;
   /** The destination this row is about, when it is about one. The panel is a
    *  summary, and a summary whose rows cannot be followed to the thing they
    *  describe is a second place to read the same fault rather than a way in. */
@@ -116,6 +120,7 @@ export function attention(status: Status | null | undefined): AttentionItem[] {
         subject: d.name,
         state,
         detail: d.process?.lastError ?? d.error,
+        cause: d.reason?.cause,
         destinationId: d.id,
       });
     } else if (state === "reconnecting" || state === "starting") {
@@ -125,6 +130,7 @@ export function attention(status: Status | null | undefined): AttentionItem[] {
         subject: d.name,
         state,
         detail: d.process?.lastError,
+        cause: d.reason?.cause,
         destinationId: d.id,
       });
     }

@@ -360,6 +360,42 @@ type lifecycleCoordinator struct {
 	// absent means due now, which is the safe direction and the one a restart
 	// lands in.
 	liveSkips map[int64]int
+
+	// announce is told every transition the platform CONFIRMED -- a broadcast
+	// moved on air or into testing, or ended -- after it is recorded. Nil means
+	// nobody is listening. It is the real-time events API's go-live and stop
+	// (broadcast.live, broadcast.complete); set once in New, before any loop
+	// runs, and never changed. Must not block: it runs on the sweep.
+	announce func(broadcastPhase)
+}
+
+// broadcastPhase is one confirmed transition, as the events stream reports it.
+type broadcastPhase struct {
+	DestinationID int64
+	SourceID      int64
+	Destination   string
+	Platform      string
+	BroadcastID   string
+	// Phase is the platform's own word for where the broadcast now is
+	// (testing, live, complete), never the one that was requested.
+	Phase string
+	// Ended is true for an end, false for a start.
+	Ended bool
+	// Redundant is true when the platform reported it was already there.
+	Redundant bool
+}
+
+func (c *lifecycleCoordinator) tell(p broadcastPhase) {
+	if c.announce != nil {
+		c.announce(p)
+	}
+}
+
+func sourceIDOf(d *db.Destination) int64 {
+	if d == nil || d.SourceID == nil {
+		return 0
+	}
+	return *d.SourceID
 }
 
 // newLifecycleCoordinator builds one. Every dependency is explicit so that what
@@ -780,6 +816,10 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 	})
 	c.log.Info("moved a broadcast on", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "to", plan.Send, "redundant", res.Redundant)
+	c.tell(broadcastPhase{
+		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
+		BroadcastID: broadcastID, Phase: firstNonBlank(res.Status, plan.Phase), Redundant: res.Redundant,
+	})
 }
 
 // end is one of TWO places in this process that send oauth.PhaseComplete, and
@@ -860,6 +900,11 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 	})
 	c.log.Info("ended a broadcast", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "redundant", res.Redundant)
+	c.tell(broadcastPhase{
+		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
+		BroadcastID: broadcastID, Phase: firstNonBlank(res.Status, phaseComplete), Ended: true,
+		Redundant: res.Redundant,
+	})
 }
 
 // endOrphan ends the broadcast of a destination whose ROW HAS BEEN DELETED.
@@ -963,6 +1008,10 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 	c.log.Info("ended the broadcast of a deleted destination",
 		"destination", t.Name, "platform", t.Platform, "broadcast", t.BroadcastID)
 	c.untrack(t.destinationID)
+	c.tell(broadcastPhase{
+		DestinationID: t.destinationID, SourceID: t.SourceID, Destination: t.Name,
+		Platform: string(t.Platform), BroadcastID: t.BroadcastID, Phase: phaseComplete, Ended: true,
+	})
 }
 
 // ------------------------------------------------------------------- the plan

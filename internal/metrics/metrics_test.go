@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -40,6 +41,9 @@ func testSnapshot() Snapshot {
 				Kind:     "rtmp",
 				Platform: "twitch",
 				Enabled:  true,
+				Cause:    failreason.KeyRejected,
+				Held:     true,
+				Failures: map[failreason.Cause]int{failreason.KeyRejected: 3, failreason.Timeout: 1},
 			},
 			{
 				Process:  Process{State: "stopped"},

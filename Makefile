@@ -82,7 +82,7 @@ dev: build-go ## Run the backend only (pair with `make ui-dev`)
 # WHAT CI RUNS, VERBATIM, and it did not used to be.
 #
 # This target ran `go test ./...`. CI runs
-# `POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...`, and the two
+# `POLYEMESIS_LEDGER=strict go test -race -timeout 25m ./...`, and the two
 # differ in ways that decide whether a class of defect can be seen locally AT
 # ALL:
 #
@@ -113,8 +113,8 @@ dev: build-go ## Run the backend only (pair with `make ui-dev`)
 test: preflight-guard ## Run the Go suite the fast way -- the loop you run before every commit
 	go test ./...
 
-test-ci: preflight-guard ## Run the Go suite EXACTLY as CI does: strict ledger, -race, 20m
-	POLYEMESIS_LEDGER=strict go test -race -timeout 20m ./...
+test-ci: preflight-guard ## Run the Go suite EXACTLY as CI does: strict ledger, -race, 25m
+	POLYEMESIS_LEDGER=strict go test -race -timeout 25m ./...
 
 .PHONY: preflight-guard
 preflight-guard: ## Prove the route-coverage preflight survives -run, -skip and -count=0
@@ -318,7 +318,7 @@ endif
 .PHONY: check
 # TWO TARGETS, BECAUSE ONE CANNOT BE BOTH FAST AND CI.
 #
-# `check` was made to run CI's exact go test -- strict ledger, -race, 20m --
+# `check` was made to run CI's exact go test -- strict ledger, -race, 25m --
 # because its parity guard was certifying a parity it did not have. That closed
 # the false claim and bought a four-minute loop turning into a twenty-five
 # minute one, which is how a pre-commit check stops being run at all. A gate

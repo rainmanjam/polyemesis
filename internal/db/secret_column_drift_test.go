@@ -47,6 +47,10 @@ func TestNoNewSecretColumnEscapesSealing(t *testing.T) {
 			"read it back (schema.sql, sources table comment)",
 		"sources.prev_token": "the token sources.token rotated away from, kept " +
 			"readable for the same reason during its grace window",
+		"chat_overlays.overlay_key": "display-only overlay key, deliberately " +
+			"plaintext: it is pasted into OBS inside a URL and Copy OBS URL has to " +
+			"read it back; it reaches nothing but the overlay's own config and " +
+			"display stream (schema.sql, chat_overlays comment)",
 	}
 
 	cols, encSiblings := loadSecretColumnCandidates(t, secretName)

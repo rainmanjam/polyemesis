@@ -74,8 +74,11 @@ var nilEngineAnswers = map[string]bool{
 	// only moves the panic to the caller's next line. The API reads the
 	// install-wide equivalents off the manager instead; see Server.tools,
 	// Server.hostSystem and Server.recordings.
-	"BackupHub":  false,
-	"Hooks":      false,
+	"BackupHub": false,
+	"Hooks":     false,
+	// Wiring, like Hooks: the hub an engine publishes into. Nothing reads it
+	// on behalf of an install with no source; GET /events holds its own.
+	"Stream":     false,
 	"Hub":        false,
 	"Monitor":    false,
 	"Playout":    false,
@@ -95,6 +98,7 @@ var nilEngineAnswers = map[string]bool{
 	"Settings":        false,
 	"Silence":         false,
 	"SourceName":      false,
+	"SourceEnabled":   false,
 }
 
 // argumentlessEngineMethods is every exported method on *Engine that takes

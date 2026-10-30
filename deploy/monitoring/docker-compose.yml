@@ -1,0 +1,58 @@
+# Prometheus and Grafana for polyemesis, pre-provisioned: the Prometheus scrape
+# and alert rules, the Grafana datasource and the polyemesis dashboard.
+#
+#   1. Create a read API token in polyemesis (Settings -> API tokens) and save
+#      it, alone, as deploy/monitoring/polyemesis.token.
+#   2. GRAFANA_ADMIN_PASSWORD='something long' docker compose up -d
+#      (run from this directory).
+#   3. Open http://127.0.0.1:3000 and sign in as admin.
+#
+# The full walkthrough, including a native (TLS) install, is docs/GRAFANA.md.
+#
+# Both UIs are bound to 127.0.0.1. Neither has authentication you would want
+# on the internet by default -- Prometheus has none at all -- so reach them over
+# SSH (`ssh -L 3000:127.0.0.1:3000 server`) or put them behind your proxy.
+name: polyemesis-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./polyemesis.token:/etc/prometheus/polyemesis.token:ro
+      - prometheus-data:/prometheus
+    # host.docker.internal is polyemesis published on this machine's port 8080
+    # (the repository's docker-compose.yml). Docker Desktop provides the name;
+    # on Linux this line does.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/polyemesis.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/polyemesis.json:/var/lib/grafana/dashboards/polyemesis.json:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  prometheus-data:
+  grafana-data:

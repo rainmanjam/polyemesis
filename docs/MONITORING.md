@@ -160,9 +160,7 @@ the one (`result`) that necessarily differs between its two sides, so it could
 never fire; it now reads `and ignoring(result)`, confirmed against this same
 Prometheus to actually match `failed` against `sent`.
 
-**The last is never normal.** `polyemesis_ingest_up` is 0 for a listener
-waiting on its streamer too, which is ordinary between shows.
-`polyemesis_source_engine_up` is 0 only when a configured programme has no
+**The last is never normal.** `polyemesis_source_engine_up` is 0 only when a configured programme has no
 engine at all: its ingest failed to build or to start, the server logged it and
 kept the other programmes on air. Nothing is receiving that programme's
 stream and no built-in alert can fire for it, because the alert watcher runs
@@ -190,9 +188,8 @@ stalled.
 **A lost ingest is not a destination stalling.** While the ingest is lost,
 every destination's output stops because there is nothing to send. That is
 `polyemesis_ingest_bitrate_bits_per_second` 0 for that programme, said once.
-It is not `polyemesis_ingest_up` 0: `_up` says the ingest process is running,
-and an SRT or RTMP listener goes on running while it waits for a publisher
-that has gone away. A destination stays `_up` 1 and
+It is not `polyemesis_ingest_up` 0: `_up` says the programme is able to
+receive, and it stays 1 while it waits for a publisher that has gone away. A destination stays `_up` 1 and
 `_stalled` 0 through it, and it has no warning, so the alert above does not
 fire once per destination for one missing source. The process itself still
 reports `"stalled": true` in `/api/v1/status`, and its bitrate reads 0, because
@@ -223,9 +220,21 @@ of it times 8 is the bitrate actually being sent now. Both reset with the
 process, which `rate()` handles.
 
 **The first watches the bitrate, not `polyemesis_ingest_up`.** `_up` is 1 while
-the ingest process is running, and an SRT or RTMP listener runs the whole time
-it waits for OBS. A publisher that disconnects leaves it at 1, so
+the programme is able to receive, which includes the whole time it waits for
+OBS. A publisher that disconnects leaves it at 1, so
 `polyemesis_ingest_up == 0` never fires for the most common way a stream ends.
+
+**What `_up` and `_state` mean for each ingest mode.** An RTMP or pull source
+has an FFmpeg ingest process, and the ingest series are that process's state.
+An SRT source has none: the shared SRT listener hands the stream straight to
+the programme. Its ingest series read the listener instead. They are
+`running` (`_up` 1) while the listener is bound, whether or not an encoder is
+connected. They are `failed` when the SRT port is configured but nothing is
+bound to it, for example because another process holds the port. They are
+`stopped` when the SRT port is turned off (`0`) or the source is disabled,
+because the listener refuses a disabled source's encoder. Before this, an SRT
+programme read `_up` 0 and `stopped` even while its encoder was pushing, and
+`PolyemesisIngestDown` could not fire for it.
 The bitrate is what arrives at the relay, sampled every second, and it reads 0
 when nothing does.
 
@@ -282,8 +291,8 @@ started. It hears the recovery, and every later occurrence. `audio.clipping`
 is the exception, because its counter resets after it fires, so a rule added
 during clipping hears the next full run. To see what is already wrong when
 you add a rule, read the Monitoring page. [The stream timeline](#the-stream-timeline)
-records its seven event types whether or not any rule exists, so it shows an
-ingest loss, a down destination or a falling-behind destination that started
+records its eight event types whether or not any rule exists, so it shows an
+ingest loss, a down or held destination or a falling-behind destination that started
 before your rule. It does not record `disk.low`, loudness or clipping.
 
 A debounce or interval out of range is **clamped rather than refused**, because
@@ -454,17 +463,18 @@ way in, so nothing here has ever been near a stream key.
 
 ### The stream conditions, and what trips them
 
-Ten of the subscribable types are the stream conditions. The thresholds are
+Eleven of the subscribable types are the stream conditions. The thresholds are
 stated because an operator picking events in the rule editor needs to know what
 is behind each name, and because a dwell time is not a delay — it is the
 difference between an alert and a mute button.
 
 | Event | Severity | Fires when |
 |---|---|---|
-| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state |
+| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state. An enabled SRT source counts as configured although it has no ingest process, the same as an RTMP or pull source; before this fix `ingest.lost` never fired for SRT. Like RTMP and pull, it also fires once if nothing has arrived 20 seconds after the server starts |
 | `ingest.recovered` | `info` | the source is delivering again |
 | `destination.down` | `critical` | an **enabled** destination has not been delivering for **20 seconds**. A destination you turned off is not down, and turning it back on starts the clock fresh rather than firing on the time it spent disabled |
 | `destination.recovered` | `info` | it is delivering again |
+| `destination.held` | `critical` | polyemesis stopped retrying an enabled destination after repeated quick rejections, and nothing happens until you press **Retry**. Fires **once per hold**, at the sweep the hold begins and without waiting for the `destination.down` dwell, because a hold is the verdict that no reconnect is coming. The `destination.down` still fires on its own clock and still says "held" in its text. Carries the same `reason`, `cause` and `detail` fields as the down, and is the one to page on if you want only the stops that will not fix themselves |
 | `failover.switched` | `warning`, or `info` when the switch is *back to* primary | the source selector changed tier. On every switch, because discovering at the end of a broadcast that you streamed the backup all night is the failure this exists to prevent. The first snapshot after a restart adopts the running count rather than greeting you with every switch since boot |
 | `audio.clipping` | `warning` | an ingest channel has been at or above **-0.1 dBFS for 3 consecutive observations**. Digital full scale is 0, and -0.1 is where a limiter is already working; one sample is a snare hit, several in a row is a level problem. The counter resets after firing, so the next alert needs another full run |
 | `disk.low` | `warning`, or `critical` once the recorder has already halted | free space on the recordings volume is under **2 GiB** *or* under **5%** — either one trips it, because a small volume runs out of percent slowly and a large one runs out of gigabytes slowly, and both end the same way. No dwell time: disk space does not flap, and a recorder that has already stopped writing should not wait twenty seconds to say so. A volume that cannot be measured says nothing rather than alerting on the zero it reads |
@@ -584,6 +594,7 @@ server itself, and they answer one question: *was that me?*
 | `debug.exported` | `critical` | a debug bundle was downloaded, with how many log records and whether the capture was truncated |
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
 | `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
+| `mcp.action` | `warning` for a stop, `info` otherwise | an AI assistant connected over [MCP](MCP.md) used a write tool; names the tool, the API token, the target and the outcome. See [MCP.md](MCP.md#the-audit-trail) |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
 rather than five. (Deleting an alert rule is `critical` too; it is covered
@@ -691,10 +702,11 @@ The Monitoring page has a **Timeline** card: what happened to the stream,
 newest first, in words. It answers "when did it fail over?" and "how often did
 Twitch drop?" after the alert has gone.
 
-It keeps seven event types, the stream-shaped subset of the alerts above:
+It keeps eight event types, the stream-shaped subset of the alerts above:
 
 - `failover.switched`
 - `destination.down` and `destination.recovered`
+- `destination.held`
 - `destination.falling_behind` and `destination.caught_up`
 - `ingest.lost` and `ingest.recovered`
 
@@ -711,6 +723,122 @@ know.
 
 A script reads the same rows from `GET /api/v1/timeline?limit=N`
 ([API.md](API.md)). A read token is enough.
+
+A row about a destination or an ingest has a **Show log** link. It opens the
+FFmpeg log on the same page, filtered to that process, in the programme the row
+is about. The log is per programme and every programme has an `ingest`, so a
+row about another programme's ingest switches the page to that programme
+first. `/monitoring?programme=<id>&process=<name>` opens it the same way from
+anywhere; without `programme=` it opens the programme you are viewing. Rows written
+before this release have no link, because the subject was not stored then.
+
+A `destination.down` row says why the destination failed, as in
+`Reason: stream key rejected; held after 3 quick rejections, press Retry once
+it is fixed.` (see the next section).
+
+---
+
+## Why a destination is failing
+
+When a destination fails, polyemesis reads the end of FFmpeg's stderr and the
+timing of the run, and names the cause. The destination card shows it in
+place of FFmpeg's raw last line. The same cause reaches every other outlet,
+under the same name:
+
+- the destination's `reason` in `GET /api/v1/status`;
+- the `destination.down` alert text and its `cause` field (so also the
+  timeline);
+- the `cause`, `held` and `keyChanged` fields of a webhook;
+- the `cause`, `held` and `causeDetail` fields of the MQTT destination topic;
+- the Stream Deck destination key;
+- the Prometheus scrape, as the three families below.
+
+| `cause` | What it means | How it is recognised |
+|---|---|---|
+| `key_rejected` | The ingest refused to let the stream publish. Usually the stream key; check the server URL too | `Server error:` naming authentication, HTTP 401 or 403, SRT `Peer rejected connection`, or `Error opening output … : I/O error` with no network-level line before it |
+| `platform_not_ready` | The ingest is up and not taking this stream yet | `Server error: Already publishing` (the platform still holds the previous session), HTTP 5xx, HTTP 404 |
+| `dns` | The server name does not resolve | `Failed to resolve hostname`, `Name does not resolve` |
+| `connection_refused` | Nothing is listening on that host and port | `Connection refused` |
+| `timeout` | The ingest did not answer in time | `Operation timed out`, `Connection timed out` |
+| `tls` | The encrypted connection failed: `rtmps://` to a plain port, or a certificate that does not verify | a `[tls @` line, `SSL routines`, `certificate verify failed` |
+| `codec_rejected` | The codec or container was refused | FFmpeg's own muxer, for example `… not compatible with flv` |
+| `upload_too_slow` | Media was moving, but delivery fell below 0.8× realtime | the delivery rate over the last 10 s, not FFmpeg's `speed=` (an average over the whole run). Also shown while the destination is still running, once the source has been arriving for 10 s |
+| `unknown` | None of the above | the card shows FFmpeg's own last line |
+
+Some failures look the same from FFmpeg's side. A wrong RTMP application, an
+unconfigured path and a refused key print identical stderr. An ingest that
+silently drops a codec it cannot carry prints only `Broken pipe`. The fixtures
+and their README in `internal/failreason/testdata` record what was captured,
+and how.
+
+### On the scrape
+
+Three families carry the cause. Each is labelled `id` and `name` like every
+other destination series, plus `cause` where it says which:
+
+- `polyemesis_destination_failure_reason{cause}` — a gauge, 1 for the cause the
+  destination is failing with now and 0 for the other eight. All nine are 0
+  while nothing is wrong. It follows the destination's `reason` in
+  `/api/v1/status`, including `upload_too_slow` on a destination that is still
+  running.
+- `polyemesis_destination_held` — 1 while the destination is held (below).
+- `polyemesis_destination_failures_total{cause}` — a counter of failed runs by
+  cause, since the destination's process was created. It resets with
+  `polyemesis_destination_restarts_total`, which `increase()` handles.
+
+**Every cause is emitted for every destination, at 0 until it happens.** That
+is not padding. A refused key is held after three refusals that can all land
+inside one 15-second scrape; a series that first appeared at 3 would have no
+earlier sample, and `increase()` over it would read 0 — the one failure the
+counter exists to show.
+
+**Only the code is a label, never FFmpeg's line.** The line that explains a
+refused key is the line that carries the publish URL, and a label is copied into
+every Prometheus and Grafana that scrapes this. `cause` is always one of the
+nine codes in the table above, so the families add at most nine series per
+destination each.
+
+```promql
+polyemesis_destination_failure_reason == 1                 # who is failing, and why
+polyemesis_destination_held == 1                           # waiting for Retry
+sum by (cause) (increase(polyemesis_destination_failures_total[1h]))
+```
+
+The shipped Grafana dashboard draws all three, and the shipped
+`PolyemesisDestinationDown` rule names the cause in its description — see
+[GRAFANA.md](GRAFANA.md).
+
+### Held after three quick rejections
+
+A refused key or a refused codec cannot fix itself. After **3** of them in a
+row, each within **15 s** of the spawn, the destination is **held**:
+
+- polyemesis stops retrying;
+- the card says `Held after 3 quick rejections` and shows a **Retry** button;
+- the state is `failed`, so `destination.down` fires once.
+
+Retry restarts the destination once. A settings save does not lift a hold,
+even one that makes the reconnect policy more forgiving. Editing the
+destination rebuilds it, which also lifts the hold.
+
+Network causes (`dns`, `connection_refused`, `timeout`) and
+`platform_not_ready` are never held. They keep the normal backoff, because they
+clear on their own.
+
+### "YouTube's key changed — click to update"
+
+Sometimes a destination linked to a connected YouTube or Twitch account is
+refused (`key_rejected`). polyemesis then asks the platform, read-only, for the
+account's current stream keys:
+
+- YouTube: `liveStreams.list`;
+- Twitch: Get Stream Key.
+
+If the stored key is not among them, the card offers the update as one click,
+which is **Refresh stream key**. The check runs at most once per destination
+every 5 minutes. It never creates a stream or a broadcast. Facebook, Kick and
+pasted keys are not checked: Facebook's key is a live video, so reading one
+creates one, and the others have no read-only key endpoint.
 
 ---
 
@@ -773,6 +901,8 @@ Full route reference: [API.md](API.md).
 
 ## See also
 
+- [GRAFANA.md](GRAFANA.md) — the shipped Grafana dashboard, Prometheus alert
+  rules, and a compose file that runs both pre-provisioned
 - [HOOKS.md](HOOKS.md) — the machine-readable counterpart to the alerts above:
   one signed delivery per transition, never coalesced, for a script rather than
   a person
