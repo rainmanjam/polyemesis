@@ -2444,6 +2444,12 @@ function NumberField({
 function wireProfile(p: RoutingProfile): RoutingProfile {
   return {
     ...p,
+    // Every track's mute and every cell's polarity go out as an explicit
+    // boolean. An absent key is not "off" to a server that merges the arrays
+    // over the stored ones by position: a cell list re-sorted by an edit would
+    // hand one cell's stored `invert: true` to whichever cell now sits there.
+    tracks: p.tracks ? p.tracks.map((s) => ({ ...s, muted: s.muted === true })) : p.tracks,
+    matrix: p.matrix ? p.matrix.map((c) => ({ ...c, invert: c.invert === true })) : p.matrix,
     loudness: p.loudness ?? null,
     ducking: p.ducking ?? null,
     excludeRoles: p.excludeRoles?.length ? p.excludeRoles : null,

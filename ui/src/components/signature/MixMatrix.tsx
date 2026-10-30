@@ -76,7 +76,10 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
     // A zero cell carries no information, so it is dropped rather than stored.
     // That keeps the saved profile and the generated filter minimal.
     // The polarity rides with the cell: a new gain must not quietly un-invert it.
-    const invert = index.get(key)?.invert ? { invert: true } : {};
+    // An explicit false rides too: it is what tells the server the cell is not
+    // inverted, rather than leaving that to whatever it held before.
+    const was = index.get(key)?.invert;
+    const invert = was === undefined ? {} : { invert: was };
     const next =
       clamped > 0 ? [...without, { track, channel, out, gain: clamped, ...invert }] : without;
     next.sort((a, b) => a.track - b.track || a.out - b.out || a.channel - b.channel);
@@ -89,8 +92,11 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMa
     const key = `${track}:${channel}:${out}`;
     const cur = index.get(key);
     if (!cur || cur.gain <= 0) return;
-    const { invert: _was, ...rest } = cur;
-    const flipped: MatrixCell = cur.invert ? rest : { ...rest, invert: true };
+    // Un-inverting sends `invert: false`, never an absent key. An absent key
+    // says nothing, and a server that merges a cell list over the stored one
+    // keeps whatever polarity it held at that position, which after a re-sort is
+    // another cell's.
+    const flipped: MatrixCell = { ...cur, invert: !cur.invert };
     setCleared(null);
     onChange(cells.map((c) => (c === cur ? flipped : c)));
   };

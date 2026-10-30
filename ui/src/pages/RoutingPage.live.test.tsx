@@ -318,7 +318,9 @@ describe("a stored mute survives every routing-page save path", () => {
     await save();
     const sent = savedTracks();
     expect(sent.find((s) => s.track === 1)?.muted).toBe(true);
-    expect(sent.find((s) => s.track === 2)?.muted).toBeUndefined();
+    // Unmuted is said, not implied: an absent key is no answer to a server
+    // that merges the track list over the stored one.
+    expect(sent.find((s) => s.track === 2)?.muted).toBe(false);
   });
 });
 
@@ -394,5 +396,71 @@ describe("A10: the signal path strip", () => {
     await waitFor(() => expect(screen.getByTestId("strip-output").getAttribute("data-state")).toBe("live"));
     expect(screen.queryByTestId("strip-dropped")).toBeNull();
     expect(screen.getByTestId("strip-source").textContent).toBe("-90.0 dBFS peak");
+  });
+});
+
+describe("a matrix Save never moves a polarity to another cell", () => {
+  type Cell = { track: number; channel: number; out: number; gain: number; invert?: boolean };
+  const key = (c: Cell) => `${c.track}:${c.channel}:${c.out}`;
+
+  /** What a server that merges the sent cell list over the stored one BY
+   *  POSITION would end up holding: the failure the explicit field defends. */
+  function indexMerge(storedCells: Cell[], sent: Cell[]): Cell[] {
+    return sent.map((c, i) => ({ ...(storedCells[i] ?? {}), ...c }));
+  }
+
+  function matrixDest() {
+    return dest({
+      profile: {
+        mode: "matrix",
+        tracks: [
+          { track: 0, enabled: true, gain: 1 },
+          { track: 1, enabled: true, gain: 1 },
+        ],
+        // Track 2's left channel to the left output, inverted.
+        matrix: [{ track: 1, channel: 0, out: 0, gain: 1, invert: true }],
+        normalize: "auto",
+      } as RoutingProfile,
+    });
+  }
+
+  function sentMatrix(): Cell[] {
+    const calls = updateDestination.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    return (calls[calls.length - 1][1] as { profile: RoutingProfile }).profile.matrix as Cell[];
+  }
+
+  // MUTATION: drop the matrix line from wireProfile. Observed: FAIL.
+  it("a new cell sorted ahead of an inverted one goes out with invert false", async () => {
+    stored = matrixDest();
+    await renderPage();
+    const input = screen.getAllByLabelText("Track 1 channel 1 to left")[0];
+    await act(async () => fireEvent.change(input, { target: { value: "0.5" } }));
+    await save();
+    const sent = sentMatrix();
+    // The new cell sorts first, where the inverted one used to sit.
+    expect(sent.map(key)).toEqual(["0:0:0", "1:0:0"]);
+    for (const c of sent) expect(typeof c.invert).toBe("boolean");
+    const merged = indexMerge(matrixDest().profile.matrix as Cell[], sent);
+    expect(merged.filter((c) => c.invert).map(key)).toEqual(["1:0:0"]);
+  });
+
+  // MUTATION: un-invert by dropping the key in toggleInvert AND drop the matrix
+  // line from wireProfile. Observed: FAIL.
+  it("un-inverting after a re-sort says invert false on that cell", async () => {
+    stored = matrixDest();
+    await renderPage();
+    const input = screen.getAllByLabelText("Track 1 channel 1 to left")[0];
+    await act(async () => fireEvent.change(input, { target: { value: "0.5" } }));
+    const btn = screen.getAllByRole("button", { name: /^Invert polarity.*Track 2 channel 1 to left/ })[0];
+    await act(async () => fireEvent.click(btn));
+    await save();
+    const sent = sentMatrix();
+    expect(sent).toEqual([
+      { track: 0, channel: 0, out: 0, gain: 0.5, invert: false },
+      { track: 1, channel: 0, out: 0, gain: 1, invert: false },
+    ]);
+    const merged = indexMerge(matrixDest().profile.matrix as Cell[], sent);
+    expect(merged.filter((c) => c.invert)).toEqual([]);
   });
 });
