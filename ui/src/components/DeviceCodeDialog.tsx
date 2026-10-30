@@ -190,12 +190,7 @@ export function DeviceCodeDialog({
             {t("device.title", { platform: platformName })}
           </DialogTitle>
           <DialogDescription>
-            {/* Long explanatory prose beside a control stays literal English,
-                per the convention DestinationDialog sets. The labels, buttons
-                and toasts around it are catalogue keys. */}
-            Type this code on another device — a phone works. This box never
-            needs a public address, which is the whole point of connecting this
-            way.
+            {t("device.typeCodeElsewhere")}
           </DialogDescription>
         </DialogHeader>
 

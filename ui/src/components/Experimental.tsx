@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { useT } from "@/lib/i18n";
 
 /* ==========================================================================
    The EXPERIMENTAL convention
@@ -62,9 +63,10 @@ import { Badge } from "@/components/ui/badge";
 /** The badge on its own, for a heading or a row that already carries the
  *  explanation somewhere the reader can see it. */
 export function ExperimentalBadge({ className }: { className?: string }) {
+  const t = useT();
   return (
     <Badge variant="outline" className={className}>
-      experimental
+      {t("experimental.badge")}
     </Badge>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, Copy, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 /** The generated FFmpeg filter graph, shown verbatim.
  *
@@ -15,6 +16,7 @@ export function FilterString({
   value: string;
   className?: string;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -34,9 +36,9 @@ export function FilterString({
       <div className="flex items-center justify-between border-b border-border px-2 py-1">
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
           <Terminal className="h-3 w-3" />
-          generated filter_complex
+          {t("signature.filter.generated")}
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={copy} aria-label="Copy filter string">
+        <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={t("signature.filter.copyAria")}>
           {copied ? <Check className="text-live" /> : <Copy />}
         </Button>
       </div>

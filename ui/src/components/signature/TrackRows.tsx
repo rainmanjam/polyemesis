@@ -314,7 +314,7 @@ export function TrackRows({
                 id={`${idPrefix}-track-${t.index}`}
                 checked={sel.enabled}
                 onCheckedChange={(v) => update(t.index, { enabled: v === true })}
-                aria-label={`Include track ${t.index + 1}`}
+                aria-label={translate("signature.track.include", { n: t.index + 1 })}
               />
 
               <label
@@ -323,7 +323,7 @@ export function TrackRows({
               >
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="shrink-0 text-[12px] font-semibold leading-tight">
-                    Track {t.index + 1}
+                    {translate("lib.trackLabel", { n: t.index + 1 })}
                   </span>
                   {role !== "" && (
                     <RoleBadge role={role as Exclude<TrackRole, "">} excluded={excluded} />
@@ -336,7 +336,7 @@ export function TrackRows({
                 </div>
                 <div className="truncate font-mono text-sm leading-tight text-muted-foreground">
                   {t.layout}
-                  {t.channels > 2 && " ↓ st"}
+                  {t.channels > 2 && ` ${translate("signature.track.downmix")}`}
                   {(ann.language || t.language) && ` · ${ann.language || t.language}`}
                 </div>
               </label>
@@ -360,7 +360,7 @@ export function TrackRows({
                      left out of the mix. */
                   <>
                   <div className="font-mono text-sm text-muted-foreground">
-                    {TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">]}
+                    {translate(TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">])}
                   </div>
                   {last && (
                     <div className="font-mono text-xs text-muted-foreground">
@@ -382,17 +382,17 @@ export function TrackRows({
                   )}
                   {ann.denoise && (
                     <Badge variant="outline" className="shrink-0">
-                      <VolumeX className="h-2.5 w-2.5" /> denoise
+                      <VolumeX className="h-2.5 w-2.5" /> {translate("signature.track.denoise")}
                     </Badge>
                   )}
                   {duckTrigger.includes(t.index) && (
-                    <Badge variant="armed" className="shrink-0" title="Speech here ducks the target tracks.">
-                      ducks
+                    <Badge variant="armed" className="shrink-0" title={translate("signature.track.ducksTitle")}>
+                      {translate("signature.track.ducks")}
                     </Badge>
                   )}
                   {duckTarget.includes(t.index) && (
-                    <Badge variant="armed" className="shrink-0" title="Pushed down while a trigger track is speaking.">
-                      ducked
+                    <Badge variant="armed" className="shrink-0" title={translate("signature.track.duckedTitle")}>
+                      {translate("signature.track.ducked")}
                     </Badge>
                   )}
                 </div>
@@ -418,7 +418,7 @@ export function TrackRows({
                     // The route refuses zero: silence is the mute button.
                     commitGain(t.index, Math.max(v, LIVE_MIN_GAIN), live.onGain);
                   }}
-                  aria-label={`Track ${t.index + 1} gain`}
+                  aria-label={translate("signature.track.gainAria", { n: t.index + 1 })}
                   className={cn(!sel.enabled && "opacity-40")}
                 />
                 <span
@@ -475,14 +475,12 @@ export function TrackRows({
                   <div className="flex w-fit cursor-help items-center gap-1.5 text-sm text-warn">
                     <AlertTriangle className="h-3 w-3 shrink-0" />
                     <span>
-                      Not sent — this destination excludes the “{ROLE_LABEL[role]}” role.
+                      {translate("signature.track.excludedRole", { role: ROLE_LABEL[role] })}
                     </span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-72">
-                  The exclusion follows the role, not the track number. Move this audio to
-                  another track and it stays out of this destination, as long as the role
-                  moves with it.
+                  {translate("signature.track.excludedRoleHint")}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -495,11 +493,11 @@ export function TrackRows({
                     onAnnotate(t.index, { role: v === NO_ROLE ? "" : (v as TrackRole) })
                   }
                 >
-                  <SelectTrigger className="h-6 text-sm" aria-label={`Track ${t.index + 1} role`}>
-                    <SelectValue placeholder="No role" />
+                  <SelectTrigger className="h-6 text-sm" aria-label={translate("signature.track.roleAria", { n: t.index + 1 })}>
+                    <SelectValue placeholder={translate("signature.track.noRole")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={NO_ROLE}>No role</SelectItem>
+                    <SelectItem value={NO_ROLE}>{translate("signature.track.noRole")}</SelectItem>
                     {TRACK_ROLES.map((r) => (
                       <SelectItem key={r} value={r}>
                         {ROLE_LABEL[r]}
@@ -511,28 +509,28 @@ export function TrackRows({
                 <Input
                   value={ann.label ?? ""}
                   maxLength={MAX_LABEL_LEN}
-                  placeholder={t.title || "Label — e.g. “Guest mic (Zoom)”"}
+                  placeholder={t.title || translate("signature.track.labelPlaceholder")}
                   onChange={(e) => onAnnotate(t.index, { label: e.target.value })}
                   className="h-6 text-sm"
-                  aria-label={`Track ${t.index + 1} label`}
+                  aria-label={translate("signature.track.labelAria", { n: t.index + 1 })}
                 />
 
                 <Input
                   value={ann.language ?? ""}
                   maxLength={MAX_LANG_TAG_LEN}
-                  placeholder={t.language || "lang"}
+                  placeholder={t.language || translate("signature.track.langPlaceholder")}
                   onChange={(e) => onAnnotate(t.index, { language: e.target.value })}
                   className="h-6 text-sm"
-                  aria-label={`Track ${t.index + 1} language`}
+                  aria-label={translate("signature.track.languageAria", { n: t.index + 1 })}
                 />
 
                 <label className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
                   <Switch
                     checked={ann.denoise === true}
                     onCheckedChange={(v) => onAnnotate(t.index, { denoise: v })}
-                    aria-label={`Denoise track ${t.index + 1}`}
+                    aria-label={translate("signature.track.denoiseAria", { n: t.index + 1 })}
                   />
-                  denoise
+                  {translate("signature.track.denoise")}
                 </label>
               </div>
             )}
@@ -571,6 +569,7 @@ export function TrackSummary({
   labels?: (string | undefined)[] | null;
   className?: string;
 }) {
+  const t = useT();
   const list = tracks ?? [];
   return (
     <div className={cn("flex items-center gap-1", className)}>
@@ -593,7 +592,7 @@ export function TrackSummary({
       })}
       {list.length === 0 && (
         <Badge variant="down" className="ml-1">
-          no audio
+          {t("signature.track.noAudio")}
         </Badge>
       )}
     </div>

@@ -9,7 +9,7 @@ import { toneForState } from "@/lib/signal";
 import { kbps } from "@/lib/format";
 import { useMotionTransition } from "@/lib/motion";
 import type { Status } from "@/lib/types";
-import { useStateLabel } from "@/lib/i18n";
+import { useStateLabel, useT } from "@/lib/i18n";
 
 /* ===========================================================================
    ACROSS-THE-ROOM MODE.
@@ -102,6 +102,7 @@ function RoomPanel({
   status: Status | null | undefined;
   transition: ReturnType<typeof useMotionTransition>;
 }) {
+  const t = useT();
   const stateLabel = useStateLabel();
 
   const air = onAir(status?.destinations);
@@ -125,7 +126,7 @@ function RoomPanel({
       transition={transition}
       role="dialog"
       aria-modal="true"
-      aria-label="Across the room"
+      aria-label={t("i18nSweep.acrossTheRoom")}
       className="fixed inset-0 z-50 flex flex-col gap-6 overflow-y-auto bg-background p-8"
     >
       <div className="flex items-start justify-between gap-4">
@@ -137,15 +138,15 @@ function RoomPanel({
                 half the size this needs. A seventh scale step used by one view
                 would be a step somebody picks by accident later. */}
             <div className="text-[clamp(2.5rem,9vw,7rem)] font-semibold uppercase leading-none tracking-tight">
-              {live ? "On air" : "Off air"}
+              {live ? t("room.onAir") : t("room.offAir")}
             </div>
             <div className="tnum mt-2 font-mono text-[clamp(1rem,2.5vw,1.75rem)] text-muted-foreground">
-              {air.live} of {air.enabled} destinations
+              {t("room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
               {ingest?.state === "running" && ` · ${kbps(ingest.progress?.bitrateKbps ?? 0)}`}
             </div>
           </div>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("common.close")}>
           <X />
         </Button>
       </div>
@@ -162,7 +163,7 @@ function RoomPanel({
                 {f.subject}
               </span>
               <span className="shrink-0 font-mono text-[clamp(0.875rem,2vw,1.5rem)] uppercase tracking-wider text-muted-foreground">
-                {f.state ? stateLabel(f.state) : "check"}
+                {f.state ? stateLabel(f.state) : t("room.check")}
               </span>
             </div>
           ))}

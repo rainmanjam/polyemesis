@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { trackSignal, TRACK_SIGNAL_TEXT } from "./trackSignal";
+import { translate } from "./i18n";
 
 /* THE METER COLUMN ON THE PAGE WHERE ROUTING IS DECIDED.
  *
@@ -19,7 +20,7 @@ describe("trackSignal", () => {
     expect(trackSignal({ hasLevels: false, probed: true, feedLive: true })).toBe(
       "notMeasured",
     );
-    expect(TRACK_SIGNAL_TEXT.notMeasured).toBe("not measured");
+    expect(translate("en", TRACK_SIGNAL_TEXT.notMeasured)).toBe("not measured");
   });
 
   it("distinguishes an ingest that has not been described yet", () => {
@@ -32,7 +33,7 @@ describe("trackSignal", () => {
     // read as live audio. A stale reading that looks healthy is worse than no
     // reading, because there is nothing to notice.
     expect(trackSignal({ hasLevels: true, probed: true, feedLive: false })).toBe("offline");
-    expect(TRACK_SIGNAL_TEXT.offline).toBe("meter feed offline");
+    expect(translate("en", TRACK_SIGNAL_TEXT.offline)).toBe("meter feed offline");
   });
 
   it("still draws the meter when the feed is up and the numbers are real", () => {

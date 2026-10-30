@@ -76,9 +76,7 @@ export function PullIngestFields({
             {t("set.dialsOnly", { schemes: PULL_SCHEMES.join(", ") })}</span>
         ) : (
           <span className="text-[10px] text-muted-foreground">
-            One of {PULL_SCHEMES.join(", ")}. A file:// source is a path RELATIVE to the data
-            directory and may not contain ".." — it is confined there the same way a file
-            destination is.
+            {t("set.pullSchemesNote", { schemes: PULL_SCHEMES.join(", ") })}
           </span>
         )}
       </div>
