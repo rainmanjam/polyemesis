@@ -545,10 +545,25 @@ used to have three samplers of the host disagreeing by a tick.
 | Method | Path |
 |---|---|
 | `GET` `PUT` | `/settings` |
+| `GET` `POST` | `/recording` |
 | `PUT` | `/settings/mqtt-password` |
 | `PUT` | `/settings/automod-key` |
 | `GET` | `/tls`, `/fonts` |
 | `GET` | `/tls/acme-preflight` |
+
+`GET /recording` answers the install-wide recording switch as
+`{"enabled", "state", "halted", "reason", "installWide"}`. Recording is one switch for every
+programme, so `installWide` is always true. `state` is `off` when `recording.enabled` is false;
+`halted_disk` when it is on but the free-space floor has stopped the recorder (`reason` says why);
+`recording` when an engine has its recorder child up; and `not_running` when it is on and the floor
+is clear but no recorder is up, for example because no programme has an engine yet. A read token may call it.
+
+`POST /recording` with `{"enabled": bool}` writes `recording.enabled` and nothing else, under the
+settings store's lock, then reconciles the recorder the same way a settings save does, so the
+recorder starts or stops now rather than at the next restart. It needs an admin token, and it
+answers with the new state. A change raises the same `settings.changed` audit event a settings
+save does, naming the `recording` section. A save made from a read taken before the toggle is refused as stale,
+like any other settings change, because the toggle moves the settings version.
 
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
@@ -693,6 +708,13 @@ three meter intervals and one second. `stale` means readings arrived and have st
 and how many YouTube broadcasts it would **end for good**. It reads the recorded phase and
 makes no platform call. It takes the same `?source=` scope as `stop-all`, and a read token may
 call it. `stop-all` still needs an admin token and `"confirm": true`.
+
+With `?destination=<id>` the same route previews one destination's stop, which is what a
+per-destination stop would end: `destinations` is 1 and `youtubeBroadcasts` is 0 or 1. An id that
+names no destination is a `404`, and a malformed one a `400`, never a zero count: a zero would read
+as a stop that ends nothing, over a row the caller never saw.
+Add `?source=<id>` to scope it to a programme: a destination that is on another programme is
+also a `404`, so a caller bound to one programme never gets a count for another's row.
 
 `start-all` and `stop-all` take no id list. **With `?source=<id>` they act on
 that programme's destinations only; without it, on every destination on the

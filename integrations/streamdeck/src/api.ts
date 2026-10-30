@@ -1,4 +1,12 @@
-import type { ConnectionInfo, Feed, LevelsReading, StatusPayload, StopImpact } from "./model.js";
+import type {
+  ConnectionInfo,
+  Feed,
+  LevelsReading,
+  PresetSummary,
+  RecordingState,
+  StatusPayload,
+  StopImpact,
+} from "./model.js";
 
 // The polyemesis REST client. It knows the routes and the error taxonomy and
 // nothing about Stream Deck. The transport is injected, so the tests run
@@ -45,7 +53,12 @@ export type ApiErrorKind =
   /** Any other non-2xx answer. The server's own message is kept. */
   | "http"
   /** A 2xx answer whose body is not the JSON we expected. */
-  | "malformed";
+  | "malformed"
+  /**
+   * The install has no programme yet, so a route that acts on one refused with 503 and
+   * code "no_source". The token is fine; there is simply nothing to act on.
+   */
+  | "noSource";
 
 export class ApiError extends Error {
   constructor(
@@ -104,9 +117,50 @@ export class PolyemesisClient {
     return ms;
   }
 
-  /** What a stop would end. Makes no platform call on the server. */
+  /** What a stop of the whole programme would end. Makes no platform call on the server. */
   stopImpact(sourceId?: number): Promise<StopImpact> {
     return this.call("GET", "/destinations/stop-impact", sourceId);
+  }
+
+  /**
+   * What stopping ONE destination would end. With a programme, the server also checks the
+   * destination is on it. It answers 404 for an id it does not hold, or one on another
+   * programme, and the key treats either as a refusal.
+   */
+  stopImpactFor(destinationId: number, sourceId?: number): Promise<StopImpact> {
+    return this.call("GET", "/destinations/stop-impact", sourceId, undefined, {
+      destination: String(destinationId),
+    });
+  }
+
+  /** Whether recording is on for the install, and what the recorder is doing. */
+  recording(): Promise<RecordingState> {
+    return this.call("GET", "/recording");
+  }
+
+  /** Switches recording on or off for the whole install. Needs an admin token. */
+  setRecording(enabled: boolean): Promise<RecordingState> {
+    return this.call("POST", "/recording", undefined, { enabled });
+  }
+
+  /** The routing presets this install offers. Needs no programme. */
+  async routingPresets(): Promise<PresetSummary[]> {
+    const body = await this.call<{ presets?: unknown }>("GET", "/routing/presets");
+    const presets = body.presets;
+    const isSummary = (p: unknown): p is PresetSummary =>
+      typeof p === "object" &&
+      p !== null &&
+      typeof (p as PresetSummary).id === "string" &&
+      typeof (p as PresetSummary).name === "string";
+    if (!Array.isArray(presets) || !presets.every(isSummary)) {
+      throw new ApiError("malformed", 200, "routing presets carry no id and name");
+    }
+    return presets.map((p) => ({ id: p.id, name: p.name }));
+  }
+
+  /** Applies a routing preset to one programme with the server's default options. Can restart its destinations. */
+  applyPreset(presetId: string, sourceId?: number): Promise<unknown> {
+    return this.call("POST", `/routing/presets/${encodeURIComponent(presetId)}`, sourceId);
   }
 
   startAll(sourceId?: number): Promise<unknown> {
@@ -136,11 +190,13 @@ export class PolyemesisClient {
     path: string,
     sourceId?: number,
     body?: unknown,
+    query?: Record<string, string>,
   ): Promise<T> {
     const url = new URL(this.base.toString());
     url.pathname = `${this.base.pathname.replace(/\/$/, "")}/api/v1${path}`;
     url.search = "";
     if (sourceId !== undefined) url.searchParams.set("source", String(sourceId));
+    for (const [name, value] of Object.entries(query ?? {})) url.searchParams.set(name, value);
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.token}`,
@@ -161,6 +217,9 @@ export class PolyemesisClient {
 
     if (res.status === 401) throw new ApiError("unauthorized", 401, serverMessage(res.body, "unauthorized"));
     if (res.status === 403) throw new ApiError("forbidden", 403, serverMessage(res.body, "forbidden"));
+    if (res.status === 503 && errorCode(res.body) === "no_source") {
+      throw new ApiError("noSource", 503, serverMessage(res.body, "no source"));
+    }
     if (res.status < 200 || res.status >= 300) {
       throw new ApiError("http", res.status, serverMessage(res.body, `HTTP ${res.status}`));
     }
@@ -170,6 +229,16 @@ export class PolyemesisClient {
     } catch {
       throw new ApiError("malformed", res.status, "the response was not JSON");
     }
+  }
+}
+
+/** The machine-readable code the server sends beside its message, when it sends one. */
+function errorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as { code?: unknown };
+    return typeof parsed.code === "string" ? parsed.code : undefined;
+  } catch {
+    return undefined;
   }
 }
 

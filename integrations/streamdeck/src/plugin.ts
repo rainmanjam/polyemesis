@@ -40,11 +40,20 @@ function text(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** The saved pairing, kept for requests the inspector makes without sending its own form values. */
+let savedGlobals: GlobalSettings = {};
+
 /** Applies the global pairing settings, then repaints from a fresh check. */
 function applyGlobals(raw: Record<string, unknown>): void {
   const globals: GlobalSettings = { url: text(raw.url), token: text(raw.token), caPem: text(raw.caPem) };
+  savedGlobals = globals;
   rt().configure(globals);
   void rt().tick();
+  // A preset picker open while the pairing is saved listed its presets against the OLD pairing
+  // (or none). Send it a fresh list now, so pairing first and picking second works without a reopen.
+  if (streamDeck.ui.action?.manifestId === `${PLUGIN}.preset`) {
+    void presetList().then((list) => streamDeck.ui.sendToPropertyInspector(list));
+  }
 }
 
 /** Wraps an SDK action in the runtime's Surface shape. Keys and dials differ in which calls they accept. */
@@ -124,7 +133,42 @@ export class StopAllKey extends PolyAction {
   }
 
   override onKeyUp(ev: KeyUpEvent): Promise<void> {
-    return rt().pressStopUp(ev.action.id);
+    return rt().pressHoldUp(ev.action.id);
+  }
+}
+
+@action({ UUID: `${PLUGIN}.stop-destination` })
+export class StopDestinationKey extends PolyAction {
+  readonly kind = "stopOne" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressStopOneDown(ev.action.id);
+  }
+
+  override onKeyUp(ev: KeyUpEvent): Promise<void> {
+    return rt().pressHoldUp(ev.action.id);
+  }
+}
+
+@action({ UUID: `${PLUGIN}.record` })
+export class RecordKey extends PolyAction {
+  readonly kind = "record" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressRecord(ev.action.id);
+  }
+}
+
+@action({ UUID: `${PLUGIN}.preset` })
+export class PresetKey extends PolyAction {
+  readonly kind = "preset" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressPresetDown(ev.action.id);
+  }
+
+  override onKeyUp(ev: KeyUpEvent): Promise<void> {
+    return rt().pressHoldUp(ev.action.id);
   }
 }
 
@@ -158,6 +202,9 @@ async function testConnection(g: GlobalSettings) {
 streamDeck.actions.registerAction(new DestinationKey());
 streamDeck.actions.registerAction(new GoLiveKey());
 streamDeck.actions.registerAction(new StopAllKey());
+streamDeck.actions.registerAction(new StopDestinationKey());
+streamDeck.actions.registerAction(new RecordKey());
+streamDeck.actions.registerAction(new PresetKey());
 streamDeck.actions.registerAction(new FailoverKey());
 streamDeck.actions.registerAction(new MeterDial());
 
@@ -172,8 +219,24 @@ streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>
   if (msg.type === "test") {
     const result = await testConnection({ url: text(msg.url), token: text(msg.token), caPem: text(msg.caPem) });
     await streamDeck.ui.sendToPropertyInspector({ type: "test", ...result });
+  } else if (msg.type === "presets") {
+    // The preset picker reads the saved pairing, never the inspector's form: a token typed but not saved
+    // must not be what lists the presets.
+    await streamDeck.ui.sendToPropertyInspector(await presetList());
   }
 });
+
+/** The routing presets for the inspector's picker, or the key that says why they could not be listed. */
+async function presetList(): Promise<{ type: "presets"; presets?: { id: string; name: string }[]; key?: StreamDeckKey }> {
+  try {
+    const client = clientFor(savedGlobals, nodeTransport);
+    return { type: "presets", presets: await client.routingPresets() };
+  } catch (err) {
+    if (err instanceof ConfigError) return { type: "presets", key: err.key as StreamDeckKey };
+    if (err instanceof ApiError) return { type: "presets", key: authKeyFor(err) };
+    return { type: "presets", key: "streamdeck.pi.presetsFailed" as StreamDeckKey };
+  }
+}
 
 await streamDeck.connect();
 

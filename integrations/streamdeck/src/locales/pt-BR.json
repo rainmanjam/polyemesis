@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Informe o endereço do servidor.",
   "streamdeck.err.urlInvalid": "O endereço do servidor não é uma URL válida.",
   "streamdeck.err.urlScheme": "Use https:// para o servidor. http:// simples só é permitido para localhost.",
-  "streamdeck.err.tokenRequired": "Cole um token da API das Configurações da instalação."
+  "streamdeck.err.tokenRequired": "Cole um token da API das Configurações da instalação.",
+  "streamdeck.record.on": "Gravando",
+  "streamdeck.record.off": "Gravação desligada",
+  "streamdeck.record.notRunning": "Não está em execução",
+  "streamdeck.record.haltedDisk": "PARADA: DISCO",
+  "streamdeck.preset.hold": "Segure para aplicar",
+  "streamdeck.preset.applying": "Aplicando",
+  "streamdeck.preset.noIngest": "Sem ingestão",
+  "streamdeck.pi.presetLabel": "Predefinição de roteamento",
+  "streamdeck.pi.presetHint": "Aplicar uma predefinição pode reiniciar os destinos deste programa.",
+  "streamdeck.pi.presetsFailed": "Não foi possível carregar a lista de predefinições.",
+  "streamdeck.pi.presetChoose": "Escolha uma predefinição",
+  "streamdeck.pi.presetMissing": "{id} (não existe mais nesta instalação)",
+  "streamdeck.pi.installWide": "A gravação é da instalação inteira: esta tecla a liga ou desliga para todos os programas."
 }

@@ -769,6 +769,10 @@ export const api = {
    *  a caller that never showed one is exactly who the refusal is for. */
   stopAllDestinations: () =>
     post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
+  /** What a stop-all would end right now: the server's count, from each row's recorded phase.
+   *  The Stop dialog shows this and nothing local, so the dialog and the stop agree. Read-only. */
+  stopImpact: () =>
+    get<{ destinations: number; youtubeBroadcasts: number }>("/destinations/stop-impact"),
   refreshStreamKey: (id: DestinationId) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 

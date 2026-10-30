@@ -221,4 +221,49 @@ describe("ConfirmDestructive names what it is about to destroy", () => {
       "a bulk dialog must not stringify its own subject marker into the UI",
     ).toBeNull();
   });
+
+  // A stop whose count is still loading, or failed to load, must not be confirmable.
+  // The dialog stays open to say so; a press on the held button does nothing.
+  it("holds the confirm button shut while confirmDisabled, and never runs the action", () => {
+    let ran = 0;
+    render(
+      <ConfirmDestructive
+        open
+        onOpenChange={() => {}}
+        subject={{ unnamed: true }}
+        title="Stop all"
+        description="Counting"
+        confirmLabel="Stop all"
+        confirmDisabled
+        onConfirm={() => {
+          ran++;
+        }}
+      />,
+    );
+    const confirm = screen.getByRole("button", { name: "Stop all" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(ran).toBe(0);
+  });
+
+  it("confirms normally when confirmDisabled is left out", () => {
+    let ran = 0;
+    render(
+      <ConfirmDestructive
+        open
+        onOpenChange={() => {}}
+        subject={{ unnamed: true }}
+        title="Stop all"
+        description="Counted"
+        confirmLabel="Stop all"
+        onConfirm={() => {
+          ran++;
+        }}
+      />,
+    );
+    const confirm = screen.getByRole("button", { name: "Stop all" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(ran).toBe(1);
+  });
 });

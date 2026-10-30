@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Enter the server address.",
   "streamdeck.err.urlInvalid": "The server address is not a valid URL.",
   "streamdeck.err.urlScheme": "Use https:// for the server. Plain http:// is allowed only for localhost.",
-  "streamdeck.err.tokenRequired": "Paste an API token from the install's Settings."
+  "streamdeck.err.tokenRequired": "Paste an API token from the install's Settings.",
+  "streamdeck.record.on": "Recording",
+  "streamdeck.record.off": "Record off",
+  "streamdeck.record.notRunning": "Not running",
+  "streamdeck.record.haltedDisk": "HALTED: DISK",
+  "streamdeck.preset.hold": "Hold to apply",
+  "streamdeck.preset.applying": "Applying",
+  "streamdeck.preset.noIngest": "No ingest",
+  "streamdeck.pi.presetLabel": "Routing preset",
+  "streamdeck.pi.presetHint": "Applying a preset can restart this programme's destinations.",
+  "streamdeck.pi.presetsFailed": "The preset list could not be loaded.",
+  "streamdeck.pi.presetChoose": "Choose a preset",
+  "streamdeck.pi.presetMissing": "{id} (no longer on this install)",
+  "streamdeck.pi.installWide": "Recording is install-wide: this key switches it for every programme."
 }

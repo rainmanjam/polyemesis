@@ -25,6 +25,8 @@ export interface GlobalSettings {
 export interface KeySettings {
   sourceId?: number;
   destinationId?: number;
+  /** A routing preset id from GET /routing/presets. Not a secret: it is safe in action settings. */
+  presetId?: string;
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -61,8 +63,10 @@ export function positiveId(raw: unknown): number | undefined {
 }
 
 export function keySettings(raw: Record<string, unknown> | undefined): KeySettings {
+  const preset = typeof raw?.presetId === "string" ? raw.presetId.trim() : "";
   return {
     sourceId: positiveId(raw?.sourceId),
     destinationId: positiveId(raw?.destinationId),
+    presetId: preset === "" ? undefined : preset,
   };
 }

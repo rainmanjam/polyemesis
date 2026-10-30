@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Voer het serveradres in.",
   "streamdeck.err.urlInvalid": "Het serveradres is geen geldige URL.",
   "streamdeck.err.urlScheme": "Gebruik https:// voor de server. Gewoon http:// is alleen toegestaan voor localhost.",
-  "streamdeck.err.tokenRequired": "Plak een API-token uit de instellingen van de installatie."
+  "streamdeck.err.tokenRequired": "Plak een API-token uit de instellingen van de installatie.",
+  "streamdeck.record.on": "Opname actief",
+  "streamdeck.record.off": "Opname uit",
+  "streamdeck.record.notRunning": "Draait niet",
+  "streamdeck.record.haltedDisk": "GESTOPT: SCHIJF",
+  "streamdeck.preset.hold": "Ingedrukt houden om toe te passen",
+  "streamdeck.preset.applying": "Toepassen",
+  "streamdeck.preset.noIngest": "Geen ingest",
+  "streamdeck.pi.presetLabel": "Routeringspreset",
+  "streamdeck.pi.presetHint": "Een preset toepassen kan de bestemmingen van dit programma opnieuw starten.",
+  "streamdeck.pi.presetsFailed": "De presetlijst kon niet worden geladen.",
+  "streamdeck.pi.presetChoose": "Kies een preset",
+  "streamdeck.pi.presetMissing": "{id} (niet meer op deze installatie)",
+  "streamdeck.pi.installWide": "Opname geldt voor de hele installatie: deze toets schakelt het voor elk programma."
 }

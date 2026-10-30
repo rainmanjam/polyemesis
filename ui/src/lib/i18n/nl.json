@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} daarvan is ingeschakeld en start direct opnieuw op de bronvideo. Geen van hen wordt verwijderd en hun audiorouting blijft ongewijzigd.",
   "i18nSweep.enabledMany": "{count} daarvan zijn ingeschakeld en starten direct opnieuw op de bronvideo. Geen van hen wordt verwijderd en hun audiorouting blijft ongewijzigd.",
   "i18nSweep.resultsEmpty": "Resultaten verschijnen hier, één rij per platform.",
-  "i18nSweep.matrixOut": "Uit"
+  "i18nSweep.matrixOut": "Uit",
+  "dash.stopCountLoading": "Tellen van de YouTube-uitzendingen die deze stop zou beëindigen…",
+  "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw."
 }

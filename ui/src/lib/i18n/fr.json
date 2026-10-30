@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} d'entre eux est activé et redémarrera immédiatement sur la vidéo source. Aucun n'est supprimé, et leur routage audio reste inchangé.",
   "i18nSweep.enabledMany": "{count} d'entre eux sont activés et redémarreront immédiatement sur la vidéo source. Aucun n'est supprimé, et leur routage audio reste inchangé.",
   "i18nSweep.resultsEmpty": "Les résultats apparaissent ici, une ligne par plateforme.",
-  "i18nSweep.matrixOut": "Sortie"
+  "i18nSweep.matrixOut": "Sortie",
+  "dash.stopCountLoading": "Décompte des diffusions YouTube que cet arrêt terminerait…",
+  "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez."
 }

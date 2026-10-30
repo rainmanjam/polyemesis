@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Wpisz adres serwera.",
   "streamdeck.err.urlInvalid": "Adres serwera nie jest prawidłowym adresem URL.",
   "streamdeck.err.urlScheme": "Użyj https:// dla serwera. Zwykłe http:// jest dozwolone tylko dla localhost.",
-  "streamdeck.err.tokenRequired": "Wklej token API z Ustawień instalacji."
+  "streamdeck.err.tokenRequired": "Wklej token API z Ustawień instalacji.",
+  "streamdeck.record.on": "Nagrywanie",
+  "streamdeck.record.off": "Nagrywanie wyłączone",
+  "streamdeck.record.notRunning": "Nie działa",
+  "streamdeck.record.haltedDisk": "ZATRZYMANE: DYSK",
+  "streamdeck.preset.hold": "Przytrzymaj, aby zastosować",
+  "streamdeck.preset.applying": "Stosowanie",
+  "streamdeck.preset.noIngest": "Brak wejścia",
+  "streamdeck.pi.presetLabel": "Ustawienie routingu",
+  "streamdeck.pi.presetHint": "Zastosowanie ustawienia może zrestartować miejsca docelowe tego programu.",
+  "streamdeck.pi.presetsFailed": "Nie udało się wczytać listy ustawień.",
+  "streamdeck.pi.presetChoose": "Wybierz preset",
+  "streamdeck.pi.presetMissing": "{id} (nie ma go już w tej instalacji)",
+  "streamdeck.pi.installWide": "Nagrywanie dotyczy całej instalacji: ten przycisk przełącza je dla wszystkich programów."
 }

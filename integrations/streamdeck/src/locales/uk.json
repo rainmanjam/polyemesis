@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Введіть адресу сервера.",
   "streamdeck.err.urlInvalid": "Адреса сервера не є дійсною URL-адресою.",
   "streamdeck.err.urlScheme": "Використовуйте https:// для сервера. Звичайний http:// дозволено лише для localhost.",
-  "streamdeck.err.tokenRequired": "Вставте API-токен з налаштувань інсталяції."
+  "streamdeck.err.tokenRequired": "Вставте API-токен з налаштувань інсталяції.",
+  "streamdeck.record.on": "Запис",
+  "streamdeck.record.off": "Запис вимкнено",
+  "streamdeck.record.notRunning": "Не запущено",
+  "streamdeck.record.haltedDisk": "ЗУПИНЕНО: ДИСК",
+  "streamdeck.preset.hold": "Утримуйте, щоб застосувати",
+  "streamdeck.preset.applying": "Застосовується",
+  "streamdeck.preset.noIngest": "Немає вхідного потоку",
+  "streamdeck.pi.presetLabel": "Пресет маршрутизації",
+  "streamdeck.pi.presetHint": "Застосування пресета може перезапустити призначення цієї програми.",
+  "streamdeck.pi.presetsFailed": "Не вдалося завантажити список пресетів.",
+  "streamdeck.pi.presetChoose": "Виберіть пресет",
+  "streamdeck.pi.presetMissing": "{id} (більше немає в цьому встановленні)",
+  "streamdeck.pi.installWide": "Запис спільний для всієї установки: ця клавіша перемикає його для всіх програм."
 }

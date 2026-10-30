@@ -7,6 +7,10 @@
   let actionContext;
   let pluginUUID;
   let strings = {};
+  // The key's saved preset, and the install's list once it arrives. Kept apart because either can
+  // arrive first, and the picker must show the SAVED choice, never silently the first preset.
+  let savedPresetId = "";
+  let presetList = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -58,8 +62,51 @@
     if (Number.isSafeInteger(source) && source > 0) payload.sourceId = source;
     const dest = Number($("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
+    if ($("presetId").value) payload.presetId = $("presetId").value;
+    savedPresetId = $("presetId").value;
     send({ event: "setSettings", context: actionContext, payload });
     flashSaved();
+  }
+
+  // The preset list comes from the plugin, which reads the SAVED pairing. Never from this page,
+  // so a token typed but not yet saved cannot be what lists the presets.
+  function requestPresets() {
+    send({ action: actionType, event: "sendToPlugin", context: actionContext, payload: { type: "presets" } });
+  }
+
+  function showPresets(payload) {
+    const error = $("err-preset");
+    if (payload.key) {
+      error.textContent = strings[payload.key] || strings["streamdeck.pi.presetsFailed"] || "";
+      error.hidden = false;
+      renderPresets();
+      return;
+    }
+    error.hidden = true;
+    presetList = payload.presets || [];
+    renderPresets();
+  }
+
+  // An empty "choose" entry first, so nothing is chosen until the operator chooses: a key with no
+  // preset is unbound, and the picker says so rather than showing a preset the key does not hold.
+  // A saved preset the install no longer lists stays visible, marked, instead of vanishing.
+  function renderPresets() {
+    const select = $("presetId");
+    const option = (value, label) => {
+      const o = document.createElement("option");
+      o.value = value;
+      o.textContent = label;
+      return o;
+    };
+    select.replaceChildren(option("", strings["streamdeck.pi.presetChoose"] || ""));
+    const list = presetList || [];
+    list.forEach((p) => select.appendChild(option(p.id, p.name)));
+    if (savedPresetId && presetList && !list.some((p) => p.id === savedPresetId)) {
+      select.appendChild(option(savedPresetId, (strings["streamdeck.pi.presetMissing"] || "{id}").replace("{id}", savedPresetId)));
+    } else if (savedPresetId && !presetList) {
+      select.appendChild(option(savedPresetId, savedPresetId));
+    }
+    select.value = savedPresetId;
   }
 
   function showGlobal(settings) {
@@ -71,6 +118,8 @@
   function showAction(settings) {
     if (typeof settings.sourceId === "number") $("sourceId").value = String(settings.sourceId);
     if (typeof settings.destinationId === "number") $("destinationId").value = String(settings.destinationId);
+    savedPresetId = typeof settings.presetId === "string" ? settings.presetId : "";
+    renderPresets();
   }
 
   function runTest() {
@@ -113,6 +162,7 @@
     else if (msg.event === "sendToPropertyInspector") {
       const payload = msg.payload || {};
       if (payload.type === "test") onTestResult(payload);
+      else if (payload.type === "presets") showPresets(payload);
     }
   }
 
@@ -123,16 +173,22 @@
     pluginUUID = uuid;
     actionType = action.action;
     actionContext = action.context;
-    $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination";
+    $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination" && actionType !== "com.polyemesis.streamdeck.stop-destination";
+    $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
+    $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
+    // Recording is install-wide: the Record key takes no programme, so it shows no programme field.
+    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record";
     socket = new WebSocket("ws://127.0.0.1:" + port);
     socket.onopen = function () {
       send({ event: registerEvent, uuid: uuid });
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
+      if (!$("block-preset").hidden) requestPresets();
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
     ["sourceId", "destinationId"].forEach((f) => $(f).addEventListener("change", saveAction));
+    $("presetId").addEventListener("change", saveAction);
     $("test").addEventListener("click", runTest);
   };
 })();

@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} de ellos está activado y se reiniciará de inmediato con el vídeo de la fuente. Ninguno se elimina y su enrutamiento de audio no cambia.",
   "i18nSweep.enabledMany": "{count} de ellos están activados y se reiniciarán de inmediato con el vídeo de la fuente. Ninguno se elimina y su enrutamiento de audio no cambia.",
   "i18nSweep.resultsEmpty": "Los resultados aparecen aquí, una fila por plataforma.",
-  "i18nSweep.matrixOut": "Salida"
+  "i18nSweep.matrixOut": "Salida",
+  "dash.stopCountLoading": "Contando las transmisiones de YouTube que este stop terminaría…",
+  "dash.stopCountFailed": "No se pudo cargar el recuento de transmisiones que terminaría este stop, así que «Detener todo» no está disponible. Cierra y vuelve a intentarlo."
 }

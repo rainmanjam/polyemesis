@@ -387,6 +387,9 @@ func leakRoutes() []string {
 		// counts it returns describe a buffer of the server's own logs -- exactly
 		// the shape this sweep exists to check for leaks.
 		"/api/v1/debug",
+		// The Record key's state: enabled, a state word and a human reason for a
+		// disk halt. A read a read-scoped token may make; no credential is in it.
+		"/api/v1/recording",
 		"/api/v1/status",
 		"/api/v1/source",
 		"/api/v1/destinations",

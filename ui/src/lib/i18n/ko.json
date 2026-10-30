@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "그중 {count}개가 활성화되어 있으며 소스 영상으로 즉시 다시 시작됩니다. 삭제되는 항목은 없고 오디오 라우팅도 그대로 유지됩니다.",
   "i18nSweep.enabledMany": "그중 {count}개가 활성화되어 있으며 소스 영상으로 즉시 다시 시작됩니다. 삭제되는 항목은 없고 오디오 라우팅도 그대로 유지됩니다.",
   "i18nSweep.resultsEmpty": "결과가 여기에 표시되며, 플랫폼마다 한 줄씩 나타납니다.",
-  "i18nSweep.matrixOut": "출력"
+  "i18nSweep.matrixOut": "출력",
+  "dash.stopCountLoading": "이 중지로 종료될 YouTube 방송을 세는 중…",
+  "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요."
 }

@@ -65,22 +65,33 @@ describe("manifest", () => {
     expect(imageExists(manifest.CategoryIcon)).toBe(true);
   });
 
-  it("gives every key action the same six states, in KEY_STATE order", () => {
+  // Each key action has its own face set: imgs/keys/<action>/<state>, with the action's own glyph.
+  const shortName = (uuid: string) => uuid.replace(`${manifest.UUID}.`, "");
+
+  it("gives every key action the same eight states, in KEY_STATE order, from its own face set", () => {
     const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
     expect(keys.length).toBeGreaterThan(0);
-    const expected = ["idle", "live", "warn", "error", "held", "unbound"];
+    const expected = ["idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin"];
     expect(Object.keys(KEY_STATE)).toEqual(expected);
     for (const a of keys) {
       // The device draws States[index]; the runtime sends KEY_STATE[tone] as index.
+      expect(a.States, a.UUID).toHaveLength(expected.length);
       for (const name of expected) {
         const index = KEY_STATE[name as keyof typeof KEY_STATE];
-        expect(a.States[index]?.Image, `${a.UUID} state ${name}`).toBe(`imgs/keys/${name}`);
+        expect(a.States[index]?.Image, `${a.UUID} state ${name}`).toBe(
+          `imgs/keys/${shortName(a.UUID)}/${name}`,
+        );
       }
     }
   });
 
-  it("gives each key state an image on disk, at both sizes", () => {
-    for (const n of Object.keys(KEY_STATE)) expect(imageExists(`imgs/keys/${n}`), n).toBe(true);
+  it("gives each key action's states an image on disk, at both sizes", () => {
+    const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
+    for (const a of keys) {
+      for (const n of Object.keys(KEY_STATE)) {
+        expect(imageExists(`imgs/keys/${shortName(a.UUID)}/${n}`), `${a.UUID} ${n}`).toBe(true);
+      }
+    }
   });
 
   it("gives every action an icon and a property inspector that exist", () => {
@@ -92,7 +103,7 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "stop-all"],
+      ["destination", "failover", "go-live", "meter", "preset", "record", "stop-all", "stop-destination"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
   });

@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
   "Name": "polyemesis",
-  "Description": "Destination state, go live, stop with confirmation, failover and dial meters for a polyemesis install.",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
@@ -38,22 +38,28 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/destination/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/destination/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/destination/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/destination/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/destination/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/destination/halted"
+        },
+        {
+          "Image": "imgs/keys/destination/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -70,22 +76,28 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/go-live/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/go-live/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/go-live/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/go-live/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/go-live/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/go-live/unbound"
+        },
+        {
+          "Image": "imgs/keys/go-live/halted"
+        },
+        {
+          "Image": "imgs/keys/go-live/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -102,22 +114,28 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/stop-all/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/stop-all/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/stop-all/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/stop-all/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/stop-all/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/stop-all/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-all/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -135,26 +153,148 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/failover/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/failover/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/failover/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/failover/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/failover/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/failover/unbound"
+        },
+        {
+          "Image": "imgs/keys/failover/halted"
+        },
+        {
+          "Image": "imgs/keys/failover/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.stop-destination",
+      "Name": "Stop destination",
+      "Tooltip": "Hold to stop this one destination. Stopping a YouTube broadcast ends it for good. Needs an admin token.",
+      "Icon": "imgs/actions/stop-destination",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/stop-destination/idle"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/live"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/warn"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/error"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/held"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/needsAdmin"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.record",
+      "Name": "Record",
+      "Tooltip": "Switches recording on or off for the whole install, not one programme. Tap to switch. Needs an admin token.",
+      "Icon": "imgs/actions/record",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/record/idle"
+        },
+        {
+          "Image": "imgs/keys/record/live"
+        },
+        {
+          "Image": "imgs/keys/record/warn"
+        },
+        {
+          "Image": "imgs/keys/record/error"
+        },
+        {
+          "Image": "imgs/keys/record/held"
+        },
+        {
+          "Image": "imgs/keys/record/unbound"
+        },
+        {
+          "Image": "imgs/keys/record/halted"
+        },
+        {
+          "Image": "imgs/keys/record/needsAdmin"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.preset",
+      "Name": "Routing preset",
+      "Tooltip": "Hold to apply a routing preset to this programme. Applying can restart its destinations. Needs an admin token.",
+      "Icon": "imgs/actions/preset",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/preset/idle"
+        },
+        {
+          "Image": "imgs/keys/preset/live"
+        },
+        {
+          "Image": "imgs/keys/preset/warn"
+        },
+        {
+          "Image": "imgs/keys/preset/error"
+        },
+        {
+          "Image": "imgs/keys/preset/held"
+        },
+        {
+          "Image": "imgs/keys/preset/unbound"
+        },
+        {
+          "Image": "imgs/keys/preset/halted"
+        },
+        {
+          "Image": "imgs/keys/preset/needsAdmin"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
     },
     {
       "UUID": "com.polyemesis.streamdeck.meter",

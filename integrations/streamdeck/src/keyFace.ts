@@ -7,8 +7,13 @@ import type { StreamDeckKey } from "./keys.js";
 // destination is "starting" (a reconcile may be in flight, see #462), and a
 // backup that is dead beside a healthy primary is shown, never hidden.
 
-/** The colour family a key is drawn in. Green means live and nothing else. */
-export type KeyTone = "live" | "warn" | "error" | "idle" | "held" | "unbound";
+/**
+ * The colour family a key is drawn in. Green means live and nothing else.
+ * "halted" is the Record key's HALTED: DISK face, its own image so an unreachable
+ * install (error) can never be mistaken for a full disk. "needsAdmin" is a write
+ * key on a read token: its own lock face, not the generic warn tile.
+ */
+export type KeyTone = "live" | "warn" | "error" | "idle" | "held" | "unbound" | "halted" | "needsAdmin";
 
 export interface KeyFace {
   tone: KeyTone;

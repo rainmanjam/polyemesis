@@ -41,5 +41,18 @@
   "streamdeck.err.urlRequired": "Introduce la dirección del servidor.",
   "streamdeck.err.urlInvalid": "La dirección del servidor no es una URL válida.",
   "streamdeck.err.urlScheme": "Usa https:// para el servidor. http:// simple solo se permite para localhost.",
-  "streamdeck.err.tokenRequired": "Pega un token de API de los Ajustes de la instalación."
+  "streamdeck.err.tokenRequired": "Pega un token de API de los Ajustes de la instalación.",
+  "streamdeck.record.on": "Grabando",
+  "streamdeck.record.off": "Grabación apagada",
+  "streamdeck.record.notRunning": "No se ejecuta",
+  "streamdeck.record.haltedDisk": "DETENIDA: DISCO",
+  "streamdeck.preset.hold": "Mantener para aplicar",
+  "streamdeck.preset.applying": "Aplicando",
+  "streamdeck.preset.noIngest": "Sin entrada",
+  "streamdeck.pi.presetLabel": "Preajuste de enrutamiento",
+  "streamdeck.pi.presetHint": "Aplicar un preajuste puede reiniciar los destinos de este programa.",
+  "streamdeck.pi.presetsFailed": "No se pudo cargar la lista de preajustes.",
+  "streamdeck.pi.presetChoose": "Elige un preajuste",
+  "streamdeck.pi.presetMissing": "{id} (ya no está en esta instalación)",
+  "streamdeck.pi.installWide": "La grabación es para toda la instalación: esta tecla la activa o desactiva para todos los programas."
 }

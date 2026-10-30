@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} deles está ativo e será reiniciado imediatamente com o vídeo da fonte. Nenhum será excluído, e o roteamento de áudio deles não muda.",
   "i18nSweep.enabledMany": "{count} deles estão ativos e serão reiniciados imediatamente com o vídeo da fonte. Nenhum será excluído, e o roteamento de áudio deles não muda.",
   "i18nSweep.resultsEmpty": "Os resultados aparecem aqui, uma linha por plataforma.",
-  "i18nSweep.matrixOut": "Saída"
+  "i18nSweep.matrixOut": "Saída",
+  "dash.stopCountLoading": "Contando as transmissões do YouTube que esta parada encerraria…",
+  "dash.stopCountFailed": "Não foi possível carregar a contagem de transmissões que esta parada encerraria, então 'Parar tudo' não está disponível. Feche e tente de novo."
 }

@@ -1828,5 +1828,7 @@
   "i18nSweep.enabledOne": "{count} di antaranya aktif dan akan langsung dimulai ulang pada video sumber. Tidak ada yang dihapus, dan routing audionya tidak berubah.",
   "i18nSweep.enabledMany": "{count} di antaranya aktif dan akan langsung dimulai ulang pada video sumber. Tidak ada yang dihapus, dan routing audionya tidak berubah.",
   "i18nSweep.resultsEmpty": "Hasil muncul di sini, satu baris per platform.",
-  "i18nSweep.matrixOut": "Keluar"
+  "i18nSweep.matrixOut": "Keluar",
+  "dash.stopCountLoading": "Menghitung siaran YouTube yang akan dihentikan…",
+  "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi."
 }

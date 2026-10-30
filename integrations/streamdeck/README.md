@@ -15,14 +15,17 @@ install the socket interleaves every programme's meters.
 
 - Stream Deck app 7.1 or later, and the plugin runs on Node 24 (the README of
   `@elgato/streamdeck` states both requirements).
-- A polyemesis install with the connection-check and stop-impact routes
-  (`GET /api/v1/auth/connection`, `GET /api/v1/destinations/stop-impact`).
+- A polyemesis install with the connection-check, stop-impact, recording and
+  routing-preset routes (`GET /api/v1/auth/connection`,
+  `GET /api/v1/destinations/stop-impact`, `GET` and `POST /api/v1/recording`,
+  `GET /api/v1/routing/presets`, `POST /api/v1/routing/presets/{preset}`).
 
 ## Pairing
 
 1. In the install's Settings, create an API token. A read token is enough to
-   show state. Start, stop and failover keys need an **admin** token, and the
-   plugin says so on the key instead of failing with a 403.
+   show state. Start, stop, failover, record and preset keys need an **admin**
+   token, and the plugin says so on the key instead of failing with a 403. A
+   read token sends no write request at all.
 2. In the Stream Deck app, open any polyemesis action and paste the server
    address and token. Press **Test connection**.
 3. For an install with a self-signed certificate, copy the CA from
@@ -39,11 +42,17 @@ action settings, so it does not travel with a profile export.
 | Destination | Shows one destination's live state. Tap to start it when it is off. |
 | Go live | Starts every destination on the key's programme. Needs admin. |
 | Stop all | Hold to stop every destination on the key's programme. Shows how many YouTube broadcasts a stop would end, and refuses if that count cannot be loaded. Needs admin. |
+| Stop destination | Hold to stop one destination. Shows how many YouTube broadcasts that stop would end, read from the server for that destination, and refuses if the count cannot be loaded or the destination is unknown. Needs admin. |
+| Record | Shows the install-wide recording switch: **Recording**, **Record off**, **Not running**, or **HALTED: DISK** with the reason when the free-space floor stopped it. Tap to switch. Recording is not per programme, so the key does not take a programme. Needs admin to switch. |
+| Routing preset | Hold to apply a routing preset to the key's programme. The preset list comes from the install. Applying can restart that programme's destinations. Shows **No ingest** when the install has no programme to apply to. Needs admin. |
 | Failover | Shows which source is on air. Tap to hand control back to automatic. Needs admin. |
 | Meter (dial) | The loudest channel on this install's meters, read from `GET /levels` for the key's programme. Shows NO FEED when the server reports the feed stale or unreachable. |
 
-Track mute is not included. The engine cannot change a track's gain without
-restarting the destination's stream, and that decision is still open.
+Record is a tap, not a hold, so one press starts or stops recording for every
+programme. Stopping a recording does not end a broadcast; a stop is a hold because
+it ends YouTube broadcasts for good.
+
+Track mute is coming with live gain (I4).
 
 ## Development
 
@@ -54,10 +63,20 @@ npm run coverage  # the same tests with lcov, read by SonarCloud
 npm run typecheck # tsc --noEmit
 npm run build     # bundles src/plugin.ts into com.polyemesis.streamdeck.sdPlugin/bin
                   # and writes ui/strings.js from the catalogs
-node scripts/icons.mjs   # regenerates the placeholder PNG icons
+node scripts/icons.mjs   # redraws every icon under com.polyemesis.streamdeck.sdPlugin/imgs
 ```
 
-The icons are flat colour placeholders. They are not final artwork.
+The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, and
+the PNGs are committed. Each key action has eight faces at 72 and 144 px, one per
+state in `KEY_STATE` order (`src/render.ts`): a tile in the state colour with the
+action's glyph in the corner, clear of the title. Held uses the UI's accent
+(`--primary`). Two states draw a status mark instead of the action glyph, so they
+can never be mistaken for another state: **HALTED: DISK** (a drive, on crimson; only
+the Record key uses it) and **Needs admin token** (a padlock, on violet). The action
+icons are white monochrome glyphs on transparent at 20 and 40 px, the category icon
+the same at 28 and 56 px. The plugin icon (256 and 512 px) is the emblem in the UI's
+`--primary-bright` on its dark ground. The dial uses the built-in `$B1` layout, so
+there is no encoder background image.
 
 Strings live in `src/locales/*.json`, in the same fifteen locales the UI ships.
 The inspector reads `ui/strings.js`, which the build generates from those files.
