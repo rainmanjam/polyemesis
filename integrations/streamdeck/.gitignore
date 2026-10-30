@@ -2,3 +2,5 @@ node_modules/
 com.polyemesis.streamdeck.sdPlugin/bin/
 *.streamDeckPlugin
 coverage/
+logs/
+com.polyemesis.streamdeck.sdPlugin/logs/
