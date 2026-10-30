@@ -8,6 +8,13 @@ import (
 
 // What happens when an operator changes a setting while the stream is up.
 //
+// Per-track gain and mute on a destination are a separate case, and live. They
+// are not settings fields, so they have no entry in the table below. A level is
+// the only thing that changes, and it is delivered by applyLiveLevels
+// (live_gains.go) over the stdin command channel, falling back to a restart with
+// a reported reason. See docs/HOT-RELOAD.md.
+//
+//
 // This file is the answer, written down as data rather than as prose, because
 // prose does not fail a build. Every silent no-op this repo has shipped had the
 // same shape: a field added to db.Settings, validated, stored, returned by the

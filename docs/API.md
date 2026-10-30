@@ -659,6 +659,17 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
 | `POST` | `/destinations/{id}/facebook/end-broadcast` |
 | `GET` | `/destinations/{id}/facebook/stream-health` |
+| `POST` | `/destinations/{id}/tracks/{track}/gain` |
+
+`POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
+destination. The body takes `muted` (boolean), `gain` (a finite number above
+zero), or both. A zero gain is refused: use `"muted": true`, which keeps the
+track in the mix at level zero. A matrix mix takes a gain per cell, so `gain` is
+refused there. The change is stored first and the destination is then reconciled.
+The response is `{"applied": "live" | "restart", "reason"?: string, "destination": ...}`.
+`live` means the running process took the level on its command channel. `restart`
+means it was restarted, and `reason` says why: a command was refused or timed
+out, the platform has no verified live path, or the change alters the command line.
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.

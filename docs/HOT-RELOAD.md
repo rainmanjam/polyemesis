@@ -134,19 +134,39 @@ child process** — the supervisor is asleep in its backoff.
   anything else would leave it failed for ever, which is the silent no-op this
   work exists to remove. The restart is reported in `reload`.
 
-## Why FFmpeg cannot be reconfigured in flight
+## Live per-track gain and mute: the stdin command channel
 
-FFmpeg 8.1.2 offers exactly two in-flight channels: the `zmq`/`azmq` filters and
-`sendcmd`/`asendcmd`. Both address **filters that were already instantiated with
-a command interface**, and neither can change a muxer, an encoder, an output URL,
-a stream mapping or a pixel format.
+FFmpeg does take a runtime command, on **stdin**, once it is started without
+`-nostdin`. A command names a filter instance and sets one option:
+`c<target> -1 volume <level>`. FFmpeg answers on stderr with
+`Command reply for stream N: ret:R`, and `ret:0` is the only success.
 
-Using them would mean pre-instrumenting every filter graph against the
-possibility of a future edit, accepting that only a subset of edits could be
-delivered, and — the decisive objection — accepting a state where FFmpeg silently
-declined a command and the process is running configuration nobody can read
-back. That is precisely the "stored and reported as applied, but not in effect"
-failure this whole design exists to eliminate. Declined.
+This is how a destination's per-track gain and mute are applied live:
+
+- Every mixed track has a named stage, `volume@trk<N>`, placed after its pan
+  (`internal/routing/filtergraph.go`). Gain and mute are only its level. Mute
+  sets the level to `0` and keeps the track in the graph.
+- A destination's restart signature is taken over the graph with those levels
+  masked (`ffmpeg.MaskLiveVolumes`). A level-only change therefore does not
+  restart it, and the engine sends the moved levels as commands instead
+  (`applyLiveLevels`, `internal/engine/live_gains.go`).
+- The stored profile is written **first**. Every spawn of the process, including
+  a crash or reconnect, reads the graph the live path leaves behind, so a restart
+  never brings back a level the operator has changed.
+- Only the supervisor's serialised writer ever writes to that pipe, and only
+  well-formed `volume@<name> -1 volume <level>` lines (`internal/supervisor/live.go`).
+  The reply must be a whole stderr line, and its `ret` must be `0`. A timeout
+  (2 s), a refusal, or a platform that has not been verified (Windows) falls back
+  to a restart, and the reason is reported.
+
+What it does **not** cover: anything that changes the command line. A muxer,
+encoder, output URL, stream mapping, track added or removed, a normaliser that
+flips, or a matrix cell gain all still restart the destination. A gain edit that
+crosses the normaliser's threshold is structural and restarts for the same reason.
+
+The earlier conclusion, that FFmpeg cannot be reconfigured in flight, held for
+muxers, encoders and graphs. It was wrong for levels, and this channel is the
+measured way to change them. The `zmq`/`sendcmd` filters are still not used.
 
 ## Not covered
 
