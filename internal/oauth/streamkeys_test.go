@@ -77,3 +77,28 @@ func TestOnlyPlatformsWithAReadOnlyKeyEndpointOfferStreamKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestYouTubeStreamKeysReadsEveryPage: liveStreams.list answers 50 at a time,
+// and a channel that has created a stream per destination for a year can have
+// more. A key on page two read as "not listed" would put "YouTube's key
+// changed" on a destination whose key is fine -- sending the operator to
+// rotate a working key, the exact harm a read-only check exists to avoid.
+func TestYouTubeStreamKeysReadsEveryPage(t *testing.T) {
+	var log []capture
+	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"GET " + ytStreamsPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("pageToken") == "p2" {
+				_, _ = io.WriteString(w, `{"items":[{"id":"s2","cdn":{"ingestionInfo":{"streamName":"key-on-page-two"}}}]}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"nextPageToken":"p2","items":[{"id":"s1","cdn":{"ingestionInfo":{"streamName":"key-on-page-one"}}}]}`)
+		},
+	})
+	keys, err := y.StreamKeys(context.Background(), "cid", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(keys, []string{"key-on-page-one", "key-on-page-two"}) {
+		t.Fatalf("keys = %v, want both pages", keys)
+	}
+}

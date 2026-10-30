@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -56,19 +58,44 @@ func (s Set) StreamKeysFor(p db.Platform) (StreamKeyReader, bool) {
 // nothing else: a channel holds one stream per destination that asked for its
 // own, so "the" current key is any of them, and a held key absent from all of
 // them is the rotation the caller is looking for.
+//
+// EVERY PAGE, unlike listStreams, which reads the first 50 and is enough for
+// choosing a stream. Here a key on page two read as absent would put "key
+// changed" on a destination whose key is fine and send the operator to rotate
+// it. Bounded at ytKeyPagesMax pages: a channel past that is answered as "cannot
+// tell" (an error), never as "changed".
 func (y *YouTube) StreamKeys(ctx context.Context, _, accessToken string) ([]string, error) {
-	streams, err := y.listStreams(ctx, accessToken)
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(streams))
-	for _, s := range streams {
-		if k := s.CDN.IngestionInfo.StreamName; k != "" {
-			keys = append(keys, k)
+	var keys []string
+	token := ""
+	for page := 0; page < ytKeyPagesMax; page++ {
+		var list struct {
+			NextPageToken string         `json:"nextPageToken"`
+			Items         []ytLiveStream `json:"items"`
 		}
+		u := y.apiEndpoint() + ytStreamsPath + "?part=cdn&mine=true&maxResults=50"
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		if err := getJSON(ctx, u, accessToken, nil, &list); err != nil {
+			return nil, err
+		}
+		for _, s := range list.Items {
+			if k := s.CDN.IngestionInfo.StreamName; k != "" {
+				keys = append(keys, k)
+			}
+		}
+		if list.NextPageToken == "" {
+			return keys, nil
+		}
+		token = list.NextPageToken
 	}
-	return keys, nil
+	return nil, fmt.Errorf("the channel lists more than %d pages of live streams; not checking its keys", ytKeyPagesMax)
 }
+
+// ytKeyPagesMax bounds the key read at 500 streams. liveStreams.list costs one
+// quota unit per page, and the check runs at most once per destination every
+// few minutes, so the bound is about a runaway loop, not about cost.
+const ytKeyPagesMax = 10
 
 // StreamKeys is the channel's one key. Get Stream Key is a read; Twitch's reset
 // is a separate action in the dashboard that this never performs.
