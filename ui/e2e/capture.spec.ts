@@ -167,7 +167,25 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // YouTube with the music bed excluded. Asserted rather than assumed: a hero
   // photographing a destination that DOES carry the music would argue against
   // the sentence beside it.
-  await expect(page.getByText("Music excluded", { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+  //
+  // A SKIP, NOT A FAILURE, when it is missing. capture-media.sh runs this same
+  // spec against seed_demo.go's install, whose first destination carries the
+  // music; failing here would stop that script before it compresses or copies
+  // anything, over a frame it was never going to use. demo-seed.sh's fixture
+  // is the one the hero is taken from.
+  const excluded = await page
+    .getByText("Music excluded", { exact: false })
+    .first()
+    .waitFor({ state: "visible", timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!excluded) {
+    test.info().annotations.push({
+      type: "skipped-shot",
+      description: "02-routing-hero.png: the selected destination carries the music, so the hero frame would contradict the home page",
+    });
+    return;
+  }
   // At 1024px wide, not 1440. The hero column is ~560 CSS px, and at 1440 the
   // track card is 1000px of mostly meter bar, which the column shrinks until
   // the track names are unreadable again. At 1024 the card is ~600px, so the

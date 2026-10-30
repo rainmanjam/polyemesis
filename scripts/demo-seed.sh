@@ -381,6 +381,28 @@ else
   echo "    skipped: python3 with Pillow not found, shots left unquantised" >&2
 fi
 
+# The site keeps its own copies (Astro must see them under web/src to build the
+# avif/webp variants), and web/src/lib/features-shots.test.ts fails when they
+# differ from docs/media by a byte. So refresh them here, the same way
+# capture-media.sh does: only files the site already ships, and only when this
+# run wrote the committed set. A verification run into a scratch --out must not
+# touch the site.
+SITE_SHOTS="$ROOT/web/src/assets/shots"
+if [ "$OUT" = "$ROOT/docs/media" ] && [ -d "$SITE_SHOTS" ]; then
+  echo "==> refreshing the site's copies"
+  copied=0
+  for dst in "$SITE_SHOTS"/*.png; do
+    [ -e "$dst" ] || continue
+    src="$OUT/$(basename "$dst")"
+    if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
+      cp -f "$src" "$dst"
+      echo "    $(basename "$dst")"
+      copied=$((copied + 1))
+    fi
+  done
+  [ "$copied" -eq 0 ] && echo "    already in step"
+fi
+
 echo
 echo "==> done"
 ls -la "$OUT"/*.png

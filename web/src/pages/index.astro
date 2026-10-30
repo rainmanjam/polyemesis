@@ -171,7 +171,11 @@ const features = [
         <figure class="rise rise-5 w-full">
           <div class="overflow-hidden rounded-token border border-line bg-surface shadow-2xl shadow-black/40">
             <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
-              <span class="size-1.5 rounded-full bg-live" aria-hidden="true"></span>
+              {/* Neutral, not the live green: in the install this was taken
+                  from, the YouTube destination is configured but not
+                  broadcasting, and a green dot beside its name would say it
+                  was. */}
+              <span class="size-1.5 rounded-full bg-line-strong" aria-hidden="true"></span>
               <span class="font-mono text-[11px] text-subtle">Routing · YouTube — main channel</span>
             </div>
             <Picture
