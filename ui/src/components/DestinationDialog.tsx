@@ -1256,7 +1256,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 a URL pasting. */}
                             {rowCaps.tier === "unsupported" && (
                               <Badge variant="warn" className="shrink-0">
-                                not supported
+                                {t("dest.tierNotSupported")}
                               </Badge>
                             )}
                             {/* Partial signs in as much as integrated does —
@@ -1265,15 +1265,20 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 The suffix is what stops "sign in" reading as
                                 "and you are done". */}
                             {(rowCaps.tier === "integrated" || rowCaps.tier === "partial") && (
-                              <span className="shrink-0 text-sm text-muted-foreground">
-                                {rowCaps.tier === "partial" ? "sign in + paste key" : "sign in"}
+                              // B2 follow-up: at the 12px floor these hints can
+                              // starve the platform name on a phone-width dialog,
+                              // and in the longer locales overflow the row. They
+                              // truncate instead of refusing to shrink; the
+                              // transport tag and the name keep their room.
+                              <span className="min-w-0 max-w-[40%] truncate text-sm text-muted-foreground">
+                                {rowCaps.tier === "partial" ? t("dest.tierSignInPasteKey") : t("dest.tierSignIn")}
                               </span>
                             )}
                             {/* Saying so here saves the operator picking a
                                 platform and then wondering why the URL box is
                                 still empty. */}
                             {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
-                              <span className="shrink-0 text-sm text-muted-foreground">
+                              <span className="min-w-0 max-w-[40%] truncate text-sm text-muted-foreground">
                                 {t("dest.urlFromDashboard")}
                               </span>
                             )}
