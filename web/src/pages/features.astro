@@ -65,10 +65,15 @@ const SHOT_WIDTHS = [420, 690, 960, 1440];
 
 
 /* Each section pairs a claim with the screenshot that evidences it. The
- * dashboard capture is deliberately absent: it currently photographs an ingest
- * reading "Offline" while audio is demonstrably flowing, which is a defect in
- * the capture harness and the product's state reporting, not something to put
- * on a marketing page.
+ * dashboard capture is still deliberately absent, though for a different reason
+ * than it used to be. It no longer reads "Offline" while audio flows -- the
+ * ingest card now says LIVE. But on an install with several programmes the card
+ * is not scoped to the one the header has selected: the header says "Main
+ * Programme" while the card underneath is titled with whichever programme
+ * reported last, above a box explaining that the figures are not scoped. That
+ * is the product's state reporting, not the capture, and the UX Council's S5
+ * condition -- fix the ingest state reporting, then show the dashboard -- is not
+ * met yet. Add it here when the card follows the selected programme.
  *
  * `note` is the EXPERIMENTAL convention from the product, carried onto the
  * site. It exists because this page — not a Go doc comment, not a card in the
@@ -90,7 +95,7 @@ const sections = [
       "Nothing is filtered until a destination asks for it. Track annotations describe the ingest — what track 3 actually is — and save on their own, independent of any destination.",
     ],
     shot: "02-routing.png",
-    caption: "Every destination on the install, each with its own track selection — and the switch that keeps a music bed out of one of them.",
+    caption: "Every destination on the install, each with its own track selection. YouTube, selected, takes tracks 1, 2 and 4 and leaves the music bed out.",
     alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
   },
   {
@@ -119,7 +124,7 @@ const sections = [
       "The resolved FFmpeg filtergraph is shown before you apply it, so nothing about the mix is hidden behind the UI.",
     ],
     shot: "08-mix-matrix.png",
-    caption: "Output channels down, ingest tracks across, a gain in any cell that carries one. A mic-only destination is two cells and the rest at zero.",
+    caption: "Output channels down, ingest tracks across, a gain in any cell that carries one. This Twitch mix takes both mics, the room at 0.4, and no music.",
     alt: "polyemesis mix matrix: input channels against output channels with a gain in each cell",
   },
   {
@@ -147,8 +152,8 @@ const sections = [
       "You can also drive it by hand — pin the source to primary, backup or slate, or hand it back with auto — which is what you want during a rehearsal, or when you know the good feed is the one the automation is not choosing.",
     ],
     shot: "05-sources.png",
-    caption: "Sources, their ingest state, and the selector that decides which one is on air.",
-    alt: "polyemesis sources page: ingest configuration and the failover source selector",
+    caption: "Three programmes on one SRT port, each publishing with its own token. The failover ladder is switched on per install in Settings, and is off until you do.",
+    alt: "polyemesis sources page: three programmes on one SRT port, each showing signal detected and its live publishing state",
   },
   {
     id: "platforms",
@@ -161,9 +166,14 @@ const sections = [
       "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one — twenty-three other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
     ],
     note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects — which looks like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
-    shot: "21-platforms.png",
-    caption: "Settings, Platform credentials: a developer app's Client ID and secret per platform, shown here with nothing connected yet.",
-    alt: "polyemesis Platform credentials settings: why you register your own developer app, then empty Client ID and Client secret fields for YouTube, Twitch and Facebook",
+    shot: "22-platforms-connected.png",
+    caption: "Settings, Platform credentials, after the one-time setup: an app registered and an account connected per platform. The accounts are demo data served to the real page; nothing here is anybody's channel.",
+    alt: "polyemesis Platform credentials settings: YouTube and Twitch each marked Configured, with a stored client secret and one connected demo account",
+    setup: {
+      shot: "21-platforms.png",
+      caption: "Before that: the one-time setup a new install starts in — your own developer app's Client ID and secret, per platform.",
+      alt: "polyemesis Platform credentials settings on a new install: why you register your own developer app, then empty Client ID and Client secret fields for YouTube, Twitch and Facebook",
+    },
   },
   {
     id: "player",
@@ -189,8 +199,8 @@ const sections = [
       "Prometheus metrics and in-process alert rules with webhook delivery, so a stream that stops can page you rather than wait to be noticed.",
     ],
     shot: "07-monitoring.png",
-    caption: "Each child process with its own live FFmpeg stderr, beside host CPU, memory and ingest loss.",
-    alt: "polyemesis monitoring page: process table, host resources and live FFmpeg log",
+    caption: "Host CPU, memory, relay throughput and ingest loss, above the last 30 minutes of ingest bitrate. Each process and its FFmpeg log sit further down the same page.",
+    alt: "polyemesis monitoring page: host CPU, memory, relay-in, relay-drops and ingest-loss tiles above a 30-minute ingest bitrate chart",
   },
   {
     id: "recording",
@@ -232,7 +242,7 @@ const sections = [
     shot: "20-automod.png",
     alt: "polyemesis automatic moderation settings: a model checker with endpoint, instruction and spend ceiling beside a per-platform matrix granting each action",
     caption:
-      "The model checker beside the matrix that grants permission — Twitch with three automatic actions armed, Kick and Facebook with none.",
+      "The model checker, off by default, beside the per-platform matrix that grants each action — every platform here with nothing automatic armed, which is how an install starts.",
   },
 ];
 
@@ -241,7 +251,7 @@ const sections = [
  * capture, because a section list may name the same screenshot twice -- and it
  * does: #routing and #matrix share 02-routing.png. */
 const fullShot = new Map<string, string>();
-for (const name of new Set(sections.map((s) => s.shot))) {
+for (const name of new Set(sections.flatMap((s) => [s.shot, ...("setup" in s && s.setup ? [s.setup.shot] : [])]))) {
   fullShot.set(
     name,
     (await getImage({ src: shotOf(name), format: "webp", width: 2880 })).src,
@@ -416,6 +426,36 @@ const rooms = [
             <figcaption class="mt-3 text-sm leading-relaxed text-subtle">
               {s.caption}
             </figcaption>
+            {/* THE SECONDARY "ONE-TIME SETUP" PICTURE (S5). Only the platforms
+                section has one: its main picture is the connected end state,
+                and the empty credential form a new install starts in is shown
+                smaller beneath it, because it is a step you take once rather
+                than the screen you live with. */}
+            {"setup" in s && s.setup && (
+              <div class="mt-6 sm:w-3/5">
+                <button
+                  type="button"
+                  class="shot-open"
+                  data-shot={fullShot.get(s.setup.shot)}
+                  data-shot-alt={s.setup.alt}
+                  aria-label={`Expand screenshot: ${s.setup.alt}`}
+                >
+                  <Picture
+                    src={shotOf(s.setup.shot)}
+                    formats={["avif", "webp"]}
+                    fallbackFormat="webp"
+                    widths={[420, 690]}
+                    sizes="(min-width: 1024px) 414px, calc(60vw - 1.5rem)"
+                    alt={s.setup.alt}
+                    loading="lazy"
+                    decoding="async"
+                    class="w-full rounded-token border border-dashed border-line"
+                    pictureAttributes={{ class: "block" }}
+                  />
+                </button>
+                <p class="mt-2 text-xs leading-relaxed text-subtle">{s.setup.caption}</p>
+              </div>
+            )}
           </figure>
         </div>
       </section>

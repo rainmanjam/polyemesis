@@ -20,16 +20,23 @@
 
 const FLOOR = -40; // dBFS at which a bar reads empty
 
-/* These MUST match scripts/seed_demo.go, which generates the capture beside
- * this. They did not: this was first written from the hero's illustrative
- * arrangement, which names an "Archive" destination taking "all six" tracks.
- * Neither exists in the capture — and worse, "all six" was shown 6.3 LU quieter
- * than a two-track destination, which is impossible for a superset and is
- * exactly the arithmetic a broadcast engineer checks first. */
+/* These MUST match the capture beside this: 04-meters.png, photographed from
+ * the install scripts/demo-seed.sh stands up from demo-seed.fixture.json. The
+ * figures are the INTEGRATED readings at the moment of capture, read off the
+ * screenshot; re-capture and they move by a tenth or two, so update them with
+ * the image rather than separately.
+ *
+ * Two of the three are the same number, and that is the honest result, not a
+ * typo: the archive and the compliance log both carry all four tracks, unnormalised.
+ * The podcast feed carries the two voices and is normalised to its own -16
+ * target, which it meets. An earlier version of this file showed three different
+ * figures from a capture that no longer exists; it was first written from an
+ * illustrative arrangement and later from scripts/seed_demo.go, and both were
+ * correct only until the capture changed under them. */
 const DESTS = [
-  { name: "YouTube", lufs: -12.6, tracks: "01 + 02 + 03", tone: "live" },
-  { name: "Twitch", lufs: -14.0, tracks: "01 + 03", tone: "live" },
-  { name: "Podcast", lufs: -18.9, tracks: "01", tone: "meter" },
+  { name: "Archive", lufs: -25.8, tracks: "01 + 02 + 03 + 04", tone: "meter" },
+  { name: "Compliance", lufs: -25.8, tracks: "01 + 02 + 03 + 04", tone: "meter" },
+  { name: "Podcast", lufs: -16.0, tracks: "01 + 02", tone: "live" },
 ] as const;
 
 const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 100));

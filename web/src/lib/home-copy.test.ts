@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { MUSIC_TRACK, TRACK_LAYOUT } from "../data/tracks.mjs";
+
 /* Source-level guards for copy decisions that a rendered page cannot be
  * trusted to keep. They live in src/lib, not beside the page: Astro treats
  * every file under src/pages as a route (see features-shots.test.ts). */
@@ -21,6 +23,35 @@ describe("the home page's track layout (S7)", () => {
   it("states the capture's track layout in one legend line", () => {
     const legends = home.match(/Track layout in this capture/g) ?? [];
     expect(legends.length).toBe(1);
+  });
+
+  /* ONE LAYOUT, NOT ONE PER SECTION. The legend above used to exist because
+   * the problem section, the patchbay and the capture each numbered the tracks
+   * differently. Now all three read src/data/tracks.mjs, and that file restates
+   * the seeded install the screenshots are taken from. These pin both halves:
+   * nothing on the page keeps its own copy, and the copy they share matches
+   * what the capture actually photographed. */
+  it("reads the track layout from the shared module everywhere it is used", () => {
+    expect(home).toMatch(/from "\.\.\/data\/tracks\.mjs"/);
+    const matrix = readFileSync(join(here, "..", "components", "MixMatrix.astro"), "utf8");
+    expect(matrix).toMatch(/const TRACKS = TRACK_LAYOUT;/);
+    // The six-track layout this replaced, so it cannot come back by paste.
+    expect(matrix).not.toMatch(/"Full mix"|"Clean mix"/);
+    expect(home).not.toMatch(/Track 1 is the full mix/i);
+  });
+
+  it("matches the layout of the seeded install the screenshots come from", () => {
+    const fixture = JSON.parse(
+      readFileSync(join(here, "..", "..", "..", "scripts", "demo-seed.fixture.json"), "utf8"),
+    ) as { sources: { audio: { label: string }[] }[] };
+    const captured = fixture.sources[0].audio.map((a) => a.label);
+    expect(
+      TRACK_LAYOUT.map((t) => t.fixtureLabel),
+      "src/data/tracks.mjs no longer matches the first programme in " +
+        "scripts/demo-seed.fixture.json, so the home page names tracks the " +
+        "routing and meters screenshots do not show",
+    ).toEqual(captured);
+    expect(TRACK_LAYOUT.find((t) => t.id === MUSIC_TRACK)?.fixtureLabel).toMatch(/music/i);
   });
 
   it("does not end the payoff paragraph with the Twitch GPU requirement", () => {
@@ -109,7 +140,16 @@ describe("the home hero (S1)", () => {
   });
 
   it("shows the real routing product in the first screen", () => {
-    expect(heroBody).toMatch(/src=\{routing\}/);
+    expect(heroBody).toMatch(/src=\{routingHero\}/);
+    expect(home).toMatch(/import routingHero from "\.\.\/assets\/shots\/02-routing-hero\.png"/);
+  });
+
+  /* The hero picture used to be the full 1440px routing screen scaled into a
+   * ~560px column with CSS offsets -- legible to nobody, and tuned to one
+   * capture's pixels. It is now a dedicated clip from the capture harness, so
+   * no arbitrary-offset crop classes belong on it. */
+  it("does not crop the hero picture with CSS offsets", () => {
+    expect(heroBody).not.toMatch(/left-\[-\d+%\]|top-\[-[\d.]+%\]/);
   });
 });
 
