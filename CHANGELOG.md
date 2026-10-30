@@ -401,6 +401,12 @@ its first tagged release.
 
 ### Changed
 
+- **The site banner and comparison blurbs lead with what polyemesis does.** The
+  bar on every page now reads "Free and open source (MIT). One stream in, every
+  platform out, each with its own mix." and links to /features. The comparison
+  card on the home page, the docs index and `docs/COMPARISON.md` describe the
+  page as how polyemesis compares with the other tools. The comparison page's
+  content is unchanged.
 - **Twitch sign-in now uses PKCE.** Connecting a Twitch account sends an S256
   `code_challenge`, and the token exchange sends the matching `code_verifier`
   along with the client secret. A leaked authorization code is no use to anyone
@@ -471,6 +477,18 @@ its first tagged release.
   While the model checker was on, every non-empty message was sent to it,
   including ones the free checkers had just deleted. Those answers could change
   nothing. Messages the free checkers only flag are still sent.
+- **Audio no longer falls behind the video after a format-changing failover.**
+  When a failover switched to a source with a different sample rate or channel
+  count, a destination that rode the switch could put silence in front of its
+  audio. The silence was as long as the stream had been running, so the audio
+  stayed that far behind the video until the destination restarted. Measured:
+  96 s behind after a failover 98 s in. Switching onto a backup encoder at
+  another rate does this. So does switching onto the slate (always 48 kHz
+  stereo) under a 44.1 kHz or mono primary. Destinations that mix one track
+  now stay in sync and keep their connection. A destination that mixes several
+  tracks still gets the silence at such a switch. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now
   names the row's programme, and Monitoring switches to that programme before

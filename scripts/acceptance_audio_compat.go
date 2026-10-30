@@ -71,7 +71,7 @@ func main() {
 			name:    "one track, no normalisation",
 			profile: simple([]int{0}, "off", 48000),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];" +
-				"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_t0]aresample=48000:async=1[aout]",
 		},
 		{
 			// Two tracks under auto, which is the default a destination is
@@ -84,7 +84,7 @@ func main() {
 				"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,volume@trk1=volume=1,aresample=async=1:first_pts=0[a_t1];" +
 				"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 		{
 			// All three, with the non-unity gains that exercise the pan
@@ -96,7 +96,7 @@ func main() {
 				"[0:a:2]pan=stereo|c0=1*c0|c1=1*c1,volume@trk2=volume=1.25,aresample=async=1:first_pts=0[a_t2];" +
 				"[a_t0][a_t1][a_t2]amix=inputs=3:duration=longest:normalize=0[a_mix];" +
 				"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-				"[a_norm]aresample=44100:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=44100:async=1[aout]",
 		},
 		{
 			// The old fixed loudnorm. A destination that asked for loudnorm
@@ -106,7 +106,7 @@ func main() {
 			profile: simple([]int{0}, "loudnorm", 48000),
 			want: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1,volume@trk0=volume=1[a_t0];" +
 				"[a_t0]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
-				"[a_norm]aresample=48000:async=1:first_pts=0[aout]",
+				"[a_norm]aresample=48000:async=1[aout]",
 		},
 	}
 

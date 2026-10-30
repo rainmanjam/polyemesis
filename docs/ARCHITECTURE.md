@@ -212,7 +212,7 @@ Then sum and finish:
 ```
 [a0][a1][a2] amix=inputs=3:duration=longest:normalize=0 [mixed]
 [mixed] alimiter=limit=0.95:level=disabled [lim]
-[lim]   aresample=48000:async=1:first_pts=0 [aout]
+[lim]   aresample=48000:async=1 [aout]
 ```
 
 `normalize=0` on `amix` is **essential** — the default divides by input count,
@@ -221,6 +221,22 @@ explicitly with per-track gain instead, and catch the resulting clipping risk
 with the limiter, which is auto-enabled whenever ≥2 tracks are summed.
 
 Single track + no normalization degenerates to one `pan` — no `amix` at all.
+
+The final `aresample` has **no `first_pts`**, on purpose. FFmpeg builds this
+graph again from the argv, mid-run, whenever the decoded sample rate or channel
+count changes. A failover onto a backup or slate that encodes differently does
+exactly that. A rebuilt `first_pts=0` meets its first frame at the stream's
+runtime T and pads T seconds of silence in front of it. The muxer clamps that
+silence onto the current timestamp, so the audio ends up T seconds behind the
+video until the destination restarts. In Docker this measured 96 s behind,
+after a failover 98 s in (`scripts/acceptance-audio-drift.sh`). Without
+`first_pts`, a rebuilt graph continues from the timestamp it is handed. The
+outage before the rebuild stays a timestamp gap, the same gap the copied video
+has.
+
+The per-track legs above keep `first_pts=0`, because nothing else gives `amix`
+a common origin. So a **multi-track** mix still pads at a format-changing switch.
+A switch that keeps the format is unaffected.
 
 The generated string is returned to the UI verbatim so the user can see exactly
 what their routing compiles to.

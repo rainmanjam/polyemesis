@@ -272,7 +272,7 @@ func TestADestinationShapedReaderJoiningMidStreamPublishesItsAudio(t *testing.T)
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
 	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(relayURL),
-		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 		"-map", "0:v:0", "-c:v", "copy",
 		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
 		"-f", "mpegts", "-flush_packets", "1",
@@ -368,7 +368,7 @@ func TestAReaderStartedBeforeAnyDataStillPublishesItsAudio(t *testing.T) {
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
 	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(relayURL),
-		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 		"-map", "0:v:0", "-c:v", "copy",
 		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
 		"-f", "mpegts", "-flush_packets", "1", "-t", "12", "-y", tsPath)
@@ -529,7 +529,7 @@ func TestTheWholeChainThroughARealHubCarriesTheRoutedAudio(t *testing.T) {
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
 	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(subURL),
-		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 		"-map", "0:v:0", "-c:v", "copy",
 		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
 		"-f", "mpegts", "-flush_packets", "1", "-t", "10", "-y", tsPath)
@@ -673,7 +673,7 @@ func TestAReaderJoiningBetweenTwoPublishesResolvesTheSecondOnesAudio(t *testing.
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
 	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(subURL),
-		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 		"-map", "0:v:0", "-c:v", "copy",
 		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
 		"-f", "mpegts", "-flush_packets", "1", "-t", "12", "-y", tsPath)
@@ -852,7 +852,7 @@ func TestADestinationStillResolvesItsAudioBesideEightOtherSubscribers(t *testing
 	rdArgs := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error"},
 		ffmpeg.RelayInputArgs()...)
 	rdArgs = append(rdArgs, "-i", ffmpeg.RelayInputURL(subURL),
-		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		"-filter_complex", "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 		"-map", "0:v:0", "-c:v", "copy",
 		"-map", "[aout]", "-c:a", "aac", "-b:a", "128k",
 		"-f", "mpegts", "-flush_packets", "1", "-t", "12", "-y", tsPath)
