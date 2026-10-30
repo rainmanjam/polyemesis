@@ -199,7 +199,9 @@ How the server applies a level live is in
 | Live | The destination's process is running and sending |
 | Starting, Reconnecting | Coming up, or retrying after a drop |
 | Stalled | Running, but not making progress |
-| Failed | Stopped on an error |
+| Failed | Stopped on an error. The second line names the cause the server classified (**Key rejected**, **Not ready**, **DNS failed**, **Refused**, **Timed out**, **TLS failed**, **Codec rejected**, **Unknown** with FFmpeg's own line), or **Key changed** when the connected account reports a different stream key |
+| Held | The server stopped retrying after repeated quick key or codec rejections. Press Retry on the destination card to try again |
+| Live, Upload slow | Running, but delivering slower than realtime |
 | Off | Not running |
 | Stop warning | The last stop timed out and the process was killed without being seen to exit, so it may still have been publishing; the detail says why |
 | Backup down | The destination's redundant feed is not running |

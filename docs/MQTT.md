@@ -267,9 +267,24 @@ dashboard, and it is usually the fastest answer to "why is `live` false".
   "restarts": 0,
   "rendition": "1080p",      // the shared encode feeding it; omitted when none
   "error": "…",              // omitted when empty; masked
+  "cause": "key_rejected",   // why it is failing; omitted while nothing is wrong
+  "held": true,              // retrying has stopped; omitted when false
+  "causeDetail": "…",        // the FFmpeg line behind `cause`; masked
   "at": "2026-07-28T20:14:02Z"
 }
 ```
+
+`cause` is the same code the status JSON, webhooks and alerts carry. See
+[Why a destination is failing](MONITORING.md#why-a-destination-is-failing) for
+the list and how each is detected. `held` means polyemesis has stopped retrying
+after repeated quick rejections. Nothing changes until somebody presses Retry
+in the console. Discovery adds one sensor per destination, `<name> failure`,
+whose state is the cause, or `none` while nothing is wrong.
+
+The status JSON also says when the connected platform account reports a
+different stream key. MQTT does not carry that flag, because a field whose name
+contains `key` is refused on this topic tree by design. A rotated key arrives
+as `cause: key_rejected`.
 
 `running` is the engine's verdict rather than the process's, and the difference
 matters when you write the alert: a destination whose routing graph would not
@@ -389,7 +404,8 @@ holding.
 What a destination contributes is listed in full under
 [Payloads](#payloads): identity (`id`, `name`, `slug`, `platform`, `kind`),
 state (`enabled`, `running`, `rendition`), numbers (`bitrateKbps`, `uptimeSec`,
-`restarts`) and a masked `error`. **No URL, stream key or passphrase has a field
+`restarts`), a masked `error`, and the failure `cause`, `held` and masked
+`causeDetail`. **No URL, stream key or passphrase has a field
 to travel in** — the struct has none, and that absence is the mechanism, not an
 omission from this page.
 

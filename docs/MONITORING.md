@@ -712,6 +712,76 @@ know.
 A script reads the same rows from `GET /api/v1/timeline?limit=N`
 ([API.md](API.md)). A read token is enough.
 
+A `destination.down` row says why the destination failed, as in
+`Reason: stream key rejected; held after 3 quick rejections, press Retry once
+it is fixed.` (see the next section).
+
+---
+
+## Why a destination is failing
+
+When a destination fails, polyemesis reads the end of FFmpeg's stderr and the
+timing of the run, and names the cause. The destination card shows it in
+place of FFmpeg's raw last line. The same cause reaches every other outlet,
+under the same name:
+
+- the destination's `reason` in `GET /api/v1/status`;
+- the `destination.down` alert text and its `cause` field (so also the
+  timeline);
+- the `cause`, `held` and `keyChanged` fields of a webhook;
+- the `cause`, `held` and `causeDetail` fields of the MQTT destination topic;
+- the Stream Deck destination key.
+
+| `cause` | What it means | How it is recognised |
+|---|---|---|
+| `key_rejected` | The ingest refused to let the stream publish. Usually the stream key; check the server URL too | `Server error:` naming authentication, HTTP 401 or 403, SRT `Peer rejected connection`, or `Error opening output … : I/O error` with no network-level line before it |
+| `platform_not_ready` | The ingest is up and not taking this stream yet | `Server error: Already publishing` (the platform still holds the previous session), HTTP 5xx, HTTP 404 |
+| `dns` | The server name does not resolve | `Failed to resolve hostname`, `Name does not resolve` |
+| `connection_refused` | Nothing is listening on that host and port | `Connection refused` |
+| `timeout` | The ingest did not answer in time | `Operation timed out`, `Connection timed out` |
+| `tls` | The encrypted connection failed: `rtmps://` to a plain port, or a certificate that does not verify | a `[tls @` line, `SSL routines`, `certificate verify failed` |
+| `codec_rejected` | The codec or container was refused | FFmpeg's own muxer, for example `… not compatible with flv` |
+| `upload_too_slow` | Media was moving, but delivery fell below 0.8× realtime | the delivery rate over the last 10 s, not FFmpeg's `speed=` (an average over the whole run). Also shown while the destination is still running, once the source has been arriving for 10 s |
+| `unknown` | None of the above | the card shows FFmpeg's own last line |
+
+Some failures look the same from FFmpeg's side. A wrong RTMP application, an
+unconfigured path and a refused key print identical stderr. An ingest that
+silently drops a codec it cannot carry prints only `Broken pipe`. The fixtures
+and their README in `internal/failreason/testdata` record what was captured,
+and how.
+
+### Held after three quick rejections
+
+A refused key or a refused codec cannot fix itself. After **3** of them in a
+row, each within **15 s** of the spawn, the destination is **held**:
+
+- polyemesis stops retrying;
+- the card says `Held after 3 quick rejections` and shows a **Retry** button;
+- the state is `failed`, so `destination.down` fires once.
+
+Retry restarts the destination once. A settings save does not lift a hold,
+even one that makes the reconnect policy more forgiving. Editing the
+destination rebuilds it, which also lifts the hold.
+
+Network causes (`dns`, `connection_refused`, `timeout`) and
+`platform_not_ready` are never held. They keep the normal backoff, because they
+clear on their own.
+
+### "YouTube's key changed — click to update"
+
+Sometimes a destination linked to a connected YouTube or Twitch account is
+refused (`key_rejected`). polyemesis then asks the platform, read-only, for the
+account's current stream keys:
+
+- YouTube: `liveStreams.list`;
+- Twitch: Get Stream Key.
+
+If the stored key is not among them, the card offers the update as one click,
+which is **Refresh stream key**. The check runs at most once per destination
+every 5 minutes. It never creates a stream or a broadcast. Facebook, Kick and
+pasted keys are not checked: Facebook's key is a live video, so reading one
+creates one, and the others have no read-only key endpoint.
+
 ---
 
 ## Automation

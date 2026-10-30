@@ -10,6 +10,29 @@ its first tagged release.
 
 ### Added
 
+- **Why a destination is failing.** When a destination fails, polyemesis
+  reads the end of FFmpeg's stderr and the timing of the run, and names the
+  cause. The causes are `key_rejected`, `platform_not_ready`, `dns`,
+  `connection_refused`, `timeout`, `tls`, `codec_rejected`, `upload_too_slow`
+  and `unknown`. For `unknown`, the card shows FFmpeg's raw last line.
+  - The destination card shows the cause in place of the raw line.
+  - `GET /api/v1/status` carries it as the destination's `reason`.
+  - The `destination.down` alert text and its timeline row include it, and the
+    alert gains `cause`, `reason` and `detail` fields.
+  - Webhooks gain `cause`, `held` and `keyChanged` fields.
+  - The MQTT destination topic gains `cause`, `held` and `causeDetail`, plus a
+    `<name> failure` discovery sensor.
+  - The Stream Deck key shows the cause.
+
+  After 3 quick key or codec refusals in a row, a destination is **held**: it
+  stops retrying until somebody presses **Retry**. Network causes keep the
+  normal backoff. For a destination linked to a connected YouTube or Twitch
+  account, a refused key starts a read-only check of the account's current
+  keys. If the stored key is not among them, the card offers "YouTube's key
+  changed — click to update". The fixtures are real FFmpeg 8.1.3 stderr,
+  captured in Docker against local ingest servers.
+  [MONITORING.md](docs/MONITORING.md#why-a-destination-is-failing)
+
 - **A destination's per-track gain and mute apply to the running stream.** A
   level change used to be an argv change, so it replaced the destination's
   FFmpeg process and dropped that platform's connection. Each mixed track now
