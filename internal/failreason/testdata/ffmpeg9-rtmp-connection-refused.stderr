@@ -1,0 +1,5 @@
+[tcp @ 0x79844085a0] Connection to tcp://127.0.0.1:19351?tcp_nodelay=0 failed: Connection refused
+[rtmp @ 0x7984408500] Cannot open connection tcp://127.0.0.1:19351?tcp_nodelay=0
+[out#0/flv @ 0x7984804900] Error opening output rtmp://127.0.0.1:19351/live/goodkey: Connection refused
+Error opening output file rtmp://127.0.0.1:19351/live/goodkey.
+Error opening output files: Connection refused

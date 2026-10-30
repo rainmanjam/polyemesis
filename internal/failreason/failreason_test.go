@@ -303,3 +303,29 @@ func TestTheSentenceNamesHeldAndARotatedKey(t *testing.T) {
 		t.Errorf("unknown sentence = %q", got)
 	}
 }
+
+// TestTheHostFFmpegsWordingClassifiesTheSame: binary installs run the host's
+// FFmpeg, not the image's, and its errno text comes from a different C library.
+// These four were captured with FFmpeg 9.0.2 on macOS against the same
+// nginx-rtmp (see the README). musl says "I/O error" where Darwin and glibc say
+// "Input/output error", and that one difference used to turn a refused key on
+// every binary install into "unknown".
+func TestTheHostFFmpegsWordingClassifiesTheSame(t *testing.T) {
+	cases := []struct {
+		fixture string
+		want    Cause
+	}{
+		{"ffmpeg9-rtmp-onpublish-403", KeyRejected},
+		{"ffmpeg9-rtmp-connection-refused", ConnectionRefused},
+		{"ffmpeg9-rtmp-dns-unresolvable", DNS},
+		{"ffmpeg9-rtmps-to-plain-port", TLS},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			got, ok := Classify(Input{Stderr: fixture(t, tc.fixture), Failed: true, RanFor: time.Second})
+			if !ok || got.Cause != tc.want {
+				t.Fatalf("got %+v, want %s", got, tc.want)
+			}
+		})
+	}
+}

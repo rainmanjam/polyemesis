@@ -258,8 +258,14 @@ var rules = []rule{
 // [tcp @] line would have said otherwise) and the session was closed when the
 // stream asked to publish, which is what an ingest does with a key it will not
 // take. Checked only after every rule has had its turn.
+//
+// BOTH SPELLINGS OF EIO. The text is the C library's strerror, not FFmpeg's:
+// musl (the Alpine image) says "I/O error", while glibc and Darwin -- every
+// binary install -- say "Input/output error". Matching only the first turned a
+// refused key on every binary install into "unknown" (ffmpeg9-* fixtures).
 func openRefused(lower string) bool {
-	return strings.Contains(lower, "error opening output") && strings.HasSuffix(lower, ": i/o error")
+	return strings.Contains(lower, "error opening output") &&
+		(strings.HasSuffix(lower, ": i/o error") || strings.HasSuffix(lower, ": input/output error"))
 }
 
 var timeoutSubs = []string{

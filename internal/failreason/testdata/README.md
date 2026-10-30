@@ -58,6 +58,18 @@ prints them. The classifier treats them as noise.
 | `rtmp-throttled-upload` | Egress capped at 16 kbit/s under a 1 Mbit/s stream | `upload_too_slow` (from timing) |
 | `rtmp-accepted` | A key the ingest admits, `-t 4`, exit 0 | no reason |
 
+## The host-FFmpeg fixtures
+
+The four `ffmpeg9-*` files were captured with the host's FFmpeg 9.0.2 on macOS
+(Homebrew), against a `pe-w1-nginx9` container that published nginx-rtmp on
+127.0.0.1:19350. Each ran the same command as its Alpine twin. Binary installs
+run the host's FFmpeg, so these files check that the classifier does not
+depend on one build's wording. They exposed one difference: the errno text
+comes from the C library. musl says `I/O error`, while glibc and Darwin say
+`Input/output error`. The resolver error also differs (`nodename nor servname
+provided` on macOS, `Name does not resolve` on musl). The classifier accepts
+both forms of each.
+
 ## What these files cannot tell apart
 
 These limits are real. They are not gaps in the classifier.
