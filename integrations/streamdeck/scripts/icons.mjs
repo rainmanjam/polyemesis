@@ -206,6 +206,9 @@ const GLYPH = {
 // The category and plugin marks: a ring with a centre dot, the broadcast emblem.
 const EMBLEM = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.11));
 
+// A disc: the halted-disk mark on the record key's error face.
+const DISC = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.07));
+
 // ---- png -----------------------------------------------------------------
 
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
@@ -255,9 +258,33 @@ function write(rel, size, paint) {
 
 // ---- the set -------------------------------------------------------------
 
-for (const [name, colour] of Object.entries(KEY_COLOURS)) {
-  write(`keys/${name}.png`, 72, keyTile(colour));
-  write(`keys/${name}@2x.png`, 144, keyTile(colour));
+// Each key action has its own set of six state faces. A face is the state tile with the
+// action's glyph as a badge in the top-left corner, clear of the centred title text. The
+// record key's error face (HALTED: DISK) carries a disc, not the record dot, so the halted
+// state is a face of its own rather than the generic error tile.
+const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover"];
+const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
+
+function badged(base, shape) {
+  const tile = keyTile(base);
+  return (x, y) => {
+    const c = tile(x, y);
+    if (!c) return null;
+    const bx = (x - BADGE.x) / BADGE.s;
+    const by = (y - BADGE.y) / BADGE.s;
+    if (bx >= 0 && bx <= 1 && by >= 0 && by <= 1 && shape(bx, by)) {
+      return c.map((v) => Math.round(v + (255 - v) * 0.85));
+    }
+    return c;
+  };
+}
+
+for (const action of KEY_ACTIONS) {
+  for (const [state, colour] of Object.entries(KEY_COLOURS)) {
+    const shape = action === "record" && state === "error" ? DISC : GLYPH[action];
+    write(`keys/${action}/${state}.png`, 72, badged(colour, shape));
+    write(`keys/${action}/${state}@2x.png`, 144, badged(colour, shape));
+  }
 }
 
 for (const [name, shape] of Object.entries(GLYPH)) {

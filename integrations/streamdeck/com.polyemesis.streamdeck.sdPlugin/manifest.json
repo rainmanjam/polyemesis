@@ -38,22 +38,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/destination/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/destination/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/destination/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/destination/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/destination/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/destination/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -70,22 +70,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/go-live/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/go-live/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/go-live/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/go-live/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/go-live/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/go-live/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -102,22 +102,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/stop-all/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/stop-all/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/stop-all/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/stop-all/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/stop-all/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/stop-all/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -135,22 +135,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/failover/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/failover/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/failover/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/failover/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/failover/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/failover/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -167,22 +167,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/stop-destination/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/stop-destination/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/stop-destination/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/stop-destination/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/stop-destination/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/stop-destination/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -200,22 +200,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/record/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/record/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/record/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/record/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/record/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/record/unbound"
         }
       ],
       "DisableAutomaticStates": true,
@@ -232,22 +232,22 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/idle"
+          "Image": "imgs/keys/preset/idle"
         },
         {
-          "Image": "imgs/keys/live"
+          "Image": "imgs/keys/preset/live"
         },
         {
-          "Image": "imgs/keys/warn"
+          "Image": "imgs/keys/preset/warn"
         },
         {
-          "Image": "imgs/keys/error"
+          "Image": "imgs/keys/preset/error"
         },
         {
-          "Image": "imgs/keys/held"
+          "Image": "imgs/keys/preset/held"
         },
         {
-          "Image": "imgs/keys/unbound"
+          "Image": "imgs/keys/preset/unbound"
         }
       ],
       "DisableAutomaticStates": true,
