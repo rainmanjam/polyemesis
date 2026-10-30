@@ -41,6 +41,15 @@ describe("time-to-first-stream copy (S2)", () => {
    * is excluded on purpose: it describes rival tools, not polyemesis. */
   const own = ["index.astro", "download.astro", "features.astro"];
 
+  /* A step count is also a claim. docs/QUICKSTART.md has eight numbered steps,
+   * so "three steps" was false the moment it was written. Say what happens,
+   * not how many steps it takes. */
+  it("states no step count for the quickstart", () => {
+    for (const name of own) {
+      expect(pages(name), name).not.toMatch(/three steps/i);
+    }
+  });
+
   it("states no minute figure for polyemesis's own first stream", () => {
     for (const name of own) {
       const src = pages(name);
