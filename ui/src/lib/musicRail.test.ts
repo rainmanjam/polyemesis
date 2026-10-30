@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { musicRailMark } from "./musicRail";
+import { musicRailMark, musicRailReason } from "./musicRail";
 import en from "./i18n/en.json";
 
 describe("musicRailMark", () => {
@@ -42,5 +42,31 @@ describe("RoutingPage's destination rail", () => {
     // rail whose every other green thing means on air.
     expect(src).not.toContain('<Music className="ml-auto h-3 w-3 shrink-0 text-live" />');
     expect(src).not.toContain('<Music className="ml-auto h-3 w-3 shrink-0 text-warn" />');
+  });
+});
+
+/* B1: the rail's mark is a word, and the word now carries its reason as well.
+ * Every non-null mark has a reason in the catalogue, so a hover or a screen
+ * reader never meets a bare "no music" with nothing behind it. */
+describe("musicRailReason", () => {
+  it("gives every visible mark a reason English defines", () => {
+    for (const [guarded, policy] of [[true, false], [true, true], [false, true]] as const) {
+      const key = musicRailReason(guarded, policy);
+      expect(key, `mark for ${guarded}/${policy} has no reason`).not.toBeNull();
+      expect(en[key!]).toBeTruthy();
+    }
+  });
+
+  it("gives no reason when no mark is shown", () => {
+    expect(musicRailReason(false, false)).toBeNull();
+  });
+});
+
+describe("the rail mark's reason reaches the accessible name, not only a hover title", () => {
+  it("renders the reason as screen-reader text inside the destination button", () => {
+    // A title attribute is not read by keyboard users and is not part of the
+    // button's accessible name. The reason must be text in the button itself.
+    const src = readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "utf8");
+    expect(src).toMatch(/<span className="sr-only">\{markReason \? t\(markReason\) : ""\}<\/span>/);
   });
 });

@@ -1098,7 +1098,10 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	levels, at := eng.Levels()
-	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at})
+	// feed says whether this reading is current, so a dial can show NO FEED
+	// rather than a frozen bar. See levels_feed.go.
+	feed := levelsFeedState(at, time.Now(), eng.MeterInterval())
+	writeJSON(w, http.StatusOK, map[string]any{"levels": levels, "at": at, "feed": feed})
 }
 
 // handleMetrics renders the Prometheus exposition.
@@ -2622,6 +2625,28 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// The body is read BEFORE the lock below, so a slow client holds nothing.
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+
+	// SERIALISED WITH THE TRACK-GAIN ROUTE. Both are a read-modify-write of the
+	// whole row: this one decodes over the stored row and writes all of it back,
+	// so a mute that POST .../tracks/{n}/gain stored between this read and this
+	// write was silently undone -- even by a PUT that never mentioned the
+	// profile. Held through the reconcile, as the gain route holds it, so neither
+	// request reads the other's live-level outcome as its own.
+	//
+	// A mutex rather than a row version with 409 on a stale write: a version only
+	// protects a writer that sends it back, and neither the console nor the
+	// Stream Deck plugin does today, so it would either leave their writes
+	// unprotected or start refusing them. The one network call this can hold the
+	// lock across, fillFacebookBackupIngest, happens only on the save that first
+	// turns on a Facebook backup ingest.
+	s.trackGainMu.Lock()
+	defer s.trackGainMu.Unlock()
+
 	existing, err := s.store.GetDestination(id)
 	if err != nil {
 		writeStoreError(w, err)
@@ -2630,7 +2655,8 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
-	if !decodeJSON(w, r, existing) {
+	if err := decodeJSONInto(body, existing); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	existing.ID = id

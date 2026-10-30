@@ -49,8 +49,8 @@ export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
   return (
     <div className="rounded-md border border-border bg-background px-2 py-1.5">
       <div className="flex items-center gap-1.5">
-        <Activity className="h-3 w-3 shrink-0 text-subtle-foreground" />
-        <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
+        <Activity className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
           {t("dash.streamHealth")}
         </span>
       </div>
@@ -127,7 +127,7 @@ function Body({
                   without a backup ingest has exactly one, and a lone opaque
                   Facebook id above a single row is noise. */}
               {state.streams.length > 1 && (
-                <div className="truncate font-mono text-[9px] text-subtle-foreground">
+                <div className="truncate font-mono text-[9px] text-muted-foreground">
                   {s.id}
                 </div>
               )}

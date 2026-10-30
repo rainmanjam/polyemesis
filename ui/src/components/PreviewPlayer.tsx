@@ -204,10 +204,10 @@ export function PreviewPlayer({
       {standingIn && (
         <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-black/70 px-1.5 py-0.5 backdrop-blur-sm">
           <span className="text-[10px] font-medium uppercase tracking-wider text-warn">
-            Input offline
+            {t("i18nSweep.inputOffline")}
           </span>
           <span className="text-[10px] text-muted-foreground">
-            showing {onAir}
+            {t("i18nSweep.showingOnAir", { what: onAir ?? "" })}
           </span>
         </div>
       )}
@@ -218,7 +218,7 @@ export function PreviewPlayer({
             variant="secondary"
             size="icon-sm"
             onClick={() => setMuted((m) => !m)}
-            aria-label={muted ? "Unmute preview" : "Mute preview"}
+            aria-label={muted ? t("i18nSweep.unmutePreview") : t("i18nSweep.mutePreview")}
           >
             {muted ? <VolumeX /> : <Volume2 />}
           </Button>

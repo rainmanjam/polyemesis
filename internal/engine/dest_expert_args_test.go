@@ -120,3 +120,32 @@ func equalArgs(a, b []string) bool {
 // splitOK exists so the unparseable fixture is checked against the real parser
 // rather than against a belief about it.
 func splitOK(raw string) ([]string, error) { return ffmpeg.SplitArgs(raw) }
+
+// A stored "-/" option never reaches FFmpeg. The API refuses it on the way in,
+// but a row saved before that check existed still carries it, and FFmpeg 7.0+
+// would read the option's value from a file on this box -- past every guard
+// the expert editor applies. expertArgv drops the stored arguments, exactly as
+// it does for text the parser refuses, and the destination starts on its
+// generated command.
+//
+// Mutation: delete the "-/" loop in expertArgv. Observed to fail: the stored
+// -/filter_complex is in the command line.
+func TestAStoredFileValueOptionNeverReachesTheCommandLine(t *testing.T) {
+	compiled := routing.Result{FilterComplex: "anull", OutLabel: "a"}
+	e := &Engine{log: testLogger()}
+	for _, field := range []string{"input", "output"} {
+		t.Run(field, func(t *testing.T) {
+			row := backupRow()
+			if field == "input" {
+				row.ExtraInputArgs = "-/thread_queue_size q.txt"
+			} else {
+				row.ExtraOutputArgs = "-b:v 6000k -/filter_complex graph.txt"
+			}
+			for _, a := range e.destArgs(row, compiled, "udp://127.0.0.1:1", row.Target()) {
+				if len(a) >= 2 && a[:2] == "-/" {
+					t.Fatalf("%s reached the command line: FFmpeg would read its value from a file", a)
+				}
+			}
+		})
+	}
+}

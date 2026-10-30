@@ -584,3 +584,18 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_author ON chat_messages(platform, a
 
 -- And again for renditions.aspect_mode and pad_color: MigrateRenditionAspect
 -- (renditions.go) owns them, for the same reason.
+
+-- The operator timeline: the stream's transitions (failover, a destination
+-- going down or recovering, ingest lost or back) kept so "when did it fail
+-- over?" can be answered after the fact. Written from the notifier's
+-- recorder, never from the publish path. Capped by row count and by age in
+-- RecordTimelineEvent (timeline.go), so it cannot grow without bound.
+CREATE TABLE IF NOT EXISTS timeline_events (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    at       INTEGER NOT NULL,        -- unix milliseconds
+    type     TEXT    NOT NULL,
+    severity TEXT    NOT NULL,
+    title    TEXT    NOT NULL,
+    detail   TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_timeline_events_at ON timeline_events(at, id);

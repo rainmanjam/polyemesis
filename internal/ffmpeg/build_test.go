@@ -769,7 +769,7 @@ func TestMetersArgsMergesTracksIntoOneStream(t *testing.T) {
 		"[0:a:2]aresample=48000,aformat=channel_layouts=5.1[mt2];" +
 		"[mt0][mt1][mt2]amerge=inputs=3[mgd];" +
 		"[mgd]astats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none," +
-		"ametadata=mode=print:file=-[mout]"
+		"ametadata=mode=print:file=-:direct=1[mout]"
 	if fc != want {
 		t.Errorf("\n got  %s\n want %s", fc, want)
 	}
@@ -1116,9 +1116,29 @@ func TestMetersArgsPinsInputChannelLayouts(t *testing.T) {
 		"[0:a:2]aresample=48000,aformat=channel_layouts=mono[mt2];" +
 		"[mt0][mt1][mt2]amerge=inputs=3[mgd];" +
 		"[mgd]astats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none," +
-		"ametadata=mode=print:file=-[mout]"
+		"ametadata=mode=print:file=-:direct=1[mout]"
 	if fc != want {
 		t.Errorf("\n got  %s\n want %s", fc, want)
+	}
+}
+
+// The meters child must flush every reading as it is made.
+//
+// Buffered, ametadata delivered the levels in bursts about 3.8 s apart, and
+// /api/v1/levels -- which calls a reading older than one second stale --
+// reported a live meter as stale most of the time, so the Stream Deck dial
+// showed NO FEED beside a healthy stream. The loudness analyser carries the
+// same option for the same reason (internal/meters/loudness.go).
+func TestMetersArgsFlushEveryReading(t *testing.T) {
+	for _, channels := range [][]int{{2}, {1, 1}, {2, 2, 6}} {
+		args := MetersArgs(MetersSpec{RelayURL: "udp://127.0.0.1:1", TrackChannels: channels})
+		fc, ok := argsAfter(args, "-filter_complex")
+		if !ok {
+			t.Fatalf("%v: no filter_complex", channels)
+		}
+		if !strings.Contains(fc, "ametadata=mode=print:file=-:direct=1") {
+			t.Errorf("%v: the meters print buffered, so levels arrive seconds late: %s", channels, fc)
+		}
 	}
 }
 

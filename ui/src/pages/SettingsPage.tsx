@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import { useSearchParams } from "react-router";
+import { SettingsSectionSearch } from "@/components/SettingsSectionSearch";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -33,6 +34,7 @@ import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { DebugSettings } from "@/components/DebugSettings";
+import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -277,7 +279,7 @@ export function SettingsPage() {
         saved.mqtt = { ...saved.mqtt, enabled: saved.mqtt?.enabled ?? false, hasPassword: true };
       }
       setSettings(saved);
-      toast.success("MQTT settings saved.");
+      toast.success(t("i18nSweep.mqttSaved"));
     } catch (err) {
       if (isSettingsConflict(err) && err instanceof Error) {
         conflictToast(err.message);
@@ -334,8 +336,27 @@ export function SettingsPage() {
         actions={<TourReplayButton />}
       />
 
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <TabsList>
+      <SettingsSectionSearch
+        labels={{
+          ingest: t("set.ingest"),
+          pipeline: t("set.tabPipeline"),
+          platforms: t("set.tabPlatforms"),
+          security: t("set.tabSecurity"),
+          debug: t("set.tabDebug"),
+        }}
+        onPick={(v) => setParams({ tab: v })}
+      />
+
+      {/* The sections run down a left rail on wide screens and stack on narrow
+          ones. The rail is the same tab list, so a rail link and a search result
+          both set the same ?tab= value. */}
+      <Tabs
+        value={tab}
+        orientation="vertical"
+        onValueChange={(v) => setParams({ tab: v })}
+        className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-4 [&>[role=tablist]]:lg:row-span-full [&>[role=tabpanel]]:lg:col-start-2"
+      >
+        <TabsList className="lg:flex-col lg:items-stretch">
           <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
@@ -1570,7 +1591,7 @@ function PipelineSettings({
                     void onClearMqttPassword();
                   }}
                 >
-                  Clear stored password
+                  {t("i18nSweep.clearStoredPassword")}
                 </Button>
               )}
 
@@ -1920,7 +1941,7 @@ function MultitrackHardware({
           <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
             <div className="flex flex-wrap items-end gap-2">
               <div className="flex min-w-56 flex-1 flex-col gap-1">
-                <Label htmlFor={`mt-model-${i}`}>Model</Label>
+                <Label htmlFor={`mt-model-${i}`}>{t("automod.modelName")}</Label>
                 <Input
                   id={`mt-model-${i}`}
                   value={g.model ?? ""}
@@ -1929,13 +1950,13 @@ function MultitrackHardware({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`mt-vendor-${i}`}>Vendor</Label>
+                <Label htmlFor={`mt-vendor-${i}`}>{t("i18nSweep.gpuVendor")}</Label>
                 <Select
                   value={g.vendorId ? String(g.vendorId) : ""}
                   onValueChange={(v) => patch(i, { vendorId: Number(v) })}
                 >
                   <SelectTrigger id={`mt-vendor-${i}`} className="w-52">
-                    <SelectValue placeholder="Choose the vendor" />
+                    <SelectValue placeholder={t("i18nSweep.gpuChooseVendor")} />
                   </SelectTrigger>
                   <SelectContent>
                     {PCI_VENDORS.map((v) => (
@@ -1947,7 +1968,7 @@ function MultitrackHardware({
                 </Select>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`mt-driver-${i}`}>Driver version</Label>
+                <Label htmlFor={`mt-driver-${i}`}>{t("i18nSweep.gpuDriver")}</Label>
                 <Input
                   id={`mt-driver-${i}`}
                   value={g.driverVersion ?? ""}
@@ -1959,7 +1980,7 @@ function MultitrackHardware({
               <Button
                 size="sm"
                 variant="ghost"
-                aria-label="Remove this GPU"
+                aria-label={t("i18nSweep.gpuRemove")}
                 onClick={() => write(gpus.filter((_, n) => n !== i))}
               >
                 <Trash2 />
@@ -1967,7 +1988,7 @@ function MultitrackHardware({
             </div>
             <div className="flex flex-wrap gap-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`mt-device-${i}`}>Device ID (decimal)</Label>
+                <Label htmlFor={`mt-device-${i}`}>{t("i18nSweep.gpuDeviceId")}</Label>
                 <Input
                   id={`mt-device-${i}`}
                   type="number"
@@ -1978,7 +1999,7 @@ function MultitrackHardware({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`mt-vram-${i}`}>Video memory (bytes)</Label>
+                <Label htmlFor={`mt-vram-${i}`}>{t("i18nSweep.gpuVram")}</Label>
                 <Input
                   id={`mt-vram-${i}`}
                   type="number"
@@ -2002,7 +2023,7 @@ function MultitrackHardware({
                   that shows; a discrete card usually reports a smaller figure
                   here rather than none at all. */}
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`mt-shared-${i}`}>Shared system memory (bytes)</Label>
+                <Label htmlFor={`mt-shared-${i}`}>{t("i18nSweep.gpuShared")}</Label>
                 <Input
                   id={`mt-shared-${i}`}
                   type="number"
@@ -2029,7 +2050,7 @@ function MultitrackHardware({
             variant="outline"
             onClick={() => write([...gpus, { model: "", vendorId: 0 }])}
           >
-            Add a GPU
+            {t("i18nSweep.gpuAdd")}
           </Button>
         </div>
       </CardContent>
@@ -2258,7 +2279,7 @@ export function PlatformCredCard({
       setCheck(saved.check ?? null);
       // Saved is saved, whatever the checker thought. The verdict renders
       // below; it does not turn a successful save into a failure toast.
-      toast.success(`${guide.name} credentials saved.`);
+      toast.success(t("i18nSweep.credentialsSaved", { name: guide.name }));
       setClientSecret("");
       onChanged();
     } catch (err) {
@@ -2371,15 +2392,15 @@ export function PlatformCredCard({
         <div>
           <CardTitle className="flex items-center gap-2">
             {guide.name}
-            {!guide.supported && <Badge variant="outline">manual key</Badge>}
-            {creds?.hasSecret && <Badge variant="live">configured</Badge>}
+            {!guide.supported && <Badge variant="outline">{t("i18nSweep.manualKey")}</Badge>}
+            {creds?.hasSecret && <Badge variant="live">{t("i18nSweep.configured")}</Badge>}
           </CardTitle>
           {guide.note && <CardDescription className="mt-1">{guide.note}</CardDescription>}
         </div>
         {guide.consoleUrl && (
           <Button variant="outline" size="sm" asChild>
             <a href={guide.consoleUrl} target="_blank" rel="noreferrer noopener">
-              <ExternalLink /> Console
+              <ExternalLink /> {t("i18nSweep.console")}
             </a>
           </Button>
         )}
@@ -2450,7 +2471,7 @@ export function PlatformCredCard({
                 <SecretInput
                   id={`cs-${guide.platform}`}
                   value={clientSecret}
-                  placeholder={creds?.hasSecret ? "•••••••• (stored, encrypted)" : ""}
+                  placeholder={creds?.hasSecret ? t("i18nSweep.storedEncrypted") : ""}
                   onChange={(e) => setClientSecret(e.target.value)}
                   className="font-mono"
                 />
@@ -2476,10 +2497,10 @@ export function PlatformCredCard({
                           : "outline"
                   }
                 >
-                  {check.state === "verified" && "verified"}
-                  {check.state === "rejected" && "rejected"}
-                  {check.state === "unverified" && "not verifiable"}
-                  {check.state === "unreachable" && "could not check"}
+                  {check.state === "verified" && t("i18nSweep.credVerified")}
+                  {check.state === "rejected" && t("i18nSweep.credRejected")}
+                  {check.state === "unverified" && t("i18nSweep.credUnverifiable")}
+                  {check.state === "unreachable" && t("i18nSweep.credUnreachable")}
                 </Badge>
                 <span className="text-muted-foreground">{check.detail}</span>
               </div>
@@ -2487,11 +2508,11 @@ export function PlatformCredCard({
 
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" onClick={save} disabled={busy || !clientId.trim() || !clientSecret.trim()}>
-                {busy ? <Loader2 className="animate-spin" /> : <Save />} Save credentials
+                {busy ? <Loader2 className="animate-spin" /> : <Save />} {t("i18nSweep.saveCredentials")}
               </Button>
               {creds?.hasSecret && (
                 <Button size="sm" variant="outline" onClick={recheck} disabled={rechecking}>
-                  {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} Re-check
+                  {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} {t("i18nSweep.recheck")}
                 </Button>
               )}
               {/* Which of these the card offers is decided in
@@ -2502,7 +2523,7 @@ export function PlatformCredCard({
               {connectControls.includes("connectRedirect") && (
                 <Button size="sm" variant="outline" asChild>
                   <a href={api.connectUrl(guide.platform)}>
-                    <ExternalLink /> Connect an account
+                    <ExternalLink /> {t("i18nSweep.connectAccount")}
                   </a>
                 </Button>
               )}
@@ -2513,7 +2534,7 @@ export function PlatformCredCard({
               )}
               {connectControls.includes("removeCredentials") && (
                 <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
-                  <Trash2 /> Remove
+                  <Trash2 /> {t("i18nSweep.remove")}
                 </Button>
               )}
             </div>
@@ -2531,7 +2552,7 @@ export function PlatformCredCard({
                         <span className="truncate text-sm">{a.accountName}</span>
                         {a.reconnect?.needed && (
                           <Badge variant="outline" className="border-warn text-micro text-warn">
-                            reconnect needed
+                            {t("i18nSweep.reconnectNeeded")}
                           </Badge>
                         )}
                       </div>
@@ -2552,7 +2573,7 @@ export function PlatformCredCard({
                         <div className="mt-0.5 text-micro text-warn">
                           {a.reconnect.reason}
                           {a.reconnect.missing && a.reconnect.missing.length > 0 && (
-                            <> Missing: <code>{a.reconnect.missing.join(", ")}</code></>
+                            <> {t("i18nSweep.missingScopes")} <code>{a.reconnect.missing.join(", ")}</code></>
                           )}
                         </div>
                       )}
@@ -2618,7 +2639,7 @@ export function PlatformCredCard({
             {inUse?.message}
             {inUse && inUse.destinations.length > 0 && (
               <span className="mt-2 flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wider text-subtle-foreground">
+                <span className="text-micro uppercase tracking-wider text-muted-foreground">
                   {t("set.disconnectInUseList")}
                 </span>
                 {/* NAMED, not counted. "3 destinations" is not something an
@@ -2725,7 +2746,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
               />
             </div>
             <Button type="submit" size="sm" disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Change password
+              {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} {t("i18nSweep.changePassword")}
             </Button>
           </form>
         </CardContent>
@@ -3028,7 +3049,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
       <CardContent className="flex flex-col gap-2">
         {!tls && !loadError && (
           <div className="flex items-center gap-2 text-tiny text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" /> Reading the certificate…
+            <Loader2 className="h-3 w-3 animate-spin" /> {t("i18nSweep.readingCertificate")}
           </div>
         )}
         {loadError && <p className="text-tiny text-down">{loadError}</p>}
@@ -3039,7 +3060,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               <span className="text-tiny text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
-                  <span className="text-micro text-subtle-foreground">auto resolved to</span>
+                  <span className="text-micro text-muted-foreground">auto resolved to</span>
                 )}
                 <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>
@@ -3100,7 +3121,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {tls.caAvailable && (
               <div className="flex flex-col gap-1.5 border-t border-border pt-2">
                 <span className="text-tiny text-muted-foreground">
-                  Local certificate authority
+                  {t("i18nSweep.localCa")}
                 </span>
                 <code className="tnum break-all rounded border border-border bg-background p-1.5 font-mono text-micro leading-relaxed text-muted-foreground">
                   {tls.caFingerprint}
@@ -3110,7 +3131,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                     the untrusted certificate can still get it. */}
                 <Button asChild size="sm" variant="outline" className="w-fit">
                   <a href={api.caDownloadUrl()} download>
-                    <Download /> Download CA certificate
+                    <Download /> {t("i18nSweep.downloadCa")}
                   </a>
                 </Button>
                 <p className="text-micro text-muted-foreground">
@@ -3274,7 +3295,7 @@ function ApiTokens() {
             </Select>
           </div>
           <Button type="submit" size="sm" disabled={busy || !name.trim()}>
-            {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} Create token
+            {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} {t("i18nSweep.createToken")}
           </Button>
         </form>
         <span className="text-micro text-muted-foreground">
@@ -3343,6 +3364,11 @@ function ApiTokens() {
             ))}
           </div>
         )}
+        {/* Paste a token here to see what it is before a plugin uses it. The
+            check is read-only and changes nothing on the install. */}
+        <div className="border-t pt-4">
+          <PairingCheck />
+        </div>
       </CardContent>
 
       <ConfirmDestructive

@@ -856,7 +856,7 @@ function RuleDialog({
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
@@ -989,7 +989,7 @@ function Schedules({
                       {s.nextAt ? (
                         timestamp(s.nextAt)
                       ) : (
-                        <span className="text-subtle-foreground">never again</span>
+                        <span className="text-muted-foreground">never again</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center">
@@ -1053,7 +1053,7 @@ function Schedules({
               </div>
             ))
           )}
-          <p className="text-micro text-subtle-foreground">
+          <p className="text-micro text-muted-foreground">
             {t("auto.missedNote")}
           </p>
         </CardContent>
@@ -1332,7 +1332,7 @@ function ScheduleDialog({
             <span className="mr-auto text-left text-micro text-warn">{t(blocked.reason)}</span>
           )}
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" onClick={save} disabled={saving || blocked.kind !== "ok"}>
             {saving && <Loader2 className="animate-spin" />}

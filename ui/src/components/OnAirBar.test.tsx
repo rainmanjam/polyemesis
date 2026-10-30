@@ -14,6 +14,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 
 import { OnAirBar } from "./OnAirBar";
 import type { DestStatus, Status } from "@/lib/types";
+import { translate } from "@/lib/i18n";
 
 afterEach(cleanup);
 
@@ -108,5 +109,55 @@ describe("OnAirBar across-the-room", () => {
     render(<OnAirBar status={status([proc("running")])} />);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: /across the room/i })).toBeTruthy();
+  });
+});
+
+describe("OnAirBar verdict line", () => {
+  it("says all destinations are healthy, and how long the ingest has been stable", () => {
+    const st = {
+      ingest: { state: "running", uptimeSec: 760 },
+      destinations: [proc("running"), proc("running", { id: did(2) })],
+    } as unknown as Status;
+    render(<OnAirBar status={st} />);
+
+    expect(screen.getByText(translate("en", "health.verdictHealthy", { count: 2 }))).toBeTruthy();
+    expect(screen.getByText(/Ingest stable/)).toBeTruthy();
+  });
+
+  it("names how many destinations need attention, out of how many there are", () => {
+    render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
+
+    expect(
+      screen.getByText(
+        translate("en", "health.verdictAttention", { count: 1, total: 2 }),
+      ),
+    ).toBeTruthy();
+  });
+
+  it("offers a way to the first destination that needs attention", () => {
+    render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
+
+    expect(screen.getByRole("button", { name: translate("en", "health.verdictShow") })).toBeTruthy();
+  });
+
+  it("does not claim healthy while the broadcast is on the slate", () => {
+    const st = {
+      ingest: null,
+      destinations: [proc("running"), proc("running", { id: did(2) })],
+    } as unknown as Status;
+    render(
+      <OnAirBar
+        status={st}
+        failover={{ active: "slate", switchedAt: "", switches: 1, primaryLive: false, backupLive: false, backupEnabled: false, slateEnabled: true }}
+      />,
+    );
+
+    expect(screen.queryByText(translate("en", "health.verdictHealthy", { count: 2 }))).toBeNull();
+  });
+
+  it("does not claim healthy while an enabled destination is quietly stopped", () => {
+    render(<OnAirBar status={status([proc("running"), proc("stopped", { id: did(2) })])} />);
+
+    expect(screen.queryByText(translate("en", "health.verdictHealthy", { count: 2 }))).toBeNull();
   });
 });

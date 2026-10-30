@@ -77,12 +77,54 @@ const FRAGMENTS = [
   "Retention keeps at most",
   // PreviewPlayer
   "Start your encoder to see the preview",
+  // Destructive confirmations (A18): the title is built from the name in a
+  // template literal, which is the one way an English title slips past the
+  // catalogue unnoticed. Keyed as confirm.deleteTitle with {name}.
+  "Delete “",
   // Dashboard
   "Starts are spread out rather than fired together",
   "This FFmpeg build has no SRT support",
   // MediaUploads
   "for the default source",
+  // A19 sweep: the destructive rendition dialog's consequence copy and the
+  // Dashboard's results placeholder, both on operator-facing paths.
+  "will restart immediately on the source video",
+  "Results appear here, one row per platform",
+  // A19 sweep, second pass: the on-air chrome, the destination card, the
+  // go-live composer and the first-run password form.
+  "This button just changed to",
+  "Scheduled Facebook broadcast",
+  "A large-type state view",
+  "destinations live",
+  "has no description field",
+  "These REPLACE the existing tags",
+  "Leave empty to keep the current one",
+  "This push also sends the compliance settings",
+  "Not supported here:",
+  "If the encoder disconnects, this broadcast ends",
+  "every destination is on passthrough",
+  "could not be understood and was dropped",
+  "length helps more than symbols",
+  "This password protects the admin UI",
+  "MQTT settings saved",
+  "Expert mode — extra FFmpeg arguments",
+  "consecutive failed refreshes",
+  "Download CA certificate",
 ];
+
+/* Bare single-word labels cannot be fragments: "Cancel" is a substring of
+ * "onCancel", so a substring hit would be a false positive on every handler.
+ * They are matched as exact JSX text instead, between tags, so a prop or an
+ * identifier never matches. Restricted to the two directories that are fully
+ * keyed; components/signature is the unkeyed family (see trackSignal.ts). */
+const JSX_LABELS = ["Cancel", "Save", "Create", "Delete rendition", "Out", "Go live"];
+
+function jsxLabelHits(body: string): string[] {
+  return JSX_LABELS.filter((label) => {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`>\\s*${esc}\\s*<`).test(body);
+  });
+}
 
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
@@ -115,6 +157,17 @@ describe("operator-facing sentences", () => {
       for (const f of FRAGMENTS) {
         if (body.includes(f)) hits.push(`${relative(SRC, file)}: ${f}`);
       }
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it("keeps bare labels out of JSX text in pages/ and components/", () => {
+    const hits: string[] = [];
+    for (const file of sources(SRC)) {
+      const rel = relative(SRC, file);
+      if (!/^(pages|components)\//.test(rel) || rel.startsWith("components/signature/")) continue;
+      const body = code(readFileSync(file, "utf8"));
+      for (const label of jsxLabelHits(body)) hits.push(`${rel}: ${label}`);
     }
     expect(hits).toEqual([]);
   });

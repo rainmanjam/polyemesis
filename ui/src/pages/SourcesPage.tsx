@@ -50,11 +50,13 @@ import { InfoHint } from "@/components/InfoHint";
 import { SecretCode } from "@/components/SecretCode";
 import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
+import { WaitingForEncoder } from "@/components/WaitingForEncoder";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
+import { ingestPhase, ingestSummary } from "@/lib/sourceIngest";
 import type { Source, SourceId, SourceView } from "@/lib/types";
 
 /* ===========================================================================
@@ -368,6 +370,11 @@ export function SourceCard({
   const setIngest = (changes: Partial<Source["ingest"]>) =>
     setDraft((d) => ({ ...d, ...changes }));
   const dirty = JSON.stringify(draft) !== JSON.stringify(source.ingest);
+  // The state of the feed as the server reports it, not as the draft reads.
+  // Derived from the saved source so an unsaved protocol change does not
+  // claim an encoder is waiting on a port that is not yet listening.
+  const phase = ingestPhase(source);
+  const summary = ingestSummary({ ...source, ingest: ing });
 
   return (
     <Card className={source.running ? undefined : "border-warn/40"}>
@@ -492,7 +499,20 @@ export function SourceCard({
                 aria-label={t("sources.ingest")}
                 data-testid="ingest-mode"
               >
-                <SelectValue />
+                <SelectValue placeholder={t("sources.ingestPlaceholder")}>
+                  {summary && (
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[12px] font-semibold text-primary">
+                        {summary.proto}
+                      </span>
+                      {summary.detail && (
+                        <span className="font-mono text-[12px] text-muted-foreground">
+                          {summary.detail}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="srt">SRT</SelectItem>
@@ -572,6 +592,21 @@ export function SourceCard({
           )}
         </div>
 
+        {phase === "waiting" && <WaitingForEncoder />}
+
+        {phase === "receiving" && (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-md border border-live/30 bg-live-dim/20 px-3 py-2"
+          >
+            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-live">{t("sources.signalDetected")}</p>
+              <p className="text-[12px] text-muted-foreground">{t("sources.signalDetectedBody")}</p>
+            </div>
+          </div>
+        )}
+
         {dirty && (
           /* The consequence, at the moment of decision. Applying reconciles
              this source's ingest, which restarts its FFmpeg child; if an
@@ -620,7 +655,7 @@ export function SourceCard({
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
             <div key={proto} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
+              <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {proto}
               </span>
               {/* Gated on what the string CARRIES, not on the row's label.
@@ -670,7 +705,7 @@ export function SourceCard({
         {/* The token, and the truth about it. */}
         <div className="flex flex-col gap-1.5 border-t border-border pt-2">
           <div className="flex items-center gap-2">
-            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
               {t("sources.token")}
             </span>
             <SecretCode value={source.token} />
@@ -768,7 +803,7 @@ function NumberField({
     <div className="flex flex-col gap-1">
       <Label className="flex items-center gap-1">
         {label}
-        <span className="font-normal text-subtle-foreground">
+        <span className="font-normal text-muted-foreground">
           {min}–{max}
         </span>
         {hint && <InfoHint body={hint} />}

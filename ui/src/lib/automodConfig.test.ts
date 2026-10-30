@@ -7,6 +7,7 @@ import {
   confidenceOutOfRange,
   nextRuleId,
   ruleProblems,
+  modelStatus,
   serverRejection,
 } from "./automodConfig";
 import en from "./i18n/en.json";
@@ -207,5 +208,19 @@ describe("the vocabulary", () => {
     expect(catalogue[ACTION_KEYS.flag]).toBe("Flag for review");
     expect(catalogue[CHECKER_KEYS.model]).toBe("Model");
     expect(catalogue[CHECKER_KEYS.rules]).toBe("Rules");
+  });
+});
+
+describe("modelStatus (A17 AI moderation badge)", () => {
+  const base = { enabled: false, hasApiKey: false };
+  it("is off while the checker is off, whatever the key", () => {
+    expect(modelStatus(base).tone).toBe("outline");
+    expect(modelStatus({ ...base, hasApiKey: true }).key).toBe("automod.statusOff");
+  });
+  it("is configured when on and a key is stored", () => {
+    expect(modelStatus({ enabled: true, hasApiKey: true })).toEqual({ key: "automod.statusOn", tone: "live" });
+  });
+  it("warns when on with no key stored", () => {
+    expect(modelStatus({ enabled: true, hasApiKey: false })).toEqual({ key: "automod.statusNoKey", tone: "warn" });
   });
 });

@@ -344,15 +344,16 @@ func waitPublishing(fx *fixture) {
 		live, dark := publishingSplit(want)
 		if len(dark) == 0 && live == len(want) {
 			fmt.Fprintf(os.Stderr, "  %d/%d programmes publishing\n", live, len(want))
-			// Bytes on the relay AND a probed layout, for the default
+			// Bytes on the relay AND a probed layout, for every seeded
 			// programme. Publishing means an encoder connected; the routing
 			// editor still has no tracks to draw until the probe lands, and a
 			// screenshot taken between the two shows a live source with an
 			// empty mixer.
-			if waitProbed() {
-				return
+			if unprobed := waitProbed(fx); len(unprobed) > 0 {
+				die("these programmes published but their layout never probed: %s",
+					strings.Join(unprobed, ", "))
 			}
-			die("the default programme published but its layout never probed")
+			return
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -379,18 +380,37 @@ func publishingSplit(want map[string]bool) (int, []string) {
 	return live, dark
 }
 
-func waitProbed() bool {
+// waitProbed returns the names of the seeded programmes whose layout has not
+// probed by the deadline; empty means every one has.
+//
+// EACH PROGRAMME BY ID. This read a bare GET /source, which answers for "the"
+// programme -- and an install running several refuses that with 400
+// source_required rather than guess. The fixture always seeds several, so the
+// harness died here on every run, before a single destination existed and
+// before anything was photographed. Asking per id is also the stronger wait:
+// the old one only ever looked at the default programme, and the other lanes
+// could still be drawn with an empty mixer.
+func waitProbed(fx *fixture) []string {
+	ids := sourcesByName()
 	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		si := get("/source")
-		tracks, _ := si["tracks"].([]any)
-		if probed, _ := si["probed"].(bool); probed && len(tracks) > 0 {
-			fmt.Fprintf(os.Stderr, "  default programme probed: %d audio tracks\n", len(tracks))
-			return true
+	for {
+		var unprobed []string
+		for _, s := range fx.Sources {
+			si := get(fmt.Sprintf("/source?source=%d", ids[s.Name]))
+			tracks, _ := si["tracks"].([]any)
+			if probed, _ := si["probed"].(bool); !probed || len(tracks) == 0 {
+				unprobed = append(unprobed, s.Name)
+			}
+		}
+		if len(unprobed) == 0 {
+			fmt.Fprintf(os.Stderr, "  %d/%d programmes probed\n", len(fx.Sources), len(fx.Sources))
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return unprobed
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return false
 }
 
 // ------------------------------------------------------------------ 3. finish

@@ -43,7 +43,7 @@ export const toneText: Record<SignalTone, string> = {
   warn: "text-warn",
   down: "text-down",
   armed: "text-armed",
-  idle: "text-subtle-foreground",
+  idle: "text-muted-foreground",
 };
 
 export const toneBg: Record<SignalTone, string> = {

@@ -695,7 +695,7 @@ export function ClipEditor() {
                     <p className="text-sm text-muted-foreground">
                       No proxy has been generated for this segment.
                     </p>
-                    <p className="text-tiny text-subtle-foreground">
+                    <p className="text-tiny text-muted-foreground">
                       The cut still works — a proxy only gives you a picture to aim with. Generate
                       one from the library.
                     </p>
@@ -841,7 +841,7 @@ export function ClipEditor() {
                     {timecode(Math.max(0, outMs - inMs))}
                   </div>
                 </div>
-                <p className="ml-auto max-w-md text-micro text-subtle-foreground">
+                <p className="ml-auto max-w-md text-micro text-muted-foreground">
             {t("clipedit.shortcuts")}
                 </p>
               </div>
@@ -930,7 +930,7 @@ export function ClipEditor() {
                         </label>
                       ))
                     )}
-                    <p className="text-micro text-subtle-foreground">
+                    <p className="text-micro text-muted-foreground">
                       Selected tracks are copied, not mixed — the clip keeps them as separate
                       tracks, exactly as recorded.
                     </p>
@@ -975,7 +975,7 @@ export function ClipEditor() {
                 {exporting ? <Loader2 className="animate-spin" /> : <Scissors />}
                 Export clip
               </Button>
-              <p className="text-micro text-subtle-foreground">
+              <p className="text-micro text-muted-foreground">
             {t("clipedit.queueNote")}
               </p>
             </CardContent>
@@ -999,7 +999,7 @@ export function ClipEditor() {
               ) : (
                 <>
                   <div className="relative">
-                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-subtle-foreground" />
+                    <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
@@ -1028,7 +1028,7 @@ export function ClipEditor() {
                       ))
                     )}
                   </div>
-                  <p className="text-micro text-subtle-foreground">
+                  <p className="text-micro text-muted-foreground">
             {t("clipedit.clickLine")}
                   </p>
                 </>
@@ -1266,7 +1266,7 @@ function TranscriptRow({
       // shorter and less useful, and would need translating into twelve
       // locales to say less.
     >
-      <span className="tnum shrink-0 font-mono text-micro text-subtle-foreground">
+      <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
         {timecode(line.startMs).slice(0, 8)}
       </span>
       <span className="min-w-0 flex-1">

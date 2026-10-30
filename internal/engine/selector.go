@@ -1212,6 +1212,14 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	}
 	e.mu.Unlock()
 
+	// A new feed, switched to or respawned, may decode at another rate or
+	// layout, and the reinit that follows rebuilds every destination graph
+	// from its argv. Non-blocking: it only queues restarts for destinations
+	// whose argv levels a live change has left stale. See respawnStaleLevels.
+	if feed != nil {
+		e.respawnStaleLevels("the source feed changed to " + string(want))
+	}
+
 	if respawn {
 		// Not a switch, but never silent either: a feed that keeps dying is the
 		// difference between a broadcast that is on air and one that only looks
@@ -2050,7 +2058,8 @@ func (e *Engine) reconcileBackupIngest(s db.Settings) {
 		// immediately rather than backing off toward half a minute.
 		MinBackoff: 500 * time.Millisecond,
 		MaxBackoff: 5 * time.Second,
-		OnLog:      e.onLog, OnState: e.onState, LogSink: logSink{e},
+		// A new session can change the decoded format: see respawnStaleLevels.
+		OnLog: e.onLog, OnState: e.onUpstreamState, LogSink: logSink{e},
 	})
 
 	e.mu.Lock()

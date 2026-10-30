@@ -239,10 +239,22 @@ const reportFlagRefusal = "-report makes FFmpeg write its own log file, and the 
 	"It would be written to disk unmasked, outside the log polyemesis scrubs. Remove it; " +
 	"the resolved command is available on this page without it"
 
+// fileValueRefusal is the answer to FFmpeg 7.0's "-/" option prefix, which reads
+// the option's value from a file: "-/filter_complex graph.txt". Every guard
+// below matches a flag by its spelling, so "-/filter_complex" or "-/c:v" would
+// slip past all of them, and any "-/" option can carry a file from this box
+// into what FFmpeg sends a platform. Nothing expert mode is for needs it.
+const fileValueRefusal = "%s: the -/ prefix makes FFmpeg read the option's value from a " +
+	"file on the server, which bypasses the checks on this page and can send a file's " +
+	"contents to the platform. Type the value inline instead (%s)"
+
 func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuard, err error) {
 	for _, a := range append(append([]string{}, in...), out...) {
 		if a == "-report" {
 			return nil, errors.New(reportFlagRefusal)
+		}
+		if strings.HasPrefix(a, "-/") {
+			return nil, fmt.Errorf(fileValueRefusal, a, "-"+strings.TrimPrefix(a, "-/"))
 		}
 	}
 	for _, a := range in {

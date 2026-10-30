@@ -5,7 +5,7 @@ import { Compass, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { useT, type Translator } from "@/lib/i18n";
+import { useT, type TranslationKey, type Translator } from "@/lib/i18n";
 import { TOUR_STEPS } from "@/lib/tourSteps";
 
 /* ==========================================================================
@@ -150,7 +150,13 @@ function useStartTour(onFinished?: () => void): () => void {
  *  unconditional — an operator who took the tour on day one and is looking for
  *  the thing about secret.key on day ninety should not have to have dismissed
  *  something to find it. */
-export function TourReplayButton() {
+export function TourReplayButton({
+  labelKey = "tour.replay",
+}: {
+  /** The button's words. The dashboard's checklist says "Show me around" for
+   *  the same tour; the words change, the replay does not. */
+  labelKey?: TranslationKey;
+} = {}) {
   const t = useT();
   // Replaying also records completion. Usually that is a no-op — the server
   // takes the first write and ignores the rest — but it covers the operator who
@@ -166,7 +172,7 @@ export function TourReplayButton() {
   );
   return (
     <Button size="sm" variant="outline" onClick={start}>
-      <Compass className="h-3 w-3" /> {t("tour.replay")}
+      <Compass className="h-3 w-3" /> {t(labelKey)}
     </Button>
   );
 }

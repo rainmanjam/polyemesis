@@ -160,7 +160,7 @@ export function ChatMessageMenu({
       >
         <DropdownMenuLabel className="truncate">
           {message.author.name}
-          <span className="ml-1 font-normal text-subtle-foreground">
+          <span className="ml-1 font-normal text-muted-foreground">
             on {platformNoun(message.platform)}
           </span>
         </DropdownMenuLabel>

@@ -52,7 +52,7 @@ RUN mkdir -p /src/internal/web && npm run build
 # Cross-compiling is safe because CGO_ENABLED=0 already: there is no C
 # toolchain in the picture, so a native Go compiler targeting another GOARCH
 # produces the same static binary emulation would have.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -130,13 +130,13 @@ LABEL org.opencontainers.image.title="polyemesis" \
 #   3. Confirm the new build still has SRT before shipping it:
 #      docker run --rm <image> ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 #
-# 8.1.2-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
+# 8.1.3-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
 # libx264 and native aac encoders all present.
 #
 # The trailing grep is not decoration: it fails the build rather than shipping
 # an image whose multitrack SRT ingest cannot work. `grep srt` would be no check
 # at all — every build lists `srtp`, which is a different protocol.
-ARG FFMPEG_VERSION=8.1.2-r0
+ARG FFMPEG_VERSION=8.1.3-r0
 RUN apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata \
  && adduser -D -u 10001 polyemesis \
  && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt

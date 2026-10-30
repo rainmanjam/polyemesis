@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
@@ -203,7 +204,14 @@ export function DestinationCard({
         {/* --- identity + state --- */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <StatusDot tone={tone} />
+            {/* The badge beside this names the state in words and carries the same
+                tone, so the dot repeated it. Kept only for a stopped card, where the
+                badge is an outline and the dot is the one mark of its tone. */}
+            {!dest.enabled && (
+              <span data-testid="card-status-dot">
+                <StatusDot tone={tone} />
+              </span>
+            )}
             <div className="min-w-0">
               <div className="truncate text-[13px] font-semibold leading-tight">{dest.name}</div>
               <div className="font-mono text-[10px] leading-tight text-muted-foreground">
@@ -218,27 +226,27 @@ export function DestinationCard({
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${dest.name}`}>
+                <Button variant="ghost" size="icon-sm" aria-label={t("i18nSweep.actionsFor", { name: dest.name })}>
                   <MoreVertical />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={onEdit}>
-                  <Pencil /> Edit
+                  <Pencil /> {t("common.edit")}
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link to={`/routing/${dest.id}`}>
-                    <KeyRound /> Edit routing
+                    <KeyRound /> {t("i18nSweep.editRouting")}
                   </Link>
                 </DropdownMenuItem>
                 {dest.enabled && (
                   <DropdownMenuItem onSelect={onRestart}>
-                    <RefreshCw /> Restart
+                    <RefreshCw /> {t("common.restart")}
                   </DropdownMenuItem>
                 )}
                 {dest.platform !== "custom" && dest.platform !== "kick" && (
                   <DropdownMenuItem onSelect={onRefreshKey}>
-                    <RefreshCw /> Refresh stream key
+                    <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
                   </DropdownMenuItem>
                 )}
                 {/* Below the separator, with Delete, because this reaches the
@@ -255,7 +263,7 @@ export function DestinationCard({
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onSelect={onDelete}>
-                  <Trash2 /> Delete
+                  <Trash2 /> {t("common.delete")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -270,8 +278,8 @@ export function DestinationCard({
             to="/renditions"
             className="group flex items-center justify-between gap-2 px-2 py-1.5 transition-colors hover:bg-muted"
           >
-            <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
-              video
+            <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              {t("route.video")}
             </span>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
               {video}
@@ -282,19 +290,28 @@ export function DestinationCard({
             className="group flex items-center justify-between gap-2 border-t border-border px-2 py-1.5 transition-colors hover:bg-muted"
           >
             <div className="flex min-w-0 items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
-                audio
+              <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                {t("route.audio")}
               </span>
               <TrackSummary tracks={dest.tracks} labels={trackLabels} />
             </div>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
-              {dest.summary || "not configured"}
+              {dest.summary || t("automod.notConfigured")}
             </span>
           </Link>
         </div>
 
         {/* --- performance --- */}
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {/* Bitrate and uptime lead. They are the two figures an operator reads to
+            know a destination is up and moving.
+
+            THE COUNTERS ARE SECONDARY, not removed. Restarts, dropped, duplicated
+            and speed are the evidence when something is wrong, and they keep the
+            same gating and dash-not-zero rules they had (#787): cumulative over a
+            run, so they are shown only while the encoder is measuring. What
+            changed is the weight. A zero is muted and a non-zero warn, and the row
+            sits quietly beneath the primary pair instead of matching it. */}
+        <div className="grid grid-cols-2 gap-2">
           <Stat
             labelKey="dest.bitrate"
             value={running ? kbps(progress?.bitrateKbps ?? 0) : "—"}
@@ -305,22 +322,11 @@ export function DestinationCard({
             value={running ? duration(dest.process?.uptimeSec ?? 0) : "—"}
             tone={running ? "default" : "muted"}
           />
-          {/* A DASH IS NOT A ZERO, and these two were the only cells in this
-              grid not obeying the rule its own comment states four lines down.
-
-              Restarts: with no process there is no restart count. `?? 0` said
-              "this destination has restarted zero times" about a destination
-              nobody has reported on — the same reassuring number a healthy
-              never-restarted run produces, so the one reading that would send
-              somebody looking is indistinguishable from the one that says
-              nothing at all.
-
-              Dropped: this is CUMULATIVE OVER A RUN, so a finished run's total
-              stays on screen after the encoder is gone and reads as a live
-              count. "Dropped 0" beside a stopped destination is the worse half:
-              it claims a clean run for a stream nothing is measuring. Gated on
-              `running` like Bitrate, Uptime and Speed beside it, so every cell
-              in the row now answers the same question the same way. */}
+        </div>
+        <div
+          data-testid="card-secondary-stats"
+          className="grid grid-cols-4 gap-2 border-t border-border pt-2"
+        >
           <Stat
             labelKey="dest.restarts"
             value={dest.process ? (dest.process.restarts ?? 0) : "—"}
@@ -331,23 +337,11 @@ export function DestinationCard({
             value={running && progress ? (progress.dropFrames ?? 0) : "—"}
             tone={running && (progress?.dropFrames ?? 0) > 0 ? "warn" : "muted"}
           />
-          {/* #787: dupFrames has existed on Progress since types.ts:729 and
-              docs/MONITORING.md promises it beside Dropped ("The same numbers
-              are on each destination's card, live") -- nothing here ever read
-              it. Same gating and dash-not-zero rule as Dropped right above:
-              cumulative over a run, so it stays on screen after the encoder
-              is gone, and "0" from a destination nothing is measuring would
-              read as a clean run rather than as unmeasured. */}
           <Stat
             labelKey="dest.duplicated"
             value={running && progress ? (progress.dupFrames ?? 0) : "—"}
             tone={running && (progress?.dupFrames ?? 0) > 0 ? "warn" : "muted"}
           />
-          {/* Almost every destination here is a passthrough, so there is barely
-              any encoding work to be slow at — a speed under 1 means FFmpeg is
-              blocking on the write to the platform. Zero is "no progress block
-              yet" rather than stopped, which is why it renders as a dash and
-              not as a failure. */}
           <Stat
             labelKey="dest.speed"
             value={running && (progress?.speed ?? 0) > 0 ? `${(progress?.speed ?? 0).toFixed(2)}x` : "—"}
@@ -362,16 +356,28 @@ export function DestinationCard({
         </div>
 
         {/* --- problems --- */}
+        {/* B1: every problem row names its reason, the failing step and the
+            as-of time. dest.error is shared by a routing compile failure, a
+            live child error and a missing programme engine, and the card cannot
+            tell which, so the step is left unreported rather than guessed. The
+            server does not yet send when a reading was taken, so the as-of line
+            says so. */}
         {dest.error && (
-          <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+          <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="break-words">{dest.error}</span>
+            <StatusReason reason={dest.error} step={null} asOf={null} />
           </div>
         )}
         {!dest.error && dest.process?.lastError && state !== "running" && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="line-clamp-2 break-words">{dest.process.lastError}</span>
+            <StatusReason
+              reason={dest.process.lastError}
+              step={t("foundation.status.step.destination", {
+                platform: PLATFORM_LABEL[dest.platform] ?? dest.platform,
+              })}
+              asOf={null}
+            />
           </div>
         )}
         {/* THE STOP THAT WAS NOT CONFIRMED.
@@ -387,9 +393,9 @@ export function DestinationCard({
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
         {dest.stopWarning && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span className="break-words">{dest.stopWarning}</span>
+            <StatusReason reason={dest.stopWarning} step={t("foundation.status.step.stop")} asOf={null} />
           </div>
         )}
         {warnings.map((w) => (
@@ -449,7 +455,7 @@ export function DestinationCard({
             whether it is healthy or not. */}
         {dest.backupProcess && (
           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span>backup feed:</span>
+            <span>{t("i18nSweep.backupFeed")}</span>
             {/* Through toneForState, like every other state in the app. The
                 two hand-written classes this replaced were `text-ok` and
                 `text-warn`: there is no --color-ok token, so Tailwind never
@@ -480,7 +486,7 @@ export function DestinationCard({
             rel="noreferrer"
             className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
-            Scheduled Facebook broadcast
+            {t("i18nSweep.scheduledFacebook")}
           </a>
         )}
 
@@ -533,9 +539,9 @@ export function DestinationCard({
               size="sm"
               className="flex-1"
               onClick={held.cancel}
-              aria-label={`Undo stopping ${dest.name}`}
+              aria-label={t("i18nSweep.undoStopping", { name: dest.name })}
             >
-              <Undo2 /> Undo ({undoSecondsLeft(held.remaining)})
+              <Undo2 /> {t("i18nSweep.undoCountdown", { seconds: undoSecondsLeft(held.remaining) })}
             </Button>
           ) : dest.enabled ? (
             <Button
@@ -550,11 +556,11 @@ export function DestinationCard({
               // guard exists to interrupt.
               title={
                 unsettled
-                  ? "This button just changed to Stop. Wait a moment, so a repaint cannot turn a Start you meant into a Stop you did not."
-                  : `Stop ${dest.name}`
+                  ? t("i18nSweep.justChangedToStop")
+                  : t("i18nSweep.stopNamed", { name: dest.name })
               }
             >
-              <Square /> Stop
+              <Square /> {t("common.stop")}
             </Button>
           ) : (
             <Button
@@ -565,11 +571,11 @@ export function DestinationCard({
               disabled={busy || unsettled}
               title={
                 unsettled
-                  ? "This button just changed to Start. Wait a moment, so a repaint cannot turn a Stop you meant into a Start you did not."
-                  : `Start ${dest.name}`
+                  ? t("i18nSweep.justChangedToStart")
+                  : t("i18nSweep.startNamed", { name: dest.name })
               }
             >
-              <Play /> Start
+              <Play /> {t("common.start")}
             </Button>
           )}
           {/* Buttons rather than drag: they work from the keyboard, and moving
@@ -580,7 +586,7 @@ export function DestinationCard({
             size="icon-sm"
             onClick={onMoveEarlier}
             disabled={!canMoveEarlier}
-            aria-label={`Move ${dest.name} earlier`}
+            aria-label={t("i18nSweep.moveEarlier", { name: dest.name })}
           >
             <ChevronUp />
           </Button>
@@ -589,7 +595,7 @@ export function DestinationCard({
             size="icon-sm"
             onClick={onMoveLater}
             disabled={!canMoveLater}
-            aria-label={`Move ${dest.name} later`}
+            aria-label={t("i18nSweep.moveLater", { name: dest.name })}
           >
             <ChevronDown />
           </Button>

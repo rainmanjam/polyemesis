@@ -162,14 +162,14 @@ function MessageRow({
       <span className="mr-1.5 inline-flex items-center gap-1 align-baseline">
         <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
         {!compact && (
-          <span className="tnum font-mono text-[10px] text-subtle-foreground" title={timestamp(m.at)}>
+          <span className="tnum font-mono text-[10px] text-muted-foreground" title={timestamp(m.at)}>
             {clockTime(m.at)}
           </span>
         )}
       </span>
 
       {m.replyTo && (
-        <span className="mr-1 inline-flex items-center gap-0.5 text-[10px] text-subtle-foreground">
+        <span className="mr-1 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
           <CornerUpLeft className="h-2.5 w-2.5" />
           {m.replyTo}
         </span>
@@ -207,7 +207,7 @@ function MessageRow({
       >
         {m.author.name}
       </button>
-      <span className="text-subtle-foreground">{m.action ? " " : ": "}</span>
+      <span className="text-muted-foreground">{m.action ? " " : ": "}</span>
       <span
         className={cn(
           "break-words",
@@ -348,7 +348,7 @@ export function PlatformFilter({
   if (platforms.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <Filter className="h-3 w-3 text-subtle-foreground" aria-hidden />
+      <Filter className="h-3 w-3 text-muted-foreground" aria-hidden />
       {platforms.map((p) => {
         const accent = accentFor(p);
         const Icon = accent.icon;
@@ -361,7 +361,7 @@ export function PlatformFilter({
             aria-pressed={on}
             className={cn(
               "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-              on ? accent.chipOn : "border-border text-subtle-foreground hover:text-muted-foreground",
+              on ? accent.chipOn : "border-border text-muted-foreground hover:text-muted-foreground",
             )}
           >
             <Icon className="h-3 w-3" />
@@ -507,7 +507,7 @@ export function ChatComposer({
         <p
           className={cn(
             "mt-1 text-[10px]",
-            over ? "text-warn" : "text-subtle-foreground",
+            over ? "text-warn" : "text-muted-foreground",
           )}
         >
           <span className="tnum font-mono">
@@ -556,7 +556,7 @@ export function ChatStatusList({
                 {s.channel && (
                   <span className="truncate text-[11px] text-muted-foreground">{s.channel}</span>
                 )}
-                <span className="ml-auto text-[10px] uppercase tracking-wider text-subtle-foreground">
+                <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
                   {s.state}
                 </span>
               </div>
@@ -564,7 +564,7 @@ export function ChatStatusList({
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{detail}</p>
               )}
               {quota && (
-                <p className="mt-0.5 text-[10px] leading-snug text-subtle-foreground">
+                <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
                   <span className="tnum font-mono">
                     {quota.used.toLocaleString()}/{quota.limit.toLocaleString()}
                   </span>{" "}
@@ -577,7 +577,7 @@ export function ChatStatusList({
                 </p>
               )}
               {!compact && (
-                <p className="mt-0.5 text-[10px] text-subtle-foreground">
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
                   <span className="tnum font-mono">{s.received.toLocaleString()}</span> received ·{" "}
                   <span className="tnum font-mono">{s.sent.toLocaleString()}</span> sent
                   {s.restarts > 0 && (
@@ -615,7 +615,7 @@ export function ChatSearchBox({
         className,
       )}
     >
-      <Search className="h-3 w-3 shrink-0 text-subtle-foreground" aria-hidden />
+      <Search className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
       <input
         type="search"
         value={search.query}
@@ -633,13 +633,13 @@ export function ChatSearchBox({
         aria-label="Search chat history"
         className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-subtle-foreground"
       />
-      {search.loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-subtle-foreground" />}
+      {search.loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />}
       {search.query && (
         <button
           type="button"
           onClick={search.clear}
           aria-label="Clear search"
-          className="shrink-0 rounded p-0.5 text-subtle-foreground hover:text-foreground"
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </button>
@@ -668,7 +668,7 @@ export function ChatSearchResults({
   const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-subtle-foreground">
+      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-muted-foreground">
         <span>
           {search.loading
             ? "Searching…"
@@ -689,7 +689,7 @@ export function ChatSearchResults({
           <div className="px-2 py-4 text-[12px] text-muted-foreground">
             <p>{t("chatpage.noMatchesInScrollback")}</p>
             {search.note && (
-              <p className="mt-1 text-[11px] text-subtle-foreground">{search.note}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">{search.note}</p>
             )}
           </div>
         ) : (
@@ -706,7 +706,7 @@ export function ChatSearchResults({
       </div>
 
       {search.results.length > 0 && search.note && (
-        <p className="shrink-0 border-t border-border px-2 py-1 text-[10px] leading-snug text-subtle-foreground">
+        <p className="shrink-0 border-t border-border px-2 py-1 text-[10px] leading-snug text-muted-foreground">
           {search.note}
         </p>
       )}
@@ -728,6 +728,7 @@ export function ChatPanel({
   className?: string;
   showComposer?: boolean;
 }) {
+  const t = useT();
   const {
     messages,
     statuses,
@@ -829,9 +830,9 @@ export function ChatPanel({
         {frameError && (
           <Badge
             variant="warn"
-            title="A message could not be understood and was dropped. The timeline may be missing something."
+            title={t("i18nSweep.chatFrameErrorHint")}
           >
-            frame error
+            {t("i18nSweep.frameError")}
           </Badge>
         )}
         <div className="ml-auto">

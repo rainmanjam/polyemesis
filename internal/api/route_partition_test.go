@@ -97,6 +97,15 @@ var nonCredentialVariance = map[string]string{
 	"GET /api/v1/auth/me#/tokenName": "the caller's own token NAME, which the caller chose " +
 		"when it minted the token. Absent for a session principal, which is why the shape " +
 		"differs at all.",
+	// The test-connection check answers for the presented token only, so every
+	// field of it is the caller's own credential's metadata. None is the secret.
+	"GET /api/v1/auth/connection#/name": "the caller's own token NAME, which the caller chose " +
+		"when it minted the token. The check reports the presented token and nothing else.",
+	"GET /api/v1/auth/connection#/prefix": "the first eight characters of the caller's own " +
+		"token, which the token list already shows. Never the secret.",
+	"GET /api/v1/auth/connection#/scope": "the caller's own token scope, a property of the " +
+		"credential the caller already holds.",
+	"GET /api/v1/auth/connection#/adminScope": "derived from the caller's own scope.",
 }
 
 // unstableSweeps are the swept paths whose bytes move between two samples with

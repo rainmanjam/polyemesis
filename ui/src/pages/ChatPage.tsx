@@ -146,9 +146,9 @@ export function ChatPage() {
             {frameError && (
               <Badge
                 variant="warn"
-                title="A message from the server could not be understood and was dropped."
+                title={t("i18nSweep.chatPageFrameErrorHint")}
               >
-                frame error
+                {t("i18nSweep.frameError")}
               </Badge>
             )}
             <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>
@@ -164,7 +164,7 @@ export function ChatPage() {
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1.5">
             <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-semibold">{t("chatpage.timeline")}</span>
-            <span className="tnum font-mono text-micro text-subtle-foreground">
+            <span className="tnum font-mono text-micro text-muted-foreground">
               {visible.length}
               {visible.length !== messages.length && ` of ${messages.length}`}
             </span>
@@ -283,7 +283,7 @@ export function ChatPage() {
           )}
 
           {stats && (
-            <dl className="rounded-md border border-border bg-card px-2 py-1.5 text-micro text-subtle-foreground">
+            <dl className="rounded-md border border-border bg-card px-2 py-1.5 text-micro text-muted-foreground">
               <div className="flex justify-between gap-2">
                 <dt>{t("chatpage.received")}</dt>
                 <dd className="tnum font-mono">{stats.received.toLocaleString()}</dd>
@@ -309,7 +309,7 @@ export function ChatPage() {
             </dl>
           )}
 
-          <p className="px-1 text-micro leading-relaxed text-subtle-foreground">
+          <p className="px-1 text-micro leading-relaxed text-muted-foreground">
                     {t("chatpage.deleteNote")}
           </p>
         </aside>

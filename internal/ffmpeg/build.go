@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -25,6 +26,34 @@ import (
 //     input and silently pause itself
 //   - -loglevel      : warning keeps the log tail useful rather than a firehose
 func commonArgs() []string {
+	return append([]string{"-hide_banner", "-nostdin"}, logLevelArgs()...)
+}
+
+// commonArgsLive is commonArgs for a destination process, which takes runtime
+// commands on stdin (see supervisor.Spec.LiveCommands). It is identical except
+// that -nostdin is absent: with it, FFmpeg never reads its standard input, so a
+// volume command written there would be ignored. Stdin is then a live channel,
+// and FFmpeg also reads its interactive keys from it -- a stray `q` stops the
+// stream and `+`/`-` change the log level. Only the supervisor's serialised
+// command writer ever writes to that pipe, and it writes only validated
+// commands, so nothing can reach FFmpeg's key handler by accident.
+//
+// Windows is the exception: the live path is unverified there, the supervisor
+// gives the child no pipe, and the engine restarts on every level change. So
+// the flag stays, and a Windows destination runs the same command as before.
+func commonArgsLive() []string {
+	return commonArgsLiveFor(runtime.GOOS)
+}
+
+func commonArgsLiveFor(goos string) []string {
+	if goos == "windows" {
+		return commonArgs()
+	}
+	return append([]string{"-hide_banner"}, logLevelArgs()...)
+}
+
+// logLevelArgs is the -loglevel pair every child gets.
+func logLevelArgs() []string {
 	lvl := "warning"
 	// Every child's own log level, raisable without a rebuild. At `debug` the demuxer
 	// reports its PID and PES parsing decisions -- which streams it saw, how
@@ -33,7 +62,7 @@ func commonArgs() []string {
 	if v := os.Getenv("POLYEMESIS_FFMPEG_LOGLEVEL"); v != "" {
 		lvl = v
 	}
-	return []string{"-hide_banner", "-nostdin", "-loglevel", lvl}
+	return []string{"-loglevel", lvl}
 }
 
 // progressArgs routes machine-readable stats to stdout, leaving stderr as a
@@ -1331,7 +1360,9 @@ func DestinationArgs(s DestSpec) []string {
 		s.AudioOutLabel = "aout"
 	}
 
-	args := commonArgs()
+	// No -nostdin: the destination takes live gain and mute on stdin. See
+	// commonArgsLive.
+	args := commonArgsLive()
 	args = append(args, progressArgs()...)
 	args = append(args,
 		"-fflags", "+genpts",
@@ -1806,9 +1837,17 @@ func MetersArgs(s MetersSpec) []string {
 	}
 	// measure_overall=none and a narrow measure_perchannel keep this to two
 	// lines per channel per frame instead of twenty-four.
+	//
+	// direct=1 is load-bearing, for the reason internal/meters/loudness.go
+	// gives: without it ametadata writes through a buffered avio, and the
+	// readings reach the engine in bursts about 3.8 s apart rather than every
+	// 100 ms. The bars jumped instead of moving, and /api/v1/levels, whose
+	// "feed" goes stale after one second, reported a healthy meter as stale
+	// about 70% of the time -- so a Stream Deck dial read NO FEED on a live
+	// stream. Measured on FFmpeg 8.1: largest gap 3.75 s buffered, 0.03 s direct.
 	chains = append(chains, fmt.Sprintf(
 		"%sastats=metadata=1:reset=1:length=0.1:measure_perchannel=Peak_level+RMS_level:measure_overall=none,"+
-			"ametadata=mode=print:file=-[mout]", merged))
+			"ametadata=mode=print:file=-:direct=1[mout]", merged))
 
 	args := commonArgs()
 	args = append(args,

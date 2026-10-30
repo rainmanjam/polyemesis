@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src ws://127.0.0.1:*">
+  <title>polyemesis</title>
+  <link rel="stylesheet" href="pi.css">
+</head>
+<body>
+  <!-- Every label is replaced from strings.js, which the build generates from the
+       plugin's catalogs, in the Stream Deck app's language (see pi.js). The
+       English text below is only the fallback, so each label still names its
+       control if strings.js fails to load. -->
+  <section class="block">
+    <label for="url" data-i18n="streamdeck.pi.url">Server address</label>
+    <input id="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://">
+    <p id="err-url" class="error" hidden></p>
+  </section>
+
+  <section class="block">
+    <label for="token" data-i18n="streamdeck.pi.token">API token</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <p id="err-token" class="error" hidden></p>
+  </section>
+
+  <section class="block">
+    <label for="caPem" data-i18n="streamdeck.pi.ca">Certificate (optional)</label>
+    <textarea id="caPem" rows="3" spellcheck="false"></textarea>
+    <p class="hint" data-i18n="streamdeck.pi.caHint"></p>
+  </section>
+
+  <section class="block" id="block-source">
+    <label for="sourceId" data-i18n="streamdeck.pi.sourceId">Programme ID</label>
+    <input id="sourceId" type="number" min="1" step="1">
+    <p class="hint" data-i18n="streamdeck.pi.sourceHint"></p>
+  </section>
+
+  <section class="block" id="block-destination" hidden>
+    <label for="destinationId" data-i18n="streamdeck.pi.destinationId">Destination ID</label>
+    <input id="destinationId" type="number" min="1" step="1">
+  </section>
+
+  <section class="block" id="block-track" hidden>
+    <label for="trackDestination" data-i18n="streamdeck.pi.destinationLabel">Destination</label>
+    <select id="trackDestination"></select>
+    <label for="track" data-i18n="streamdeck.pi.trackLabel">Track</label>
+    <select id="track"></select>
+    <p class="hint" data-i18n="streamdeck.pi.trackHint"></p>
+    <p id="err-track" class="error" hidden></p>
+  </section>
+
+  <section class="block" id="block-preset" hidden>
+    <label for="presetId" data-i18n="streamdeck.pi.presetLabel">Routing preset</label>
+    <select id="presetId"></select>
+    <p class="hint" data-i18n="streamdeck.pi.presetHint"></p>
+    <p id="err-preset" class="error" hidden></p>
+  </section>
+
+  <section class="block" id="block-install-wide" hidden>
+    <p class="hint" data-i18n="streamdeck.pi.installWide"></p>
+  </section>
+
+  <section class="block">
+    <button id="test" type="button" data-i18n="streamdeck.pi.test"></button>
+    <p id="result" class="result" role="status" aria-live="polite"></p>
+    <p id="admin-warning" class="warning" hidden></p>
+  </section>
+
+  <script src="strings.js"></script>
+  <script src="pi.js"></script>
+</body>
+</html>

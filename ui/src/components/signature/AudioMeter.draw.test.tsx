@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { AudioMeter } from "./AudioMeter";
 
@@ -145,7 +145,9 @@ describe("position: an operator can read level off geometry", () => {
   it("draws all four breaks, so the two the scale cannot label are still marked", () => {
     render(<AudioMeter rms={[-30]} peak={[-30]} />);
     tick(16);
-    const marks = rects.filter((r) => r.fill === HOLD && r.w === 1);
+    // The -14 streaming reference is drawn too (A16), at its own faint alpha, so
+    // it is excluded here: this guard is about the four zone breaks alone.
+    const marks = rects.filter((r) => r.fill === HOLD && r.w === 1 && r.alpha !== 0.45);
     expect(marks.map((r) => r.x).sort((a, b) => a - b)).toEqual(
       [x(-18), x(-12), x(-6), x(-2)].sort((a, b) => a - b),
     );
@@ -226,5 +228,40 @@ describe("shape", () => {
     // one draw no hold tick at all, rather than a tick pinned at full scale.
     const ticks = rects.filter((r) => r.w === 2 || r.w === 3);
     expect(ticks.map((r) => r.y)).toEqual([0]);
+  });
+});
+
+/* A16: a numeric peak beside each bar, a click that resets the hold, and a
+ * zoomed range that still draws the -14 streaming reference. */
+describe("A16: numeric peak and Auto zoom", () => {
+  it("prints the peak hold as a number beside the bar", () => {
+    render(<AudioMeter rms={[-20]} peak={[-6.34]} />);
+    tick(16);
+    expect(screen.getByRole("button", { name: "Reset peak hold" }).textContent).toBe("-6.3 dB");
+  });
+
+  it("clicking the number resets the hold to the live level, not the old peak", () => {
+    const { rerender } = render(<AudioMeter rms={[-20]} peak={[-6.34]} />);
+    tick(16);
+    fireEvent.click(screen.getByRole("button", { name: "Reset peak hold" }));
+    rerender(<AudioMeter rms={[-30]} peak={[-30]} />);
+    tick(16);
+    expect(screen.getByRole("button", { name: "Reset peak hold" }).textContent).toBe("-30.0 dB");
+  });
+
+  it("draws the -14 streaming reference inside a zoomed range", () => {
+    render(<AudioMeter rms={[-20]} peak={[-10]} range={{ minDb: -24, maxDb: 0 }} />);
+    tick(16);
+    const x = Math.round(((-14 + 24) / 24) * WIDTH);
+    expect(rects.some((r) => r.x === x && r.w === 1)).toBe(true);
+  });
+});
+
+describe("A16 follow-up: each reset control names its channel", () => {
+  it("names the reset for each channel, so L and R can be told apart", () => {
+    render(<AudioMeter rms={[-20, -21]} peak={[-6, -7]} labels={["L", "R"]} />);
+    tick(16);
+    expect(screen.getByRole("button", { name: "Reset peak hold for L" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset peak hold for R" })).toBeTruthy();
   });
 });

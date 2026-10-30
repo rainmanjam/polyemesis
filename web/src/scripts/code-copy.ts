@@ -14,11 +14,15 @@ export {};
 document.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const btn = target.closest<HTMLButtonElement>("[data-code-copy]");
+  const btn = target.closest<HTMLButtonElement>("[data-code-copy], [data-copy-target]");
   if (!btn) return;
 
-  const block = btn.closest(".code");
-  const code = block?.querySelector("code");
+  // A button can name its source by id (the hero's primary action sits outside
+  // the code box). Otherwise the text is the enclosing block's <code>.
+  const named = btn.dataset.copyTarget;
+  const code = named
+    ? document.getElementById(named)
+    : btn.closest(".code")?.querySelector("code") ?? null;
   const text = code?.textContent ?? "";
   if (!text) return;
 

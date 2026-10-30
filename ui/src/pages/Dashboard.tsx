@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
@@ -13,7 +13,15 @@ import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
 import { failoverNotice, type FailoverNotice } from "@/lib/failoverNotice";
-import { backupOnAir } from "@/lib/ingestChip";
+import {
+  failoverBannerTone,
+  failoverElapsedSeconds,
+  failoverSinceClock,
+} from "@/lib/failoverBanner";
+import { backupOnAir, ingestProblem } from "@/lib/ingestChip";
+import { publishRows } from "@/lib/publish-url";
+import { copyToClipboard } from "@/lib/clipboard";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
@@ -25,6 +33,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
+import { GoLiveSheet } from "@/components/GoLiveSheet";
+import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLive";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
@@ -338,10 +350,10 @@ export function GoLiveComposer() {
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
-          Go live
+          {t("golive.title")}
         </CardTitle>
         <span className="font-mono text-micro text-muted-foreground">
-          {targets.length === 1 ? "1 account" : `${targets.length} accounts`}
+          {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
         </span>
       </CardHeader>
 
@@ -376,8 +388,7 @@ export function GoLiveComposer() {
               />
               {overLimit.length > 0 && (
                 <p className="text-micro text-down">
-                  Too long for {overLimit.map((t) => t.platform).join(", ")}; that platform will be
-                  reported as failed and the others still pushed.
+                  {t("i18nSweep.titleTooLong", { platforms: overLimit.map((o) => o.platform).join(", ") })}
                 </p>
               )}
             </div>
@@ -411,8 +422,9 @@ export function GoLiveComposer() {
               )}
               {noDescription.length > 0 && (
                 <p className="text-micro text-muted-foreground">
-                  {noDescription.map((t) => t.platform).join(", ")} has no description field, so
-                  this is skipped there rather than failed.
+                  {t("i18nSweep.noDescriptionField", {
+                    platforms: noDescription.map((o) => o.platform).join(", "),
+                  })}
                 </p>
               )}
             </div>
@@ -427,7 +439,7 @@ export function GoLiveComposer() {
               />
               {categoryHint && (
                 <p className="text-micro text-muted-foreground">
-                  {categoryHint} Type the name — polyemesis looks up the id.
+                  {categoryHint} {t("i18nSweep.categoryTypeName")}
                 </p>
               )}
             </div>
@@ -442,9 +454,7 @@ export function GoLiveComposer() {
                   onChange={(e) => setTags(e.target.value)}
                 />
                 <span className="text-micro text-muted-foreground">
-                  Comma separated. These REPLACE the existing tags rather than adding to them,
-                  because that is what each platform's API does. Applies to{" "}
-                  {tagTargets.map((t) => t.platform).join(", ")}.
+                  {t("i18nSweep.tagsReplace", { platforms: tagTargets.map((o) => o.platform).join(", ") })}
                 </span>
               </div>
             )}
@@ -454,7 +464,7 @@ export function GoLiveComposer() {
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("dash.broadcastSettings")}</Label>
                   <span className="text-micro text-muted-foreground">
-                    {broadcastAccounts.map((w) => w.platform).join(", ")} only
+                    {t("i18nSweep.platformsOnly", { platforms: broadcastAccounts.map((w) => w.platform).join(", ") })}
                   </span>
                 </div>
 
@@ -467,7 +477,7 @@ export function GoLiveComposer() {
                     onChange={(e) => setScheduledStart(e.target.value)}
                   />
                   <span className="text-micro text-muted-foreground">
-                    Leave empty to keep the current one.
+                    {t("i18nSweep.leaveEmptyKeep")}
                   </span>
                 </div>
 
@@ -480,9 +490,9 @@ export function GoLiveComposer() {
 
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: "dvr", label: "DVR", value: dvr, set: setDvr },
-                    { id: "autostart", label: "Auto-start", value: autoStart, set: setAutoStart },
-                    { id: "autostop", label: "Auto-stop", value: autoStop, set: setAutoStop },
+                    { id: "dvr", label: t("i18nSweep.dvr"), value: dvr, set: setDvr },
+                    { id: "autostart", label: t("i18nSweep.autoStart"), value: autoStart, set: setAutoStart },
+                    { id: "autostop", label: t("i18nSweep.autoStop"), value: autoStop, set: setAutoStop },
                   ].map((f) => (
                     <div key={f.id} className="flex flex-col gap-1">
                       <Label htmlFor={`golive-${f.id}`}>{f.label}</Label>
@@ -497,7 +507,7 @@ export function GoLiveComposer() {
                             "off". An omitted field keeps whatever the platform
                             has; sending false turns the feature off. */}
                         <option value="">{t("dash.leaveUnchanged")}</option>
-                        <option value="on">On</option>
+                        <option value="on">{t("i18nSweep.on")}</option>
                         <option value="off">{t("dash.off")}</option>
                       </select>
                     </div>
@@ -514,16 +524,17 @@ export function GoLiveComposer() {
                 <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
               <span className="text-micro text-muted-foreground">
-                Applies to {accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount")}.
+                {t("i18nSweep.appliesTo", {
+                  who: accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount"),
+                })}
               </span>
             </div>
 
             {withCompliance.length > 0 && (
               <p className="text-micro text-muted-foreground">
-                This push also sends the compliance settings stored on{" "}
-                {withCompliance.map((t) => t.accountName || t.platform).join(", ")} &mdash;
-                visibility, made-for-kids and content labels are configured per destination, not
-                here, and go out whether or not you change anything above.
+                {t("i18nSweep.pushSendsCompliance", {
+                  accounts: withCompliance.map((o) => o.accountName || o.platform).join(", "),
+                })}
               </p>
             )}
           </div>
@@ -532,7 +543,7 @@ export function GoLiveComposer() {
           <div aria-live="polite" className="flex flex-col gap-1.5">
             {job === null ? (
               <p className="text-tiny text-muted-foreground">
-                Results appear here, one row per platform.
+                {t("i18nSweep.resultsEmpty")}
               </p>
             ) : (
               <>
@@ -571,17 +582,24 @@ export function GoLiveComposer() {
 
                     {res.applied.length > 0 && (
                       <p className="text-micro text-muted-foreground">
-                        Set {res.applied.join(", ")}
-                        {res.category && ` — category “${res.category}”`}
-                        {res.target && ` on ${res.target}`}
+                        {t("i18nSweep.pushApplied", { fields: res.applied.join(", ") })}
+                        {res.category && ` — ${t("i18nSweep.pushCategory", { category: res.category })}`}
+                        {res.target && ` ${t("i18nSweep.pushOnTarget", { target: res.target })}`}
                       </p>
                     )}
                     {res.skipped && res.skipped.length > 0 && (
                       <p className="text-micro text-muted-foreground">
-                        Not supported here: {res.skipped.join(", ")}
+                        {t("i18nSweep.pushNotSupported", { fields: res.skipped.join(", ") })}
                       </p>
                     )}
-                    {res.message && <p className="text-micro text-down">{res.message}</p>}
+                    {res.message && (
+                      <StatusReason
+                        className="text-micro text-down"
+                        reason={res.message}
+                        step={t("foundation.status.step.metaPush", { platform: res.platform })}
+                        asOf={null}
+                      />
+                    )}
                     {res.warnings?.map((warn) => (
                       <p key={warn} className="text-micro text-warn">
                         {warn}
@@ -646,13 +664,56 @@ const bulkTone: Record<BulkDestOutcome, SignalTone> = {
 };
 
 function BulkDestinationControl({
-  count,
+  destinations,
+  sources,
   onFinished,
-}: Readonly<{ count: number; onFinished: () => void }>) {
+}: Readonly<{
+  destinations: readonly DestStatus[];
+  sources: readonly SourceView[];
+  onFinished: () => void;
+}>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
-  const [busy, setBusy] = useState<"start" | "stop" | null>(null);
+  const [reportAt, setReportAt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The sheet's rows, frozen when it opens. See GoLiveSheet.
+  const [sheetRows, setSheetRows] = useState<GoLiveRow[] | null>(null);
   const confirmStopAll = useConfirm<true>();
+  // The Stop dialog's count comes from the server, the same answer the stop is judged by. It is
+  // fetched fresh each time the dialog opens, and until it arrives the dialog cannot be confirmed:
+  // a stop whose count is unknown is a stop the operator did not see.
+  type StopCountState =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ready"; youtube: number; destinations: number }
+    | { status: "failed"; message: string };
+  const [stopCount, setStopCount] = useState<StopCountState>({ status: "idle" });
+  const stopCountSeq = useRef(0);
+  const count = destinations.length;
+  // The Go live sheet still counts YouTube broadcasts locally for its own warning.
+  const youtube = youtubeBroadcastsAtRisk(destinations);
+
+  const openStopAll = () => {
+    const seq = ++stopCountSeq.current;
+    setStopCount({ status: "loading" });
+    confirmStopAll.ask(true);
+    api.stopImpact().then(
+      (impact) => {
+        if (seq === stopCountSeq.current) {
+          setStopCount({
+            status: "ready",
+            youtube: impact.youtubeBroadcasts,
+            destinations: impact.destinations,
+          });
+        }
+      },
+      (err: unknown) => {
+        if (seq === stopCountSeq.current) {
+          setStopCount({ status: "failed", message: err instanceof Error ? err.message : String(err) });
+        }
+      },
+    );
+  };
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -662,84 +723,75 @@ function BulkDestinationControl({
     skipped: t("dash.bulkSkipped"),
   };
 
-  const run = async (action: "start" | "stop") => {
-    setBusy(action);
-    // Cleared rather than left standing: a list from the previous press sitting
-    // under a spinner reads as this press's answer, and the row that has not
-    // been touched yet is exactly the one an operator would misread.
+  // STOP ALL ONLY. Starting moved to the Go live sheet, which lists every
+  // destination before anything fires and starts each one through the same
+  // per-destination path the card uses (see lib/goLive.ts).
+  const stopAll = async () => {
+    setBusy(true);
     setReport(null);
     try {
-      const res =
-        action === "start" ? await api.startAllDestinations() : await api.stopAllDestinations();
+      const res = await api.stopAllDestinations();
       setReport(res);
-      // The count, not a verdict. "Six of eight started" is a sentence an
-      // operator can act on; "failed" over eight destinations of which two
-      // refused is one they have to go and decode.
-      const done = res.results.filter(
-        (r) => r.outcome === "started" || r.outcome === "stopped",
-      ).length;
+      // The moment this answer arrived: the as-of time for every reason in it.
+      setReportAt(new Date().toISOString());
+      const done = res.results.filter((r) => r.outcome === "stopped").length;
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
-        toast.success(
-          action === "start" ? t("dash.bulkStartDone", params) : t("dash.bulkStopDone", params),
-        );
+        toast.success(t("dash.bulkStopDone", params));
       } else {
-        // Not an error toast: the request succeeded and every destination has
-        // an answer. The rows below say which ones did not take.
-        toast.warning(
-          action === "start"
-            ? t("dash.bulkStartPartial", params)
-            : t("dash.bulkStopPartial", params),
-        );
+        toast.warning(t("dash.bulkStopPartial", params));
       }
       onFinished();
     } catch (err) {
-      // A refusal of the WHOLE request -- no engine, no permission. Nothing was
-      // reported per destination because nothing got that far.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : action === "start"
-            ? t("dash.bulkStartFailed")
-            : t("dash.bulkStopFailed"),
-      );
+      toast.error(err instanceof Error ? err.message : t("dash.bulkStopFailed"));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
   if (count === 0) return null;
 
+  // Once the server has answered, the dialog names the server's destination count: that is the set a
+  // stop-all touches, and the one the stop is judged by. Until then, the count on screen stands in.
+  const shownCount = stopCount.status === "ready" ? stopCount.destinations : count;
+  const consequence = t("dash.stopAllConsequence", { count: String(shownCount) });
+  const stopDescription =
+    stopCount.status === "loading" || stopCount.status === "idle"
+      ? t("dash.stopCountLoading")
+      : stopCount.status === "failed"
+        ? `${t("dash.stopCountFailed")} ${stopCount.message}`
+        : stopCount.youtube > 0
+          ? `${consequence} ${t("golive.stopYoutube", { count: stopCount.youtube })}`
+          : consequence;
+
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={busy !== null} onClick={() => void run("start")}>
-          <Play /> {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setSheetRows(goLiveRows(destinations, sources));
+          }}
+        >
+          <Play /> {t("golive.trigger")}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          disabled={busy !== null}
-          onClick={() => confirmStopAll.ask(true)}
+          disabled={busy}
+          onClick={openStopAll}
         >
-          <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
+          <Square /> {busy ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
-        <span className="text-micro text-muted-foreground">
-          {t("dash.bulkAppliesTo", { count })}
-        </span>
       </div>
 
-      {/* Starts are paced on the server, so the button stays busy for a while
-          on a long list. Saying why turns a stuck-looking dashboard into one
-          that is visibly working. */}
-      <p className="text-micro text-muted-foreground">{t("dash.bulkPacingNote")}</p>
-
-      {/* ---------- what each destination did ---------- */}
-      <div aria-live="polite" className="flex flex-col gap-1.5">
-        {report === null ? (
-          <p className="text-tiny text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
-        ) : (
-          report.results.map((res) => {
+      {/* Results appear only once there are some. An empty "results appear
+          here" line sat under the buttons on every visit, and the sheet already
+          says what a press is about to do. */}
+      {report !== null && (
+        <div aria-live="polite" className="flex flex-col gap-1.5">
+          {report.results.map((res) => {
             const tone = bulkTone[res.outcome];
             return (
               <div
@@ -756,23 +808,34 @@ function BulkDestinationControl({
                   </div>
                   <Badge variant={toneBadge[tone]}>{bulkLabel[res.outcome]}</Badge>
                 </div>
-                {/* WHY, on every row that is not a clean start or stop. A row
-                    that only says "Failed" sends the operator to the card to
-                    find out what this request already knows. */}
+                {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
-                  <p
+                  <StatusReason
                     className={`text-micro ${
                       res.outcome === "failed" ? "text-down" : "text-warn"
                     }`}
-                  >
-                    {res.message}
-                  </p>
+                    reason={res.message}
+                    step={t("foundation.status.step.stop")}
+                    asOf={reportAt}
+                  />
                 )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
+
+      <GoLiveSheet
+        open={sheetRows !== null}
+        onOpenChange={(o) => {
+          if (!o) setSheetRows(null);
+        }}
+        rows={sheetRows ?? []}
+        live={destinations}
+        youtubeAtRisk={youtube}
+        onStart={(id) => api.startDestination(id).then(() => undefined)}
+        onFinished={onFinished}
+      />
 
       <ConfirmDestructive
         open={confirmStopAll.open}
@@ -781,10 +844,11 @@ function BulkDestinationControl({
         // in the title and the description; a subject box would have shown
         // the verb "Stop all".
         subject={{ unnamed: true }}
-        title={t("dash.stopAllTitle", { count })}
-        description={t("dash.stopAllConsequence", { count: String(count) })}
+        title={t("dash.stopAllTitle", { count: shownCount })}
+        description={stopDescription}
         confirmLabel={t("dash.stopAll")}
-        onConfirm={() => run("stop")}
+        confirmDisabled={stopCount.status !== "ready"}
+        onConfirm={() => stopAll()}
       />
     </div>
   );
@@ -793,6 +857,7 @@ function BulkDestinationControl({
 /** The failover exposure line. Renders nothing when there is nothing to say,
  *  which is the common case on a correctly configured install. */
 function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+  const t = useT();
   if (notice.kind === "none") return null;
 
   return (
@@ -804,17 +869,11 @@ function FailoverExposure({ notice }: { notice: FailoverNotice }) {
     >
       <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
       <p className="text-muted-foreground">
-        <span className="text-foreground">
-          If the encoder disconnects, this broadcast ends.
-        </span>{" "}
-        Without failover the destination restarts and takes the platform
-        connection with it, and a completed YouTube broadcast cannot return to
-        live. Turning it on in{" "}
+        <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
+        {t("i18nSweep.noFailoverBody")}{" "}
         <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-          Settings → Failover
-        </Link>{" "}
-        holds the connection up with a standby ingest, a looping file or a
-        slate. It costs a remux hop.
+          {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
+        </Link>
       </p>
     </div>
   );
@@ -893,17 +952,39 @@ export function FailoverControl({
   const name = (kind: FailoverSource) =>
     FAILOVER_LABEL[kind] ? t(FAILOVER_LABEL[kind]) : kind;
   const target = confirm.target ?? "primary";
+  // Amber for a degraded picture the audience still gets, red for a slate.
+  // A pin on the primary has no severity of its own, so it reads as amber.
+  const severity = failoverBannerTone(state.active) ?? "warn";
+  const since = failoverSinceClock(state.switchedAt);
 
   return (
     <section
-      className="mb-3 flex flex-col gap-2 rounded-md border border-warn/40 bg-warn-dim px-2.5 py-2"
+      className={cn(
+        "mb-3 flex w-full flex-col gap-2 rounded-md border px-3 py-2.5",
+        severity === "down" ? "border-down/40 bg-down-dim" : "border-warn/40 bg-warn-dim",
+      )}
       aria-label={t("dash.failoverTitle")}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warn" />
-        <span className="text-[11px] font-medium">
-          {t("dash.failoverOnAir", { source: name(state.active) })}
-        </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <ShieldAlert
+          className={cn("h-4 w-4 shrink-0", severity === "down" ? "text-down" : "text-warn")}
+        />
+        {/* THE LIVE REGION IS THE STATE, NOT THE CLOCK. The source and the
+            switch time change only when the broadcast changes source, so this
+            is the one thing a screen reader should announce. The elapsed
+            figure sits outside it and is hidden from assistive tech: a figure
+            that ticks every second would be read out every second. */}
+        <div aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold">
+            {t("dash.failoverOnAir", { source: name(state.active) })}
+          </span>
+          {since && (
+            <span className="text-sm text-muted-foreground">
+              {t("failover.bannerSince", { time: since })}
+            </span>
+          )}
+        </div>
+        <FailoverElapsed switchedAt={state.switchedAt} />
         <Badge variant="outline">
           {pinned ? t("dash.failoverByHand") : t("dash.failoverAutomatic")}
         </Badge>
@@ -913,9 +994,9 @@ export function FailoverControl({
           than re-derived here: it names the cause ("the primary ingest stopped
           delivering") and a paraphrase computed from `active` alone could only
           restate the effect, which is the half already on screen above. */}
-      {state.reason && <p className="text-[10px] text-muted-foreground">{state.reason}</p>}
+      {state.reason && <p className="text-sm text-muted-foreground">{state.reason}</p>}
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {onPrimary
           ? t("dash.failoverPinnedHere")
           : manualReturn
@@ -929,7 +1010,7 @@ export function FailoverControl({
           is back. Without this line the operator presses the button, gets a
           success toast, and watches the backup keep going out. */}
       {!onPrimary && !state.primaryLive && (
-        <p className="text-[10px] text-warn">{t("dash.failoverPrimaryDown")}</p>
+        <p className="text-sm font-medium text-warn">{t("dash.failoverPrimaryDown")}</p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -964,6 +1045,24 @@ export function FailoverControl({
         onConfirm={() => onSwitch(target)}
       />
     </section>
+  );
+}
+
+/** The ticking "for 2m 14s" figure. Its own component so the one-second tick
+ *  re-renders this span and nothing else: the Dashboard is 1800 lines and a
+ *  tick in the parent would redraw all of them every second. */
+function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = failoverElapsedSeconds(switchedAt, now);
+  if (secs === null) return null;
+  return (
+    <span aria-hidden="true" className="tnum font-mono text-sm">
+      {duration(secs)}
+    </span>
   );
 }
 
@@ -1187,7 +1286,7 @@ export function Dashboard() {
     }
   };
 
-  const confirmDelete = useConfirm<{ id: DestinationId; name: string }>();
+  const confirmDelete = useConfirm<{ id: DestinationId; name: string; live: boolean }>();
 
   const remove = async (id: DestinationId) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
@@ -1210,6 +1309,11 @@ export function Dashboard() {
   // on-air banner. `failoverState` is the programme-scoped snapshot.
   const onBackup = backupOnAir(failoverState);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  // The primary's failure stays visible here while the backup is on air: this
+  // card is about the primary, and the reason it fell over is what the
+  // operator needs to fix it. The header chip, which speaks for the show,
+  // hides it in that case.
+  const ingestReason = ingestProblem(ingest, ingestLive, false);
   const source = status?.source;
   // The word a pipeline row uses when it has no process. "—" for unknown: a
   // settings read that has not landed is not a fact about the feature.
@@ -1251,6 +1355,18 @@ export function Dashboard() {
    * See lib/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
 
+  /* The first-run checklist, shown in place of the "no destinations" sentence
+   * when a source exists and nothing is configured to send it anywhere. Every
+   * tick is derived from what the server reports now (lib/setupChecklist), so
+   * an operator who loses their source or encoder sees the list reopen rather
+   * than a stored "done" over an empty page. Null while the source count has
+   * not arrived: that is drawn as the plain card, never as a guessed checklist. */
+  const checklist = setupChecklist({
+    sourceCount,
+    signal: ingestLive,
+    destinations: destinations.length,
+  });
+
   /* ONE CARD, rendered from the GLOBAL index rather than a per-group one.
    *
    * The move arrows reorder the whole list and the order is persisted whole, so
@@ -1284,7 +1400,13 @@ export function Dashboard() {
                   act(d.id, () => api.restartDestination(d.id), "restart the destination")
                 }
                 onEdit={() => openEdit(d.id)}
-                onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
+                onDelete={() =>
+                  confirmDelete.ask({
+                    id: d.id,
+                    name: d.name,
+                    live: d.process?.state === "running",
+                  })
+                }
                 onRefreshKey={async () => {
                   await act(
                     d.id,
@@ -1364,6 +1486,15 @@ export function Dashboard() {
     }
   };
 
+  // A1: the selected programme's publish address for the checklist, host
+  // filled in. In RTMP mode the server sends the stream key as its own row
+  // (OBS wants server and key in two boxes, and the address alone reaches
+  // nothing), so it is offered as its own copy -- copied, never displayed.
+  const checklistSource = sources.find((x) => x.id === programme) ?? sources[0];
+  const checklistAddresses = checklistSource
+    ? publishRows(checklistSource.publishUrls, window.location.hostname)
+    : [];
+
   const copyIngest = async () => {
     if (!system?.ingestUrl) return;
     try {
@@ -1391,6 +1522,25 @@ export function Dashboard() {
       <div className="p-3">
         <PageHeader title={t("dash.title")} subtitle={t("dash.subtitle")} />
         <NoProgrammeYet title={t("empty.dashTitle")} body={t("empty.dashBody")} />
+        {/* The same checklist as a configured install, starting at step one. The
+         * explanation above is kept, because it is the one place that says what
+         * a programme is. The checklist is the state, and it is what reopens
+         * when the last source is removed. */}
+        {checklist && (
+          <div className="mt-3">
+            <SetupChecklist
+              checklist={checklist}
+              addresses={checklistAddresses}
+              onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto === "streamKey" ? t("sources.streamKey") : a.proto.toUpperCase())}
+              ingestUrl={system?.ingestUrl ?? ""}
+              onCopyIngest={copyIngest}
+              onAddDestination={() => {
+                setEditing(null);
+                setDialogOpen(true);
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -1415,7 +1565,7 @@ export function Dashboard() {
               setDialogOpen(true);
             }}
           >
-            <Plus /> Add destination
+            <Plus /> {t("firstRun.addDestination")}
           </Button>
         }
       />
@@ -1424,7 +1574,7 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} />
+      <OnAirBar status={status} failover={failoverState} />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest
@@ -1495,7 +1645,7 @@ export function Dashboard() {
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <StatusDot tone={ingestTone} />
-                Ingest
+                {t("chrome.ingest")}
                 {/* WHOSE INGEST. Only on an install with more than one
                     programme, where the answer is not obvious and the feed
                     behind these figures is not scoped to either. */}
@@ -1576,9 +1726,16 @@ export function Dashboard() {
                 </Button>
               </div>
 
-              {ingest?.lastError && ingest.state !== "running" && (
+              {/* B1: the reason, the failing step and the as-of line. Gated by
+                  ingestProblem, the same rule the header chip uses, so a stale
+                  lastError never sits beside a stream that has recovered. */}
+              {ingestReason && (
                 <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-micro text-down">
-                  {ingest.lastError}
+                  <StatusReason
+                    reason={ingestReason}
+                    step={t("foundation.status.step.ingest")}
+                    asOf={null}
+                  />
                 </div>
               )}
 
@@ -1656,7 +1813,7 @@ export function Dashboard() {
                 <span className="text-tiny text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
                   <span className="font-mono text-micro text-muted-foreground">
-                    none — every destination is on passthrough
+                    {t("i18nSweep.noRenditions")}
                   </span>
                 ) : (
                   renditions.map((r) => (
@@ -1669,7 +1826,7 @@ export function Dashboard() {
                         <span className="truncate text-tiny">{r.name}</span>
                       </div>
                       <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
-                        {r.consumers === 1 ? "1 dest" : `${r.consumers} dests`}
+                        {r.consumers === 1 ? t("i18nSweep.destsOne") : t("i18nSweep.destsMany", { count: r.consumers })}
                       </span>
                     </div>
                   ))
@@ -1686,7 +1843,7 @@ export function Dashboard() {
       <div className="mt-4">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold tracking-tight">
-            Destinations
+            {t("route.destinations")}
             <span className="ml-1.5 font-mono text-tiny font-normal text-muted-foreground">
               {destinations.length}
             </span>
@@ -1718,7 +1875,8 @@ export function Dashboard() {
             below the buttons needs the full width to put a destination name and
             a refusal on one line. */}
         <BulkDestinationControl
-          count={destinations.length}
+          destinations={destinations}
+          sources={sources}
           onFinished={() => setRefreshKey((k) => k + 1)}
         />
 
@@ -1746,6 +1904,18 @@ export function Dashboard() {
               <p className="text-sm text-muted-foreground">{t("dash.loadingDestinations")}</p>
             </CardContent>
           </Card>
+        ) : destinations.length === 0 && checklist ? (
+          <SetupChecklist
+            checklist={checklist}
+            addresses={checklistAddresses}
+            onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto === "streamKey" ? t("sources.streamKey") : a.proto.toUpperCase())}
+            ingestUrl={system?.ingestUrl ?? ""}
+            onCopyIngest={copyIngest}
+            onAddDestination={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          />
         ) : destinations.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
@@ -1759,7 +1929,7 @@ export function Dashboard() {
                   setDialogOpen(true);
                 }}
               >
-                <Plus /> Add destination
+                <Plus /> {t("firstRun.addDestination")}
               </Button>
             </CardContent>
           </Card>
@@ -1848,8 +2018,23 @@ export function Dashboard() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title={`Delete “${confirmDelete.target?.name}”?`}
-        description={t("dash.deleteDestDescription")}
+        // A18: typed only while it is live. Deleting a running destination
+        // ends a broadcast people are watching, which does not come back;
+        // deleting an idle one is a profile that can be added again.
+        requireTyping={confirmDelete.target?.live ?? false}
+        title={t("confirm.deleteTitle", { name: confirmDelete.target?.name ?? "" })}
+        description={
+          confirmDelete.target?.live ? (
+            <>
+              <span className="block font-medium text-down">
+                {t("dash.deleteDestLive")}
+              </span>
+              {t("dash.deleteDestDescription")}
+            </>
+          ) : (
+            t("dash.deleteDestDescription")
+          )
+        }
         confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target.id);

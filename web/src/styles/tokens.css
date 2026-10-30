@@ -33,6 +33,11 @@
   --primary: oklch(60.2% 0.1177 263.2);
   --primary-foreground: oklch(15.9% 0.0091 264.3);
   --primary-dim: oklch(31.3% 0.0447 262.9);
+  /* The brighter accent for text and hover on dark surfaces, in the baseline
+     the new layouts draw from. Computed from these token values, not measured
+     in a browser: 7.13:1 on --card, 7.80:1 on --background, 5.23:1 on
+     --primary-dim. Use it for accent text, never for large fills. */
+  --primary-bright: oklch(71.9% 0.1090 257.4);
 
   --secondary: oklch(25.2% 0.0245 264.0);
   --secondary-foreground: oklch(85.9% 0.0225 263.2);

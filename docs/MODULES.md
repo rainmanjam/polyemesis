@@ -172,7 +172,7 @@ do not reach polyemesis's own MIT-licensed code.
 
 | Image | Base | FFmpeg | Platforms |
 |---|---|---|---|
-| `Dockerfile` (default) | `alpine:3.24` | pinned `8.1.2-r0` | linux/amd64, linux/arm64 |
+| `Dockerfile` (default) | `alpine:3.24` | pinned `8.1.3-r0` | linux/amd64, linux/arm64 |
 | `Dockerfile.cuda` | `nvidia/cuda:12.6.3-base-ubuntu24.04` | pinned `7:6.1.1-3ubuntu5` | linux/amd64 |
 | `Dockerfile.vaapi` | `ubuntu:26.04` | pinned `7:8.0.1-3ubuntu2` | linux/amd64 |
 | build stages | `golang:1.27-alpine`, `node:24-alpine` | — | cross-compiled from `$BUILDPLATFORM` |

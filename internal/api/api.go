@@ -552,6 +552,12 @@ type Server struct {
 	// state the delete's in-use guard exists to prevent. Neither handler is
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
+	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain, and
+	// PUT /destinations/{id} against it. Each is a read-modify-write of a whole
+	// row followed by a reconcile whose outcome it reads back; two keys pressed
+	// together, or a key pressed while the editor saves, must not overwrite each
+	// other's change or read each other's outcome.
+	trackGainMu sync.Mutex
 
 	// preannounceMu guards announceFails, which the pre-announce sweep mutates
 	// and nothing else reads.
@@ -829,6 +835,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
+			// Test connection for a pairing client: what this token is and may do.
+			// See connection_check.go.
+			r.Get("/auth/connection", s.handleConnectionCheck)
 
 			// The onboarding tour's "have I already been offered this".
 			//
@@ -1001,6 +1010,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+			// The Record key's switch: one install-wide bit, written on its own so
+			// the key never reads and rewrites the whole document. GET is readable;
+			// POST is admin by method. See recording_toggle.go.
+			r.Get("/recording", s.handleGetRecording)
+			r.Post("/recording", s.handleSetRecording)
 			// Its own route because the password must never travel outward in
 			// the settings blob -- see handlePutMQTTPassword.
 			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
@@ -1032,6 +1046,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Order is display state and deliberately does NOT reconcile (see
 			// handleReorderDestinations), so it needs no programme either.
 			r.Put("/destinations/order", s.handleReorderDestinations)
+			// Read-only preview of what stop and stop-all would end. Reads the
+			// recorded phase and makes no platform call. See destinations_stop_impact.go.
+			r.With(s.requireSource).Get("/destinations/stop-impact", s.handleStopImpact)
 			// The bulk pair, beside the per-destination controls they drive.
 			// Static segments again, so they do not collide with {id} below.
 			//
@@ -1046,6 +1063,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
+			// Live gain and mute for one track. Persists first, then reconciles; the
+			// response says whether the change went live or restarted. See
+			// destinations_track_gain.go.
+			r.With(s.requireSource).Post("/destinations/{id}/tracks/{track}/gain", s.handleSetTrackGain)
 			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
@@ -1263,6 +1284,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
+			r.Get("/timeline", s.handleListTimeline)
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)
@@ -2229,7 +2251,12 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 // decodeJSONInto is decodeJSON's second half, over bytes already read. It
 // returns badRequestError rather than writing, so a settings closure can use it
 // without touching the ResponseWriter under the store's lock.
+//
+// A sent array or map REPLACES the one already in v rather than merging into it
+// by index or key; see resetSentCollections. On a freshly zeroed v that is a
+// no-op, so it matters only to the handlers that decode over a stored row.
 func decodeJSONInto(body []byte, v any) error {
+	resetSentCollections(body, v)
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

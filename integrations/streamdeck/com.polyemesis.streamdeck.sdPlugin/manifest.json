@@ -1,0 +1,451 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "com.polyemesis.streamdeck",
+  "Name": "polyemesis",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
+  "Author": "polyemesis",
+  "Version": "0.1.0.0",
+  "Icon": "imgs/plugin-icon",
+  "Category": "polyemesis",
+  "CategoryIcon": "imgs/category-icon",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "24"
+  },
+  "Actions": [
+    {
+      "UUID": "com.polyemesis.streamdeck.destination",
+      "Name": "Destination",
+      "Tooltip": "One destination's live state. Tap to start it when it is off.",
+      "Icon": "imgs/actions/destination",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/destination/idle"
+        },
+        {
+          "Image": "imgs/keys/destination/live"
+        },
+        {
+          "Image": "imgs/keys/destination/warn"
+        },
+        {
+          "Image": "imgs/keys/destination/error"
+        },
+        {
+          "Image": "imgs/keys/destination/held"
+        },
+        {
+          "Image": "imgs/keys/destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/destination/halted"
+        },
+        {
+          "Image": "imgs/keys/destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/destination/muted"
+        },
+        {
+          "Image": "imgs/keys/destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/destination/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.go-live",
+      "Name": "Go live",
+      "Tooltip": "Start every destination on this programme. Needs an admin token.",
+      "Icon": "imgs/actions/go-live",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/go-live/idle"
+        },
+        {
+          "Image": "imgs/keys/go-live/live"
+        },
+        {
+          "Image": "imgs/keys/go-live/warn"
+        },
+        {
+          "Image": "imgs/keys/go-live/error"
+        },
+        {
+          "Image": "imgs/keys/go-live/held"
+        },
+        {
+          "Image": "imgs/keys/go-live/unbound"
+        },
+        {
+          "Image": "imgs/keys/go-live/halted"
+        },
+        {
+          "Image": "imgs/keys/go-live/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/go-live/muted"
+        },
+        {
+          "Image": "imgs/keys/go-live/restarted"
+        },
+        {
+          "Image": "imgs/keys/go-live/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.stop-all",
+      "Name": "Stop all",
+      "Tooltip": "Hold to stop every destination on this programme. Stopping ends YouTube broadcasts. Needs an admin token.",
+      "Icon": "imgs/actions/stop-all",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/stop-all/idle"
+        },
+        {
+          "Image": "imgs/keys/stop-all/live"
+        },
+        {
+          "Image": "imgs/keys/stop-all/warn"
+        },
+        {
+          "Image": "imgs/keys/stop-all/error"
+        },
+        {
+          "Image": "imgs/keys/stop-all/held"
+        },
+        {
+          "Image": "imgs/keys/stop-all/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-all/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-all/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.failover",
+      "Name": "Failover",
+      "Tooltip": "Which source is on air. Tap to hand control back to automatic. Needs an admin token.",
+      "Icon": "imgs/actions/failover",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/failover/idle"
+        },
+        {
+          "Image": "imgs/keys/failover/live"
+        },
+        {
+          "Image": "imgs/keys/failover/warn"
+        },
+        {
+          "Image": "imgs/keys/failover/error"
+        },
+        {
+          "Image": "imgs/keys/failover/held"
+        },
+        {
+          "Image": "imgs/keys/failover/unbound"
+        },
+        {
+          "Image": "imgs/keys/failover/halted"
+        },
+        {
+          "Image": "imgs/keys/failover/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/failover/muted"
+        },
+        {
+          "Image": "imgs/keys/failover/restarted"
+        },
+        {
+          "Image": "imgs/keys/failover/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.stop-destination",
+      "Name": "Stop destination",
+      "Tooltip": "Hold to stop this one destination. Stopping a YouTube broadcast ends it for good. Needs an admin token.",
+      "Icon": "imgs/actions/stop-destination",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/stop-destination/idle"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/live"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/warn"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/error"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/held"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.record",
+      "Name": "Record",
+      "Tooltip": "Switches recording on or off for the whole install, not one programme. Tap to switch. Needs an admin token.",
+      "Icon": "imgs/actions/record",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/record/idle"
+        },
+        {
+          "Image": "imgs/keys/record/live"
+        },
+        {
+          "Image": "imgs/keys/record/warn"
+        },
+        {
+          "Image": "imgs/keys/record/error"
+        },
+        {
+          "Image": "imgs/keys/record/held"
+        },
+        {
+          "Image": "imgs/keys/record/unbound"
+        },
+        {
+          "Image": "imgs/keys/record/halted"
+        },
+        {
+          "Image": "imgs/keys/record/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/record/muted"
+        },
+        {
+          "Image": "imgs/keys/record/restarted"
+        },
+        {
+          "Image": "imgs/keys/record/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.preset",
+      "Name": "Routing preset",
+      "Tooltip": "Hold to apply a routing preset to this programme. Applying can restart its destinations. Needs an admin token.",
+      "Icon": "imgs/actions/preset",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/preset/idle"
+        },
+        {
+          "Image": "imgs/keys/preset/live"
+        },
+        {
+          "Image": "imgs/keys/preset/warn"
+        },
+        {
+          "Image": "imgs/keys/preset/error"
+        },
+        {
+          "Image": "imgs/keys/preset/held"
+        },
+        {
+          "Image": "imgs/keys/preset/unbound"
+        },
+        {
+          "Image": "imgs/keys/preset/halted"
+        },
+        {
+          "Image": "imgs/keys/preset/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/preset/muted"
+        },
+        {
+          "Image": "imgs/keys/preset/restarted"
+        },
+        {
+          "Image": "imgs/keys/preset/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.track-mute",
+      "Name": "Mute track",
+      "Tooltip": "Mutes or unmutes one audio track on one destination. Applies live when the server can, otherwise by a restart the viewers see. Needs an admin token.",
+      "Icon": "imgs/actions/track-mute",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/track-mute/idle"
+        },
+        {
+          "Image": "imgs/keys/track-mute/live"
+        },
+        {
+          "Image": "imgs/keys/track-mute/warn"
+        },
+        {
+          "Image": "imgs/keys/track-mute/error"
+        },
+        {
+          "Image": "imgs/keys/track-mute/held"
+        },
+        {
+          "Image": "imgs/keys/track-mute/unbound"
+        },
+        {
+          "Image": "imgs/keys/track-mute/halted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/track-mute/muted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/restarted"
+        },
+        {
+          "Image": "imgs/keys/track-mute/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.track-gain",
+      "Name": "Track gain",
+      "Tooltip": "One audio track's gain on one destination, in 0.5 dB steps. Push to mute, touch for 0 dB. Applies live when the server can, otherwise by a restart. Needs an admin token.",
+      "Icon": "imgs/actions/track-gain",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Gain, 0.5 dB a step",
+          "Push": "Mute / unmute",
+          "Touch": "Reset to 0 dB"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/track-gain"
+        }
+      ]
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.meter",
+      "Name": "Meter",
+      "Tooltip": "The loudest channel on this install's meters. Shows NO FEED when the install is not sending levels.",
+      "Icon": "imgs/actions/meter",
+      "Controllers": [
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1"
+      },
+      "States": [
+        {
+          "Image": "imgs/actions/meter"
+        }
+      ]
+    }
+  ]
+}

@@ -7,24 +7,24 @@
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
   "inertCeiling": 6,
-  "varianceExemptCeiling": 2,
+  "varianceExemptCeiling": 6,
   "shapeFloor": 27,
-  "guardedFloor": 22,
+  "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 229,
-    "swept": 63,
+    "methodPatternPairs": 235,
+    "swept": 67,
     "excused": 50,
-    "denied": 116,
+    "denied": 118,
     "nonTrieProbes": 12,
     "shapesEmitted": 27,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 50,
+    "invariant": 53,
     "inertSubsetOfInvariant": 6,
-    "explainedVariance": 1,
+    "explainedVariance": 2,
     "unstable": 4
   },
   "routes": [
@@ -68,6 +68,12 @@
       "method": "POST",
       "pattern": "/api/v1/alerts/rules/{id}/test",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/auth/connection",
+      "coverage": "swept",
       "zeroSource": "unguarded"
     },
     {
@@ -359,6 +365,12 @@
       "zeroSource": "guarded"
     },
     {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/stop-impact",
+      "coverage": "swept",
+      "zeroSource": "guarded"
+    },
+    {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}",
       "coverage": "denied-by-method",
@@ -439,6 +451,12 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/stop",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/tracks/{track}/gain",
       "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
@@ -882,6 +900,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/recording",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recording",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/recordings",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1123,6 +1153,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/system",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/timeline",
       "coverage": "swept",
       "zeroSource": "unguarded"
     },
@@ -1420,6 +1456,17 @@
       "class": "invariant"
     },
     {
+      "path": "/api/v1/auth/connection",
+      "pattern": "GET /api/v1/auth/connection",
+      "class": "explained-variance",
+      "pointers": [
+        "/adminScope",
+        "/name",
+        "/prefix",
+        "/scope"
+      ]
+    },
+    {
       "path": "/api/v1/auth/me",
       "pattern": "GET /api/v1/auth/me",
       "class": "explained-variance",
@@ -1505,6 +1552,11 @@
     {
       "path": "/api/v1/destinations/3",
       "pattern": "GET /api/v1/destinations/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/destinations/stop-impact",
+      "pattern": "GET /api/v1/destinations/stop-impact",
       "class": "invariant"
     },
     {
@@ -1644,6 +1696,11 @@
       "path": "/api/v1/processes",
       "pattern": "GET /api/v1/processes",
       "class": "unstable"
+    },
+    {
+      "path": "/api/v1/recording",
+      "pattern": "GET /api/v1/recording",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/recordings",
@@ -1797,6 +1854,11 @@
       "sentinels": [
         "SENTINEL-source-srt-passphrase-9f3a"
       ]
+    },
+    {
+      "path": "/api/v1/timeline",
+      "pattern": "GET /api/v1/timeline",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/tls",

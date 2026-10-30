@@ -162,14 +162,20 @@ test.describe("sources", () => {
     // TestASettingsRoundTripLeavesTheDefaultSourcesIngestAlone pins). With that
     // fixed, the source was still SRT, picking SRT changed nothing, no Apply
     // appeared, and the click timed out.
+    //
+    // The trigger shows the protocol AND the port since A2 ("SRT:6000" as
+    // text, two spans), so the protocol is read as a PREFIX. An exact "SRT"
+    // never matched once the port was there: the test re-picked SRT on a
+    // source that already was SRT, no Apply appeared, and the click timed out
+    // -- the same shape of failure the paragraph above describes.
     const mode = page.getByTestId("ingest-mode").first();
     await expect(mode).toBeVisible();
-    if ((await mode.textContent())?.trim() !== "SRT") {
+    if (!(await mode.textContent())?.trim().startsWith("SRT")) {
       await mode.click();
       await page.getByRole("option", { name: "SRT", exact: true }).click();
       await page.getByRole("button", { name: /^Apply/ }).first().click();
     }
-    await expect(mode).toHaveText("SRT");
+    await expect(mode).toHaveText(/^SRT\b/);
     // The precondition the blur is measured against: nothing pending.
     await expect(page.getByRole("button", { name: /^Apply/ })).toBeHidden();
 

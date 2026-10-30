@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { backupOnAir, ingestChipReading } from "@/lib/ingestChip";
+import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { StatusReason } from "@/components/signature/StatusReason";
 import { useMotionTransition } from "@/lib/motion";
 import { NavLink, Outlet, useLocation } from "react-router";
 
@@ -13,6 +15,7 @@ import { TourOffer } from "./Tour";
 import { BrandMark } from "./BrandMark";
 import {
   Activity,
+  AlertTriangle,
   AudioLines,
   CalendarClock,
   Check,
@@ -63,6 +66,7 @@ import {
   useT,
   type TranslationKey,
 } from "@/lib/i18n";
+import { NAV_SECTIONS } from "@/lib/navSections";
 import { cn } from "@/lib/utils";
 
 /** A nav entry names itself either through the catalogue or, for a page whose
@@ -202,6 +206,7 @@ export function AppLayout({
   const failoverIsOurs = programme == null || status?.source?.id === programme;
   const onBackup = failoverIsOurs && backupOnAir(status?.failover);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
+  const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
   const liveCount =
     status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
 
@@ -275,6 +280,26 @@ export function AppLayout({
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>
+          {/* B1: the WHY behind a non-pass chip, beside it rather than inside
+              it -- the chip's text is asserted by tests and by e2e, and a
+              three-line reason does not fit an 11-unit bar. Click, not hover,
+              for the reasons InfoHint gives. */}
+          {ingestReason && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("b1.ingestWhy")}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm">
+                <StatusReason reason={ingestReason} step={t("foundation.status.step.ingest")} asOf={null} />
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-3">
@@ -298,17 +323,14 @@ export function AppLayout({
           )}
           {/* #13/#21: a frame the socket delivered could not be parsed and was
               dropped -- silently before this. `connected` cannot say it: the
-              socket stayed open. Plain English rather than a t() key, matching
-              ChatPage's own "socket offline" badge -- adding a key here means
-              adding it correctly translated to all sixteen locales, which
-              lib/i18n.test.ts enforces, and this is a rare fault path rather
-              than a string worth that cost today. */}
+              socket stayed open. Keyed in the A19 sweep: it is rare, but it is
+              the one badge that says the numbers on screen may be stale. */}
           {frameError && (
             <Badge
               variant="warn"
-              title="A status update from the server could not be understood and was dropped. Numbers on this page may be stale."
+              title={t("i18nSweep.frameErrorHint")}
             >
-              frame error
+              {t("i18nSweep.frameError")}
             </Badge>
           )}
           <span className="hidden text-tiny text-muted-foreground lg:inline">{username}</span>
@@ -474,7 +496,41 @@ export function AppLayout({
               mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
             )}
           >
-            {NAV.map(({ to, labelKey, label, icon: Icon, end, tour }) => {
+            {/* A11: the links, in labelled sections. Each section is a named
+                group, so a screen reader announces the job before its links.
+                Expanded, the heading is visible. Collapsed to the icon rail,
+                the heading is screen-reader-only and a hairline stands in for
+                it, so the rail keeps its icons and its grouping. On the mobile
+                drawer the headings always show. */}
+            {NAV_SECTIONS.map((section, si) => (
+              <div
+                key={section.labelKey}
+                role="group"
+                aria-labelledby={`nav-section-${si}`}
+                className="flex flex-col gap-0.5"
+              >
+                {si > 0 && (
+                  <div
+                    aria-hidden
+                    className={cn(
+                      "mx-2 my-1 h-px bg-border",
+                      navCollapsed ? "hidden md:block" : "hidden",
+                    )}
+                  />
+                )}
+                <p
+                  id={`nav-section-${si}`}
+                  className={cn(
+                    "px-2 pb-0.5 pt-2 text-sm font-medium text-muted-foreground",
+                    navCollapsed && "md:sr-only",
+                  )}
+                >
+                  {t(section.labelKey)}
+                </p>
+                {section.routes.map((route) => {
+                  const item = NAV.find((n) => n.to === route);
+                  if (!item) return null;
+                  const { to, labelKey, label, icon: Icon, end, tour } = item;
               const text = labelKey ? t(labelKey) : label;
               // Tooltip/TooltipTrigger mount UNCONDITIONALLY -- only
               // TooltipContent below is gated on navCollapsed. Earlier this
@@ -574,7 +630,9 @@ export function AppLayout({
                   )}
                 </Tooltip>
               );
-            })}
+                })}
+              </div>
+            ))}
 
             {/* Pinned to the bottom, so the target does not move as the width
                 changes. mt-auto rather than a spacer div. */}

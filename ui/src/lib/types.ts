@@ -45,6 +45,8 @@ export interface TrackSel {
   track: number;
   enabled: boolean;
   gain: number;
+  /** Silenced at volume 0 but still in the graph, so unmuting is a live change. */
+  muted?: boolean;
 }
 
 export interface MatrixCell {
@@ -53,6 +55,9 @@ export interface MatrixCell {
   /** 0 = left, 1 = right */
   out: number;
   gain: number;
+  /** Polarity inverted (A15). A pan coefficient, so changing it restarts the
+   *  destination. Sent as an explicit false when cleared, never dropped. */
+  invert?: boolean;
 }
 
 // ------------------------------------------------------------- track roles
@@ -789,6 +794,10 @@ export interface DestStatus {
    *  so cannot say this. It arrives in every status snapshot, not only on the
    *  POST response, which is why the card can render it with no API change. */
   stopWarning?: string;
+  /** How the most recent per-track gain or mute change took effect (I4):
+   *  "applied live", "applied live: <reason>" or "applied by restart: <reason>".
+   *  Absent until a level change has been recorded for this destination. */
+  levelChange?: string;
   /** The shared encode feeding this destination; absent for passthrough. */
   renditionId?: number | null;
   renditionName?: string;
@@ -1167,6 +1176,13 @@ export interface SourceView extends Source {
     rttMs: number;
     lossPackets: number;
     retransPackets: number;
+  };
+  /** Uplink for a source on the RTMP listener, when a publisher is connected.
+   *  TCP has no RTT or loss to report, so only who and since are here. */
+  rtmpLink?: {
+    peer: string;
+    since: string;
+    bytesIn: number;
   };
   /** Whether an engine actually came up. A source whose port was already taken
    *  is stored but not running, and that is the answer to "why is nothing
@@ -2067,6 +2083,17 @@ export interface CredentialCheck {
   state: "verified" | "unverified" | "rejected" | "unreachable";
   method: "client_credentials" | "format";
   detail: string;
+}
+
+/** One stream transition from the operator timeline. Titles are the server's
+ *  already-redacted text. */
+export interface TimelineRow {
+  id: number;
+  at: string;
+  type: string;
+  severity: "critical" | "warning" | "info" | string;
+  title: string;
+  detail?: string;
 }
 
 export interface LogLine {

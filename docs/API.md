@@ -492,11 +492,17 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 |---|---|
 | `POST` | `/auth/logout` |
 | `GET` | `/auth/me` |
+| `GET` | `/auth/connection` |
 | `POST` | `/auth/password` |
 | `GET` `POST` | `/auth/tokens` |
 | `DELETE` | `/auth/tokens/{id}` |
 | `GET` | `/tour` |
 | `POST` | `/tour/complete` |
+
+`GET /auth/connection` answers for the token that made the request, and for no other:
+`{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
+`adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
+pairing client should say so when it is pasted. A status or meter plugin needs only a read token.
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not
@@ -516,13 +522,14 @@ does not get to change what another operator's console shows them.
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
 | `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
-| `GET` | `/levels` | Current audio levels |
+| `GET` | `/levels` | Current audio levels, and `feed`: `none`, `live` or `stale` (see below) |
 | `GET` | `/source` | Probed track layout |
 | `PUT` | `/source/annotations` | Label what each incoming track is |
 | `GET` | `/version`, `POST` `/version/check` | |
 | `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
 | `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
+| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?}`. Install-wide, so it takes no `?source=` |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
 
@@ -538,10 +545,25 @@ used to have three samplers of the host disagreeing by a tick.
 | Method | Path |
 |---|---|
 | `GET` `PUT` | `/settings` |
+| `GET` `POST` | `/recording` |
 | `PUT` | `/settings/mqtt-password` |
 | `PUT` | `/settings/automod-key` |
 | `GET` | `/tls`, `/fonts` |
 | `GET` | `/tls/acme-preflight` |
+
+`GET /recording` answers the install-wide recording switch as
+`{"enabled", "state", "halted", "reason", "installWide"}`. Recording is one switch for every
+programme, so `installWide` is always true. `state` is `off` when `recording.enabled` is false;
+`halted_disk` when it is on but the free-space floor has stopped the recorder (`reason` says why);
+`recording` when an engine has its recorder child up; and `not_running` when it is on and the floor
+is clear but no recorder is up, for example because no programme has an engine yet. A read token may call it.
+
+`POST /recording` with `{"enabled": bool}` writes `recording.enabled` and nothing else, under the
+settings store's lock, then reconciles the recorder the same way a settings save does, so the
+recorder starts or stops now rather than at the next restart. It needs an admin token, and it
+answers with the new state. A change raises the same `settings.changed` audit event a settings
+save does, naming the `recording` section. A save made from a read taken before the toggle is refused as stale,
+like any other settings change, because the toggle moves the settings version.
 
 `PUT /settings` takes the whole blob. Read it, change what you want, write it
 back — a partial object will clear what it omits.
@@ -643,6 +665,7 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 |---|---|
 | `GET` `POST` | `/destinations` |
 | `PUT` | `/destinations/order` |
+| `GET` | `/destinations/stop-impact` |
 | `POST` | `/destinations/start-all`, `/stop-all` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}` |
 | `POST` | `/destinations/{id}/start`, `/stop`, `/restart` |
@@ -651,9 +674,47 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
 | `POST` | `/destinations/{id}/facebook/end-broadcast` |
 | `GET` | `/destinations/{id}/facebook/stream-health` |
+| `POST` | `/destinations/{id}/tracks/{track}/gain` |
+
+`POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
+destination. The body takes `muted` (boolean), `gain` (a finite number above
+zero), or both. A zero gain is refused: use `"muted": true`, which keeps the
+track in the mix at level zero. A matrix mix takes a gain per cell, so `gain` is
+refused there. The change is stored first and the destination is then reconciled.
+The response is `{"applied": "live" | "restart", "reason"?: string, "destination": ...}`.
+`live` means the running process took the level on its command channel. `restart`
+means the level reaches the output through a (re)start, and `reason` says why: a
+command was refused or timed out, the platform has no verified live path (Windows),
+the change alters more than a level, or the destination is not running and the
+level is stored for when it starts. A copy destination (`audio.copy`) passes its
+audio through unchanged, so a level cannot apply: `409`, and nothing is stored.
+`404` when the track is not in the destination's selection. If the reconcile after
+the save fails, the answer is still `200` with the reconcile failure in `warnings`, because the
+change was stored. Requests are serialised, so two tracks changed at once do not
+overwrite each other. Admin scope; the destination's programme is the one asked.
+The destination status carries the same outcome as `levelChange`
+(`"applied live"` or `"applied by restart: <reason>"`).
 
 List rows arrive wrapped as `{"destination": ..., "routing": ...}` so the UI
 gets the compiled routing without a second round trip.
+
+`GET /levels` returns `{levels, at, feed}`. `feed` says whether the reading is current, so a
+dial can show NO FEED rather than a frozen bar. `none` means no reading has arrived in this run
+of the engine. `live` means the newest reading is inside the window, which is the larger of
+three meter intervals and one second. `stale` means readings arrived and have stopped.
+
+`GET /destinations/stop-impact` previews a stop without making one. It answers
+`{"destinations": n, "youtubeBroadcasts": m}`: how many destinations a stop would touch,
+and how many YouTube broadcasts it would **end for good**. It reads the recorded phase and
+makes no platform call. It takes the same `?source=` scope as `stop-all`, and a read token may
+call it. `stop-all` still needs an admin token and `"confirm": true`.
+
+With `?destination=<id>` the same route previews one destination's stop, which is what a
+per-destination stop would end: `destinations` is 1 and `youtubeBroadcasts` is 0 or 1. An id that
+names no destination is a `404`, and a malformed one a `400`, never a zero count: a zero would read
+as a stop that ends nothing, over a row the caller never saw.
+Add `?source=<id>` to scope it to a programme: a destination that is on another programme is
+also a `404`, so a caller bound to one programme never gets a count for another's row.
 
 `start-all` and `stop-all` take no id list. **With `?source=<id>` they act on
 that programme's destinations only; without it, on every destination on the

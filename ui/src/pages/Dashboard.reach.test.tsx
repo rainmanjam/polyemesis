@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { Dashboard } from "./Dashboard";
@@ -226,5 +226,71 @@ describe("Dashboard: the Ingest card while the backup is on air", () => {
       }),
     );
     expect(await screen.findByText(translate("en", "dash.ingestBackupOnAir"))).toBeTruthy();
+  });
+});
+
+describe("Dashboard: the first-run checklist replaces the empty-destinations sentence", () => {
+  it("draws the checklist when a source exists and nothing is configured to send it", async () => {
+    draw();
+
+    expect(
+      await screen.findByText(translate("en", "firstRun.title")),
+      "an operator with a source and no destination gets one sentence and no next step",
+    ).toBeTruthy();
+    expect(screen.queryByText(translate("en", "dash.noDestinations"))).toBeNull();
+  });
+});
+
+describe("Dashboard: a fresh install starts the checklist at step one", () => {
+  it("shows the checklist on an install with no source yet", async () => {
+    const before = routes["/api/v1/setup"];
+    routes["/api/v1/setup"] = { needsSetup: false, minPasswordChars: 8, sources: 0 };
+    try {
+      draw();
+      expect(
+        await screen.findByText(translate("en", "firstRun.title")),
+        "a fresh install gets the explanation and nothing that says what to do next",
+      ).toBeTruthy();
+      // Two links to Sources on this screen: the explanation card's, and the
+      // checklist's first step. The checklist's is the one under test.
+      const checklist = screen.getByTestId("setup-checklist");
+      expect(
+        within(checklist).getByRole("link", { name: translate("en", "empty.goToSources") }),
+      ).toBeTruthy();
+    } finally {
+      routes["/api/v1/setup"] = before;
+    }
+  });
+});
+
+describe("Dashboard: bulk start goes through the Go live sheet, bulk stop stays confirmed", () => {
+  const oneDest = {
+    id: 1,
+    name: "Twitch — no music",
+    kind: "rtmp",
+    platform: "twitch",
+    enabled: false,
+    summary: "",
+    tracks: null,
+    filterComplex: "",
+    normalization: "off",
+    warnings: null,
+    sourceId: 1,
+  };
+
+  it("offers Go live instead of Start all, and no start fires from the bar itself", async () => {
+    draw(live({ status: status({ destinations: [oneDest as never] }) }));
+
+    expect(
+      await screen.findByRole("button", { name: translate("en", "golive.trigger") }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: translate("en", "dash.startAll") })).toBeNull();
+  });
+
+  it("keeps Stop all behind its confirmation", async () => {
+    draw(live({ status: status({ destinations: [{ ...oneDest, enabled: true } as never] }) }));
+
+    fireEvent.click(await screen.findByRole("button", { name: translate("en", "dash.stopAll") }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });

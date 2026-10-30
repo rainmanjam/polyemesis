@@ -31,14 +31,35 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/AppLayout";
 import { Experimental, ExperimentalBadge } from "@/components/Experimental";
-import { TrackRows } from "@/components/signature/TrackRows";
+import { TrackRows, type TrackRowsLive } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
+import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { musicRailMark } from "@/lib/musicRail";
+import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
+import { storedMixes } from "@/lib/storedMixes";
+import { isLevelOnlySave } from "@/lib/saveImpact";
+import { autoApi } from "@/lib/autoApi";
+import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
+import { OutputStrip } from "@/components/signature/OutputStrip";
+import {
+  carryMutes,
+  destinationLiveBlock,
+  levelOutcome,
+  setMuted,
+  storedLevel,
+  LevelSequencer,
+  trackLiveBlock,
+  withLevel,
+  type LevelChange,
+  type LevelOutcome,
+} from "@/lib/liveTrackLevel";
+import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
+import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
+import { toneForState } from "@/lib/signal";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -122,7 +143,7 @@ export function RoutingPage() {
   const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { connected, levels, source } = useLiveData();
+  const { connected, levels, source, status, programme } = useLiveData();
   const tracks = useSourceTracks();
 
   const [list, setList] = useState<DestinationWithRouting[]>([]);
@@ -181,6 +202,56 @@ export function RoutingPage() {
   // at the same time do not cancel each other.
   const presetSeq = useRef<{ live: number; vod: number }>({ live: 0, vod: 0 });
 
+  // ---- live per-track mute and gain (I4) ----
+  //
+  // The outcome of the most recent live change, per destination, as the
+  // operator reads it. `liveSeq` keeps a slower earlier answer from replacing
+  // the report of a later one.
+  const [liveOutcome, setLiveOutcome] = useState<{
+    dest: DestinationId;
+    outcome: LevelOutcome;
+  } | null>(null);
+  const liveSeq = useRef<Record<number, number>>({});
+  // Per destination AND track: answers for two tracks commute, so only a later
+  // request for the same track can supersede one.
+  const levelSeq = useRef(new LevelSequencer());
+  // Refusals the stored row could not predict: a 409 keyed by the destination,
+  // a 404 by "destination:track". Cleared by a save, which changes what the
+  // server holds.
+  const [liveRefusals, setLiveRefusals] = useState<Record<string, string>>({});
+  // A live change writes the stored row, and the list has to hold it: Discard
+  // reads the list, and a draft seeded from an older list would put the old
+  // level back on the next Save. But writing the list re-runs the selection
+  // effect, which reseeds the draft and clears dirty. This names the one
+  // destination whose next reseed is skipped: the one on screen, whose draft
+  // either has the level merged in already or was not touched by it, and may
+  // carry unsaved edits besides.
+  const keepDraftFor = useRef<DestinationId | null>(null);
+
+  // The drafts as last rendered, for Save to compare after its awaits. A
+  // closure holds the values from the click, which is exactly what is compared
+  // AGAINST; this is the other side.
+  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null }>({
+    profile: null,
+    vod: null,
+  });
+  useEffect(() => {
+    draftRef.current = { profile, vod: vodProfile };
+  }, [profile, vodProfile]);
+
+  // The live editor's latest compile and the draft it was compiled from. The
+  // save bar compares it, levels masked, with the stored graph to say whether
+  // Save restarts the destination or only moves levels (lib/saveImpact). A
+  // compile of an older draft is never used: identity with `profile` decides.
+  const [liveGraph, setLiveGraph] = useState<{
+    profile: RoutingProfile;
+    graph: string | null;
+  } | null>(null);
+  const noteLiveGraph = useCallback(
+    (p: RoutingProfile, graph: string | null) => setLiveGraph({ profile: p, graph }),
+    [],
+  );
+
   // ---- load destinations & presets ----
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +300,14 @@ export function RoutingPage() {
       return;
     }
     const found = list.find((d) => d.destination.id === Number(id));
+    const keep = keepDraftFor.current;
+    keepDraftFor.current = null;
+    if (found && keep === found.destination.id) {
+      // A live level landed on the destination being edited. Its draft has the
+      // change already (applyLevel), so only the stored row moves.
+      setSelected(found.destination);
+      return;
+    }
     if (found) {
       setSelected(found.destination);
       setProfile(structuredClone(found.destination.profile));
@@ -327,6 +406,10 @@ export function RoutingPage() {
 
   const save = async () => {
     if (!selected || !profile) return;
+    // What Save sends. An edit made while the request is out replaces one of
+    // these objects, and is not in what the server now holds.
+    const sentProfile = profile;
+    const sentVod = vodProfile;
     setSaving(true);
     try {
       // Every optional field goes out explicitly, including the nulls: the
@@ -344,17 +427,49 @@ export function RoutingPage() {
         vodProfile: vodProfile ? wireProfile(vodProfile) : null,
       });
       toast.success(
-        selected.enabled
-          ? `Routing saved. "${selected.name}" is restarting with the new mix.`
-          : "Routing saved.",
+        !selected.enabled
+          ? t("route.saved")
+          : levelOnly
+            ? t("route.savedLive", { name: selected.name })
+            : t("route.savedRestarting", { name: selected.name }),
       );
-      setDirty(false);
-      setList(await api.listDestinations());
+      setLiveRefusals({});
+      const fresh = await api.listDestinations();
+      // Compared after the LAST await: an edit can land during the PUT or the
+      // list read. If the draft is still the one that was sent, the stored row
+      // is now the draft and the list write reseeds it. If it moved on, the
+      // reseed would throw the newer edit away, so it is skipped and the form
+      // stays dirty: those edits still need a Save.
+      const now = draftRef.current;
+      if (now.profile !== sentProfile || now.vod !== sentVod) {
+        keepDraftFor.current = selected.id;
+      } else {
+        setDirty(false);
+      }
+      setList(fresh);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
     } finally {
       setSaving(false);
     }
+  };
+
+  // Throws away the pending edit and puts back what the server holds (A7). The
+  // same reads the destination-select effect does, so a discard and a fresh
+  // selection cannot disagree about what "stored" means.
+  const discardChanges = () => {
+    const found = list.find((d) => d.destination.id === selected?.id);
+    if (!found) return;
+    // A preset still in flight would land after this and re-dirty the form, so
+    // every outstanding apply is retired here, the same way a destination switch
+    // retires it (A7).
+    presetSeq.current = { live: presetSeq.current.live + 1, vod: presetSeq.current.vod + 1 };
+    const { profile: stored, vodProfile: storedVod } = storedMixes(found.destination);
+    setProfile(stored);
+    setVodProfile(storedVod);
+    vodEnabledRef.current = storedVod !== null;
+    stashedVod.current = null;
+    setDirty(false);
   };
 
   // Shared by both mixes. `mix` says which profile asked, so an archive preset
@@ -395,7 +510,8 @@ export function RoutingPage() {
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
-        if (mix === "live") setProfile(res.profile);
+        // A preset arrives unmuted; a mute the operator set stays (carryMutes).
+        if (mix === "live") setProfile((prev) => carryMutes(res.profile, prev));
         else setVodProfile(res.profile);
         setDirty(true);
         toast.success(t("route.presetApplied"));
@@ -417,6 +533,174 @@ export function RoutingPage() {
     (presetId: string) => applyPresetTo("vod", presetId),
     [applyPresetTo],
   );
+
+  // One track's mute or gain, through the live route rather than Save. The
+  // server stores it in the destination's LIVE mix and reconciles, so a
+  // level-only change reaches the running output without a restart, and the
+  // answer says whether it did.
+  //
+  // `dest` is bound by the caller when the control was used, not read here: a
+  // gain is gathered for a moment before it is sent, and the operator may have
+  // switched destination meanwhile. The level belongs to the one it was set on.
+  const applyLevel = useCallback(
+    async (dest: DestinationId, track: number, change: LevelChange): Promise<void> => {
+      const seq = (liveSeq.current[dest] = (liveSeq.current[dest] ?? 0) + 1);
+      const key = `${dest}:${track}`;
+      const trackSeq = levelSeq.current.next(key);
+      try {
+        const res = await api.setTrackLevel(dest, track, change, editedSourceId);
+        // An answer older than one already shown for this track is dropped:
+        // the server serialises the requests, so the newer answer already
+        // carries this one's effect, and applying it now would put an old
+        // level back on screen.
+        if (!levelSeq.current.accept(key, trackSeq)) return;
+        // What the server STORED, not what was asked for. Merged per track
+        // rather than replaced wholesale, so answers for two tracks commute and
+        // the draft's unsaved edits on other fields survive.
+        const level = storedLevel(res, track, change);
+        // Stored: the list must say so whatever else happens, or Discard and the
+        // next Save would put the old level back.
+        // The list write below must not reseed whichever draft is on screen: if
+        // it is this destination's, the level is merged into it here; if the
+        // operator has moved on, that destination's stored row did not change.
+        keepDraftFor.current = selectedIdRef.current;
+        if (selectedIdRef.current === dest) {
+          setProfile((p) => (p ? withLevel(p, track, level) : p));
+        }
+        setList((prev) =>
+          prev.map((row) =>
+            row.destination.id === dest
+              ? {
+                  ...row,
+                  destination: {
+                    ...row.destination,
+                    profile: withLevel(row.destination.profile, track, level),
+                  },
+                }
+              : row,
+          ),
+        );
+        if (seq === liveSeq.current[dest]) setLiveOutcome({ dest, outcome: levelOutcome(res) });
+      } catch (err) {
+        // 409 and 404 are states, not failures: the control is disabled with
+        // the server's reason rather than offered again.
+        if (err instanceof ApiError && err.status === 409) {
+          setLiveRefusals((r) => ({ ...r, [String(dest)]: err.message }));
+          return;
+        }
+        if (err instanceof ApiError && err.status === 404) {
+          setLiveRefusals((r) => ({ ...r, [`${dest}:${track}`]: err.message }));
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : t("route.live.failed"));
+      }
+    },
+    [editedSourceId, t],
+  );
+
+  const storedRow = useMemo(
+    () => list.find((r) => r.destination.id === selected?.id)?.destination ?? null,
+    [list, selected?.id],
+  );
+
+  const liveRows = useMemo<TrackRowsLive | undefined>(() => {
+    if (!storedRow) return undefined;
+    return {
+      blocked: (track) => {
+        const whole = liveRefusals[String(storedRow.id)];
+        if (whole) return { reason: whole, inline: false };
+        const one = liveRefusals[`${storedRow.id}:${track}`];
+        if (one) return { reason: one, inline: true };
+        const key = trackLiveBlock(storedRow, track);
+        if (!key) return null;
+        // The copy reason holds for every row and is shown once, above them.
+        return { reason: t(key), inline: key !== "route.live.copyBlocked" };
+      },
+      onMute: (track, muted) => applyLevel(storedRow.id, track, { muted }),
+      onGain: (track, gain) => applyLevel(storedRow.id, track, { gain }),
+    };
+  }, [storedRow, liveRefusals, applyLevel, t]);
+
+  const storedRouting = useMemo(
+    () => list.find((r) => r.destination.id === selected?.id)?.routing ?? null,
+    [list, selected?.id],
+  );
+  // What Save will do to a running destination: a level-only change applies
+  // live where the server supports it; anything else restarts it.
+  const levelOnly = isLevelOnlySave({
+    storedGraph: storedRouting?.filterComplex,
+    draftGraph: liveGraph && liveGraph.profile === profile ? liveGraph.graph : null,
+    secondMixChanged:
+      JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
+    storedProfile: storedRow?.profile,
+    draftProfile: profile,
+  });
+
+  // ---- A10: the destination's output, measured after routing ----
+  //
+  // Polled like the Meters page polls it: the analyser publishes about once a
+  // second and one card is not worth a socket subscription. Scoped to the
+  // destination's own programme. `loudNow` advances on every attempt, failed or
+  // not, so a feed that stops answering ages into "stale" instead of freezing
+  // its last reading as live.
+  const [loudFeed, setLoudFeed] = useState<LoudnessFeed | null>(null);
+  const [loudNow, setLoudNow] = useState(() => Date.now());
+  // Per destination: the last frame seen and when, on this browser's clock, it
+  // arrived. Staleness is judged against this, never the server's `at`, so a
+  // skewed clock cannot make every reading stale or a dead one live.
+  const [loudSeen, setLoudSeen] = useState<Record<number, { key: string; at: number }>>({});
+  const loudSourceId = selected?.sourceId ?? null;
+  const hasSelection = selected !== null;
+  useEffect(() => {
+    if (!hasSelection) return;
+    let cancelled = false;
+    const read = () =>
+      autoApi
+        .loudness<LoudnessFeed>(loudSourceId)
+        .then((f) => {
+          if (cancelled) return;
+          const now = Date.now();
+          setLoudFeed(f);
+          setLoudNow(now);
+          setLoudSeen((prev) => {
+            const next: Record<number, { key: string; at: number }> = {};
+            for (const r of f.reports ?? []) {
+              const key = reportKey(r);
+              const was = prev[r.destinationId];
+              next[r.destinationId] = was && was.key === key ? was : { key, at: now };
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setLoudNow(Date.now());
+        });
+    void read();
+    const timer = window.setInterval(read, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasSelection, loudSourceId]);
+
+  // The source stage: the ingest meter over the tracks this destination sends
+  // as stored (what is running), muted ones left out because a muted track's
+  // silence at the output is the operator's, not a fault. Only from a live
+  // meter feed of THIS destination's programme: the socket carries one.
+  const stripSource = useMemo(() => {
+    if (!connected || !storedRow || !storedRouting) return null;
+    if (storedRow.sourceId != null && programme != null && storedRow.sourceId !== programme) return null;
+    const muted = new Set((storedRow.profile.tracks ?? []).filter((s) => s.muted).map((s) => s.track));
+    return sourcePeak(levels?.peak, (storedRouting.tracks ?? []).filter((t) => !muted.has(t)));
+  }, [connected, storedRow, storedRouting, programme, levels]);
+
+  const liveNotice = useMemo(() => {
+    if (!storedRow) return null;
+    const refused = liveRefusals[String(storedRow.id)];
+    if (refused) return refused;
+    const key = destinationLiveBlock(storedRow);
+    return key ? t(key) : null;
+  }, [storedRow, liveRefusals, t]);
 
   const trackOptions = useMemo(
     () => tracks.map((t) => ({ value: String(t.index), label: `Track ${t.index + 1}` })),
@@ -512,6 +796,56 @@ export function RoutingPage() {
   // turned off.
   const blockingError = liveError || (vodProfile ? vodError : "");
 
+  /* A4: the Overview tab. Its rows read the same routing the editor edits: the
+     live draft for the selected destination, and each other destination's stored
+     mixes. A cell edit goes through `patch`, the path the Simple view uses, so the
+     save bar and the dirty state treat both the same. */
+  const [view, setView] = useState<"overview" | "editor">("editor");
+  const overviewRows = useMemo<OverviewRow[]>(
+    () =>
+      list.map(({ destination: d }) => {
+        const isSel = d.id === selected?.id;
+        const stored = storedMixes(d);
+        const live = isSel && profile ? profile : stored.profile;
+        const vodMix = isSel ? vodProfile : stored.vodProfile;
+        return {
+          id: d.id,
+          name: d.name,
+          tone: d.enabled
+            ? toneForState(status?.destinations?.find((x) => x.id === d.id)?.process?.state)
+            : "idle",
+          kind: !isSel ? "select" : live.mode === "matrix" ? "matrix" : "editable",
+          routed: routedTracks(live),
+          vodBound: vodMix !== null,
+          vodRouted: vodMix ? routedTracks(vodMix) : [],
+          guardedMusic: (live.excludeRoles ?? []).includes("music"),
+          vodGuardedMusic: (vodMix?.excludeRoles ?? []).includes("music"),
+        };
+      }),
+    [list, selected, profile, vodProfile, status],
+  );
+  const overviewTracks = useMemo<OverviewTrack[]>(
+    () =>
+      ctx.tracks.map((tr) => ({
+        index: tr.index,
+        title: ctx.annotations.find((a) => a.track === tr.index)?.label || tr.title || undefined,
+      })),
+    [ctx.tracks, ctx.annotations],
+  );
+  const toggleCell = useCallback(
+    (track: number) => {
+      patch({ tracks: toggleTrackSelection(profile?.tracks ?? [], track) });
+    },
+    [profile, patch],
+  );
+  /* The fix acts on the VOD mix: that is the archive the risk reaches, and each
+     mix keeps its own guard. Muting the live mix would not clear the amber cell. */
+  const keepMusicOutOfVod = useCallback(() => {
+    if (!vodProfile) return;
+    const roles = [...new Set([...(vodProfile.excludeRoles ?? []), "music" as TrackRole])];
+    patchVod({ excludeRoles: roles });
+  }, [vodProfile, patchVod]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -540,7 +874,6 @@ export function RoutingPage() {
         subtitle={t("route.audioRoutingDesc")}
         actions={
           <>
-            {dirty && <Badge variant="warn">unsaved</Badge>}
             <Button size="sm" onClick={save} disabled={!dirty || saving || !!blockingError}>
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
               Save
@@ -549,7 +882,36 @@ export function RoutingPage() {
         }
       />
 
-      <div className="grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]">
+      <Tabs value={view} onValueChange={(v) => setView(v as "overview" | "editor")} className="mb-3">
+        <TabsList>
+          <TabsTrigger value="overview">{t("routing.overview.tab")}</TabsTrigger>
+          <TabsTrigger value="editor">{t("routing.overview.editor")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {view === "overview" && (
+        <Card className="mb-3">
+          <CardContent className="pt-3">
+            <RouteOverview
+              rows={overviewRows}
+              tracks={overviewTracks}
+              music={musicTracks}
+              onToggle={toggleCell}
+              onSelect={(id) => navigate(`/routing/${id}`)}
+              onFix={(id) => {
+                if (id === selected?.id) keepMusicOutOfVod();
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      <div
+        className={cn(
+          "grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]",
+          view === "overview" && "hidden",
+        )}
+      >
         {/* ---------- destination picker ---------- */}
         <Card className="h-fit">
           <CardHeader>
@@ -561,6 +923,8 @@ export function RoutingPage() {
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
               // A word, not a colour. See lib/musicRail.ts.
               const mark = musicRailMark(guarded, pol?.exclude ?? false);
+              // The reason behind the word, on hover and to a screen reader (B1).
+              const markReason = musicRailReason(guarded, pol?.exclude ?? false);
               return (
                 <button
                   key={d.id}
@@ -575,17 +939,26 @@ export function RoutingPage() {
                     <span className="truncate">{d.name}</span>
                     {mark && (
                       <span
+                        title={markReason ? t(markReason) : undefined}
                         className={cn(
-                          "ml-auto flex shrink-0 items-center gap-1 text-[10px]",
-                          mark.tone === "warn" ? "text-warn" : "text-muted-foreground",
+                          "ml-auto flex shrink-0 items-center gap-1 text-sm",
+                          railTextClass(mark.tone, d.id === selected?.id),
                         )}
                       >
                         <Music className="h-3 w-3 shrink-0" />
                         {t(mark.label)}
+                        {/* The reason, as text in the button: it is part of the
+                            accessible name, which a title attribute is not. */}
+                        <span className="sr-only">{markReason ? t(markReason) : ""}</span>
                       </span>
                     )}
                   </span>
-                  <span className="truncate font-mono text-[10px] text-muted-foreground">
+                  <span
+                    className={cn(
+                      "truncate font-mono text-sm",
+                      railTextClass("muted", d.id === selected?.id),
+                    )}
+                  >
                     {routing?.summary ?? "—"}
                   </span>
                 </button>
@@ -597,6 +970,10 @@ export function RoutingPage() {
         {/* ---------- editor ---------- */}
         {selected && profile && (
           <div className="flex flex-col gap-3">
+            <OutputStrip
+              state={outputState(loudFeed, selected.id, loudNow, loudSeen[selected.id]?.at ?? 0)}
+              source={stripSource}
+            />
             <ProfileEditor
               idPrefix="live"
               ctx={ctx}
@@ -604,7 +981,15 @@ export function RoutingPage() {
               onPatch={patch}
               onApplyPreset={applyPreset}
               onCompileError={setLiveError}
+              onCompiledGraph={noteLiveGraph}
               allowAnnotating
+              live={
+                liveRows && {
+                  rows: liveRows,
+                  notice: liveNotice,
+                  outcome: liveOutcome?.dest === selected.id ? liveOutcome.outcome : null,
+                }
+              }
               footer={(compiled) => (
                 <>
                   {t("route.copyFooter")}
@@ -702,6 +1087,18 @@ export function RoutingPage() {
           </div>
         )}
       </div>
+
+      {/* ---------- pending change (A7) ---------- */}
+      <RoutingSaveBar
+        dirty={dirty}
+        saving={saving}
+        blocked={!!blockingError}
+        destinationName={selected?.name ?? ""}
+        restarts={!!selected?.enabled}
+        levelOnly={levelOnly}
+        onSave={save}
+        onDiscard={discardChanges}
+      />
     </div>
   );
 }
@@ -771,6 +1168,8 @@ function ProfileEditor({
   onCompileError,
   allowAnnotating = false,
   footer,
+  live,
+  onCompiledGraph,
 }: {
   /** Namespaces every DOM id this editor emits. Must differ between instances. */
   idPrefix: string;
@@ -786,11 +1185,23 @@ function ProfileEditor({
    *  not. MUST be referentially stable — a raw setState function is ideal —
    *  because it is a dependency of the compile effect below. */
   onCompileError: (message: string) => void;
+  /** Called with each compile of `profile`: its graph, or null when it did not
+   *  compile. Must be referentially stable, like onCompileError. */
+  onCompiledGraph?: (profile: RoutingProfile, graph: string | null) => void;
   /** Track roles describe the SOURCE, so one editor owns the labelling UI and
    *  the other reads the result. Two buttons toggling one flag would look like
    *  two independent controls that mysteriously move together. */
   allowAnnotating?: boolean;
   footer: (compiled: RoutingResult | null) => ReactNode;
+  /** Live per-track mute and gain (I4). Given ONLY to the live mix's editor:
+   *  the route writes the destination's live profile, so the second mix's
+   *  editor must never carry it. */
+  live?: {
+    rows: TrackRowsLive;
+    /** A reason that holds for every row (an audio-copy destination). */
+    notice: string | null;
+    outcome: LevelOutcome | null;
+  };
 }) {
   const t = useT();
   const [compiled, setCompiled] = useState<RoutingResult | null>(null);
@@ -821,6 +1232,7 @@ function ProfileEditor({
           setCompiled(res.routing);
           setCompileError("");
           onCompileError("");
+          onCompiledGraph?.(profile, res.routing.filterComplex);
         })
         .catch((err) => {
           if (cancelled) return;
@@ -828,13 +1240,14 @@ function ProfileEditor({
           setCompiled(null);
           setCompileError(msg);
           onCompileError(msg);
+          onCompiledGraph?.(profile, null);
         });
     }, 180);
     return () => {
       cancelled = true;
       window.clearTimeout(debounceRef.current);
     };
-  }, [profile, ctx.sourceId, t, onCompileError]);
+  }, [profile, ctx.sourceId, t, onCompileError, onCompiledGraph]);
 
   // An editor that unmounts — the second mix being switched off — must not
   // leave its last error behind, or the Save button stays disabled by a mix
@@ -889,7 +1302,7 @@ function ProfileEditor({
           />
           {ctx.platformPresets.length > 0 && (
             <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 Platform defaults
               </div>
               <PresetRow
@@ -950,6 +1363,7 @@ function ProfileEditor({
             </div>
 
             <TabsContent value="simple">
+              {live && <LiveLevelStatus live={live} />}
               <TrackRows
                 idPrefix={idPrefix}
                 tracks={ctx.tracks}
@@ -964,12 +1378,13 @@ function ProfileEditor({
                 excludeRoles={excludeRoles}
                 duckTrigger={profile.ducking?.trigger ?? []}
                 duckTarget={profile.ducking?.target ?? []}
+                live={live?.rows}
               />
               {allowAnnotating && ctx.annotating && ctx.annotationsStored === false && (
-                <p className="mt-2 text-[10px] text-warn">{t("route.localOnlyNote")}</p>
+                <p className="mt-2 text-sm text-warn">{t("route.localOnlyNote")}</p>
               )}
               {allowAnnotating && ctx.annotating && ctx.annotationsStored !== false && (
-                <p className="mt-2 text-[10px] text-muted-foreground">{t("route.rolesNote")}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{t("route.rolesNote")}</p>
               )}
             </TabsContent>
 
@@ -978,6 +1393,8 @@ function ProfileEditor({
                 tracks={ctx.tracks}
                 cells={profile.matrix ?? []}
                 onChange={(next: MatrixCell[]) => onPatch({ matrix: next })}
+                muted={(profile.tracks ?? []).filter((s) => s.muted).map((s) => s.track)}
+                onMute={(track, m) => onPatch({ tracks: setMuted(profile.tracks ?? [], track, m) })}
               />
             </TabsContent>
           </Tabs>
@@ -1042,7 +1459,7 @@ function ProfileEditor({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {compileError && (
-            <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1.5 text-[11px] text-down">
+            <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1.5 text-sm text-down">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{compileError}</span>
             </div>
@@ -1050,17 +1467,66 @@ function ProfileEditor({
           {compiled?.warnings?.map((w) => (
             <div
               key={w}
-              className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn"
+              className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
             >
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{w}</span>
             </div>
           ))}
           {compiled && <FilterString value={compiled.filterComplex} />}
-          <p className="text-[10px] text-muted-foreground">{footer(compiled)}</p>
+          <p className="text-sm text-muted-foreground">{footer(compiled)}</p>
         </CardContent>
       </Card>
     </>
+  );
+}
+
+/** What the operator is told about live mute and gain: that they apply without
+ *  Save, why they cannot (once, for the whole destination), and how the last
+ *  change took effect. A live apply is a quiet line; a restart, or a stored
+ *  change whose reconcile failed, is a visible notice with the reason. */
+function LiveLevelStatus({
+  live,
+}: {
+  live: { notice: string | null; outcome: LevelOutcome | null };
+}) {
+  const t = useT();
+  if (live.notice) {
+    return (
+      <div
+        className="mb-2 flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
+        data-testid="live-level-notice"
+      >
+        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+        <span>{live.notice}</span>
+      </div>
+    );
+  }
+  const o = live.outcome;
+  return (
+    <div className="mb-2 flex flex-col gap-1">
+      <p className="text-sm text-muted-foreground">{t("route.live.hint")}</p>
+      {o && o.tone === "quiet" && (
+        <p className="text-sm text-muted-foreground" data-testid="live-level-outcome" role="status">
+          {t(o.key, { reason: o.reason })}
+        </p>
+      )}
+      {o && o.tone === "warn" && (
+        <div
+          className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
+          data-testid="live-level-outcome"
+          role="status"
+        >
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="flex flex-col gap-0.5">
+            <span>{t(o.key, { reason: o.reason })}</span>
+            {o.warnings.map((w) => (
+              <span key={w}>{w}</span>
+            ))}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1149,12 +1615,12 @@ function SecondMixCard({
             exists to send. */}
         <div className="flex h-9 items-center gap-2">
           <Switch id="vod-enabled" checked={profile !== null} onCheckedChange={enable} />
-          <Label htmlFor="vod-enabled" className="text-[11px] text-muted-foreground">
+          <Label htmlFor="vod-enabled" className="text-sm text-muted-foreground">
             {profile !== null ? t("route.vodConfigured") : t("route.vodOneMix")}
           </Label>
         </div>
 
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {t("route.vodNote")}
           {profile === null && restorable !== null && <> {t("route.vodRestores")}</>}
         </span>
@@ -1165,7 +1631,7 @@ function SecondMixCard({
             one. It is first because it outranks the others: an unprobed ingest
             is not a Twitch question. */}
         {!probed && profile !== null && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               This second mix is <strong>not being sent yet</strong>, on any platform. The ingest
@@ -1179,7 +1645,7 @@ function SecondMixCard({
 
         {/* State 1: definitely not being sent, and this page knows why. */}
         {blockedByToggle && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               This second mix is <strong>not being sent</strong>. The ordinary Twitch RTMP ingest
@@ -1195,7 +1661,7 @@ function SecondMixCard({
             a dependency, never as a success — the answer does not exist until
             go-live, and it lands on the destination card. */}
         {twitchRtmp && multitrack && profile !== null && probed && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             Whether this second track is actually sent is decided at go-live: Twitch grants
             Enhanced Broadcasting only to a client with a GPU it supports, and where it is not
             granted this destination publishes the live mix alone to the ordinary Twitch ingest.
@@ -1208,7 +1674,7 @@ function SecondMixCard({
             generic two-mix egress is what runs. Said plainly so the Twitch
             caveats above are not read as applying everywhere. */}
         {!twitchRtmp && profile !== null && probed && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             This destination is not a Twitch RTMP one, so nothing is negotiated: both mixes are
             built in the same FFmpeg process and published as two audio tracks. Whether the far
             end accepts a second track is a property of that endpoint — an RTMP ingest that takes
@@ -1308,7 +1774,7 @@ function PresetRow({
               value={opts.language ?? ""}
               placeholder={t("route.langPlaceholder")}
               onChange={(e) => setOpts((o) => ({ ...o, language: e.target.value }))}
-              className="h-6 text-[10px]"
+              className="h-6 text-sm"
               aria-label={t("route.commentaryLanguage")}
             />
           )}
@@ -1322,7 +1788,7 @@ function PresetRow({
                 }))
               }
             >
-              <SelectTrigger className="h-6 text-[10px]" aria-label={t("route.musicPolicy")}>
+              <SelectTrigger className="h-6 text-sm" aria-label={t("route.musicPolicy")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1351,8 +1817,8 @@ function TrackPick({
 }) {
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className="h-6 text-[10px]" aria-label={`${label} track`}>
-        <span className="mr-1 text-subtle-foreground">{label}</span>
+      <SelectTrigger className="h-6 text-sm" aria-label={`${label} track`}>
+        <span className="mr-1 text-muted-foreground">{label}</span>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1463,7 +1929,7 @@ function MusicRightsCard({
           )}
         </label>
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {excluded ? (
             musicTracks.length > 0 ? (
               <>
@@ -1488,7 +1954,7 @@ function MusicRightsCard({
         </p>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-          <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
             Also exclude
           </span>
           {TRACK_ROLES.filter((r) => r !== "music").map((r) => {
@@ -1499,10 +1965,10 @@ function MusicRightsCard({
                 onClick={() => toggleRole(r, !on)}
                 aria-pressed={on}
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+                  "rounded border px-1.5 py-0.5 text-sm font-semibold uppercase tracking-wider transition-colors",
                   on
                     ? "border-warn/40 bg-warn-dim text-warn"
-                    : "border-border text-subtle-foreground hover:border-border-strong hover:text-muted-foreground",
+                    : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
                 )}
               >
                 {ROLE_LABEL[r]}
@@ -1615,13 +2081,13 @@ export function LoudnessCard({
             the select to Custom would change the operator's chosen preset as a
             side effect of a typo, which is the larger harm. */}
         {loudness && value !== LOUDNESS_CUSTOM && (
-          <p className="text-[10px] text-muted-foreground" data-testid="target-locked">
+          <p className="text-sm text-muted-foreground" data-testid="target-locked">
             {t("route.targetFollowsPreset")}
           </p>
         )}
 
         {inert && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[10px] leading-relaxed text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm leading-relaxed text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               Clip protection is set to “{t(NORMALIZE_LABEL[normalize])}”, which polyemesis never
@@ -1631,7 +2097,7 @@ export function LoudnessCard({
           </div>
         )}
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {loudness ? (
             t("route.measuredOverTheWholeProgramme")
           ) : normalize === "loudnorm" ? (
@@ -1724,7 +2190,7 @@ export function DelayCard({
           />
         </div>
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {delayMs === 0 ? (
             t("route.audioAndVideoGoOut")
           ) : direction === "audio" ? (
@@ -1810,7 +2276,7 @@ export function DuckingCard({
           <Waves className="h-3.5 w-3.5" /> Ducking
         </CardTitle>
         <label className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-sm uppercase tracking-wider text-muted-foreground">
             {ducking ? t("route.on") : t("clips.off")}
           </span>
           <Switch
@@ -1823,13 +2289,13 @@ export function DuckingCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {!ducking ? (
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             {t("route.duckingNote")}
           </p>
         ) : (
           <>
             <div className="flex flex-col gap-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 When these speak
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -1844,17 +2310,17 @@ export function DuckingCard({
                   />
                 ))}
               </div>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
             {t("route.duckingTriggerNote")}
               </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 Push these down
               </div>
               {mixedTracks.length === 0 && (
-                <p className="text-[10px] text-warn" data-testid="duck-no-target">
+                <p className="text-sm text-warn" data-testid="duck-no-target">
                   {t("route.duckingNoTargetInMix")}
                 </p>
               )}
@@ -1914,7 +2380,7 @@ export function DuckingCard({
                 onChange={(n) => onChange({ ...ducking, releaseMs: n })}
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Blank uses the defaults: {DEFAULT_DUCK_THRESHOLD_DB} dB, {DEFAULT_DUCK_RATIO}:1,{" "}
               {DEFAULT_DUCK_ATTACK_MS} ms attack, {DEFAULT_DUCK_RELEASE_MS} ms release — about
               12 dB of reduction, fast enough to catch a word’s first syllable and slow enough
@@ -1946,12 +2412,12 @@ function TrackChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] transition-colors",
+        "flex items-center gap-1.5 rounded border px-2 py-1 text-sm transition-colors",
         active
           ? tone === "armed"
             ? "border-armed/40 bg-armed-dim text-armed"
             : "border-warn/40 bg-warn-dim text-warn"
-          : "border-border text-subtle-foreground hover:border-border-strong hover:text-muted-foreground",
+          : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
       )}
     >
       <span className="tnum font-mono font-semibold">{track + 1}</span>
@@ -1991,9 +2457,9 @@ function NumberField({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="flex items-baseline justify-between text-sm uppercase tracking-wider text-muted-foreground">
         {label}
-        <span className="normal-case tracking-normal text-subtle-foreground">{unit}</span>
+        <span className="normal-case tracking-normal text-muted-foreground">{unit}</span>
       </span>
       <Input
         type="number"
@@ -2021,6 +2487,12 @@ function NumberField({
 function wireProfile(p: RoutingProfile): RoutingProfile {
   return {
     ...p,
+    // Every track's mute and every cell's polarity go out as an explicit
+    // boolean. An absent key is not "off" to a server that merges the arrays
+    // over the stored ones by position: a cell list re-sorted by an edit would
+    // hand one cell's stored `invert: true` to whichever cell now sits there.
+    tracks: p.tracks ? p.tracks.map((s) => ({ ...s, muted: s.muted === true })) : p.tracks,
+    matrix: p.matrix ? p.matrix.map((c) => ({ ...c, invert: c.invert === true })) : p.matrix,
     loudness: p.loudness ?? null,
     ducking: p.ducking ?? null,
     excludeRoles: p.excludeRoles?.length ? p.excludeRoles : null,

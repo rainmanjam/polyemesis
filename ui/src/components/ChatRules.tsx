@@ -167,7 +167,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               className="tnum h-6 w-14 rounded border border-border bg-card-raised px-1 text-[11px]"
             />
           )}
-          {slow && <span className="text-[10px] text-subtle-foreground">seconds</span>}
+          {slow && <span className="text-[10px] text-muted-foreground">seconds</span>}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -205,7 +205,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             />
           )}
           {followers && (
-            <span className="text-[10px] text-subtle-foreground">
+            <span className="text-[10px] text-muted-foreground">
               {followerMinutes === 0 ? "minutes — any follower" : "minutes"}
             </span>
           )}
@@ -273,7 +273,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               ))}
             </select>
           )}
-          {modDelay && <span className="text-[10px] text-subtle-foreground">seconds</span>}
+          {modDelay && <span className="text-[10px] text-muted-foreground">seconds</span>}
         </div>
       </div>
 
@@ -286,7 +286,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
           Turn all off
         </Button>
         {/* The limitation, said out loud. See the note at the top of this file. */}
-        <span className="text-[10px] text-subtle-foreground">
+        <span className="text-[10px] text-muted-foreground">
           Applies what is switched on here; it does not read Twitch's current settings back.
         </span>
       </div>

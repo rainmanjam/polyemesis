@@ -74,6 +74,24 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
+  # integrations/streamdeck, the Elgato Stream Deck plugin. Its lockfile is
+  # bundled into the plugin an operator installs, so a vulnerable ws or zod
+  # here ships to a desktop, not just to a build runner. Grouped as ui/ is not:
+  # the plugin has only a handful of packages, and development tooling is the
+  # only family that moves together. Its @types/node follows the ui/ hold, since
+  # the plugin typechecks against the same Node line.
+  - package-ecosystem: npm
+    directory: "/integrations/streamdeck"
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
   # The actions are pinned by major tag; this is what notices a v7 -> v8.
   - package-ecosystem: github-actions
     directory: "/"

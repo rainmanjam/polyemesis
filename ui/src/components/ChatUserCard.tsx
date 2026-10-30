@@ -235,7 +235,7 @@ export function ChatUserCard({
           ) : (
             messages.map((m: ChatMessage) => (
               <div key={m.id} className="py-0.5 text-[12px] leading-snug">
-                <span className="tnum mr-1.5 font-mono text-[10px] text-subtle-foreground">
+                <span className="tnum mr-1.5 font-mono text-[10px] text-muted-foreground">
                   {clockTime(m.at)}
                 </span>
                 <span className="break-words">{m.text}</span>
@@ -248,7 +248,7 @@ export function ChatUserCard({
             "3 messages" as "this person has said three things ever" has been
             misled by a window that only ever showed them a slice. */}
         {card?.retentionNote && (
-          <p className="text-[10px] leading-relaxed text-subtle-foreground">
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
             {card.truncated && <strong>{t("chatpage.showingRecentOnly")}</strong>}
             {card.retentionNote}
           </p>
@@ -257,7 +257,7 @@ export function ChatUserCard({
         {/* ---- what can be done ---- */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
               Time out
             </span>
             {TIMEOUTS.map((t) => (
@@ -291,7 +291,7 @@ export function ChatUserCard({
           {!ban.ok && <p className="text-[10px] text-warn">{ban.reason}</p>}
 
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
               Hide
             </span>
 
@@ -388,7 +388,7 @@ export function ChatUserCard({
               make it. Hiding and deleting are one endpoint apart in the API
               and a world apart to the person pressing them, and the pane
               offers no way to find that out at the moment of the decision. */}
-          <p className="text-[10px] leading-relaxed text-subtle-foreground">
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
             Hiding can be undone; deleting cannot.{" "}
             {hideUpstream.ok
               ? `On ${accent.label} a hidden message stays on the thread and stops being visible to anyone else, so an unfair call costs nothing to reverse.`
@@ -396,7 +396,7 @@ export function ChatUserCard({
           </p>
 
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
               Ban
             </span>
 
@@ -442,7 +442,7 @@ export function ChatUserCard({
                   Ban permanently — confirm
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmBan(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </>
             ) : (

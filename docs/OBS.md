@@ -230,7 +230,7 @@ Two settings look like they configure this and do not:
 
 ## See also
 
-- [QUICKSTART.md](QUICKSTART.md) — first stream in about five minutes
+- [QUICKSTART.md](QUICKSTART.md) — from install to a first stream
 - [AUDIO-ROUTING.md](AUDIO-ROUTING.md) — what to do with the tracks once they
   arrive
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md#the-ingest-never-goes-live) — when the

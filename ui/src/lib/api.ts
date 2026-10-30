@@ -1,5 +1,6 @@
 import { setDisplayTimeZone } from "@/lib/format";
 import { noteResponseStatus } from "@/lib/session";
+import type { LevelChange, TrackLevelResult } from "@/lib/liveTrackLevel";
 import type {
   BroadcastWindowRow,
   MetaJob,
@@ -100,6 +101,7 @@ import type {
   VersionInfo,
   UpgradePlan,
   UpgradeResult,
+  TimelineRow,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -600,7 +602,7 @@ export const api = {
   status: (sourceId: number | null) => get<Status>("/status" + sourceQuery(sourceId)),
   source: (sourceId: number | null) => get<SourceInfo>("/source" + sourceQuery(sourceId)),
   levels: (sourceId: number | null) =>
-    get<{ levels: Levels; at: string }>("/levels" + sourceQuery(sourceId)),
+    get<{ levels: Levels; at: string; feed: "none" | "live" | "stale" }>("/levels" + sourceQuery(sourceId)),
   stats: () =>
     get<{ system: SystemStats; bitrate: BitrateSample[] | null }>("/stats"),
 
@@ -743,6 +745,21 @@ export const api = {
     post<{ enabled: boolean }>(`/destinations/${id}/stop`),
   restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
+  /** Live per-track mute or gain (I4). Writes the STORED live mix and
+   *  reconciles, so a level-only change reaches the running FFmpeg without a
+   *  restart. `applied` says which happened and `reason` why. 409 for an
+   *  audio-copy destination, 404 for a track outside the stored selection. Named
+   *  by programme like every other scoped write (#497). */
+  setTrackLevel: (
+    id: DestinationId,
+    track: number,
+    change: LevelChange,
+    sourceId?: number | null,
+  ) =>
+    post<TrackLevelResult>(
+      `/destinations/${id}/tracks/${track}/gain${sourceQuery(sourceId)}`,
+      change,
+    ),
 
   /* --- every destination at once ----------------------------------------
    *
@@ -768,6 +785,10 @@ export const api = {
    *  a caller that never showed one is exactly who the refusal is for. */
   stopAllDestinations: () =>
     post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
+  /** What a stop-all would end right now: the server's count, from each row's recorded phase.
+   *  The Stop dialog shows this and nothing local, so the dialog and the stop agree. Read-only. */
+  stopImpact: () =>
+    get<{ destinations: number; youtubeBroadcasts: number }>("/destinations/stop-impact"),
   refreshStreamKey: (id: DestinationId) =>
     post<{ destination: Destination }>(`/destinations/${id}/refresh-key`),
 
@@ -1053,6 +1074,7 @@ export const api = {
      MonitoringPage simply never passed one and the whole page was dead there. */
   listProcesses: (sourceId: number | null) =>
     get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
+  listTimeline: (limit = 50) => get<TimelineRow[]>(`/timeline?limit=${limit}`),
   processLogs: (name: string, sourceId: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
       `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),
@@ -1379,3 +1401,45 @@ export const api = {
     deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
   },
 };
+
+/** What the install says about a token: see GET /auth/connection. */
+export interface ConnectionInfo {
+  name: string;
+  prefix: string;
+  scope: string;
+  adminScope: boolean;
+}
+
+/**
+ * The answer to a pasted token. `refused` is the install saying no (a bad or
+ * revoked token); `unreachable` is the request never arriving; `failed` is
+ * anything else. They are separate because the operator fixes each differently.
+ */
+export type ConnectionOutcome =
+  | { ok: true; info: ConnectionInfo }
+  | { ok: false; reason: "refused" | "unreachable" | "failed" };
+
+/**
+ * Asks the install what a pasted API token is. It uses fetch directly rather
+ * than request(): a refused token must not send the console to the sign-in
+ * screen (noteResponseStatus), and the browser session must not be sent along,
+ * so the answer is about the token alone.
+ */
+export async function checkConnection(token: string): Promise<ConnectionOutcome> {
+  let resp: Response;
+  try {
+    resp = await fetch(BASE + "/auth/connection", {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "omit",
+    });
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+  if (resp.status === 401 || resp.status === 403) return { ok: false, reason: "refused" };
+  if (!resp.ok) return { ok: false, reason: "failed" };
+  try {
+    return { ok: true, info: (await resp.json()) as ConnectionInfo };
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
+}

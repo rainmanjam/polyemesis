@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"log/slog"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 )
@@ -22,22 +25,23 @@ import (
 // stream that is going out perfectly.
 func TestObserveWanted(t *testing.T) {
 	tests := []struct {
-		name                     string
-		alerts, hooks, lifecycle bool
-		want                     bool
+		name                               string
+		alerts, hooks, lifecycle, timeline bool
+		want                               bool
 	}{
-		{"nothing at all", false, false, false, false},
-		{"alerts only", true, false, false, true},
-		{"hooks only", false, true, false, true},
-		{"lifecycle only", false, false, true, true},
-		{"alerts and hooks", true, true, false, true},
-		{"everything", true, true, true, true},
+		{"nothing at all", false, false, false, false, false},
+		{"alerts only", true, false, false, false, true},
+		{"hooks only", false, true, false, false, true},
+		{"lifecycle only", false, false, true, false, true},
+		{"timeline only", false, false, false, true, true},
+		{"alerts and hooks", true, true, false, false, true},
+		{"everything", true, true, true, true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := observeWanted(tc.alerts, tc.hooks, tc.lifecycle); got != tc.want {
-				t.Fatalf("observeWanted(%v, %v, %v) = %v, want %v",
-					tc.alerts, tc.hooks, tc.lifecycle, got, tc.want)
+			if got := observeWanted(tc.alerts, tc.hooks, tc.lifecycle, tc.timeline); got != tc.want {
+				t.Fatalf("observeWanted(%v, %v, %v, %v) = %v, want %v",
+					tc.alerts, tc.hooks, tc.lifecycle, tc.timeline, got, tc.want)
 			}
 		})
 	}
@@ -65,6 +69,28 @@ func TestLifecycleWantedIsOffWhenTheObserverHasNothingToDrive(t *testing.T) {
 	if !e.lifecycleWanted() {
 		t.Fatal("an observer with work to do did not want the sweep built; no broadcast on " +
 			"this install would ever go live")
+	}
+}
+
+// THE CALL SITE, which is where all four of these bugs actually lived.
+//
+// The table above proves observeWanted ORs what it is given; it cannot see an
+// input the loop never passes. A13's timeline was exactly that: a recorder on
+// every engine with a store, and a gate that never asked about it, so a default
+// install -- no alert rule, no hook, no lifecycle platform -- built no snapshot
+// and /api/v1/timeline stayed empty through restarts and ingest loss.
+func TestSweepWantedForTheTimelineAlone(t *testing.T) {
+	noRules := alerts.RuleFunc(func() ([]alerts.Rule, error) { return nil, nil })
+
+	e := &Engine{alerter: alerts.New(slog.Default(), noRules)}
+	if e.sweepWanted() {
+		t.Fatal("an engine with no rule, hook, lifecycle platform or recorder wanted the sweep built")
+	}
+
+	e = &Engine{alerter: alerts.New(slog.Default(), noRules, alerts.WithRecorder(func(alerts.Event) {}))}
+	if !e.sweepWanted() {
+		t.Fatal("an engine with a timeline recorder and nothing else did not want the sweep built; " +
+			"the stream timeline records nothing on a default install")
 	}
 }
 

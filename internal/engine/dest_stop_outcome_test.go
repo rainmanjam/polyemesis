@@ -12,6 +12,7 @@ package engine
 // after a stop.
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +54,8 @@ const engineFakeChildEchoLast = "POLYEMESIS_ENGINE_FAKE_CHILD_ECHO_LAST"
 const (
 	engineFakeChildProgressFrozen = "progress-frozen"
 	engineFakeChildProgressMoving = "progress-moving"
+	// engineFakeChildLiveReply answers each stdin line with the next argument.
+	engineFakeChildLiveReply = "live-reply"
 )
 
 func TestMain(m *testing.M) {
@@ -98,6 +101,22 @@ func TestMain(m *testing.M) {
 			fmt.Printf("out_time_us=%d\ntotal_size=%d\nbitrate=2000.0kbits/s\nspeed=1.0x\nprogress=continue\n", us, us)
 			time.Sleep(200 * time.Millisecond)
 		}
+	}
+	if len(os.Args) > 3 && os.Args[1] == engineFakeChildFlag && os.Args[2] == engineFakeChildLiveReply {
+		// A stand-in for FFmpeg's command channel: every line read on stdin is
+		// answered with os.Args[3] on stderr, as FFmpeg answers a `c` command.
+		// The reader runs beside the sleep rather than in front of it, so a child
+		// with no stdin pipe -- every destination on Windows -- reads EOF at
+		// once and stays up anyway. A /bin/sh loop did this until Windows CI.
+		reply := os.Args[3]
+		go func() {
+			sc := bufio.NewScanner(os.Stdin)
+			for sc.Scan() {
+				fmt.Fprintln(os.Stderr, reply)
+			}
+		}()
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
 	}
 	if len(os.Args) > 1 && os.Args[1] == engineFakeChildFlag {
 		// A child that says something and dies, for the tests that need the

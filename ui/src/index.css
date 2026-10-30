@@ -61,6 +61,23 @@
   font-display: swap;
 }
 
+/* PER-SCRIPT FALLBACKS. IBM Plex Sans has no Han, Hangul or kana, so a
+   Japanese, Korean or Chinese label fell through to whatever the operating
+   system picked. Each rule keeps Plex first for Latin and names the platform's
+   own CJK faces in order after it. Only faces the OS already ships are named:
+   a self-hosted Noto subset is a decision to make with real screenshots, and
+   ui/src/lib/font-fallbacks.test.ts holds the list of locales that need one.
+   Not a @font-face, deliberately: none of these are loaded from the server. */
+:root:lang(ja) {
+  --font-sans: "IBM Plex Sans", "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", ui-sans-serif, system-ui, sans-serif;
+}
+:root:lang(ko) {
+  --font-sans: "IBM Plex Sans", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", ui-sans-serif, system-ui, sans-serif;
+}
+:root:lang(zh-Hans) {
+  --font-sans: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, sans-serif;
+}
+
 /* ===========================================================================
    polyemesis theme — the entire palette lives here and nowhere else.
    No component may hardcode a colour; everything below is exposed as a
@@ -136,6 +153,11 @@
   --primary: oklch(60.2% 0.1177 263.2);
   --primary-foreground: oklch(15.9% 0.0091 264.3);
   --primary-dim: oklch(31.3% 0.0447 262.9);
+  /* The brighter accent for text and hover on dark surfaces, in the baseline
+     the new layouts draw from. Computed from these token values, not measured
+     in a browser: 7.13:1 on --card, 7.80:1 on --background, 5.23:1 on
+     --primary-dim. Use it for accent text, never for large fills. */
+  --primary-bright: oklch(71.9% 0.1090 257.4);
 
   --secondary: oklch(25.2% 0.0245 264.0);
   --secondary-foreground: oklch(85.9% 0.0225 263.2);
@@ -451,6 +473,12 @@
   /* Faster, more urgent: reconnecting. */
   .animate-signal-fast {
     animation: signal-pulse 0.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  /* Where a settings search result landed. An outline, so nothing moves. */
+  [data-search-hit] {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: 4px;
   }
 }
 

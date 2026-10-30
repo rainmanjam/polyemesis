@@ -176,6 +176,10 @@ type TrackSel struct {
 	Track   int     `json:"track"`   // 0-based ingest track index
 	Enabled bool    `json:"enabled"` //
 	Gain    float64 `json:"gain"`    // 1.0 == unity == "100%" in the UI
+	// Muted silences the track in the mix WITHOUT removing it from the graph.
+	// It is applied live (see volume@ stages); toggling it never restarts a
+	// destination.
+	Muted bool `json:"muted,omitempty"`
 }
 
 // Cell is one square of the advanced mix matrix: how much of one source
@@ -185,6 +189,11 @@ type Cell struct {
 	Channel int     `json:"channel"` // 0-based channel within that track
 	Out     int     `json:"out"`     // OutL | OutR
 	Gain    float64 `json:"gain"`    // 0.0 .. MaxGain
+	// Invert flips the polarity of this channel's contribution (A15). It is
+	// rendered as a negative pan coefficient, so it is structural: changing it
+	// restarts the destination, unlike a level. Matrix mode only; omitted when
+	// false so a profile that never uses it stores and compiles as before.
+	Invert bool `json:"invert,omitempty"`
 }
 
 // Loudness is a destination's programme-loudness target.

@@ -66,6 +66,11 @@ type DestStatus struct {
 	// observed, and the reason it has to be said out loud is that Process.State
 	// reads "stopped" on both of Stop's arms and so cannot say it (#209).
 	StopWarning string `json:"stopWarning,omitempty"`
+	// LevelChange says how the most recent per-track gain or mute change took
+	// effect: "applied live", or "applied by restart: <reason>" when the
+	// running FFmpeg could not take it and was restarted instead. Empty until a
+	// level has changed. See live_gains.go.
+	LevelChange string `json:"levelChange,omitempty"`
 	// RolledOverTo is the file a file destination is actually writing to, when
 	// that is not the name the operator configured.
 	//
@@ -451,6 +456,7 @@ func (e *Engine) Status() Status {
 			// would be silently absent exactly when the warning is true.
 			ds.StopWarning, _ = e.StopUnreaped(row.ID)
 			ds.RolledOverTo, _ = e.RolledOver(row.ID)
+			ds.LevelChange = e.levelChangeText(row.ID)
 			// Looked up ONCE. This was two identical linear scans of the same
 			// list with the same argument, per row, on a function that runs per
 			// WebSocket push and per telemetry tick.

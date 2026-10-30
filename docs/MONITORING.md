@@ -272,6 +272,20 @@ defaults and then wondering:
 | `events` | empty | any type on this page | Empty means **every** type |
 | `allowPrivateTarget` | `false` | — | The deliberate opt-in past the SSRF guard; see below |
 
+**A rule hears transitions that happen after it is saved.** Most of the
+stream conditions below latch: they are raised once when they start and once
+more when they end, and they are not repeated while they last. These are
+`ingest.lost`, `destination.down`, `destination.falling_behind`, `disk.low` and
+the loudness check. A rule added while one of them is already in progress,
+such as an ingest already lost or a destination already down, is not told it
+started. It hears the recovery, and every later occurrence. `audio.clipping`
+is the exception, because its counter resets after it fires, so a rule added
+during clipping hears the next full run. To see what is already wrong when
+you add a rule, read the Monitoring page. [The stream timeline](#the-stream-timeline)
+records its seven event types whether or not any rule exists, so it shows an
+ingest loss, a down destination or a falling-behind destination that started
+before your rule. It does not record `disk.low`, loudness or clipping.
+
 A debounce or interval out of range is **clamped rather than refused**, because
 a value that drifted out of bounds should cost a bounded message rate and not a
 rule that has silently stopped alerting. An unknown `format` or `minSeverity` is
@@ -664,6 +678,39 @@ read before the delete, so a channel that goes quiet has been told why, and the
 deletion is in the log. What an attacker who deletes your only rule still
 leaves unrecorded is everything they do *after* it. If you need a record that
 survives the incident, the receiving end of the webhook is where to keep it.
+
+The [stream timeline](#the-stream-timeline) below is a table, but it is not
+this record either. It keeps only stream events, never a sign-in, a token or a
+settings change.
+
+---
+
+## The stream timeline
+
+The Monitoring page has a **Timeline** card: what happened to the stream,
+newest first, in words. It answers "when did it fail over?" and "how often did
+Twitch drop?" after the alert has gone.
+
+It keeps seven event types, the stream-shaped subset of the alerts above:
+
+- `failover.switched`
+- `destination.down` and `destination.recovered`
+- `destination.falling_behind` and `destination.caught_up`
+- `ingest.lost` and `ingest.recovered`
+
+A destination restart shows as a down followed by a recovered. A stream
+ending is not on it, because nothing raises that event.
+
+The rows are the notifier's text, already redacted, kept in the database. The
+store holds at most 1000 rows and nothing older than 30 days; both caps apply
+on every write. Rows are written from their own bounded queue. If the database
+is too slow to keep up, a row is dropped and counted in the notifier's
+`dropped` counter, rather than delaying the streaming path. A gap in the
+timeline is therefore possible under load, and the counter is how you would
+know.
+
+A script reads the same rows from `GET /api/v1/timeline?limit=N`
+([API.md](API.md)). A read token is enough.
 
 ---
 

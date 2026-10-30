@@ -111,7 +111,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu   -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
@@ -250,6 +250,16 @@ type Engine struct {
 	// onCaptionsDegraded -- the one callback that does -- explicitly hands it
 	// to a fresh goroutine rather than calling it inline.
 	reconcileMu sync.Mutex
+
+	// liveNotes records, per destination, what the last level change did:
+	// applied live, or by a restart and why. Read by the API. Guarded by mu.
+	liveNotes map[int64]liveNote
+	// levelRespawning holds the processes respawnStaleLevels has already asked
+	// to restart, so two upstream events in quick succession cycle a stale
+	// destination once rather than twice. Its own mutex, not mu: it is written
+	// from an ingest's state callback, which must never take mu for writing.
+	levelRespawnMu  sync.Mutex
+	levelRespawning map[*supervisor.Process]bool
 
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
 	// from teardown paths that already hold it.
@@ -576,6 +586,9 @@ type destination struct {
 	port     int
 	subName  string
 	compiled routing.Result
+	// graph is the graph the primary process is spawned from, shared with its
+	// NextArgs so respawns carry the last live level. See live_gains.go.
+	graph *graphHolder
 	// hub is where this destination reads from: the ingest hub for a
 	// passthrough destination, its rendition's own hub otherwise. Held so
 	// teardown unsubscribes from the same hub it subscribed to.
@@ -598,6 +611,9 @@ type destination struct {
 	backup     *supervisor.Process
 	backupPort int
 	backupSub  string
+	// backupGraph is the graph the backup process is spawned from, for the same
+	// reason as graph.
+	backupGraph *graphHolder
 	// backupSpec is the backup's OWN restart hash, deliberately not derived
 	// from spec. The two must cycle independently: a rotated backup key has to
 	// restart only the backup, and nothing about the backup may ever restart
@@ -756,7 +772,23 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// Both read their configuration from the database on every pass, so a rule
 	// or a schedule added later takes effect without a restart, and a server
 	// with neither configured does no work beyond one cheap sweep.
-	e.alerter = alerts.New(log, store)
+	// The timeline is written from the notifier's own goroutine, so the
+	// database may be slow without touching the reconcile loop. A nil store
+	// (tests that build an engine without one) gets no recorder at all, rather
+	// than one that discards: a recorder opens the sweep gate (sweepWanted),
+	// and a sink with nowhere to write is not a consumer worth sweeping for.
+	var alertOpts []alerts.Option
+	if store != nil {
+		alertOpts = append(alertOpts, alerts.WithRecorder(func(ev alerts.Event) {
+			if err := store.RecordTimelineEvent(db.TimelineEvent{
+				At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
+				Title: ev.Title, Detail: ev.Text,
+			}); err != nil {
+				log.Warn("timeline record failed", "type", ev.Type, "err", err)
+			}
+		}))
+	}
+	e.alerter = alerts.New(log, store, alertOpts...)
 	e.alertWatch = alerts.NewWatcher(alerts.WatchConfig{})
 	// Named from the source row on the first sweep; SourceRef starts with the
 	// id alone so an event raised before that still identifies its programme.
@@ -1610,8 +1642,10 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// written, which nothing has ever recorded.
 		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
+		// Each spawn is a new streamer session, which can change the decoded
+		// format under every destination. See respawnStaleLevels.
+		OnState: e.onUpstreamState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
@@ -2330,9 +2364,6 @@ func previewIdle(s db.Settings, seen, now time.Time) bool {
 	return now.Sub(seen) >= previewIdleWindow(s)
 }
 
-// reconcileMeters restarts the metering sidecar whenever the ingest's track
-// layout changes, because the merged channel numbering it parses depends on
-// the exact per-track channel counts.
 // applyMeterInterval publishes a changed metering throttle to the sidecar that
 // is already running.
 //
@@ -2364,6 +2395,9 @@ func (t *meterThrottle) allow(now time.Time) bool {
 	return true
 }
 
+// reconcileMeters restarts the metering sidecar whenever the ingest's track
+// layout changes, because the merged channel numbering it parses depends on
+// the exact per-track channel counts.
 func (e *Engine) reconcileMeters(s db.Settings) {
 	// Before every early return below. See applyMeterInterval.
 	e.applyMeterInterval(s.Meters)
@@ -4813,6 +4847,15 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	e.log.Info("live captions stopped")
 }
 
+// MeterInterval is the metering throttle the engine is applying, or zero before
+// one has been set. It is the same value that gates the levels WebSocket frames.
+func (e *Engine) MeterInterval() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return time.Duration(e.meterInterval.Load())
+}
+
 // Levels returns the most recent metering frame, or an empty one and the zero
 // time when there is no engine to have measured anything. See Engine.Status.
 func (e *Engine) Levels() (ffmpeg.Levels, time.Time) {
@@ -5115,8 +5158,39 @@ func (m *Manager) onSchedule(r scheduler.Result) {
 // The visible result is not an error anywhere: it is every YouTube broadcast on
 // that box sitting in "testing" for ever while the watch page says "starting
 // soon" and the stream itself is perfectly healthy.
-func observeWanted(alertRules, hookRules, lifecycleWanted bool) bool {
-	return alertRules || hookRules || lifecycleWanted
+//
+// AND A FOURTH TIME, for the stream timeline (A13). The notifier records the
+// timeline subset of every event it is handed, but it is only handed events
+// from a sweep, and a default install never swept: /api/v1/timeline stayed
+// empty through restarts, falling-behind and ingest loss, and filled the moment
+// an alert rule happened to exist. A recorder is a consumer like the other
+// three, so it opens the gate on its own.
+func observeWanted(alertRules, hookRules, lifecycleWanted, timeline bool) bool {
+	return alertRules || hookRules || lifecycleWanted || timeline
+}
+
+// sweepWanted is the gate observeLoop asks, with every consumer it knows of.
+//
+// A method rather than four arguments at the call site because the last three
+// bugs were all the call site forgetting an input; the table test above cannot
+// see that, and TestSweepWantedForTheTimelineAlone tests this instead.
+//
+// A CONSEQUENCE, KEPT ON PURPOSE AND DOCUMENTED (docs/MONITORING.md, "A rule
+// hears transitions that happen after it is saved"). With a recorder, every
+// install sweeps, so the watcher sees a condition start even when no rule
+// exists. An alert rule added while that condition lasts is not told it started,
+// because the watcher raises an event once, at the transition. Before the
+// timeline opened the gate, an install with no rule never swept, so its first
+// rule happened to meet a fresh watcher and hear an outage already in progress.
+// An install that already had one rule never had that, so the behaviour is
+// now the same for every install. Replaying in-progress conditions to a new
+// rule would need a delivery aimed at that one rule. The notifier fans every
+// event out to every matching rule, so a plain re-publish would alert the
+// existing rules a second time about an outage they were already told of.
+// The timeline is the record of what started before a rule existed.
+func (e *Engine) sweepWanted() bool {
+	return observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted(),
+		e.alerter.HasRecorder())
 }
 
 // observeLoop samples the pipeline and hands each snapshot to BOTH watchers.
@@ -5167,15 +5241,22 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			live := !firstRx && rx > lastRx
 			lastRx, firstRx = rx, false
 
-			// A server with neither an alert rule nor a hook pays for two
-			// cached lookups and nothing else — no status snapshot, no
-			// queries, no disk read. Adding the first one starts the timers
-			// from that moment, which is the only honest thing it could do.
+			// A server with no consumer at all -- no alert rule, no hook, no
+			// lifecycle platform, no timeline recorder -- pays for the cached
+			// lookups and nothing else: no status snapshot, no queries, no
+			// disk read. Adding the first one starts the timers from that
+			// moment, which is the only honest thing it could do.
+			//
+			// An engine built with a store always has the timeline recorder,
+			// so in production the sweep now always runs: one status
+			// snapshot per alertSweep, and the disk read on its own
+			// alertDiskEvery cadence below. That is the price of a timeline
+			// that records without an alert rule having to exist first.
 			//
 			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
 			// alerts.Notifier and transcribe.Tools use. Guarding at the call
 			// site instead is what makes the two diverge.
-			if !observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted()) {
+			if !e.sweepWanted() {
 				haveDisk = false
 				continue
 			}

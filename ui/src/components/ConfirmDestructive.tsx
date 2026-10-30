@@ -35,6 +35,10 @@ import { useT } from "@/lib/i18n";
 interface ConfirmDestructiveBase {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Holds the confirm button shut while the dialog's own facts are still loading or have failed to
+   *  load. A stop whose count is unknown must not be confirmable, so the dialog says so instead.
+   *  Defaults to false, which is every existing caller's behaviour. */
+  confirmDisabled?: boolean;
   title: string;
   /** What will happen, in the operator's terms. */
   description: React.ReactNode;
@@ -114,6 +118,7 @@ export function ConfirmDestructive({
   consequences,
   consequencesLabel,
   confirmLabel,
+  confirmDisabled = false,
   onConfirm,
 }: Readonly<ConfirmDestructiveProps>) {
   const t = useT();
@@ -156,7 +161,7 @@ export function ConfirmDestructive({
   const typeToConfirm = t("confirm.typeToConfirm").split("{subject}");
 
   const run = async () => {
-    if (!unlocked || busy) return;
+    if (!unlocked || busy || confirmDisabled) return;
     setBusy(true);
     try {
       await onConfirm();
@@ -193,7 +198,7 @@ export function ConfirmDestructive({
 
         {consequences && consequences.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-down/40 bg-down-dim/20 px-2.5 py-2">
-            <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
               {consequencesLabel ?? t("confirm.alsoRemoves")}
             </span>
             {consequences.map((c) => (
@@ -267,7 +272,7 @@ export function ConfirmDestructive({
           <Button
             variant="destructive"
             onClick={() => void run()}
-            disabled={!unlocked || busy}
+            disabled={!unlocked || busy || confirmDisabled}
           >
             {confirmLabel ?? t("common.delete")}
           </Button>

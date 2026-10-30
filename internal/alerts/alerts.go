@@ -268,6 +268,23 @@ type Field struct {
 	Value string `json:"value"`
 }
 
+// timelineTypes is the operator's history of the stream: the transitions a
+// person asks about after the fact ("when did it fail over?", "how many times
+// did Twitch restart?"). Deliberately narrower than every Type. Auth and
+// settings records belong to the audit trail, not to the stream timeline.
+var timelineTypes = map[Type]bool{
+	TypeFailoverSwitched:         true,
+	TypeDestinationDown:          true,
+	TypeDestinationRecovered:     true,
+	TypeDestinationFallingBehind: true,
+	TypeDestinationCaughtUp:      true,
+	TypeIngestLost:               true,
+	TypeIngestRecovered:          true,
+}
+
+// IsTimelineType reports whether an event belongs in the stream timeline.
+func IsTimelineType(t Type) bool { return timelineTypes[t] }
+
 // Event is one thing worth telling somebody about.
 type Event struct {
 	Type     Type     `json:"type"`

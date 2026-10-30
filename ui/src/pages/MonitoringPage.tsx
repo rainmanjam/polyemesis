@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/InfoHint";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -15,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -24,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
@@ -32,6 +35,15 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
+import {
+  VERDICT_WINDOW_SEC,
+  collapseRepeats,
+  countLevels,
+  filterLines,
+  isErrorLine,
+  type LogLevelFilter,
+  verdict,
+} from "@/lib/logSummary";
 import { cn } from "@/lib/utils";
 import {
   asDestinationId,
@@ -248,7 +260,7 @@ export function ExpertPanel() {
       <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle className="flex items-center gap-1.5">
           <TerminalSquare className="h-3.5 w-3.5" />
-          Expert mode — extra FFmpeg arguments
+          {t("i18nSweep.expertModeTitle")}
         </CardTitle>
         <Select value={selected} onValueChange={choose}>
           <SelectTrigger className="h-7 w-56 text-tiny">
@@ -307,7 +319,7 @@ export function ExpertPanel() {
             <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" onClick={preview} disabled={busy !== ""}>
                 {busy === "preview" && <Loader2 className="h-3 w-3 animate-spin" />}
-                Resolve command
+                {t("i18nSweep.resolveCommand")}
               </Button>
               <Button size="sm" variant="secondary" onClick={doDryRun} disabled={busy !== ""}>
                 {busy === "dryrun" && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -315,7 +327,7 @@ export function ExpertPanel() {
               </Button>
               <Button size="sm" onClick={apply} disabled={!canApply}>
                 {busy === "apply" && <Loader2 className="h-3 w-3 animate-spin" />}
-                Apply
+                {t("common.apply")}
               </Button>
               <Button
                 size="sm"
@@ -377,18 +389,18 @@ export function ExpertPanel() {
             {resolved?.command?.command && (
               <div>
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
+                  <span className="text-micro uppercase tracking-wide text-muted-foreground">
             {t("mon.fullCommand")}
                   </span>
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
                     {resolved.command.live ? t("mon.fromRunningProcess") : t("mon.rebuilt")}
                   </Badge>
-                  {!shown && <Badge variant="outline">stale</Badge>}
+                  {!shown && <Badge variant="outline">{t("i18nSweep.stale")}</Badge>}
                 </div>
                 <pre
                   className={cn(
                     "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-micro",
-                    shown ? "text-foreground" : "text-subtle-foreground",
+                    shown ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
                   {resolved.command.command}
@@ -402,7 +414,7 @@ export function ExpertPanel() {
             {dryRun && (
               <div>
                 <div className="mb-1 flex items-center gap-2 text-tiny">
-                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
+                  <span className="text-micro uppercase tracking-wide text-muted-foreground">
             {t("mon.dryRun")}
                   </span>
                   <span className={DRY_RUN_TONE[dryRun.verdict]}>
@@ -415,7 +427,7 @@ export function ExpertPanel() {
                 {dryRun.output && (
                   <details className="mt-1">
                     <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
-                      FFmpeg output
+                      {t("i18nSweep.ffmpegOutput")}
                     </summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {dryRun.output}
@@ -455,6 +467,13 @@ export function MonitoringPage() {
   const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
   const [follow, setFollow] = useState(true);
+  // Errors is the default view: a healthy stream writes little, so the lines
+  // worth reading first are the failures.
+  const [level, setLevel] = useState<LogLevelFilter>("errors");
+  const [search, setSearch] = useState("");
+  const [showRaw, setShowRaw] = useState(false);
+  // Ticks so the verdict's window slides forward while the log is quiet.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const logRef = useRef<HTMLDivElement>(null);
   const logsRef = useRef(logs);
 
@@ -539,6 +558,26 @@ export function MonitoringPage() {
     [merged, filter],
   );
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const levelCounts = useMemo(() => countLevels(filtered), [filtered]);
+  const shown = useMemo(
+    () => filterLines(filtered, level, search),
+    [filtered, level, search],
+  );
+  const groups = useMemo(() => collapseRepeats(shown), [shown]);
+  const verdictState = useMemo(() => verdict(merged, nowMs), [merged, nowMs]);
+  const errorsByProcess = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of merged) {
+      if (isErrorLine(l)) m.set(l.process, (m.get(l.process) ?? 0) + 1);
+    }
+    return m;
+  }, [merged]);
+
   // Clearing has to take the backfill with it, or the "cleared" log would
   // instantly redraw everything the ring buffer still holds.
   const clearAll = useCallback(() => {
@@ -551,7 +590,7 @@ export function MonitoringPage() {
   useEffect(() => {
     if (!follow || !logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [filtered, follow]);
+  }, [groups, follow]);
 
   const chartData = useMemo(
     () =>
@@ -592,7 +631,8 @@ export function MonitoringPage() {
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {system?.numCpu ?? 0} cores · polyemesis {pct(system?.procCpuPercent ?? 0)}
+              {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
+              <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -606,6 +646,7 @@ export function MonitoringPage() {
             <div className="mt-1 text-micro text-muted-foreground">
               {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
               {bytes(system?.procMemBytes ?? 0)}
+              <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -613,7 +654,11 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-micro text-muted-foreground">
-              {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
+              {t("i18nSweep.monSubscribers", {
+                count: status?.relay.subscribers?.length ?? 0,
+                port: status?.relay.port ?? "—",
+              })}
+              <InfoHint body="mon.relayIn.hint" title="mon.relayIn" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -626,6 +671,7 @@ export function MonitoringPage() {
             />
             <div className="mt-1 text-micro text-muted-foreground">
               {t("mon.relayDropsNote")}
+              <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -637,9 +683,12 @@ export function MonitoringPage() {
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {(status?.relay.tsLost ?? 0).toLocaleString()} of{" "}
-              {((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString()} TS
-              packets missing · {(status?.relay.discontinuities ?? 0).toLocaleString()} breaks
+              {t("i18nSweep.monTsMissing", {
+                lost: (status?.relay.tsLost ?? 0).toLocaleString(),
+                total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
+                breaks: (status?.relay.discontinuities ?? 0).toLocaleString(),
+              })}
+              <InfoHint body="mon.ingestLoss.hint" title="mon.ingestLoss" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -653,7 +702,7 @@ export function MonitoringPage() {
         <CardContent className="h-40 px-1">
           {chartData.length < 2 ? (
             <div className="flex h-full items-center justify-center text-tiny text-muted-foreground">
-              Collecting samples…
+              {t("i18nSweep.collectingSamples")}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -710,13 +759,17 @@ export function MonitoringPage() {
       </Card>
 
       <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        {/* ---------- processes ---------- */}
+        <div className="mb-3">
+        <MonitorTimeline />
+      </div>
+
+      {/* ---------- processes ---------- */}
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>{t("mon.processes")}</CardTitle>
               {procFreshness.stale && (
-                <Badge variant="warn" title={`${procFreshness.failures} consecutive failed refreshes`}>
-                  not updating
+                <Badge variant="warn" title={t("i18nSweep.failedRefreshes", { count: procFreshness.failures })}>
+                  {t("meters.notUpdating")}
                 </Badge>
               )}
           </CardHeader>
@@ -735,7 +788,14 @@ export function MonitoringPage() {
                       <StatusDot tone={tone} size="sm" />
                       <span className="truncate font-mono text-tiny">{p.name}</span>
                     </div>
-                    <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {(errorsByProcess.get(p.name) ?? 0) > 0 && (
+                        <Badge variant="warn">
+                          {t("monitor.processErrors", { count: errorsByProcess.get(p.name) ?? 0 })}
+                        </Badge>
+                      )}
+                      <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
+                    </div>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
                     <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
@@ -752,7 +812,7 @@ export function MonitoringPage() {
                   </div>
                   {p.nextRetryIn ? (
                     <div className="mt-1 text-micro text-warn">
-                      retrying in {p.nextRetryIn.toFixed(0)}s
+                      {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
                     </div>
                   ) : null}
                   {p.lastError && (
@@ -762,7 +822,7 @@ export function MonitoringPage() {
                   )}
                   <details className="mt-1">
                     <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
-                      command line
+                      {t("i18nSweep.commandLine")}
                     </summary>
                     <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
                       {command}
@@ -777,7 +837,13 @@ export function MonitoringPage() {
         {/* ---------- log tail ---------- */}
         <Card className="flex min-h-0 flex-col">
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
+              <Badge variant="down">{t("monitor.errorsCount", { count: levelCounts.errors })}</Badge>
+              <Badge variant="warn">
+                {t("monitor.warningsCount", { count: levelCounts.warnings })}
+              </Badge>
+            </div>
             <div className="flex items-center gap-2">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger className="h-7 w-36 text-tiny">
@@ -795,7 +861,7 @@ export function MonitoringPage() {
               <div className="flex items-center gap-1.5">
                 <Switch id="follow" checked={follow} onCheckedChange={setFollow} />
                 <Label htmlFor="follow" className="cursor-pointer">
-                  Follow
+                  {t("i18nSweep.follow")}
                 </Label>
               </div>
               <Button variant="ghost" size="icon-sm" onClick={clearAll} aria-label={t("mon.clearLog")}>
@@ -803,27 +869,102 @@ export function MonitoringPage() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-2">
+            <p role="status" className="text-tiny text-muted-foreground">
+              {verdictState.kind === "clean"
+                ? t("monitor.verdictClean", { window: VERDICT_WINDOW_SEC })
+                : t("monitor.verdictErrors", {
+                    process: verdictState.process,
+                    count: verdictState.count,
+                    window: verdictState.windowSec,
+                  })}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex gap-1">
+                {(
+                  [
+                    ["errors", "monitor.filterErrors"],
+                    ["warnings", "monitor.filterWarnings"],
+                    ["all", "monitor.filterAll"],
+                  ] as const
+                ).map(([value, key]) => (
+                  <Button
+                    key={value}
+                    variant={level === value ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-pressed={level === value}
+                    onClick={() => setLevel(value)}
+                  >
+                    {t(key)}
+                  </Button>
+                ))}
+              </div>
+              <Input
+                type="search"
+                className="h-7 max-w-xs flex-1 text-tiny"
+                aria-label={t("monitor.searchLog")}
+                placeholder={t("monitor.searchLog")}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
             <div
               ref={logRef}
-              className="h-[26rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
+              className="h-[22rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
             >
-              {filtered.length === 0 ? (
+              {merged.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground">
                   {t("mon.noLogLines")}
                 </div>
+              ) : groups.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground">
+                  {t("monitor.noMatchingLines")}
+                </div>
               ) : (
-                filtered.map((l, i) => (
+                groups.map((g, i) => (
                   <div key={i} className="flex gap-2">
-                    <span className="tnum shrink-0 text-subtle-foreground">
-                      {clockTime(l.time)}
+                    <span className="tnum shrink-0 text-muted-foreground">
+                      {clockTime(g.line.time)}
                     </span>
-                    <span className="shrink-0 text-primary/70">{l.process}</span>
-                    <span className={cn("break-all", LOG_LEVEL_CLASS[l.level] ?? "")}>
-                      {l.text}
+                    <span className="shrink-0 text-primary/70">{g.line.process}</span>
+                    {g.count > 1 && (
+                      <span
+                        className="shrink-0 rounded bg-muted px-1 tnum text-muted-foreground"
+                        title={t("monitor.repeatTitle", { count: g.count })}
+                      >
+                        {`×${g.count}`}
+                      </span>
+                    )}
+                    <span className={cn("break-all", LOG_LEVEL_CLASS[g.line.level] ?? "")}>
+                      {g.line.text}
                     </span>
                   </div>
                 ))
+              )}
+            </div>
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={showRaw}
+                onClick={() => setShowRaw((v) => !v)}
+              >
+                {showRaw ? t("monitor.hideRaw") : t("monitor.showRaw")}
+              </Button>
+              {showRaw && (
+                <div className="mt-2 h-48 overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed">
+                  {filtered.map((l, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className="tnum shrink-0 text-muted-foreground">
+                        {clockTime(l.time)}
+                      </span>
+                      <span className="shrink-0 text-primary/70">{l.process}</span>
+                      <span className={cn("break-all", LOG_LEVEL_CLASS[l.level] ?? "")}>
+                        {l.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </CardContent>
