@@ -206,7 +206,7 @@ func TestCompileSimpleSingleTrack(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-		"[a_t0]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_t0]aresample=48000:async=1[aout]"
 	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
@@ -228,7 +228,7 @@ func TestCompileSimpleTwoTracksAutoLimits(t *testing.T) {
 		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_norm]aresample=48000:async=1[aout]"
 	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
@@ -292,7 +292,7 @@ func TestCompile51SourceDownmixesBeforeSumming(t *testing.T) {
 		"[0:a:1]pan=stereo|c0=1*c0|c1=1*c1,aresample=async=1:first_pts=0[a_t1];" +
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
-		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_norm]aresample=48000:async=1[aout]"
 	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
@@ -322,7 +322,7 @@ func TestCompileMatrixMode(t *testing.T) {
 		"[0:a:2]pan=stereo|c0=0.8*c0|c1=0*c0,aresample=async=1:first_pts=0[a_t2];" +
 		"[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
-		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
+		"[a_norm]aresample=48000:async=1[aout]"
 	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}

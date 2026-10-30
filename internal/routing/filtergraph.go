@@ -76,7 +76,7 @@ type Result struct {
 //	[0:a:1]pan=stereo|c0=...|c1=...,aresample=async=1:first_pts=0[a_t1];
 //	[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];
 //	[a_mix]alimiter=limit=0.95:level=disabled[a_norm];
-//	[a_norm]aresample=48000:async=1:first_pts=0[aout]
+//	[a_norm]aresample=48000:async=1[aout]
 //
 // Simple mode and matrix mode both funnel through this one path: simple mode
 // is expanded to matrix cells using the standard downmix table first.
@@ -258,11 +258,28 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 
 	// Final resample pins the rate the AAC encoder sees and lets FFmpeg absorb
 	// the small timestamp drift that a UDP relay inevitably introduces.
+	//
+	// NO first_pts HERE, and it is not an omission. This graph is not built
+	// once: when a failover changes the decoded sample rate or channel count,
+	// FFmpeg rebuilds it from the argv in the middle of the run, and a rebuilt
+	// `first_pts=0` meets its first frame at T -- the stream's whole runtime --
+	// and pads T seconds of silence in front of it. The muxer clamps those
+	// samples onto the current timestamp, so the audio goes T seconds behind
+	// the video and stays there. Measured in Docker: 96 s behind after a
+	// failover 98 s in. Without it the rebuilt instance continues from the
+	// timestamp it is handed, and async=1 still fills gaps within an instance.
+	// What a rebuild cannot do is fill the outage that preceded it, since it
+	// has no earlier timestamp to fill from; that gap stays a timestamp gap,
+	// matching the one the copied video carries. reinit_drift_test.go.
+	//
+	// The per-track legs (trackAlign) keep first_pts=0, because nothing else
+	// gives amix a common origin, so a rebuilt MULTI-track graph still pads.
+	// See trackAlign.
 	rate := p.SampleRate
 	if rate == 0 {
 		rate = 48000
 	}
-	chains = append(chains, fmt.Sprintf("[%s]aresample=%d:async=1:first_pts=0[%s]", cur, rate, n.of(OutLabel)))
+	chains = append(chains, fmt.Sprintf("[%s]aresample=%d:async=1[%s]", cur, rate, n.of(OutLabel)))
 
 	res.FilterComplex = strings.Join(chains, ";")
 	res.Summary = summarize(tracks)
@@ -315,6 +332,16 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 // What this does NOT change: while a track is absent, a mix that needs it has
 // no input to sum and produces nothing, as selector.go's slate note says. This
 // makes the return correct; it does not make the outage audible.
+//
+// KNOWN LIMITATION: zero is the right origin only for the graph FFmpeg builds
+// at spawn. When a failover changes the decoded sample rate or channel count,
+// FFmpeg rebuilds the graph mid-run, and every leg of the rebuilt one pads from
+// zero to the current timestamp -- so a multi-track mix goes the stream's
+// runtime behind its video, exactly the fault the final resample no longer has
+// (see compile). It cannot be fixed here: amix sums by sample count, no
+// filter can name "where this graph instance started", and dropping first_pts
+// from the legs loses the late-track alignment above (measured: the tone lands
+// 10 s early). A switch that keeps the format, the common case, is unaffected.
 const trackAlign = "aresample=async=1:first_pts=0"
 
 // trackGain is the per-track gain a provisional chain applies by hand, because

@@ -446,7 +446,7 @@ func TestDestinationArgsNeverReencodesVideo(t *testing.T) {
 		Kind:          DestRTMP,
 		Target:        "rtmp://a.example/live/key",
 		RelayURL:      "udp://127.0.0.1:20001",
-		FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+		FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[a_t0]aresample=48000:async=1[aout]",
 		AudioBitrate:  160,
 	})
 	s := join(args)
@@ -481,7 +481,7 @@ func TestDestinationArgsNeverReencodesVideo(t *testing.T) {
 func TestDestinationArgsMapsTheFilterOutputNotARawTrack(t *testing.T) {
 	args := DestinationArgs(DestSpec{
 		Kind: DestSRT, Target: "srt://x:9000", RelayURL: "udp://127.0.0.1:2",
-		FilterComplex: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1:first_pts=0[aout]",
+		FilterComplex: "[0:a:1]pan=stereo|c0=1*c0|c1=1*c1[a_t1];[a_t1]aresample=48000:async=1[aout]",
 	})
 	maps := allAfter(args, "-map")
 	if len(maps) != 2 {
@@ -1382,7 +1382,7 @@ func TestDestinationArgsAudioOnlyEmitsNoVideo(t *testing.T) {
 			args := DestinationArgs(DestSpec{
 				Kind: DestAudio, Target: tc.target, RelayURL: "udp://127.0.0.1:20010",
 				FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
-					"[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+					"[a_t0]aresample=48000:async=1[aout]",
 				AudioBitrate: 160,
 			})
 			s := join(args)
@@ -1554,7 +1554,7 @@ func TestDestinationArgsNegativeDelayHoldsTheVideoBack(t *testing.T) {
 			}
 			args := DestinationArgs(DestSpec{
 				Kind: tc.kind, Target: target, RelayURL: "udp://127.0.0.1:20020",
-				FilterComplex: "[0:a:0]aresample=48000:async=1:first_pts=0[aout]",
+				FilterComplex: "[0:a:0]aresample=48000:async=1[aout]",
 				VideoDelayMS:  tc.delay,
 			})
 			got, ok := argsAfter(args, "-bsf:v")

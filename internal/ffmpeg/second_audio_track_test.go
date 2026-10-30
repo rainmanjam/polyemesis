@@ -53,8 +53,8 @@ const (
 // mixes" and "the same mix twice".
 func twoMixGraph(liveSrc, vodSrc string) string {
 	return fmt.Sprintf(
-		"[%s]pan=stereo|c0=1*c0|c1=1*c1[a_live];[a_live]aresample=48000:async=1:first_pts=0[aout];"+
-			"[%s]pan=stereo|c0=1*c0|c1=1*c1[a_vod];[a_vod]aresample=48000:async=1:first_pts=0[vodout]",
+		"[%s]pan=stereo|c0=1*c0|c1=1*c1[a_live];[a_live]aresample=48000:async=1[aout];"+
+			"[%s]pan=stereo|c0=1*c0|c1=1*c1[a_vod];[a_vod]aresample=48000:async=1[vodout]",
 		liveSrc, vodSrc)
 }
 
