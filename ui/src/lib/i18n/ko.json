@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "{platform} 출력",
   "foundation.status.step.stop": "중지 요청",
   "foundation.route.noMusicReason": "이 출력 대상의 프로필은 음악 트랙을 믹스에서 제외합니다.",
-  "foundation.route.musicOnReason": "플랫폼의 음악 정책은 음악을 허용하지 않지만, 이 출력 대상의 프로필은 음악을 보냅니다."
+  "foundation.route.musicOnReason": "플랫폼의 음악 정책은 음악을 허용하지 않지만, 이 출력 대상의 프로필은 음악을 보냅니다.",
+  "nav.group.live": "라이브",
+  "nav.group.content": "콘텐츠",
+  "nav.group.community": "커뮤니티",
+  "nav.group.operations": "운영",
+  "nav.group.settings": "설정"
 }

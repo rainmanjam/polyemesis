@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Sortie vers {platform}",
   "foundation.status.step.stop": "Demande d'arrêt",
   "foundation.route.noMusicReason": "Le profil de cette destination exclut la piste musicale de son mixage.",
-  "foundation.route.musicOnReason": "La politique musicale de la plateforme demande l'absence de musique, mais le profil de cette destination la transmet."
+  "foundation.route.musicOnReason": "La politique musicale de la plateforme demande l'absence de musique, mais le profil de cette destination la transmet.",
+  "nav.group.live": "Direct",
+  "nav.group.content": "Contenu",
+  "nav.group.community": "Communauté",
+  "nav.group.operations": "Exploitation",
+  "nav.group.settings": "Réglages"
 }

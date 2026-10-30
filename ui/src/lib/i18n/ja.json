@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "{platform} への出力",
   "foundation.status.step.stop": "停止要求",
   "foundation.route.noMusicReason": "この出力先のプロファイルでは、音楽トラックをミックスから除外しています。",
-  "foundation.route.musicOnReason": "プラットフォームの音楽ポリシーでは音楽なしが求められていますが、この出力先のプロファイルは音楽を送信しています。"
+  "foundation.route.musicOnReason": "プラットフォームの音楽ポリシーでは音楽なしが求められていますが、この出力先のプロファイルは音楽を送信しています。",
+  "nav.group.live": "ライブ",
+  "nav.group.content": "コンテンツ",
+  "nav.group.community": "コミュニティ",
+  "nav.group.operations": "運用",
+  "nav.group.settings": "設定"
 }

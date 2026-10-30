@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Вивід на {platform}",
   "foundation.status.step.stop": "Запит на зупинку",
   "foundation.route.noMusicReason": "Профіль цього призначення виключає музичну доріжку з мікса.",
-  "foundation.route.musicOnReason": "Музична політика платформи вимагає без музики, але профіль цього призначення її надсилає."
+  "foundation.route.musicOnReason": "Музична політика платформи вимагає без музики, але профіль цього призначення її надсилає.",
+  "nav.group.live": "Ефір",
+  "nav.group.content": "Контент",
+  "nav.group.community": "Спільнота",
+  "nav.group.operations": "Експлуатація",
+  "nav.group.settings": "Налаштування"
 }

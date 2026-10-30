@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Keluaran ke {platform}",
   "foundation.status.step.stop": "Permintaan henti",
   "foundation.route.noMusicReason": "Profil tujuan ini mengeluarkan jalur musik dari mix-nya.",
-  "foundation.route.musicOnReason": "Kebijakan musik platform meminta tanpa musik, tetapi profil tujuan ini tetap mengirimkannya."
+  "foundation.route.musicOnReason": "Kebijakan musik platform meminta tanpa musik, tetapi profil tujuan ini tetap mengirimkannya.",
+  "nav.group.live": "Siaran langsung",
+  "nav.group.content": "Konten",
+  "nav.group.community": "Komunitas",
+  "nav.group.operations": "Operasi",
+  "nav.group.settings": "Pengaturan"
 }

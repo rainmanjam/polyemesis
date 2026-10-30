@@ -166,3 +166,34 @@ describe("the collapsed rail", () => {
     ).toEqual([]);
   });
 });
+
+describe("the navigation is grouped by the job it serves (A11)", () => {
+  it("puts each link under the section that names its job", async () => {
+    // The sections are a claim about how an operator works, so the test pins
+    // the claim where a user meets it: inside the rendered navigation, under a
+    // group whose accessible name is the section label.
+    vi.spyOn(api, "version").mockResolvedValue(info);
+    renderChrome();
+    await waitFor(() => expect(screen.getByText("v0.9.0")).toBeTruthy());
+
+    const nav = screen.getByRole("navigation");
+    const live = within(nav).getByRole("group", { name: "Live" });
+    for (const name of ["Dashboard", "Sources", "Audio meters", "Routing", "Renditions"]) {
+      expect(within(live).getByRole("link", { name })).toBeTruthy();
+    }
+    expect(within(live).queryByRole("link", { name: "Chat" })).toBeNull();
+
+    const community = within(nav).getByRole("group", { name: "Community" });
+    expect(within(community).getByRole("link", { name: "Chat" })).toBeTruthy();
+    expect(within(community).getByRole("link", { name: "Automation" })).toBeTruthy();
+  });
+
+  it("keeps the tour anchors on the links it points at", async () => {
+    vi.spyOn(api, "version").mockResolvedValue(info);
+    renderChrome();
+    await waitFor(() => expect(screen.getByText("v0.9.0")).toBeTruthy());
+    expect(document.querySelector('[data-tour="nav-sources"]')).not.toBeNull();
+    expect(document.querySelector('[data-tour="nav-routing"]')).not.toBeNull();
+    expect(document.querySelector('[data-tour="nav-renditions"]')).not.toBeNull();
+  });
+});

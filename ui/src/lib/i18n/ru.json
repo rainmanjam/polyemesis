@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Вывод на {platform}",
   "foundation.status.step.stop": "Запрос остановки",
   "foundation.route.noMusicReason": "Профиль этого назначения исключает музыкальную дорожку из микса.",
-  "foundation.route.musicOnReason": "Музыкальная политика платформы требует без музыки, но профиль этого назначения её отправляет."
+  "foundation.route.musicOnReason": "Музыкальная политика платформы требует без музыки, но профиль этого назначения её отправляет.",
+  "nav.group.live": "Эфир",
+  "nav.group.content": "Контент",
+  "nav.group.community": "Сообщество",
+  "nav.group.operations": "Эксплуатация",
+  "nav.group.settings": "Настройки"
 }

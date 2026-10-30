@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Uscita verso {platform}",
   "foundation.status.step.stop": "Richiesta di arresto",
   "foundation.route.noMusicReason": "Il profilo di questa destinazione esclude la traccia musicale dal suo mix.",
-  "foundation.route.musicOnReason": "La politica musicale della piattaforma chiede nessuna musica, ma il profilo di questa destinazione la invia."
+  "foundation.route.musicOnReason": "La politica musicale della piattaforma chiede nessuna musica, ma il profilo di questa destinazione la invia.",
+  "nav.group.live": "In onda",
+  "nav.group.content": "Contenuti",
+  "nav.group.community": "Community",
+  "nav.group.operations": "Operazioni",
+  "nav.group.settings": "Impostazioni"
 }

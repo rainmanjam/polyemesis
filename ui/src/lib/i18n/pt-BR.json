@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Saída para {platform}",
   "foundation.status.step.stop": "Solicitação de parada",
   "foundation.route.noMusicReason": "O perfil deste destino deixa a faixa de música fora da mixagem.",
-  "foundation.route.musicOnReason": "A política musical da plataforma pede sem música, mas o perfil deste destino a envia."
+  "foundation.route.musicOnReason": "A política musical da plataforma pede sem música, mas o perfil deste destino a envia.",
+  "nav.group.live": "Ao vivo",
+  "nav.group.content": "Conteúdo",
+  "nav.group.community": "Comunidade",
+  "nav.group.operations": "Operações",
+  "nav.group.settings": "Configurações"
 }

@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "输出到 {platform}",
   "foundation.status.step.stop": "停止请求",
   "foundation.route.noMusicReason": "此目标的配置在其混音中排除了音乐轨道。",
-  "foundation.route.musicOnReason": "平台的音乐政策要求不含音乐，但此目标的配置仍会发送音乐。"
+  "foundation.route.musicOnReason": "平台的音乐政策要求不含音乐，但此目标的配置仍会发送音乐。",
+  "nav.group.live": "直播",
+  "nav.group.content": "内容",
+  "nav.group.community": "社区",
+  "nav.group.operations": "运维",
+  "nav.group.settings": "设置"
 }

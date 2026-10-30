@@ -63,6 +63,7 @@ import {
   useT,
   type TranslationKey,
 } from "@/lib/i18n";
+import { NAV_SECTIONS } from "@/lib/navSections";
 import { cn } from "@/lib/utils";
 
 /** A nav entry names itself either through the catalogue or, for a page whose
@@ -474,7 +475,41 @@ export function AppLayout({
               mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
             )}
           >
-            {NAV.map(({ to, labelKey, label, icon: Icon, end, tour }) => {
+            {/* A11: the links, in labelled sections. Each section is a named
+                group, so a screen reader announces the job before its links.
+                Expanded, the heading is visible. Collapsed to the icon rail,
+                the heading is screen-reader-only and a hairline stands in for
+                it, so the rail keeps its icons and its grouping. On the mobile
+                drawer the headings always show. */}
+            {NAV_SECTIONS.map((section, si) => (
+              <div
+                key={section.labelKey}
+                role="group"
+                aria-labelledby={`nav-section-${si}`}
+                className="flex flex-col gap-0.5"
+              >
+                {si > 0 && (
+                  <div
+                    aria-hidden
+                    className={cn(
+                      "mx-2 my-1 h-px bg-border",
+                      navCollapsed ? "hidden md:block" : "hidden",
+                    )}
+                  />
+                )}
+                <p
+                  id={`nav-section-${si}`}
+                  className={cn(
+                    "px-2 pb-0.5 pt-2 text-sm font-medium text-muted-foreground",
+                    navCollapsed && "md:sr-only",
+                  )}
+                >
+                  {t(section.labelKey)}
+                </p>
+                {section.routes.map((route) => {
+                  const item = NAV.find((n) => n.to === route);
+                  if (!item) return null;
+                  const { to, labelKey, label, icon: Icon, end, tour } = item;
               const text = labelKey ? t(labelKey) : label;
               // Tooltip/TooltipTrigger mount UNCONDITIONALLY -- only
               // TooltipContent below is gated on navCollapsed. Earlier this
@@ -574,7 +609,9 @@ export function AppLayout({
                   )}
                 </Tooltip>
               );
-            })}
+                })}
+              </div>
+            ))}
 
             {/* Pinned to the bottom, so the target does not move as the width
                 changes. mt-auto rather than a spacer div. */}

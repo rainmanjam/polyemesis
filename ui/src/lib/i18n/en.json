@@ -1691,5 +1691,10 @@
   "foundation.status.step.destination": "Output to {platform}",
   "foundation.status.step.stop": "Stop request",
   "foundation.route.noMusicReason": "This destination's profile leaves the music track out of its mix.",
-  "foundation.route.musicOnReason": "The platform's music policy asks for no music, but this destination's profile sends it."
+  "foundation.route.musicOnReason": "The platform's music policy asks for no music, but this destination's profile sends it.",
+  "nav.group.live": "Live",
+  "nav.group.content": "Content",
+  "nav.group.community": "Community",
+  "nav.group.operations": "Operations",
+  "nav.group.settings": "Settings"
 }
