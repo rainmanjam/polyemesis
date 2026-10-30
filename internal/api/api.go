@@ -552,9 +552,10 @@ type Server struct {
 	// state the delete's in-use guard exists to prevent. Neither handler is
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
-	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain. Each
-	// is a read-modify-write of a whole profile followed by a reconcile whose
-	// outcome it reads back; two keys pressed together must not overwrite each
+	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain, and
+	// PUT /destinations/{id} against it. Each is a read-modify-write of a whole
+	// row followed by a reconcile whose outcome it reads back; two keys pressed
+	// together, or a key pressed while the editor saves, must not overwrite each
 	// other's change or read each other's outcome.
 	trackGainMu sync.Mutex
 
