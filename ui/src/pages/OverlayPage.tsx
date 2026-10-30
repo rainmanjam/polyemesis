@@ -66,43 +66,45 @@ export function OverlayPage() {
       setPhase({ kind: "ready", config });
       setLines((ls) => (ls.length > maxRef.current ? ls.slice(ls.length - maxRef.current) : ls));
     };
-    (async () => {
-      try {
-        const config = await fetchOverlayConfig(key, ctl.signal);
-        if (!config) {
-          setPhase({ kind: "denied" });
-          return;
-        }
-        apply(config);
-        let first = true;
-        await runOverlayStream(
-          key,
-          {
-            onLine: (l) => setLines((ls) => addLine(ls, { ...l, receivedAt: Date.now() }, maxRef.current)),
-            onRemove: (ids) => setLines((ls) => removeLines(ls, ids)),
-            onDenied: () => {
-              setLines([]);
-              setPhase({ kind: "denied" });
-            },
-            onState: setConnected,
-            // Saving in Settings ends open streams on purpose; the reconnect is
-            // where a new style is picked up. Not on the first connect, which
-            // the read above already covers.
-            onConnect: async () => {
-              if (first) {
-                first = false;
-                return;
-              }
-              const fresh = await fetchOverlayConfig(key, ctl.signal).catch(() => undefined);
-              if (fresh) apply(fresh);
-            },
-          },
-          ctl.signal,
-        );
-      } catch {
-        if (!ctl.signal.aborted) setPhase({ kind: "denied" });
+    // A named function and an explicit .catch rather than an IIFE whose
+    // promise is dropped: every rejection -- the config read, the stream --
+    // lands in one handler, and a failure on the overlay draws nothing.
+    const run = async () => {
+      const config = await fetchOverlayConfig(key, ctl.signal);
+      if (!config) {
+        setPhase({ kind: "denied" });
+        return;
       }
-    })();
+      apply(config);
+      let first = true;
+      await runOverlayStream(
+        key,
+        {
+          onLine: (l) => setLines((ls) => addLine(ls, { ...l, receivedAt: Date.now() }, maxRef.current)),
+          onRemove: (ids) => setLines((ls) => removeLines(ls, ids)),
+          onDenied: () => {
+            setLines([]);
+            setPhase({ kind: "denied" });
+          },
+          onState: setConnected,
+          // Saving in Settings ends open streams on purpose; the reconnect is
+          // where a new style is picked up. Not on the first connect, which
+          // the read above already covers.
+          onConnect: async () => {
+            if (first) {
+              first = false;
+              return;
+            }
+            const fresh = await fetchOverlayConfig(key, ctl.signal).catch(() => undefined);
+            if (fresh) apply(fresh);
+          },
+        },
+        ctl.signal,
+      );
+    };
+    run().catch(() => {
+      if (!ctl.signal.aborted) setPhase({ kind: "denied" });
+    });
     return () => ctl.abort();
   }, [key, dock]);
 

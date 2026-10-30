@@ -134,7 +134,10 @@ const OVERLAY_PATH = /^\/overlay(\/dock)?(?:\/k\/([^/]+))?$/;
  *  A key in the path wins over one in the fragment. Both appear only in a URL
  *  edited by hand, and the path is the one the page was served under. */
 export function overlayLocation(pathname: string, hash: string): { key: string; dock: boolean } | null {
-  const m = OVERLAY_PATH.exec(pathname.replace(/\/+$/, ""));
+  // Trailing slashes trimmed by hand: /\/+$/ backtracks on a long run of them.
+  let end = pathname.length;
+  while (end > 1 && pathname[end - 1] === "/") end--;
+  const m = OVERLAY_PATH.exec(pathname.slice(0, end));
   if (!m) return null;
   let key = "";
   if (m[2]) {
