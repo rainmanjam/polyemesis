@@ -7,7 +7,7 @@ import { AcrossTheRoom } from "@/components/AcrossTheRoom";
 import { attention, onAir } from "@/lib/attention";
 import type { SignalTone } from "@/lib/signal";
 import type { FailoverStatus, Status } from "@/lib/types";
-import { useStateLabel, useT } from "@/lib/i18n";
+import { useStateLabel, useT, type TranslationKey } from "@/lib/i18n";
 import { healthVerdict } from "@/lib/healthVerdict";
 import { duration } from "@/lib/format";
 
@@ -37,13 +37,13 @@ import { duration } from "@/lib/format";
  *  beside it is confirmation rather than the message. An operator who cannot
  *  separate the green from the amber still reads the line.
  */
-function headline(state: ReturnType<typeof onAir>): { text: string; tone: SignalTone } {
-  if (state.live > 0) return { text: "On air", tone: "live" };
-  if (state.degraded > 0) return { text: "Coming up", tone: "warn" };
-  if (state.failed > 0) return { text: "Off air", tone: "down" };
+function headline(state: ReturnType<typeof onAir>): { text: TranslationKey; tone: SignalTone } {
+  if (state.live > 0) return { text: "onAir.onAir", tone: "live" };
+  if (state.degraded > 0) return { text: "onAir.comingUp", tone: "warn" };
+  if (state.failed > 0) return { text: "onAir.offAir", tone: "down" };
   // No destination enabled at all is "off air" too, but it is not a fault, and
   // an idle mark rather than a red one is what says so.
-  return { text: "Off air", tone: state.enabled > 0 ? "armed" : "idle" };
+  return { text: "onAir.offAir", tone: state.enabled > 0 ? "armed" : "idle" };
 }
 
 export function OnAirBar({
@@ -91,7 +91,7 @@ export function OnAirBar({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
         <h2 className="flex items-center gap-2">
           <StatusDot tone={head.tone} size="lg" />
-          <span className="text-[15px] font-semibold uppercase tracking-wide">{head.text}</span>
+          <span className="text-[15px] font-semibold uppercase tracking-wide">{t(head.text)}</span>
         </h2>
 
         {/* The denominator is enabled destinations, not every row — see onAir().

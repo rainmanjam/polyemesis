@@ -239,17 +239,20 @@ function fromLocalInput(value: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
-function describeSchedule(s: Schedule): string {
+function describeSchedule(t: Translator, s: Schedule): string {
   const zone = s.tz || "UTC";
+  const time = s.localTime || hhmm(s.atMinutes);
   switch (s.kind) {
     case "daily":
-      return `Every day at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
+      return t("auto.describeDaily", { time, zone });
     case "weekly": {
-      const days = (s.days ?? []).map((d) => WEEKDAY_KEYS[d] ?? d).join(", ");
-      return `${days || "no days"} at ${s.localTime || hhmm(s.atMinutes)} ${zone}`;
+      const days = (s.days ?? [])
+        .map((d) => (WEEKDAY_KEYS[d] ? t(WEEKDAY_KEYS[d]) : String(d)))
+        .join(", ");
+      return t("auto.describeWeekly", { days: days || t("auto.noDays"), time, zone });
     }
     default:
-      return `Once, ${timestamp(s.runAt)}`;
+      return t("auto.describeOnce", { at: timestamp(s.runAt) });
   }
 }
 
@@ -332,15 +335,15 @@ export function AutomationPage() {
         <Tabs defaultValue="alerts">
           <TabsList>
             <TabsTrigger value="alerts">
-              <Bell className="h-3.5 w-3.5" /> Alerts
+              <Bell className="h-3.5 w-3.5" /> {t("auto.tabAlerts")}
             </TabsTrigger>
             <TabsTrigger value="schedules">
-              <CalendarClock className="h-3.5 w-3.5" /> Schedules
+              <CalendarClock className="h-3.5 w-3.5" /> {t("auto.schedules")}
             </TabsTrigger>
             {/* A sibling of Alerts, not a mode of it. An alert is for a person
                 and coalesces; a hook is for a script and must not. */}
             <TabsTrigger value="hooks">
-              <Webhook className="h-3.5 w-3.5" /> Webhooks
+              <Webhook className="h-3.5 w-3.5" /> {t("auto.tabWebhooks")}
             </TabsTrigger>
           </TabsList>
 
@@ -482,7 +485,7 @@ function AlertRules({
     setTesting(r.id);
     try {
       await autoApi.post(`/alerts/rules/${r.id}/test`, {});
-      toast.success(`Test alert delivered to ${r.name}. Check the channel.`);
+      toast.success(t("auto.testDelivered", { name: r.name }));
     } catch (err) {
       toast.error(errText(err, t("auto.theEndpointDidNotAccept")));
     } finally {
@@ -498,7 +501,7 @@ function AlertRules({
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>{t("auto.webhookRules")}</CardTitle>
           <Button size="sm" onClick={onNew}>
-            <Plus /> New rule
+            <Plus /> {t("auto.newRuleButton")}
           </Button>
         </CardHeader>
         <CardContent className="px-0 pb-0">
@@ -524,7 +527,7 @@ function AlertRules({
                   <TableHead>{t("auto.rule")}</TableHead>
                   <TableHead>{t("auto.endpoint")}</TableHead>
                   <TableHead>{t("auto.subscribedTo")}</TableHead>
-                  <TableHead className="text-center">On</TableHead>
+                  <TableHead className="text-center">{t("i18nSweep.on")}</TableHead>
                   <TableHead className="w-28" />
                 </TableRow>
               </TableHeader>
@@ -534,8 +537,12 @@ function AlertRules({
                     <TableCell>
                       <div className="text-sm">{r.name}</div>
                       <div className="text-micro text-muted-foreground">
-                        {r.format} · at least {r.minSeverity} · coalesced {r.debounceSeconds}s ·
-                        max 1 per {r.minIntervalSeconds}s
+                        {t("auto.ruleSummary", {
+                          format: r.format,
+                          severity: r.minSeverity,
+                          debounce: r.debounceSeconds,
+                          interval: r.minIntervalSeconds,
+                        })}
                       </div>
                     </TableCell>
                     {/* The stored URL is never sent back; this is the mask, and
@@ -545,11 +552,12 @@ function AlertRules({
                     </TableCell>
                     <TableCell>
                       {(r.events ?? []).length === 0 ? (
-                        <Badge variant="outline">everything</Badge>
+                        <Badge variant="outline">{t("hooks.allTriggers")}</Badge>
                       ) : (
                         <span className="text-tiny text-muted-foreground">
-                          {(r.events ?? []).length} event
-                          {(r.events ?? []).length === 1 ? "" : "s"}
+                          {(r.events ?? []).length === 1
+                            ? t("auto.eventCountOne", { count: 1 })
+                            : t("auto.eventCountMany", { count: (r.events ?? []).length })}
                         </span>
                       )}
                     </TableCell>
@@ -557,7 +565,7 @@ function AlertRules({
                       <Switch
                         checked={r.enabled}
                         onCheckedChange={(v) => toggle(r, v)}
-                        aria-label={`Enable ${r.name}`}
+                        aria-label={t("hooks.enableAria", { name: r.name })}
                       />
                     </TableCell>
                     <TableCell>
@@ -714,8 +722,7 @@ function RuleDialog({
         <DialogHeader>
           <DialogTitle>{editing ? t("auto.editRule") : t("auto.newRule")}</DialogTitle>
           <DialogDescription>
-            One endpoint and what it wants to hear about. Everything raised about the same subject
-            inside the coalescing window arrives as a single message with a count.
+            {t("auto.ruleDialogDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -787,7 +794,7 @@ function RuleDialog({
                 <SelectContent>
                   {meta.formats.map((f) => (
                     <SelectItem key={f} value={f}>
-                      {f === "json" ? "Plain JSON" : f === "discord" ? "Discord" : "Slack"}
+                      {f === "json" ? t("auto.formatPlainJson") : f === "discord" ? "Discord" : "Slack"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -816,7 +823,7 @@ function RuleDialog({
           <div className="flex flex-col gap-1.5">
             <Label>{t("auto.events")}</Label>
             <p className="text-micro text-muted-foreground">
-              None selected means every event, which is the useful default for a first rule.
+              {t("auto.eventsNoneHint")}
             </p>
             <div className="grid gap-1.5 sm:grid-cols-2">
               {meta.events.map((ev) => (
@@ -931,9 +938,9 @@ function Schedules({
     // to the destination wording below would then print "every destination"
     // under every playlist row -- telling the operator this schedule does the
     // one thing its validation exists to forbid.
-    if (isPlaylistAction(s.action)) return "the failover playlist";
+    if (isPlaylistAction(s.action)) return t("auto.targetPlaylist");
     const ids = s.destinationIds ?? [];
-    if (ids.length === 0) return "every destination";
+    if (ids.length === 0) return t("auto.targetEveryDestination");
     return ids.map((id) => destNames.get(id) ?? `#${id}`).join(", ");
   };
 
@@ -943,7 +950,7 @@ function Schedules({
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>{t("auto.schedules")}</CardTitle>
           <Button size="sm" onClick={onNew}>
-            <Plus /> New schedule
+            <Plus /> {t("auto.newSchedule")}
           </Button>
         </CardHeader>
         <CardContent className="px-0 pb-0">
@@ -954,8 +961,7 @@ function Schedules({
             </div>
           ) : schedules.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              No schedules. A schedule flips the same enabled switch you would click, so a
-              scheduled start is indistinguishable from a manual one.
+              {t("auto.noSchedules")}
             </div>
           ) : (
             <Table>
@@ -964,7 +970,7 @@ function Schedules({
                   <TableHead>{t("auto.schedule")}</TableHead>
                   <TableHead>{t("auto.when")}</TableHead>
                   <TableHead>{t("auto.next")}</TableHead>
-                  <TableHead className="text-center">On</TableHead>
+                  <TableHead className="text-center">{t("i18nSweep.on")}</TableHead>
                   <TableHead className="w-20" />
                 </TableRow>
               </TableHeader>
@@ -983,20 +989,20 @@ function Schedules({
                       </div>
                     </TableCell>
                     <TableCell className="text-tiny text-muted-foreground">
-                      {describeSchedule(s)}
+                      {describeSchedule(t, s)}
                     </TableCell>
                     <TableCell className="tnum font-mono text-tiny">
                       {s.nextAt ? (
                         timestamp(s.nextAt)
                       ) : (
-                        <span className="text-muted-foreground">never again</span>
+                        <span className="text-muted-foreground">{t("auto.neverAgain")}</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center">
                       <Switch
                         checked={s.enabled}
                         onCheckedChange={(v) => toggle(s, v)}
-                        aria-label={`Enable ${s.name}`}
+                        aria-label={t("hooks.enableAria", { name: s.name })}
                       />
                     </TableCell>
                     <TableCell>
@@ -1043,7 +1049,7 @@ function Schedules({
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-tiny">{r.name}</span>
                   <Badge variant={r.error ? "down" : r.fired ? "live" : "outline"}>
-                    {r.error ? "error" : r.fired ? t("auto.fired") : t("auto.skipped")}
+                    {r.error ? t("auto.runError") : r.fired ? t("auto.fired") : t("auto.skipped")}
                   </Badge>
                 </div>
                 <span className="tnum font-mono text-micro text-muted-foreground">
@@ -1148,8 +1154,7 @@ function ScheduleDialog({
         <DialogHeader>
           <DialogTitle>{editing ? t("auto.editSchedule") : t("auto.newSchedule")}</DialogTitle>
           <DialogDescription>
-            Wall-clock times carry their own zone, so a schedule does not move when the server's
-            does.
+            {t("auto.scheduleDialogDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -1223,8 +1228,7 @@ function ScheduleDialog({
                 onChange={(e) => setForm({ ...form, runAt: fromLocalInput(e.target.value) })}
               />
               <span className="text-micro text-muted-foreground">
-                Read in this browser's clock and stored as an instant, so the zone below does not
-                apply to a one-shot.
+                {t("auto.runAtHint")}
               </span>
             </div>
           ) : (
@@ -1256,7 +1260,7 @@ function ScheduleDialog({
                     <option value={browserZone()} />
                   </datalist>
                   <span className="text-micro text-muted-foreground">
-                    IANA name. Empty means UTC.
+                    {t("auto.tzHint")}
                   </span>
                 </div>
               </div>
@@ -1268,7 +1272,7 @@ function ScheduleDialog({
                     {WEEKDAY_KEYS.map((label, i) => (
                       <label key={label} className="flex items-center gap-1.5 text-tiny">
                         <Checkbox checked={days.includes(i)} onCheckedChange={() => toggleDay(i)} />
-                        {label}
+                        {t(label)}
                       </label>
                     ))}
                   </div>
@@ -1281,8 +1285,7 @@ function ScheduleDialog({
             <div className="flex flex-col gap-1.5">
               <Label>{t("auto.destinations")}</Label>
               <p className="text-micro text-muted-foreground">
-                None selected means every destination, which is what "start the show" usually
-                means.
+                {t("auto.destinationsNoneHint")}
               </p>
               {destinationsKnown ? (
                 <div className="grid gap-1.5 sm:grid-cols-2">
@@ -1318,8 +1321,7 @@ function ScheduleDialog({
               onChange={(e) => setForm({ ...form, graceSeconds: Number(e.target.value) })}
             />
             <span className="text-micro text-muted-foreground">
-              How late an occurrence may still be acted on after a restart. Past it, the
-              occurrence is skipped.
+              {t("auto.graceHint")}
             </span>
           </div>
         </div>
