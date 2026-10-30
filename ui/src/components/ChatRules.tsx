@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { accentFor } from "@/lib/chat";
+import { useT } from "@/lib/i18n";
 import type { ChatPlatform, ChatSettings, ChatStatus } from "@/lib/types";
 
 /* ===========================================================================
@@ -52,6 +53,7 @@ const MOD_DELAYS = [2, 4, 6];
 const MAX_FOLLOWER_MINUTES = 129600;
 
 export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
+  const t = useT();
   // Twitch only, and by connection rather than by hope: an account that is not
   // attached cannot take a settings write, and the button would 400.
   const twitch = statuses.find((s) => s.platform === ("twitch" as ChatPlatform));
@@ -100,9 +102,9 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
 
     try {
       await api.updateChatSettings("twitch" as ChatPlatform, twitch.account, body);
-      toast.success("Chat rules applied on Twitch.");
+      toast.success(t("chatRules.applied"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not change the chat rules.");
+      toast.error(err instanceof Error ? err.message : t("chatRules.couldNotChange"));
     } finally {
       setBusy(false);
     }
@@ -131,9 +133,9 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
       setEmotesOnly(false);
       setUnique(false);
       setModDelay(false);
-      toast.success("Chat rules cleared on Twitch.");
+      toast.success(t("chatRules.cleared"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not clear the chat rules.");
+      toast.error(err instanceof Error ? err.message : t("chatRules.couldNotClear"));
     } finally {
       setBusy(false);
     }
@@ -143,9 +145,9 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
     <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-2">
       <div className="flex items-center gap-2">
         <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-[12px] font-semibold">Chat rules</span>
+        <span className="text-[12px] font-semibold">{t("chatRules.title")}</span>
         <span className={`text-[10px] ${accentFor("twitch" as ChatPlatform).text}`}>
-          Twitch only
+          {t("chatRules.twitchOnly")}
         </span>
       </div>
 
@@ -153,7 +155,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
         <div className="flex items-center gap-1.5">
           <Switch id="rule-slow" checked={slow} onCheckedChange={setSlow} disabled={busy} />
           <Label htmlFor="rule-slow" className="text-[11px]">
-            Slow mode
+            {t("chatRules.slowMode")}
           </Label>
           {slow && (
             <input
@@ -163,11 +165,11 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               value={slowSeconds}
               disabled={busy}
               onChange={(e) => setSlowSeconds(Math.max(1, Number(e.target.value) || 1))}
-              aria-label="Seconds between messages"
+              aria-label={t("chatRules.slowSecondsAria")}
               className="tnum h-6 w-14 rounded border border-border bg-card-raised px-1 text-[11px]"
             />
           )}
-          {slow && <span className="text-[10px] text-muted-foreground">seconds</span>}
+          {slow && <span className="text-[10px] text-muted-foreground">{t("chatRules.seconds")}</span>}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -178,7 +180,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             disabled={busy}
           />
           <Label htmlFor="rule-followers" className="text-[11px]">
-            Followers only
+            {t("chatRules.followersOnly")}
           </Label>
           {/* THE AGE, which is the whole point of the mode during a raid.
               Follower-only with no minimum is a door a raider walks through by
@@ -200,13 +202,13 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
                   Math.min(MAX_FOLLOWER_MINUTES, Math.max(0, Number(e.target.value) || 0)),
                 )
               }
-              aria-label="Minutes they must have followed for"
+              aria-label={t("chatRules.followMinutesAria")}
               className="tnum h-6 w-16 rounded border border-border bg-card-raised px-1 text-[11px]"
             />
           )}
           {followers && (
             <span className="text-[10px] text-muted-foreground">
-              {followerMinutes === 0 ? "minutes — any follower" : "minutes"}
+              {followerMinutes === 0 ? t("chatRules.minutesAnyFollower") : t("chatRules.minutes")}
             </span>
           )}
         </div>
@@ -214,7 +216,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
         <div className="flex items-center gap-1.5">
           <Switch id="rule-subs" checked={subsOnly} onCheckedChange={setSubsOnly} disabled={busy} />
           <Label htmlFor="rule-subs" className="text-[11px]">
-            Subscribers only
+            {t("chatRules.subscribersOnly")}
           </Label>
         </div>
 
@@ -228,14 +230,14 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             disabled={busy}
           />
           <Label htmlFor="rule-emotes" className="text-[11px]">
-            Emotes only
+            {t("chatRules.emotesOnly")}
           </Label>
         </div>
 
         <div className="flex items-center gap-1.5">
           <Switch id="rule-unique" checked={unique} onCheckedChange={setUnique} disabled={busy} />
           <Label htmlFor="rule-unique" className="text-[11px]">
-            No repeats
+            {t("chatRules.noRepeats")}
           </Label>
         </div>
 
@@ -251,7 +253,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             disabled={busy}
           />
           <Label htmlFor="rule-mod-delay" className="text-[11px]">
-            Moderator delay
+            {t("chatRules.modDelay")}
           </Label>
           {modDelay && (
             /* A FIXED LIST, not a number box. Helix accepts 2, 4 or 6 and
@@ -263,7 +265,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               value={modDelaySeconds}
               disabled={busy}
               onChange={(e) => setModDelaySeconds(Number(e.target.value))}
-              aria-label="Seconds moderators get to see a message first"
+              aria-label={t("chatRules.modDelayAria")}
               className="tnum h-6 rounded border border-border bg-card-raised px-1 text-[11px]"
             >
               {MOD_DELAYS.map((s) => (
@@ -273,21 +275,21 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               ))}
             </select>
           )}
-          {modDelay && <span className="text-[10px] text-muted-foreground">seconds</span>}
+          {modDelay && <span className="text-[10px] text-muted-foreground">{t("chatRules.seconds")}</span>}
         </div>
       </div>
 
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={() => void apply()} disabled={busy}>
           {busy && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-          Apply
+          {t("common.apply")}
         </Button>
         <Button size="sm" variant="secondary" onClick={() => void clear()} disabled={busy}>
-          Turn all off
+          {t("chatRules.turnAllOff")}
         </Button>
         {/* The limitation, said out loud. See the note at the top of this file. */}
         <span className="text-[10px] text-muted-foreground">
-          Applies what is switched on here; it does not read Twitch's current settings back.
+          {t("chatRules.limitation")}
         </span>
       </div>
     </div>

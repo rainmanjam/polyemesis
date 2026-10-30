@@ -108,7 +108,7 @@ export function ChatPage() {
     async (m: ChatMessage) => {
       try {
         await remove(m);
-        toast.success(`Deleted on ${accentFor(m.platform).label}.`);
+        toast.success(t("chatpage.deletedOn", { platform: accentFor(m.platform).label }));
       } catch (err) {
         // Verbatim. The server's sentence names the platform and, where one
         // exists, where the moderator can do it instead; rewording it here
@@ -132,13 +132,13 @@ export function ChatPage() {
           <>
             {stored && (
               <Badge variant="outline" title={t("chatpage.storedTitle")}>
-                stored history
+                {t("chatpage.storedHistory")}
               </Badge>
             )}
             {configured && !connected && (
               <Badge variant="warn">
                 <WifiOff className="h-3 w-3" />
-                socket offline
+                {t("chatpage.socketOffline")}
               </Badge>
             )}
             {/* #13/#21: `connected` cannot say this -- the socket stays open
@@ -165,8 +165,9 @@ export function ChatPage() {
             <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-semibold">{t("chatpage.timeline")}</span>
             <span className="tnum font-mono text-micro text-muted-foreground">
-              {visible.length}
-              {visible.length !== messages.length && ` of ${messages.length}`}
+              {visible.length !== messages.length
+                ? t("chatpage.shownOfTotal", { shown: visible.length, total: messages.length })
+                : visible.length}
             </span>
             <div className="ml-auto">
               <PlatformFilter
@@ -261,8 +262,9 @@ export function ChatPage() {
           {troubled.length > 0 && (
             <div className="rounded-md border border-warn/40 bg-warn-dim px-2 py-1.5">
               <p className="text-tiny font-semibold text-warn">
-                {troubled.length} platform{troubled.length === 1 ? "" : "s"} need
-                {troubled.length === 1 ? "s" : ""} attention
+                {t(troubled.length === 1 ? "chatpage.attentionOne" : "chatpage.attentionMany", {
+                  count: troubled.length,
+                })}
               </p>
             </div>
           )}
@@ -290,7 +292,7 @@ export function ChatPage() {
               </div>
               <div className="flex justify-between gap-2">
                 <dt title={t("chatpage.dupTitle")}>
-                  Deduplicated
+                  {t("chatpage.deduplicated")}
                 </dt>
                 <dd className="tnum font-mono">{stats.deduped.toLocaleString()}</dd>
               </div>
@@ -301,7 +303,7 @@ export function ChatPage() {
               {stats.dropped > 0 && (
                 <div className="flex justify-between gap-2 text-warn">
                   <dt title={t("chatpage.droppedTitle")}>
-                    Dropped from history
+                    {t("chatpage.droppedFromHistory")}
                   </dt>
                   <dd className="tnum font-mono">{stats.dropped.toLocaleString()}</dd>
                 </div>

@@ -12,6 +12,7 @@ import {
 import { api } from "@/lib/api";
 import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
+import { useT } from "@/lib/i18n";
 import { openPlatformLink, platformLinkFor, platformNoun } from "@/lib/platformLinks";
 import type { Asks } from "@/hooks/useConfirm";
 import type { ChatMessage } from "@/lib/types";
@@ -75,6 +76,7 @@ export function ChatMessageMenu({
   // rather than a control. A zero-size fixed div at the cursor is the standard
   // shape for that: it anchors correctly, collision-flips near screen edges for
   // free, and there is nothing to see or tab to.
+  const t = useT();
   const [open, setOpen] = useState(true);
 
   useEffect(() => {
@@ -119,15 +121,19 @@ export function ChatMessageMenu({
   const personReason = blanket === "" && noAuthor === "" ? person.reason : "";
   const deleteReason = blanket === "" ? del.reason : "";
 
-  const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
+  const run = async (
+    done: string,
+    failed: string,
+    fn: () => Promise<{ detail?: string } | void>,
+  ) => {
     try {
       const res = await fn();
       // The server's sentence wins. It knows the difference between "timed out
       // on Twitch" and "Kick rounded this to the nearest minute".
       const detail = res && "detail" in res ? res.detail : "";
-      toast.success(detail || `${what} — ${message.author.name}`);
+      toast.success(detail || done);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Could not ${what.toLowerCase()}.`);
+      toast.error(err instanceof Error ? err.message : failed);
     }
   };
 
@@ -161,7 +167,7 @@ export function ChatMessageMenu({
         <DropdownMenuLabel className="truncate">
           {message.author.name}
           <span className="ml-1 font-normal text-muted-foreground">
-            on {platformNoun(message.platform)}
+            {t("chatMenu.onPlatform", { platform: platformNoun(message.platform) })}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -197,10 +203,10 @@ export function ChatMessageMenu({
             onOpenCard(message);
           }}
           disabled={!authorId}
-          title={authorId ? "Everything they have said, and every action" : noAuthor}
+          title={authorId ? t("chatMenu.historyTitle") : noAuthor}
         >
           <UserSearch className="mr-2 h-3.5 w-3.5" />
-          View history &amp; all actions
+          {t("chatMenu.viewHistory")}
         </DropdownMenuItem>
 
         {link && (
@@ -228,25 +234,28 @@ export function ChatMessageMenu({
           </DropdownMenuLabel>
         )}
 
-        {TIMEOUTS.map((t) => (
+        {TIMEOUTS.map((to) => (
           <DropdownMenuItem
-            key={t.seconds}
+            key={to.seconds}
             disabled={!person.ok}
             title={person.reason}
             onSelect={() => {
               close();
-              void run(`Timed out for ${t.label}`, () =>
-                api.banChatUser({
-                  platform: message.platform,
-                  account: message.account,
-                  userId: authorId,
-                  seconds: t.seconds,
-                }),
+              void run(
+                t("chatMenu.timedOut", { duration: to.label, name: message.author.name }),
+                t("chatMenu.timeoutFailed", { duration: to.label, name: message.author.name }),
+                () =>
+                  api.banChatUser({
+                    platform: message.platform,
+                    account: message.account,
+                    userId: authorId,
+                    seconds: to.seconds,
+                  }),
               );
             }}
           >
             <Timer className="mr-2 h-3.5 w-3.5" />
-            Time out {t.label}
+            {t("chatMenu.timeOutItem", { duration: to.label })}
           </DropdownMenuItem>
         ))}
 
@@ -260,7 +269,7 @@ export function ChatMessageMenu({
           disabled={!person.ok}
           title={
             person.reason ||
-            "Opens the user card, which confirms before banning: a permanent ban is not a menu click"
+            t("chatMenu.banTitle")
           }
           onSelect={() => {
             close();
@@ -268,7 +277,7 @@ export function ChatMessageMenu({
           }}
         >
           <Ban className="mr-2 h-3.5 w-3.5 text-down" />
-          Ban permanently…
+          {t("chatMenu.banPermanently")}
         </DropdownMenuItem>
 
         {/* STILL RENDERED when the platform cannot delete, and inert with the
@@ -284,14 +293,14 @@ export function ChatMessageMenu({
         {onDelete && (
           <DropdownMenuItem
             disabled={!del.ok}
-            title={del.reason || "Delete this one message on the platform it came from"}
+            title={del.reason || t("chatMenu.deleteTitle")}
             onSelect={() => {
               close();
               void onDelete(message);
             }}
           >
             <Trash2 className="mr-2 h-3.5 w-3.5 text-down" />
-            Delete message
+            {t("chatMenu.deleteMessage")}
           </DropdownMenuItem>
         )}
 
