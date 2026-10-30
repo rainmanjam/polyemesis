@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "구독자 {count} · 포트 {port}",
   "i18nSweep.monTsMissing": "TS 패킷 {total}개 중 {lost}개 누락 · 끊김 {breaks}회",
   "dash.stopCountLoading": "이 중지로 종료될 YouTube 방송을 세는 중…",
-  "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요."
+  "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요.",
+  "routing.saveBar.scope": "저장되지 않은 변경: {count}건.",
+  "routing.saveBar.scopeTracks": "저장되지 않은 변경: {count}건. 영향받는 트랙: {tracks}.",
+  "routing.saveBar.trackAdded": "트랙 {n}이(가) {name}에 추가됩니다.",
+  "routing.saveBar.trackRemoved": "트랙 {n}이(가) {name}에서 제거됩니다.",
+  "routing.saveBar.trackLevel": "트랙 {n}: {name}의 레벨 또는 음소거가 바뀝니다.",
+  "routing.saveBar.diffMode": "{name}의 믹스 모드가 바뀝니다.",
+  "routing.saveBar.diffMatrix": "{name}의 채널 매트릭스가 바뀝니다.",
+  "routing.saveBar.diffLoudness": "{name}의 라우드니스 또는 클리핑 보호가 바뀝니다.",
+  "routing.saveBar.diffDelay": "{name}의 A/V 지연이 바뀝니다.",
+  "routing.saveBar.diffDucking": "{name}의 더킹이 바뀝니다.",
+  "routing.saveBar.diffMusic": "{name}의 음악 저작권 필터가 바뀝니다.",
+  "routing.saveBar.diffSampleRate": "{name}의 샘플 레이트가 바뀝니다.",
+  "routing.saveBar.diffSecondMix": "{name}의 두 번째(VOD) 믹스가 바뀝니다.",
+  "routing.saveBar.more": "기타 변경: {count}건."
 }

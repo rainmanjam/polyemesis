@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} abone · bağlantı noktası {port}",
   "i18nSweep.monTsMissing": "{total} TS paketinden {lost} tanesi eksik · {breaks} kesinti",
   "dash.stopCountLoading": "Bu durdurmanın sonlandıracağı YouTube yayınları sayılıyor…",
-  "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin."
+  "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin.",
+  "routing.saveBar.scope": "Bekleyen değişiklikler: {count}.",
+  "routing.saveBar.scopeTracks": "Bekleyen değişiklikler: {count}. Etkilenen parçalar: {tracks}.",
+  "routing.saveBar.trackAdded": "{n}. parça {name} hedefine eklenecek.",
+  "routing.saveBar.trackRemoved": "{n}. parça {name} hedefinden çıkarılacak.",
+  "routing.saveBar.trackLevel": "{n}. parça: {name} üzerinde seviye veya sessize alma değişiyor.",
+  "routing.saveBar.diffMode": "{name} üzerinde miks modu değişiyor.",
+  "routing.saveBar.diffMatrix": "{name} üzerinde kanal matrisi değişiyor.",
+  "routing.saveBar.diffLoudness": "{name} üzerinde ses yüksekliği veya kırpılma koruması değişiyor.",
+  "routing.saveBar.diffDelay": "{name} üzerinde A/V gecikmesi değişiyor.",
+  "routing.saveBar.diffDucking": "{name} üzerinde ducking değişiyor.",
+  "routing.saveBar.diffMusic": "{name} üzerinde müzik hakları filtresi değişiyor.",
+  "routing.saveBar.diffSampleRate": "{name} üzerinde örnekleme hızı değişiyor.",
+  "routing.saveBar.diffSecondMix": "{name} üzerinde ikinci (VOD) miks değişiyor.",
+  "routing.saveBar.more": "Diğer değişiklikler: {count}."
 }

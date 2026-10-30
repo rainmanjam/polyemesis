@@ -90,4 +90,43 @@ describe("RoutingSaveBar", () => {
       (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
+
+  it("counts the pending changes and names the tracks they touch", () => {
+    render(
+      <RoutingSaveBar
+        {...base}
+        changes={[{ kind: "trackRemoved", track: 1 }, { kind: "trackLevel", track: 2 }, { kind: "ducking" }]}
+      />,
+    );
+    expect(screen.getByTestId("save-bar-scope").textContent).toBe("Pending changes: 3. Tracks affected: 2, 3.");
+    // Not on air: the scope is enough, no per-change lines.
+    expect(screen.queryByTestId("save-bar-diff")).toBeNull();
+  });
+
+  it("spells out what changes on an enabled destination before it is applied", () => {
+    render(
+      <RoutingSaveBar
+        {...base}
+        restarts
+        destinationName="Twitch"
+        changes={[{ kind: "trackRemoved", track: 1 }, { kind: "matrix" }]}
+      />,
+    );
+    const diff = screen.getByTestId("save-bar-diff").textContent ?? "";
+    expect(diff).toContain("Track 2 will be removed from Twitch.");
+    expect(diff).toContain("The channel matrix changes on Twitch.");
+  });
+
+  it("caps the live diff at four lines and counts the rest", () => {
+    render(
+      <RoutingSaveBar
+        {...base}
+        restarts
+        changes={[1, 2, 3, 4, 5, 6].map((track) => ({ kind: "trackAdded" as const, track }))}
+      />,
+    );
+    const items = screen.getByTestId("save-bar-diff").querySelectorAll("li");
+    expect(items).toHaveLength(5);
+    expect(items[4].textContent).toBe("Other changes: 2.");
+  });
 });

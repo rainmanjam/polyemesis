@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} Abnehmer · Port {port}",
   "i18nSweep.monTsMissing": "{lost} von {total} TS-Paketen fehlen · {breaks} Brüche",
   "dash.stopCountLoading": "Die YouTube-Übertragungen, die dieser Stopp beenden würde, werden gezählt…",
-  "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen."
+  "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen.",
+  "routing.saveBar.scope": "Ausstehende Änderungen: {count}.",
+  "routing.saveBar.scopeTracks": "Ausstehende Änderungen: {count}. Betroffene Spuren: {tracks}.",
+  "routing.saveBar.trackAdded": "Spur {n} wird zu {name} hinzugefügt.",
+  "routing.saveBar.trackRemoved": "Spur {n} wird aus {name} entfernt.",
+  "routing.saveBar.trackLevel": "Spur {n}: Pegel oder Stummschaltung ändert sich auf {name}.",
+  "routing.saveBar.diffMode": "Der Mix-Modus ändert sich auf {name}.",
+  "routing.saveBar.diffMatrix": "Die Kanalmatrix ändert sich auf {name}.",
+  "routing.saveBar.diffLoudness": "Lautheit oder Clipping-Schutz ändert sich auf {name}.",
+  "routing.saveBar.diffDelay": "Die A/V-Verzögerung ändert sich auf {name}.",
+  "routing.saveBar.diffDucking": "Das Ducking ändert sich auf {name}.",
+  "routing.saveBar.diffMusic": "Der Musikrechte-Filter ändert sich auf {name}.",
+  "routing.saveBar.diffSampleRate": "Die Abtastrate ändert sich auf {name}.",
+  "routing.saveBar.diffSecondMix": "Der zweite (VOD-)Mix ändert sich auf {name}.",
+  "routing.saveBar.more": "Weitere Änderungen: {count}."
 }

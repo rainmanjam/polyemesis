@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} abonnés · port {port}",
   "i18nSweep.monTsMissing": "{lost} paquets TS manquants sur {total} · {breaks} ruptures",
   "dash.stopCountLoading": "Décompte des diffusions YouTube que cet arrêt terminerait…",
-  "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez."
+  "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez.",
+  "routing.saveBar.scope": "Modifications en attente : {count}.",
+  "routing.saveBar.scopeTracks": "Modifications en attente : {count}. Pistes concernées : {tracks}.",
+  "routing.saveBar.trackAdded": "La piste {n} sera ajoutée à {name}.",
+  "routing.saveBar.trackRemoved": "La piste {n} sera retirée de {name}.",
+  "routing.saveBar.trackLevel": "Piste {n} : le niveau ou la sourdine change sur {name}.",
+  "routing.saveBar.diffMode": "Le mode de mixage change sur {name}.",
+  "routing.saveBar.diffMatrix": "La matrice de canaux change sur {name}.",
+  "routing.saveBar.diffLoudness": "La sonie ou la protection contre l'écrêtage change sur {name}.",
+  "routing.saveBar.diffDelay": "Le décalage A/V change sur {name}.",
+  "routing.saveBar.diffDucking": "Le ducking change sur {name}.",
+  "routing.saveBar.diffMusic": "Le filtre de droits musicaux change sur {name}.",
+  "routing.saveBar.diffSampleRate": "La fréquence d'échantillonnage change sur {name}.",
+  "routing.saveBar.diffSecondMix": "Le second mix (VOD) change sur {name}.",
+  "routing.saveBar.more": "Autres modifications : {count}."
 }

@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} afnemers · poort {port}",
   "i18nSweep.monTsMissing": "{lost} van {total} TS-pakketten ontbreken · {breaks} onderbrekingen",
   "dash.stopCountLoading": "Tellen van de YouTube-uitzendingen die deze stop zou beëindigen…",
-  "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw."
+  "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw.",
+  "routing.saveBar.scope": "Openstaande wijzigingen: {count}.",
+  "routing.saveBar.scopeTracks": "Openstaande wijzigingen: {count}. Betrokken sporen: {tracks}.",
+  "routing.saveBar.trackAdded": "Spoor {n} wordt toegevoegd aan {name}.",
+  "routing.saveBar.trackRemoved": "Spoor {n} wordt verwijderd uit {name}.",
+  "routing.saveBar.trackLevel": "Spoor {n}: niveau of demping verandert op {name}.",
+  "routing.saveBar.diffMode": "De mixmodus verandert op {name}.",
+  "routing.saveBar.diffMatrix": "De kanaalmatrix verandert op {name}.",
+  "routing.saveBar.diffLoudness": "Luidheid of clipbescherming verandert op {name}.",
+  "routing.saveBar.diffDelay": "De A/V-vertraging verandert op {name}.",
+  "routing.saveBar.diffDucking": "Ducking verandert op {name}.",
+  "routing.saveBar.diffMusic": "Het muziekrechtenfilter verandert op {name}.",
+  "routing.saveBar.diffSampleRate": "De samplefrequentie verandert op {name}.",
+  "routing.saveBar.diffSecondMix": "De tweede (VOD-)mix verandert op {name}.",
+  "routing.saveBar.more": "Overige wijzigingen: {count}."
 }

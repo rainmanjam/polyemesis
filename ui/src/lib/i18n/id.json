@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} pelanggan · port {port}",
   "i18nSweep.monTsMissing": "{lost} dari {total} paket TS hilang · {breaks} putus",
   "dash.stopCountLoading": "Menghitung siaran YouTube yang akan dihentikan…",
-  "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi."
+  "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi.",
+  "routing.saveBar.scope": "Perubahan tertunda: {count}.",
+  "routing.saveBar.scopeTracks": "Perubahan tertunda: {count}. Trek yang terdampak: {tracks}.",
+  "routing.saveBar.trackAdded": "Trek {n} akan ditambahkan ke {name}.",
+  "routing.saveBar.trackRemoved": "Trek {n} akan dihapus dari {name}.",
+  "routing.saveBar.trackLevel": "Trek {n}: level atau senyap berubah di {name}.",
+  "routing.saveBar.diffMode": "Mode mix berubah di {name}.",
+  "routing.saveBar.diffMatrix": "Matriks kanal berubah di {name}.",
+  "routing.saveBar.diffLoudness": "Kenyaringan atau perlindungan clipping berubah di {name}.",
+  "routing.saveBar.diffDelay": "Jeda A/V berubah di {name}.",
+  "routing.saveBar.diffDucking": "Ducking berubah di {name}.",
+  "routing.saveBar.diffMusic": "Filter hak musik berubah di {name}.",
+  "routing.saveBar.diffSampleRate": "Laju sampel berubah di {name}.",
+  "routing.saveBar.diffSecondMix": "Mix kedua (VOD) berubah di {name}.",
+  "routing.saveBar.more": "Perubahan lain: {count}."
 }

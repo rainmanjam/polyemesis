@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "Подписчиков: {count} · порт {port}",
   "i18nSweep.monTsMissing": "Потеряно {lost} из {total} пакетов TS · разрывов: {breaks}",
   "dash.stopCountLoading": "Подсчёт трансляций YouTube, которые завершит эта остановка…",
-  "dash.stopCountFailed": "Не удалось загрузить число трансляций, которые завершит эта остановка, поэтому «Остановить всё» недоступно. Закройте окно и попробуйте снова."
+  "dash.stopCountFailed": "Не удалось загрузить число трансляций, которые завершит эта остановка, поэтому «Остановить всё» недоступно. Закройте окно и попробуйте снова.",
+  "routing.saveBar.scope": "Несохранённые изменения: {count}.",
+  "routing.saveBar.scopeTracks": "Несохранённые изменения: {count}. Затронутые дорожки: {tracks}.",
+  "routing.saveBar.trackAdded": "Дорожка {n} будет добавлена в {name}.",
+  "routing.saveBar.trackRemoved": "Дорожка {n} будет убрана из {name}.",
+  "routing.saveBar.trackLevel": "Дорожка {n}: меняется уровень или отключение звука в {name}.",
+  "routing.saveBar.diffMode": "Меняется режим микширования в {name}.",
+  "routing.saveBar.diffMatrix": "Меняется матрица каналов в {name}.",
+  "routing.saveBar.diffLoudness": "Меняется громкость или защита от клиппинга в {name}.",
+  "routing.saveBar.diffDelay": "Меняется задержка A/V в {name}.",
+  "routing.saveBar.diffDucking": "Меняется приглушение (ducking) в {name}.",
+  "routing.saveBar.diffMusic": "Меняется фильтр музыкальных прав в {name}.",
+  "routing.saveBar.diffSampleRate": "Меняется частота дискретизации в {name}.",
+  "routing.saveBar.diffSecondMix": "Меняется второй микс (VOD) в {name}.",
+  "routing.saveBar.more": "Другие изменения: {count}."
 }

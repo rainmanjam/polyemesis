@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "購読者 {count} · ポート {port}",
   "i18nSweep.monTsMissing": "TS パケット {total} 中 {lost} 欠落 · 途切れ {breaks}",
   "dash.stopCountLoading": "このストップで終了する YouTube 配信を数えています…",
-  "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。"
+  "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。",
+  "routing.saveBar.scope": "未保存の変更：{count} 件。",
+  "routing.saveBar.scopeTracks": "未保存の変更：{count} 件。対象トラック：{tracks}。",
+  "routing.saveBar.trackAdded": "トラック {n} が {name} に追加されます。",
+  "routing.saveBar.trackRemoved": "トラック {n} が {name} から外されます。",
+  "routing.saveBar.trackLevel": "トラック {n}：{name} のレベルまたはミュートが変わります。",
+  "routing.saveBar.diffMode": "{name} のミックスモードが変わります。",
+  "routing.saveBar.diffMatrix": "{name} のチャンネルマトリクスが変わります。",
+  "routing.saveBar.diffLoudness": "{name} のラウドネスまたはクリップ保護が変わります。",
+  "routing.saveBar.diffDelay": "{name} の A/V 遅延が変わります。",
+  "routing.saveBar.diffDucking": "{name} のダッキングが変わります。",
+  "routing.saveBar.diffMusic": "{name} の音楽権利フィルターが変わります。",
+  "routing.saveBar.diffSampleRate": "{name} のサンプルレートが変わります。",
+  "routing.saveBar.diffSecondMix": "{name} の 2 つ目（VOD）のミックスが変わります。",
+  "routing.saveBar.more": "その他の変更：{count} 件。"
 }

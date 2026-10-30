@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} sottoscrittori · porta {port}",
   "i18nSweep.monTsMissing": "{lost} pacchetti TS mancanti su {total} · {breaks} interruzioni",
   "dash.stopCountLoading": "Conteggio delle dirette YouTube che questo stop terminerebbe…",
-  "dash.stopCountFailed": "Non è stato possibile caricare il conteggio delle dirette che questo stop terminerebbe, quindi «Ferma tutto» non è disponibile. Chiudi e riprova."
+  "dash.stopCountFailed": "Non è stato possibile caricare il conteggio delle dirette che questo stop terminerebbe, quindi «Ferma tutto» non è disponibile. Chiudi e riprova.",
+  "routing.saveBar.scope": "Modifiche in sospeso: {count}.",
+  "routing.saveBar.scopeTracks": "Modifiche in sospeso: {count}. Tracce interessate: {tracks}.",
+  "routing.saveBar.trackAdded": "La traccia {n} verrà aggiunta a {name}.",
+  "routing.saveBar.trackRemoved": "La traccia {n} verrà rimossa da {name}.",
+  "routing.saveBar.trackLevel": "Traccia {n}: cambiano livello o muto su {name}.",
+  "routing.saveBar.diffMode": "La modalità di mix cambia su {name}.",
+  "routing.saveBar.diffMatrix": "La matrice dei canali cambia su {name}.",
+  "routing.saveBar.diffLoudness": "Cambiano loudness o protezione dal clipping su {name}.",
+  "routing.saveBar.diffDelay": "Il ritardo A/V cambia su {name}.",
+  "routing.saveBar.diffDucking": "Il ducking cambia su {name}.",
+  "routing.saveBar.diffMusic": "Il filtro dei diritti musicali cambia su {name}.",
+  "routing.saveBar.diffSampleRate": "La frequenza di campionamento cambia su {name}.",
+  "routing.saveBar.diffSecondMix": "Il secondo mix (VOD) cambia su {name}.",
+  "routing.saveBar.more": "Altre modifiche: {count}."
 }

@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "Odbiorcy: {count} · port {port}",
   "i18nSweep.monTsMissing": "Brakuje {lost} z {total} pakietów TS · przerwy: {breaks}",
   "dash.stopCountLoading": "Liczenie transmisji YouTube, które to zatrzymanie zakończy…",
-  "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie."
+  "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie.",
+  "routing.saveBar.scope": "Oczekujące zmiany: {count}.",
+  "routing.saveBar.scopeTracks": "Oczekujące zmiany: {count}. Dotyczy ścieżek: {tracks}.",
+  "routing.saveBar.trackAdded": "Ścieżka {n} zostanie dodana do {name}.",
+  "routing.saveBar.trackRemoved": "Ścieżka {n} zostanie usunięta z {name}.",
+  "routing.saveBar.trackLevel": "Ścieżka {n}: zmienia się poziom lub wyciszenie w {name}.",
+  "routing.saveBar.diffMode": "Zmienia się tryb miksu w {name}.",
+  "routing.saveBar.diffMatrix": "Zmienia się macierz kanałów w {name}.",
+  "routing.saveBar.diffLoudness": "Zmienia się głośność lub ochrona przed przesterowaniem w {name}.",
+  "routing.saveBar.diffDelay": "Zmienia się opóźnienie A/V w {name}.",
+  "routing.saveBar.diffDucking": "Zmienia się ducking w {name}.",
+  "routing.saveBar.diffMusic": "Zmienia się filtr praw do muzyki w {name}.",
+  "routing.saveBar.diffSampleRate": "Zmienia się częstotliwość próbkowania w {name}.",
+  "routing.saveBar.diffSecondMix": "Zmienia się drugi miks (VOD) w {name}.",
+  "routing.saveBar.more": "Inne zmiany: {count}."
 }

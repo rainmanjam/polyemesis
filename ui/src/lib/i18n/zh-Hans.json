@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} 个订阅者 · 端口 {port}",
   "i18nSweep.monTsMissing": "{total} 个 TS 包中缺失 {lost} 个 · 中断 {breaks} 次",
   "dash.stopCountLoading": "正在统计此次停止将结束的 YouTube 直播…",
-  "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。"
+  "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。",
+  "routing.saveBar.scope": "待保存的更改：{count} 项。",
+  "routing.saveBar.scopeTracks": "待保存的更改：{count} 项。涉及的音轨：{tracks}。",
+  "routing.saveBar.trackAdded": "音轨 {n} 将加入 {name}。",
+  "routing.saveBar.trackRemoved": "音轨 {n} 将从 {name} 中移除。",
+  "routing.saveBar.trackLevel": "音轨 {n}：{name} 上的电平或静音将改变。",
+  "routing.saveBar.diffMode": "{name} 的混音模式将改变。",
+  "routing.saveBar.diffMatrix": "{name} 的声道矩阵将改变。",
+  "routing.saveBar.diffLoudness": "{name} 的响度或削波保护将改变。",
+  "routing.saveBar.diffDelay": "{name} 的音画延迟将改变。",
+  "routing.saveBar.diffDucking": "{name} 的闪避（ducking）设置将改变。",
+  "routing.saveBar.diffMusic": "{name} 的音乐版权过滤将改变。",
+  "routing.saveBar.diffSampleRate": "{name} 的采样率将改变。",
+  "routing.saveBar.diffSecondMix": "{name} 的第二路（VOD）混音将改变。",
+  "routing.saveBar.more": "其他更改：{count} 项。"
 }

@@ -34,6 +34,7 @@ import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { TrackRows, type TrackRowsLive } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
 import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
+import { routingChanges } from "@/lib/routingDiff";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
@@ -636,6 +637,20 @@ export function RoutingPage() {
     draftProfile: profile,
   });
 
+  // What the pending save moves, for the save bar's scope line and live diff.
+  const pendingChanges = useMemo(
+    () =>
+      dirty
+        ? routingChanges({
+            stored: storedRow?.profile,
+            draft: profile,
+            storedSecond: storedRow?.vodProfile ?? null,
+            draftSecond: vodProfile ?? null,
+          })
+        : [],
+    [dirty, storedRow, profile, vodProfile],
+  );
+
   // ---- A10: the destination's output, measured after routing ----
   //
   // Polled like the Meters page polls it: the analyser publishes about once a
@@ -1096,6 +1111,7 @@ export function RoutingPage() {
         destinationName={selected?.name ?? ""}
         restarts={!!selected?.enabled}
         levelOnly={levelOnly}
+        changes={pendingChanges}
         onSave={save}
         onDiscard={discardChanges}
       />

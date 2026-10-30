@@ -1989,5 +1989,19 @@
   "i18nSweep.monSubscribers": "{count} subscribers · port {port}",
   "i18nSweep.monTsMissing": "{lost} of {total} TS packets missing · {breaks} breaks",
   "dash.stopCountLoading": "Counting the YouTube broadcasts this stop would end…",
-  "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again."
+  "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again.",
+  "routing.saveBar.scope": "Pending changes: {count}.",
+  "routing.saveBar.scopeTracks": "Pending changes: {count}. Tracks affected: {tracks}.",
+  "routing.saveBar.trackAdded": "Track {n} will be added to {name}.",
+  "routing.saveBar.trackRemoved": "Track {n} will be removed from {name}.",
+  "routing.saveBar.trackLevel": "Track {n}: level or mute changes on {name}.",
+  "routing.saveBar.diffMode": "The mix mode changes on {name}.",
+  "routing.saveBar.diffMatrix": "The channel matrix changes on {name}.",
+  "routing.saveBar.diffLoudness": "Loudness or clip protection changes on {name}.",
+  "routing.saveBar.diffDelay": "The A/V delay changes on {name}.",
+  "routing.saveBar.diffDucking": "Ducking changes on {name}.",
+  "routing.saveBar.diffMusic": "The music rights filter changes on {name}.",
+  "routing.saveBar.diffSampleRate": "The sample rate changes on {name}.",
+  "routing.saveBar.diffSecondMix": "The second (VOD) mix changes on {name}.",
+  "routing.saveBar.more": "Other changes: {count}."
 }
