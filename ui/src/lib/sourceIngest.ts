@@ -5,22 +5,28 @@ import type { SourceView } from "@/lib/types";
  *  - "unset"     no protocol chosen yet, or pull (which has its own fields).
  *                Nothing to wait for, so nothing is claimed.
  *  - "off"       the source is disabled; publishes are refused regardless.
+ *  - "unavailable" SRT or RTMP is configured but the source's listener is not
+ *                up (not running, or not enforcing the token). Nothing can
+ *                connect, so nothing is waited for.
  *  - "waiting"   SRT or RTMP is configured and no encoder is attached.
  *  - "receiving" an encoder is attached. `publishing` only covers the shared
  *                listener, so a per-port SRT or RTMP source that is live is
  *                seen through its uplink (`link` or `rtmpLink`) instead.
  */
-export type IngestPhase = "unset" | "off" | "waiting" | "receiving";
+export type IngestPhase = "unset" | "off" | "unavailable" | "waiting" | "receiving";
 
 type IngestFacts = Pick<
   SourceView,
-  "enabled" | "ingest" | "publishing" | "link" | "rtmpLink" | "publishUrls"
+  "enabled" | "ingest" | "publishing" | "link" | "rtmpLink" | "publishUrls" | "running" | "tokenEnforced"
 >;
 
 export function ingestPhase(s: IngestFacts): IngestPhase {
   const mode = s.ingest?.mode;
   if (mode !== "srt" && mode !== "rtmp") return "unset";
   if (!s.enabled) return "off";
+  // Checked before the uplink: a live publisher on a listener that is not up
+  // cannot exist, so this is the answer that stays true.
+  if (!s.running || !s.tokenEnforced) return "unavailable";
   if (s.publishing || s.link || s.rtmpLink) return "receiving";
   return "waiting";
 }

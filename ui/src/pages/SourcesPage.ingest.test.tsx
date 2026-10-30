@@ -77,6 +77,15 @@ describe("SourceCard ingest state", () => {
     expect(screen.queryByText("Waiting for encoder")).toBeNull();
   });
 
+  it("does not tell the operator to wait when the listener is down", () => {
+    // The card's own warning says the source is not running; a waiting strip
+    // on top would send the operator to reconfigure an encoder that cannot
+    // connect for a reason on this side of the wire.
+    draw({ running: false, tokenEnforced: false, publishing: false });
+    expect(screen.queryByText("Waiting for encoder")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("says nothing about a disabled source's encoder", () => {
     draw({ enabled: false, publishing: false });
     expect(screen.queryByText("Waiting for encoder")).toBeNull();

@@ -501,11 +501,11 @@ export function SourceCard({
                 <SelectValue placeholder={t("sources.ingestPlaceholder")}>
                   {summary && (
                     <span className="flex items-center gap-2">
-                      <span className="font-mono text-[11px] font-semibold text-primary">
+                      <span className="font-mono text-[12px] font-semibold text-primary">
                         {summary.proto}
                       </span>
                       {summary.detail && (
-                        <span className="font-mono text-[11px] text-muted-foreground">
+                        <span className="font-mono text-[12px] text-muted-foreground">
                           {summary.detail}
                         </span>
                       )}
