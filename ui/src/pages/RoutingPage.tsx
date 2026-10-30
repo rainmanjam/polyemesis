@@ -42,6 +42,9 @@ import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
 import { isLevelOnlySave } from "@/lib/saveImpact";
+import { autoApi } from "@/lib/autoApi";
+import { outputState, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
+import { OutputStrip } from "@/components/signature/OutputStrip";
 import {
   carryMutes,
   destinationLiveBlock,
@@ -138,7 +141,7 @@ export function RoutingPage() {
   const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { connected, levels, source, status } = useLiveData();
+  const { connected, levels, source, status, programme } = useLiveData();
   const tracks = useSourceTracks();
 
   const [list, setList] = useState<DestinationWithRouting[]>([]);
@@ -588,6 +591,50 @@ export function RoutingPage() {
       JSON.stringify(vodProfile ?? null) !== JSON.stringify(storedRow?.vodProfile ?? null),
   });
 
+  // ---- A10: the destination's output, measured after routing ----
+  //
+  // Polled like the Meters page polls it: the analyser publishes about once a
+  // second and one card is not worth a socket subscription. Scoped to the
+  // destination's own programme. `loudNow` advances on every attempt, failed or
+  // not, so a feed that stops answering ages into "stale" instead of freezing
+  // its last reading as live.
+  const [loudFeed, setLoudFeed] = useState<LoudnessFeed | null>(null);
+  const [loudNow, setLoudNow] = useState(() => Date.now());
+  const loudSourceId = selected?.sourceId ?? null;
+  const hasSelection = selected !== null;
+  useEffect(() => {
+    if (!hasSelection) return;
+    let cancelled = false;
+    const read = () =>
+      autoApi
+        .loudness<LoudnessFeed>(loudSourceId)
+        .then((f) => {
+          if (cancelled) return;
+          setLoudFeed(f);
+          setLoudNow(Date.now());
+        })
+        .catch(() => {
+          if (!cancelled) setLoudNow(Date.now());
+        });
+    void read();
+    const timer = window.setInterval(read, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasSelection, loudSourceId]);
+
+  // The source stage: the ingest meter over the tracks this destination sends
+  // as stored (what is running), muted ones left out because a muted track's
+  // silence at the output is the operator's, not a fault. Only from a live
+  // meter feed of THIS destination's programme: the socket carries one.
+  const stripSource = useMemo(() => {
+    if (!connected || !storedRow || !storedRouting) return null;
+    if (storedRow.sourceId != null && programme != null && storedRow.sourceId !== programme) return null;
+    const muted = new Set((storedRow.profile.tracks ?? []).filter((s) => s.muted).map((s) => s.track));
+    return sourcePeak(levels?.peak, (storedRouting.tracks ?? []).filter((t) => !muted.has(t)));
+  }, [connected, storedRow, storedRouting, programme, levels]);
+
   const liveNotice = useMemo(() => {
     if (!storedRow) return null;
     const refused = liveRefusals[String(storedRow.id)];
@@ -864,6 +911,7 @@ export function RoutingPage() {
         {/* ---------- editor ---------- */}
         {selected && profile && (
           <div className="flex flex-col gap-3">
+            <OutputStrip state={outputState(loudFeed, selected.id, loudNow)} source={stripSource} />
             <ProfileEditor
               idPrefix="live"
               ctx={ctx}

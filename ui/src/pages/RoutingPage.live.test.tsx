@@ -8,6 +8,7 @@ import { RoutingPage } from "./RoutingPage";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
+import { autoApi } from "@/lib/autoApi";
 import type { TrackLevelResult } from "@/lib/liveTrackLevel";
 import type { Destination, RoutingProfile, RoutingResult } from "@/lib/types";
 
@@ -71,6 +72,8 @@ const compiled: RoutingResult = {
   warnings: null,
 };
 
+let levels: LiveData["levels"] = null;
+
 function live(): LiveData {
   return {
     programme: 3,
@@ -80,7 +83,7 @@ function live(): LiveData {
     snapshotKnown: true,
     status: null,
     source: { id: 3, name: "Main", probed: true, tracks: TRACKS, annotations: [] },
-    levels: null,
+    levels,
     system: null,
     bitrate: [],
     logs: [],
@@ -107,6 +110,8 @@ function rows(): DestinationWithRouting[] {
 
 beforeEach(() => {
   stored = dest();
+  levels = null;
+  vi.spyOn(autoApi, "loudness").mockResolvedValue({ enabled: false, reports: [] } as never);
   vi.spyOn(api, "listDestinations").mockImplementation(async () => rows());
   vi.spyOn(api, "listPresets").mockResolvedValue({
     presets: [{ id: "mix-a", name: "Mix A", description: "" }],
@@ -345,5 +350,49 @@ describe("the save bar says what Save will do to a running destination", () => {
     );
     await save();
     await waitFor(() => expect(savedTracks().find((x) => x.track === 0)?.gain).toBe(0.95));
+  });
+});
+
+describe("A10: the signal path strip", () => {
+  it("names an unmeasured output rather than drawing a reading", async () => {
+    await renderPage();
+    await waitFor(() => expect(screen.getByTestId("strip-output").getAttribute("data-state")).toBe("off"));
+    expect(autoApi.loudness).toHaveBeenCalledWith(3);
+  });
+
+  it("flags a hot source with a silent output as the routing dropping signal", async () => {
+    levels = { peak: [[-8, -9], [-60, -60]], rms: [[-20, -21], [-70, -70]] } as LiveData["levels"];
+    vi.mocked(autoApi.loudness).mockResolvedValue({
+      enabled: true,
+      reports: [
+        {
+          destinationId: 7,
+          seconds: 40,
+          momentaryLufs: -70,
+          truePeakDbtp: -120,
+          reason: "",
+          at: new Date().toISOString(),
+        },
+      ],
+    } as never);
+    await renderPage();
+    await screen.findByTestId("strip-dropped");
+    expect(screen.getByTestId("strip-source").textContent).toBe("-8.0 dBFS peak");
+    expect(screen.getByTestId("strip-output").textContent).toMatch(/below the loudness gate/);
+  });
+
+  it("leaves a muted track out of the source stage, so its silence is not a fault", async () => {
+    // Track 2 (index 1) is stored muted and is the only hot one.
+    levels = { peak: [[-90, -90], [-6, -6]], rms: [[-90, -90], [-20, -20]] } as LiveData["levels"];
+    vi.mocked(autoApi.loudness).mockResolvedValue({
+      enabled: true,
+      reports: [
+        { destinationId: 7, seconds: 40, momentaryLufs: -70, truePeakDbtp: -120, reason: "", at: new Date().toISOString() },
+      ],
+    } as never);
+    await renderPage();
+    await waitFor(() => expect(screen.getByTestId("strip-output").getAttribute("data-state")).toBe("live"));
+    expect(screen.queryByTestId("strip-dropped")).toBeNull();
+    expect(screen.getByTestId("strip-source").textContent).toBe("-90.0 dBFS peak");
   });
 });
