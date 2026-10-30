@@ -135,7 +135,7 @@ function ActionSelect({
  *  pattern that is not beside the pattern is a message about nothing. */
 function Problem({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <p className="flex items-start gap-1 text-[10px] text-warn" role="alert">
+    <p className="flex items-start gap-1 text-sm text-warn" role="alert">
       <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />
       <span>{children}</span>
     </p>
@@ -335,7 +335,7 @@ export function AutomodConfig({
                       patchRule(rule.id, { pattern: e.target.value })
                     }
                   />
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("automod.patternNote")}
                   </span>
                   {pattern && (
@@ -401,7 +401,7 @@ export function AutomodConfig({
                 {t("automod.addRule")}
               </Button>
             </div>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {t("automod.allOrNothing")}
             </span>
           </div>
@@ -443,7 +443,7 @@ export function AutomodConfig({
                 autoComplete="off"
                 onChange={(e) => patchModel({ endpoint: e.target.value })}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("automod.endpointNote")}
               </span>
             </div>
@@ -474,7 +474,7 @@ export function AutomodConfig({
               value={model.instruction}
               onChange={(e) => patchModel({ instruction: e.target.value })}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {t("automod.instructionNote")}
             </span>
           </div>
@@ -497,7 +497,7 @@ export function AutomodConfig({
                   patchModel({ minConfidence: Number(e.target.value) })
                 }
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("automod.minConfidenceNote")}
               </span>
               {/* THE ONLY PLACE THIS CAN BE SAID. The server does not refuse a
@@ -524,19 +524,19 @@ export function AutomodConfig({
                   patchModel({ maxCallsPerHour: Number(e.target.value) })
                 }
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("automod.maxCallsNote")}
               </span>
               {/* THE READING, BESIDE THE CEILING IT IS BOUNDED BY. A ceiling
                   with no spend beside it is a number an operator guesses at
                   and never revisits. */}
               {statsFailed && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("automod.spendUnread")}
                 </span>
               )}
               {stats && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {stats.ceiling > 0
                     ? t("automod.spend", {
                         used: stats.callsThisHour,
@@ -546,7 +546,7 @@ export function AutomodConfig({
                 </span>
               )}
               {stats && stats.failures > 0 && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("automod.spendFailures", { count: stats.failures })}
                 </span>
               )}
@@ -573,7 +573,7 @@ export function AutomodConfig({
                   patchModel({ timeoutSeconds: Number(e.target.value) })
                 }
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("automod.answerTimeoutNote")}
               </span>
             </div>
@@ -675,11 +675,11 @@ export function AutomodConfig({
               </div>
             )}
 
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {t("automod.keyNeverReturned")}
             </span>
             {keyNote && (
-              <span className="text-[10px] text-muted-foreground" role="status">
+              <span className="text-sm text-muted-foreground" role="status">
                 {keyNote}
               </span>
             )}

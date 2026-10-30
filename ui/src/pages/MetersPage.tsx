@@ -291,7 +291,7 @@ export function MetersPage() {
               />
             ))
           )}
-          <p className="text-[10px] text-subtle-foreground">
+          <p className="text-[10px] text-muted-foreground">
             {t("meters.integratedNote", {
               seconds: loudness?.bounds.minIntegrationSeconds ?? 20,
             })}
@@ -362,7 +362,7 @@ export function MetersPage() {
                   <span
                     className={cn(
                       "tnum font-mono text-[11px]",
-                      active ? "text-foreground" : "text-subtle-foreground",
+                      active ? "text-foreground" : "text-muted-foreground",
                     )}
                   >
                     {db(hottest)} dBFS
@@ -390,7 +390,7 @@ export function MetersPage() {
                           <span className="font-mono text-[10px] text-muted-foreground">{l}</span>
                           <span className="tnum font-mono text-[10px]">
                             {db(rms[i] ?? -100)}
-                            <span className="text-subtle-foreground"> / </span>
+                            <span className="text-muted-foreground"> / </span>
                             <span className={cn((peak[i] ?? -100) >= -0.2 && "text-down")}>
                               {db(peak[i] ?? -100)}
                             </span>
@@ -398,12 +398,12 @@ export function MetersPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="pl-[calc(1.25rem+0.5rem)] text-[9px] uppercase tracking-wider text-subtle-foreground">
+                    <div className="pl-[calc(1.25rem+0.5rem)] text-[9px] uppercase tracking-wider text-muted-foreground">
                       rms / peak dBFS
                     </div>
                   </>
                 ) : (
-                  <div className="py-3 text-center font-mono text-[11px] text-subtle-foreground">
+                  <div className="py-3 text-center font-mono text-[11px] text-muted-foreground">
                     {probed ? t("meters.noSignal") : t("clips.waitingForStream")}
                   </div>
                 )}
@@ -504,7 +504,7 @@ export function ComplianceRow({
               tone={peakOver ? "down" : "default"}
             />
           </div>
-          <span className="text-[10px] text-subtle-foreground">{report.reason}</span>
+          <span className="text-[10px] text-muted-foreground">{report.reason}</span>
         </>
       )}
     </div>

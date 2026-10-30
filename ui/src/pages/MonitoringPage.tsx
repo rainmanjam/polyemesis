@@ -377,7 +377,7 @@ export function ExpertPanel() {
             {resolved?.command?.command && (
               <div>
                 <div className="mb-1 flex items-center gap-2">
-                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
+                  <span className="text-micro uppercase tracking-wide text-muted-foreground">
             {t("mon.fullCommand")}
                   </span>
                   <Badge variant={resolved.command.live ? "default" : "outline"}>
@@ -388,7 +388,7 @@ export function ExpertPanel() {
                 <pre
                   className={cn(
                     "max-h-56 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-micro",
-                    shown ? "text-foreground" : "text-subtle-foreground",
+                    shown ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
                   {resolved.command.command}
@@ -402,7 +402,7 @@ export function ExpertPanel() {
             {dryRun && (
               <div>
                 <div className="mb-1 flex items-center gap-2 text-tiny">
-                  <span className="text-micro uppercase tracking-wide text-subtle-foreground">
+                  <span className="text-micro uppercase tracking-wide text-muted-foreground">
             {t("mon.dryRun")}
                   </span>
                   <span className={DRY_RUN_TONE[dryRun.verdict]}>
@@ -815,7 +815,7 @@ export function MonitoringPage() {
               ) : (
                 filtered.map((l, i) => (
                   <div key={i} className="flex gap-2">
-                    <span className="tnum shrink-0 text-subtle-foreground">
+                    <span className="tnum shrink-0 text-muted-foreground">
                       {clockTime(l.time)}
                     </span>
                     <span className="shrink-0 text-primary/70">{l.process}</span>

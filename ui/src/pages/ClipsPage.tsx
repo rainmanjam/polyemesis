@@ -474,7 +474,7 @@ export function ClipsPage() {
                   bytes: bytes(view?.usage.maxBytes ?? 0),
                 })}
               </p>
-              <p className="text-micro text-subtle-foreground">
+              <p className="text-micro text-muted-foreground">
             {t("clips.bufferLiveNote")}
               </p>
             </CardContent>

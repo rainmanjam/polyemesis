@@ -175,7 +175,7 @@ export function TrackRows({
                     </Badge>
                   )}
                 </div>
-                <div className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
+                <div className="truncate font-mono text-sm leading-tight text-muted-foreground">
                   {t.layout}
                   {t.channels > 2 && " ↓ st"}
                   {(ann.language || t.language) && ` · ${ann.language || t.language}`}
@@ -199,13 +199,13 @@ export function TrackRows({
                      metering. On the page where routing is decided, "this
                      track carries nothing" is the reading that gets a track
                      left out of the mix. */
-                  <div className="font-mono text-[10px] text-subtle-foreground">
+                  <div className="font-mono text-sm text-muted-foreground">
                     {TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">]}
                   </div>
                 )}
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                   {label && (
-                    <span className="truncate text-[10px] text-muted-foreground">{label}</span>
+                    <span className="truncate text-sm text-muted-foreground">{label}</span>
                   )}
                   {ann.denoise && (
                     <Badge variant="outline" className="shrink-0">
@@ -238,8 +238,8 @@ export function TrackRows({
                 />
                 <span
                   className={cn(
-                    "tnum w-10 shrink-0 text-right font-mono text-[11px]",
-                    sel.enabled ? "text-foreground" : "text-subtle-foreground",
+                    "tnum w-10 shrink-0 text-right font-mono text-sm",
+                    sel.enabled ? "text-foreground" : "text-muted-foreground",
                     // Boost above unity is where clipping starts; flag it.
                     sel.enabled && sel.gain > 1 && "text-warn",
                   )}
@@ -252,7 +252,7 @@ export function TrackRows({
             {excluded && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="flex w-fit cursor-help items-center gap-1.5 text-[10px] text-warn">
+                  <div className="flex w-fit cursor-help items-center gap-1.5 text-sm text-warn">
                     <AlertTriangle className="h-3 w-3 shrink-0" />
                     <span>
                       Not sent — this destination excludes the “{ROLE_LABEL[role]}” role.
@@ -275,7 +275,7 @@ export function TrackRows({
                     onAnnotate(t.index, { role: v === NO_ROLE ? "" : (v as TrackRole) })
                   }
                 >
-                  <SelectTrigger className="h-6 text-[10px]" aria-label={`Track ${t.index + 1} role`}>
+                  <SelectTrigger className="h-6 text-sm" aria-label={`Track ${t.index + 1} role`}>
                     <SelectValue placeholder="No role" />
                   </SelectTrigger>
                   <SelectContent>
@@ -293,7 +293,7 @@ export function TrackRows({
                   maxLength={MAX_LABEL_LEN}
                   placeholder={t.title || "Label — e.g. “Guest mic (Zoom)”"}
                   onChange={(e) => onAnnotate(t.index, { label: e.target.value })}
-                  className="h-6 text-[10px]"
+                  className="h-6 text-sm"
                   aria-label={`Track ${t.index + 1} label`}
                 />
 
@@ -302,11 +302,11 @@ export function TrackRows({
                   maxLength={MAX_LANG_TAG_LEN}
                   placeholder={t.language || "lang"}
                   onChange={(e) => onAnnotate(t.index, { language: e.target.value })}
-                  className="h-6 text-[10px]"
+                  className="h-6 text-sm"
                   aria-label={`Track ${t.index + 1} language`}
                 />
 
-                <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                <label className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
                   <Switch
                     checked={ann.denoise === true}
                     onCheckedChange={(v) => onAnnotate(t.index, { denoise: v })}
@@ -321,7 +321,7 @@ export function TrackRows({
       })}
 
       {!probed && (
-        <div className="mt-1 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+        <div className="mt-1 flex items-start gap-1.5 text-sm text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warn" />
           <span>{t("meters.defaultTracksNote")}</span>
         </div>
@@ -361,10 +361,10 @@ export function TrackSummary({
             key={i}
             title={trackChipTitle(i, on, labels?.[i])}
             className={cn(
-              "tnum flex h-4 w-4 items-center justify-center rounded-[3px] font-mono text-[9px] font-bold",
+              "tnum flex h-4 w-4 items-center justify-center rounded-[3px] font-mono text-sm font-bold",
               on
                 ? "bg-primary text-primary-foreground"
-                : "bg-muted text-subtle-foreground",
+                : "bg-muted text-muted-foreground",
             )}
           >
             {i + 1}

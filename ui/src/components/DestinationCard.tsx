@@ -270,7 +270,7 @@ export function DestinationCard({
             to="/renditions"
             className="group flex items-center justify-between gap-2 px-2 py-1.5 transition-colors hover:bg-muted"
           >
-            <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
+            <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
               video
             </span>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
@@ -282,7 +282,7 @@ export function DestinationCard({
             className="group flex items-center justify-between gap-2 border-t border-border px-2 py-1.5 transition-colors hover:bg-muted"
           >
             <div className="flex min-w-0 items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-wide text-subtle-foreground">
+              <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                 audio
               </span>
               <TrackSummary tracks={dest.tracks} labels={trackLabels} />

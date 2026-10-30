@@ -551,11 +551,11 @@ export function RenditionsPage() {
         <CardContent>
           <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
             <Badge variant="outline">passthrough</Badge>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               Destinations with no rendition take the source untouched — no process, no CPU. That is
               the default, and where every destination starts.
             </span>
-            <span className="tnum ml-auto font-mono text-[11px]">{passthrough.length}</span>
+            <span className="tnum ml-auto font-mono text-sm">{passthrough.length}</span>
           </div>
           {passthrough.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -644,7 +644,7 @@ function DestChip({ dest }: { dest: DestStatus }) {
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
+      className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
       title={dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
     >
       <StatusDot tone={tone} size="sm" />
@@ -737,19 +737,19 @@ export function RenditionCard({
           />
         </div>
 
-        {r.note && <p className="text-[11px] text-muted-foreground">{r.note}</p>}
+        {r.note && <p className="text-sm text-muted-foreground">{r.note}</p>}
 
         <div>
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-sm uppercase tracking-wider text-muted-foreground">
               Feeds
             </span>
-            <span className="tnum font-mono text-[10px] text-muted-foreground">
+            <span className="tnum font-mono text-sm text-muted-foreground">
               {enabled} of {total} enabled
             </span>
           </div>
           {total === 0 ? (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
             {t("rend.unused")}
             </p>
           ) : users ? (
@@ -759,24 +759,24 @@ export function RenditionCard({
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
             {t("rend.waitingSnapshot")}
             </p>
           )}
         </div>
 
         {encoderProblemText && (
-          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             {encoderProblemText} Edit this rendition to choose one that works.
           </div>
         )}
         {live?.error && (
-          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             {live.error}
           </div>
         )}
         {proc?.lastError && proc.state !== "running" && (
-          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-[10px] text-down">
+          <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             {proc.lastError}
           </div>
         )}
@@ -784,7 +784,7 @@ export function RenditionCard({
         {/* Only the verdict worth interrupting for. Everything else the cost
             model has to say lives in the editor, next to the controls. */}
         {cost.tone === "down" && (
-          <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-[10px] text-warn">
+          <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             {cost.headline}. {cost.detail}
           </div>
         )}
@@ -810,7 +810,7 @@ export function RenditionCard({
               comes from the install-wide status socket, which on a
               multi-programme install describes whichever engine spoke last. */}
           {!proc && (
-            <span className="text-[10px] text-muted-foreground" data-testid="restart-reason">
+            <span className="text-sm text-muted-foreground" data-testid="restart-reason">
               {t("rend.noProcessToRestart")}
             </span>
           )}
@@ -1206,7 +1206,7 @@ export function RenditionDialog({
         <div className="flex flex-col gap-3">
           {presets.length > 0 && (
             <div className="flex flex-col gap-1.5 rounded border border-border bg-background p-2">
-              <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-sm uppercase tracking-wider text-muted-foreground">
                 Starting points
               </span>
               <div className="flex flex-wrap gap-1">
@@ -1226,8 +1226,8 @@ export function RenditionDialog({
               </div>
               {/* Verbatim from the server so the UI and the docs cannot drift
                   into presenting these numbers as a platform's actual limits. */}
-              <span className="text-[10px] text-warn">{disclaimer}</span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-warn">{disclaimer}</span>
+              <span className="text-sm text-muted-foreground">
             {t("rend.seedNote")}
               </span>
             </div>
@@ -1271,7 +1271,7 @@ export function RenditionDialog({
                 value={form.fps}
                 onChange={(e) => set("fps", Number(e.target.value))}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 fps, or 0 to keep the source's.
               </span>
             </div>
@@ -1303,7 +1303,7 @@ export function RenditionDialog({
                   onChange={(e) => set("height", Number(e.target.value))}
                 />
               </div>
-              <span className="col-span-2 text-[10px] text-muted-foreground">
+              <span className="col-span-2 text-sm text-muted-foreground">
             {t("rend.evenNote")}
               </span>
             </div>
@@ -1321,7 +1321,7 @@ export function RenditionDialog({
                 value={form.videoBitrate}
                 onChange={(e) => set("videoBitrate", Number(e.target.value))}
               />
-              <span className={`text-[10px] ${bitrateOk ? "text-muted-foreground" : "text-down"}`}>
+              <span className={`text-sm ${bitrateOk ? "text-muted-foreground" : "text-down"}`}>
                 kbps, video only — audio is copied and costs nothing here.
               </span>
             </div>
@@ -1337,7 +1337,7 @@ export function RenditionDialog({
                 value={form.gopSeconds}
                 onChange={(e) => set("gopSeconds", Number(e.target.value))}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 seconds. Most live platforms want 1–4; 2 is the common answer.
               </span>
             </div>
@@ -1359,7 +1359,7 @@ export function RenditionDialog({
                 value={form.maxrateKbps}
                 onChange={(e) => set("maxrateKbps", Number(e.target.value))}
               />
-              <span className={`text-[10px] ${maxrateOk ? "text-muted-foreground" : "text-down"}`}>
+              <span className={`text-sm ${maxrateOk ? "text-muted-foreground" : "text-down"}`}>
                 {maxrateOk
                   ? "kbps. 0 matches the target, which is CBR. Higher allows burst up to a platform's published maximum."
                   : "must be 0, or at least the target bitrate — a ceiling below the target is a contradiction, not a preference."}
@@ -1376,7 +1376,7 @@ export function RenditionDialog({
                 value={form.bufsizeKbps}
                 onChange={(e) => set("bufsizeKbps", Number(e.target.value))}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 kbps. 0 is twice the ceiling. Smaller corrects faster and pumps
                 more visibly on a cut.
               </span>
@@ -1402,7 +1402,7 @@ export function RenditionDialog({
                   ))}
                 </SelectContent>
               </Select>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {!aspectApplies
                   ? t("rend.needsBothAWidthAnd")
                   : (() => { const m = ASPECT_MODES.find((m) => m.key === form.aspectMode); return m ? t(m.hint) : ""; })()}
@@ -1429,7 +1429,7 @@ export function RenditionDialog({
               {/* THROUGH t(), like the SelectItem eleven lines up and like the
                   aspect-mode hint above. `hint` is a TranslationKey; rendered
                   bare it printed "rend.deintOffHint" at the operator. */}
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {(() => {
                   const m = DEINTERLACE_MODES.find((m) => m.key === form.deinterlace);
                   return m ? t(m.hint) : "";
@@ -1447,7 +1447,7 @@ export function RenditionDialog({
                 placeholder={t("rend.colourBlack")}
                 onChange={(e) => set("padColor", e.target.value)}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Empty means black. One word — <code>{t("rend.colourBlack")}</code>, <code>0x101010</code> — because it
                 lands on a filter graph where a comma would end the argument.
               </span>
@@ -1458,7 +1458,7 @@ export function RenditionDialog({
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="rend-overlay-image">{t("rend.watermarkImage")}</Label>
               {!aspectApplies && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   needs a fixed width and height
                 </span>
               )}
@@ -1470,7 +1470,7 @@ export function RenditionDialog({
               placeholder={t("rend.watermarkPlaceholder")}
               onChange={(e) => set("overlayImage", e.target.value)}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               A path inside the data directory — put the file in{" "}
               <code>&lt;data&gt;/overlays/</code>. Leave empty for a clean feed. A watermark
               re-encodes nothing extra: it costs a few percent CPU on an encode that is already
@@ -1533,7 +1533,7 @@ export function RenditionDialog({
                   </div>
                 </div>
 
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("rend.percentNote")}
                 </span>
               </>
@@ -1544,12 +1544,12 @@ export function RenditionDialog({
             <div className="flex items-center justify-between gap-2">
               <Label htmlFor="rend-text-content">{t("rend.burnedText")}</Label>
               {!aspectApplies && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   needs a fixed width and height
                 </span>
               )}
               {aspectApplies && fonts && !fonts.textSupported && (
-                <span className="text-[10px] text-warn">
+                <span className="text-sm text-warn">
                   this FFmpeg has no drawtext
                 </span>
               )}
@@ -1562,12 +1562,12 @@ export function RenditionDialog({
               placeholder={t("rend.textPlaceholder")}
               onChange={(e) => set("textContent", e.target.value)}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               Drawn on top of the watermark. One line — a line break would end the filter argument.
               The text is never interpreted, so a <code>%</code> is just a percent sign.
             </span>
             {fonts && !fonts.textSupported && (
-              <span className="text-[10px] text-warn">
+              <span className="text-sm text-warn">
                 This FFmpeg was built without libfreetype, so it has no <code>drawtext</code> filter
                 and text would never render. The setting is disabled rather than accepted and
                 silently ignored.
@@ -1602,7 +1602,7 @@ export function RenditionDialog({
                     onChange={(v) => set("textAnchor", v)}
                   />
                 </div>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   Drop a <code>.ttf</code> or <code>.otf</code> into <code>&lt;data&gt;/fonts/</code>{" "}
                   to add your own — any font works, including one downloaded from Google Fonts. The
                   built-in ones are rewritten on every start, so replace those by adding a new file
@@ -1687,7 +1687,7 @@ export function RenditionDialog({
                   />
                   Draw a box behind the text
                 </label>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   The box is what keeps white text readable over a white shirt. Colours are one word
                   — <code>{t("rend.colourWhite")}</code>, <code>0x101010</code> — because they land on a filter graph.
                 </span>
@@ -1738,12 +1738,12 @@ export function RenditionDialog({
                 </SelectContent>
               </Select>
               {choices.length === 0 && (
-                <span className="text-[10px] text-warn">
+                <span className="text-sm text-warn">
             {t("rend.noEncoder")}
                 </span>
               )}
               {encoderProblem(t, encoder) && (
-                <span className="text-[10px] text-down">{encoderProblem(t, encoder)}</span>
+                <span className="text-sm text-down">{encoderProblem(t, encoder)}</span>
               )}
               {/* Only on NVENC, QSV, VA-API and AMF, and only about the FLAGS.
                   Gated on the encoder FAMILY rather than on `hardware`, which
@@ -1765,7 +1765,7 @@ export function RenditionDialog({
                 </Experimental>
               )}
               {!caps?.tested && choices.length > 0 && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("rend.notProbed")}
                 </span>
               )}
@@ -1781,7 +1781,7 @@ export function RenditionDialog({
                 onChange={(e) => set("preset", e.target.value)}
                 placeholder={t("rend.presetPlaceholder")}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 The encoder's own speed knob, and its vocabulary: veryfast for x264, p4 for nvenc.
               </span>
             </div>
@@ -1806,7 +1806,7 @@ export function RenditionDialog({
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span
                   className={cn(
-                    "text-[11px] font-medium",
+                    "text-sm font-medium",
                     permissionBlocked ? "text-down" : "text-foreground",
                   )}
                 >
@@ -1817,7 +1817,7 @@ export function RenditionDialog({
                   <span
                     key={d.text}
                     className={cn(
-                      "text-[10px]",
+                      "text-sm",
                       d.permission ? "text-down" : "text-muted-foreground",
                     )}
                   >
@@ -1825,7 +1825,7 @@ export function RenditionDialog({
                   </span>
                 ))}
                 {permissionBlocked && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     This is a permissions problem, not a missing driver — the device is there. Add
                     the user polyemesis runs as to the group that owns the render node, or pass the
                     node into the container, then re-detect.
@@ -1836,7 +1836,7 @@ export function RenditionDialog({
           )}
 
           {encoder?.codec === "hevc" && (
-            <div className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
+            <div className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-sm text-warn">
             {t("rend.hevcWarning")}
             </div>
           )}
@@ -1848,12 +1848,12 @@ export function RenditionDialog({
               className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", COST_CLASSES[cost.tone].icon)}
             />
             <div className="flex min-w-0 flex-col gap-0.5">
-              <span className={cn("text-[11px] font-medium", COST_CLASSES[cost.tone].title)}>
+              <span className={cn("text-sm font-medium", COST_CLASSES[cost.tone].title)}>
                 {cost.headline}
               </span>
-              <span className="text-[10px] text-muted-foreground">{cost.detail}</span>
+              <span className="text-sm text-muted-foreground">{cost.detail}</span>
               {notes.map((n) => (
-                <span key={n} className="text-[10px] text-muted-foreground">
+                <span key={n} className="text-sm text-muted-foreground">
                   {n}
                 </span>
               ))}
@@ -1878,7 +1878,7 @@ export function RenditionDialog({
               none. */}
           {editing && consequence.kind !== "none" && (
             <div className="flex flex-col gap-1 rounded border border-border bg-background p-2">
-              <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-sm uppercase tracking-wider text-muted-foreground">
                 {consequence.kind === "unknown"
                   ? t("rend.usersUnknown")
                   : `Feeds ${consequence.kind === "named" ? consequence.users.length : consequence.total} destination${(consequence.kind === "named" ? consequence.users.length : consequence.total) === 1 ? "" : "s"}`}
@@ -1891,10 +1891,10 @@ export function RenditionDialog({
                 </div>
               )}
               {consequence.kind === "counted" && (
-                <span className="text-[10px] text-muted-foreground">{t("rend.usersNotNamed")}</span>
+                <span className="text-sm text-muted-foreground">{t("rend.usersNotNamed")}</span>
               )}
               {consequence.kind !== "unknown" && consequence.enabled > 0 && (
-                <span className="text-[10px] text-warn">
+                <span className="text-sm text-warn">
                   Saving restarts this encode, and with it the {consequence.enabled} enabled
                   destination{consequence.enabled === 1 ? "" : "s"} above. Their audio routing is
                   untouched.
@@ -1982,7 +1982,7 @@ function DeleteRenditionDialog({
         </DialogHeader>
 
         {consequence.kind === "counted" && (
-          <p className="text-[10px] text-muted-foreground">{t("rend.usersNotNamed")}</p>
+          <p className="text-sm text-muted-foreground">{t("rend.usersNotNamed")}</p>
         )}
 
         {consequence.kind !== "none" && consequence.kind !== "unknown" && (
@@ -1995,7 +1995,7 @@ function DeleteRenditionDialog({
               </div>
             )}
             {consequence.enabled > 0 && (
-              <p className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-[10px] text-warn">
+              <p className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-sm text-warn">
                 {consequence.enabled} of them {consequence.enabled === 1 ? "is" : "are"} enabled and
                 will restart immediately on the source video. None of them is deleted, and their
                 audio routing is untouched.

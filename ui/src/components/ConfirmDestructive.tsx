@@ -193,7 +193,7 @@ export function ConfirmDestructive({
 
         {consequences && consequences.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md border border-down/40 bg-down-dim/20 px-2.5 py-2">
-            <span className="text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
               {consequencesLabel ?? t("confirm.alsoRemoves")}
             </span>
             {consequences.map((c) => (

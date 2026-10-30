@@ -576,7 +576,7 @@ export function RoutingPage() {
                     {mark && (
                       <span
                         className={cn(
-                          "ml-auto flex shrink-0 items-center gap-1 text-[10px]",
+                          "ml-auto flex shrink-0 items-center gap-1 text-sm",
                           mark.tone === "warn" ? "text-warn" : "text-muted-foreground",
                         )}
                       >
@@ -585,7 +585,7 @@ export function RoutingPage() {
                       </span>
                     )}
                   </span>
-                  <span className="truncate font-mono text-[10px] text-muted-foreground">
+                  <span className="truncate font-mono text-sm text-muted-foreground">
                     {routing?.summary ?? "—"}
                   </span>
                 </button>
@@ -889,7 +889,7 @@ function ProfileEditor({
           />
           {ctx.platformPresets.length > 0 && (
             <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 Platform defaults
               </div>
               <PresetRow
@@ -966,10 +966,10 @@ function ProfileEditor({
                 duckTarget={profile.ducking?.target ?? []}
               />
               {allowAnnotating && ctx.annotating && ctx.annotationsStored === false && (
-                <p className="mt-2 text-[10px] text-warn">{t("route.localOnlyNote")}</p>
+                <p className="mt-2 text-sm text-warn">{t("route.localOnlyNote")}</p>
               )}
               {allowAnnotating && ctx.annotating && ctx.annotationsStored !== false && (
-                <p className="mt-2 text-[10px] text-muted-foreground">{t("route.rolesNote")}</p>
+                <p className="mt-2 text-sm text-muted-foreground">{t("route.rolesNote")}</p>
               )}
             </TabsContent>
 
@@ -1042,7 +1042,7 @@ function ProfileEditor({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {compileError && (
-            <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1.5 text-[11px] text-down">
+            <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1.5 text-sm text-down">
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{compileError}</span>
             </div>
@@ -1050,14 +1050,14 @@ function ProfileEditor({
           {compiled?.warnings?.map((w) => (
             <div
               key={w}
-              className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn"
+              className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
             >
               <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{w}</span>
             </div>
           ))}
           {compiled && <FilterString value={compiled.filterComplex} />}
-          <p className="text-[10px] text-muted-foreground">{footer(compiled)}</p>
+          <p className="text-sm text-muted-foreground">{footer(compiled)}</p>
         </CardContent>
       </Card>
     </>
@@ -1149,12 +1149,12 @@ function SecondMixCard({
             exists to send. */}
         <div className="flex h-9 items-center gap-2">
           <Switch id="vod-enabled" checked={profile !== null} onCheckedChange={enable} />
-          <Label htmlFor="vod-enabled" className="text-[11px] text-muted-foreground">
+          <Label htmlFor="vod-enabled" className="text-sm text-muted-foreground">
             {profile !== null ? t("route.vodConfigured") : t("route.vodOneMix")}
           </Label>
         </div>
 
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {t("route.vodNote")}
           {profile === null && restorable !== null && <> {t("route.vodRestores")}</>}
         </span>
@@ -1165,7 +1165,7 @@ function SecondMixCard({
             one. It is first because it outranks the others: an unprobed ingest
             is not a Twitch question. */}
         {!probed && profile !== null && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               This second mix is <strong>not being sent yet</strong>, on any platform. The ingest
@@ -1179,7 +1179,7 @@ function SecondMixCard({
 
         {/* State 1: definitely not being sent, and this page knows why. */}
         {blockedByToggle && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[11px] text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               This second mix is <strong>not being sent</strong>. The ordinary Twitch RTMP ingest
@@ -1195,7 +1195,7 @@ function SecondMixCard({
             a dependency, never as a success — the answer does not exist until
             go-live, and it lands on the destination card. */}
         {twitchRtmp && multitrack && profile !== null && probed && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             Whether this second track is actually sent is decided at go-live: Twitch grants
             Enhanced Broadcasting only to a client with a GPU it supports, and where it is not
             granted this destination publishes the live mix alone to the ordinary Twitch ingest.
@@ -1208,7 +1208,7 @@ function SecondMixCard({
             generic two-mix egress is what runs. Said plainly so the Twitch
             caveats above are not read as applying everywhere. */}
         {!twitchRtmp && profile !== null && probed && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             This destination is not a Twitch RTMP one, so nothing is negotiated: both mixes are
             built in the same FFmpeg process and published as two audio tracks. Whether the far
             end accepts a second track is a property of that endpoint — an RTMP ingest that takes
@@ -1308,7 +1308,7 @@ function PresetRow({
               value={opts.language ?? ""}
               placeholder={t("route.langPlaceholder")}
               onChange={(e) => setOpts((o) => ({ ...o, language: e.target.value }))}
-              className="h-6 text-[10px]"
+              className="h-6 text-sm"
               aria-label={t("route.commentaryLanguage")}
             />
           )}
@@ -1322,7 +1322,7 @@ function PresetRow({
                 }))
               }
             >
-              <SelectTrigger className="h-6 text-[10px]" aria-label={t("route.musicPolicy")}>
+              <SelectTrigger className="h-6 text-sm" aria-label={t("route.musicPolicy")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1351,8 +1351,8 @@ function TrackPick({
 }) {
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className="h-6 text-[10px]" aria-label={`${label} track`}>
-        <span className="mr-1 text-subtle-foreground">{label}</span>
+      <SelectTrigger className="h-6 text-sm" aria-label={`${label} track`}>
+        <span className="mr-1 text-muted-foreground">{label}</span>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1463,7 +1463,7 @@ function MusicRightsCard({
           )}
         </label>
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {excluded ? (
             musicTracks.length > 0 ? (
               <>
@@ -1488,7 +1488,7 @@ function MusicRightsCard({
         </p>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-          <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
             Also exclude
           </span>
           {TRACK_ROLES.filter((r) => r !== "music").map((r) => {
@@ -1499,10 +1499,10 @@ function MusicRightsCard({
                 onClick={() => toggleRole(r, !on)}
                 aria-pressed={on}
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+                  "rounded border px-1.5 py-0.5 text-sm font-semibold uppercase tracking-wider transition-colors",
                   on
                     ? "border-warn/40 bg-warn-dim text-warn"
-                    : "border-border text-subtle-foreground hover:border-border-strong hover:text-muted-foreground",
+                    : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
                 )}
               >
                 {ROLE_LABEL[r]}
@@ -1615,13 +1615,13 @@ export function LoudnessCard({
             the select to Custom would change the operator's chosen preset as a
             side effect of a typo, which is the larger harm. */}
         {loudness && value !== LOUDNESS_CUSTOM && (
-          <p className="text-[10px] text-muted-foreground" data-testid="target-locked">
+          <p className="text-sm text-muted-foreground" data-testid="target-locked">
             {t("route.targetFollowsPreset")}
           </p>
         )}
 
         {inert && (
-          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-[10px] leading-relaxed text-warn">
+          <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm leading-relaxed text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               Clip protection is set to “{t(NORMALIZE_LABEL[normalize])}”, which polyemesis never
@@ -1631,7 +1631,7 @@ export function LoudnessCard({
           </div>
         )}
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {loudness ? (
             t("route.measuredOverTheWholeProgramme")
           ) : normalize === "loudnorm" ? (
@@ -1724,7 +1724,7 @@ export function DelayCard({
           />
         </div>
 
-        <p className="text-[10px] leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           {delayMs === 0 ? (
             t("route.audioAndVideoGoOut")
           ) : direction === "audio" ? (
@@ -1810,7 +1810,7 @@ export function DuckingCard({
           <Waves className="h-3.5 w-3.5" /> Ducking
         </CardTitle>
         <label className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-sm uppercase tracking-wider text-muted-foreground">
             {ducking ? t("route.on") : t("clips.off")}
           </span>
           <Switch
@@ -1823,13 +1823,13 @@ export function DuckingCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {!ducking ? (
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             {t("route.duckingNote")}
           </p>
         ) : (
           <>
             <div className="flex flex-col gap-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 When these speak
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -1844,17 +1844,17 @@ export function DuckingCard({
                   />
                 ))}
               </div>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
             {t("route.duckingTriggerNote")}
               </p>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="text-sm uppercase tracking-wider text-muted-foreground">
                 Push these down
               </div>
               {mixedTracks.length === 0 && (
-                <p className="text-[10px] text-warn" data-testid="duck-no-target">
+                <p className="text-sm text-warn" data-testid="duck-no-target">
                   {t("route.duckingNoTargetInMix")}
                 </p>
               )}
@@ -1914,7 +1914,7 @@ export function DuckingCard({
                 onChange={(n) => onChange({ ...ducking, releaseMs: n })}
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Blank uses the defaults: {DEFAULT_DUCK_THRESHOLD_DB} dB, {DEFAULT_DUCK_RATIO}:1,{" "}
               {DEFAULT_DUCK_ATTACK_MS} ms attack, {DEFAULT_DUCK_RELEASE_MS} ms release — about
               12 dB of reduction, fast enough to catch a word’s first syllable and slow enough
@@ -1946,12 +1946,12 @@ function TrackChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] transition-colors",
+        "flex items-center gap-1.5 rounded border px-2 py-1 text-sm transition-colors",
         active
           ? tone === "armed"
             ? "border-armed/40 bg-armed-dim text-armed"
             : "border-warn/40 bg-warn-dim text-warn"
-          : "border-border text-subtle-foreground hover:border-border-strong hover:text-muted-foreground",
+          : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
       )}
     >
       <span className="tnum font-mono font-semibold">{track + 1}</span>
@@ -1991,9 +1991,9 @@ function NumberField({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="flex items-baseline justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="flex items-baseline justify-between text-sm uppercase tracking-wider text-muted-foreground">
         {label}
-        <span className="normal-case tracking-normal text-subtle-foreground">{unit}</span>
+        <span className="normal-case tracking-normal text-muted-foreground">{unit}</span>
       </span>
       <Input
         type="number"

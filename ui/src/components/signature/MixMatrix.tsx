@@ -96,7 +96,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           {totalCols} source channel{totalCols === 1 ? "" : "s"} → 2 output channels.
           Gain 0–2 per cell; 0 removes the connection.
         </div>
@@ -111,7 +111,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
             {/* Track grouping header, so a 5.1 track's six columns read as one
                 unit rather than six unrelated channels. */}
             <tr>
-              <th className="sticky left-0 z-10 bg-card px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <th className="sticky left-0 z-10 bg-card px-2 py-1 text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                 Out
               </th>
               {tracks.map((t, ti) => (
@@ -119,12 +119,12 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                   key={t.index}
                   colSpan={t.channels}
                   className={cn(
-                    "border-b border-border px-1 py-1 text-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground",
+                    "border-b border-border px-1 py-1 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground",
                     ti > 0 && "border-l border-border-strong",
                   )}
                 >
                   Track {t.index + 1}
-                  <span className="ml-1 font-mono normal-case text-subtle-foreground">
+                  <span className="ml-1 font-mono normal-case text-muted-foreground">
                     {t.layout}
                   </span>
                 </th>
@@ -137,7 +137,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                   <th
                     key={`${t.index}-${ci}`}
                     className={cn(
-                      "border-b border-border px-1 pb-1 text-center font-mono text-[10px] font-normal text-subtle-foreground",
+                      "border-b border-border px-1 pb-1 text-center font-mono text-sm font-normal text-muted-foreground",
                       ti > 0 && ci === 0 && "border-l border-border-strong",
                     )}
                   >
@@ -150,7 +150,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
           <tbody>
             {[0, 1].map((out) => (
               <tr key={out}>
-                <td className="sticky left-0 z-10 bg-card px-2 py-1 font-mono text-[11px] font-semibold">
+                <td className="sticky left-0 z-10 bg-card px-2 py-1 font-mono text-sm font-semibold">
                   {out === 0 ? "L" : "R"}
                 </td>
                 {tracks.map((t, ti) =>
@@ -260,9 +260,9 @@ function MatrixCellInput({
           onChange(Number.isFinite(v) ? v : 0);
         }}
         className={cn(
-          "tnum relative h-full w-full bg-transparent text-center font-mono text-[11px] outline-none",
+          "tnum relative h-full w-full bg-transparent text-center font-mono text-sm outline-none",
           "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
-          active ? "text-foreground" : "text-subtle-foreground",
+          active ? "text-foreground" : "text-muted-foreground",
         )}
       />
     </div>
@@ -322,7 +322,7 @@ function MatrixQuickFills({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Fill</span>
+      <span className="text-sm uppercase tracking-wider text-muted-foreground">Fill</span>
       <Button variant="outline" size="sm" onClick={identity}>
         All tracks 1:1
       </Button>

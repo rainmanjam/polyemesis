@@ -315,7 +315,7 @@ export function AudioMeter({
     <div className={cn("flex items-start gap-2", className)}>
       {labels && (
         <div
-          className="flex shrink-0 flex-col text-[9px] font-mono leading-none text-subtle-foreground"
+          className="flex shrink-0 flex-col text-[9px] font-mono leading-none text-muted-foreground"
           style={{ gap: `${barGap}px` }}
         >
           {labels.map((l, i) => (
@@ -367,7 +367,7 @@ export function MeterScale({ className }: { className?: string }) {
             key={m}
             className={cn(
               "absolute top-0 font-mono text-[9px] leading-none",
-              isBreak(m) ? "text-muted-foreground" : "text-subtle-foreground",
+              isBreak(m) ? "text-muted-foreground" : "text-muted-foreground",
             )}
             style={{
               left: `${left}%`,

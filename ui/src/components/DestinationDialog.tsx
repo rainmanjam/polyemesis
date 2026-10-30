@@ -1186,7 +1186,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     if (rows.length === 0) return null;
                     return (
                       <div key={g.key}>
-                        <div className="px-2 pt-2 pb-1 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
+                        <div className="px-2 pt-2 pb-1 text-sm font-medium uppercase tracking-wider text-muted-foreground">
                           {g.label}
                         </div>
                         {rows.map((p) => {
@@ -1222,7 +1222,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 The suffix is what stops "sign in" reading as
                                 "and you are done". */}
                             {(rowCaps.tier === "integrated" || rowCaps.tier === "partial") && (
-                              <span className="shrink-0 text-[9px] text-muted-foreground">
+                              <span className="shrink-0 text-sm text-muted-foreground">
                                 {rowCaps.tier === "partial" ? "sign in + paste key" : "sign in"}
                               </span>
                             )}
@@ -1230,11 +1230,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                                 platform and then wondering why the URL box is
                                 still empty. */}
                             {p.kind && !p.url && rowCaps.tier !== "unsupported" && (
-                              <span className="shrink-0 text-[9px] text-muted-foreground">
+                              <span className="shrink-0 text-sm text-muted-foreground">
                                 {t("dest.urlFromDashboard")}
                               </span>
                             )}
-                            <span className="shrink-0 font-mono text-[9px] uppercase text-muted-foreground">
+                            <span className="shrink-0 font-mono text-sm uppercase text-muted-foreground">
                               {p.transport}
                             </span>
                             {p.id === presetId && <Check className="size-3 shrink-0" />}
@@ -1245,7 +1245,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     );
                   })}
                   {matches.length === 0 && (
-                    <p className="px-2 py-3 text-[11px] text-muted-foreground">
+                    <p className="px-2 py-3 text-sm text-muted-foreground">
                       Nothing matches “{query}”. Any platform works: pick a generic transport
                       below and paste the URL and key from its dashboard.
                     </p>
@@ -1268,13 +1268,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             >
               <div className="flex items-center gap-1.5">
                 <Badge variant={unsupported ? "warn" : "outline"}>{tierInfo(caps.tier).label}</Badge>
-                <span className="text-[10px] text-muted-foreground">{tierInfo(caps.tier).help}</span>
+                <span className="text-sm text-muted-foreground">{tierInfo(caps.tier).help}</span>
               </div>
-              <p className={unsupported ? "text-[11px] text-warn" : "text-[11px] text-muted-foreground"}>
+              <p className={unsupported ? "text-sm text-warn" : "text-sm text-muted-foreground"}>
                 {caps.summary}
               </p>
               {caps.readFirst && (
-                <p className="text-[10px] text-muted-foreground">{caps.readFirst}</p>
+                <p className="text-sm text-muted-foreground">{caps.readFirst}</p>
               )}
               <div className="flex flex-wrap gap-1">
                 {CAPABILITY_COLUMNS.map((col) => {
@@ -1294,7 +1294,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 })}
               </div>
               {unsupported && (
-                <p className="text-[10px] text-warn">
+                <p className="text-sm text-warn">
                   Nothing stops you saving this — if your account is one of the exceptions, paste
                   what the platform gave you and it will stream. It is unticked here so that a
                   destination which can never connect does not look like a bug in polyemesis.
@@ -1344,13 +1344,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </SelectContent>
                 </Select>
               ) : readFailed(accountsRead) ? (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   The connected accounts could not be read, so this cannot say whether{" "}
                   {caps.name} is already linked. Reopen this dialog once the connection is
                   back rather than reconnecting — following that link leaves this form.
                 </p>
               ) : !mayClaim(accountsRead) ? (
-                <p className="text-[11px] text-muted-foreground">Checking for a linked account…</p>
+                <p className="text-sm text-muted-foreground">Checking for a linked account…</p>
               ) : (
                 <Button variant="outline" size="sm" asChild>
                   <a href={api.connectUrl(caps.connect)}>
@@ -1363,7 +1363,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   and an operator who reads "connect an account" as "this is how
                   I get my key" will conclude the feature is broken when the key
                   field stays empty. */}
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {manualKey
                   ? `Signing in gets you ${[
                       supportOf(caps, "chatRead") === "yes" && "chat",
@@ -1401,7 +1401,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   ))}
                 </SelectContent>
               </Select>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Nearest is usually best. Every address here already carries the
                 application path the platform needs.
               </span>
@@ -1413,7 +1413,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               dashboard leaves out. Shown before the empty box, not after it. */}
           {kind === "rtmp" && service?.perChannelIngest && service.note && (
             <p
-              className="rounded-md border border-warn/40 bg-warn/10 p-2 text-[11px] leading-snug"
+              className="rounded-md border border-warn/40 bg-warn/10 p-2 text-sm leading-snug"
               data-testid="per-channel-ingest-note"
             >
               {service.note}
@@ -1438,7 +1438,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               }
             />
             {kind === "file" && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Written into the recordings directory. A relative name only — no paths.
               </span>
             )}
@@ -1446,7 +1446,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 is one whose platform issues the hostname per account. Say that
                 where the empty box is, not in a tooltip somewhere else. */}
             {selectedPreset?.kind && !selectedPreset.url && kind !== "file" && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {selectedPreset.name} issues its ingest URL per account or per broadcast, so
                 there is nothing to prefill — paste the one from its dashboard.
               </span>
@@ -1464,7 +1464,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 placeholder="xxxx-xxxx-xxxx-xxxx"
               />
               {selectedPreset && !selectedPreset.separateKey && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {selectedPreset.name} puts everything in the URL — leave this empty unless
                   its dashboard shows a separate key.
                 </span>
@@ -1473,7 +1473,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   button that is never going to appear. The reason travels with
                   it so this does not read as an apology. */}
               {manualKey && caps && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {showOAuth
                     ? `Type this one in even with an account connected. ${caps.reasons?.streamKey ?? ""}`
                     : caps.reasons?.streamKey ??
@@ -1518,7 +1518,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <span className="text-[13px] font-medium">{t("dest.copySource")}</span>
                   <Badge variant="outline" className="ml-auto">recommended</Badge>
                 </span>
-                <span className="mt-1 block text-[10px] text-muted-foreground">
+                <span className="mt-1 block text-sm text-muted-foreground">
                   <span className="font-mono">-c:v copy</span> — the source video exactly as your
                   encoder sent it. No encode, no process, no CPU.
                 </span>
@@ -1548,7 +1548,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <StatusDot tone={renditionId !== PASSTHROUGH ? "live" : "idle"} size="sm" />
                   <span className="text-[13px] font-medium">{t("dest.useSharedEncode")}</span>
                 </span>
-                <span className="mt-1 block text-[10px] text-muted-foreground">
+                <span className="mt-1 block text-sm text-muted-foreground">
                   {/* THREE STATES, NOT TWO. #719. "No shared encodes yet"
                       is a POSITIVE CLAIM -- it says the server answered and
                       there are none -- and it sends the operator to the
@@ -1592,7 +1592,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </Select>
 
                 {selectedView && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {/* The consequence, computed rather than asserted. Whether
                         this costs a new encode or nothing at all is the fact
                         the whole shared model turns on, and it was previously
@@ -1601,7 +1601,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </span>
                 )}
                 {selectedRendition?.note && (
-                  <span className="text-[10px] text-muted-foreground">{selectedRendition.note}</span>
+                  <span className="text-sm text-muted-foreground">{selectedRendition.note}</span>
                 )}
 
                 {/* #661. The catalogue knew this all along and nothing read it
@@ -1618,11 +1618,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     data-testid="rendition-concerns"
                     className="flex flex-col gap-1 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5"
                   >
-                    <span className="text-[10px] font-medium text-warn">
+                    <span className="text-sm font-medium text-warn">
                       {t("dest.renditionConcerns")}
                     </span>
                     {concerns.map((c) => (
-                      <span key={c.field} className="text-[10px] text-muted-foreground">
+                      <span key={c.field} className="text-sm text-muted-foreground">
                         {c.detail}{" "}
                         <a
                           href={c.source}
@@ -1650,10 +1650,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     open={variantOpen}
                     onToggle={(e) => setVariantOpen((e.target as HTMLDetailsElement).open)}
                   >
-                    <summary className="cursor-pointer text-[11px] font-medium">
+                    <summary className="cursor-pointer text-sm font-medium">
                       {t("dest.customiseSummary")}
                     </summary>
-                    <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    <p className="mt-1.5 text-sm text-muted-foreground">
                       {t("dest.variantWarning", { name: selectedRendition.name })}
                     </p>
                     <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1704,7 +1704,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     {platformVideo && (
                       <button
                         type="button"
-                        className="mt-2 text-left text-[10px] text-primary underline hover:opacity-80"
+                        className="mt-2 text-left text-sm text-primary underline hover:opacity-80"
                         onClick={() => {
                           // The TOP of the range, not the bottom.
                           //
@@ -1726,7 +1726,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       </button>
                     )}
                     {variantErr && (
-                      <p className="mt-1.5 text-[10px] text-down">{variantErr}</p>
+                      <p className="mt-1.5 text-sm text-down">{variantErr}</p>
                     )}
                     <Button
                       type="button"
@@ -1786,10 +1786,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             {platformVideo && (
               <div className="rounded-md border border-border bg-background p-2">
                 <span className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="text-[11px] font-medium">
+                  <span className="text-sm font-medium">
                     {guidance.find((g) => g.id === presetId)?.name ?? "This platform"} publishes:
                   </span>
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-sm text-muted-foreground">
                     {[
                       platformVideo.width && platformVideo.height
                         ? `${platformVideo.width}×${platformVideo.height}`
@@ -1807,14 +1807,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   </span>
                 </span>
                 {platformVideo.note && (
-                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                     {platformVideo.note}
                   </p>
                 )}
                 {/* The disclaimer this catalogue has always carried, applied to
                     numbers rather than to hostnames. A figure whose provenance
                     is not on screen is indistinguishable from a guess. */}
-                <p className="mt-1 text-[10px] text-subtle-foreground">
+                <p className="mt-1 text-sm text-muted-foreground">
                   Starting point, not a rule —{" "}
                   <a
                     href={platformVideo.source}
@@ -1830,7 +1830,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             )}
 
             {leaving && (
-              <span className="text-[10px] text-warn">
+              <span className="text-sm text-warn">
                 {leaveConsequence(leaving)}
               </span>
             )}
@@ -1845,11 +1845,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   checked={copyOn}
                   onCheckedChange={(v) => setAudio({ ...audio, copy: v })}
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {copyOn ? "Copy the ingest tracks" : "Mix and re-encode"}
                 </span>
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {copyOn
                   ? "This destination forwards your encoder's own audio tracks untouched — no decode, no mix, no encoder. Which tracks go out, and which roles are excluded, still apply. Everything the mix does to the samples does not: gain, normalization, loudness, ducking, delay and mono are all refused on save rather than silently ignored."
                   : "The mix path: your routing profile decides the tracks and levels, and the result is encoded to one stereo track. Switch to copy for an archive or a hand-off where the receiver can take the tracks as they are."}
@@ -1870,9 +1870,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 className="w-24"
                 disabled={copyOn}
               />
-              <span className="text-[11px] text-muted-foreground">kbps, AAC stereo</span>
+              <span className="text-sm text-muted-foreground">kbps, AAC stereo</span>
             </div>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {copyOn
                 ? "Not used: nothing is encoded, so the bitrate is whatever your encoder sent."
                 : "Mixed here from this destination's own routing profile, whichever rendition it is on — a rendition never touches audio."}
@@ -1885,8 +1885,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               <span
                 className={
                   bitrate > (service?.recommended.maxAudioKbps ?? 0)
-                    ? "text-[10px] text-warn"
-                    : "text-[10px] text-muted-foreground"
+                    ? "text-sm text-warn"
+                    : "text-sm text-muted-foreground"
                 }
                 data-testid="audio-ceiling-hint"
               >
@@ -1915,7 +1915,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <SelectItem value="opus">Opus — better below 64 kbps</SelectItem>
                 </SelectContent>
               </Select>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {copyOn
                   ? "Not used: nothing is encoded, so the codec is whatever your encoder sent."
                   : kind === "rtmp"
@@ -1932,11 +1932,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   onCheckedChange={(v) => setAudio({ ...audio, mono: v })}
                   disabled={copyOn}
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {audio.mono ? "Mono" : "Stereo"}
                 </span>
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {copyOn
                   ? "Not used: folding to one channel needs a decode and a re-encode, which is what copy removes."
                   : "Mono folds your mix down rather than re-routing it, and halves the bitrate on talk content for no perceptual loss."}
@@ -1947,7 +1947,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several
                 content classes, Facebook has no way to widen a broadcast's audience once
                 someone has already seen it, and going live publicly by accident cannot be
@@ -1978,7 +1978,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectItem value="public">{t("dest.public")}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-sm text-muted-foreground">
                       "Leave as it is" is the safe default and means no visibility write happens at
                       all. That matters: YouTube's update is destructive by section, so a write
                       that omitted this would revert your broadcast to its default rather than
@@ -2019,7 +2019,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-sm text-muted-foreground">
                       "No" is a declaration, not the absence of one, so it is sent. This is written
                       through YouTube's video resource rather than the broadcast, because that is
                       the only place it is settable once a broadcast exists.
@@ -2034,7 +2034,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <div className="flex flex-col gap-1">
                     {TWITCH_LABELS.map((id) => (
                       <div key={id} className="flex items-center justify-between gap-2">
-                        <span className="text-[11px]">{id.replace(/([A-Z])/g, " $1").trim()}</span>
+                        <span className="text-sm">{id.replace(/([A-Z])/g, " $1").trim()}</span>
                         <Switch
                           checked={compliance.labels?.[id] ?? false}
                           onCheckedChange={(v) =>
@@ -2047,7 +2047,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       </div>
                     ))}
                   </div>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     Twitch requires these for mature games, sexual themes, drugs, gambling and
                     graphic violence. "Mature game" is not here because Twitch derives it from the
                     category and refuses to let anything set it.
@@ -2056,7 +2056,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               )}
 
               {platform === "facebook" && facebookTargetsAPage && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   This account publishes to a Page, and a Page broadcast is public: Facebook
                   has no personal audience to restrict it to. There is no audience setting to
                   make, which is why one is not offered.
@@ -2106,7 +2106,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       ))}
                     </SelectContent>
                   </Select>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     Applied when the broadcast is CREATED, not while it airs &mdash; changing this
                     afterwards takes effect on the next broadcast, not the current one. If this
                     destination is later pointed at a Page, the setting stops applying: a Page
@@ -2139,7 +2139,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   // actually send. See the payload note at `multitrack` above.
                   onCheckedChange={setMultitrack}
                 />
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {multitrack ? "Negotiate at go-live" : "Use the ordinary Twitch ingest"}
                 </span>
               </div>
@@ -2147,7 +2147,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   negotiation that does not succeed is the EXPECTED outcome on
                   the machine most operators run this on, so saying it in amber
                   would train them to read a normal broadcast as broken. */}
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Asks Twitch at go-live for an ingest endpoint, a stream key it mints for this
                 broadcast, and the audio tracks it will accept &mdash; which is what a second
                 (VOD) audio mix needs, because the ordinary Twitch ingest carries one track.
@@ -2161,7 +2161,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   asked at all until the machine's GPU is declared, and the
                   answer is a line on this destination's card rather than a
                   dialog nobody is standing in front of at go-live. */}
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Nothing is asked until this machine's GPU is declared under Settings &rarr;
                 Pipeline &rarr; Enhanced Broadcasting hardware; with none declared the negotiation
                 is skipped rather than attempted and failed. What was decided appears on this
@@ -2191,7 +2191,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {platform === "facebook" && (
             <div className="flex flex-col gap-3 rounded-md border border-border p-2">
               <p className="text-xs font-medium">{t("dest.fbBoxTitle")}</p>
-              <span className="text-[10px] text-muted-foreground">{t("dest.fbBoxIntro")}</span>
+              <span className="text-sm text-muted-foreground">{t("dest.fbBoxIntro")}</span>
 
               {/* Both costs stated, because both are real and neither is
                   guessable. The reconnect is unavoidable rather than sloppy: a
@@ -2225,7 +2225,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       emphasised -- and a translator given a sentence fragment
                       ending in a comma cannot reorder it into their own grammar,
                       which is how emphasis markup usually ruins a catalogue. */}
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("dest.fbBackupHelp")} <strong>{t("dest.fbBackupCost")}</strong>{" "}
                     {t("dest.fbBackupReconnect")}
                   </span>
@@ -2289,7 +2289,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 >
                   <Plus className="size-3.5" /> {t("dest.fbCrosspostAdd")}
                 </Button>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("dest.fbCrosspostHelp")}
                 </span>
               </div>
@@ -2305,7 +2305,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   placeholder={t("dest.fbDonatePlaceholder")}
                   className="font-mono"
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("dest.fbDonateHelp")}
                 </span>
               </div>
@@ -2318,11 +2318,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               {(transport.noDurationFilesize ||
                 (transport.muxQueuePackets ?? 0) > 0 ||
                 (transport.rwTimeoutSeconds ?? 0) > 0) && (
-                <span className="ml-2 text-[10px] text-muted-foreground">(customised)</span>
+                <span className="ml-2 text-sm text-muted-foreground">(customised)</span>
               )}
             </summary>
             <div className="mt-2 flex flex-col gap-3">
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 Leave all of these alone unless a platform is misbehaving. Every one is off by
                 default, and off means polyemesis sends exactly the FFmpeg command it always has.
               </span>
@@ -2340,7 +2340,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                   className="w-24"
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   0 disables it. Worth setting on a platform behind a load balancer: a far end that
                   disappears without closing the connection otherwise blocks the muxer forever.
                   FFmpeg keeps running, polyemesis sees a healthy process, and the stream is off air
@@ -2361,7 +2361,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </div>
               )}
               {kind === "rtmp" && (
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   Both are necessarily zero on a live stream, and some ingests read a zero duration
                   as a broken file rather than as a live one. RTMP only.
                 </span>
@@ -2393,7 +2393,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("dest.muxQueuePair")}
               </span>
 
@@ -2429,7 +2429,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
               </div>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 0 on both takes the default, 1s doubling to 30s. A destination that stays up past a
                 minute is treated as healthy and starts again from the shorter delay.
               </span>
@@ -2447,7 +2447,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                   className="w-24"
                 />
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   0 retries forever, which is the default and is right for a platform that is
                   merely slow to come back. Set it when you would rather be TOLD: a destination
                   retrying forever looks exactly like one that works &mdash; the card says
@@ -2461,14 +2461,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           {selectedPreset && (
             <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">
-              <p className="text-[10px] text-muted-foreground">{selectedPreset.notes}</p>
-              <p className="text-[10px] text-muted-foreground">{PRESET_DISCLAIMER}</p>
+              <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
+              <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
               {selectedPreset.helpUrl && (
                 <a
                   href={selectedPreset.helpUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-[10px] underline underline-offset-2"
+                  className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
                 >
                   <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
                 </a>

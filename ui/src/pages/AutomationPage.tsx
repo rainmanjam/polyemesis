@@ -989,7 +989,7 @@ function Schedules({
                       {s.nextAt ? (
                         timestamp(s.nextAt)
                       ) : (
-                        <span className="text-subtle-foreground">never again</span>
+                        <span className="text-muted-foreground">never again</span>
                       )}
                     </TableCell>
                     <TableCell className="text-center">
@@ -1053,7 +1053,7 @@ function Schedules({
               </div>
             ))
           )}
-          <p className="text-micro text-subtle-foreground">
+          <p className="text-micro text-muted-foreground">
             {t("auto.missedNote")}
           </p>
         </CardContent>

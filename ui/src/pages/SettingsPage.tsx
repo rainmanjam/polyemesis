@@ -2618,7 +2618,7 @@ export function PlatformCredCard({
             {inUse?.message}
             {inUse && inUse.destinations.length > 0 && (
               <span className="mt-2 flex flex-col gap-0.5">
-                <span className="text-micro uppercase tracking-wider text-subtle-foreground">
+                <span className="text-micro uppercase tracking-wider text-muted-foreground">
                   {t("set.disconnectInUseList")}
                 </span>
                 {/* NAMED, not counted. "3 destinations" is not something an
@@ -3039,7 +3039,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               <span className="text-tiny text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
-                  <span className="text-micro text-subtle-foreground">auto resolved to</span>
+                  <span className="text-micro text-muted-foreground">auto resolved to</span>
                 )}
                 <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>

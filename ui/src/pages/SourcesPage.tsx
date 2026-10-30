@@ -620,7 +620,7 @@ export function SourceCard({
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
             <div key={proto} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
+              <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {proto}
               </span>
               {/* Gated on what the string CARRIES, not on the row's label.
@@ -670,7 +670,7 @@ export function SourceCard({
         {/* The token, and the truth about it. */}
         <div className="flex flex-col gap-1.5 border-t border-border pt-2">
           <div className="flex items-center gap-2">
-            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-subtle-foreground">
+            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
               {t("sources.token")}
             </span>
             <SecretCode value={source.token} />
@@ -768,7 +768,7 @@ function NumberField({
     <div className="flex flex-col gap-1">
       <Label className="flex items-center gap-1">
         {label}
-        <span className="font-normal text-subtle-foreground">
+        <span className="font-normal text-muted-foreground">
           {min}–{max}
         </span>
         {hint && <InfoHint body={hint} />}
