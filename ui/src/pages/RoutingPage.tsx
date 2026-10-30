@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Archive,
+  ChevronDown,
   Clock,
   Gauge,
   Loader2,
@@ -27,6 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/AppLayout";
@@ -35,6 +37,7 @@ import { TrackRows, type TrackRowsLive } from "@/components/signature/TrackRows"
 import { MixMatrix } from "@/components/signature/MixMatrix";
 import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
 import { routingChanges } from "@/lib/routingDiff";
+import { PresetReviewDialog, type PresetReview } from "@/components/PresetReviewDialog";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
@@ -42,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
+import { readVodStash, writeVodStash } from "@/lib/vodStash";
 import { isLevelOnlySave } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
 import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
@@ -191,6 +195,10 @@ export function RoutingPage() {
   // stash is an undo for the toggle, not a clipboard between destinations.
   const stashedVod = useRef<RoutingProfile | null>(null);
 
+  // The preset waiting on the review dialog (A14). applyPresetTo reads the
+  // draft it will replace from draftRef, after its await.
+  const [presetReview, setPresetReview] = useState<PresetReview | null>(null);
+
   // ---- what applyPresetTo re-checks AFTER its await ----
   //
   // A closure captures values, not state, so reading `selected` or `vodProfile`
@@ -232,13 +240,14 @@ export function RoutingPage() {
   // The drafts as last rendered, for Save to compare after its awaits. A
   // closure holds the values from the click, which is exactly what is compared
   // AGAINST; this is the other side.
-  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null }>({
+  const draftRef = useRef<{ profile: RoutingProfile | null; vod: RoutingProfile | null; dirty: boolean }>({
     profile: null,
     vod: null,
+    dirty: false,
   });
   useEffect(() => {
-    draftRef.current = { profile, vod: vodProfile };
-  }, [profile, vodProfile]);
+    draftRef.current = { profile, vod: vodProfile, dirty };
+  }, [profile, vodProfile, dirty]);
 
   // The live editor's latest compile and the draft it was compiled from. The
   // save bar compares it, levels masked, with the stored graph to say whether
@@ -322,8 +331,9 @@ export function RoutingPage() {
       setVodProfile(vod);
       selectedIdRef.current = found.destination.id;
       vodEnabledRef.current = vod !== null;
-      // A stash from the destination we just left is not an undo for this one.
-      stashedVod.current = null;
+      // A stash from the destination we just left is not an undo for this one;
+      // this one's own, from earlier in the tab, is (A14).
+      stashedVod.current = readVodStash(found.destination.id);
       setDirty(false);
     }
   }, [id, list]);
@@ -470,6 +480,7 @@ export function RoutingPage() {
     setVodProfile(storedVod);
     vodEnabledRef.current = storedVod !== null;
     stashedVod.current = null;
+    writeVodStash(found.destination.id, null);
     setDirty(false);
   };
 
@@ -512,10 +523,36 @@ export function RoutingPage() {
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
         // A preset arrives unmuted; a mute the operator set stays (carryMutes).
-        if (mix === "live") setProfile((prev) => carryMutes(res.profile, prev));
-        else setVodProfile(res.profile);
+        const before = mix === "live" ? draftRef.current.profile : draftRef.current.vod;
+        const after = mix === "live" ? carryMutes(res.profile, before) : res.profile;
+        // SHOWN BEFORE IT LANDS (A14). What goes in, what comes out and which
+        // destination changes, with Back to edit; nothing is written until the
+        // operator says so, and even then only into the draft Save applies.
+        const ok = await new Promise<boolean>((resolve) =>
+          setPresetReview({ presetId, mix, before, after, resolve }),
+        );
+        setPresetReview(null);
+        if (!ok) return null;
+        if (seq !== presetSeq.current[mix]) return null;
+        if (selectedIdRef.current !== destAtClick) return null;
+        const wasDirty = draftRef.current.dirty;
+        if (mix === "live") setProfile(after);
+        else setVodProfile(after);
         setDirty(true);
-        toast.success(t("route.presetApplied"));
+        // Undo puts back the very draft the preset replaced, dirty flag and all,
+        // and only while the same destination is still selected.
+        toast.success(t("route.presetApplied"), {
+          action: {
+            label: t("routing.matrix.undo"),
+            onClick: () => {
+              if (selectedIdRef.current !== destAtClick) return;
+              presetSeq.current = { ...presetSeq.current, [mix]: presetSeq.current[mix] + 1 };
+              if (mix === "live") setProfile(before);
+              else setVodProfile(before);
+              setDirty(wasDirty);
+            },
+          },
+        });
         return res.routing;
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("route.couldNotApplyThePreset"));
@@ -1023,7 +1060,10 @@ export function RoutingPage() {
                 // Switching OFF stashes what is being dropped, so switching
                 // back on is an UNDO rather than a fresh copy of the live mix.
                 // See stashedVod.
-                if (next === null && vodProfile) stashedVod.current = vodProfile;
+                if (next === null && vodProfile) {
+                  stashedVod.current = vodProfile;
+                  writeVodStash(selected.id, vodProfile);
+                }
                 setVodProfile(next);
                 vodEnabledRef.current = next !== null;
                 setDirty(true);
@@ -1114,6 +1154,13 @@ export function RoutingPage() {
         changes={pendingChanges}
         onSave={save}
         onDiscard={discardChanges}
+      />
+
+      <PresetReviewDialog
+        review={presetReview}
+        presetName={presets.find((p) => p.id === presetReview?.presetId)?.name ?? ""}
+        destinationName={selected?.name ?? ""}
+        live={!!selected?.enabled}
       />
     </div>
   );
@@ -1294,6 +1341,11 @@ function ProfileEditor({
     [onApplyPreset, onCompileError],
   );
 
+  // The three starters, in this order when the server has them; anything it
+  // does not offer is skipped rather than drawn as a dead tile.
+  const starters = STARTER_PRESETS.flatMap((id) => ctx.mixPresets.filter((p) => p.id === id));
+  const recipes = ctx.mixPresets.filter((p) => !STARTER_PRESETS.includes(p.id));
+
   const excludeRoles = profile.excludeRoles ?? [];
   // The compiler's own answer to "which tracks reach this destination", which
   // is the only one that survives a role exclusion.
@@ -1301,35 +1353,57 @@ function ProfileEditor({
 
   return (
     <>
-      {/* presets */}
+      {/* presets: three starters in view, the rest a click away (A14), so the
+          editor and Music rights are not pushed below the fold by a wall of
+          equal-weight tiles. Every preset goes through the review dialog. */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-1.5">
-            <Wand2 className="h-3.5 w-3.5" /> Presets
+            <Wand2 className="h-3.5 w-3.5" /> {t("routing.presets.title")}
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-wrap items-start gap-2">
           <PresetRow
-            presets={ctx.mixPresets}
+            presets={starters}
             opts={ctx.presetOpts}
             setOpts={ctx.setPresetOpts}
             trackOptions={ctx.trackOptions}
             onApply={handleApplyPreset}
           />
-          {ctx.platformPresets.length > 0 && (
-            <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-              <div className="text-sm uppercase tracking-wider text-muted-foreground">
-                Platform defaults
-              </div>
-              <PresetRow
-                presets={ctx.platformPresets}
-                opts={ctx.presetOpts}
-                setOpts={ctx.setPresetOpts}
-                trackOptions={ctx.trackOptions}
-                onApply={handleApplyPreset}
-                showMusicPolicy
-              />
-            </div>
+          {(recipes.length > 0 || ctx.platformPresets.length > 0) && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" data-testid="more-recipes">
+                  <ChevronDown /> {t("routing.presets.more")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="flex w-[min(44rem,90vw)] flex-col gap-3">
+                {recipes.length > 0 && (
+                  <PresetRow
+                    presets={recipes}
+                    opts={ctx.presetOpts}
+                    setOpts={ctx.setPresetOpts}
+                    trackOptions={ctx.trackOptions}
+                    onApply={handleApplyPreset}
+                  />
+                )}
+                {ctx.platformPresets.length > 0 && (
+                  <div className="flex flex-col gap-1.5 border-t border-border pt-3">
+                    <div className="text-sm uppercase tracking-wider text-muted-foreground">
+                      {t("routing.presets.platformDefaults")}
+                    </div>
+                    <PresetRow
+                      presets={ctx.platformPresets}
+                      opts={ctx.presetOpts}
+                      setOpts={ctx.setPresetOpts}
+                      trackOptions={ctx.trackOptions}
+                      onApply={handleApplyPreset}
+                      showMusicPolicy
+                    />
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
           )}
         </CardContent>
       </Card>
@@ -1717,6 +1791,11 @@ function SecondMixCard({
    Presets
    ========================================================================== */
 
+/** The presets shown without opening "More recipes": everything, no music and
+ *  mic only, the three a first-time operator reaches for (A14). The ids are
+ *  internal/routing/presets.go's. */
+const STARTER_PRESETS: readonly string[] = ["everything", "no-music", "mic-only"];
+
 interface PresetRowProps {
   presets: Preset[];
   opts: PresetOpts;
@@ -1750,7 +1829,7 @@ function PresetRow({
           </Button>
           {p.policy?.exclude && (
             <Badge variant="warn" className="w-fit">
-              no music
+              {t("route.railNoMusic")}
             </Badge>
           )}
           {p.needsMusicTrack && !p.platform && (
