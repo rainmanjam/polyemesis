@@ -111,7 +111,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu   -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
