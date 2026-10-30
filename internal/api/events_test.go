@@ -5,10 +5,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -215,7 +217,7 @@ func TestAReadTokenIsNeverSentChatOnTheEventsStream(t *testing.T) {
 		if !ok {
 			t.Fatal("the stream ended")
 		}
-		if spec, _ := eventstream.Lookup(f.Env.Type); spec.ReadScope != eventstream.Granted {
+		if spec, _ := eventstream.Lookup(f.Env.Type); spec.ReadScope == eventstream.Withheld {
 			t.Fatalf("a read token was sent %s", f.Env.Type)
 		}
 		if f.Env.Type == eventstream.TypeDestinationUp {
@@ -329,6 +331,53 @@ func TestAClientThatStopsReadingIsDisconnected(t *testing.T) {
 	}
 	if hub.HasSubscribers() {
 		t.Error("the disconnected client is still counted as a subscriber")
+	}
+}
+
+// TestAClientThatStopsReadingDoesNotHoldItsConnectionForever: the hub letting go
+// is half of it. The server has no WriteTimeout -- it would end every stream --
+// so the handler's per-write deadline is the only thing that unblocks a write
+// to a client that has stopped reading. If it were a silent no-op (a writer
+// wrapper without Unwrap makes http.ResponseController answer ErrNotSupported),
+// the handler goroutine and the connection would be held for ever. Measured on
+// the connection itself, not on the hub.
+func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	s := serverUnderTest(t, h)
+	hub := eventstream.NewHub(eventstream.WithClientBuffer(4))
+	s.stream = hub
+	tok := createScopedToken(t, h, sign, "stuck", db.ScopeAdmin)
+
+	closed := make(chan struct{})
+	srv := httptest.NewUnstartedServer(s.Handler())
+	var once sync.Once
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateClosed {
+			once.Do(func() { close(closed) })
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	// A raw connection with a tiny receive buffer that is never read.
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.(*net.TCPConn).SetReadBuffer(4096)
+	_, _ = conn.Write([]byte("GET /api/v1/events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + tok + "\r\n\r\n"))
+	waitForListener(t, hub)
+
+	big := strings.Repeat("x", 64<<10)
+	for i := 0; hub.HasSubscribers() && i < 100_000; i++ {
+		hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: big})
+	}
+	select {
+	case <-closed:
+	case <-time.After(writeWait + 10*time.Second):
+		t.Fatalf("the server still held the connection %s after the client stopped reading; "+
+			"the per-write deadline is not reaching the connection", writeWait+10*time.Second)
 	}
 }
 

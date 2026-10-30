@@ -19,7 +19,7 @@ its first tagged release.
   `held`, `keyChanged` and the whole failure reason.
   - Authenticated like the rest of the API: a bearer token or the session
     cookie, never a token in the URL. A `read` token gets everything except
-    chat.
+    chat and the audit alerts that are not on the timeline.
   - Every event is numbered. A client that reconnects with `Last-Event-ID` is
     replayed what it missed, for up to 5 minutes, or told `stream.gap`.
   - A client that falls 256 events behind is disconnected, not silently

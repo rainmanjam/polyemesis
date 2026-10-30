@@ -22,6 +22,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 )
@@ -74,9 +75,9 @@ const (
 	TypeStreamGap             Type = "stream.gap"
 )
 
-// Access says whether a read-scoped API token receives a type. There are two
-// values and no default: the zero value is Withheld, so a Spec written without
-// thinking about it withholds rather than discloses.
+// Access says whether a read-scoped API token receives a type. The zero value
+// is Withheld, so a Spec written without thinking about it withholds rather
+// than discloses.
 type Access int
 
 const (
@@ -84,6 +85,9 @@ const (
 	Withheld Access = iota
 	// Granted is sent to every principal.
 	Granted
+	// Partly is decided per event by the Spec's ReadIf, which must exist; a
+	// Partly row without one sends nothing to a read token.
+	Partly
 )
 
 // Spec is one row of the catalogue.
@@ -95,6 +99,18 @@ type Spec struct {
 	ReadScope Access
 	// Summary is the one line docs/EVENTS.md must carry for this type.
 	Summary string
+	// ReadIf decides a Partly row per event, on the REDACTED envelope.
+	ReadIf func(Envelope) bool
+}
+
+// alertOnTheTimeline is the alert row's ReadIf: a read token is sent exactly
+// the alerts it can already read on GET /timeline -- the stream's operational
+// transitions -- and none of the audit trail (sign-ins, token and settings
+// changes, rule edits, debug exports, upgrades), which is not on the timeline.
+// Anything that is not an alerts.Event is withheld: fail closed.
+func alertOnTheTimeline(env Envelope) bool {
+	a, ok := env.Data.(alerts.Event)
+	return ok && alerts.IsTimelineType(a.Type)
 }
 
 // catalogue is THE ONE PLACE an event type is declared to exist.
@@ -111,41 +127,43 @@ var catalogue = []Spec{
 	// Destinations. Status is readable by a read token over REST and /ws
 	// already; none of these carries a URL or a stream key, and every free-text
 	// field is redacted by Publish.
-	{TypeDestinationUp, TopicDestination, Granted, "A destination started delivering."},
-	{TypeDestinationDown, TopicDestination, Granted, "A destination stopped: failed, stalled, disabled or removed; reason says which, cause and failure say why."},
-	{TypeDestinationHeld, TopicDestination, Granted, "Polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry."},
-	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited."},
-	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart."},
-	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage."},
+	{TypeDestinationUp, TopicDestination, Granted, "A destination started delivering.", nil},
+	{TypeDestinationDown, TopicDestination, Granted, "A destination stopped: failed, stalled, disabled or removed; reason says which, cause and failure say why.", nil},
+	{TypeDestinationHeld, TopicDestination, Granted, "Polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry.", nil},
+	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited.", nil},
+	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart.", nil},
+	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage.", nil},
 
 	// Ingest and failover.
-	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest."},
-	{TypeIngestDisconnected, TopicIngest, Granted, "Nothing has arrived on a programme's ingest for the disconnect window."},
-	{TypeFailoverSwitched, TopicFailover, Granted, "A programme switched between its primary, backup and slate sources."},
+	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest.", nil},
+	{TypeIngestDisconnected, TopicIngest, Granted, "Nothing has arrived on a programme's ingest for the disconnect window.", nil},
+	{TypeFailoverSwitched, TopicFailover, Granted, "A programme switched between its primary, backup and slate sources.", nil},
 
 	// Go-live and stop: the platform broadcast's own lifecycle.
-	{TypeBroadcastLive, TopicBroadcast, Granted, "A platform broadcast was moved on air (or into testing) by polyemesis."},
-	{TypeBroadcastComplete, TopicBroadcast, Granted, "A platform broadcast was ended by polyemesis."},
-	{TypeBroadcastFault, TopicBroadcast, Granted, "A platform refused to move a broadcast; the stream itself is unaffected."},
+	{TypeBroadcastLive, TopicBroadcast, Granted, "A platform broadcast was moved on air (or into testing) by polyemesis.", nil},
+	{TypeBroadcastComplete, TopicBroadcast, Granted, "A platform broadcast was ended by polyemesis.", nil},
+	{TypeBroadcastFault, TopicBroadcast, Granted, "A platform refused to move a broadcast; the stream itself is unaffected.", nil},
 
 	// Recording.
-	{TypeRecordingStarted, TopicRecording, Granted, "A programme's recorder started writing."},
-	{TypeRecordingStopped, TopicRecording, Granted, "A programme's recorder stopped writing; reason says why."},
+	{TypeRecordingStarted, TopicRecording, Granted, "A programme's recorder started writing.", nil},
+	{TypeRecordingStopped, TopicRecording, Granted, "A programme's recorder stopped writing; reason says why.", nil},
 
 	// Chat is content a viewer wrote, under their name, and a moderation action
 	// names the viewer it was taken against. A read token is refused the REST
 	// scrollback (readScopeDeniedPatterns) and the live /ws copy (wsDrop); this
 	// is a third door to the same content and gets the same answer.
-	{TypeChatMessage, TopicChat, Withheld, "A chat message arrived from any connected platform."},
-	{TypeChatRetract, TopicChat, Withheld, "Chat messages that were delivered are gone: deleted, hidden, or swept by a ban."},
-	{TypeChatModeration, TopicChat, Withheld, "A moderation action was taken, by an operator or by automod."},
+	{TypeChatMessage, TopicChat, Withheld, "A chat message arrived from any connected platform.", nil},
+	{TypeChatRetract, TopicChat, Withheld, "Chat messages that were delivered are gone: deleted, hidden, or swept by a ban.", nil},
+	{TypeChatModeration, TopicChat, Withheld, "A moderation action was taken, by an operator or by automod.", nil},
 
-	// Operator alerts, fired and resolved, after alerts.Event.Redacted. The
-	// same rows are on GET /timeline, which a read token may read.
-	{TypeAlert, TopicAlert, Granted, "An operator alert fired or resolved."},
+	// Operator alerts, fired and resolved, after alerts.Event.Redacted. A read
+	// token gets the ones GET /timeline already shows it and no others: the
+	// audit half of the alert catalogue is not on the timeline, and a stream
+	// that sent it would widen what a read token can see.
+	{TypeAlert, TopicAlert, Partly, "An operator alert fired or resolved.", alertOnTheTimeline},
 
 	// The stream's own bookkeeping. Carries no data from anywhere else.
-	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST."},
+	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST.", nil},
 }
 
 // Catalogue returns every emitted type, in the order docs/EVENTS.md lists them.

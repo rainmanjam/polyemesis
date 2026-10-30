@@ -82,10 +82,13 @@ func TestEveryTypeConstantIsCatalogued(t *testing.T) {
 		if s.Topic == "" || s.Summary == "" {
 			t.Errorf("%s has no topic or no summary", s.Type)
 		}
+		if (s.ReadScope == Partly) != (s.ReadIf != nil) {
+			t.Errorf("%s: a Partly row needs a ReadIf, and only a Partly row may have one", s.Type)
+		}
 	}
 }
 
-var docRow = regexp.MustCompile("^\\| `([a-z._]+)` \\| ([a-z]+) \\| (yes|no) \\| (.+) \\|$")
+var docRow = regexp.MustCompile("^\\| `([a-z._]+)` \\| ([a-z]+) \\| (yes|no|partly) \\| (.+) \\|$")
 
 func docSection(t *testing.T, doc, heading string) string {
 	t.Helper()
@@ -121,10 +124,7 @@ func TestTheDocsListExactlyTheCatalogue(t *testing.T) {
 		t.Fatalf("docs/EVENTS.md lists %d types; the catalogue has %d", len(rows), len(cat))
 	}
 	for i, s := range cat {
-		read := "no"
-		if s.ReadScope == Granted {
-			read = "yes"
-		}
+		read := map[Access]string{Granted: "yes", Withheld: "no", Partly: "partly"}[s.ReadScope]
 		want := []string{string(s.Type), string(s.Topic), read, s.Summary}
 		for k := range want {
 			if rows[i][k] != want[k] {

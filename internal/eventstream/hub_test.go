@@ -275,9 +275,36 @@ func TestAReadScopedSubscriberIsNeverSentAWithheldType(t *testing.T) {
 	h.Publish(Envelope{Type: TypeChatRetract})
 	h.Publish(Envelope{Type: TypeDestinationDown})
 	for _, env := range drain(read) {
-		if spec, _ := Lookup(env.Type); spec.ReadScope != Granted {
+		if spec, _ := Lookup(env.Type); spec.ReadScope == Withheld {
 			t.Errorf("read-scoped subscriber was sent %s", env.Type)
 		}
+	}
+}
+
+// TestAReadTokenIsSentTheTimelinesAlertsAndNotTheAuditTrail: the alert row is
+// Partly. A read token can already read the stream-history alerts on
+// GET /timeline, so it is sent those; the audit half (sign-ins, token and
+// settings changes) is not on the timeline, and a stream that sent it would
+// widen what a read token sees. Anything that is not an alert payload at all is
+// withheld -- fail closed.
+func TestAReadTokenIsSentTheTimelinesAlertsAndNotTheAuditTrail(t *testing.T) {
+	h := NewHub()
+	read, _, _ := h.Subscribe(Filter{ReadScoped: true}, "")
+	defer read.Close()
+	admin, _, _ := h.Subscribe(Filter{}, "")
+	defer admin.Close()
+
+	h.Publish(Envelope{Type: TypeAlert, Data: alerts.Event{Type: alerts.TypeLoginFailed, Title: "sign-in failed"}})
+	h.Publish(Envelope{Type: TypeAlert, Data: alerts.Event{Type: alerts.TypeAPITokenCreated, Title: "token"}})
+	h.Publish(Envelope{Type: TypeAlert, Data: map[string]string{"type": "destination.down"}})
+	h.Publish(Envelope{Type: TypeAlert, Data: alerts.Event{Type: alerts.TypeDestinationDown, Title: "down"}})
+
+	got := drain(read)
+	if len(got) != 1 || got[0].Data.(alerts.Event).Type != alerts.TypeDestinationDown {
+		t.Fatalf("read token got %d alerts (%+v), want only the timeline's destination.down", len(got), got)
+	}
+	if n := len(drain(admin)); n != 4 {
+		t.Errorf("admin got %d alerts, want all 4", n)
 	}
 }
 

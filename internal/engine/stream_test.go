@@ -229,15 +229,21 @@ func TestEveryAlertReachesTheStreamThroughTheNotifiersOwnDoor(t *testing.T) {
 
 	e.Alerts().Publish(alerts.Event{
 		Type: alerts.TypeDestinationDown, Severity: alerts.SeverityCritical, Title: "YouTube is down",
+		Key:  "destination:3",
 		Text: "rtmp://a.rtmp.youtube.com/live2/abcd-efgh-ijkl-mnop refused",
 	})
 	ev := streamtest.Expect(t, sub, eventstream.TypeAlert)
+	// The subject survives: it is how a consumer pairs a fire with its
+	// resolution, and a field NAMED key is not a credential.
+	if got := ev.Data.(alerts.Event).Key; got != "destination:3" {
+		t.Errorf("alert key = %q, want the subject destination:3", got)
+	}
 	if ev.Source != nil {
 		t.Errorf("source = %+v: an alert names its subject in its own key and title, and "+
 			"an audit event published through the first engine would be stamped with a "+
 			"programme it has nothing to do with", ev.Source)
 	}
-	if text := ev.Data.(map[string]any)["text"].(string); text == "" || strings.Contains(text, "abcd-efgh-ijkl-mnop") {
+	if text := ev.Data.(alerts.Event).Text; text == "" || strings.Contains(text, "abcd-efgh-ijkl-mnop") {
 		t.Errorf("alert text = %q: empty, or the stream key survived", text)
 	}
 

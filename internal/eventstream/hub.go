@@ -129,13 +129,21 @@ func (f Filter) topicSet() map[Topic]bool {
 // wants is the per-connection policy, and it FAILS CLOSED: a type with no
 // catalogue row is sent to nobody, read-scoped or not. Publish refuses such a
 // type before it reaches here, so this is the net under that guard.
-func wants(topics map[Topic]bool, readScoped bool, t Type) bool {
-	spec, ok := Lookup(t)
+func wants(topics map[Topic]bool, readScoped bool, env Envelope) bool {
+	spec, ok := Lookup(env.Type)
 	if !ok {
 		return false
 	}
-	if readScoped && spec.ReadScope != Granted {
-		return false
+	if readScoped {
+		switch spec.ReadScope {
+		case Granted:
+		case Partly:
+			if spec.ReadIf == nil || !spec.ReadIf(env) {
+				return false
+			}
+		default:
+			return false
+		}
 	}
 	return topics == nil || topics[spec.Topic]
 }
@@ -183,7 +191,7 @@ func (h *Hub) Publish(env Envelope) {
 	h.ring = append(h.ring, env)
 	h.pruneLocked(now)
 	for s := range h.subs {
-		if !wants(s.topics, s.read, env.Type) {
+		if !wants(s.topics, s.read, env) {
 			continue
 		}
 		select {
@@ -252,7 +260,7 @@ func (h *Hub) Subscribe(f Filter, lastID string) (sub *Subscription, replay []En
 			gap = true
 		}
 		for _, env := range h.ring[from:] {
-			if wants(topics, f.ReadScoped, env.Type) {
+			if wants(topics, f.ReadScoped, env) {
 				replay = append(replay, env)
 			}
 		}
@@ -331,14 +339,23 @@ func (e Envelope) redacted() Envelope {
 		f.Line = alerts.Redact(f.Line)
 		e.Failure = &f
 	}
-	// An alert's own rules first: its fields are name/value PAIRS, and a pair
-	// whose name says credential is masked by alerts.Event.Redacted, which the
-	// generic tree pass cannot do -- it sees a key called "value". The notifier
-	// tap already hands over a redacted copy; doing it again here means a
-	// producer that publishes an alert some other way is held to the same
-	// rule rather than trusted to have remembered it.
+	// An alert is redacted by ITS OWN rules and NOT by the tree pass. Its
+	// fields are name/value PAIRS, and a pair whose name says credential is
+	// masked by alerts.Event.Redacted, which the generic pass cannot do -- it
+	// sees a key called "value". And the generic pass would do the opposite
+	// harm to the alert's own `key`, which is the SUBJECT ("destination:3"),
+	// not a credential: a field named "key" is masked outright by name, and an
+	// alert whose subject reads "[redacted]" cannot be correlated with its
+	// resolution. The key is run through the text redactor instead.
+	//
+	// The notifier tap already hands over a redacted copy; doing it again
+	// here means a producer that publishes an alert some other way is held to
+	// the same rule rather than trusted to have remembered it.
 	if a, ok := e.Data.(alerts.Event); ok {
-		e.Data = a.Redacted()
+		a = a.Redacted()
+		a.Key = alerts.Redact(a.Key)
+		e.Data = a
+		return e
 	}
 	if e.Data != nil {
 		e.Data = alerts.RedactTree(e.Data)

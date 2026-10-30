@@ -50,10 +50,18 @@ in a URL ends up in proxy logs, browser history and `Referer` headers, and the
 only client that would need it is a browser, which already has the cookie.
 
 **Scopes.** An `admin` token or a session receives every event. A `read` token
-receives every event except the `chat` topic. Chat is withheld because it is
-content viewers wrote under their names, and a read token is refused it
-everywhere else too. That rule lives in the event catalogue below, one row per
-type, and it fails closed: a type nobody has classified reaches nobody.
+receives everything except:
+
+- the `chat` topic. Chat is content viewers wrote under their names, and a read
+  token is refused it everywhere else too.
+- `alert` events that are not on the timeline. A read token is sent the
+  stream-history alerts it can already read on `GET /timeline` (failovers,
+  destinations going down, recovering, falling behind and catching up, and the
+  ingest being lost or recovered). It is not sent the audit trail: sign-ins,
+  token and settings changes, rule edits, debug exports and upgrades.
+
+The rule lives in the event catalogue below, one row per type, and it fails
+closed: a type nobody has classified reaches nobody.
 
 **Revocation reaches an open stream.** Revoking the token, or changing the
 password for a session, ends the stream within one heartbeat (15 seconds).
@@ -167,7 +175,7 @@ real producer, to actually be emitted.
 | `chat.message` | chat | no | A chat message arrived from any connected platform. |
 | `chat.retract` | chat | no | Chat messages that were delivered are gone: deleted, hidden, or swept by a ban. |
 | `chat.moderation` | chat | no | A moderation action was taken, by an operator or by automod. |
-| `alert` | alert | yes | An operator alert fired or resolved. |
+| `alert` | alert | partly | An operator alert fired or resolved. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
 ### Destinations
@@ -284,7 +292,8 @@ one of the [alert types](MONITORING.md), for example `destination.down` or
 
 Every alert is sent, whether or not a rule matches it. Coalescing is a
 courtesy to a chat channel and does not apply here: a destination flapping 12
-times is 12 `alert` events.
+times is 12 `alert` events. A `read` token is sent only the alert types that
+appear on `GET /timeline`; see [Connecting](#connecting).
 
 ### Redaction
 
