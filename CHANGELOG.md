@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Added
 
+- **A startup warning on FFmpeg 9.0 and 9.0.1.** Both releases shipped a
+  scheduler change that can misorder output, end streams early and use extreme
+  memory, and 9.0.2 reverted it (FFmpeg commit 9d4ca2122). A destination that
+  mixes several audio tracks is the shape it affects. polyemesis still starts
+  on them, but the banner and the log now name the binary and say to install
+  9.0.2 or later, or an 8.1 release. 9.0.2 and 8.x stay quiet. FFmpeg 9.0.2 is
+  tested and supported; see docs/INSTALL.md.
+
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends
@@ -322,6 +330,15 @@ its first tagged release.
 
 ### Fixed
 
+- **`install.sh --ffmpeg force` downloads again.** It pinned a BtbN daily
+  build, and BtbN deletes dailies after about two weeks, so every forced
+  FFmpeg install failed with a 404. It now pins the month-end release
+  `autobuild-2026-09-30-13-08` (FFmpeg 8.1.3), the kind BtbN keeps for about
+  two years, and a test refuses any pin that is not a month-end build.
+- **A stale FFmpeg pin in the Docker image now says what to change.** When
+  Alpine moves `ffmpeg` to a new version, the image build used to stop at apk's
+  "unable to select packages". It now prints the version the branch serves and
+  the `FFMPEG_VERSION` line to change.
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now
   names the row's programme, and Monitoring switches to that programme before

@@ -45,6 +45,7 @@ on:
       - "internal/srtserver/**"
       - "internal/multitrack/**"
       - "internal/uploadprobe/**"
+      - "internal/routing/**"
       - "go.mod"
       - "go.sum"
       # THIS FILE COUNTS, for the reason obs-multitrack.yml gives.
@@ -162,4 +163,4 @@ jobs:
             ./internal/media/ ./internal/meters/ ./internal/clipper/ \
             ./internal/clips/ ./internal/playlistmedia/ ./internal/transcribe/ \
             ./internal/recording/ ./internal/rtmpserver/ ./internal/srtserver/ \
-            ./internal/multitrack/ ./internal/uploadprobe/
+            ./internal/multitrack/ ./internal/uploadprobe/ ./internal/routing/
