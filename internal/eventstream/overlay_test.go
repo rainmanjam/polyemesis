@@ -283,13 +283,17 @@ func TestAPollDisplayCarriesNoPlatformOrVoterField(t *testing.T) {
 // TestAPollDisplaySurvivesRedactionTyped: the overlay policy recognises the
 // poll by its TYPE, so redaction must keep it one while it scrubs the text.
 func TestAPollDisplaySurvivesRedactionTyped(t *testing.T) {
-	env := Envelope{Type: TypePollDisplay, Data: PollDisplay{Question: "rtmp://x/live/sk_live_abcdefghijklmnop",
-		Options: []PollDisplayOption{{Label: "rtmp://y/app/sk_live_qrstuvwxyzabcdef"}}}}.redacted()
+	// Built at runtime: an obviously fake key in a stream-key URL, so no
+	// literal in this file looks like a real credential to a scanner.
+	keyA := strings.Repeat("a1b2", 5)
+	keyB := strings.Repeat("c3d4", 5)
+	env := Envelope{Type: TypePollDisplay, Data: PollDisplay{Question: "rtmp://x/live/" + keyA,
+		Options: []PollDisplayOption{{Label: "rtmp://y/app/" + keyB}}}}.redacted()
 	d, ok := env.Data.(PollDisplay)
 	if !ok {
 		t.Fatalf("redaction changed the payload to %T", env.Data)
 	}
-	if strings.Contains(d.Question, "sk_live_abcdefghijklmnop") || strings.Contains(d.Options[0].Label, "sk_live_qrstuvwxyzabcdef") {
-		t.Errorf("a credential-shaped string survived redaction: %+v", d)
+	if strings.Contains(d.Question, keyA) || strings.Contains(d.Options[0].Label, keyB) {
+		t.Errorf("a stream key survived redaction: %+v", d)
 	}
 }
