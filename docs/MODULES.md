@@ -154,7 +154,7 @@ architectural choice, not an omission: see
 
 | Tool | Requirement | Licence | Why |
 |---|---|---|---|
-| **FFmpeg** | 6.0+ required, 8.1.2 recommended, **libsrt needed for multitrack** | LGPL-2.1+/GPL-2+ by build | Every ingest, route, encode and recording |
+| **FFmpeg** | 6.0+ required, 8.1.3 or 9.0.2 recommended (never 9.0.0/9.0.1), **libsrt needed for multitrack** | LGPL-2.1+/GPL-2+ by build | Every ingest, route, encode and recording |
 | **ffprobe** | ships with FFmpeg | same | Stream probing, keyframe indexes, verification |
 | **whisper.cpp** | optional (`whisper`, `whisper-cli`, `whisper-cpp`) | MIT | Transcription. Absent means the feature is off, not broken |
 
@@ -182,7 +182,7 @@ do not reach polyemesis's own MIT-licensed code.
 > in FFmpeg **7.1** — so Enhanced RTMP multitrack ingest, which
 > [OBS.md](OBS.md), [FAQ.md](FAQ.md), [CONFIGURATION.md](CONFIGURATION.md) and
 > the README all describe as working on 7.1+, does **not** work in this image.
-> The default Alpine image (8.1.2) and the VA-API image (8.0.1) are both above
+> The default Alpine image (8.1.3) and the VA-API image (8.0.1) are both above
 > the floor. NVENC is what `Dockerfile.cuda` is for; if you also need multitrack
 > RTMP ingest, do not use it.
 

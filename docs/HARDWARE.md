@@ -141,7 +141,7 @@ host at `docker run` time or it does not arrive.
 > base's stock FFmpeg, `7:6.1.1-3ubuntu5` (`Dockerfile.cuda:132`), and multitrack
 > FLV demuxing landed in FFmpeg **7.1** — see
 > [OBS.md](OBS.md#enhanced-rtmp-multitrack-works-on-ffmpeg-71-not-from-obs). The
-> default Alpine image (8.1.2) and `Dockerfile.vaapi` (8.0.1) are both above that
+> default Alpine image (8.1.3) and `Dockerfile.vaapi` (8.0.1) are both above that
 > floor; this one is the exception, and choosing it for NVENC is choosing to give
 > up that ingest path.
 
@@ -362,6 +362,18 @@ this FFmpeg was built against. FFmpeg prints the exact version it wants — take
 that number rather than any table, and update the **host** driver. Nothing
 inside the container can fix this: the encode library comes from the host, so a
 newer image is not the answer.
+
+**FFmpeg 9.0 raised this floor.** It removed support for NVENC SDKs before 11.1,
+so a host driver that worked with an 8.x build can fail this check on 9.x. It
+also removed the deprecated NVENC options: the named presets (`hq`, `hp`, `ll`,
+`llhq`, `llhp`, `bd`, `default`, `lossless`, `losslesshp`), the `*_hq`,
+`ll_2pass_*`, `vbr_2pass` and `vbr_minqp` rate-control modes, and the `-cbr` and
+`-2pass` flags. polyemesis's own argv was already on the current set
+(`-preset p1`…`p7`, `-rc cbr` / `-rc vbr`), so the encoders it builds are
+unaffected. Expert arguments typed by hand are not: an NVENC destination whose
+expert args carry one of the removed spellings will not start on 9.x. Source:
+the FFmpeg 9.0 `Changelog` ("Remove deprecated NVENC options and support for
+pre-11.1 SDK versions"). Not measured on a GPU here; see #375.
 
 ### `No VA display found for device /dev/dri/renderD128` / `Device creation failed: -22` — (reproduced)
 
