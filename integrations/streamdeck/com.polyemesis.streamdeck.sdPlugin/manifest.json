@@ -166,12 +166,24 @@
       ],
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
-        { "Image": "imgs/keys/idle" },
-        { "Image": "imgs/keys/live" },
-        { "Image": "imgs/keys/warn" },
-        { "Image": "imgs/keys/error" },
-        { "Image": "imgs/keys/held" },
-        { "Image": "imgs/keys/unbound" }
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false,
@@ -187,12 +199,24 @@
       ],
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
-        { "Image": "imgs/keys/idle" },
-        { "Image": "imgs/keys/live" },
-        { "Image": "imgs/keys/warn" },
-        { "Image": "imgs/keys/error" },
-        { "Image": "imgs/keys/held" },
-        { "Image": "imgs/keys/unbound" }
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false
@@ -207,12 +231,24 @@
       ],
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
-        { "Image": "imgs/keys/idle" },
-        { "Image": "imgs/keys/live" },
-        { "Image": "imgs/keys/warn" },
-        { "Image": "imgs/keys/error" },
-        { "Image": "imgs/keys/held" },
-        { "Image": "imgs/keys/unbound" }
+        {
+          "Image": "imgs/keys/idle"
+        },
+        {
+          "Image": "imgs/keys/live"
+        },
+        {
+          "Image": "imgs/keys/warn"
+        },
+        {
+          "Image": "imgs/keys/error"
+        },
+        {
+          "Image": "imgs/keys/held"
+        },
+        {
+          "Image": "imgs/keys/unbound"
+        }
       ],
       "DisableAutomaticStates": true,
       "UserTitleEnabled": false,
