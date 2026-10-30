@@ -25,8 +25,8 @@ describe("the home page's track layout (S7)", () => {
 
   it("does not end the payoff paragraph with the Twitch GPU requirement", () => {
     const payoff = home.slice(home.indexOf("polyemesis ingests once and lets you pick"));
-    const paragraph = payoff.slice(0, payoff.indexOf("</p>"));
-    expect(paragraph).not.toMatch(/needs a supported GPU/);
+    const paragraph = payoff.slice(0, payoff.indexOf("</p>")).replace(/<[^>]+>/g, "");
+    expect(paragraph).not.toMatch(/GPU/);
     expect(paragraph).not.toMatch(/Enhanced Broadcasting/);
   });
 
