@@ -329,7 +329,10 @@ func bulkBody(enabled bool, results []bulkDestResult) map[string]any {
 func (s *Server) bulkOne(row *db.Destination, enabled bool) bulkDestResult {
 	res := bulkDestResult{ID: row.ID, Name: row.Name, Platform: row.Platform}
 
-	ctl := s.applyDestinationEnabled(row.ID, enabled)
+	// Stop-all CUTS every broadcast delay (#11). It is the panic button, and a
+	// panic button that left fifteen minutes of buffered programme airing
+	// would not be one.
+	ctl := s.applyDestinationEnabled(row.ID, enabled, !enabled)
 	switch {
 	case ctl.StoreErr != nil:
 		// Overwhelmingly db.ErrNotFound: the row was deleted between the list

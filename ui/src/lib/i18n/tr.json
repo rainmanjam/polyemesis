@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Başlat",
   "obs.actionStop": "Durdur",
   "set.tokenScopeObs": "OBS betiği",
-  "set.tokenScopeObsHint": "OBS'nin yayın başlatma, durdurma ve sahne değişimlerini bildirebilir, başka hiçbir şey yapamaz. OBS betiğinin istediği budur."
+  "set.tokenScopeObsHint": "OBS'nin yayın başlatma, durdurma ve sahne değişimlerini bildirebilir, başka hiçbir şey yapamaz. OBS betiğinin istediği budur.",
+  "delay.field": "Yayın gecikmesi (saniye)",
+  "delay.help": "Bu hedefin çıkışını 15 dakikaya (900 sn) kadar geciktirir; 0 kapalıdır. Diğer hedefler etkilenmez. Durdur, gecikmeli kalanı yayınlayıp biter; Şimdi durdur onu atar.",
+  "delay.liveRestart": "Bu hedef açık: kaydetmek onu yeniden başlatır ve {seconds} sn gecikmeyle yeni arabellek dolana kadar platforma hiçbir şey ulaşmaz.",
+  "delay.badge": "{seconds} sn gecikmeli",
+  "delay.buffering": "Gecikme doluyor: {seconds} sn’nin {buffered} sn’si",
+  "delay.fillLabel": "Gecikme arabelleği doluluğu",
+  "delay.draining": "Gecikmeli arabellek yayında: {seconds} sn kaldı",
+  "delay.cutNow": "Şimdi kes",
+  "delay.cutNowTitle": "{name} hedefinin arabellekte tuttuğunu atar, hiçbiri yayına çıkmaz",
+  "delay.stopNow": "Şimdi durdur",
+  "delay.stopNowTitle": "{name} hedefini durdur ve gecikme arabelleğini yayınlamak yerine at"
 }

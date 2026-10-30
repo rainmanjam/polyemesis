@@ -430,3 +430,25 @@ func TestShortRendersDurationsTheWayAnOperatorReadsThem(t *testing.T) {
 		})
 	}
 }
+
+// #11: a destination filling its broadcast delay is enabled and has no process
+// for up to fifteen minutes BY DESIGN. That is not destination.down; once the
+// delayed data is due and its FFmpeg is up, a real outage still is.
+func TestWatcherDoesNotCallADestinationFillingItsBroadcastDelayDown(t *testing.T) {
+	w := NewWatcher(WatchConfig{DownFor: 20 * time.Second})
+	dest := func(buffering, running bool) func(*Snapshot) {
+		return func(s *Snapshot) {
+			s.Destinations = []DestState{{ID: 7, Name: "YouTube", Enabled: true,
+				Buffering: buffering, Running: running}}
+		}
+	}
+	runSteps(t, w, nil, []step{
+		{after: 0, snap: dest(true, false)},
+		{after: 5 * time.Minute, snap: dest(true, false)},
+		{after: 15 * time.Minute, snap: dest(true, false)},
+		{after: 15*time.Minute + time.Second, snap: dest(false, true)},
+		// On air now, so going away is an incident again.
+		{after: 16 * time.Minute, snap: dest(false, false)},
+		{after: 17 * time.Minute, snap: dest(false, false), want: []Type{TypeDestinationDown}},
+	})
+}

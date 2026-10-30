@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Starten",
   "obs.actionStop": "Stoppen",
   "set.tokenScopeObs": "OBS-script",
-  "set.tokenScopeObsHint": "Kan het starten, stoppen en wisselen van scène in OBS melden, en verder niets. Dit is wat het OBS-script nodig heeft."
+  "set.tokenScopeObsHint": "Kan het starten, stoppen en wisselen van scène in OBS melden, en verder niets. Dit is wat het OBS-script nodig heeft.",
+  "delay.field": "Uitzendvertraging (seconden)",
+  "delay.help": "Houdt de uitvoer van deze bestemming tot 15 minuten (900 s) achter; 0 is uit. Andere bestemmingen merken er niets van. Stoppen zendt de vertraagde rest nog uit; Nu stoppen gooit die weg.",
+  "delay.liveRestart": "Deze bestemming staat aan: opslaan herstart haar, en met {seconds} s vertraging bereikt niets het platform tot de nieuwe buffer gevuld is.",
+  "delay.badge": "Vertraagd {seconds} s",
+  "delay.buffering": "Vertraging vult zich: {buffered} van {seconds} s",
+  "delay.fillLabel": "Vulling van de vertragingsbuffer",
+  "delay.draining": "Vertraagde buffer wordt uitgezonden: nog {seconds} s",
+  "delay.cutNow": "Nu afkappen",
+  "delay.cutNowTitle": "Gooit weg wat {name} nog gebufferd heeft, zodat niets daarvan wordt uitgezonden",
+  "delay.stopNow": "Nu stoppen",
+  "delay.stopNowTitle": "{name} stoppen en de vertragingsbuffer weggooien in plaats van uitzenden"
 }

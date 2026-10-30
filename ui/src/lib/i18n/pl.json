@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Uruchom",
   "obs.actionStop": "Zatrzymaj",
   "set.tokenScopeObs": "Skrypt OBS",
-  "set.tokenScopeObsHint": "Może zgłaszać start, stop i zmiany scen w OBS i nic więcej. Tego potrzebuje skrypt OBS."
+  "set.tokenScopeObsHint": "Może zgłaszać start, stop i zmiany scen w OBS i nic więcej. Tego potrzebuje skrypt OBS.",
+  "delay.field": "Opóźnienie emisji (sekundy)",
+  "delay.help": "Opóźnia wyjście tego celu o maksymalnie 15 minut (900 s); 0 wyłącza. Inne cele nie są objęte. Zatrzymaj nadaje opóźnioną końcówkę przed zakończeniem; Zatrzymaj teraz ją odrzuca.",
+  "delay.liveRestart": "Ten cel jest włączony: zapis uruchomi go ponownie, a przy opóźnieniu {seconds} s nic nie dotrze do platformy, dopóki nowy bufor się nie zapełni.",
+  "delay.badge": "Opóźnione {seconds} s",
+  "delay.buffering": "Wypełnianie opóźnienia: {buffered} z {seconds} s",
+  "delay.fillLabel": "Wypełnienie bufora opóźnienia",
+  "delay.draining": "Nadawanie opóźnionego bufora: zostało {seconds} s",
+  "delay.cutNow": "Odetnij teraz",
+  "delay.cutNowTitle": "Odrzuca to, co {name} ma jeszcze w buforze, aby nic z tego nie poszło na antenę",
+  "delay.stopNow": "Zatrzymaj teraz",
+  "delay.stopNowTitle": "Zatrzymaj {name} i odrzuć bufor opóźnienia zamiast go nadawać"
 }

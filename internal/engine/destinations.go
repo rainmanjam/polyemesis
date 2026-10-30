@@ -186,6 +186,19 @@ func keepDestination(d *destination, p destPlan, wanted bool, wantHub *relay.Hub
 	return d.hub == nil || d.hub == wantHub
 }
 
+// delayRepoint is a delayed destination whose line must follow a new upstream.
+type delayRepoint struct {
+	d  *destination
+	to *relay.Hub
+}
+
+// delayedHubMoved is keepDestination's exception for a delayed destination:
+// everything matches except the upstream hub, which the line can follow.
+func delayedHubMoved(d *destination, p destPlan, wanted bool, wantHub *relay.Hub) bool {
+	return d.delay != nil && wantHub != nil && d.hub != wantHub &&
+		keepDestination(d, p, wanted, d.hub)
+}
+
 // stopDestinations tears down every destination that is gone, newly disabled,
 // newly broken, or running with arguments that no longer match. Everything else
 // is left strictly alone — that is the guarantee that renaming a destination,
@@ -218,9 +231,23 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		}
 	}
 
+	// Which leaving destinations still have a row, read before the lock.
+	var leaving []int64
+	e.mu.RLock()
+	for id, d := range e.dests {
+		if _, wanted := plans[id]; !wanted && d.delay != nil {
+			leaving = append(leaving, id)
+		}
+	}
+	e.mu.RUnlock()
+	stillThere := e.rowsStillThere(leaving)
+
 	e.mu.Lock()
-	var toStop []*destination
+	cutReq := e.cutRequested
+	e.cutRequested = nil
+	var toStop, toDrain []*destination
 	var liveTry []liveCandidate
+	var repoints []delayRepoint
 	for id, d := range e.dests {
 		p, wanted := plans[id]
 		// A running destination whose hub is not the hub it would now be given
@@ -229,6 +256,17 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		// a new one. A destination that has no hub yet (d.hub == nil) is not
 		// running and is judged on spec alone.
 		keep := keepDestination(d, p, wanted, wantHub[id])
+		if !keep && delayedHubMoved(d, p, wanted, wantHub[id]) {
+			// EXCEPT A DELAYED ONE. Its FFmpeg reads the private hub, which has
+			// not moved; only the line's input has to follow the upstream. So
+			// the line is re-pointed and the buffer -- up to fifteen minutes of
+			// programme -- survives a rendition restart or a rebuilt tier.
+			next := *d
+			next.hub = wantHub[id]
+			e.dests[id] = &next
+			repoints = append(repoints, delayRepoint{d: &next, to: wantHub[id]})
+			d, keep = &next, true
+		}
 		if keep && d.graph != nil && p.row != nil && levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
 			// Same restart signature, different levels: a live change, decided
 			// below once the lock is released, since it does I/O. A copy
@@ -245,6 +283,21 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 			// the level reaches the output by this restart. Recorded so the
 			// operator is told a restart happened rather than nothing.
 			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
+		}
+		if !keep && !wanted && d.delay != nil && d.proc != nil && stillThere[id] && !cutReq[id] {
+			// STOPPED OR DISABLED, AND DELAYED: FLUSH. The tail plays out
+			// before the FFmpeg stops, so the audience sees the end of the
+			// programme rather than a cut Delay before it. A DELETED row and a
+			// cut request (Stop now, stop-all, delete) fall through to the cut
+			// below instead: the delay exists to keep things off the air, and
+			// those are the operator saying so. See the table in delay.go.
+			delete(e.dests, id)
+			if e.draining == nil {
+				e.draining = map[int64]*destination{}
+			}
+			e.draining[id] = d
+			toDrain = append(toDrain, d)
+			continue
 		}
 		if !keep {
 			toStop = append(toStop, d)
@@ -265,6 +318,33 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 		}
 	}
 	e.mu.Unlock()
+
+	for _, d := range toDrain {
+		e.beginDrain(d)
+	}
+	for _, r := range repoints {
+		if err := r.d.delay.repoint(r.to); err != nil {
+			// The line's input could not follow, so nothing new would ever
+			// reach the buffer: a destination about to go quiet while looking
+			// healthy. Torn down instead, so the next reconcile starts it
+			// afresh on the new upstream -- the buffer is lost, and said so.
+			e.log.Error("broadcast delay: could not move the delay buffer to the new upstream; "+
+				"restarting the destination, and its buffered delay is lost",
+				"dest", r.d.row.Name, "err", err)
+			e.mu.Lock()
+			mine := e.dests[r.d.row.ID] == r.d
+			if mine {
+				delete(e.dests, r.d.row.ID)
+			}
+			e.mu.Unlock()
+			if mine {
+				e.teardownDest(r.d)
+			}
+			continue
+		}
+		e.log.Info("broadcast delay: upstream replaced; the delay buffer follows it and is kept",
+			"dest", r.d.row.Name)
+	}
 
 	// Live attempts, outside the lock. A refusal, a timeout, or a platform with no
 	// verified path falls back to the restart this function would otherwise have
@@ -375,6 +455,11 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 			continue
 		}
 		e.mu.Unlock()
+		// Started again while a delayed tail of it is still playing out -- in
+		// this programme or any other: that drain is cut first. Two FFmpegs
+		// publishing one key is a conflict the platform resolves by dropping
+		// one of them, and the operator asked for the new one.
+		e.cutDrainAnywhere(id)
 
 		if p.err != "" {
 			e.mu.Lock()
@@ -457,7 +542,7 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 	if row.RenditionID != nil {
 		source = "rendition:" + strconv.FormatInt(*row.RenditionID, 10)
 	}
-	return hashStrings([]string{
+	parts := []string{
 		// Everything that reaches the argv, taken from the argv builder's own
 		// input rather than listed again by hand. See destArgvSig.
 		//
@@ -474,7 +559,16 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// reads is what makes moving it between tiers, or editing the tier it
 		// sits on, restart that destination and no other.
 		source, upstream,
-	})
+	}
+	if row.DelaySeconds > 0 {
+		// The broadcast delay restarts the destination when it changes (#11):
+		// the buffer is sized and filled for one delay, and a running line
+		// cannot be stretched or shrunk without releasing data early or
+		// holding the platform on a gap. The UI says so before it is saved.
+		// Only when set, so an undelayed destination hashes as it always did.
+		parts = append(parts, "delay="+strconv.Itoa(row.DelaySeconds))
+	}
+	return hashStrings(parts)
 }
 
 // destSpecFor is one output's ffmpeg.DestSpec: the single description of what
@@ -945,17 +1039,33 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		vodDropped = noteVODNotNegotiated
 	}
 
+	// A delayed destination reads its own private hub, fed by the delay line;
+	// see delay.go. upstream (hub) is still what the line reads and what the
+	// keep test compares. readHub is what this destination's FFmpeg reads.
+	var dd *destDelay
+	readHub := hub
+	if row.DelaySeconds > 0 {
+		var derr error
+		dd, derr = e.buildDelay(row)
+		if derr != nil {
+			return derr
+		}
+		readHub = dd.hub
+	}
+
 	port, err := e.allocPort()
 	if err != nil {
+		e.closeDelay(dd)
 		return err
 	}
 	subName := destSubName(row.ID, "")
-	url, err := hub.Subscribe(subName, port)
+	url, err := readHub.Subscribe(subName, port)
 	if err != nil {
 		// #711. An occupied name means another consumer is reading under it;
 		// taking it would leave that one running, correct-looking and receiving
 		// nothing. Same release-and-bail shape as the port refusal above.
 		e.releasePort(port)
+		e.closeDelay(dd)
 		return err
 	}
 
@@ -982,8 +1092,9 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			// for ever while the port went back to the allocator -- so the port
 			// is reissued and the stale entry blasts transport-stream datagrams
 			// into whatever now owns that socket.
-			hub.Unsubscribe(subName)
+			readHub.Unsubscribe(subName)
 			e.releasePort(port)
+			e.closeDelay(dd)
 			return err
 		}
 		target = resolved
@@ -1079,7 +1190,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// same silent feed took the same 8s and ended its session unflushed.
 		// The wake only ever reaches a feed that has gone quiet. See
 		// relay.Hub.Wake.
-		WakeOnStop: relayWaker(hub, subName),
+		WakeOnStop: relayWaker(readHub, subName),
 	})
 
 	e.mu.Lock()
@@ -1103,15 +1214,17 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// and this subscription and the Start would then bring a child up on both.
 	if e.stopped {
 		e.mu.Unlock()
-		hub.Unsubscribe(subName)
+		readHub.Unsubscribe(subName)
 		e.releasePort(port)
+		e.closeDelay(dd)
 		return nil
 	}
-	e.dests[row.ID] = &destination{
+	published := &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
 		compiled: compiled, graph: graph, hub: hub, spec: spec,
-		multitrack: mt, vodDropped: vodDropped,
+		multitrack: mt, vodDropped: vodDropped, delay: dd,
 	}
+	e.dests[row.ID] = published
 	e.mu.Unlock()
 
 	if e.afterPublish != nil {
@@ -1120,7 +1233,14 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// A new child supersedes whatever the previous one's stop failed to observe:
 	// the warning is about THIS destination's current situation, not a log.
 	e.noteStopOutcome(row.ID, nil)
-	proc.Start()
+	if dd == nil {
+		proc.Start()
+	} else if err := e.attachDelay(row, published, hub); err != nil {
+		// NOT proc.Start() for a delayed one: the line is fed from here on,
+		// and delayDue starts the child when the first delayed datagram is
+		// about to come out.
+		return err
+	}
 	// SPAWNED, NOT PUBLISHING, and the wording now says so.
 	//
 	// This line read "destination started" and was written on the instruction
@@ -1192,17 +1312,16 @@ func (e *Engine) teardownDest(d *destination) {
 		cancel()
 	}
 	if d.subName != "" {
-		// Its own hub, which is not always the ingest's.
-		hub := d.hub
-		if hub == nil {
-			hub = e.hub
-		}
-		hub.Unsubscribe(d.subName)
+		// Its own hub, which is not always the ingest's -- and for a delayed
+		// destination, its private one.
+		d.readHub(e.hub).Unsubscribe(d.subName)
 	}
 	if d.port != 0 {
 		e.releasePort(d.port)
 	}
 	e.stopBackup(d)
+	// Last: the backup above reads the private hub this closes.
+	e.closeDelay(d.delay)
 }
 
 // stopUnreapedWarning is what a caller is told when a stop ended on the deadline
@@ -1391,12 +1510,15 @@ func (e *Engine) publishDest(id int64, prev, next *destination) {
 		return
 	}
 	e.dests[id] = next
+	// A delayed destination's backup waits for the delayed data like its
+	// primary; delayDue starts it if it is published before that.
+	waiting := next.delay != nil && !next.delay.due
 	e.mu.Unlock()
 
 	if e.afterPublish != nil {
 		e.afterPublish()
 	}
-	if next.backup != nil {
+	if next.backup != nil && !waiting {
 		next.backup.Start()
 		e.log.Info("backup ingest started", "dest", next.row.Name)
 	}
@@ -1411,10 +1533,9 @@ func (e *Engine) publishDest(id int64, prev, next *destination) {
 // state -- and it must cost the redundancy rather than the broadcast, which is
 // why this returns quietly with a reason instead of failing the destination.
 func (e *Engine) buildBackup(d *destination, compiled routing.Result, spec string) {
-	hub := d.hub
-	if hub == nil {
-		hub = e.hub
-	}
+	// The backup carries the same delayed feed as its primary, or the platform
+	// would receive two streams Delay apart.
+	hub := d.readHub(e.hub)
 	port, err := e.allocPort()
 	if err != nil {
 		d.backupErr = "no relay port is free for the backup feed"
@@ -1488,11 +1609,7 @@ func (e *Engine) stopBackup(d *destination) {
 		cancel()
 	}
 	if d.backupSub != "" {
-		hub := d.hub
-		if hub == nil {
-			hub = e.hub
-		}
-		hub.Unsubscribe(d.backupSub)
+		d.readHub(e.hub).Unsubscribe(d.backupSub)
 	}
 	if d.backupPort != 0 {
 		e.releasePort(d.backupPort)

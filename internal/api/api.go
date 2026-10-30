@@ -799,6 +799,10 @@ func New(o Options) *Server {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
 		s.lifecycle.announce = s.announceBroadcastPhase
+		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
+		// the coordinator wait, never stop or start anything. See
+		// lifecycleCoordinator.airing.
+		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())

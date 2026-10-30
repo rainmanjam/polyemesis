@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Iniciar",
   "obs.actionStop": "Parar",
   "set.tokenScopeObs": "Script do OBS",
-  "set.tokenScopeObsHint": "Pode informar inícios, paradas e trocas de cena do OBS, e nada mais. É disso que o script do OBS precisa."
+  "set.tokenScopeObsHint": "Pode informar inícios, paradas e trocas de cena do OBS, e nada mais. É disso que o script do OBS precisa.",
+  "delay.field": "Atraso de transmissão (segundos)",
+  "delay.help": "Atrasa a saída deste destino em até 15 minutos (900 s); 0 desliga. Os outros destinos não são afetados. Parar transmite o trecho atrasado antes de encerrar; Parar agora o descarta.",
+  "delay.liveRestart": "Este destino está ativo: salvar o reinicia e, com atraso de {seconds} s, nada chega à plataforma até o novo buffer encher.",
+  "delay.badge": "Atrasado {seconds} s",
+  "delay.buffering": "Preenchendo o atraso: {buffered} de {seconds} s",
+  "delay.fillLabel": "Preenchimento do buffer de atraso",
+  "delay.draining": "Transmitindo o buffer atrasado: faltam {seconds} s",
+  "delay.cutNow": "Cortar agora",
+  "delay.cutNowTitle": "Descarta o que {name} ainda tem no buffer, para que nada vá ao ar",
+  "delay.stopNow": "Parar agora",
+  "delay.stopNowTitle": "Parar {name} e descartar o buffer de atraso em vez de transmiti-lo"
 }

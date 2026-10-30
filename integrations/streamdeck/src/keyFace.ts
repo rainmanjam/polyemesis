@@ -41,6 +41,9 @@ export interface KeyFace {
   warning?: StreamDeckKey;
   /** Server words for the warning, when the warning is the server's own text. */
   warningDetail?: string;
+  /** The destination's broadcast delay in seconds (#11), for the marker line:
+   *  a delayed key must not look like the live platform. */
+  delaySeconds?: number;
 }
 
 /** The face of a destination key bound to one destination and, optionally, one programme. */
@@ -57,8 +60,25 @@ export function destinationFace(
   if (boundSourceId !== undefined && dest.sourceId !== boundSourceId) {
     return { tone: "unbound", label: "streamdeck.state.otherProgramme" };
   }
+  const face = stateFace(dest, hold);
+  const seconds = dest.delay?.seconds ?? dest.delaySeconds ?? 0;
+  return seconds > 0 ? { ...face, delaySeconds: seconds } : face;
+}
 
+/** A bound destination's state, before the delay marker is added. */
+function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): KeyFace {
   const warn = warningFor(dest);
+  // The broadcast delay's two phases with nothing on the platform's side to
+  // read (#11). Both come first: a buffering destination's process exists and
+  // reads "stopped" until the delayed data is due, which would otherwise draw
+  // it as Off; a draining one is DISABLED and still on the air, which would
+  // otherwise draw it as Off too -- the most dangerous reading of the two.
+  if (dest.delay?.phase === "draining") {
+    return withWarning({ tone: "warn", label: "streamdeck.state.draining" }, warn);
+  }
+  if (dest.delay?.phase === "buffering") {
+    return withWarning({ tone: "warn", label: "streamdeck.state.buffering" }, warn);
+  }
   const proc = dest.process ?? null;
 
   if (!proc) {

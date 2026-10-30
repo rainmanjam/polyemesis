@@ -226,6 +226,19 @@ type Engine struct {
 	// from e.dests by then -- that is the whole problem -- so there is nothing
 	// left to carry a flag.
 	retiring map[int64]*destination
+	// draining holds stopped destinations whose broadcast delay is still
+	// playing its tail out (#11), keyed by id and guarded by e.mu. Like
+	// retiring, a separate map because the entry has left e.dests; unlike it,
+	// for up to fifteen minutes, so Status, Stop now and shutdown all look here.
+	draining map[int64]*destination
+	// drains is install-wide when a Manager built this engine (it replaces
+	// this engine's own before Start), so a start in ANY programme cuts a drain
+	// of the same destination id in any other. Never two publishers on a key.
+	drains *drainRegistry
+	// cutRequested marks destinations whose next stop must CUT, not drain:
+	// Stop now, stop-all and delete (CutOnStop). Guarded by e.mu, consumed by
+	// the stopDestinations pass that follows.
+	cutRequested map[int64]bool
 
 	// vaapiOnce guards a single DRM-node enumeration, done lazily the first
 	// time a VAAPI rendition actually starts.
@@ -667,6 +680,12 @@ type destination struct {
 	// because the two have different causes: the pair can be refused with no
 	// negotiation attempted at all.
 	vodDropped string
+
+	// delay is this destination's broadcast delay (#11), nil when it has none.
+	// When set, the FFmpeg and the backup read delay.hub, and hub above stays
+	// the UPSTREAM hub the line reads -- which is what keepDestination compares,
+	// so a replaced upstream re-points the line instead of restarting it.
+	delay *destDelay
 }
 
 // rendition is one running shared video encode.
@@ -734,6 +753,8 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		loud:       map[int64]*loudnessMon{},
 		rolledOver: map[int64]string{},
 		retiring:   map[int64]*destination{},
+		draining:   map[int64]*destination{},
+		drains:     newDrainRegistry(),
 		loudStore:  meters.NewStore(),
 		playProcs:  map[string]*supervisor.Process{},
 		// Promoted fields cannot be set in a composite literal; the placeholder
@@ -1102,9 +1123,19 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	e.selMu.Lock()
 	e.mu.Lock()
 	e.stopped = true
-	dests := make([]*destination, 0, len(e.dests))
+	dests := make([]*destination, 0, len(e.dests)+len(e.draining))
 	for _, d := range e.dests {
 		dests = append(dests, d)
+	}
+	// Destinations still playing their delayed tail out are cut: a shutdown
+	// cannot wait up to fifteen minutes, and left running they would be
+	// FFmpegs publishing to a platform that nothing could find or stop. Taken
+	// out of the map here, under the lock, so the drain goroutine finds them
+	// gone and leaves the teardown to this path.
+	for id, d := range e.draining {
+		dests = append(dests, d)
+		delete(e.draining, id)
+		e.drains.remove(id, e)
 	}
 	rends := make([]*rendition, 0, len(e.rends))
 	for _, r := range e.rends {
@@ -5400,7 +5431,14 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 	}
 	for _, d := range st.Destinations {
 		ds := alerts.DestState{
-			ID: d.ID, Name: d.Name, Enabled: d.Enabled,
+			// A stopped destination playing its delayed tail out is still on
+			// the air, so it is still ENABLED to every watcher until the tail
+			// ends: the down edge -- and the YouTube end it triggers -- waits
+			// for the last delayed second. See delayStillPublishing.
+			ID: d.ID, Name: d.Name, Enabled: d.Enabled || delayStillPublishing(d),
+			// Filling its delay: enabled, not running, and not down either.
+			Buffering:    delayHoldsBack(d),
+			DelaySeconds: d.DelaySeconds,
 			// A destination whose graph would not compile has no process at
 			// all, and that is as down as a failed one.
 			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
@@ -5500,7 +5538,16 @@ func (e *Engine) RestartRendition(id int64) error {
 func (e *Engine) RestartDestination(id int64) error {
 	e.mu.RLock()
 	d := e.dests[id]
+	// A delayed destination still filling its buffer has no FFmpeg BY DESIGN
+	// (#11). Restarting one would start it now, on an idle private hub, for the
+	// whole delay -- read as stalled, and with #20's quick-rejection clock
+	// running against a socket that is not the attempt. The buffer is kept and
+	// the start comes when the delayed data is due, as it would anyway.
+	waiting := d != nil && d.delay != nil && !d.delay.due
 	e.mu.RUnlock()
+	if waiting {
+		return nil
+	}
 	if d == nil || d.proc == nil {
 		return e.Reconcile()
 	}

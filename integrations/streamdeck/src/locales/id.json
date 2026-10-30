@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (tidak lagi terdaftar)",
   "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
   "streamdeck.pi.destinationLabel": "Tujuan",
-  "streamdeck.gain.matrix": "matriks: pakai UI"
+  "streamdeck.gain.matrix": "matriks: pakai UI",
+  "streamdeck.state.buffering": "Mengisi jeda",
+  "streamdeck.state.draining": "Sisa jeda tayang",
+  "streamdeck.delay.marker": "Jeda {seconds}dtk"
 }

@@ -271,6 +271,9 @@ export interface Destination {
   /** Reconnect policy. Always present in a server response and empty for a
    *  destination that has not opted in. */
   resilience?: DestResilience;
+  /** Broadcast delay in seconds, 0 to 900 (#11). Absent or 0 is off. Changing
+   *  it while live restarts this destination. */
+  delaySeconds?: number;
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;
@@ -802,12 +805,34 @@ export interface FailureReason {
   at: string;
 }
 
+/** A destination's broadcast delay buffer (#11). */
+export interface DelayStatus {
+  seconds: number;
+  /** buffering: filling, nothing aired yet. on-air: releasing. draining:
+   *  stopped, and still airing its buffered tail until drainRemainingSeconds
+   *  runs out -- Stop now cuts it. */
+  phase: "buffering" | "on-air" | "draining";
+  /** 0 to 1: how much of the delay the buffer holds. */
+  fill: number;
+  bufferedSeconds: number;
+  drainRemainingSeconds?: number;
+  memBytes: number;
+  diskBytes: number;
+  droppedBytes?: number;
+  problem?: string;
+}
+
 export interface DestStatus {
   id: DestinationId;
   name: string;
   kind: DestKind;
   platform: Platform;
   enabled: boolean;
+  /** The configured broadcast delay, whenever the row has one. */
+  delaySeconds?: number;
+  /** The live buffer, while there is one. A draining destination is disabled
+   *  and still on the air; this is the only field that says so. */
+  delay?: DelayStatus | null;
   summary: string;
   tracks: number[] | null;
   filterComplex: string;

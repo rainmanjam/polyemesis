@@ -39,6 +39,11 @@ import (
 // destinations would quietly bind onto the first programme's traffic. One
 // allocator, handed to every engine.
 type Manager struct {
+	// drains is the install-wide record of which engine has which destination
+	// draining its broadcast delay, shared by every engine this builds. See
+	// drainRegistry.
+	drains *drainRegistry
+
 	log   *slog.Logger
 	cfg   config.Config
 	store *db.DB
@@ -315,6 +320,7 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		tools:   tools,
 		bus:     bus,
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
+		drains:  newDrainRegistry(),
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
 	}
@@ -435,6 +441,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	// FIRST, so it is in the log above the noise of everything coming up.
 	m.warnAboutUnreadableStreamKeys()
 
+	// Before any engine can start a delayed destination: a previous process's
+	// delay spill is an old programme, and nothing may ever release it (#11).
+	sweepDelayRoot(m.cfg.DataDir)
+
 	// Before the engines and outside the error paths below: the resource
 	// sampler describes the box, so it is worth having on an install where not
 	// one source came up -- that is exactly the install an operator is staring
@@ -553,6 +563,9 @@ func (m *Manager) Sync() error {
 		// operator already had and silently not on the one they just added.
 		// See engineSettings.
 		m.applyEngineSettings(eng, m.engineSettingsSnapshot())
+		// Before Start, so no destination this engine starts can miss a drain
+		// of the same id in another programme.
+		eng.drains = m.drains
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
 			eng.Stop()

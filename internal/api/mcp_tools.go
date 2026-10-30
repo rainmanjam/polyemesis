@@ -390,6 +390,11 @@ var (
 		"type":        "boolean",
 		"description": "Must be true to act. Without it nothing happens and the tool answers with what the action would end.",
 	}
+	schemaStopNow = map[string]any{
+		"type": "boolean",
+		"description": "Stop now: cut a broadcast delay's buffered tail instead of letting it air. " +
+			"Default false, which plays the tail out.",
+	}
 )
 
 func checkID(name string, v int64) error {
@@ -468,7 +473,13 @@ func jsonInt(v any) (int64, bool) {
 // the console shows, whether the retry hold is on, and whether the platform
 // reports a different stream key.
 func destHealth(d any) map[string]any {
-	h := pick(d, "id", "name", "platform", "kind", "enabled", "summary", "error", "stalled", "stopWarning", "warnings")
+	h := pick(d, "id", "name", "platform", "kind", "enabled", "summary", "error", "stalled", "stopWarning", "warnings", "delaySeconds")
+	// The broadcast delay's buffer (#11). A draining destination is disabled and
+	// STILL ON THE AIR, which only this says -- and stop_destination with
+	// now:true is how an agent cuts it.
+	if dl, ok := d.(map[string]any)["delay"].(map[string]any); ok {
+		h["delay"] = pick(dl, "seconds", "phase", "fill", "bufferedSeconds", "drainRemainingSeconds", "droppedBytes", "problem")
+	}
 	if p, ok := d.(map[string]any)["process"]; ok && p != nil {
 		h["process"] = pick(p, "state", "restarts", "uptimeSec", "lastError", "nextRetryIn", "stalled", "stalledSec")
 	}
@@ -518,7 +529,7 @@ func destinationRows(v any) []any {
 // act on it. The read-safe view has already masked the URL; it is kept so an
 // agent can tell two YouTube destinations apart by their server.
 func destSummary(d any) map[string]any {
-	return pick(d, "id", "name", "platform", "kind", "enabled", "sourceId", "url", "multitrack")
+	return pick(d, "id", "name", "platform", "kind", "enabled", "sourceId", "url", "multitrack", "delaySeconds")
 }
 
 // --- the catalogue ---
@@ -616,7 +627,7 @@ func mcpCatalogue() []mcpTool {
 					return nil, err
 				}
 				out := destSummary(d)
-				for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience") {
+				for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience", "delaySeconds") {
 					out[k] = v
 				}
 				src := a.Source
@@ -888,9 +899,9 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "stop_destination", title: "Stop a destination", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
-			confirms:    "every call",
-			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. Needs confirm:true; without it, answers with what the stop would end.",
-			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm},
+			confirms:    "every call, now:true included: cutting a delay's tail ends what viewers are still watching",
+			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. A destination with a broadcast delay plays its buffered tail out before it stops; now:true cuts the tail instead (also cuts a tail already playing). Needs confirm:true; without it, answers with what the stop would end.",
+			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm, "now": schemaStopNow},
 			required:    []string{"destinationId"},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 				return c.destAction(raw, "/stop", true)
@@ -949,7 +960,7 @@ func mcpCatalogue() []mcpTool {
 		{
 			name: "stop_all_destinations", title: "Stop all destinations", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
 			confirms:    "every call",
-			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return. Needs confirm:true; without it, answers with what would end.",
+			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return, and every broadcast delay is cut: nothing still buffered airs. Needs confirm:true; without it, answers with what would end.",
 			props:       map[string]any{"source": schemaSource, "confirm": schemaConfirm},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 				var a struct {
@@ -1177,6 +1188,7 @@ func (c *mcpCtx) destAction(raw json.RawMessage, suffix string, needsConfirm boo
 		DestinationID int64  `json:"destinationId"`
 		Source        *int64 `json:"source"`
 		Confirm       bool   `json:"confirm"`
+		Now           bool   `json:"now"`
 	}
 	if needsConfirm {
 		if err := decodeArgs(raw, &a); err != nil {
@@ -1210,6 +1222,14 @@ func (c *mcpCtx) destAction(raw json.RawMessage, suffix string, needsConfirm boo
 			return c.refusal("Not done: stopping this destination ends what it is delivering. "+
 				"Show the user this impact, then call again with confirm:true.", map[string]any{"stopImpact": impact})
 		}
+	}
+	if a.Now {
+		// Through the same REST route, as ?now=true: the cut is the handler's
+		// to make, under the handler's auth and scope.
+		if q == nil {
+			q = url.Values{}
+		}
+		q.Set("now", "true")
 	}
 	v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, suffix), q, nil)
 	if err != nil {

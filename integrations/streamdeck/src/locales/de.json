@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (nicht mehr aufgeführt)",
   "streamdeck.pi.trackHint": "Eine Änderung wird live übernommen, wenn möglich. Sonst startet das Ziel neu und die Zuschauer sehen eine Neuverbindung. Ein Windows-Server startet immer neu.",
   "streamdeck.pi.destinationLabel": "Ziel",
-  "streamdeck.gain.matrix": "Matrix: UI nutzen"
+  "streamdeck.gain.matrix": "Matrix: UI nutzen",
+  "streamdeck.state.buffering": "Verzögerung füllt",
+  "streamdeck.state.draining": "Rest läuft noch",
+  "streamdeck.delay.marker": "Verzög. {seconds}s"
 }

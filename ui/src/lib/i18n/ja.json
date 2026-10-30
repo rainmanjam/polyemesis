@@ -3019,5 +3019,16 @@
   "obs.actionStart": "開始",
   "obs.actionStop": "停止",
   "set.tokenScopeObs": "OBS スクリプト",
-  "set.tokenScopeObsHint": "OBS の配信開始・停止とシーン切り替えを報告できるだけで、ほかには何もできません。OBS スクリプトに必要なのはこれです。"
+  "set.tokenScopeObsHint": "OBS の配信開始・停止とシーン切り替えを報告できるだけで、ほかには何もできません。OBS スクリプトに必要なのはこれです。",
+  "delay.field": "配信ディレイ（秒）",
+  "delay.help": "この配信先の出力を最大15分（900秒）遅らせます。0でオフ。他の配信先には影響しません。「停止」は遅延分を最後まで送出してから止め、「今すぐ停止」は破棄します。",
+  "delay.liveRestart": "この配信先は稼働中です。保存すると再起動し、{seconds}秒の遅延では新しいバッファが満ちるまでプラットフォームに何も届きません。",
+  "delay.badge": "{seconds}秒ディレイ",
+  "delay.buffering": "ディレイを蓄積中：{seconds}秒中{buffered}秒",
+  "delay.fillLabel": "ディレイバッファの充填率",
+  "delay.draining": "遅延バッファを送出中：残り{seconds}秒",
+  "delay.cutNow": "今すぐカット",
+  "delay.cutNowTitle": "{name}にまだ溜まっている分を破棄し、何も放送されないようにします",
+  "delay.stopNow": "今すぐ停止",
+  "delay.stopNowTitle": "{name}を停止し、遅延バッファを送出せずに破棄します"
 }

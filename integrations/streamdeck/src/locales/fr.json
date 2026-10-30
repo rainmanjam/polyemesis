@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (n'est plus listé)",
   "streamdeck.pi.trackHint": "Un changement s'applique en direct quand c'est possible. Sinon la destination redémarre et les spectateurs voient une reconnexion. Un serveur Windows redémarre toujours.",
   "streamdeck.pi.destinationLabel": "Destination",
-  "streamdeck.gain.matrix": "matrice : utiliser l'UI"
+  "streamdeck.gain.matrix": "matrice : utiliser l'UI",
+  "streamdeck.state.buffering": "Différé en cours",
+  "streamdeck.state.draining": "Fin différée à l’antenne",
+  "streamdeck.delay.marker": "Différé {seconds}s"
 }

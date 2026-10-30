@@ -1026,3 +1026,28 @@ func proveMCPToolOutputs(t *testing.T) proofResult {
 		Read:    b.String(),
 	}
 }
+
+// #11: stop_destination takes now:true, the broadcast delay's "Stop now", and
+// it changes nothing about the confirm rule: unconfirmed, it is still refused
+// with the impact; confirmed, it stops through the same REST route.
+func TestStopNowThroughMCPKeepsTheConfirmRuleAndStops(t *testing.T) {
+	rig := newMCPRig(t)
+	if err := rig.store.SetDestinationEnabled(1, true); err != nil {
+		t.Fatal(err)
+	}
+	c := mcpClient(t, rig.h, rig.admin)
+	text, isErr := callText(t, c, "stop_destination", map[string]any{"destinationId": 1, "now": true})
+	if !isErr || !strings.Contains(text, "Not done") {
+		t.Fatalf("an unconfirmed Stop now answered (isError=%v): %s", isErr, text)
+	}
+	if d, _ := rig.store.GetDestination(1); !d.Enabled {
+		t.Fatal("an unconfirmed Stop now stopped the destination")
+	}
+	text, isErr = callText(t, c, "stop_destination", map[string]any{"destinationId": 1, "now": true, "confirm": true})
+	if isErr {
+		t.Fatalf("a confirmed Stop now failed: %s", text)
+	}
+	if d, _ := rig.store.GetDestination(1); d.Enabled {
+		t.Fatal("a confirmed Stop now left the destination enabled")
+	}
+}

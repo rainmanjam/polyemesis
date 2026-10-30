@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Iniciar",
   "obs.actionStop": "Detener",
   "set.tokenScopeObs": "Script de OBS",
-  "set.tokenScopeObsHint": "Puede comunicar inicios, paradas y cambios de escena de OBS, y nada más. Es lo que necesita el script de OBS."
+  "set.tokenScopeObsHint": "Puede comunicar inicios, paradas y cambios de escena de OBS, y nada más. Es lo que necesita el script de OBS.",
+  "delay.field": "Retardo de emisión (segundos)",
+  "delay.help": "Retiene la salida de este destino hasta 15 minutos (900 s); 0 lo desactiva. Los demás destinos no se ven afectados. Detener emite la cola retrasada antes de terminar; Detener ya la descarta.",
+  "delay.liveRestart": "Este destino está activo: al guardar se reinicia y, con un retardo de {seconds} s, nada llega a la plataforma hasta que se llene el nuevo búfer.",
+  "delay.badge": "Retrasado {seconds} s",
+  "delay.buffering": "Llenando el retardo: {buffered} de {seconds} s",
+  "delay.fillLabel": "Llenado del búfer de retardo",
+  "delay.draining": "Emitiendo el búfer retrasado: quedan {seconds} s",
+  "delay.cutNow": "Cortar ya",
+  "delay.cutNowTitle": "Descarta lo que {name} aún tiene en búfer para que no se emita nada",
+  "delay.stopNow": "Detener ya",
+  "delay.stopNowTitle": "Detener {name} y descartar su búfer de retardo en lugar de emitirlo"
 }

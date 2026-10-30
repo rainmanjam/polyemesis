@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (no longer listed)",
   "streamdeck.pi.trackHint": "A change applies live when it can. Otherwise the destination restarts and viewers see a reconnect. A Windows server always restarts.",
   "streamdeck.pi.destinationLabel": "Destination",
-  "streamdeck.gain.matrix": "matrix: use UI"
+  "streamdeck.gain.matrix": "matrix: use UI",
+  "streamdeck.state.buffering": "Buffering delay",
+  "streamdeck.state.draining": "Airing delay tail",
+  "streamdeck.delay.marker": "Delay {seconds}s"
 }

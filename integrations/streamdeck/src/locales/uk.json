@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (більше немає в списку)",
   "streamdeck.pi.trackHint": "Зміна застосовується наживо, коли це можливо. Інакше призначення перезапускається, і глядачі бачать перепідключення. Сервер Windows завжди перезапускається.",
   "streamdeck.pi.destinationLabel": "Призначення",
-  "streamdeck.gain.matrix": "матриця: через UI"
+  "streamdeck.gain.matrix": "матриця: через UI",
+  "streamdeck.state.buffering": "Набір затримки",
+  "streamdeck.state.draining": "В ефірі хвіст",
+  "streamdeck.delay.marker": "Затримка {seconds}с"
 }

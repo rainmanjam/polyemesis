@@ -142,6 +142,9 @@ type Ingest struct {
 // Destination is one output, plus the labels identifying it.
 type Destination struct {
 	Process
+	// Delay is the broadcast delay (#11): configured seconds, and the buffer
+	// while a line exists. Zero for a destination with no delay.
+	Delay    DestDelay
 	ID       int64
 	Name     string
 	Kind     string
@@ -455,6 +458,54 @@ func renderDestinationReasons(d *doc, sorted []Destination, ident func(Destinati
 		"1 when the destination has stopped retrying after repeated quick key or codec rejections; Retry clears it.")
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_held", boolValue(dest.Held), ident(dest)...)
+	}
+
+	renderDelay(d, sorted, ident)
+}
+
+// DestDelay is one destination's broadcast delay on the scrape.
+type DestDelay struct {
+	Seconds int
+	// Fill is the share of the delay the buffer holds, 0 to 1.
+	Fill         float64
+	MemBytes     int64
+	DiskBytes    int64
+	DroppedBytes uint64
+	// Draining is a stopped destination still airing its delayed tail.
+	Draining bool
+}
+
+// renderDelay is the broadcast delay's series (#11). The bytes are the bound
+// the design promises -- RAM and disk, separately -- so an operator can
+// alert on the disk filling before the buffer has to drop.
+func renderDelay(d *doc, sorted []Destination, ident func(Destination) []label) {
+	d.family("polyemesis_destination_delay_seconds", "gauge",
+		"The destination's configured broadcast delay; 0 when it has none.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_seconds", float64(dest.Delay.Seconds), ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_buffer_fill", "gauge",
+		"How much of the broadcast delay the buffer holds, 0 to 1; 1 while on air.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_buffer_fill", dest.Delay.Fill, ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_buffer_bytes", "gauge",
+		"Bytes the broadcast delay buffer holds, by tier: memory or disk.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_buffer_bytes", float64(dest.Delay.MemBytes),
+			append(ident(dest), label{"tier", "memory"})...)
+		d.sample("polyemesis_destination_delay_buffer_bytes", float64(dest.Delay.DiskBytes),
+			append(ident(dest), label{"tier", "disk"})...)
+	}
+	d.family("polyemesis_destination_delay_dropped_bytes_total", "counter",
+		"Bytes the broadcast delay buffer dropped for want of room, keeping the delay; resets when the destination restarts.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_dropped_bytes_total", float64(dest.Delay.DroppedBytes), ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_draining", "gauge",
+		"1 while a stopped destination is still airing its delayed tail.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_draining", boolValue(dest.Delay.Draining), ident(dest)...)
 	}
 }
 

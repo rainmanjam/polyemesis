@@ -332,6 +332,13 @@ type lifecycleCoordinator struct {
 	// because the thing that could stop a stream is not in scope here.
 	escalate func(lifecycleFault)
 
+	// airing reports whether a destination is still on the air with its
+	// broadcast delay's buffered tail (#11). Its row is already disabled -- the
+	// operator pressed Stop -- but viewers are still watching, so ending the
+	// platform broadcast now would cut them off up to fifteen minutes early.
+	// Nil means no delay is possible here (tests, an engine-less server).
+	airing func(id int64) bool
+
 	// wake carries destination ids whose state may have changed. Buffered and
 	// lossy on purpose -- see lifecycleWakeQueue.
 	wake chan int64
@@ -615,6 +622,14 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		BroadcastID: broadcastID,
 		Phase:       d.Lifecycle.Phase,
 	})
+
+	// STOPPED BUT STILL AIRING ITS DELAYED TAIL: not yet. The row says
+	// disabled, which on its own would complete the broadcast this sweep, with
+	// the tail still playing to viewers. Tracked above so the gate stays on; the
+	// drain's end is a down edge, which wakes the sweep that ends it.
+	if !d.Enabled && c.airing != nil && c.airing(d.ID) {
+		return
+	}
 
 	cleared := c.takeClearFault(d.ID)
 	if cleared {

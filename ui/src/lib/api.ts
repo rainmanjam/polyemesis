@@ -769,8 +769,12 @@ export const api = {
     put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
   startDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/start`),
-  stopDestination: (id: DestinationId) =>
-    post<{ enabled: boolean }>(`/destinations/${id}/stop`),
+  /** `now` is the broadcast delay's "Stop now" (#11): the buffered tail is
+   *  cut instead of airing. It also cuts a tail that is already draining. */
+  stopDestination: (id: DestinationId, now = false) =>
+    post<{ enabled: boolean; drainingSeconds?: number; cut?: boolean }>(
+      `/destinations/${id}/stop${now ? "?now=true" : ""}`,
+    ),
   restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
   /** Live per-track mute or gain (I4). Writes the STORED live mix and

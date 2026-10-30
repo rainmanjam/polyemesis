@@ -140,6 +140,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.profile.tracks.muted":               sPublic,
 	"destination.profile.tracks.track":               sPublic,
 	"destination.renditionId":                        sPublic,
+	"destination.delaySeconds":                       sPublic,
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,

@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Start",
   "obs.actionStop": "Stop",
   "set.tokenScopeObs": "OBS script",
-  "set.tokenScopeObsHint": "Can report OBS stream starts, stops and scene switches, and nothing else. This is what the OBS script wants."
+  "set.tokenScopeObsHint": "Can report OBS stream starts, stops and scene switches, and nothing else. This is what the OBS script wants.",
+  "delay.field": "Broadcast delay (seconds)",
+  "delay.help": "Holds this destination's output back by up to 15 minutes (900 s); 0 is off. Other destinations are unaffected. Stop plays the delayed tail out before it ends; Stop now discards it.",
+  "delay.liveRestart": "This destination is on: saving restarts it, and with a {seconds} s delay nothing reaches the platform until the new buffer has filled.",
+  "delay.badge": "Delayed {seconds} s",
+  "delay.buffering": "Filling the delay: {buffered} of {seconds} s",
+  "delay.fillLabel": "Delay buffer fill",
+  "delay.draining": "Airing delayed buffer: {seconds} s left",
+  "delay.cutNow": "Cut now",
+  "delay.cutNowTitle": "Discard what {name} still has buffered, so none of it airs",
+  "delay.stopNow": "Stop now",
+  "delay.stopNowTitle": "Stop {name} and discard its delay buffer instead of airing it"
 }

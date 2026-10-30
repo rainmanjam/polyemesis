@@ -1389,3 +1389,30 @@ func TestADeletedDestinationThatWasLiveIsStillEnded(t *testing.T) {
 			"stays open forever. sent=%v", after)
 	}
 }
+
+// #11: STOP ON A DELAYED DESTINATION DOES NOT END THE BROADCAST UNDER ITS TAIL.
+// The row is disabled the moment Stop is pressed, but the buffered tail is
+// still airing to viewers for up to the delay. While it airs, the sweep leaves
+// the broadcast alone; once the tail is out, the same disabled row ends it.
+//
+// Mutation: delete the `c.airing(d.ID)` early return in considerRow. The end
+// then goes out on the first sweep, with the tail still playing.
+func TestAStoppedDestinationStillAiringItsDelayedTailIsNotEndedUntilTheTailIsOut(t *testing.T) {
+	monitorOn := true
+	yt := &ytFake{status: "live", streamStatus: "active", monitor: &monitorOn}
+	c, _, _ := lifecycleFixture(t, yt, lifecycleTestRow(false, "live"))
+	airing := true
+	c.airing = func(int64) bool { return airing }
+
+	c.sweepOnce(context.Background(), sweepEverything)
+	if sent, _ := yt.snapshot(); len(sent) != 0 {
+		t.Fatalf("transitions sent while the delayed tail was still airing: %v", sent)
+	}
+
+	airing = false
+	c.sweepOnce(context.Background(), sweepEverything)
+	sent, _ := yt.snapshot()
+	if len(sent) != 1 || sent[0] != string(oauth.PhaseComplete) {
+		t.Fatalf("after the tail ended, transitions sent = %v, want exactly one %q", sent, oauth.PhaseComplete)
+	}
+}

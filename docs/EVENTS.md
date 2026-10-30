@@ -164,6 +164,7 @@ real producer, to actually be emitted.
 | `destination.restarted` | destination | yes | A destination's process was respawned after it exited. |
 | `destination.level` | destination | yes | A level (gain or mute) change reached a destination, applied live or by a restart. |
 | `destination.rolledover` | destination | yes | A file destination continued into a new file because the configured one already held footage. |
+| `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer. |
 | `ingest.published` | ingest | yes | Data started arriving on a programme's ingest. |
 | `ingest.disconnected` | ingest | yes | Nothing has arrived on a programme's ingest for the disconnect window. |
 | `failover.switched` | failover | yes | A programme switched between its primary, backup and slate sources. |
@@ -229,6 +230,33 @@ report every destination's lifetime count.
 `data: {"applied": "live"}` means it reached the running process without a
 reconnect. `{"applied": "restart"}` comes with a `reason`, the one the
 destination card shows. See [HOT-RELOAD.md](HOT-RELOAD.md).
+On a destination with a broadcast delay, `data` also has `"delaySeconds"`:
+the process has the change now, and viewers hear it that many seconds later.
+
+On a destination with a broadcast delay, `destination.up`, `.down`, `.held`
+and `.restarted` carry `"delaySeconds"` in `data`. `up` then means the
+delayed programme reached the platform.
+
+`destination.delay` follows a destination's broadcast delay
+([BROADCAST-DELAY.md](BROADCAST-DELAY.md)). `reason` is the phase it entered:
+
+- `buffering`: the destination started and is filling its delay. It has no
+  FFmpeg yet, by design.
+- `on-air`: the delayed data is reaching it and its FFmpeg has started.
+- `draining`: it was stopped and is airing its buffered tail.
+  `data.drainRemainingSeconds` says for how long. Stop now cuts it.
+- `drained`: the tail is out and the destination has stopped.
+- `cut`: Stop now discarded the tail.
+- `dropping`: the buffer ran out of room and is dropping data to keep the
+  delay. `error` says why (disk budget, free-space floor). Sent at most once a
+  minute.
+
+```json
+{"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,
+ "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0}
+```
+
+`drainRemainingSeconds` and `droppedBytes` appear only when non-zero.
 
 ### Ingest and failover
 

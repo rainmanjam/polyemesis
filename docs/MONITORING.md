@@ -808,6 +808,27 @@ The shipped Grafana dashboard draws all three, and the shipped
 `PolyemesisDestinationDown` rule names the cause in its description — see
 [GRAFANA.md](GRAFANA.md).
 
+### Broadcast delay
+
+A destination with a broadcast delay ([BROADCAST-DELAY.md](BROADCAST-DELAY.md))
+adds these, labelled `id` and `name`. A destination with no delay reports 0:
+
+- `polyemesis_destination_delay_seconds`: the configured delay.
+- `polyemesis_destination_delay_buffer_fill`: how much of the delay the buffer
+  holds, 0 to 1. It is 1 while on air.
+- `polyemesis_destination_delay_buffer_bytes{tier}`: bytes held, with `tier`
+  `memory` or `disk`. These are the two bounded quantities.
+- `polyemesis_destination_delay_dropped_bytes_total`: bytes dropped for want
+  of room. The delay was kept and the platform saw a gap. Resets when the
+  destination restarts.
+- `polyemesis_destination_delay_draining`: 1 while a stopped destination is
+  still airing its delayed tail.
+
+```promql
+increase(polyemesis_destination_delay_dropped_bytes_total[5m]) > 0   # the delay is losing data
+polyemesis_destination_delay_draining == 1                           # stopped, still on the air
+```
+
 ### Held after three quick rejections
 
 A refused key or a refused codec cannot fix itself. After **3** of them in a

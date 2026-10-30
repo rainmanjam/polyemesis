@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Démarrer",
   "obs.actionStop": "Arrêter",
   "set.tokenScopeObs": "Script OBS",
-  "set.tokenScopeObsHint": "Peut signaler les démarrages, arrêts et changements de scène d'OBS, et rien d'autre. C'est ce qu'il faut au script OBS."
+  "set.tokenScopeObsHint": "Peut signaler les démarrages, arrêts et changements de scène d'OBS, et rien d'autre. C'est ce qu'il faut au script OBS.",
+  "delay.field": "Différé de diffusion (secondes)",
+  "delay.help": "Retarde la sortie de cette destination jusqu’à 15 minutes (900 s) ; 0 le désactive. Les autres destinations ne sont pas concernées. Arrêter diffuse la fin retardée avant de s’arrêter ; Arrêter maintenant la supprime.",
+  "delay.liveRestart": "Cette destination est active : l’enregistrement la redémarre et, avec un différé de {seconds} s, rien n’atteint la plateforme avant que le nouveau tampon soit rempli.",
+  "delay.badge": "Différé {seconds} s",
+  "delay.buffering": "Remplissage du différé : {buffered} sur {seconds} s",
+  "delay.fillLabel": "Remplissage du tampon de différé",
+  "delay.draining": "Diffusion du tampon différé : encore {seconds} s",
+  "delay.cutNow": "Couper maintenant",
+  "delay.cutNowTitle": "Supprime ce que {name} a encore en tampon, pour que rien n’en soit diffusé",
+  "delay.stopNow": "Arrêter maintenant",
+  "delay.stopNowTitle": "Arrêter {name} et supprimer son tampon de différé au lieu de le diffuser"
 }

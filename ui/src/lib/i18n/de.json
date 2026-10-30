@@ -3019,5 +3019,16 @@
   "obs.actionStart": "Starten",
   "obs.actionStop": "Stoppen",
   "set.tokenScopeObs": "OBS-Skript",
-  "set.tokenScopeObsHint": "Kann Streamstarts, -stopps und Szenenwechsel von OBS melden, sonst nichts. Genau das braucht das OBS-Skript."
+  "set.tokenScopeObsHint": "Kann Streamstarts, -stopps und Szenenwechsel von OBS melden, sonst nichts. Genau das braucht das OBS-Skript.",
+  "delay.field": "Sendeverzögerung (Sekunden)",
+  "delay.help": "Hält die Ausgabe dieses Ziels um bis zu 15 Minuten (900 s) zurück; 0 ist aus. Andere Ziele sind nicht betroffen. Stopp spielt den verzögerten Rest noch aus; Sofort stoppen verwirft ihn.",
+  "delay.liveRestart": "Dieses Ziel läuft: Speichern startet es neu, und mit {seconds} s Verzögerung erreicht nichts die Plattform, bis der neue Puffer gefüllt ist.",
+  "delay.badge": "Verzögert {seconds} s",
+  "delay.buffering": "Verzögerung füllt sich: {buffered} von {seconds} s",
+  "delay.fillLabel": "Füllstand des Verzögerungspuffers",
+  "delay.draining": "Verzögerter Puffer läuft noch: {seconds} s übrig",
+  "delay.cutNow": "Jetzt abschneiden",
+  "delay.cutNowTitle": "Verwirft, was {name} noch gepuffert hat, damit nichts davon gesendet wird",
+  "delay.stopNow": "Sofort stoppen",
+  "delay.stopNowTitle": "{name} stoppen und den Verzögerungspuffer verwerfen, statt ihn zu senden"
 }

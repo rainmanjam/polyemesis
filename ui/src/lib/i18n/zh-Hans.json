@@ -3019,5 +3019,16 @@
   "obs.actionStart": "启动",
   "obs.actionStop": "停止",
   "set.tokenScopeObs": "OBS 脚本",
-  "set.tokenScopeObsHint": "只能报告 OBS 的推流开始、停止和场景切换，别无其他。OBS 脚本需要的正是这个。"
+  "set.tokenScopeObsHint": "只能报告 OBS 的推流开始、停止和场景切换，别无其他。OBS 脚本需要的正是这个。",
+  "delay.field": "直播延迟（秒）",
+  "delay.help": "将此目标的输出延后最多 15 分钟（900 秒）；0 为关闭。其他目标不受影响。“停止”会先播完延迟中的内容再结束；“立即停止”会将其丢弃。",
+  "delay.liveRestart": "此目标正在运行：保存会重启它；延迟为 {seconds} 秒时，新缓冲区填满前平台不会收到任何内容。",
+  "delay.badge": "延迟 {seconds} 秒",
+  "delay.buffering": "正在填充延迟：{buffered} / {seconds} 秒",
+  "delay.fillLabel": "延迟缓冲区填充度",
+  "delay.draining": "正在播出延迟缓冲：剩余 {seconds} 秒",
+  "delay.cutNow": "立即切断",
+  "delay.cutNowTitle": "丢弃 {name} 仍在缓冲的内容，使其不再播出",
+  "delay.stopNow": "立即停止",
+  "delay.stopNowTitle": "停止 {name}，丢弃其延迟缓冲而不播出"
 }

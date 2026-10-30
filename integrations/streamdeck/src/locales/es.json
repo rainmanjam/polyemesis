@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (ya no aparece)",
   "streamdeck.pi.trackHint": "Un cambio se aplica en directo cuando es posible. Si no, el destino se reinicia y los espectadores ven una reconexión. Un servidor Windows siempre reinicia.",
   "streamdeck.pi.destinationLabel": "Destino",
-  "streamdeck.gain.matrix": "matriz: usa la UI"
+  "streamdeck.gain.matrix": "matriz: usa la UI",
+  "streamdeck.state.buffering": "Llenando retardo",
+  "streamdeck.state.draining": "Emitiendo cola",
+  "streamdeck.delay.marker": "Retardo {seconds}s"
 }

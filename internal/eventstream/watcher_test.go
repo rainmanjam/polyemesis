@@ -125,3 +125,61 @@ func sameTypes(a, b []Type) bool {
 	}
 	return true
 }
+
+// #11: A DELAYED DESTINATION'S EDGES SAY SO. "up" on one means the DELAYED
+// programme reached the platform; up, down and restarted carry delaySeconds, and
+// an undelayed destination's edges carry nothing new.
+//
+// Mutation: make the edge branch's `ok && d.DelaySeconds > 0` condition false.
+// The up edge then has no delaySeconds.
+func TestADelayedDestinationsEdgesCarryItsDelay(t *testing.T) {
+	w := NewWatcher()
+	delayed := alerts.DestState{ID: 3, Enabled: true, Running: true, DelaySeconds: 30, Restarts: 1}
+	plain := alerts.DestState{ID: 4, Enabled: true, Running: true}
+	got := w.Observe(prog, snapAt(0, delayed, plain),
+		[]hooks.Event{edge(hooks.TriggerDestinationUp, 3), edge(hooks.TriggerDestinationUp, 4)})
+	if len(got) != 2 {
+		t.Fatalf("got %v", typesOf(got))
+	}
+	if data, _ := got[0].Data.(map[string]int); data["delaySeconds"] != 30 {
+		t.Errorf("the delayed destination's up carries %v, want delaySeconds 30", got[0].Data)
+	}
+	if got[1].Data != nil {
+		t.Errorf("an undelayed destination's up carries %v", got[1].Data)
+	}
+	delayed.Restarts = 2
+	got = w.Observe(prog, snapAt(2, delayed, plain), nil)
+	if data, _ := got[0].Data.(map[string]int); got[0].Type != TypeDestinationRestarted || data["delaySeconds"] != 30 {
+		t.Errorf("restarted = %v %v", got[0].Type, got[0].Data)
+	}
+}
+
+// #11 against Wave 1's move of destination.held: the hold is the webhook
+// watcher's edge, converted here, so a delayed destination's held carries
+// delaySeconds through the same edge branch as up and down -- once, with its
+// failure, and never from the snapshot alone. Written when #11 (which added
+// the delay) met main (which had moved the hold): neither branch's tests saw
+// both.
+//
+// Mutation: restrict the delaySeconds branch in Observe to up and down. The
+// held edge then carries no delay.
+func TestADelayedDestinationsHeldEdgeCarriesItsDelayOnce(t *testing.T) {
+	w := NewWatcher()
+	held := alerts.DestState{ID: 3, Enabled: true, DelaySeconds: 30, Reason: heldReason()}
+	if got := w.Observe(prog, snapAt(0, held), nil); len(got) != 0 {
+		t.Fatalf("the stream derived %v on its own for a delayed hold", typesOf(got))
+	}
+	got := w.Observe(prog, snapAt(2, held), []hooks.Event{edge(hooks.TriggerDestinationHeld, 3)})
+	if !sameTypes(typesOf(got), []Type{TypeDestinationHeld}) {
+		t.Fatalf("got %v, want exactly one held", typesOf(got))
+	}
+	if data, _ := got[0].Data.(map[string]int); data["delaySeconds"] != 30 {
+		t.Errorf("the delayed destination's held carries %v, want delaySeconds 30", got[0].Data)
+	}
+	if got[0].Failure == nil || !got[0].Failure.Held {
+		t.Errorf("held = %+v, want the failure beside the delay", got[0])
+	}
+	if got := w.Observe(prog, snapAt(4, held), nil); len(got) != 0 {
+		t.Errorf("the hold was announced again with no edge: %v", typesOf(got))
+	}
+}
