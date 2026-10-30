@@ -41,6 +41,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.failover.playlist",
   "streamdeck.failover.slate",
   "streamdeck.failover.unknown",
+  "streamdeck.failover.degraded",
   "streamdeck.mute.muted",
   "streamdeck.mute.unmuted",
   "streamdeck.mute.appliedLive",

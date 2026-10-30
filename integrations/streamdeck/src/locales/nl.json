@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist on air",
   "streamdeck.failover.slate": "Slate on air",
   "streamdeck.failover.unknown": "Geen signaalinfo",
+  "streamdeck.failover.degraded": "Primair verslechterd",
   "streamdeck.meter.noFeed": "GEEN SIGNAAL",
   "streamdeck.meter.quiet": "STIL",
   "streamdeck.auth.connected": "Verbonden",

@@ -186,6 +186,11 @@ export function failoverFace(f: FailoverStatus | null | undefined): KeyFace {
     return { tone: "error", label: SOURCE_LABEL[f.active] ?? SOURCE_LABEL[""], detail: f.error };
   }
   const label = SOURCE_LABEL[f.active] ?? SOURCE_LABEL[""];
+  // A degraded primary that had nowhere to go is still on air, and the key
+  // must not read as a healthy "live": the link is breaking up.
+  if (f.active === "primary" && f.degraded) {
+    return { tone: "warn", label: "streamdeck.failover.degraded", detail: f.degraded };
+  }
   if (f.active === "primary") return { tone: "live", label };
   if (f.active === "") return { tone: "idle", label };
   return { tone: "warn", label, detail: f.reason };

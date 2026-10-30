@@ -894,6 +894,171 @@
       }
     },
     {
+      "type": "state-timeline",
+      "title": "Degraded link (failover)",
+      "id": 33,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "1 while degraded-link failover judges a programme's primary link degraded: still delivering, but below the bitrate, RTT or loss threshold for the sustain window. The selector then puts the backup, playlist or slate on air; the reason starts \"degraded: \". 0 when healthy or when failover is off.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "polyemesis_failover_degraded{id=~\"$programme\"}",
+          "refId": "A",
+          "legendFormat": "{{name}} degraded",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "polyemesis_failover_active{id=~\"$programme\",source=\"primary\"}",
+          "refId": "B",
+          "legendFormat": "{{name}} primary on air",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "No",
+                  "color": "#6e6e6e",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Yes",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#6e6e6e",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Primary link RTT and loss",
+      "id": 34,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The primary encoder's SRT round-trip time and the share of packets found missing over the last interval -- the two figures degraded-link failover compares against its RTT and loss thresholds. Only an SRT or SRTLA primary has them, and only while degraded-link failover is on; RTMP and pull programmes show no line.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "polyemesis_ingest_link_rtt_seconds{id=~\"$programme\"}",
+          "refId": "A",
+          "legendFormat": "{{name}} RTT",
+          "range": true,
+          "instant": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "polyemesis_ingest_link_loss_ratio{id=~\"$programme\"}",
+          "refId": "B",
+          "legendFormat": "{{name}} loss",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Destinations",
       "id": 16,
@@ -902,7 +1067,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 29
       },
       "panels": []
     },
@@ -919,7 +1084,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -994,7 +1159,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 30
       },
       "targets": [
         {
@@ -1139,7 +1304,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 31
+        "y": 39
       },
       "targets": [
         {
@@ -1194,7 +1359,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 31
+        "y": 39
       },
       "targets": [
         {
@@ -1278,7 +1443,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 39
+        "y": 47
       },
       "targets": [
         {
@@ -1343,7 +1508,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 39
+        "y": 47
       },
       "targets": [
         {
@@ -1390,7 +1555,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 39
+        "y": 47
       },
       "targets": [
         {
@@ -1460,7 +1625,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 55
       },
       "panels": []
     },
@@ -1477,7 +1642,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1535,7 +1700,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 56
       },
       "targets": [
         {
@@ -1600,7 +1765,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 63
       },
       "panels": []
     },
@@ -1617,7 +1782,7 @@
         "h": 7,
         "w": 6,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "targets": [
         {
@@ -1680,7 +1845,7 @@
         "h": 7,
         "w": 12,
         "x": 6,
-        "y": 56
+        "y": 64
       },
       "targets": [
         {
@@ -1738,7 +1903,7 @@
         "h": 7,
         "w": 6,
         "x": 18,
-        "y": 56
+        "y": 64
       },
       "targets": [
         {
@@ -1790,7 +1955,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 71
       },
       "panels": []
     },
@@ -1807,7 +1972,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 72
       },
       "targets": [],
       "fieldConfig": {

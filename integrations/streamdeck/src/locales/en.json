@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist on air",
   "streamdeck.failover.slate": "Slate on air",
   "streamdeck.failover.unknown": "No feed info",
+  "streamdeck.failover.degraded": "Primary degraded",
   "streamdeck.meter.noFeed": "NO FEED",
   "streamdeck.meter.quiet": "QUIET",
   "streamdeck.auth.connected": "Connected",

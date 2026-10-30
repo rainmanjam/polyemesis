@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist tayang",
   "streamdeck.failover.slate": "Slate tayang",
   "streamdeck.failover.unknown": "Tidak ada info sinyal",
+  "streamdeck.failover.degraded": "Utama menurun",
   "streamdeck.meter.noFeed": "TIDAK ADA SINYAL",
   "streamdeck.meter.quiet": "SENYAP",
   "streamdeck.auth.connected": "Terhubung",

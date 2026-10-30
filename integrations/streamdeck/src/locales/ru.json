@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Плейлист в эфире",
   "streamdeck.failover.slate": "Заставка в эфире",
   "streamdeck.failover.unknown": "Нет данных о сигнале",
+  "streamdeck.failover.degraded": "Основной ухудшен",
   "streamdeck.meter.noFeed": "НЕТ СИГНАЛА",
   "streamdeck.meter.quiet": "ТИШИНА",
   "streamdeck.auth.connected": "Подключено",

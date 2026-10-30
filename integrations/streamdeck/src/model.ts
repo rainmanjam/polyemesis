@@ -72,6 +72,10 @@ export interface FailoverStatus {
   active: SourceKind;
   reason?: string;
   error?: string;
+  /** Set while the primary's link is judged degraded (#6): the measured
+   *  explanation, e.g. "bitrate 640 kbps below 800 kbps for 5s". Present even
+   *  when the primary is still on air because there was nowhere to switch to. */
+  degraded?: string;
 }
 
 export interface StopImpact {

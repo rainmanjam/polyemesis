@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlista na antenie",
   "streamdeck.failover.slate": "Slate na antenie",
   "streamdeck.failover.unknown": "Brak info o sygnale",
+  "streamdeck.failover.degraded": "Główne osłabione",
   "streamdeck.meter.noFeed": "BRAK SYGNAŁU",
   "streamdeck.meter.quiet": "CISZA",
   "streamdeck.auth.connected": "Połączono",

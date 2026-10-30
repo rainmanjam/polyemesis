@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Liste yayında",
   "streamdeck.failover.slate": "Slate yayında",
   "streamdeck.failover.unknown": "Sinyal bilgisi yok",
+  "streamdeck.failover.degraded": "Ana kaynak zayıf",
   "streamdeck.meter.noFeed": "SİNYAL YOK",
   "streamdeck.meter.quiet": "SESSİZ",
   "streamdeck.auth.connected": "Bağlandı",

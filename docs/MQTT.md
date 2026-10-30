@@ -232,6 +232,8 @@ things.
   "recording": true,
   "destinations": 3, "destinationsUp": 3,
   "failover": "backup",      // primary | backup | playlist | slate; omitted when the tier is off
+  "failoverReason": "degraded: the primary ingest's link is degraded (bitrate 640 kbps below 800 kbps for 5s)",
+  "degraded": "bitrate 640 kbps below 800 kbps for 5s", // omitted while the link is healthy
   "ingestError": "…",        // omitted when empty; masked before it is captured
   "at": "2026-07-28T20:14:02Z"
 }
@@ -248,6 +250,14 @@ source has no failover tier running. Anything other than `primary` means you are
 not broadcasting what you think you are broadcasting. A failover nobody notices
 is how an operator finds out at the end of a broadcast that they streamed the
 backup all night.
+
+`failoverReason` is why the selector last moved, in its own words. With
+[degraded-link failover](LINK-HEALTH.md#degraded-link-failover) on, a move
+caused by a link that was still delivering but below the operator's bitrate,
+RTT or loss thresholds starts `degraded: `. `degraded` is set for as long as
+the primary's link is judged degraded, including when there was nowhere to
+switch to and the primary stayed on air; that is the case `failover` alone
+cannot show. Both are omitted when empty.
 
 `ingestError` is FFmpeg's own last error line for the ingest, also `omitempty`.
 It is masked before it is captured — see [What is deliberately not

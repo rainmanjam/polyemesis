@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Lista al aire",
   "streamdeck.failover.slate": "Cartela al aire",
   "streamdeck.failover.unknown": "Sin info de señal",
+  "streamdeck.failover.degraded": "Principal degradado",
   "streamdeck.meter.noFeed": "SIN SEÑAL",
   "streamdeck.meter.quiet": "SILENCIO",
   "streamdeck.auth.connected": "Conectado",

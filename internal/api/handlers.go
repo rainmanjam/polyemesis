@@ -1325,6 +1325,12 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps
 		}
+		if fo := st.Failover; fo != nil {
+			in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
+			if l := fo.PrimaryLink; l != nil {
+				in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
+			}
+		}
 		out = append(out, in)
 	}
 

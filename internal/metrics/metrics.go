@@ -137,7 +137,26 @@ type Ingest struct {
 	// a running engine, which is all of them but one sweep, is right without
 	// setting it.
 	NoEngine bool
+	// Failover is the programme's source-selector tier, nil while it is off.
+	Failover *Failover
 }
+
+// Failover is a programme's selector tier and the primary's link health (#6).
+type Failover struct {
+	// Active is the source on air: primary, backup, playlist or slate.
+	Active string
+	// Degraded is the primary's link judged degraded right now.
+	Degraded bool
+	// RTTMs and LossPercent are the primary's SRT link figures, nil when not
+	// measured -- an RTMP or pull primary, or degraded-link failover off.
+	RTTMs       *float64
+	LossPercent *float64
+}
+
+// failoverSources is every kind the selector can put on air, emitted for every
+// programme with a tier so that `source="slate"` sits at 0 rather than
+// appearing only once the slate has been used.
+var failoverSources = []string{"primary", "backup", "playlist", "slate"}
 
 // Destination is one output, plus the labels identifying it.
 type Destination struct {
@@ -226,6 +245,7 @@ func Render(s Snapshot) string {
 	renderIngests(&d, s.Ingests)
 	renderDestinations(&d, s.Destinations)
 	renderRelay(&d, s.Ingests)
+	renderFailover(&d, s.Ingests)
 	renderRecordings(&d, s.Recordings)
 	renderHost(&d, s.Host)
 	renderAlerts(&d, s.Alerts)
@@ -497,6 +517,50 @@ func renderRelay(d *doc, ins []Ingest) {
 		d.family(fam.name, fam.typ, fam.help)
 		for _, in := range sorted {
 			d.sample(fam.name, fam.value(in.Relay), ingestIdent(in)...)
+		}
+	}
+}
+
+// renderFailover emits the selector tier and the primary's link health.
+//
+// THE DEGRADED GAUGE IS EVERY PROGRAMME'S, at 0 when the tier is off, for the
+// usual reason: an alert on `polyemesis_failover_degraded == 1` must evaluate
+// before the first degradation. The link figures are the opposite case and are
+// absent until measured, because 0 ms RTT and 0% loss are claims about a link.
+func renderFailover(d *doc, ins []Ingest) {
+	sorted := sortedIngests(ins)
+
+	d.family("polyemesis_failover_degraded", "gauge",
+		"1 while the programme's primary link is judged degraded by degraded-link failover; 0 otherwise, including when failover is off.")
+	for _, in := range sorted {
+		d.sample("polyemesis_failover_degraded", boolValue(in.Failover != nil && in.Failover.Degraded), ingestIdent(in)...)
+	}
+
+	d.family("polyemesis_failover_active", "gauge",
+		"Source on air for a programme with failover on; 1 for the active source. Absent while failover is off.")
+	for _, in := range sorted {
+		if in.Failover == nil {
+			continue
+		}
+		for _, src := range failoverSources {
+			d.sample("polyemesis_failover_active", boolValue(in.Failover.Active == src),
+				append(ingestIdent(in), label{"source", src})...)
+		}
+	}
+
+	d.family("polyemesis_ingest_link_rtt_seconds", "gauge",
+		"Smoothed SRT round-trip time of the programme's primary encoder. Absent unless the primary is SRT or SRTLA and degraded-link failover is on.")
+	for _, in := range sorted {
+		if in.Failover != nil && in.Failover.RTTMs != nil {
+			d.sample("polyemesis_ingest_link_rtt_seconds", *in.Failover.RTTMs/1000, ingestIdent(in)...)
+		}
+	}
+
+	d.family("polyemesis_ingest_link_loss_ratio", "gauge",
+		"Share of SRT data packets found missing over the last interval, 0-1. Absent under the same conditions as the RTT.")
+	for _, in := range sorted {
+		if in.Failover != nil && in.Failover.LossPercent != nil {
+			d.sample("polyemesis_ingest_link_loss_ratio", *in.Failover.LossPercent/100, ingestIdent(in)...)
 		}
 	}
 }
