@@ -92,6 +92,18 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 		t.Fatalf("plant source credentials: %v", err)
 	}
 
+	// One timeline row, so the sweep of /timeline reads a real body rather than
+	// an empty list. The text is an ordinary transition: a sentinel here would
+	// make the sweep demand that a read token never see one, which is the point
+	// of the timeline being read-scoped, but the row is written the way the
+	// notifier writes it -- already redacted.
+	if err := store.RecordTimelineEvent(db.TimelineEvent{
+		At: time.Date(2026, 10, 29, 20, 0, 0, 0, time.UTC), Type: "failover.switched",
+		Severity: "critical", Title: "Failover: primary lost",
+	}); err != nil {
+		t.Fatalf("plant timeline row: %v", err)
+	}
+
 	st, err := store.GetSettings()
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
@@ -384,6 +396,10 @@ func leakRoutes() []string {
 		"/api/v1/playout",
 		"/api/v1/failover/playlist",
 		"/api/v1/processes",
+		// The stream timeline: failovers, restarts and outages. A read a
+		// read-scoped token may make, and its rows are the notifier's redacted
+		// text, so the sweep checks that no planted credential reaches them.
+		"/api/v1/timeline",
 		"/api/v1/metadata",
 		"/api/v1/renditions",
 		// #661's console warning. A platform is named so the sweep reads a

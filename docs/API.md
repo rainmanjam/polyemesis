@@ -523,6 +523,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
 | `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
+| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200 and the store keeps at most 1000 rows for 30 days |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
 

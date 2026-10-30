@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -24,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
@@ -32,6 +34,15 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
+import {
+  VERDICT_WINDOW_SEC,
+  collapseRepeats,
+  countLevels,
+  filterLines,
+  isErrorLine,
+  type LogLevelFilter,
+  verdict,
+} from "@/lib/logSummary";
 import { cn } from "@/lib/utils";
 import {
   asDestinationId,
@@ -455,6 +466,13 @@ export function MonitoringPage() {
   const [history, setHistory] = useState<LogLine[]>([]);
   const [filter, setFilter] = useState("all");
   const [follow, setFollow] = useState(true);
+  // Errors is the default view: a healthy stream writes little, so the lines
+  // worth reading first are the failures.
+  const [level, setLevel] = useState<LogLevelFilter>("errors");
+  const [search, setSearch] = useState("");
+  const [showRaw, setShowRaw] = useState(false);
+  // Ticks so the verdict's window slides forward while the log is quiet.
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const logRef = useRef<HTMLDivElement>(null);
   const logsRef = useRef(logs);
 
@@ -539,6 +557,26 @@ export function MonitoringPage() {
     [merged, filter],
   );
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const levelCounts = useMemo(() => countLevels(filtered), [filtered]);
+  const shown = useMemo(
+    () => filterLines(filtered, level, search),
+    [filtered, level, search],
+  );
+  const groups = useMemo(() => collapseRepeats(shown), [shown]);
+  const verdictState = useMemo(() => verdict(merged, nowMs), [merged, nowMs]);
+  const errorsByProcess = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of merged) {
+      if (isErrorLine(l)) m.set(l.process, (m.get(l.process) ?? 0) + 1);
+    }
+    return m;
+  }, [merged]);
+
   // Clearing has to take the backfill with it, or the "cleared" log would
   // instantly redraw everything the ring buffer still holds.
   const clearAll = useCallback(() => {
@@ -551,7 +589,7 @@ export function MonitoringPage() {
   useEffect(() => {
     if (!follow || !logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [filtered, follow]);
+  }, [groups, follow]);
 
   const chartData = useMemo(
     () =>
@@ -710,7 +748,11 @@ export function MonitoringPage() {
       </Card>
 
       <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        {/* ---------- processes ---------- */}
+        <div className="mb-3">
+        <MonitorTimeline />
+      </div>
+
+      {/* ---------- processes ---------- */}
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>{t("mon.processes")}</CardTitle>
@@ -735,7 +777,14 @@ export function MonitoringPage() {
                       <StatusDot tone={tone} size="sm" />
                       <span className="truncate font-mono text-tiny">{p.name}</span>
                     </div>
-                    <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {(errorsByProcess.get(p.name) ?? 0) > 0 && (
+                        <Badge variant="warn">
+                          {t("monitor.processErrors", { count: errorsByProcess.get(p.name) ?? 0 })}
+                        </Badge>
+                      )}
+                      <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
+                    </div>
                   </div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
                     <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
@@ -777,7 +826,13 @@ export function MonitoringPage() {
         {/* ---------- log tail ---------- */}
         <Card className="flex min-h-0 flex-col">
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
-            <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
+            <div className="flex items-center gap-2">
+              <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
+              <Badge variant="down">{t("monitor.errorsCount", { count: levelCounts.errors })}</Badge>
+              <Badge variant="warn">
+                {t("monitor.warningsCount", { count: levelCounts.warnings })}
+              </Badge>
+            </div>
             <div className="flex items-center gap-2">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger className="h-7 w-36 text-tiny">
@@ -803,27 +858,102 @@ export function MonitoringPage() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-2">
+            <p role="status" className="text-tiny text-muted-foreground">
+              {verdictState.kind === "clean"
+                ? t("monitor.verdictClean", { window: VERDICT_WINDOW_SEC })
+                : t("monitor.verdictErrors", {
+                    process: verdictState.process,
+                    count: verdictState.count,
+                    window: verdictState.windowSec,
+                  })}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex gap-1">
+                {(
+                  [
+                    ["errors", "monitor.filterErrors"],
+                    ["warnings", "monitor.filterWarnings"],
+                    ["all", "monitor.filterAll"],
+                  ] as const
+                ).map(([value, key]) => (
+                  <Button
+                    key={value}
+                    variant={level === value ? "secondary" : "ghost"}
+                    size="sm"
+                    aria-pressed={level === value}
+                    onClick={() => setLevel(value)}
+                  >
+                    {t(key)}
+                  </Button>
+                ))}
+              </div>
+              <Input
+                type="search"
+                className="h-7 max-w-xs flex-1 text-tiny"
+                aria-label={t("monitor.searchLog")}
+                placeholder={t("monitor.searchLog")}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
             <div
               ref={logRef}
-              className="h-[26rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
+              className="h-[22rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
             >
-              {filtered.length === 0 ? (
+              {merged.length === 0 ? (
                 <div className="py-6 text-center text-muted-foreground">
                   {t("mon.noLogLines")}
                 </div>
+              ) : groups.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground">
+                  {t("monitor.noMatchingLines")}
+                </div>
               ) : (
-                filtered.map((l, i) => (
+                groups.map((g, i) => (
                   <div key={i} className="flex gap-2">
                     <span className="tnum shrink-0 text-muted-foreground">
-                      {clockTime(l.time)}
+                      {clockTime(g.line.time)}
                     </span>
-                    <span className="shrink-0 text-primary/70">{l.process}</span>
-                    <span className={cn("break-all", LOG_LEVEL_CLASS[l.level] ?? "")}>
-                      {l.text}
+                    <span className="shrink-0 text-primary/70">{g.line.process}</span>
+                    {g.count > 1 && (
+                      <span
+                        className="shrink-0 rounded bg-muted px-1 tnum text-muted-foreground"
+                        title={t("monitor.repeatTitle", { count: g.count })}
+                      >
+                        {`×${g.count}`}
+                      </span>
+                    )}
+                    <span className={cn("break-all", LOG_LEVEL_CLASS[g.line.level] ?? "")}>
+                      {g.line.text}
                     </span>
                   </div>
                 ))
+              )}
+            </div>
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={showRaw}
+                onClick={() => setShowRaw((v) => !v)}
+              >
+                {showRaw ? t("monitor.hideRaw") : t("monitor.showRaw")}
+              </Button>
+              {showRaw && (
+                <div className="mt-2 h-48 overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed">
+                  {filtered.map((l, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className="tnum shrink-0 text-muted-foreground">
+                        {clockTime(l.time)}
+                      </span>
+                      <span className="shrink-0 text-primary/70">{l.process}</span>
+                      <span className={cn("break-all", LOG_LEVEL_CLASS[l.level] ?? "")}>
+                        {l.text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </CardContent>
