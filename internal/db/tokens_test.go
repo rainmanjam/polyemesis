@@ -231,3 +231,30 @@ func TestAPITokenExistsAnswersForBothOutcomes(t *testing.T) {
 		t.Errorf("APITokenExists(999999) = %v, %v; want false, nil", ok, err)
 	}
 }
+
+// The test-connection check reports when a token was last used BEFORE the
+// request that asks. LookupAPIToken writes last_used_at as part of the lookup,
+// so the value the handler can read is "now" unless the prior value is kept.
+func TestLookupKeepsThePriorLastUsedAt(t *testing.T) {
+	d := testDB(t)
+	tok, plaintext, err := d.CreateAPIToken("streamdeck", ScopeRead)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	long := time.Now().Add(-2 * time.Hour).Unix()
+	if _, err := d.sql.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, long, tok.ID); err != nil {
+		t.Fatalf("seed last_used_at: %v", err)
+	}
+
+	got, err := d.LookupAPIToken(plaintext)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got.PreviousLastUsedAt.Unix() != long {
+		t.Errorf("PreviousLastUsedAt = %v, want the value before this lookup (%v)",
+			got.PreviousLastUsedAt, time.Unix(long, 0))
+	}
+	if got.LastUsedAt.Unix() <= long {
+		t.Errorf("LastUsedAt = %v, want it advanced to now", got.LastUsedAt)
+	}
+}

@@ -829,6 +829,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
+			// Test connection for a pairing client: what this token is and may do.
+			// See connection_check.go.
+			r.Get("/auth/connection", s.handleConnectionCheck)
 
 			// The onboarding tour's "have I already been offered this".
 			//

@@ -397,6 +397,9 @@ func leakRoutes() []string {
 		// The stop preview: two counts and nothing else. Swept so that a future
 		// change which adds a field to it is checked for planted credentials.
 		"/api/v1/destinations/stop-impact",
+		// The token's own name, prefix and scope, and nothing about another token.
+		// Swept so a later field that carried a secret would be caught here.
+		"/api/v1/auth/connection",
 		"/api/v1/metrics",
 		"/api/v1/version",
 		"/api/v1/automod/matrix",
