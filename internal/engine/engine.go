@@ -111,7 +111,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu   -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
@@ -254,6 +254,12 @@ type Engine struct {
 	// liveNotes records, per destination, what the last level change did:
 	// applied live, or by a restart and why. Read by the API. Guarded by mu.
 	liveNotes map[int64]liveNote
+	// levelRespawning holds the processes respawnStaleLevels has already asked
+	// to restart, so two upstream events in quick succession cycle a stale
+	// destination once rather than twice. Its own mutex, not mu: it is written
+	// from an ingest's state callback, which must never take mu for writing.
+	levelRespawnMu  sync.Mutex
+	levelRespawning map[*supervisor.Process]bool
 
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
 	// from teardown paths that already hold it.
@@ -1636,8 +1642,10 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 		// written, which nothing has ever recorded.
 		OnProgress: e.ingestProgressLogger(),
 		OnLog:      e.onLog,
-		OnState:    e.onState,
-		LogSink:    logSink{e},
+		// Each spawn is a new streamer session, which can change the decoded
+		// format under every destination. See respawnStaleLevels.
+		OnState: e.onUpstreamState,
+		LogSink: logSink{e},
 	})
 
 	e.mu.Lock()
@@ -5166,6 +5174,20 @@ func observeWanted(alertRules, hookRules, lifecycleWanted, timeline bool) bool {
 // A method rather than four arguments at the call site because the last three
 // bugs were all the call site forgetting an input; the table test above cannot
 // see that, and TestSweepWantedForTheTimelineAlone tests this instead.
+//
+// A CONSEQUENCE, KEPT ON PURPOSE AND DOCUMENTED (docs/MONITORING.md, "A rule
+// hears transitions that happen after it is saved"). With a recorder, every
+// install sweeps, so the watcher sees a condition start even when no rule
+// exists. An alert rule added while that condition lasts is not told it started,
+// because the watcher raises an event once, at the transition. Before the
+// timeline opened the gate, an install with no rule never swept, so its first
+// rule happened to meet a fresh watcher and hear an outage already in progress.
+// An install that already had one rule never had that, so the behaviour is
+// now the same for every install. Replaying in-progress conditions to a new
+// rule would need a delivery aimed at that one rule. The notifier fans every
+// event out to every matching rule, so a plain re-publish would alert the
+// existing rules a second time about an outage they were already told of.
+// The timeline is the record of what started before a rule existed.
 func (e *Engine) sweepWanted() bool {
 	return observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted(),
 		e.alerter.HasRecorder())

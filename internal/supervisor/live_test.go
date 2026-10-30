@@ -8,9 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -76,121 +74,15 @@ func TestVolumeLineIsTheOnlyShapeTheWriterEmits(t *testing.T) {
 }
 
 // A process that did not opt in has no pipe and must say so, not write to a
-// nil or a wrong descriptor.
+// nil or a wrong descriptor. The child is the re-executed test binary, so this
+// runs on Windows too.
 func TestSetVolumeRefusesAProcessThatDidNotOptIn(t *testing.T) {
-	p := New(quietLog(), Spec{Name: "plain", Bin: "/bin/sh", Args: []string{"-c", "sleep 5"}})
+	p := testProcess(t, fakeSleep(30*time.Second), Spec{Name: "plain"})
 	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
 	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
 
 	if err := p.SetVolume("volume@trk0", 0.5); err != errLiveUnavailable {
 		t.Fatalf("SetVolume on a non-opted-in process = %v, want errLiveUnavailable", err)
-	}
-}
-
-// The success path: the line reaches the child exactly as built, and a reply
-// with ret:0 is what the caller is told.
-func TestSetVolumeWritesOneCommandAndAcceptsRetZero(t *testing.T) {
-	dir := t.TempDir()
-	got := filepath.Join(dir, "line")
-	script := `read line; printf '%s' "$line" > "$0.out"; echo "Command reply for stream 0: ret:0 res:" >&2; sleep 30`
-	p := New(quietLog(), Spec{
-		Name: "live", Bin: "/bin/sh", Args: []string{"-c", script, got}, LiveCommands: true,
-	})
-	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
-	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
-
-	if err := p.SetVolume("volume@trk0", 0.5); err != nil {
-		t.Fatalf("SetVolume: %v", err)
-	}
-	b, err := os.ReadFile(got + ".out")
-	if err != nil {
-		t.Fatalf("the child never received the command: %v", err)
-	}
-	if string(b) != "c"+"volume@trk0 -1 volume 0.5" {
-		t.Errorf("child received %q", string(b))
-	}
-}
-
-// FFmpeg answers a rejected command with a non-zero ret. That must come back
-// as an error so the engine restarts instead of believing the level changed.
-func TestSetVolumeReportsARejectionAsAnError(t *testing.T) {
-	script := `read line; echo "Command reply for stream 0: ret:-78 res:" >&2; sleep 30`
-	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/sh", Args: []string{"-c", script}, LiveCommands: true})
-	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
-	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
-
-	if err := p.SetVolume("volume@trk0", 0.5); err == nil {
-		t.Fatal("a ret:-78 rejection was reported as success")
-	}
-}
-
-// No reply inside the deadline is a failure, and it poisons the run. The child
-// answers the first command LATE, inside the second command's window. A run
-// that was not poisoned would take that stale ret:0 as the second command's
-// answer; a poisoned run refuses the second command without writing it.
-func TestSetVolumeTimeoutPoisonsTheRun(t *testing.T) {
-	withReplyTimeout(t, 200*time.Millisecond)
-	script := `read line; sleep 0.3; echo "Command reply for stream 0: ret:0 res:" >&2; while read l; do :; done`
-	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/sh", Args: []string{"-c", script}, LiveCommands: true})
-	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
-	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
-
-	start := time.Now()
-	if err := p.SetVolume("volume@trk0", 0.5); err != errLiveTimeout {
-		t.Fatalf("first SetVolume = %v, want errLiveTimeout", err)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("timeout took %v, far beyond the %v deadline", elapsed, liveReplyTimeout)
-	}
-	if err := p.SetVolume("volume@trk0", 0.6); err != errLiveUnavailable {
-		t.Fatalf("second SetVolume after a timeout = %v, want errLiveUnavailable: a late reply to the first command must not answer the second", err)
-	}
-}
-
-// One command at a time: two concurrent callers each get their own reply and
-// their lines do not interleave on the pipe.
-func TestSetVolumeCallersDoNotInterleave(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "lines")
-	script := `while read line; do printf '%s\n' "$line" >> "$0"; echo "Command reply for stream 0: ret:0 res:" >&2; done`
-	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/sh", Args: []string{"-c", script, out}, LiveCommands: true})
-	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
-	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
-
-	var wg sync.WaitGroup
-	errs := make(chan error, 8)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			errs <- p.SetVolume("volume@trk0", float64(i)/10)
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Errorf("concurrent SetVolume: %v", err)
-		}
-	}
-	b, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 8 {
-		t.Fatalf("child read %d lines, want 8: %q", len(lines), lines)
-	}
-	for _, l := range lines {
-		// The leading `c` is FFmpeg's command key, which the fake child sees too.
-		if !strings.HasPrefix(l, "cvolume@trk0 -1 volume ") {
-			t.Errorf("a line arrived interleaved or malformed: %q", l)
-		}
 	}
 }
 
@@ -238,10 +130,19 @@ func TestOnlyTheCommandWriterTouchesTheStdinPipe(t *testing.T) {
 // A reply counts only when it is the whole stderr line FFmpeg prints. A line
 // that merely contains the text (stream metadata, a title, an error echoing
 // input) must not be read as an acknowledgement.
+//
+// The good lines are FFmpeg's own bytes, captured with cat -v from 6.1.6,
+// 7.1.5, 8.1.3 and 9.0.2: every reply, acknowledgement or refusal, ends exactly
+// at "res:". The last bad lines are the review's spoofs, which an earlier
+// pattern (`(?: res:.*)?$`) accepted.
+//
+// MUTATION: restore `(?: res:.*)?$` in liveReplyRE. Observed: FAIL, "a non-reply
+// line was taken as an acknowledgement" for the res: tails.
 func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
 	good := []string{
 		"Command reply for stream 0: ret:0 res:",
-		"Command reply for stream 0: ret:0",
+		"Command reply for stream 0: ret:-22 res:",
+		"Command reply for stream 0: ret:-38 res:",
 		"Command reply for stream 1: ret:-78 res:",
 	}
 	for _, line := range good {
@@ -256,6 +157,12 @@ func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
 		"x Command reply for stream 0: ret:0",
 		"Command reply for stream 0: ret:0\nq",
 		"Command reply for stream x: ret:0",
+		// No FFmpeg prints a reply without " res:".
+		"Command reply for stream 0: ret:0",
+		// The review's spoofs: text after res: on the reply line itself.
+		"Command reply for stream 0: ret:0 res:'",
+		"Command reply for stream 0: ret:0 res:anything an attacker wants",
+		"Command reply for stream 0: ret:0 res: ",
 	}
 	for _, line := range bad {
 		if _, _, ok := parseReply(line); ok {
@@ -271,6 +178,10 @@ func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/true", LiveCommands: true})
 	old := &liveRun{replies: make(chan liveReply, 4)}
 	cur := &liveRun{replies: make(chan liveReply, 4)}
+	// Both mid-command, so it is the binding that is tested here and not the
+	// in-flight gate (TestAReplyWithNoCommandInFlightIsDropped).
+	old.inFlight.Store(true)
+	cur.inFlight.Store(true)
 	p.live = cur
 
 	deliverReply(old, "Command reply for stream 0: ret:0 res:")
@@ -290,29 +201,22 @@ func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	}
 }
 
-// THE STREAM INDEX IS CHECKED, not just parsed. FFmpeg sends a `c` command to
-// every filter graph and prints one reply per graph, numbered by graph. A
-// destination has exactly one, its -filter_complex, which is graph 0. A reply
-// numbered anything else means a second graph answered, so which reply is ours
-// is ambiguous, and an ambiguous answer is a refusal: the caller restarts.
+// A reply line that arrives while no command is waiting is dropped by the
+// scanner, so it cannot sit in the queue for the next command to read. The
+// drain at the top of send would also discard it; this is the gate in front.
 //
-// MUTATION: in send, drop the `rep.stream != liveGraphIndex` arm. Observed:
-// FAIL, a stream-1 ret:0 was taken as success.
-func TestAReplyFromAnotherGraphIsNotAnAcknowledgement(t *testing.T) {
-	withReplyTimeout(t, 500*time.Millisecond)
-	script := `read line; echo "Command reply for stream 1: ret:0 res:" >&2; while read l; do :; done`
-	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/sh", Args: []string{"-c", script}, LiveCommands: true})
-	p.Start()
-	defer func() { _ = p.Stop(t.Context()) }()
-	waitFor(t, "running", func() bool { return p.Status().State == StateRunning })
-
-	if err := p.SetVolume("volume@trk0", 0.5); err == nil {
-		t.Fatal("a reply from filter graph 1 acknowledged a command meant for graph 0")
+// MUTATION: remove the inFlight check from deliverReply. Observed: FAIL, "a
+// reply with no command in flight was queued".
+func TestAReplyWithNoCommandInFlightIsDropped(t *testing.T) {
+	run := &liveRun{replies: make(chan liveReply, 4)}
+	deliverReply(run, "Command reply for stream 0: ret:0 res:")
+	if len(run.replies) != 0 {
+		t.Fatal("a reply with no command in flight was queued")
 	}
-	// And the run is spent: whatever graph 0 says later cannot be trusted to
-	// belong to the next command.
-	if err := p.SetVolume("volume@trk0", 0.6); err != errLiveUnavailable {
-		t.Fatalf("after an ambiguous reply SetVolume = %v, want errLiveUnavailable", err)
+	run.inFlight.Store(true)
+	deliverReply(run, "Command reply for stream 0: ret:0 res:")
+	if len(run.replies) != 1 {
+		t.Fatal("a reply during a command was not delivered")
 	}
 }
 

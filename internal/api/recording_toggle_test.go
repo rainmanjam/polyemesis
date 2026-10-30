@@ -331,3 +331,46 @@ func TestRecordingToggleAndASettingsSaveRacingBothSurvive(t *testing.T) {
 		}
 	}
 }
+
+// A failed reconcile after the switch is STORED is a warning on the 200, as
+// every other mutation reports it (#709), not a 500. The 500 read as "nothing
+// happened" while the setting had changed, and a Stream Deck key pressed again
+// on the strength of it toggled recording straight back.
+//
+// The reconcile is made to fail for real, after the write: the manager's Sync
+// lists the programmes first, and the sources table is renamed out from under
+// it, which the settings write never touches.
+//
+// MUTATION: restore `writeError(w, http.StatusInternalServerError, rw)` for a
+// non-empty reconcile warning. Observed: FAIL, "POST /recording = 500".
+func TestRecordingToggleReportsAFailedReconcileAsAWarningNotA500(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	store := s.store
+	if _, err := store.SQL().Exec(`ALTER TABLE sources RENAME TO sources_gone`); err != nil {
+		t.Fatalf("break the reconcile: %v", err)
+	}
+
+	r := jsonRequest(t, http.MethodPost, "/api/v1/recording", map[string]any{"enabled": true})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /recording = %d after the switch was stored: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Enabled  bool     `json:"enabled"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Enabled || len(body.Warnings) == 0 {
+		t.Errorf("response = %s, want enabled with the reconcile warning", w.Body.String())
+	}
+	st, err := store.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Recording.Enabled {
+		t.Error("the switch was not stored; the reconcile was not what failed")
+	}
+}

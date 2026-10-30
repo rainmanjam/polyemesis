@@ -272,6 +272,20 @@ defaults and then wondering:
 | `events` | empty | any type on this page | Empty means **every** type |
 | `allowPrivateTarget` | `false` | — | The deliberate opt-in past the SSRF guard; see below |
 
+**A rule hears transitions that happen after it is saved.** Most of the
+stream conditions below latch: they are raised once when they start and once
+more when they end, and they are not repeated while they last. These are
+`ingest.lost`, `destination.down`, `destination.falling_behind`, `disk.low` and
+the loudness check. A rule added while one of them is already in progress,
+such as an ingest already lost or a destination already down, is not told it
+started. It hears the recovery, and every later occurrence. `audio.clipping`
+is the exception, because its counter resets after it fires, so a rule added
+during clipping hears the next full run. To see what is already wrong when
+you add a rule, read the Monitoring page. [The stream timeline](#the-stream-timeline)
+records its seven event types whether or not any rule exists, so it shows an
+ingest loss, a down destination or a falling-behind destination that started
+before your rule. It does not record `disk.low`, loudness or clipping.
+
 A debounce or interval out of range is **clamped rather than refused**, because
 a value that drifted out of bounds should cost a bounded message rate and not a
 rule that has silently stopped alerting. An unknown `format` or `minSeverity` is

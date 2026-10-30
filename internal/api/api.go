@@ -552,9 +552,10 @@ type Server struct {
 	// state the delete's in-use guard exists to prevent. Neither handler is
 	// hot enough for the coarse scope to matter.
 	settingsMu sync.Mutex
-	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain. Each
-	// is a read-modify-write of a whole profile followed by a reconcile whose
-	// outcome it reads back; two keys pressed together must not overwrite each
+	// trackGainMu serialises POST /destinations/{id}/tracks/{track}/gain, and
+	// PUT /destinations/{id} against it. Each is a read-modify-write of a whole
+	// row followed by a reconcile whose outcome it reads back; two keys pressed
+	// together, or a key pressed while the editor saves, must not overwrite each
 	// other's change or read each other's outcome.
 	trackGainMu sync.Mutex
 
@@ -2250,7 +2251,12 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 // decodeJSONInto is decodeJSON's second half, over bytes already read. It
 // returns badRequestError rather than writing, so a settings closure can use it
 // without touching the ResponseWriter under the store's lock.
+//
+// A sent array or map REPLACES the one already in v rather than merging into it
+// by index or key; see resetSentCollections. On a freshly zeroed v that is a
+// no-op, so it matters only to the handlers that decode over a stored row.
 func decodeJSONInto(body []byte, v any) error {
+	resetSentCollections(body, v)
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

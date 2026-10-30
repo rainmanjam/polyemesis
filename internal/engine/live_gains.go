@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // Live per-track gain and mute.
@@ -151,6 +153,149 @@ func liveApplyTo(proc liveSetter, holder *graphHolder, want routing.Result) erro
 	before := holder.get()
 	holder.set(want)
 	return applyLiveLevels(proc, before.FilterComplex, want.FilterComplex)
+}
+
+// A LIVE LEVEL DOES NOT SURVIVE A FILTER-GRAPH REINIT, so the argv must carry it.
+//
+// A volume command changes only the graph that is running. When the decoded
+// input format changes -- a failover from a 48 kHz ingest to a 44.1 kHz slate
+// or playlist, or the ingest's next session arriving at another rate -- FFmpeg
+// throws that graph away and builds a new one from its ARGV, and the level the
+// process was spawned with comes back. Measured on FFmpeg 7.1.5 and 9.0.2: a
+// track muted live (-91 dB) is back at full level (-18 dB) the moment the
+// 44.1 kHz frames reach the graph (TestALiveMuteSurvivesAFormatChange).
+//
+// Re-sending the level at the switch does not repair it. The command lands
+// when the feed is swapped, and the reinit happens later, when the new feed's
+// first frames have crossed the relay and the destination's decoder, so the
+// reinit wipes the re-sent level as well. Nothing at the default -loglevel
+// reports the reinit (FFmpeg logs "Reconfiguring filter graph" at verbose), so
+// there is no later moment to re-send at either. And -reinit_filter 0 is no
+// way out: a real rate change then fails with "Changing audio frame properties
+// on the fly is not supported" and the output stops.
+//
+// So the repair is to make the argv true. At every event that can change the
+// decoded format, a running process whose argv levels differ from the levels
+// it would now be spawned with (its holder) is restarted, and the respawn reads
+// the holder. That costs one reconnect per destination per live change, at most:
+// once the argv matches, every later reinit rebuilds the right level. A
+// destination nobody has changed live is never touched.
+
+// argvGraph returns the -filter_complex an argv was spawned with, or "" when it
+// has none (a copy destination, which has no volume stage to revert).
+func argvGraph(argv []string) string {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "-filter_complex" {
+			return argv[i+1]
+		}
+	}
+	return ""
+}
+
+// spawnedArgs is what the stale check needs of a process: the argv its running
+// child was actually spawned with. *supervisor.Process satisfies it.
+type spawnedArgs interface {
+	Args() []string
+}
+
+// levelsStale reports whether a running child's argv carries a level other than
+// the one its holder would spawn it with, which is exactly the level a reinit
+// would bring back.
+func levelsStale(proc spawnedArgs, holder *graphHolder) bool {
+	if proc == nil || holder == nil {
+		return false
+	}
+	spawned := argvGraph(proc.Args())
+	if spawned == "" {
+		return false
+	}
+	return levelsDiffer(spawned, holder.get().FilterComplex)
+}
+
+// staleLevelProc is one process respawnStaleLevels will cycle.
+type staleLevelProc struct {
+	name string
+	proc *supervisor.Process
+}
+
+// staleLevelProcs lists the running destination processes, primary and
+// backup, whose argv levels differ from their holders'. The destinations are
+// snapshotted under e.mu and judged outside it, since the judgement takes the
+// process's and the holder's own locks.
+func (e *Engine) staleLevelProcs() []staleLevelProc {
+	type cand struct {
+		name   string
+		proc   *supervisor.Process
+		holder *graphHolder
+	}
+	var cands []cand
+	e.mu.RLock()
+	for _, d := range e.dests {
+		if d == nil || d.row == nil || copyPathOf(d.row) {
+			continue
+		}
+		if d.proc != nil && d.graph != nil {
+			cands = append(cands, cand{d.row.Name, d.proc, d.graph})
+		}
+		if d.backup != nil && d.backupGraph != nil {
+			cands = append(cands, cand{d.row.Name + " (backup)", d.backup, d.backupGraph})
+		}
+	}
+	e.mu.RUnlock()
+
+	var out []staleLevelProc
+	for _, c := range cands {
+		if c.proc.Retired() || !levelsStale(c.proc, c.holder) {
+			continue
+		}
+		out = append(out, staleLevelProc{name: c.name, proc: c.proc})
+	}
+	return out
+}
+
+// respawnStaleLevels restarts every destination process whose live levels a
+// filter-graph reinit would revert (see above). why is the upstream event, for
+// the log line. It never blocks its caller on a restart: the selector sweep and
+// a process's state callback both call it, and a destination stop can take
+// seconds. A process already being cycled for this reason is not cycled again.
+func (e *Engine) respawnStaleLevels(why string) {
+	for _, s := range e.staleLevelProcs() {
+		e.levelRespawnMu.Lock()
+		if e.levelRespawning[s.proc] {
+			e.levelRespawnMu.Unlock()
+			continue
+		}
+		if e.levelRespawning == nil {
+			e.levelRespawning = map[*supervisor.Process]bool{}
+		}
+		e.levelRespawning[s.proc] = true
+		e.levelRespawnMu.Unlock()
+
+		e.log.Warn("restarting destination so a live level survives the upstream change",
+			"dest", s.name, "event", why)
+		go func(p *supervisor.Process) {
+			defer func() {
+				e.levelRespawnMu.Lock()
+				delete(e.levelRespawning, p)
+				e.levelRespawnMu.Unlock()
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+			defer cancel()
+			p.Restart(ctx)
+			e.publishStatus()
+		}(s.proc)
+	}
+}
+
+// onUpstreamState is the state callback of a process that publishes what
+// destinations decode -- the primary and backup ingest listeners. Each spawn is
+// a new streamer session, which may arrive at a new sample rate or channel
+// layout without the selector's feed changing at all, so it is a format event.
+func (e *Engine) onUpstreamState(s supervisor.Status) {
+	if s.State == supervisor.StateRunning {
+		e.respawnStaleLevels("the " + s.Name + " process started a new session")
+	}
+	e.onState(s)
 }
 
 // fallbackReason is the operator-facing reason a live change became a restart.
