@@ -54,6 +54,17 @@ import { LIVE_MIN_GAIN } from "@/lib/liveTrackLevel";
  *  accept it as an item, but "no role" is a value the operator can pick. */
 const NO_ROLE = "__none__";
 
+/** How long a live gain is gathered before it is sent. Long enough that a run
+ *  of arrow-key presses goes as one request; short enough to feel immediate. */
+export const LIVE_GAIN_DEBOUNCE_MS = 150;
+
+/** One row's live requests: at most one in flight, and the latest gain. */
+interface RowQueue {
+  pending?: { value: number; send: (track: number, gain: number) => Promise<void> };
+  timer?: number;
+  inFlight: boolean;
+}
+
 /** Live per-track mute and gain (I4).
  *
  *  Given only to the editor of the destination's LIVE mix: the route it calls
@@ -162,17 +173,68 @@ export function TrackRows({
       if (Number.isFinite(db)) lastRef.current.set(tr.index, { db, at });
     }
   }, [levels, tracks, meterFeedLive]);
-  /* The slider's position while a live drag is in flight. The draft is not
-     touched until the server has stored the level, so a refused change snaps
-     back to what is stored instead of leaving the form dirty. */
+  /* The slider's position while a live level is pending or in flight. The
+     draft is not touched until the server has stored the level, so a refused
+     change snaps back to what is stored instead of leaving the form dirty. It
+     is cleared only once the row is idle: clearing it on the first of several
+     answers would snap the thumb back while a later level is still out. */
   const [drag, setDrag] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const settle = (index: number, work: Promise<void>) => {
+  /* One live request per row at a time, and a gain gathered for
+     LIVE_GAIN_DEBOUNCE_MS before it goes. The slider's keyboard commits on
+     every keystroke; without this each one was its own POST, several in
+     flight at once, and the first answer re-enabled Mute while the rest were
+     still out. The send is captured at commit, so a level committed for one
+     destination is never posted to the next one on screen. */
+  const queues = useRef(new Map<number, RowQueue>());
+  const queueFor = (index: number): RowQueue => {
+    let q = queues.current.get(index);
+    if (!q) queues.current.set(index, (q = { inFlight: false }));
+    return q;
+  };
+  useEffect(() => {
+    const all = queues.current;
+    return () => {
+      for (const q of all.values()) if (q.timer !== undefined) window.clearTimeout(q.timer);
+      all.clear();
+    };
+  }, []);
+  const idle = (q: RowQueue) => !q.inFlight && q.pending === undefined && q.timer === undefined;
+  const finish = (index: number, q: RowQueue) => {
+    q.inFlight = false;
+    if (q.pending !== undefined && q.timer === undefined) {
+      pump(index, q);
+      return;
+    }
+    if (!idle(q)) return;
+    setBusy(({ [index]: _done, ...rest }) => rest);
+    setDrag(({ [index]: _gone, ...rest }) => rest);
+  };
+  // Sends the latest gathered gain, unless a request is already out: its
+  // answer sends whatever is latest by then, once.
+  const pump = (index: number, q: RowQueue) => {
+    if (q.inFlight || q.pending === undefined) return;
+    const { value, send } = q.pending;
+    q.pending = undefined;
+    q.inFlight = true;
+    void send(index, value).finally(() => finish(index, q));
+  };
+  const commitGain = (index: number, value: number, send: TrackRowsLive["onGain"]) => {
+    const q = queueFor(index);
+    q.pending = { value, send };
+    setBusy((b) => (b[index] ? b : { ...b, [index]: true }));
+    if (q.timer !== undefined) window.clearTimeout(q.timer);
+    q.timer = window.setTimeout(() => {
+      q.timer = undefined;
+      pump(index, q);
+    }, LIVE_GAIN_DEBOUNCE_MS);
+  };
+  const pressMute = (index: number, work: () => Promise<void>) => {
+    const q = queueFor(index);
+    if (!idle(q)) return;
+    q.inFlight = true;
     setBusy((b) => ({ ...b, [index]: true }));
-    void work.finally(() => {
-      setBusy(({ [index]: _done, ...rest }) => rest);
-      setDrag(({ [index]: _gone, ...rest }) => rest);
-    });
+    void work().finally(() => finish(index, q));
   };
   const selFor = (index: number): TrackSel =>
     selection.find((s) => s.track === index) ?? { track: index, enabled: false, gain: 1 };
@@ -333,7 +395,7 @@ export function TrackRows({
                   step={0.05}
                   // Not disabled while a level is in flight: disabling the
                   // focused control would drop keyboard focus to the page. The
-                  // server serialises the requests.
+                  // row's queue sends one level at a time, the latest.
                   disabled={!sel.enabled}
                   onValueChange={([v]) =>
                     liveOk
@@ -343,7 +405,7 @@ export function TrackRows({
                   onValueCommit={([v]) => {
                     if (!liveOk || !live) return;
                     // The route refuses zero: silence is the mute button.
-                    settle(t.index, live.onGain(t.index, Math.max(v, LIVE_MIN_GAIN)));
+                    commitGain(t.index, Math.max(v, LIVE_MIN_GAIN), live.onGain);
                   }}
                   aria-label={`Track ${t.index + 1} gain`}
                   className={cn(!sel.enabled && "opacity-40")}
@@ -379,7 +441,8 @@ export function TrackRows({
                   className={cn(sel.muted && "text-warn", rowBusy && "opacity-60")}
                   onClick={() => {
                     if (rowBusy) return;
-                    settle(t.index, live.onMute(t.index, !sel.muted));
+                    const muted = !sel.muted;
+                    pressMute(t.index, () => live.onMute(t.index, muted));
                   }}
                 >
                   {sel.muted ? <VolumeX /> : <Volume2 />}

@@ -512,10 +512,12 @@ export function RoutingPage() {
   // server stores it in the destination's LIVE mix and reconciles, so a
   // level-only change reaches the running output without a restart, and the
   // answer says whether it did.
+  //
+  // `dest` is bound by the caller when the control was used, not read here: a
+  // gain is gathered for a moment before it is sent, and the operator may have
+  // switched destination meanwhile. The level belongs to the one it was set on.
   const applyLevel = useCallback(
-    async (track: number, change: LevelChange): Promise<void> => {
-      const dest = selectedIdRef.current;
-      if (dest == null) return;
+    async (dest: DestinationId, track: number, change: LevelChange): Promise<void> => {
       const seq = (liveSeq.current[dest] = (liveSeq.current[dest] ?? 0) + 1);
       const key = `${dest}:${track}`;
       const trackSeq = levelSeq.current.next(key);
@@ -588,8 +590,8 @@ export function RoutingPage() {
         // The copy reason holds for every row and is shown once, above them.
         return { reason: t(key), inline: key !== "route.live.copyBlocked" };
       },
-      onMute: (track, muted) => applyLevel(track, { muted }),
-      onGain: (track, gain) => applyLevel(track, { gain }),
+      onMute: (track, muted) => applyLevel(storedRow.id, track, { muted }),
+      onGain: (track, gain) => applyLevel(storedRow.id, track, { gain }),
     };
   }, [storedRow, liveRefusals, applyLevel, t]);
 
