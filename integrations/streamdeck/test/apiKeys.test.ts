@@ -107,16 +107,16 @@ describe("no programme", () => {
   it("maps a 503 with the no_source code to its own kind, not a generic http error", async () => {
     const body = JSON.stringify({ error: "this install has no source yet", code: "no_source" });
     const { transport } = fakeTransport([{ status: 503, body }]);
-    const err = await new PolyemesisClient(BASE, "t", transport).applyPreset("everything").catch((e) => e);
+    const err: unknown = await new PolyemesisClient(BASE, "t", transport).applyPreset("everything").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err.kind).toBe("noSource");
-    expect(err.status).toBe(503);
-    expect(err.message).toBe("this install has no source yet");
+    expect((err as ApiError).kind).toBe("noSource");
+    expect((err as ApiError).status).toBe(503);
+    expect((err as ApiError).message).toBe("this install has no source yet");
   });
 
   it("keeps any other 503 as an ordinary http error", async () => {
     const { transport } = fakeTransport([{ status: 503, body: '{"error":"busy"}' }]);
-    const err = await new PolyemesisClient(BASE, "t", transport).applyPreset("everything").catch((e) => e);
+    const err: any = await new PolyemesisClient(BASE, "t", transport).applyPreset("everything").catch((e) => e);
     expect(err.kind).toBe("http");
   });
 });
