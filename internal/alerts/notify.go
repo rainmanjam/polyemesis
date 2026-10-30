@@ -382,6 +382,16 @@ func (n *Notifier) HasRules() bool {
 	return len(n.currentRules()) > 0
 }
 
+// HasRecorder reports whether a timeline sink is registered (WithRecorder).
+//
+// A recorder is a listener in its own right: it hears the timeline subset of
+// every event, rule or no rule, so a caller that skips building a snapshot when
+// HasRules is false must ask this too, or the timeline records nothing on an
+// install with no alert rules.
+func (n *Notifier) HasRecorder() bool {
+	return n != nil && n.recorder != nil
+}
+
 // Stats reports what has happened so far.
 func (n *Notifier) Stats() Stats {
 	if n == nil {

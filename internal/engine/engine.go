@@ -768,18 +768,21 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// with neither configured does no work beyond one cheap sweep.
 	// The timeline is written from the notifier's own goroutine, so the
 	// database may be slow without touching the reconcile loop. A nil store
-	// (tests that build an engine without one) records nothing.
-	e.alerter = alerts.New(log, store, alerts.WithRecorder(func(ev alerts.Event) {
-		if store == nil {
-			return
-		}
-		if err := store.RecordTimelineEvent(db.TimelineEvent{
-			At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
-			Title: ev.Title, Detail: ev.Text,
-		}); err != nil {
-			log.Warn("timeline record failed", "type", ev.Type, "err", err)
-		}
-	}))
+	// (tests that build an engine without one) gets no recorder at all, rather
+	// than one that discards: a recorder opens the sweep gate (sweepWanted),
+	// and a sink with nowhere to write is not a consumer worth sweeping for.
+	var alertOpts []alerts.Option
+	if store != nil {
+		alertOpts = append(alertOpts, alerts.WithRecorder(func(ev alerts.Event) {
+			if err := store.RecordTimelineEvent(db.TimelineEvent{
+				At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
+				Title: ev.Title, Detail: ev.Text,
+			}); err != nil {
+				log.Warn("timeline record failed", "type", ev.Type, "err", err)
+			}
+		}))
+	}
+	e.alerter = alerts.New(log, store, alertOpts...)
 	e.alertWatch = alerts.NewWatcher(alerts.WatchConfig{})
 	// Named from the source row on the first sweep; SourceRef starts with the
 	// id alone so an event raised before that still identifies its programme.
@@ -5147,8 +5150,25 @@ func (m *Manager) onSchedule(r scheduler.Result) {
 // The visible result is not an error anywhere: it is every YouTube broadcast on
 // that box sitting in "testing" for ever while the watch page says "starting
 // soon" and the stream itself is perfectly healthy.
-func observeWanted(alertRules, hookRules, lifecycleWanted bool) bool {
-	return alertRules || hookRules || lifecycleWanted
+//
+// AND A FOURTH TIME, for the stream timeline (A13). The notifier records the
+// timeline subset of every event it is handed, but it is only handed events
+// from a sweep, and a default install never swept: /api/v1/timeline stayed
+// empty through restarts, falling-behind and ingest loss, and filled the moment
+// an alert rule happened to exist. A recorder is a consumer like the other
+// three, so it opens the gate on its own.
+func observeWanted(alertRules, hookRules, lifecycleWanted, timeline bool) bool {
+	return alertRules || hookRules || lifecycleWanted || timeline
+}
+
+// sweepWanted is the gate observeLoop asks, with every consumer it knows of.
+//
+// A method rather than four arguments at the call site because the last three
+// bugs were all the call site forgetting an input; the table test above cannot
+// see that, and TestSweepWantedForTheTimelineAlone tests this instead.
+func (e *Engine) sweepWanted() bool {
+	return observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted(),
+		e.alerter.HasRecorder())
 }
 
 // observeLoop samples the pipeline and hands each snapshot to BOTH watchers.
@@ -5199,15 +5219,22 @@ func (e *Engine) observeLoop(ctx context.Context) {
 			live := !firstRx && rx > lastRx
 			lastRx, firstRx = rx, false
 
-			// A server with neither an alert rule nor a hook pays for two
-			// cached lookups and nothing else — no status snapshot, no
-			// queries, no disk read. Adding the first one starts the timers
-			// from that moment, which is the only honest thing it could do.
+			// A server with no consumer at all -- no alert rule, no hook, no
+			// lifecycle platform, no timeline recorder -- pays for the cached
+			// lookups and nothing else: no status snapshot, no queries, no
+			// disk read. Adding the first one starts the timers from that
+			// moment, which is the only honest thing it could do.
+			//
+			// An engine built with a store always has the timeline recorder,
+			// so in production the sweep now always runs: one status
+			// snapshot per alertSweep, and the disk read on its own
+			// alertDiskEvery cadence below. That is the price of a timeline
+			// that records without an alert rule having to exist first.
 			//
 			// e.hooks may be nil; HasHooks is nil-safe, the same discipline
 			// alerts.Notifier and transcribe.Tools use. Guarding at the call
 			// site instead is what makes the two diverge.
-			if !observeWanted(e.alerter.HasRules(), e.Hooks().HasHooks(), e.lifecycleWanted()) {
+			if !e.sweepWanted() {
 				haveDisk = false
 				continue
 			}
