@@ -59,10 +59,10 @@ func TestProvisionalStillAppliesPerTrackGain(t *testing.T) {
 	if !strings.Contains(res.FilterComplex, "volume=0.5") {
 		t.Errorf("per-track gain was dropped:\n%s", res.FilterComplex)
 	}
-	// And unity gain adds no filter at all.
+	// Unity gain still gets its volume stage, at 1, so a later edit is live.
 	unity, _ := CompileProvisional(simple(NormAuto, 0), DefaultSource())
-	if strings.Contains(unity.FilterComplex, "volume=") {
-		t.Errorf("unity gain emitted a volume filter:\n%s", unity.FilterComplex)
+	if got := volumesOf(unity.FilterComplex)["trk0"]; got != "1" {
+		t.Errorf("unity gain volume stage = %q, want \"1\":\n%s", got, unity.FilterComplex)
 	}
 }
 
@@ -88,8 +88,8 @@ func TestMatrixModeGetsUnityGainProvisionally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileProvisional: %v", err)
 	}
-	if strings.Contains(res.FilterComplex, "volume=") {
-		t.Errorf("a matrix profile emitted a stand-in gain:\n%s", res.FilterComplex)
+	if got := volumesOf(res.FilterComplex)["trk0"]; got != "1" {
+		t.Errorf("a matrix profile emitted a stand-in gain (volume stage %q):\n%s", got, res.FilterComplex)
 	}
 	// And the operator is told exactly what is not happening.
 	joined := strings.Join(res.Warnings, "\n")

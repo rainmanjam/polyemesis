@@ -131,6 +131,21 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	cells, exWarns := applyRolePolicy(p, src, cells)
 	warns = dedupe(append(warns, exWarns...))
 	res.Warnings = warns
+
+	// The pan that is WRITTEN carries unity gain in simple mode. The configured
+	// gain lives in the track's volume stage instead, so a live command reaches
+	// the output without being folded into a matrix a restart would have to
+	// rebuild. `cells` above still carries the configured gains: they feed the
+	// normaliser decision (peakGain, resolveNorm), which must not change when
+	// the operator moves a fader on a live destination unless the level crosses
+	// the limiter threshold, and then it is a structural change and restarts.
+	panCells := cells
+	if p.Mode != ModeMatrix {
+		unity := p
+		unity.Tracks = unityTracks(p.Tracks)
+		panCells, _ = resolveCells(unity, src)
+		panCells, _ = applyRolePolicy(unity, src, panCells)
+	}
 	if len(cells) == 0 {
 		if selected > 0 {
 			// Say *why* there is no audio. "selects no audio" would send an
@@ -143,7 +158,7 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	// Group by track, preserving ascending track order so the generated string
 	// is deterministic (and therefore diffable and testable).
 	byTrack := map[int][]Cell{}
-	for _, c := range cells {
+	for _, c := range panCells {
 		byTrack[c.Track] = append(byTrack[c.Track], c)
 	}
 	tracks := make([]int, 0, len(byTrack))
@@ -157,9 +172,15 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	bodies := make([]string, len(tracks))
 	for i, t := range tracks {
 		label[t] = n.track(t)
-		bodies[i] = trackChain(src, t, byTrack[t])
+		// Always present, including at unity, so the first gain edit is a
+		// command rather than a new stage. Placed right after the pan and before
+		// the denoiser: the gain used to act inside the pan, and moving it past
+		// a nonlinear stage would change how denoised tracks sound.
+		stage := volumeStage(n, t, trackVolume(p, t))
 		if provisional {
-			bodies[i] = provisionalChain(src, t, trackGain(p, t))
+			bodies[i] = provisionalChain(src, t, stage)
+		} else {
+			bodies[i] = trackChain(src, t, byTrack[t], stage)
 		}
 	}
 
@@ -326,11 +347,59 @@ func trackGain(p Profile, track int) float64 {
 	return 1
 }
 
+// trackVolume is the level a track's volume stage is set to: zero while muted,
+// otherwise trackGain. Mute is checked first and applies in matrix mode too;
+// the matrix's own cell gains stay in the pan and are structural.
+func trackVolume(p Profile, track int) float64 {
+	for _, sel := range p.Tracks {
+		if sel.Track == track && sel.Muted {
+			return 0
+		}
+	}
+	return trackGain(p, track)
+}
+
+// unityTracks copies the track rows with every present track at unity gain.
+// Presence (Enabled, Gain > 0) is kept, so the set of tracks in the graph does
+// not move.
+func unityTracks(in []TrackSel) []TrackSel {
+	out := make([]TrackSel, len(in))
+	for i, sel := range in {
+		if sel.Gain > 0 {
+			sel.Gain = 1
+		}
+		out[i] = sel
+	}
+	return out
+}
+
+// liveVolume is the filter instance name of track t's volume stage in a
+// graph compiled under namespace n. The name is the contract with the live
+// path in internal/ffmpeg: it addresses the stage by this name on the command
+// channel, so it must not change without that package changing with it.
+func (n ns) liveVolume(t int) string {
+	return "volume@" + n.of(fmt.Sprintf("trk%d", t))
+}
+
+// volumeStage renders track t's named volume filter at level v.
+func volumeStage(n ns, t int, v float64) string {
+	return fmt.Sprintf("%s=volume=%s", n.liveVolume(t), fmtCoeff(v))
+}
+
+// withStage appends an optional stage to a chain.
+func withStage(chain, stage string) string {
+	if stage == "" {
+		return chain
+	}
+	return chain + "," + stage
+}
+
 // trackChain renders the filter chain for one contributing track: the pan that
-// selects and downmixes its channels, plus noise suppression when the source
-// says the track needs it.
-func trackChain(src Source, track int, cells []Cell) string {
-	return denoised(src, track, PanFilter(cells))
+// selects and downmixes its channels, the volume stage, and noise suppression
+// when the source says the track needs it. stage is empty for the duck key,
+// which is measured at the source level and never follows mute or gain.
+func trackChain(src Source, track int, cells []Cell, stage string) string {
+	return denoised(src, track, withStage(PanFilter(cells), stage))
 }
 
 // ProvisionalFilter is the per-track chain used when the ingest layout has NOT
@@ -361,12 +430,8 @@ const ProvisionalFilter = "aformat=channel_layouts=stereo"
 // Gain is still applied, because a per-track gain is the operator's decision and
 // does not depend on the layout. It goes after the fold so it scales the stereo
 // result rather than one arbitrary channel.
-func provisionalChain(src Source, track int, gain float64) string {
-	chain := ProvisionalFilter
-	if gain != 1 {
-		chain += "," + fmt.Sprintf("volume=%s", fmtCoeff(gain))
-	}
-	return denoised(src, track, chain)
+func provisionalChain(src Source, track int, stage string) string {
+	return denoised(src, track, withStage(ProvisionalFilter, stage))
 }
 
 func denoised(src Source, track int, chain string) string {
@@ -462,9 +527,9 @@ func duckGraph(d Ducking, src Source, tracks []int, label map[int]string, provis
 		// placeholder channel counts would take channels 0 and 1 of a wide
 		// track where the mix takes a proper fold, so the detector would be
 		// listening to a different signal than the one being ducked.
-		tap := trackChain(src, t, CellsForTrack(t, tr, 1.0))
+		tap := trackChain(src, t, CellsForTrack(t, tr, 1.0), "")
 		if provisional {
-			tap = provisionalChain(src, t, 1)
+			tap = provisionalChain(src, t, "")
 		}
 		chains = append(chains, fmt.Sprintf("[0:a:%d]%s,%s[%s]", t, tap, trackAlign, keyLbl))
 		keys = append(keys, keyLbl)

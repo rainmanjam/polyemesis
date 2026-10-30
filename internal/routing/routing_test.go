@@ -207,7 +207,7 @@ func TestCompileSimpleSingleTrack(t *testing.T) {
 	}
 	want := "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];" +
 		"[a_t0]aresample=48000:async=1:first_pts=0[aout]"
-	if res.FilterComplex != want {
+	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
 	// A single track cannot sum-clip, so auto must not insert a limiter.
@@ -229,7 +229,7 @@ func TestCompileSimpleTwoTracksAutoLimits(t *testing.T) {
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
-	if res.FilterComplex != want {
+	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
 	if res.Normalization != NormLimiter {
@@ -274,8 +274,8 @@ func TestCompileGainIsAppliedPerTrack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.FilterComplex, "[0:a:1]pan=stereo|c0=0.25*c0|c1=0.25*c1,") {
-		t.Errorf("track 2 gain not applied: %s", res.FilterComplex)
+	if got := volumesOf(res.FilterComplex)["trk1"]; got != "0.25" {
+		t.Errorf("track 2 gain not applied (volume stage %q): %s", got, res.FilterComplex)
 	}
 }
 
@@ -293,7 +293,7 @@ func TestCompile51SourceDownmixesBeforeSumming(t *testing.T) {
 		"[a_t0][a_t1]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]alimiter=limit=0.95:level=disabled[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
-	if res.FilterComplex != want {
+	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
 }
@@ -323,7 +323,7 @@ func TestCompileMatrixMode(t *testing.T) {
 		"[a_t0][a_t2]amix=inputs=2:duration=longest:normalize=0[a_mix];" +
 		"[a_mix]loudnorm=I=-16:TP=-1.5:LRA=11[a_norm];" +
 		"[a_norm]aresample=48000:async=1:first_pts=0[aout]"
-	if res.FilterComplex != want {
+	if withoutVolumeStages(res.FilterComplex) != want {
 		t.Errorf("\n got  %s\n want %s", res.FilterComplex, want)
 	}
 }
