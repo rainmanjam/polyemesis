@@ -161,11 +161,12 @@ its first tagged release.
   data, so the supervisor never learned that media was flowing, and Monitoring
   showed `--:--:--` for as long as they ran.
 
-- **The dashboard's Ingest card follows the programme selected in the
-  header.** On an install with several programmes it showed whichever one had
-  reported last. Its state, bitrate, uptime, track count, video line and
-  publish address are now the selected programme's, and read "—" until that
-  programme reports.
+- **The dashboard's Ingest and Pipeline cards follow the programme selected
+  in the header.** On an install with several programmes they showed whichever
+  one had reported last. The Ingest card's state, bitrate, track count, video
+  line and publish address, and the Pipeline card's recorder, preview, meters,
+  relay subscribers and renditions, are now the selected programme's, and read
+  "—" until that programme reports.
 
 - **A four-track source shows four audio chips.** Destination cards always drew
   six. They now draw one per track of the card's own programme.

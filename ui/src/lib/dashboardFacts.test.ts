@@ -99,12 +99,12 @@ describe("Dashboard, wired to these decisions", () => {
 
   it("takes each pipeline row's absent word from the feature's own setting", () => {
     const src = dashboard();
-    expect(src).toContain('["Recorder", status?.recorder, absentLabel(featureEnabled?.recording)]');
-    expect(src).toContain('["Meters", status?.meters, absentLabel(featureEnabled?.meters)]');
+    expect(src).toContain('["Recorder", programmeStatus?.recorder, absentLabel(featureEnabled?.recording)]');
+    expect(src).toContain('["Meters", programmeStatus?.meters, absentLabel(featureEnabled?.meters)]');
     // The hard-coded word this replaced, which was the operator's own setting
     // read back at them whatever the truth was.
-    expect(src).not.toContain('["Recorder", status?.recorder, "disabled"]');
-    expect(src).not.toContain('["Meters", status?.meters, "disabled"]');
+    expect(src).not.toContain('["Recorder", programmeStatus?.recorder, "disabled"]');
+    expect(src).not.toContain('["Meters", programmeStatus?.meters, "disabled"]');
   });
 
   it("labels the Ingest card with the programme the snapshot came from", () => {

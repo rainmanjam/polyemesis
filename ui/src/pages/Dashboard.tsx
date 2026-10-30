@@ -1411,7 +1411,11 @@ export function Dashboard() {
   // genuinely ambiguous. See ingestAttribution().
   const attribution = ingestAttribution(sourceCount, source);
   const live = status?.destinations;
-  const renditions = status?.renditions ?? [];
+  // The Pipeline card's figures are the SELECTED programme's, like the Ingest
+  // card's: recorder, preview, meters, relay subscribers and the rendition
+  // ladder are all per engine, and the socket's last frame may be another
+  // programme's. See programmeSnapshot().
+  const renditions = programmeStatus?.renditions ?? [];
 
   // The socket republishes status on a two-second cadence, so a move applied
   // only on the server would leave the card sitting still after the click.
@@ -1855,12 +1859,12 @@ export function Dashboard() {
                   silence when the settings read has not landed. */}
               {(
                 [
-                  ["Recorder", status?.recorder, absentLabel(featureEnabled?.recording)],
+                  ["Recorder", programmeStatus?.recorder, absentLabel(featureEnabled?.recording)],
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
-                  ["Meters", status?.meters, absentLabel(featureEnabled?.meters)],
+                  ["Preview", programmeStatus?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
+                  ["Meters", programmeStatus?.meters, absentLabel(featureEnabled?.meters)],
                 ] as const
               ).map(([label, proc, absent]) => {
                 const tone = proc ? toneForState(proc.state) : "idle";
@@ -1882,7 +1886,7 @@ export function Dashboard() {
                   {/* Not `?? 0`: before the first snapshot there is no
                       subscriber count, and zero subscribers is a meaningful,
                       alarming number to show someone who is broadcasting. #663. */}
-                  {snapshotKnown ? (status?.relay.subscribers?.length ?? 0) : "—"}
+                  {snapshotKnown && programmeStatus ? (programmeStatus.relay?.subscribers?.length ?? 0) : "—"}
                 </span>
               </div>
 
