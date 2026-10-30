@@ -79,7 +79,7 @@ export function Experimental({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-card-raised p-2">
       <ExperimentalBadge className="self-start" />
-      <span className="text-[10px] text-muted-foreground">{children}</span>
+      <span className="text-sm text-muted-foreground">{children}</span>
     </div>
   );
 }

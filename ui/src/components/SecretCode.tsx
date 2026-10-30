@@ -32,7 +32,7 @@ export function SecretCode({
     <>
       <code
         className={cn(
-          "min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]",
+          "min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-sm",
           className,
         )}
       >

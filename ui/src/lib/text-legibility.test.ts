@@ -106,6 +106,12 @@ const CONFIG_SURFACES = [
   "pages/JobsPage.tsx",
   "pages/AutomationPage.tsx",
   "components/MediaUploads.tsx",
+  // Shared pieces that render on those surfaces: the floor is per element, so
+  // a child drawn smaller on a config page breaks it as much as the page does.
+  "components/SecretCode.tsx",
+  "components/signature/FilterString.tsx",
+  "components/Experimental.tsx",
+  "pages/ChatPage.tsx",
 ];
 
 describe("config surfaces hold a 12px floor for labels and values", () => {

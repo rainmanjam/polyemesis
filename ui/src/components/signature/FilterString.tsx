@@ -34,7 +34,7 @@ export function FilterString({
   return (
     <div className={cn("rounded-md border border-border bg-background", className)}>
       <div className="flex items-center justify-between border-b border-border px-2 py-1">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-sm uppercase tracking-wider text-muted-foreground">
           <Terminal className="h-3 w-3" />
           {t("signature.filter.generated")}
         </div>
@@ -42,7 +42,7 @@ export function FilterString({
           {copied ? <Check className="text-live" /> : <Copy />}
         </Button>
       </div>
-      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+      <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all px-2 py-1.5 font-mono text-sm leading-relaxed text-muted-foreground">
         {value}
       </pre>
     </div>
