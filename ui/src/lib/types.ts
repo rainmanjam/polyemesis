@@ -1937,6 +1937,19 @@ export interface PlatformAccount {
    *  the BINARY changes, not when the row does — upgrading polyemesis can turn
    *  a fine account into one that needs reconnecting. */
   reconnect?: ReconnectReason;
+  /** The last token refresh's outcome and the token's own expiry (A5), read
+   *  per request; see internal/api/account_health.go. Absent on an older
+   *  server, which the UI reads as "no news" rather than as healthy. */
+  health?: AccountHealth;
+}
+
+/** internal/api/account_health.go's AccountHealth. */
+export interface AccountHealth {
+  state: "ok" | "expiring" | "refreshFailing" | "expired";
+  /** Refreshes in a row that failed, and the platform's words for the last. */
+  failures?: number;
+  lastError?: string;
+  failedAt?: string;
 }
 
 /** What `POST /platforms/credentials/{platform}/device` answers with: the code

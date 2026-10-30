@@ -138,6 +138,9 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 type accountView struct {
 	db.PlatformAccount
 	Reconnect oauth.ReconnectReason `json:"reconnect"`
+	// Health is the last refresh's outcome and the token's own expiry, read
+	// per request (A5). See account_health.go.
+	Health AccountHealth `json:"health"`
 }
 
 func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -147,8 +150,23 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]accountView, 0, len(accts))
+	now := time.Now()
 	for _, a := range accts {
-		out = append(out, accountView{PlatformAccount: a, Reconnect: oauth.AccountNeedsReconnect(a)})
+		o, failing := s.acctHealth.get(a.ID)
+		// The list read carries no secrets, so whether a near-expiry account
+		// can refresh is one extra read, for that account only. A failed read
+		// assumes it can: "expired" is a claim this must not make on a guess.
+		canRefresh := true
+		if nearExpiry(a, now) {
+			if full, err := s.store.GetPlatformAccount(s.box, a.ID); err == nil {
+				canRefresh = full.RefreshToken != ""
+			}
+		}
+		out = append(out, accountView{
+			PlatformAccount: a,
+			Reconnect:       oauth.AccountNeedsReconnect(a),
+			Health:          accountHealthFor(a, canRefresh, o, failing, now),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1291,6 +1309,10 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 
 	tok, err := provider.Refresh(ctx, creds.ClientID, creds.ClientSecret, acct.RefreshToken)
 	if err != nil {
+		// Recorded for the account's health (A5): the dialog and Settings say
+		// "failing to refresh" with the platform's words, before a broadcast
+		// that needs the token finds out.
+		s.acctHealth.fail(acct.ID, err, time.Now())
 		return nil, fmt.Errorf("could not refresh the %s token: %w", acct.Platform, err)
 	}
 
@@ -1312,6 +1334,7 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	if err != nil {
 		return nil, err
 	}
+	s.acctHealth.ok(acct.ID)
 	return updated, nil
 }
 
