@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 )
 
 // ContentType is what a scrape expects back. Prometheus sniffs the version
@@ -161,6 +163,22 @@ type Destination struct {
 	// advancing the moment delivery does.
 	OutTimeMS   int64
 	OutputBytes int64
+
+	// Cause is why the destination is failing now (engine.DestStatus.Reason),
+	// empty while nothing is wrong. Held is the supervisor having stopped
+	// retrying it after repeated quick rejections.
+	//
+	// ONLY THE CODE, never Reason.Line. The line is FFmpeg's stderr, which for
+	// a refused publish is the line carrying the publish URL, and a label is
+	// copied into every time-series database that scrapes this. The code is a
+	// fixed enum, so the label's cardinality is bounded too; a value outside
+	// failreason.AllCauses() is rendered as unknown rather than passed through.
+	Cause failreason.Cause
+	Held  bool
+	// Failures counts this destination's failed runs by cause, from the
+	// supervisor (supervisor.Status.Failures). It restarts from zero with the
+	// process, which is a counter reset to Prometheus.
+	Failures map[failreason.Cause]int
 }
 
 // Relay is the fan-out hub's throughput.
@@ -389,6 +407,66 @@ func renderDestinations(d *doc, dests []Destination) {
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_dropped_frames_total", float64(dest.DropFrames), ident(dest)...)
 	}
+
+	renderDestinationReasons(d, sorted, ident)
+}
+
+// renderDestinationReasons emits why each destination is failing (#20).
+//
+// EVERY CAUSE FOR EVERY DESTINATION, at 0 when it does not apply, for the same
+// reason the state series do -- and for one more that is specific to the
+// counter. A refused key is held after three quick rejections, which can all
+// land inside one scrape interval: a series first seen at 3 has no earlier
+// sample, so increase() over it reads 0 and the failure never shows. Present at
+// 0 from the destination's first scrape, the same three failures read as 3.
+//
+// Bounded: nine causes times the destinations configured, and the cause is a
+// code from a fixed list, never text from FFmpeg.
+func renderDestinationReasons(d *doc, sorted []Destination, ident func(Destination) []label) {
+	causes := failreason.AllCauses()
+
+	d.family("polyemesis_destination_failures_total", "counter",
+		"Runs of the destination's process that ended in a failure, by cause, since the process was created.")
+	for _, dest := range sorted {
+		counts := map[failreason.Cause]int{}
+		for c, n := range dest.Failures {
+			counts[knownCause(c)] += n
+		}
+		for _, c := range causes {
+			d.sample("polyemesis_destination_failures_total", float64(counts[c]),
+				append(ident(dest), label{"cause", string(c)})...)
+		}
+	}
+
+	d.family("polyemesis_destination_failure_reason", "gauge",
+		"Why the destination is failing now; 1 for the current cause, all 0 while nothing is wrong.")
+	for _, dest := range sorted {
+		current := failreason.Cause("")
+		if dest.Cause != "" {
+			current = knownCause(dest.Cause)
+		}
+		for _, c := range causes {
+			d.sample("polyemesis_destination_failure_reason", boolValue(current == c),
+				append(ident(dest), label{"cause", string(c)})...)
+		}
+	}
+
+	d.family("polyemesis_destination_held", "gauge",
+		"1 when the destination has stopped retrying after repeated quick key or codec rejections; Retry clears it.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_held", boolValue(dest.Held), ident(dest)...)
+	}
+}
+
+// knownCause folds anything outside the published enum into unknown, so a
+// label value is always one of the nine codes whatever a caller passes in.
+func knownCause(c failreason.Cause) failreason.Cause {
+	for _, k := range failreason.AllCauses() {
+		if c == k {
+			return c
+		}
+	}
+	return failreason.Unknown
 }
 
 // renderRelay emits one relay series set per programme, because there is one

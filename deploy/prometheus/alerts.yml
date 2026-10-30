@@ -1,0 +1,111 @@
+# Prometheus alerting rules for polyemesis.
+#
+# Load with `rule_files: [alerts.yml]` in prometheus.yml; deploy/monitoring/
+# does exactly that. Every metric named here is checked against what the server
+# actually exports by internal/metrics/dashboard_drift_test.go. The rules'
+# behaviour is pinned by alerts_test.yml beside this file:
+#   docker run --rm -v "$PWD/deploy/prometheus:/r:ro" --entrypoint promtool \
+#     prom/prometheus:v3.15.0 test rules /r/alerts_test.yml
+#
+# These are the Prometheus side. polyemesis also has built-in alert rules that
+# deliver from inside the server (docs/MONITORING.md, "Built-in alerts"); the
+# two are independent, and an outage of the server itself is only visible from
+# here -- add `up{job="polyemesis"} == 0` to whatever pages you for scrape
+# targets in general.
+groups:
+  - name: polyemesis
+    rules:
+      # A platform you think you are streaming to and are not. _up is
+      # "running AND output moving", so a stalled sink counts.
+      #
+      # ONLY WHILE ITS PROGRAMME IS RECEIVING. Between shows nothing arrives
+      # and every destination is idle, which is not an outage; and a push
+      # ingest on the shared SRT/RTMP port can leave a destination reading
+      # up=0, stalled=1 once its encoder disconnects. The join goes through
+      # _info's source_id because destination ids and programme ids are
+      # different numbering.
+      #
+      # The cause is looked up at notification time from the one-hot
+      # failure_reason gauge: a code from a fixed list, never FFmpeg's text.
+      - alert: PolyemesisDestinationDown
+        expr: |
+          polyemesis_destination_up == 0
+            and polyemesis_destination_enabled == 1
+            and on(instance, id) (
+              polyemesis_destination_info
+                and on(instance, source_id) label_replace(
+                  polyemesis_ingest_bitrate_bits_per_second > 0,
+                  "source_id", "$1", "id", "(.*)"))
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Destination "{{ $labels.name }}" is enabled and not delivering'
+          description: >-
+            Its programme's ingest is receiving, but destination {{ $labels.name }}
+            (id {{ $labels.id }}) has not been delivering for 2 minutes.
+            Cause: {{ with printf "polyemesis_destination_failure_reason{instance=%q,id=%q} == 1" $labels.instance $labels.id | query }}{{ range . }}{{ .Labels.cause }}{{ end }}{{ else }}not classified (stalled or still starting){{ end }}.
+            Held: {{ with printf "polyemesis_destination_held{instance=%q,id=%q} == 1" $labels.instance $labels.id | query }}yes -- press Retry on its card once the cause is fixed{{ else }}no{{ end }}.
+
+      # A programme the server is not able to receive at all: its engine failed
+      # to build or start, or its ingest process gave up. NOT ingest_up == 0
+      # alone, and not a zero bitrate: an SRT or RTMP listener runs while it
+      # waits for the encoder, and a zero bitrate is every gap between shows.
+      - alert: PolyemesisIngestDown
+        expr: |
+          polyemesis_source_engine_up == 0
+            or polyemesis_ingest_state{state="failed"} == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Programme "{{ $labels.name }}" cannot receive its stream'
+          description: >-
+            Programme {{ $labels.name }} (id {{ $labels.id }}) has no running engine,
+            or its ingest process has failed and stopped retrying. Nothing an encoder
+            sends to it is being received. Check the server log and the programme's
+            ingest settings.
+
+      # The same floor as the built-in disk.low alert: 2 GiB free or under 5% of
+      # the volume. Recording stops when the volume fills.
+      - alert: PolyemesisRecordingDiskLow
+        expr: |
+          polyemesis_recording_total_bytes > 0
+            and (
+              polyemesis_recording_free_bytes < 2147483648
+              or polyemesis_recording_free_bytes / polyemesis_recording_total_bytes < 0.05
+            )
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Recording volume is nearly full"
+          description: >-
+            {{ with printf "polyemesis_recording_free_bytes{instance=%q}" $labels.instance | query }}{{ . | first | value | humanize1024 }}B{{ end }}
+            free on the volume holding the recordings directory. Delete or move
+            recordings, or lower retention.
+
+      # More than five restarts in 15 minutes is a destination or ingest that
+      # keeps failing, not one that blipped. A held destination stops
+      # restarting after its third refusal, so a refused key on its own fires
+      # PolyemesisDestinationDown rather than this -- until Retry is pressed
+      # twice more without fixing the key, which is a storm of its own.
+      - alert: PolyemesisDestinationRestartStorm
+        expr: increase(polyemesis_destination_restarts_total[15m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Destination "{{ $labels.name }}" is restarting repeatedly'
+          description: >-
+            {{ $value | printf "%.0f" }} restarts in 15 minutes.
+            Last cause: {{ with printf "polyemesis_destination_failure_reason{instance=%q,id=%q} == 1" $labels.instance $labels.id | query }}{{ range . }}{{ .Labels.cause }}{{ end }}{{ else }}none recorded{{ end }}.
+
+      - alert: PolyemesisIngestRestartStorm
+        expr: increase(polyemesis_ingest_restarts_total[15m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Programme "{{ $labels.name }}" ingest is restarting repeatedly'
+          description: >-
+            The ingest process for programme {{ $labels.name }} restarted
+            {{ $value | printf "%.0f" }} times in 15 minutes.

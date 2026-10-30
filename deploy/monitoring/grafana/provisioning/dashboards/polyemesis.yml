@@ -1,0 +1,13 @@
+# Loads deploy/grafana/polyemesis.json, mounted at /var/lib/grafana/dashboards
+# by ../../docker-compose.yml. Edits made in the Grafana UI are not written
+# back; export the JSON if you want to keep them.
+apiVersion: 1
+providers:
+  - name: polyemesis
+    folder: polyemesis
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards

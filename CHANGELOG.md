@@ -32,6 +32,25 @@ its first tagged release.
   - curl, browser, Node and Python examples are in
     [docs/EVENTS.md](docs/EVENTS.md). Polls, viewer samples and the failover
     degraded reason are listed there as coming with #14, #4 and #6.
+- **A Grafana dashboard and Prometheus alert rules, shipped.**
+  `deploy/grafana/polyemesis.json` (Grafana 10 or later) has a **Programme**
+  picker and rows for overview, ingest, destinations, host and recording, plus
+  a placeholder row for viewers and playback quality. The destinations row
+  shows why each failing destination is failing, whether it is held, and
+  failures by cause. `deploy/prometheus/alerts.yml` adds destination down
+  (naming the cause), ingest down, recording disk low, and restart storms.
+  `deploy/monitoring/` runs Prometheus and Grafana with both pre-provisioned.
+  A CI test fails if the dashboard or the rules query a metric the server does
+  not export. [GRAFANA.md](docs/GRAFANA.md)
+- **Failure causes on the Prometheus scrape.** Three new families, each
+  labelled `id` and `name`:
+  - `polyemesis_destination_failure_reason{cause}`: 1 for the current cause;
+  - `polyemesis_destination_held`;
+  - `polyemesis_destination_failures_total{cause}`: failed runs by cause.
+
+  `cause` is always one of the nine published codes, never FFmpeg's text.
+  Every cause is emitted at 0, so `increase()` sees the first failure.
+  [MONITORING.md](docs/MONITORING.md#on-the-scrape)
 
 - **Why a destination is failing.** When a destination fails, polyemesis
   reads the end of FFmpeg's stderr and the timing of the run, and names the

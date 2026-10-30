@@ -1216,7 +1216,15 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Enabled:  d.Enabled,
 		SourceID: d.SourceID,
 	}
+	// The cause CODE and the hold flag only. d.Reason.Line is FFmpeg's stderr,
+	// scrubbed for the status payload but not something to copy into a label:
+	// see metrics.Destination.Cause.
+	if d.Reason != nil {
+		md.Cause = d.Reason.Cause
+		md.Held = d.Reason.Held
+	}
 	if d.Process != nil {
+		md.Failures = d.Process.Failures
 		md.Process = metrics.Process{
 			State:       string(d.Process.State),
 			Restarts:    d.Process.Restarts,

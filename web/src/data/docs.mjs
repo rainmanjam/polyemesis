@@ -212,6 +212,8 @@ const DOCS_BY_SECTION = {
   automation: [
     ["MONITORING.md", "Monitoring: Prometheus metrics and alerts",
       "Everything the dashboard draws, as metrics. The endpoint and why it needs authentication, metric conventions, queries to start from, and built-in alerts."],
+    ["GRAFANA.md", "Grafana dashboard and Prometheus alerts",
+      "A shipped Grafana dashboard with failure causes per destination, Prometheus alert rules, and a compose file that runs both pre-provisioned."],
     ["HOOKS.md", "Lifecycle webhooks: one signed POST per event",
       "A signed JSON POST when a stream starts or stops and when a destination goes live or drops. The envelope, verifying a signature, ordering and gaps."],
     ["EVENTS.md", "Real-time events API: Server-Sent Events",
