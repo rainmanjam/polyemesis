@@ -65,14 +65,14 @@ export interface PlatformCapability {
    *  the connect affordance off this means the button works either way. */
   connect?: string;
   tier: CapTier;
-  summary: string;
+  summary: TranslationKey;
   /** The thing that costs a day if it is met halfway through instead of at
    *  the start. Facebook's App Review is why this field exists. */
-  readFirst?: string;
+  readFirst?: TranslationKey;
   caps: Partial<Record<Capability, Support>>;
   /** Only the cells where the value alone would raise a question. A wall of
    *  tooltips is not honesty. */
-  reasons?: Partial<Record<Capability, string>>;
+  reasons?: Partial<Record<Capability, TranslationKey>>;
 }
 
 export const CAPABILITY_COLUMNS: {
@@ -191,8 +191,8 @@ export const TIER_LEGEND: { key: CapTier; label: TranslationKey; help: Translati
 function manualUnverified(
   presetId: string,
   name: string,
-  summary: string,
-  readFirst: string,
+  summary: TranslationKey,
+  readFirst: TranslationKey,
 ): PlatformCapability {
   return {
     presetId,
@@ -219,8 +219,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "YouTube Live",
     connect: "youtube",
     tier: "integrated",
-    summary:
-      "Connect a Google account and polyemesis fetches the ingest URL and stream key, pushes your title and description at go-live, and reads and replies to live chat.",
+    summary: "caps.youtube.summary",
     caps: {
       sso: "yes",
       streamKey: "yes",
@@ -232,14 +231,10 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "yes",
     },
     reasons: {
-      broadcastLifecycle:
-        "Goes live on YouTube when video actually starts arriving, and ends when you disable or delete the destination — never when the encoder merely crashes, because a completed YouTube broadcast cannot return to live and a crash is recoverable. A refused transition raises a fault and never stops the stream.",
-      viewerStats:
-        'Live state, title, start time and concurrent viewer count, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. It costs two calls: polyemesis stores no video id, so it asks which broadcast is live and then asks that video how many people are watching. YouTube omits the viewer count when the owner has hidden it, when nobody is watching, and once the broadcast ends — all three look identical, so polyemesis reports "not reported" rather than zero. The count shares the Data API\'s daily quota with title push and chat, which is why it is polled gently rather than live.',
-      chatRead:
-        "Polled against the Data API's daily quota, which polyemesis paces. A long broadcast can exhaust it; the chat pane says so with the reset time rather than going quiet.",
-      moderation:
-        "Delete a message, over the same auth/youtube scope everything else here uses — so an account connected before this existed can already do it, with no reconnect. The connected account still has to own the broadcast or moderate its chat; YouTube answers 403 otherwise and polyemesis passes that on. Banning and timing out work too, over the same scope — permanent, or a timeout in seconds.",
+      broadcastLifecycle: "caps.youtube.broadcastLifecycle",
+      viewerStats: "caps.youtube.viewerStats",
+      chatRead: "caps.youtube.chatRead",
+      moderation: "caps.youtube.moderation",
     },
   },
   {
@@ -247,8 +242,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "Twitch",
     connect: "twitch",
     tier: "integrated",
-    summary:
-      "Connect a Twitch account and polyemesis fetches the stream key, sets your title and category at go-live, and joins chat over IRC.",
+    summary: "caps.twitch.summary",
     caps: {
       sso: "yes",
       streamKey: "yes",
@@ -260,11 +254,9 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "no",
     },
     reasons: {
-      metadata: "Title and category, over the channel:manage:broadcast scope.",
-      viewerStats:
-        "Live state, viewer count, title, category and start time from Helix Get Streams. It needs no scope of its own — Twitch asks only for an app or user access token — so every account already connected can answer without reconnecting. A channel that is not live returns no count at all rather than a count of zero, and polyemesis reports the difference. Twitch publishes no encoder health on this endpoint: there is no bitrate, framerate or dropped-frame figure to show beside the viewer number.",
-      moderation:
-        "Delete a message, over moderator:manage:chat_messages. An account connected before this existed holds a token without that scope — the account list says so and asks you to reconnect, rather than letting the delete button fail on the message you needed gone. Twitch refuses to delete anything older than six hours, and refuses the broadcaster's own messages and other moderators'. Banning and timing out work over moderator:manage:banned_users, which is a separate scope from deletion because removing a person is a bigger ask than removing a message.",
+      metadata: "caps.twitch.metadata",
+      viewerStats: "caps.twitch.viewerStats",
+      moderation: "caps.twitch.moderation",
     },
   },
   {
@@ -272,10 +264,8 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "Facebook Live",
     connect: "facebook",
     tier: "integrated",
-    summary:
-      "Connect a Facebook profile or Page and polyemesis creates the broadcast, splits out the RTMPS ingest and key, pushes the title and description, and reads the comment thread.",
-    readFirst:
-      "Meta requires App Review before anyone other than you can connect an account. Your own account works immediately as a developer or tester of your app, which is all a single-operator setup needs — but publishing on someone else's behalf needs Advanced Access to publish_video (profiles) or pages_manage_posts plus pages_read_engagement (Pages). Budget days, not minutes, and start it before you need it. Separately, and NOT a permission: Meta refuses go-live on account properties no scope can satisfy. Since 2024-06-10 the account must be at least 60 days old and the Page or professional-mode profile must have at least 100 followers. A connection with every scope granted still fails both, and the Graph error names neither — so if everything looks correct and it still will not start, check those two first.",
+    summary: "caps.facebook.summary",
+    readFirst: "caps.facebook.readFirst",
     caps: {
       sso: "yes",
       streamKey: "yes",
@@ -291,16 +281,11 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       // YouTube is driven by the lifecycle coordinator, Facebook is commanded by
       // hand. Without this sentence an operator reads the two cells as equal and
       // expects an automatic end that nothing issues. Mirrors capabilities.go.
-      broadcastLifecycle:
-        'Creating the broadcast and ending it both work, but they are things YOU do — connecting the account creates the live video, and "End broadcast" is on the destination menu. Nothing ends a Facebook broadcast on its own, unlike YouTube.',
-      streamKey:
-        "Connecting the account is what creates the broadcast: the key polyemesis fetches belongs to one live video and a refresh starts a new one. Facebook does also offer a PERSISTENT stream key — Live Producer → Advanced settings — which is reusable every time you go live, but Meta's API exposes no way to read it, so that one is copied from Live Producer and pasted here by hand. It does not go stale. Its one limit is Facebook's: a persistent key carries one live video at a time, so two destinations cannot share it.",
-      moderation:
-        "Delete a comment, or HIDE one — Facebook is the only platform here that can take a message off the public thread without destroying it, because its live chat is a comment thread. Acting on a Page's comments needs the MODERATE task permission, which is separate from being able to read them, so an app that shows you the thread can still be refused when you act on it.",
-      metadata:
-        "Title and description. Facebook removed overlay_url in Graph API v24.0, so there is no overlay field to push.",
-      chatRead:
-        "Facebook's live chat is the comment thread on the live video, read over the Graph API. A destination whose key was FETCHED carries the live-video id inside the key. One whose key was PASTED does not, so polyemesis asks the connected account which broadcast it is running — which works because Facebook allows a persistent key one live video at a time. If the account has two at the same status it refuses rather than guessing, names both, and the chat pane says so; attaching to the wrong comment thread is worse than attaching to none.",
+      broadcastLifecycle: "caps.facebook.broadcastLifecycle",
+      streamKey: "caps.facebook.streamKey",
+      moderation: "caps.facebook.moderation",
+      metadata: "caps.facebook.metadata",
+      chatRead: "caps.facebook.chatRead",
     },
   },
   {
@@ -308,8 +293,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     name: "Kick",
     connect: "kick",
     tier: "integrated",
-    summary:
-      "Sign in with Kick and polyemesis fetches the ingest URL and stream key, sets the title, category and tags, reads and replies to chat, and reads viewer stats.",
+    summary: "caps.kick.summary",
     caps: {
       sso: "yes",
       streamKey: "yes",
@@ -321,17 +305,12 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "no",
     },
     reasons: {
-      sso: "OAuth 2.1, which requires PKCE. Kick is the first polyemesis provider that uses it.",
-      streamKey:
-        "Fetched from the channels resource, over the streamkey:read scope. This was recorded here as impossible for a long time and the reasoning is worth keeping: the key rides as stream.key on the very same GET /public/v1/channels response that channel:read already fetches, but the field is omitted unless streamkey:read was granted too. There is no /streamkey endpoint, so reading the endpoint list suggests the capability does not exist. An account connected before that scope was requested holds a token without it and sees no key — reconnect it in Settings → Platforms.",
-      metadata:
-        "Stream title, category and up to ten custom tags, over PATCH /public/v1/channels.",
-      chatRead:
-        "Kick delivers chat by webhook rather than a socket, so polyemesis needs a public HTTPS URL it can be reached on. Without one the pane is silent, and it warns you rather than letting silence look like a quiet chat.",
-      moderation:
-        "Delete a message, over moderation:chat_message:manage. Banning and timing out work over moderation:ban. Note that Kick counts timeouts in MINUTES where YouTube and Twitch count seconds, and caps them at 7 days; polyemesis converts, so you give it one unit everywhere.",
-      viewerStats:
-        "Live state and viewer count from Kick's livestreams endpoints.",
+      sso: "caps.kick.sso",
+      streamKey: "caps.kick.streamKey",
+      metadata: "caps.kick.metadata",
+      chatRead: "caps.kick.chatRead",
+      moderation: "caps.kick.moderation",
+      viewerStats: "caps.kick.viewerStats",
     },
   },
   {
@@ -343,10 +322,8 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
        and lives only in the creator dashboard — a different field, and a
        one-time copy rather than a per-broadcast chore. */
     tier: "integrated",
-    summary:
-      "Sign in with Trovo and polyemesis fetches the stream key, sets the title and category at go-live, and reads the live viewer count. The server URL is the one field you copy across yourself, once.",
-    readFirst:
-      "Trovo does not hand out the client secret from its developer portal. Its documentation says, verbatim, “If you don't have the Client Secret, please contact: developer@trovo.live” — and the authorization-code flow cannot complete without one, because Trovo documents no PKCE. Ask for it before the day you need it. Nothing else here is gated: registration is open and every capability below is in the published reference.",
+    summary: "caps.trovo.summary",
+    readFirst: "caps.trovo.readFirst",
     caps: {
       sso: "yes",
       streamKey: "yes",
@@ -361,21 +338,14 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "no",
     },
     reasons: {
-      sso: "OAuth 2.0 authorization code with a client_secret. Trovo documents no PKCE, so polyemesis does not send one — and the secret arrives by email from developer@trovo.live rather than from the portal.",
-      streamKey:
-        "Fetched from GET /openplatform/channel over the channel_details_self scope. THE SERVER URL IS NOT: Trovo issues the ingest hostname per region and publishes it nowhere in its API, so that one field is copied from the creator dashboard once and refreshing the key afterwards leaves it alone. An account connected before this integration existed has to be reconnected once.",
-      metadata:
-        "Title and category, over POST /openplatform/channels/update with channel_update_self. Trovo's channel update takes no description and has no tags, so those are reported as skipped rather than silently dropped.",
-      chatRead:
-        "Trovo delivers chat over a websocket rather than by poll or webhook. Real, documented, and not wired up here yet.",
-      chatSend:
-        "POST /openplatform/chat/send, over chat_send_self plus send_to_my_channel. Not wired up here yet, and the scopes are deliberately not requested until it is — asking for them early would put permissions on the consent screen that nothing uses.",
-      moderation:
-        "POST /openplatform/channels/command with manage_messages, which performs Trovo's own chat commands — “ban xxx”, “mod @xxx”, with no leading slash. Not wired up here yet; the scope is not requested until it is.",
-      viewerStats:
-        "Live state and viewer count from the same channel read the stream key comes from, so it costs no extra call and no extra scope. It reads current_viewers rather than Trovo's dedicated viewers endpoint on purpose: that endpoint's total is documented as the channel's “total login users”, which counts signed-in viewers only and would under-report an audience without saying so. Offline, polyemesis reports no count rather than zero.",
-      broadcastLifecycle:
-        "Trovo has no broadcast resource: nothing creates, starts or ends one, so the stream itself is the trigger and liveness can only be observed. Established by reading the whole APIs reference, not by failing to find a page.",
+      sso: "caps.trovo.sso",
+      streamKey: "caps.trovo.streamKey",
+      metadata: "caps.trovo.metadata",
+      chatRead: "caps.trovo.chatRead",
+      chatSend: "caps.trovo.chatSend",
+      moderation: "caps.trovo.moderation",
+      viewerStats: "caps.trovo.viewerStats",
+      broadcastLifecycle: "caps.trovo.broadcastLifecycle",
     },
   },
   {
@@ -388,10 +358,8 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
      *  plan, so "partial" is the accurate description rather than a
      *  compromise. */
     tier: "partial",
-    summary:
-      "Sign in with Vimeo and polyemesis reads which member the token belongs to and checks, at the moment you connect, whether your account can reach Vimeo's live API. The ingest URL and stream key are pasted from the live event: Vimeo issues them per event, and creating one is Enterprise-only.",
-    readFirst:
-      'Read this first: "our live API is available only to Vimeo Enterprise customers" — Vimeo\'s own words on its live API reference, read 2026-08-26. That is a commercial gate, not a permission: no scope, no reconnection and no app setting lifts it, and it applies to every live method Vimeo publishes (create an event, activate it, end it, read its ingest, its M3U8 playback and its thumbnails). Sign-in itself is open to any Vimeo plan, and polyemesis asks the live API whether YOUR account reaches it the moment you connect, so you find out then rather than mid-broadcast. Streaming to Vimeo works regardless — you paste the RTMPS URL and key from the event\'s setup panel, exactly as before. Vimeo is also deprecating one-time live events and recommends avoiding them, so create a recurring event.',
+    summary: "caps.vimeo.summary",
+    readFirst: "caps.vimeo.readFirst",
     caps: {
       sso: "yes",
       streamKey: "manual",
@@ -410,25 +378,19 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "unknown",
     },
     reasons: {
-      sso: "OAuth 2.0 authorization code against api.vimeo.com, over the public and private scopes. Vimeo can also verify your client ID and secret before you connect anything, so a typo is caught on the credentials page. PKCE is not documented for Vimeo and is therefore not sent — an authorization server that validates its query string strictly refuses an unknown parameter outright.",
-      streamKey:
-        "Vimeo has no permanent stream key: the ingest URL and key belong to a live event, and creating one is behind the Enterprise gate. So this is a paste, from the event's setup panel. polyemesis asks the live API which reason applies to your account and says so rather than assuming.",
-      metadata:
-        'Vimeo publishes "Update an event", and it is one of the methods the Enterprise gate covers. Nothing here calls it, so this is not built — but it is not unknown either, and the Unverified label overstates the doubt.',
-      broadcastLifecycle:
-        'Vimeo publishes "Activate an event" and "End an event", so the lifecycle polyemesis models maps cleanly onto it. Both are Enterprise-only and neither is wired up, so nothing here starts or ends a Vimeo broadcast today. Note also that Vimeo is deprecating one-time live events and recommends avoiding them; anything built here should target recurring events.',
-      viewerStats:
-        "Vimeo publishes a VPaaS viewer analytics EXPORT on live events, which is not the same thing as a live concurrent count, and it sits behind the same Enterprise gate. Whether a live count is readable at all is genuinely unchecked, so this cell means what the legend says.",
+      sso: "caps.vimeo.sso",
+      streamKey: "caps.vimeo.streamKey",
+      metadata: "caps.vimeo.metadata",
+      broadcastLifecycle: "caps.vimeo.broadcastLifecycle",
+      viewerStats: "caps.vimeo.viewerStats",
     },
   },
   {
     presetId: "x",
     name: "X (Twitter) Live",
     tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key. X does publish a live-video API — broadcasts, chat and moderation — and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
-    readFirst:
-      "X's live-video API is real but its access tier is not published. Every capability here comes from X's own served OpenAPI spec, and no pricing page names the Broadcasts family — so whether your account can call them is a question only a live request answers. Paste the stream key from X's producer tooling; the rest is automatic once you connect.",
+    summary: "caps.x.summary",
+    readFirst: "caps.x.readFirst",
     caps: {
       sso: "unknown",
       streamKey: "manual",
@@ -440,17 +402,15 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "unknown",
     },
     reasons: {
-      sso: "Nothing to sign into for live video. An OAuth app here would grant access to posts, which is not what a restreamer needs.",
+      sso: "caps.x.sso",
     },
   },
   {
     presetId: "rumble",
     name: "Rumble",
     tier: "manual",
-    summary:
-      "Paste your ingest URL and stream key from Rumble Studio. Chat is different: Rumble's live-stream API hands over the chat with a key from your own account settings, so the pane works without any sign-in.",
-    readFirst:
-      "The chat key is NOT the stream key and is not pasted into polyemesis's UI. It comes from rumble.com/account/livestream-api and is supplied in the RUMBLE_CHAT_API_KEY environment variable, because there is no account to store it against — this API has no sign-in. Treat that URL as a secret: it is the whole credential, and anyone holding it can read your chat.",
+    summary: "caps.rumble.summary",
+    readFirst: "caps.rumble.readFirst",
     caps: {
       sso: "no",
       streamKey: "manual",
@@ -462,52 +422,47 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "no",
     },
     reasons: {
-      chatRead:
-        "Polled from rumble.com/-livestream-api/get-data, which needs no sign-in — the key from your account settings is the whole credential. Chat only exists while you are live, and the pane says it is waiting rather than going quiet. Two caveats worth knowing before you rely on it: Rumble sends no message id, so polyemesis derives one from the content, and two identical messages from one person inside the same second are indistinguishable and show as one. And Rumble publishes no rate limit, so the poll is deliberately conservative at ten seconds rather than as fast as it could be.",
-      chatSend:
-        "Unverified rather than impossible. Rumble's get-data endpoint returns data and no endpoint for posting or deleting a message is published — but this API is documented thinly enough that “we could not find it” is not the same as “it is not there”, so polyemesis does not refuse on the strength of it.",
-      streamKey:
-        "Rumble Studio issues both fields per stream; copy them across by hand.",
+      chatRead: "caps.rumble.chatRead",
+      chatSend: "caps.rumble.chatSend",
+      streamKey: "caps.rumble.streamKey",
     },
   },
   manualUnverified(
     "dlive",
     "DLive",
-    "Paste your ingest URL and stream key from DLive → Dashboard → Stream settings. Streaming works; there is no integration to connect.",
-    "DLive's developer portal at dev.dlive.tv no longer resolves in DNS, so its developer support appears to be inactive. Nothing about streaming to DLive depends on that — but do not go looking for an API key, because there is currently nowhere to get one.",
+    "caps.dlive.summary",
+    "caps.dlive.readFirst",
   ),
   manualUnverified(
     "odysee",
     "Odysee",
-    "Paste your ingest URL and stream key from Odysee. Streaming works; there is no integration to connect.",
-    "Odysee's chat is the LBRY comment server, and both comments.odysee.com and comments.lbry.com answered 502 when last checked. A 502 is an outage rather than a removal, so this is unverified rather than unsupported -- but there is nothing to build against while it stays that way.",
+    "caps.odysee.summary",
+    "caps.odysee.readFirst",
   ),
   manualUnverified(
     "dailymotion",
     "Dailymotion",
-    "Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
-    "api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
+    "caps.dailymotion.summary",
+    "caps.dailymotion.readFirst",
   ),
   manualUnverified(
     "tiktok",
     "TikTok LIVE",
-    "Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
-    "TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
+    "caps.tiktok.summary",
+    "caps.tiktok.readFirst",
   ),
   manualUnverified(
     "linkedin",
     "LinkedIn Live",
-    "Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
-    "LinkedIn Live requires approved broadcast-partner status, and its APIs sit behind the Marketing Developer Platform rather than open registration. api.linkedin.com answers, so the surface exists — but access to it is granted, not requested.",
+    "caps.linkedin.summary",
+    "caps.linkedin.readFirst",
   ),
   {
     presetId: "instagram",
     name: "Instagram Live",
     tier: "unsupported",
-    summary:
-      "polyemesis cannot stream to Instagram. Instagram's platform covers messaging, content publishing and comments — there is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts.",
-    readFirst:
-      "This entry exists to save you the evening. A destination that silently never connects is worse than no destination at all: it looks like a bug in polyemesis, and there is nothing to fix. If your account still has Live Producer RTMP access, add a Generic RTMPS destination and paste the server URL and key Meta gives you — but check that you have it before you build the show around it.",
+    summary: "caps.instagram.summary",
+    readFirst: "caps.instagram.readFirst",
     caps: {
       sso: "no",
       // Not "manual": for most accounts there is no key to paste, so offering
@@ -541,8 +496,7 @@ export function capabilityFor(
     presetId,
     name: name || presetId,
     tier: "manual",
-    summary:
-      "Paste the ingest URL and stream key from this platform's dashboard. Every polyemesis feature on this side of the wire — per-destination audio routing, renditions, reconnect, meters — works exactly the same.",
+    summary: "caps.fallbackSummary",
     caps: { streamKey: "manual" },
   };
 }

@@ -33,7 +33,7 @@ import {
   sourceIsChosen,
 } from "@/lib/destinationSource";
 import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { DEST_STEPS, stepForError, type DestStep } from "@/lib/destinationSteps";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
@@ -107,7 +107,7 @@ interface DestPreset {
   url: string;
   separateKey: boolean;
   helpUrl?: string;
-  notes: string;
+  notes: TranslationKey;
   /** Extra search terms, because the name an operator types is not always the
    *  name on the tin. */
   aliases?: string[];
@@ -115,15 +115,14 @@ interface DestPreset {
 
 /** Shown beside the catalogue, always. Ingest hostnames and platform limits
  *  move without notice, so no preset is presented as authoritative. */
-const PRESET_DISCLAIMER =
-  "Starting point — ingest URLs and limits change, so verify with the platform before you go live.";
+const PRESET_DISCLAIMER: TranslationKey = "addDest.presetDisclaimer";
 
-const PRESET_GROUPS: { key: PresetGroupKey; label: string }[] = [
-  { key: "major", label: "Major" },
-  { key: "video", label: "Video platforms" },
-  { key: "selfhosted", label: "Self-hosted" },
-  { key: "cloud", label: "CDN & cloud" },
-  { key: "generic", label: "Generic" },
+const PRESET_GROUPS: { key: PresetGroupKey; label: TranslationKey }[] = [
+  { key: "major", label: "addDest.groupMajor" },
+  { key: "video", label: "addDest.groupVideo" },
+  { key: "selfhosted", label: "addDest.groupSelfHosted" },
+  { key: "cloud", label: "addDest.groupCloud" },
+  { key: "generic", label: "addDest.groupGeneric" },
 ];
 
 /** Mirrors db.DestinationPresets() in internal/db/platforms.go — the same
@@ -144,8 +143,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmp://a.rtmp.youtube.com/live2",
     separateKey: true,
     helpUrl: "https://support.google.com/youtube/answer/2907883",
-    notes:
-      "Connect a Google account in Settings → Platform credentials to fetch the stream key automatically, or paste it from YouTube Studio → Go live → Stream. YouTube Studio also shows a backup ingest URL; add it as a second destination if you want redundancy.",
+    notes: "addDest.presetNote.youtube",
     aliases: ["google", "yt"],
   },
   {
@@ -158,8 +156,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://a.rtmps.youtube.com/live2",
     separateKey: true,
     helpUrl: "https://support.google.com/youtube/answer/2907883",
-    notes:
-      "The same ingest over TLS on 443, for networks that block port 1935. The stream key is identical to the plain-RTMP one.",
+    notes: "addDest.presetNote.youtubeRtmps",
     aliases: ["google", "yt", "tls"],
   },
   {
@@ -172,8 +169,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmp://live.twitch.tv/app",
     separateKey: true,
     helpUrl: "https://help.twitch.tv/s/article/broadcast-guidelines",
-    notes:
-      "Connect a Twitch account in Settings → Platform credentials to fetch the stream key automatically. live.twitch.tv resolves to a nearby ingest; if it picks a poor one, copy a specific regional ingest host from Twitch's ingest list and paste it here instead.",
+    notes: "addDest.presetNote.twitch",
     aliases: ["ttv"],
   },
   {
@@ -186,8 +182,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://live.twitch.tv/app",
     separateKey: true,
     helpUrl: "https://help.twitch.tv/s/article/broadcast-guidelines",
-    notes:
-      "RTMP over TLS on 443, for networks that block 1935. Twitch's TLS support is per-ingest: if this host refuses the connection, use the plain Twitch preset or copy an RTMPS ingest from Twitch's ingest list.",
+    notes: "addDest.presetNote.twitchRtmps",
     aliases: ["ttv", "tls"],
   },
   {
@@ -203,8 +198,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     helpUrl: "https://kick.com/dashboard/settings/stream",
-    notes:
-      "Connect a Kick account in Settings → Platform credentials and polyemesis fetches the stream key itself, over the streamkey:read scope — an account connected before that scope existed needs reconnecting once. Without a connected account, copy the key from Kick → Settings → Stream. Either way the ingest URL is yours to supply: Kick issues the host per channel, so there is nothing to prefill here. APPEND /app to the URL Kick shows you — the dashboard prints it without one, and a Kick destination without /app cannot publish at all. The result looks like rtmps://<your-host>.global-contribute.live-video.net:443/app",
+    notes: "addDest.presetNote.kick",
   },
   {
     id: "facebook",
@@ -216,8 +210,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://live-api-s.facebook.com:443/rtmp/",
     separateKey: true,
     helpUrl: "https://www.facebook.com/live/producer",
-    notes:
-      "Connect a Facebook account in Settings → Platform credentials and polyemesis creates the broadcast and fills in both the ingest URL and the key. The key it fetches belongs to one live video, so each refresh starts a new one. Registering the Meta app is the slow part — it needs App Review before anyone but you can connect. By hand instead: Live Producer → Advanced settings → Persistent stream key gives you a key that is reusable every time you go live, so a pasted destination does not go stale. Turn on Backup stream there too and you get the second key the redundant feed publishes to. A persistent key carries one live video at a time, so two destinations cannot share one. A pasted key has no live-video id, so chat, metadata and End broadcast need the connected account. Facebook requires RTMPS; plain RTMP is refused.",
+    notes: "addDest.presetNote.facebook",
     aliases: ["meta", "fb"],
   },
   {
@@ -229,8 +222,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     helpUrl: "https://developers.facebook.com/docs/instagram-platform",
-    notes:
-      "Not supported, and this preset exists to say so rather than to be used. Instagram publishes no Live broadcast API — its platform covers messaging, content publishing and comments — and Live Producer's RTMP option was withdrawn for most accounts. If your account is one of the few that still has it, the server URL and key come from Live Producer and change every broadcast; otherwise there is nothing to paste here and no amount of configuration will change that.",
+    notes: "addDest.presetNote.instagram",
     aliases: ["meta", "ig"],
   },
   {
@@ -241,8 +233,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "TikTok issues the server URL and key per broadcast, and only to accounts granted LIVE access. Create the stream in TikTok LIVE Studio or LIVE Center and copy both fields from there.",
+    notes: "addDest.presetNote.tiktok",
   },
 
   {
@@ -253,8 +244,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Manual key only. X's API covers posts, users, media and the post firehose — “streaming” in its documentation means streaming posts, not ingesting video — so there is no documented endpoint for polyemesis to fetch an ingest from, and none is planned. Create the source in X's own producer tooling and copy the server URL and key from there.",
+    notes: "addDest.presetNote.x",
     aliases: ["twitter", "periscope"],
   },
   {
@@ -265,8 +255,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "LinkedIn issues the ingest URL and key per event, either from LinkedIn's own event creation flow or from the approved streaming tool linked to the page. Copy both from the event.",
+    notes: "addDest.presetNote.linkedin",
   },
   {
     id: "trovo",
@@ -277,8 +266,7 @@ const PRESETS: DestPreset[] = [
     platform: "trovo",
     url: "",
     separateKey: true,
-    notes:
-      "Connect a Trovo account in Settings → Platform credentials and polyemesis fetches the stream key itself, over the channel_details_self scope. The server URL is yours to supply either way: Trovo's ingest hostname varies by region and appears nowhere in its API, so copy it once from the Trovo creator dashboard → Stream. Refreshing the key afterwards leaves that URL alone.",
+    notes: "addDest.presetNote.trovo",
   },
   {
     id: "dlive",
@@ -288,8 +276,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Copy the server URL and stream key from DLive → Dashboard → Stream settings. Manual only, and likely to stay that way: DLive's developer portal at dev.dlive.tv no longer resolves, so there is nothing published to integrate against.",
+    notes: "addDest.presetNote.dlive",
   },
   {
     id: "rumble",
@@ -299,8 +286,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Manual key only. Rumble Studio issues an ingest URL and key per stream — set the stream up there and copy both fields from its RTMP details. Rumble's API page (rumble.com/account/api) is behind a login wall with nothing published, so there is no integration to build against.",
+    notes: "addDest.presetNote.rumble",
   },
   {
     id: "odysee",
@@ -310,8 +296,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Odysee issues a livestream ingest URL and key from the livestream setup on your channel. Copy both from there.",
+    notes: "addDest.presetNote.odysee",
     aliases: ["lbry"],
   },
   {
@@ -329,8 +314,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     helpUrl: "https://developer.vimeo.com/api/reference/live",
-    notes:
-      "Vimeo issues an RTMPS URL and key per live event. Open the event in Vimeo and copy the server URL and stream key from its setup panel — connecting a Vimeo account does not change that, because Vimeo's live API is available only to Vimeo Enterprise customers and a key belongs to an event. Connect one anyway if you have an account: polyemesis asks the live API whether YOURS reaches it and tells you at connect time, rather than letting the refusal turn up mid-broadcast. Create a RECURRING event — Vimeo is deprecating one-time live events and recommends avoiding them.",
+    notes: "addDest.presetNote.vimeo",
   },
   {
     id: "dailymotion",
@@ -340,8 +324,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Dailymotion Studio issues an ingest URL and key per live video. Copy both from the live video's settings.",
+    notes: "addDest.presetNote.dailymotion",
   },
 
   {
@@ -353,8 +336,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmp://{peertube-host}:1935/live",
     separateKey: true,
     helpUrl: "https://docs.joinpeertube.org/",
-    notes:
-      "Replace {peertube-host} with your instance's hostname and paste the live stream key from the video's Live settings. 1935 is the default RTMP port; an instance with RTMPS enabled listens on its own port, so check that instance's live configuration.",
+    notes: "addDest.presetNote.peertube",
   },
   {
     id: "owncast",
@@ -365,8 +347,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmp://{owncast-host}:1935/live",
     separateKey: true,
     helpUrl: "https://owncast.online/docs/broadcasting/",
-    notes:
-      "Replace {owncast-host} with your Owncast server. The stream key is the one configured in Owncast's admin under Server Setup, where the RTMP port can also be changed from the default 1935.",
+    notes: "addDest.presetNote.owncast",
   },
   {
     id: "wowza-engine",
@@ -376,8 +357,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "rtmp://{wowza-host}:1935/{application}",
     separateKey: true,
-    notes:
-      "Replace {wowza-host} and {application} with your Streaming Engine host and application name, and put the stream name in the stream key field. For the hosted product use the Wowza Video preset instead.",
+    notes: "addDest.presetNote.wowzaEngine",
   },
 
   {
@@ -389,8 +369,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://live.cloudflare.com:443/live/",
     separateKey: true,
     helpUrl: "https://developers.cloudflare.com/stream/stream-live/",
-    notes:
-      "Create a live input in Cloudflare Stream and paste its stream key. The dashboard shows the exact RTMPS URL beside the key — use that if it differs from the one prefilled here. The same input also accepts SRT and WHIP.",
+    notes: "addDest.presetNote.cloudflareStream",
     aliases: ["cf"],
   },
   {
@@ -402,8 +381,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://global-live.mux.com:443/app",
     separateKey: true,
     helpUrl: "https://docs.mux.com/guides/video/stream-live-to-mux",
-    notes:
-      "Create a live stream in Mux and paste its stream key. Mux publishes plain-RTMP and SRT endpoints for the same stream; the dashboard shows the exact URLs if you want one of those instead.",
+    notes: "addDest.presetNote.mux",
   },
   {
     id: "aws-ivs",
@@ -414,8 +392,7 @@ const PRESETS: DestPreset[] = [
     url: "rtmps://{ingest-endpoint}:443/app/",
     separateKey: true,
     helpUrl: "https://docs.aws.amazon.com/ivs/",
-    notes:
-      "Replace {ingest-endpoint} with the channel's ingest endpoint from the IVS console and paste the channel's stream key. Each channel gets its own endpoint, so this template is not usable as-is.",
+    notes: "addDest.presetNote.awsIvs",
     aliases: ["amazon", "interactive video service"],
   },
   {
@@ -427,8 +404,7 @@ const PRESETS: DestPreset[] = [
     url: "",
     separateKey: true,
     helpUrl: "https://support.restream.io/",
-    notes:
-      "Restream assigns an ingest close to you, so there is no single hostname to prefill. Copy the server URL and key from Restream → Stream with RTMP. Note that relaying through Restream re-encodes your audio, which undoes per-destination track routing — send tracks straight to each platform where you can.",
+    notes: "addDest.presetNote.restream",
   },
   {
     id: "castr",
@@ -438,8 +414,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Castr issues an ingest URL and key per stream. Copy both from the stream's ingest panel in the Castr dashboard.",
+    notes: "addDest.presetNote.castr",
   },
   {
     id: "livepush",
@@ -449,8 +424,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Copy the ingest URL and stream key from the Livepush dashboard for the channel you are pushing to.",
+    notes: "addDest.presetNote.livepush",
   },
   {
     id: "boxcast",
@@ -460,8 +434,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "BoxCast issues an ingest URL and key per broadcast source. Create the source in the BoxCast dashboard and copy both fields.",
+    notes: "addDest.presetNote.boxcast",
   },
   {
     id: "wowza-video",
@@ -471,8 +444,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Wowza Video issues a primary ingest URL and stream name per live stream, and may also require publishing credentials. Copy them from the live stream's source connection details.",
+    notes: "addDest.presetNote.wowzaVideo",
   },
   {
     id: "akamai-msl",
@@ -482,8 +454,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: true,
-    notes:
-      "Akamai issues per-stream entry point hostnames and a stream ID in Media Services Live, and they are account-specific. Copy the primary entry point and stream ID from the stream's configuration in Akamai Control Center.",
+    notes: "addDest.presetNote.akamaiMsl",
     aliases: ["msl"],
   },
   {
@@ -494,8 +465,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "",
     separateKey: false,
-    notes:
-      "A live event issues its own ingest URL once created and started; copy it from the event in the Azure portal — the key, where there is one, is already part of that URL. Azure Media Services was retired in June 2024, so confirm which live product your subscription actually has before relying on this.",
+    notes: "addDest.presetNote.azureMedia",
     aliases: ["microsoft", "ams"],
   },
 
@@ -507,8 +477,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "rtmp://{host}/{application}",
     separateKey: true,
-    notes:
-      "Any RTMP ingest. Replace {host} and {application}; the stream key is joined onto the URL with a slash when the stream starts, so leave it out of the URL itself.",
+    notes: "addDest.presetNote.genericRtmp",
   },
   {
     id: "generic-rtmps",
@@ -518,8 +487,7 @@ const PRESETS: DestPreset[] = [
     kind: "rtmp",
     url: "rtmps://{host}:443/{application}",
     separateKey: true,
-    notes:
-      "RTMP over TLS. Use it when the network blocks port 1935 or the receiver requires TLS. Otherwise identical to the generic RTMP preset.",
+    notes: "addDest.presetNote.genericRtmps",
   },
   {
     id: "generic-srt",
@@ -529,8 +497,7 @@ const PRESETS: DestPreset[] = [
     kind: "srt",
     url: "srt://{host}:{port}?streamid={streamid}",
     separateKey: false,
-    notes:
-      "SRT carries everything in the URL, including the stream id, so there is no separate key field. Add &passphrase=… and &pbkeylen=… if the receiver requires encryption.",
+    notes: "addDest.presetNote.genericSrt",
   },
   {
     id: "generic-hls",
@@ -539,8 +506,7 @@ const PRESETS: DestPreset[] = [
     transport: "hls",
     url: "",
     separateKey: false,
-    notes:
-      "polyemesis cannot push HLS to a remote HTTP endpoint. It does serve HLS itself — point players at this server's /hls path — and it can send RTMP or SRT to a packager that produces HLS for you. Choosing this preset leaves the transport alone.",
+    notes: "addDest.presetNote.genericHls",
     aliases: ["http", "m3u8"],
   },
 ];
@@ -569,12 +535,13 @@ const PASSTHROUGH = "passthrough";
 
 /** One rendition in a sentence, so two tiers in the same list are told apart
  *  by what they do rather than by whatever they were named. */
-function renditionSpec(r: Rendition): string {
+function renditionSpec(r: Rendition, t: Translator): string {
   const scaled = r.width > 0 || r.height > 0;
   // 0 on an axis means "derive it from the source", which reads as "auto"
   // rather than as a zero the user is being asked to believe in.
-  const size = scaled ? `${r.width || "auto"}×${r.height || "auto"}` : "source size";
-  const fps = r.fps > 0 ? `${r.fps} fps` : "source fps";
+  const auto = t("lib.autoBadge");
+  const size = scaled ? `${r.width || auto}×${r.height || auto}` : t("rend.sizeSource");
+  const fps = r.fps > 0 ? `${r.fps} fps` : t("rend.sourceFps");
   return `${size} · ${fps} · ${r.videoBitrate} kbps · ${r.encoder}`;
 }
 
@@ -618,10 +585,11 @@ interface Props {
 
 export function DestinationDialog({ open, onOpenChange, destination, onSaved }: Props) {
   const editing = destination !== null;
-  // Only the Facebook create-time block reads this so far. The rest of the
-  // dialog is still English literals -- a mechanical follow-up, key by key,
-  // rather than something to do halfway in a commit about drift guards.
+  // Every operator-visible sentence here comes from the catalogue. The preset
+  // table stores keys rather than English, so its notes and group labels are
+  // translated at render; preset names stay as the platforms spell them.
   const t = useT();
+  const tn = useTN();
 
   const [name, setName] = useState("");
   const [platform, setPlatform] = useState<Platform>("custom");
@@ -1147,10 +1115,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       let warnings: string[] = [];
       if (editing) {
         ({ warnings = [] } = await api.updateDestination(destination.id, payload));
-        toast.success("Destination updated.");
+        toast.success(t("addDest.toastUpdated"));
       } else {
         ({ warnings = [] } = await api.createDestination(payload));
-        toast.success("Destination created. Set its audio routing next.");
+        toast.success(t("addDest.toastCreated"));
       }
       for (const w of warnings) toast.warning(w, { duration: 10000 });
       onSaved();
@@ -1257,7 +1225,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               onClick={() => setPickerOpen((o) => !o)}
             >
               <span className="truncate">
-                {selectedPreset ? selectedPreset.name : "Choose a platform…"}
+                {selectedPreset ? selectedPreset.name : t("addDest.choosePlatform")}
               </span>
               <ChevronsUpDown className="opacity-50" />
             </Button>
@@ -1270,7 +1238,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     autoFocus
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder={`Search ${PRESETS.length} platforms…`}
+                    placeholder={t("addDest.searchPlatforms", { count: PRESETS.length })}
                     className="w-full bg-transparent py-2 text-xs outline-none placeholder:text-muted-foreground"
                   />
                 </div>
@@ -1281,7 +1249,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     return (
                       <div key={g.key}>
                         <div className="px-2 pt-2 pb-1 text-sm font-medium uppercase tracking-wider text-muted-foreground">
-                          {g.label}
+                          {t(g.label)}
                         </div>
                         {rows.map((p) => {
                           const rowCaps = capabilityFor(p.id, p.name);
@@ -1345,8 +1313,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   })}
                   {matches.length === 0 && (
                     <p className="px-2 py-3 text-sm text-muted-foreground">
-                      Nothing matches “{query}”. Any platform works: pick a generic transport
-                      below and paste the URL and key from its dashboard.
+                      {t("addDest.noMatch", { query })}
                     </p>
                   )}
                 </div>
@@ -1370,10 +1337,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 <span className="text-sm text-muted-foreground">{t(tierInfo(caps.tier).help)}</span>
               </div>
               <p className={unsupported ? "text-sm text-warn" : "text-sm text-muted-foreground"}>
-                {caps.summary}
+                {t(caps.summary)}
               </p>
               {caps.readFirst && (
-                <p className="text-sm text-muted-foreground">{caps.readFirst}</p>
+                <p className="text-sm text-muted-foreground">{t(caps.readFirst)}</p>
               )}
               <div className="flex flex-wrap gap-1">
                 {CAPABILITY_COLUMNS.map((col) => {
@@ -1387,7 +1354,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       title={t("caps.cellTitle", {
                         column: t(col.label),
                         support: t(info.label),
-                        reason: caps.reasons?.[col.key] ?? t(info.help),
+                        reason: t(caps.reasons?.[col.key] ?? info.help),
                       })}
                     >
                       {t(col.label)}
@@ -1397,11 +1364,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 })}
               </div>
               {unsupported && (
-                <p className="text-sm text-warn">
-                  Nothing stops you saving this — if your account is one of the exceptions, paste
-                  what the platform gave you and it will stream. It is unticked here so that a
-                  destination which can never connect does not look like a bug in polyemesis.
-                </p>
+                <p className="text-sm text-warn">{t("addDest.unsupportedSaveNote")}</p>
               )}
             </div>
           )}
@@ -1461,12 +1424,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </>
               ) : readFailed(accountsRead) ? (
                 <p className="text-sm text-muted-foreground">
-                  The connected accounts could not be read, so this cannot say whether{" "}
-                  {caps.name} is already linked. Reopen this dialog once the connection is
-                  back rather than reconnecting — following that link leaves this form.
+                  {t("addDest.accountsReadFailed", { platform: caps.name })}
                 </p>
               ) : !mayClaim(accountsRead) ? (
-                <p className="text-sm text-muted-foreground">Checking for a linked account…</p>
+                <p className="text-sm text-muted-foreground">{t("addDest.checkingAccount")}</p>
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {/* The code path first where the platform has one: it stays
@@ -1509,16 +1470,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   field stays empty. */}
               <span className="text-sm text-muted-foreground">
                 {manualKey
-                  ? `Signing in gets you ${[
-                      supportOf(caps, "chatRead") === "yes" && "chat",
-                      supportOf(caps, "moderation") === "yes" && "moderation",
-                      supportOf(caps, "metadata") === "yes" && "title and category push",
-                      supportOf(caps, "viewerStats") === "yes" && "viewer counts",
-                    ]
-                      .filter(Boolean)
-                      .join(", ")}. It does not get you the stream key — ${caps.name} does not publish one, so you type that in below. Both at once is the expected setup here, not a fallback.`
-                  : "Linking an account lets polyemesis fetch the stream key for you."}{" "}
-                Requires developer credentials in Settings → Platform credentials.
+                  ? t("addDest.signInGets", {
+                      features: [
+                        supportOf(caps, "chatRead") === "yes" && t("addDest.featureChat"),
+                        supportOf(caps, "moderation") === "yes" && t("addDest.featureModeration"),
+                        supportOf(caps, "metadata") === "yes" && t("addDest.featureMetadata"),
+                        supportOf(caps, "viewerStats") === "yes" && t("addDest.featureViewerStats"),
+                      ]
+                        .filter(Boolean)
+                        .join(t("addDest.featureListSeparator")),
+                      platform: caps.name,
+                    })
+                  : t("addDest.linkFetchesKey")}{" "}
+                {t("addDest.needsDevCreds")}
               </span>
             </div>
           )}
@@ -1529,13 +1493,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               of is the operator's to type and not ours to refuse. */}
           {kind === "rtmp" && (service?.servers?.length ?? 0) > 0 && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-server">{service?.name} ingest server</Label>
+              <Label htmlFor="dest-server">{t("addDest.ingestServer", { platform: service?.name ?? "" })}</Label>
               <Select
                 value={urlIsAPublishedServer ? url : ""}
                 onValueChange={(v) => setUrl(v)}
               >
                 <SelectTrigger id="dest-server" data-testid="ingest-server-picker">
-                  <SelectValue placeholder="Choose the one nearest you" />
+                  <SelectValue placeholder={t("addDest.ingestServerPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {service?.servers?.map((sv) => (
@@ -1545,10 +1509,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   ))}
                 </SelectContent>
               </Select>
-              <span className="text-sm text-muted-foreground">
-                Nearest is usually best. Every address here already carries the
-                application path the platform needs.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.ingestServerHint")}</span>
             </div>
           )}
 
@@ -1566,7 +1527,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="dest-url">
-              {kind === "file" ? "Filename" : kind === "srt" ? "SRT URL" : "RTMP URL"}
+              {kind === "file" ? t("addDest.urlLabelFile") : kind === "srt" ? "SRT URL" : "RTMP URL"}
             </Label>
             <Input
               id="dest-url"
@@ -1582,17 +1543,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               }
             />
             {kind === "file" && (
-              <span className="text-sm text-muted-foreground">
-                Written into the recordings directory. A relative name only — no paths.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.fileHint")}</span>
             )}
             {/* A preset that could not prefill a URL is not a broken preset; it
                 is one whose platform issues the hostname per account. Say that
                 where the empty box is, not in a tooltip somewhere else. */}
             {selectedPreset?.kind && !selectedPreset.url && kind !== "file" && (
               <span className="text-sm text-muted-foreground">
-                {selectedPreset.name} issues its ingest URL per account or per broadcast, so
-                there is nothing to prefill — paste the one from its dashboard.
+                {t("addDest.perAccountUrl", { platform: selectedPreset.name })}
               </span>
             )}
           </div>
@@ -1609,8 +1567,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               />
               {selectedPreset && !selectedPreset.separateKey && (
                 <span className="text-sm text-muted-foreground">
-                  {selectedPreset.name} puts everything in the URL — leave this empty unless
-                  its dashboard shows a separate key.
+                  {t("addDest.keyInUrl", { platform: selectedPreset.name })}
                 </span>
               )}
               {/* Said at the field, where the operator is looking for a Fetch
@@ -1619,9 +1576,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               {manualKey && caps && (
                 <span className="text-sm text-muted-foreground">
                   {showOAuth
-                    ? `Type this one in even with an account connected. ${caps.reasons?.streamKey ?? ""}`
-                    : caps.reasons?.streamKey ??
-                      `${caps.name} has no API to fetch a key from — copy it from the platform's dashboard.`}
+                    ? t("addDest.typeKeyAnyway", { reason: caps.reasons?.streamKey ? t(caps.reasons.streamKey) : "" })
+                    : caps.reasons?.streamKey ? t(caps.reasons.streamKey) : t("addDest.noKeyApi", { platform: caps.name })}
                 </span>
               )}
             </div>
@@ -1709,12 +1665,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       have. mayClaim is what makes that sentence unreachable
                       for a read that never landed. */}
                   {readFailed(renditionsRead)
-                    ? "The shared encodes could not be read. This is not the same as having none — reopen this dialog once the connection is back."
+                    ? t("addDest.encodesReadFailed")
                     : !mayClaim(renditionsRead)
-                      ? "Checking for shared encodes…"
+                      ? t("addDest.encodesChecking")
                       : renditions.length === 0
-                        ? "No shared encodes yet. Create one on the Renditions page first."
-                        : "Changes the picture once and shares it between destinations."}
+                        ? t("addDest.encodesNone")
+                        : t("addDest.encodesHelp")}
                 </span>
               </button>
             </div>
@@ -1737,7 +1693,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         {/* Spec first, name second. An encode named by its
                             creator tells the next person nothing; what it
                             PRODUCES tells them everything. */}
-                        <span className="font-mono">{renditionSpec(v.rendition)}</span>
+                        <span className="font-mono">{renditionSpec(v.rendition, t)}</span>
                         {v.rendition.name ? ` — ${v.rendition.name}` : ""}
                       </SelectItem>
                     ))}
@@ -1894,7 +1850,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                           // Every other field may legitimately be blank ("keep
                           // the source's"). Bitrate cannot: an encode with no
                           // target is not a variation of anything.
-                          setVariantErr("Video bitrate is required — an encode needs a target.");
+                          setVariantErr(t("addDest.variantNeedsBitrate"));
                           return;
                         }
                         setBusy(true);
@@ -1917,7 +1873,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                           setRenditionId(String(made.rendition.id));
                           setVariantOpen(false);
                         } catch (e) {
-                          setVariantErr(e instanceof Error ? e.message : "Could not create the encode.");
+                          setVariantErr(e instanceof Error ? e.message : t("addDest.variantCreateFailed"));
                         } finally {
                           setBusy(false);
                         }
@@ -1940,7 +1896,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               <div className="rounded-md border border-border bg-background p-2">
                 <span className="flex flex-wrap items-baseline gap-x-2">
                   <span className="text-sm font-medium">
-                    {guidance.find((g) => g.id === presetId)?.name ?? "This platform"} publishes:
+                    {t("addDest.platformPublishes", {
+                      platform: guidance.find((g) => g.id === presetId)?.name ?? t("addDest.thisPlatform"),
+                    })}
                   </span>
                   <span className="font-mono text-sm text-muted-foreground">
                     {[
@@ -1953,7 +1911,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                           ? `${platformVideo.kbpsMin}–${platformVideo.kbpsMax} kbps`
                           : `${platformVideo.kbpsMin} kbps`
                         : null,
-                      platformVideo.gopSeconds ? `${platformVideo.gopSeconds}s keyframes` : null,
+                      platformVideo.gopSeconds
+                        ? t("addDest.gopKeyframes", { seconds: platformVideo.gopSeconds })
+                        : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -1968,16 +1928,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     numbers rather than to hostnames. A figure whose provenance
                     is not on screen is indistinguishable from a guess. */}
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Starting point, not a rule —{" "}
-                  <a
-                    href={platformVideo.source}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline hover:text-foreground"
-                  >
-                    published by the platform
-                  </a>
-                  , read {platformVideo.checked}. Verify before you go live.
+                  {tn("addDest.figuresProvenance", {
+                    link: (
+                      <a
+                        href={platformVideo.source}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline hover:text-foreground"
+                      >
+                        {t("addDest.publishedByPlatform")}
+                      </a>
+                    ),
+                    checked: platformVideo.checked,
+                  })}
                 </p>
               </div>
             )}
@@ -2004,7 +1967,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           </p>
           {canCopyAudio && (
             <div className="flex flex-col gap-1">
-              <Label htmlFor="dest-audio-copy">Audio</Label>
+              <Label htmlFor="dest-audio-copy">{t("addDest.stepAudio")}</Label>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="dest-audio-copy"
@@ -2012,13 +1975,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   onCheckedChange={(v) => setAudio({ ...audio, copy: v })}
                 />
                 <span className="text-sm text-muted-foreground">
-                  {copyOn ? "Copy the ingest tracks" : "Mix and re-encode"}
+                  {copyOn ? t("addDest.audioCopyOn") : t("addDest.audioCopyOff")}
                 </span>
               </div>
               <span className="text-sm text-muted-foreground">
-                {copyOn
-                  ? "This destination forwards your encoder's own audio tracks untouched — no decode, no mix, no encoder. Which tracks go out, and which roles are excluded, still apply. Everything the mix does to the samples does not: gain, normalization, loudness, ducking, delay and mono are all refused on save rather than silently ignored."
-                  : "The mix path: your routing profile decides the tracks and levels, and the result is encoded to one stereo track. Switch to copy for an archive or a hand-off where the receiver can take the tracks as they are."}
+                {copyOn ? t("addDest.audioCopyOnHelp") : t("addDest.audioCopyOffHelp")}
               </span>
             </div>
           )}
@@ -2036,12 +1997,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 className="w-24"
                 disabled={copyOn}
               />
-              <span className="text-sm text-muted-foreground">kbps, AAC stereo</span>
+              <span className="text-sm text-muted-foreground">{t("addDest.kbpsAacStereo")}</span>
             </div>
             <span className="text-sm text-muted-foreground">
-              {copyOn
-                ? "Not used: nothing is encoded, so the bitrate is whatever your encoder sent."
-                : "Mixed here from this destination's own routing profile, whichever rendition it is on — a rendition never touches audio."}
+              {copyOn ? t("addDest.bitrateUnusedCopy") : t("addDest.bitrateMixHelp")}
             </span>
             {/* The platform's own ceiling, read from the registry rather than
                 recomputed here. Over it is not refused — the server decides
@@ -2057,8 +2016,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 data-testid="audio-ceiling-hint"
               >
                 {bitrate > (service?.recommended.maxAudioKbps ?? 0)
-                  ? `Above ${service?.name}'s published maximum of ${service?.recommended.maxAudioKbps} kbps — it will re-encode or refuse this.`
-                  : `${service?.name} accepts up to ${service?.recommended.maxAudioKbps} kbps.`}
+                  ? t("addDest.audioAboveMax", {
+                      platform: service?.name ?? "",
+                      max: service?.recommended.maxAudioKbps ?? 0,
+                    })
+                  : t("addDest.audioAcceptsUpTo", {
+                      platform: service?.name ?? "",
+                      max: service?.recommended.maxAudioKbps ?? 0,
+                    })}
               </span>
             )}
           </div>
@@ -2077,16 +2042,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="aac">AAC — every platform takes it</SelectItem>
-                  <SelectItem value="opus">Opus — better below 64 kbps</SelectItem>
+                  <SelectItem value="aac">{t("addDest.codecAac")}</SelectItem>
+                  <SelectItem value="opus">{t("addDest.codecOpus")}</SelectItem>
                 </SelectContent>
               </Select>
               <span className="text-sm text-muted-foreground">
                 {copyOn
-                  ? "Not used: nothing is encoded, so the codec is whatever your encoder sent."
+                  ? t("addDest.codecUnusedCopy")
                   : kind === "rtmp"
-                    ? "RTMP is AAC. FFmpeg will mux Opus into FLV, but no mainstream ingest accepts it — the stream would upload cleanly and be rejected."
-                    : "Opus is worth it for a low-bitrate feed. Check the receiver takes it."}
+                    ? t("addDest.codecRtmpAac")
+                    : t("addDest.codecOpusHint")}
               </span>
             </div>
             <div className="flex flex-col gap-1">
@@ -2099,13 +2064,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   disabled={copyOn}
                 />
                 <span className="text-sm text-muted-foreground">
-                  {audio.mono ? "Mono" : "Stereo"}
+                  {audio.mono ? t("addDest.mono") : t("addDest.stereo")}
                 </span>
               </div>
               <span className="text-sm text-muted-foreground">
-                {copyOn
-                  ? "Not used: folding to one channel needs a decode and a re-encode, which is what copy removes."
-                  : "Mono folds your mix down rather than re-routing it, and halves the bitrate on talk content for no perceptual loss."}
+                {copyOn ? t("addDest.monoUnusedCopy") : t("addDest.monoHelp")}
               </span>
             </div>
           </div>
@@ -2116,13 +2079,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>
-              <span className="text-sm text-muted-foreground">
-                Not cosmetic. COPPA is a law for YouTube, Twitch requires labels for several
-                content classes, Facebook has no way to widen a broadcast's audience once
-                someone has already seen it, and going live publicly by accident cannot be
-                undone. Anything left unset is not sent at all &mdash; polyemesis never
-                overwrites a setting you did not choose.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.complianceIntro")}</span>
 
               {platform === "youtube" && (
                 <>
@@ -2147,12 +2104,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                         <SelectItem value="public">{t("dest.public")}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-sm text-muted-foreground">
-                      "Leave as it is" is the safe default and means no visibility write happens at
-                      all. That matters: YouTube's update is destructive by section, so a write
-                      that omitted this would revert your broadcast to its default rather than
-                      leaving it alone.
-                    </span>
+                    <span className="text-sm text-muted-foreground">{t("addDest.visibilityHelp")}</span>
                   </div>
 
                   <div className="flex flex-col gap-1">
@@ -2184,15 +2136,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unset">{t("dest.leaveOnYouTube")}</SelectItem>
-                        <SelectItem value="no">No &mdash; not made for kids</SelectItem>
-                        <SelectItem value="yes">Yes &mdash; made for kids</SelectItem>
+                        <SelectItem value="no">{t("addDest.kidsNo")}</SelectItem>
+                        <SelectItem value="yes">{t("addDest.kidsYes")}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-sm text-muted-foreground">
-                      "No" is a declaration, not the absence of one, so it is sent. This is written
-                      through YouTube's video resource rather than the broadcast, because that is
-                      the only place it is settable once a broadcast exists.
-                    </span>
+                    <span className="text-sm text-muted-foreground">{t("addDest.kidsHelp")}</span>
                   </div>
                 </>
               )}
@@ -2203,7 +2151,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   <div className="flex flex-col gap-1">
                     {TWITCH_LABELS.map((id) => (
                       <div key={id} className="flex items-center justify-between gap-2">
-                        <span className="text-sm">{id.replace(/([A-Z])/g, " $1").trim()}</span>
+                        <span className="text-sm">{t(TWITCH_LABEL_KEYS[id])}</span>
                         <Switch
                           checked={compliance.labels?.[id] ?? false}
                           onCheckedChange={(v) =>
@@ -2216,20 +2164,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       </div>
                     ))}
                   </div>
-                  <span className="text-sm text-muted-foreground">
-                    Twitch requires these for mature games, sexual themes, drugs, gambling and
-                    graphic violence. "Mature game" is not here because Twitch derives it from the
-                    category and refuses to let anything set it.
-                  </span>
+                  <span className="text-sm text-muted-foreground">{t("addDest.twitchLabelsHelp")}</span>
                 </div>
               )}
 
               {platform === "facebook" && facebookTargetsAPage && (
-                <span className="text-sm text-muted-foreground">
-                  This account publishes to a Page, and a Page broadcast is public: Facebook
-                  has no personal audience to restrict it to. There is no audience setting to
-                  make, which is why one is not offered.
-                </span>
+                <span className="text-sm text-muted-foreground">{t("addDest.fbPageAudience")}</span>
               )}
 
               {platform === "facebook" && !facebookTargetsAPage && (
@@ -2275,12 +2215,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       ))}
                     </SelectContent>
                   </Select>
-                  <span className="text-sm text-muted-foreground">
-                    Applied when the broadcast is CREATED, not while it airs &mdash; changing this
-                    afterwards takes effect on the next broadcast, not the current one. If this
-                    destination is later pointed at a Page, the setting stops applying: a Page
-                    broadcast is public regardless.
-                  </span>
+                  <span className="text-sm text-muted-foreground">{t("addDest.fbAudienceHelp")}</span>
                 </div>
               )}
             </div>
@@ -2289,11 +2224,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
           {/* Gated the same way the Facebook box below is: by the selected
               platform, not by whether an account is connected. Twitch is the
               one platform that publishes this negotiation, and offering it
-              elsewhere would be a control that cannot do anything.
-
-              Copy is inline English rather than catalogue keys, following the
-              audio copy toggle and the Twitch content-labels help directly
-              above -- both are per-destination switches in this same dialog. */}
+              elsewhere would be a control that cannot do anything. The label is
+              the feature's name, which every catalogue keeps in English. */}
           {platform === "twitch" && (
             <div className="flex flex-col gap-1">
               <Label htmlFor="dest-multitrack" className="flex items-center gap-1.5">
@@ -2309,47 +2241,27 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   onCheckedChange={setMultitrack}
                 />
                 <span className="text-sm text-muted-foreground">
-                  {multitrack ? "Negotiate at go-live" : "Use the ordinary Twitch ingest"}
+                  {multitrack ? t("addDest.multitrackOn") : t("addDest.multitrackOff")}
                 </span>
               </div>
               {/* Not a warning, and deliberately not styled as one. A
                   negotiation that does not succeed is the EXPECTED outcome on
                   the machine most operators run this on, so saying it in amber
                   would train them to read a normal broadcast as broken. */}
-              <span className="text-sm text-muted-foreground">
-                Asks Twitch at go-live for an ingest endpoint, a stream key it mints for this
-                broadcast, and the audio tracks it will accept &mdash; which is what a second
-                (VOD) audio mix needs, because the ordinary Twitch ingest carries one track.
-                Twitch only grants this to a client with a supported GPU, and a rented server
-                usually has none: where it is not granted the destination simply publishes to
-                the ordinary Twitch ingest and says so once. Nothing is lost by leaving it on,
-                and nothing is wrong when it falls back.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.multitrackHelp")}</span>
               {/* The two things the sentence above leaves out, and both are
                   things an operator would otherwise have to guess: nothing is
                   asked at all until the machine's GPU is declared, and the
                   answer is a line on this destination's card rather than a
                   dialog nobody is standing in front of at go-live. */}
-              <span className="text-sm text-muted-foreground">
-                Nothing is asked until this machine's GPU is declared under Settings &rarr;
-                Pipeline &rarr; Enhanced Broadcasting hardware; with none declared the negotiation
-                is skipped rather than attempted and failed. What was decided appears on this
-                destination's card once it goes live.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.multitrackGpuNote")}</span>
               {/* The switch above still works and is still one click. What is
                   added here is the one fact the paragraphs above cannot supply,
                   because it is about our evidence rather than about Twitch:
                   where the measurements stop. They stop after Negotiate
                   returns, not before it. */}
               <Experimental>
-                The negotiation itself runs against ingest.twitch.tv and succeeds: polyemesis's
-                own tests reach the live endpoint on every run, and Twitch accepts a
-                supported-GPU inventory, grants a VOD audio track and mints a key. What has
-                never been observed is a broadcast <em>published through</em> a minted key
-                &mdash; everything after the negotiation answers, including polyemesis's own
-                wiring around it, which has only been driven by a stand-in server. Leaving this
-                on is still safe: a negotiation that does not succeed falls back to the ordinary
-                Twitch ingest, which is the path every install used before this existed.
+                {tn("addDest.multitrackEvidence", { em: <em>{t("addDest.multitrackEvidenceEm")}</em> })}
               </Experimental>
             </div>
           )}
@@ -2483,18 +2395,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
           <details className="rounded-md border border-border p-2">
             <summary className="cursor-pointer text-xs font-medium">
-              Transport &amp; muxer
+              {t("addDest.transportMuxer")}
               {(transport.noDurationFilesize ||
                 (transport.muxQueuePackets ?? 0) > 0 ||
                 (transport.rwTimeoutSeconds ?? 0) > 0) && (
-                <span className="ml-2 text-sm text-muted-foreground">(customised)</span>
+                <span className="ml-2 text-sm text-muted-foreground">{t("addDest.customised")}</span>
               )}
             </summary>
             <div className="mt-2 flex flex-col gap-3">
-              <span className="text-sm text-muted-foreground">
-                Leave all of these alone unless a platform is misbehaving. Every one is off by
-                default, and off means polyemesis sends exactly the FFmpeg command it always has.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.transportIntro")}</span>
 
               <div className="flex flex-col gap-1">
                 <Label htmlFor="dest-rwt">{t("dest.socketTimeout")}</Label>
@@ -2509,18 +2418,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                   className="w-24"
                 />
-                <span className="text-sm text-muted-foreground">
-                  0 disables it. Worth setting on a platform behind a load balancer: a far end that
-                  disappears without closing the connection otherwise blocks the muxer forever.
-                  FFmpeg keeps running, polyemesis sees a healthy process, and the stream is off air
-                  with nothing saying so.
-                </span>
+                <span className="text-sm text-muted-foreground">{t("addDest.socketTimeoutHelp")}</span>
               </div>
 
               {kind === "rtmp" && (
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="dest-flv" className="font-normal">
-                    Drop FLV duration &amp; filesize metadata
+                    {t("addDest.flvDropLabel")}
                   </Label>
                   <Switch
                     id="dest-flv"
@@ -2530,10 +2434,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 </div>
               )}
               {kind === "rtmp" && (
-                <span className="text-sm text-muted-foreground">
-                  Both are necessarily zero on a live stream, and some ingests read a zero duration
-                  as a broken file rather than as a live one. RTMP only.
-                </span>
+                <span className="text-sm text-muted-foreground">{t("addDest.flvDropHelp")}</span>
               )}
 
               <div className="grid grid-cols-2 gap-2">
@@ -2550,7 +2451,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-mqb">…above (bytes)</Label>
+                  <Label htmlFor="dest-mqb">{t("addDest.muxQueueBytes")}</Label>
                   <Input
                     id="dest-mqb"
                     type="number"
@@ -2585,7 +2486,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="dest-maxbo">…backing off to</Label>
+                  <Label htmlFor="dest-maxbo">{t("addDest.backoffMax")}</Label>
                   <Input
                     id="dest-maxbo"
                     type="number"
@@ -2598,10 +2499,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
               </div>
-              <span className="text-sm text-muted-foreground">
-                0 on both takes the default, 1s doubling to 30s. A destination that stays up past a
-                minute is treated as healthy and starts again from the shorter delay.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("addDest.backoffHelp")}</span>
 
               <div className="flex flex-col gap-1">
                 <Label htmlFor="dest-giveup">{t("dest.giveUpAfter")}</Label>
@@ -2616,14 +2514,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                   className="w-24"
                 />
-                <span className="text-sm text-muted-foreground">
-                  0 retries forever, which is the default and is right for a platform that is
-                  merely slow to come back. Set it when you would rather be TOLD: a destination
-                  retrying forever looks exactly like one that works &mdash; the card says
-                  "reconnecting" and nothing ever says this endpoint is not coming back. Giving up
-                  marks it failed, which your alert rules already treat as an incident.
-                  Consecutive failures only; a clean run resets the count.
-                </span>
+                <span className="text-sm text-muted-foreground">{t("addDest.giveUpHelp")}</span>
               </div>
             </div>
           </details>
@@ -2640,8 +2531,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 {t("addDest.howToGetKey")}
               </summary>
               <div className="flex flex-col gap-1 pt-2">
-                <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
-                <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
+                <p className="text-sm text-muted-foreground">{t(selectedPreset.notes)}</p>
+                <p className="text-sm text-muted-foreground">{t(PRESET_DISCLAIMER)}</p>
                 {selectedPreset.helpUrl && (
                   <a
                     href={selectedPreset.helpUrl}
@@ -2649,7 +2540,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                     rel="noreferrer noopener"
                     className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
                   >
-                    <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
+                    <ExternalLink className="size-3" /> {t("addDest.setupDocs", { platform: selectedPreset.name })}
                   </a>
                 )}
               </div>
@@ -2756,6 +2647,16 @@ function StepPanel({ n, step, children }: Readonly<{ n: DestStep; step: DestStep
     </div>
   );
 }
+
+/** Twitch's content classification labels, by the id Twitch's API takes. */
+const TWITCH_LABEL_KEYS: Record<(typeof TWITCH_LABELS)[number], TranslationKey> = {
+  DebatedSocialIssuesAndPolitics: "addDest.twitchLabel.DebatedSocialIssuesAndPolitics",
+  DrugsIntoxication: "addDest.twitchLabel.DrugsIntoxication",
+  Gambling: "addDest.twitchLabel.Gambling",
+  ProfanityVulgarity: "addDest.twitchLabel.ProfanityVulgarity",
+  SexualThemes: "addDest.twitchLabel.SexualThemes",
+  ViolentGraphic: "addDest.twitchLabel.ViolentGraphic",
+};
 
 const HEALTH_TONE: Record<NonNullable<PlatformAccount["health"]>["state"], "live" | "warn" | "down"> = {
   ok: "live",

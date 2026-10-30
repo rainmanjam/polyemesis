@@ -78,7 +78,7 @@ import {
   RESTART_COMMAND,
   type AcmeStance,
 } from "@/lib/acme-guidance";
-import { useT, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
@@ -452,6 +452,7 @@ function IngestSettings({
   saving: boolean;
 }) {
   const t = useT();
+  const tn = useTN();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // This page had no idea whether a broadcast was running: it never read live
@@ -592,9 +593,7 @@ function IngestSettings({
           {live && (
             <p className="flex items-start gap-1.5 text-tiny text-warn">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              A stream is arriving now. Saving restarts the ingest, which
-              disconnects the encoder and drops everyone watching. The encoder
-              will reconnect on its own once it is pointed at the new settings.
+              {t("set.ingestLiveWarn")}
             </p>
           )}
           <Button
@@ -628,9 +627,9 @@ function IngestSettings({
             </Button>
           </div>
           <p className="text-micro text-muted-foreground">
-            For multitrack, use OBS → Settings → Output → Recording, set type to Custom Output
-            (FFmpeg), container <code className="font-mono">mpegts</code>, and enable the audio
-            tracks you want to send. The README has the exact field values.
+            {tn("set.multitrackObsHint", {
+              container: <code className="font-mono">mpegts</code>,
+            })}
           </p>
           <FfmpegBadges system={system} />
         </CardContent>
@@ -775,7 +774,7 @@ function FfmpegBadges({ system }: { system: SystemInfo | null }) {
               ? t("set.drawtextOk") : t("set.drawtextMissing")
           }
         >
-          text overlays {system.ffmpeg.filters?.includes("drawtext") ? t("set.yes") : t("set.no")}
+          {t("set.textOverlaysBadge")} {system.ffmpeg.filters?.includes("drawtext") ? t("set.yes") : t("set.no")}
         </Badge>
       )}
     </div>
@@ -878,6 +877,7 @@ function PipelineSettings({
   saveError: string | null;
 }) {
   const t = useT();
+  const tn = useTN();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   // Held here and never seeded from the server: the password is not in the
@@ -1029,7 +1029,7 @@ function PipelineSettings({
                 }
                 className="w-28"
               />
-              <span className="text-micro text-muted-foreground">0 keeps everything, forever.</span>
+              <span className="text-micro text-muted-foreground">{t("set.chatRetentionZero")}</span>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -1168,11 +1168,9 @@ function PipelineSettings({
           <span className="text-micro text-muted-foreground">{t("set.chatNotOnlyDisk")}</span>
           <span className="text-micro text-muted-foreground">{t("set.chatSmall")}</span>
           <span className="text-micro text-muted-foreground">
-            <strong>{t("set.chatSendOnConnectShort")}</strong> is a different kind of number from the other two. Those
-            bound what is kept on disk; this one is a buffer held in memory, allocated in full
-            whether or not anyone is talking. It is what a browser receives the instant it opens the
-            page, before any of the stored history is queried &mdash; so raising it costs memory all
-            the time to make the first screen fuller.
+            {tn("set.chatSendOnConnectWhy", {
+              name: <strong>{t("set.chatSendOnConnectShort")}</strong>,
+            })}
           </span>
         </CardContent>
       </Card>
@@ -1527,9 +1525,7 @@ function PipelineSettings({
             />
           </div>
           <span className="text-micro text-muted-foreground">
-            <strong>{t("set.mqtt5Only")}</strong> A broker pinned to 3.1.1 will not complete a connection
-            at all &mdash; it is not a degraded mode. Mosquitto 2.x, EMQX and the Home Assistant
-            add-on are all fine.
+            {tn("set.mqtt5Why", { only: <strong>{t("set.mqtt5Only")}</strong> })}
           </span>
 
           {draft.mqtt?.enabled && (
@@ -1583,7 +1579,7 @@ function PipelineSettings({
                   <SecretInput
                     id="mq-pw"
                     value={mqttPassword}
-                    placeholder={draft.mqtt?.hasPassword ? "(unchanged)" : ""}
+                    placeholder={draft.mqtt?.hasPassword ? t("set.unchangedPlaceholder") : ""}
                     onChange={(e) => setMqttPassword(e.target.value)}
                   />
                 </div>
@@ -1936,13 +1932,7 @@ function MultitrackHardware({
             stated here rather than left to be inferred from a refusal. */}
         <Experimental>{t("set.ebExperimental")}</Experimental>
         <span className="text-micro text-muted-foreground">
-          Twitch grants Enhanced Broadcasting only to a client with a GPU it supports, and it checks
-          what it is told: a zero vendor ID, a vendor it does not know and an out-of-date driver are
-          each refused by name. polyemesis does not fill this in for you — it can read the PCI vendor
-          ID of a render node on Linux and nothing else, and sending that one field with zeros in the
-          rest would be describing a machine that does not exist. Leaving it empty is fine and is the
-          normal state: nothing is asked, and a destination with the toggle on simply publishes to
-          the ordinary Twitch ingest and says so once.
+          {t("set.ebGpuWhy")}
         </span>
         {gpus.map((g, i) => (
           <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
@@ -2045,9 +2035,7 @@ function MultitrackHardware({
                 discover by saving. A number invented to fill a box is worse
                 than an empty one: Twitch checks these. */}
             <span className="text-micro text-muted-foreground">
-              Device ID, video memory and shared system memory are optional — leave them at zero
-              rather than guessing. The model and the vendor are not: a vendor ID of zero is refused
-              by name.
+              {t("set.ebGpuOptional")}
             </span>
           </div>
         ))}
@@ -2190,7 +2178,7 @@ function PlatformCapabilityMatrix() {
                         <Badge
                           variant={info.variant}
                           className="normal-case"
-                          title={p.reasons?.[c.key] ?? t(info.help)}
+                          title={t(p.reasons?.[c.key] ?? info.help)}
                         >
                           {t(info.label)}
                         </Badge>
@@ -2219,10 +2207,10 @@ function PlatformCapabilityMatrix() {
             an operator concluding a feature is blocked when it was only never
             checked. */}
         <p className="text-micro text-muted-foreground">
-          Unverified means exactly that: polyemesis does not do it today and nobody here has read
-          the platform's API either way. It is never a refusal — if you can make it work, it
-          works, and we would rather be told than guess. Only “not possible” is a checked
-          absence.
+          {t("caps.unverifiedMeans", {
+            unverified: t("caps.supportUnknown"),
+            no: t("caps.supportNo"),
+          })}
         </p>
 
         {PLATFORM_CAPABILITIES.filter((p) => p.readFirst).map((p) => (
@@ -2236,14 +2224,14 @@ function PlatformCapabilityMatrix() {
           >
             <div className="flex items-center gap-1.5">
               <span className="text-tiny font-medium">{p.name}</span>
-              <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>read first</Badge>
+              <Badge variant={p.tier === "unsupported" ? "warn" : "outline"}>{t("caps.readFirstBadge")}</Badge>
             </div>
             <p
               className={
                 p.tier === "unsupported" ? "text-micro text-warn" : "text-micro text-muted-foreground"
               }
             >
-              {p.readFirst}
+              {p.readFirst && t(p.readFirst)}
             </p>
           </div>
         ))}
@@ -2803,12 +2791,14 @@ function expiryTone(daysRemaining: number): SignalTone {
   return "live";
 }
 
-function expiryLabel(cert: CertInfo): string {
+function expiryLabel(cert: CertInfo, t: Translator): string {
   if (cert.expired) {
     const ago = Math.abs(cert.daysRemaining);
-    return ago === 0 ? "expired today" : `expired ${ago} day${ago === 1 ? "" : "s"} ago`;
+    if (ago === 0) return t("set.certExpiredToday");
+    return t(ago === 1 ? "set.certExpiredAgoOne" : "set.certExpiredAgoMany", { n: ago });
   }
-  return `${cert.daysRemaining} day${cert.daysRemaining === 1 ? "" : "s"} left`;
+  const n = cert.daysRemaining;
+  return t(n === 1 ? "set.certDaysLeftOne" : "set.certDaysLeftMany", { n });
 }
 
 /** The config.yaml the current mode corresponds to, filled in with the values
@@ -3024,6 +3014,7 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
 
 function TransportSecurity({ system }: { system: SystemInfo | null }) {
   const t = useT();
+  const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -3067,7 +3058,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               <span className="text-tiny text-muted-foreground">{t("set.mode")}</span>
               <div className="flex items-center gap-1.5">
                 {tls.configured === "auto" && (
-                  <span className="text-micro text-muted-foreground">auto resolved to</span>
+                  <span className="text-micro text-muted-foreground">{t("set.tlsAutoResolvedTo")}</span>
                 )}
                 <Badge variant={toneBadge[modeTone(tls)]}>{t(tlsModeLabel[tls.mode])}</Badge>
               </div>
@@ -3087,7 +3078,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                   <span className="flex items-baseline gap-1.5">
                     <code className="tnum font-mono text-micro">{timestamp(cert.notAfter)}</code>
                     <span className={`tnum text-micro ${toneText[expiryTone(cert.daysRemaining)]}`}>
-                      {expiryLabel(cert)}</span>
+                      {expiryLabel(cert, t)}</span>
                   </span>
                 </div>
                 <div className="flex items-start justify-between gap-2">
@@ -3119,9 +3110,9 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             {tls.hstsWarning && <p className="text-micro text-warn">{tls.hstsWarning}</p>}
             {tls.hsts && (
               <p className="text-micro text-muted-foreground">
-                HSTS is on. Browsers will refuse plain HTTP to
-                <code className="mx-1 font-mono">{tls.hostname || "this host"}</code>
-                until the max-age lapses; there is no server-side undo.
+                {tn("set.hstsOn", {
+                  host: <code className="mx-1 font-mono">{tls.hostname || t("set.thisHost")}</code>,
+                })}
               </p>
             )}
 
@@ -3142,25 +3133,25 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
                   </a>
                 </Button>
                 <p className="text-micro text-muted-foreground">
-                  Install it to stop the browser warning, after checking the fingerprint above
-                  matches the one your browser shows.
+                  {t("set.caInstallIntro")}
                   <span className="mt-1 block">
-                    <strong className="font-medium text-foreground">macOS</strong> — open it in
-                    Keychain Access, add to System, then set it to “Always Trust”.
+                    {tn("set.caMacos", {
+                      os: <strong className="font-medium text-foreground">macOS</strong>,
+                    })}
                   </span>
                   <span className="block">
-                    <strong className="font-medium text-foreground">Linux</strong> — copy to
-                    <code className="mx-1 font-mono">/usr/local/share/ca-certificates/</code>and run
-                    <code className="mx-1 font-mono">update-ca-certificates</code>.
+                    {tn("set.caLinux", {
+                      os: <strong className="font-medium text-foreground">Linux</strong>,
+                      dir: <code className="mx-1 font-mono">/usr/local/share/ca-certificates/</code>,
+                      cmd: <code className="mx-1 font-mono">update-ca-certificates</code>,
+                    })}
                   </span>
                   <span className="block">
-                    <strong className="font-medium text-foreground">Windows</strong> — import into
-                    “Trusted Root Certification Authorities” for the local machine.
+                    {tn("set.caWindows", {
+                      os: <strong className="font-medium text-foreground">Windows</strong>,
+                    })}
                   </span>
-                  <span className="mt-1 block">
-                    Firefox and Chrome keep their own stores on some platforms and may need it
-                    imported there too.
-                  </span>
+                  <span className="mt-1 block">{t("set.caBrowsers")}</span>
                 </p>
               </div>
             )}
@@ -3194,9 +3185,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             </code>
           </div>
           <p className="text-micro text-muted-foreground">
-            OAuth tokens and client secrets are encrypted at rest with NaCl secretbox, keyed by
-            <code className="mx-1 font-mono">secret.key</code> in that directory. Back it up with the
-            database, or connected accounts must be re-authorised.
+            {tn("set.secretKeyNote", { file: <code className="mx-1 font-mono">secret.key</code> })}
           </p>
         </div>
       </CardContent>
@@ -3312,7 +3301,7 @@ function ApiTokens() {
         {minted && (
           <div className="flex flex-col gap-1.5 rounded border border-warn/50 bg-warn/5 p-2">
             <span className="text-tiny font-medium">
-              Copy {minted.token.name} now — it is never shown again.
+              {t("set.tokenCopyNow", { name: minted.token.name })}
             </span>
             <div className="flex items-center gap-1.5">
               <SecretCode value={minted.plaintext} />
@@ -3332,24 +3321,24 @@ function ApiTokens() {
           <span className="text-tiny text-muted-foreground">{t("set.noTokens")}</span>
         ) : (
           <div className="flex flex-col gap-1">
-            {tokens.value.map((t) => (
+            {tokens.value.map((tok) => (
               <div
-                key={t.id}
+                key={tok.id}
                 className="flex items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm">{t.name}</span>
+                    <span className="truncate text-sm">{tok.name}</span>
                     {/* Admin is the one worth spotting in a list, so it is the
                         one that gets the loud variant. A read token is the
                         expected case and reads as ordinary. */}
-                    <Badge variant={t.scope === "admin" ? "warn" : "outline"}>
-                      {t.scope}
+                    <Badge variant={tok.scope === "admin" ? "warn" : "outline"}>
+                      {tok.scope}
                     </Badge>
                   </div>
                   <div className="font-mono text-micro text-muted-foreground">
-                    {t.prefix}… · created {new Date(t.createdAt).toLocaleDateString()} ·{" "}
-                    {tokenLastUsed(t)}
+                    {tok.prefix}… · {t("set.tokenCreated", { date: new Date(tok.createdAt).toLocaleDateString() })} ·{" "}
+                    {tokenLastUsed(tok, t)}
                   </div>
                 </div>
                 {/* Asks, and asks with the name typed. Revoking is
@@ -3362,8 +3351,8 @@ function ApiTokens() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => confirmRevoke.ask(t)}
-                  aria-label={`Revoke ${t.name}`}
+                  onClick={() => confirmRevoke.ask(tok)}
+                  aria-label={t("set.tokenRevokeAria", { name: tok.name })}
                 >
                   <Trash2 />
                 </Button>
@@ -3395,8 +3384,8 @@ function ApiTokens() {
 }
 
 /** The server sends the zero time for a token nothing has presented yet. */
-function tokenLastUsed(t: ApiToken): string {
+function tokenLastUsed(t: ApiToken, tr: Translator): string {
   const used = new Date(t.lastUsedAt);
-  if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return "never used";
-  return `last used ${used.toLocaleString()}`;
+  if (Number.isNaN(used.getTime()) || used.getUTCFullYear() <= 1) return tr("set.tokenNeverUsed");
+  return tr("set.tokenLastUsed", { at: used.toLocaleString() });
 }
