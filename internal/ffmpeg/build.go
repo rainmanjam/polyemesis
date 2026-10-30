@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -36,7 +37,18 @@ func commonArgs() []string {
 // stream and `+`/`-` change the log level. Only the supervisor's serialised
 // command writer ever writes to that pipe, and it writes only validated
 // commands, so nothing can reach FFmpeg's key handler by accident.
+//
+// Windows is the exception: the live path is unverified there, the supervisor
+// gives the child no pipe, and the engine restarts on every level change. So
+// the flag stays, and a Windows destination runs the same command as before.
 func commonArgsLive() []string {
+	return commonArgsLiveFor(runtime.GOOS)
+}
+
+func commonArgsLiveFor(goos string) []string {
+	if goos == "windows" {
+		return commonArgs()
+	}
 	return append([]string{"-hide_banner"}, logLevelArgs()...)
 }
 
