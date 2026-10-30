@@ -113,3 +113,16 @@ export function carryMutes(next: RoutingProfile, prev: RoutingProfile | null): R
     tracks: (next.tracks ?? []).map((s) => (muted.has(s.track) ? { ...s, muted: true } : s)),
   };
 }
+
+/** A track selection with one track's mute set, for the matrix view (A15).
+ *
+ *  The matrix draws its routing in cells, but a mute is a level on the track's
+ *  volume stage and applies in matrix mode too, so it is kept on the track row.
+ *  A track the selection does not hold is added disabled: in matrix mode the
+ *  cells decide what is routed, and the row only carries the mute. */
+export function setMuted(tracks: TrackSel[], track: number, muted: boolean): TrackSel[] {
+  if (tracks.some((s) => s.track === track)) {
+    return tracks.map((s) => (s.track === track ? { ...s, muted } : s));
+  }
+  return [...tracks, { track, enabled: false, gain: 1, muted }].sort((a, b) => a.track - b.track);
+}

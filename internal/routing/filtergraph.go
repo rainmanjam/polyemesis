@@ -736,7 +736,14 @@ func PanFilter(cells []Cell) string {
 			if c.Out != out || c.Gain == 0 {
 				continue
 			}
-			terms = append(terms, fmt.Sprintf("%s*c%d", fmtCoeff(c.Gain), c.Channel))
+			// An inverted cell is a negative coefficient. FFmpeg's pan reads
+			// the sign with the number, so "-1*c0" leads a leg and "+-0.5*c1"
+			// follows a term; both were checked against a real FFmpeg.
+			coeff := fmtCoeff(c.Gain)
+			if c.Invert {
+				coeff = "-" + coeff
+			}
+			terms = append(terms, fmt.Sprintf("%s*c%d", coeff, c.Channel))
 		}
 		if len(terms) == 0 {
 			// pan requires an expression for every output channel of the

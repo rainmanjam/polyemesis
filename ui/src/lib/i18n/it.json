@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Scarta",
   "routing.saveBar.save": "Salva",
   "routing.matrix.undoClear": "Annulla cancellazione",
+  "routing.matrix.invertCell": "Inverti polarità: {cell}",
+  "routing.matrix.inverted": "inv",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Azzera il picco",
   "routing.meters.peakResetFor": "Azzera il picco di {channel}",

@@ -46,6 +46,7 @@ import {
   carryMutes,
   destinationLiveBlock,
   levelOutcome,
+  setMuted,
   trackLiveBlock,
   withLevel,
   type LevelChange,
@@ -1282,6 +1283,8 @@ function ProfileEditor({
                 tracks={ctx.tracks}
                 cells={profile.matrix ?? []}
                 onChange={(next: MatrixCell[]) => onPatch({ matrix: next })}
+                muted={(profile.tracks ?? []).filter((s) => s.muted).map((s) => s.track)}
+                onMute={(track, m) => onPatch({ tracks: setMuted(profile.tracks ?? [], track, m) })}
               />
             </TabsContent>
           </Tabs>

@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Odrzuć",
   "routing.saveBar.save": "Zapisz",
   "routing.matrix.undoClear": "Cofnij czyszczenie",
+  "routing.matrix.invertCell": "Odwróć polaryzację: {cell}",
+  "routing.matrix.inverted": "odwr.",
   "routing.matrix.stateOff": "wył.",
   "routing.meters.peakReset": "Zresetuj szczyt",
   "routing.meters.peakResetFor": "Zresetuj szczyt dla {channel}",

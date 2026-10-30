@@ -3,6 +3,7 @@ import {
   carryMutes,
   destinationLiveBlock,
   levelOutcome,
+  setMuted,
   trackLiveBlock,
   withLevel,
 } from "./liveTrackLevel";
@@ -112,5 +113,15 @@ describe("carryMutes", () => {
   it("returns the preset untouched when nothing was muted", () => {
     const next = profile();
     expect(carryMutes(next, profile({ tracks: [{ track: 1, enabled: true, gain: 1 }] }))).toBe(next);
+  });
+});
+
+describe("setMuted", () => {
+  it("sets the mute on a held track and keeps the rest of its row", () => {
+    expect(setMuted(profile().tracks, 0, true)[0]).toEqual({ track: 0, enabled: true, gain: 1, muted: true });
+  });
+
+  it("adds a track the selection lacks as disabled, so the cells still decide routing", () => {
+    expect(setMuted(profile().tracks, 3, true)[2]).toEqual({ track: 3, enabled: false, gain: 1, muted: true });
   });
 });

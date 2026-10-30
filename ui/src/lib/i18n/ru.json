@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Отменить",
   "routing.saveBar.save": "Сохранить",
   "routing.matrix.undoClear": "Отменить очистку",
+  "routing.matrix.invertCell": "Инвертировать полярность: {cell}",
+  "routing.matrix.inverted": "инв.",
   "routing.matrix.stateOff": "выкл.",
   "routing.meters.peakReset": "Сбросить пик",
   "routing.meters.peakResetFor": "Сбросить пик для {channel}",

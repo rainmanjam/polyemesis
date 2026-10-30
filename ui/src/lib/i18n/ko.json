@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "취소",
   "routing.saveBar.save": "저장",
   "routing.matrix.undoClear": "지우기 취소",
+  "routing.matrix.invertCell": "극성 반전: {cell}",
+  "routing.matrix.inverted": "반전",
   "routing.matrix.stateOff": "끔",
   "routing.meters.peakReset": "피크 초기화",
   "routing.meters.peakResetFor": "{channel} 피크 초기화",

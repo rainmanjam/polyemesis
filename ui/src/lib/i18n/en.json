@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Discard",
   "routing.saveBar.save": "Save",
   "routing.matrix.undoClear": "Undo clear",
+  "routing.matrix.invertCell": "Invert polarity: {cell}",
+  "routing.matrix.inverted": "inv",
   "routing.matrix.stateOff": "off",
   "routing.meters.peakReset": "Reset peak hold",
   "routing.meters.peakResetFor": "Reset peak hold for {channel}",

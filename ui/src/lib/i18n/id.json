@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Buang",
   "routing.saveBar.save": "Simpan",
   "routing.matrix.undoClear": "Batalkan hapus",
+  "routing.matrix.invertCell": "Balik polaritas: {cell}",
+  "routing.matrix.inverted": "inv",
   "routing.matrix.stateOff": "mati",
   "routing.meters.peakReset": "Atur ulang puncak",
   "routing.meters.peakResetFor": "Atur ulang puncak {channel}",

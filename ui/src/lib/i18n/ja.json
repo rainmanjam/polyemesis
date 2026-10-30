@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "破棄",
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "クリアを元に戻す",
+  "routing.matrix.invertCell": "極性を反転: {cell}",
+  "routing.matrix.inverted": "反転",
   "routing.matrix.stateOff": "オフ",
   "routing.meters.peakReset": "ピークをリセット",
   "routing.meters.peakResetFor": "{channel} のピークをリセット",

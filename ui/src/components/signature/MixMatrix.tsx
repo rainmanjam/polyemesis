@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { channelLabels } from "@/lib/channels";
 import type { MatrixCell, SourceTrack } from "@/lib/types";
-import { RotateCcw, Undo2 } from "lucide-react";
+import { RotateCcw, Undo2, Volume2, VolumeX } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { gainDbLabel, gainState } from "@/lib/matrixGain";
 
@@ -38,10 +38,17 @@ interface MixMatrixProps {
   tracks: SourceTrack[];
   cells: MatrixCell[];
   onChange: (next: MatrixCell[]) => void;
+  /** Tracks muted in this mix (TrackSel.muted). A mute is a level, so it
+   *  applies in matrix mode too and leaves every cell as drawn (A15). */
+  muted?: number[];
+  /** Absent, the track headers show the mute state but offer no toggle. */
+  onMute?: (track: number, muted: boolean) => void;
 }
 
-export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
+export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: MixMatrixProps) {
   const t = useT();
+  // The header maps over tracks as `t`, so it speaks through this name.
+  const say = t;
   /** What the last Clear removed, and the empty list it handed back. Undo is
    *  offered only while `cells` is still that very list: an edit, a preset, a
    *  discard or a switch to another destination all replace it, and then the
@@ -52,13 +59,15 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
   const undoAvailable = cleared !== null && cells === cleared.now;
   /** Fast lookup keyed by track/channel/out. */
   const index = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const c of cells) m.set(`${c.track}:${c.channel}:${c.out}`, c.gain);
+    const m = new Map<string, MatrixCell>();
+    for (const c of cells) m.set(`${c.track}:${c.channel}:${c.out}`, c);
     return m;
   }, [cells]);
 
   const gainAt = (track: number, channel: number, out: number) =>
-    index.get(`${track}:${channel}:${out}`) ?? 0;
+    index.get(`${track}:${channel}:${out}`)?.gain ?? 0;
+  const invertedAt = (track: number, channel: number, out: number) =>
+    index.get(`${track}:${channel}:${out}`)?.invert === true;
 
   const setGain = (track: number, channel: number, out: number, gain: number) => {
     const clamped = Math.max(0, Math.min(MAX_GAIN, gain));
@@ -66,10 +75,24 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
     const without = cells.filter((c) => `${c.track}:${c.channel}:${c.out}` !== key);
     // A zero cell carries no information, so it is dropped rather than stored.
     // That keeps the saved profile and the generated filter minimal.
-    const next = clamped > 0 ? [...without, { track, channel, out, gain: clamped }] : without;
+    // The polarity rides with the cell: a new gain must not quietly un-invert it.
+    const invert = index.get(key)?.invert ? { invert: true } : {};
+    const next =
+      clamped > 0 ? [...without, { track, channel, out, gain: clamped, ...invert }] : without;
     next.sort((a, b) => a.track - b.track || a.out - b.out || a.channel - b.channel);
     setCleared(null);
     onChange(next);
+  };
+
+  /** Flips one connected cell's polarity. An off cell has nothing to invert. */
+  const toggleInvert = (track: number, channel: number, out: number) => {
+    const key = `${track}:${channel}:${out}`;
+    const cur = index.get(key);
+    if (!cur || cur.gain <= 0) return;
+    const { invert: _was, ...rest } = cur;
+    const flipped: MatrixCell = cur.invert ? rest : { ...rest, invert: true };
+    setCleared(null);
+    onChange(cells.map((c) => (c === cur ? flipped : c)));
   };
 
   const clearAll = () => {
@@ -156,6 +179,27 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                   <span className="ml-1 font-mono normal-case text-muted-foreground">
                     {t.layout}
                   </span>
+                  {onMute ? (
+                    <Button
+                      type="button"
+                      variant={muted.includes(t.index) ? "secondary" : "ghost"}
+                      size="sm"
+                      className={cn("ml-1 h-6 px-1.5 normal-case", muted.includes(t.index) && "text-warn")}
+                      aria-pressed={muted.includes(t.index)}
+                      aria-label={say(
+                        muted.includes(t.index) ? "route.live.unmuteTrack" : "route.live.muteTrack",
+                        { n: t.index + 1 },
+                      )}
+                      onClick={() => onMute(t.index, !muted.includes(t.index))}
+                    >
+                      {muted.includes(t.index) ? <VolumeX /> : <Volume2 />}
+                      {muted.includes(t.index) && say("route.live.mutedWord")}
+                    </Button>
+                  ) : (
+                    muted.includes(t.index) && (
+                      <span className="ml-1 normal-case text-warn">{say("route.live.mutedWord")}</span>
+                    )
+                  )}
                 </th>
               ))}
             </tr>
@@ -196,6 +240,8 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                       >
                         <MatrixCellInput
                           value={g}
+                          inverted={invertedAt(t.index, ch, out)}
+                          onToggleInvert={() => toggleInvert(t.index, ch, out)}
                           out={out}
                           col={col}
                           onChange={(v) => setGain(t.index, ch, out, v)}
@@ -226,6 +272,8 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
 
 function MatrixCellInput({
   value,
+  inverted,
+  onToggleInvert,
   out,
   col,
   onChange,
@@ -233,6 +281,8 @@ function MatrixCellInput({
   label,
 }: {
   value: number;
+  inverted: boolean;
+  onToggleInvert: () => void;
   out: number;
   col: number;
   onChange: (v: number) => void;
@@ -304,14 +354,34 @@ function MatrixCellInput({
           active ? "text-foreground" : "text-muted-foreground",
         )}
       />
-      <span
-        id={stateId}
-        className={cn(
-          "tnum relative block truncate text-center font-mono text-xs leading-none",
-          active ? "text-foreground/80" : "text-muted-foreground",
+      <span className="relative flex min-w-0 items-center justify-center gap-0.5">
+        <span
+          id={stateId}
+          className={cn(
+            "tnum block truncate text-center font-mono text-xs leading-none",
+            active ? "text-foreground/80" : "text-muted-foreground",
+          )}
+        >
+          {stateText}
+          {/* The word, not only the pressed button: an inverted cell reads as
+              inverted to a screen reader and in a screenshot (A15). */}
+          {active && inverted && ` ${t("routing.matrix.inverted")}`}
+        </span>
+        {active && (
+          <button
+            type="button"
+            aria-pressed={inverted}
+            aria-label={t("routing.matrix.invertCell", { cell: label })}
+            title={t("routing.matrix.invertCell", { cell: label })}
+            onClick={onToggleInvert}
+            className={cn(
+              "rounded px-0.5 font-mono text-xs leading-none",
+              inverted ? "bg-warn-dim text-warn" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Ø
+          </button>
         )}
-      >
-        {stateText}
       </span>
     </div>
   );

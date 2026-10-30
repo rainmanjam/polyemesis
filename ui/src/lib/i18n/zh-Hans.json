@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "放弃",
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "撤销清除",
+  "routing.matrix.invertCell": "反转极性：{cell}",
+  "routing.matrix.inverted": "反相",
   "routing.matrix.stateOff": "关",
   "routing.meters.peakReset": "重置峰值",
   "routing.meters.peakResetFor": "重置 {channel} 的峰值",

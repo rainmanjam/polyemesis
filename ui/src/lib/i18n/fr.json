@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Annuler",
   "routing.saveBar.save": "Enregistrer",
   "routing.matrix.undoClear": "Annuler l'effacement",
+  "routing.matrix.invertCell": "Inverser la polarité : {cell}",
+  "routing.matrix.inverted": "inv",
   "routing.matrix.stateOff": "désactivé",
   "routing.meters.peakReset": "Réinitialiser le pic",
   "routing.meters.peakResetFor": "Réinitialiser le pic de {channel}",

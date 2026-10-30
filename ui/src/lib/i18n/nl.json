@@ -1762,6 +1762,8 @@
   "routing.saveBar.discard": "Weggooien",
   "routing.saveBar.save": "Opslaan",
   "routing.matrix.undoClear": "Wissen ongedaan maken",
+  "routing.matrix.invertCell": "Polariteit omkeren: {cell}",
+  "routing.matrix.inverted": "inv",
   "routing.matrix.stateOff": "uit",
   "routing.meters.peakReset": "Piek resetten",
   "routing.meters.peakResetFor": "Piek resetten voor {channel}",

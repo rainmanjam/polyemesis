@@ -55,6 +55,9 @@ export interface MatrixCell {
   /** 0 = left, 1 = right */
   out: number;
   gain: number;
+  /** Polarity inverted (A15). A pan coefficient, so changing it restarts the
+   *  destination; omitted when false. */
+  invert?: boolean;
 }
 
 // ------------------------------------------------------------- track roles

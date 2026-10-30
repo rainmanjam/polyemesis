@@ -66,7 +66,7 @@ func CopyMixProblems(p Profile) []string {
 		// Reported once per shape rather than once per cell. A 6-channel track
 		// wired across a stereo pair is twelve cells, and twelve near-identical
 		// sentences would bury the one instruction the operator has to change.
-		var gain, route bool
+		var gain, route, invert bool
 		for _, c := range p.Matrix {
 			// A cell at zero gain contributes nothing and resolveCells drops it
 			// before the graph is built, so it is not an instruction to
@@ -80,11 +80,19 @@ func CopyMixProblems(p Profile) []string {
 			if c.Channel != c.Out {
 				route = true
 			}
+			if c.Invert {
+				invert = true
+			}
 		}
 		if gain {
 			add("the mix matrix sets a gain other than unity, which a destination " +
 				"that copies its audio cannot apply: every selected track is " +
 				"forwarded at the level it arrived")
+		}
+		if invert {
+			add("the mix matrix inverts a channel's polarity, which a destination " +
+				"that copies its audio cannot do: every selected track is " +
+				"forwarded with the samples it arrived with")
 		}
 		if route {
 			add("the mix matrix routes channels between outputs, which a " +
