@@ -1,3 +1,4 @@
+import type { TranslationKey } from "@/lib/i18n";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 // Where a viewer can be looked at on the platform they were talking on.
@@ -28,10 +29,10 @@ export type PlatformLinkKind =
 export interface PlatformLink {
   url: string;
   kind: PlatformLinkKind;
-  /** Menu label. Says what the destination actually is. */
-  label: string;
-  /** The caveat, for a title attribute. Empty when there is nothing to warn about. */
-  caveat: string;
+  /** Menu label, as a catalogue key. Says what the destination actually is. */
+  label: TranslationKey;
+  /** The caveat, for a title attribute, as a catalogue key. */
+  caveat: TranslationKey;
 }
 
 /** Twitch display names are the login with capitalisation for most accounts,
@@ -64,20 +65,15 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
             twitchLogin(channel),
           )}/viewercard/${encodeURIComponent(login)}`,
           kind: "moderator-card",
-          label: "Open moderator card on Twitch",
-          caveat:
-            "Twitch's own viewer card for this channel: their recent messages here, plus ban and timeout. " +
-            "Opens logged in as whoever this browser is signed in to Twitch as. " +
-            "An account with a localised display name may not resolve.",
+          label: "chatLink.twitchCard",
+          caveat: "chatLink.twitchCardCaveat",
         };
       }
       return {
         url: `https://www.twitch.tv/${encodeURIComponent(login)}`,
         kind: "profile",
-        label: "Open channel on Twitch",
-        caveat:
-          "Their channel page, not a moderator view — this message arrived without a channel, " +
-          "so there is no viewer card to open.",
+        label: "chatLink.twitchChannel",
+        caveat: "chatLink.twitchChannelCaveat",
       };
     }
 
@@ -88,10 +84,8 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
       return {
         url: `https://www.youtube.com/channel/${encodeURIComponent(id)}`,
         kind: "profile",
-        label: "Open channel on YouTube",
-        caveat:
-          "YouTube publishes no per-viewer chat history, so this is their channel page. " +
-          "Moderate from the live chat in YouTube Studio.",
+        label: "chatLink.youtubeChannel",
+        caveat: "chatLink.youtubeChannelCaveat",
       };
     }
 
@@ -100,9 +94,8 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
       return {
         url: `https://kick.com/${encodeURIComponent(twitchLogin(name))}`,
         kind: "profile",
-        label: "Open profile on Kick",
-        caveat:
-          "Kick publishes no per-viewer chat history, so this is their profile page.",
+        label: "chatLink.kickProfile",
+        caveat: "chatLink.kickProfileCaveat",
       };
     }
 
@@ -114,10 +107,8 @@ export function platformLinkFor(m: ChatMessage): PlatformLink | null {
       return {
         url: `https://www.facebook.com/${encodeURIComponent(id)}`,
         kind: "profile",
-        label: "Open profile on Facebook",
-        caveat:
-          "Facebook publishes no per-viewer chat history, so this is their profile. " +
-          "Comment author ids are scoped to the page, so this may not resolve from another account.",
+        label: "chatLink.facebookProfile",
+        caveat: "chatLink.facebookProfileCaveat",
       };
     }
 

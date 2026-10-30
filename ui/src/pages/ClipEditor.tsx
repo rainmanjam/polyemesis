@@ -631,7 +631,7 @@ export function ClipEditor() {
         <PageHeader title={t("clipedit.title")} subtitle={loadError || t("clipedit.thatRecordingIsNotAvailable")} />
         <Button variant="secondary" size="sm" asChild>
           <Link to="/library">
-            <ArrowLeft /> Back to the library
+            <ArrowLeft /> {t("clipedit.backToLibrary")}
           </Link>
         </Button>
       </div>
@@ -662,7 +662,7 @@ export function ClipEditor() {
             <Badge variant="outline">{timecode(outMs - inMs)}</Badge>
             <Button variant="secondary" size="sm" asChild>
               <Link to="/library">
-                <ArrowLeft /> Library
+                <ArrowLeft /> {t("nav.library")}
               </Link>
             </Button>
           </>
@@ -693,11 +693,10 @@ export function ClipEditor() {
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
                     <p className="text-sm text-muted-foreground">
-                      No proxy has been generated for this segment.
+                      {t("clipedit.noProxy")}
                     </p>
                     <p className="text-tiny text-muted-foreground">
-                      The cut still works — a proxy only gives you a picture to aim with. Generate
-                      one from the library.
+                      {t("clipedit.noProxyHint")}
                     </p>
                   </div>
                 )}
@@ -760,10 +759,10 @@ export function ClipEditor() {
                 <span className="mx-1 h-5 w-px bg-border" />
 
                 <Button size="sm" onClick={markIn} title={t("clipedit.markIn")}>
-                  Mark in (I)
+                  {t("clipedit.markInButton")}
                 </Button>
                 <Button size="sm" onClick={markOut} title={t("clipedit.markOut")}>
-                  Mark out (O)
+                  {t("clipedit.markOutButton")}
                 </Button>
 
                 <div className="ml-auto flex items-center gap-1.5">
@@ -835,7 +834,7 @@ export function ClipEditor() {
                 <TimecodeField label={t("clipedit.out")} valueMs={outMs} onCommit={(ms) => setOutMs(Math.max(inMs + 1, Math.min(ms, durationMs)))} />
                 <div className="flex flex-col gap-1">
                   <Label className="text-micro uppercase tracking-wider text-muted-foreground">
-                    Length
+                    {t("clips.length")}
                   </Label>
                   <div className="tnum flex h-8 items-center rounded-md border border-border px-2 font-mono text-sm">
                     {timecode(Math.max(0, outMs - inMs))}
@@ -867,7 +866,7 @@ export function ClipEditor() {
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-micro uppercase tracking-wider text-muted-foreground">
-                  Mode
+                  {t("set.mode")}
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
                   <ModeButton
@@ -887,7 +886,7 @@ export function ClipEditor() {
 
               <div className="flex flex-col gap-1">
                 <Label className="text-micro uppercase tracking-wider text-muted-foreground">
-                  Audio
+                  {t("golive.colAudio")}
                 </Label>
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -895,44 +894,42 @@ export function ClipEditor() {
                     onCheckedChange={(v) => setAudioAll(v === true)}
                     aria-label={t("clipedit.keepAllTracks")}
                   />
-                  Every track, bit-exact
+                  {t("clipedit.everyTrackBitExact")}
                 </label>
                 {!audioAll && (
                   <div className="mt-1 flex flex-col gap-1 rounded-md border border-border p-2">
                     {source.tracks.length === 0 ? (
                       <p className="text-tiny text-muted-foreground">
-                        This recording's track count was never measured, so there is nothing to pick
-                        from. Take every track instead.
+                        {t("clipedit.tracksNeverMeasured")}
                       </p>
                     ) : (
-                      source.tracks.map((t) => (
-                        <label key={t.index} className="flex items-center gap-2 text-sm">
+                      source.tracks.map((tr) => (
+                        <label key={tr.index} className="flex items-center gap-2 text-sm">
                           <Checkbox
-                            checked={tracks.includes(t.index)}
+                            checked={tracks.includes(tr.index)}
                             onCheckedChange={(v) =>
                               setTracks((prev) =>
                                 v === true
-                                  ? [...prev, t.index].sort((a, b) => a - b)
-                                  : prev.filter((n) => n !== t.index),
+                                  ? [...prev, tr.index].sort((a, b) => a - b)
+                                  : prev.filter((n) => n !== tr.index),
                               )
                             }
-                            aria-label={`Audio track ${t.index + 1}`}
+                            aria-label={t("clipedit.audioTrackN", { n: tr.index + 1 })}
                           />
-                          <span className="font-mono text-tiny">{t.index + 1}</span>
+                          <span className="font-mono text-tiny">{tr.index + 1}</span>
                           <span className="truncate">
-                            {t.speaker || t.label || `Track ${t.index + 1}`}
+                            {tr.speaker || tr.label || t("lib.trackLabel", { n: tr.index + 1 })}
                           </span>
-                          {t.role && (
+                          {tr.role && (
                             <Badge variant="outline" className="ml-auto">
-                              {t.role}
+                              {tr.role}
                             </Badge>
                           )}
                         </label>
                       ))
                     )}
                     <p className="text-micro text-muted-foreground">
-                      Selected tracks are copied, not mixed — the clip keeps them as separate
-                      tracks, exactly as recorded.
+                      {t("clipedit.tracksCopiedNotMixed")}
                     </p>
                   </div>
                 )}
@@ -950,7 +947,7 @@ export function ClipEditor() {
 
               <div className="flex flex-col gap-1">
                 <Label className="text-micro uppercase tracking-wider text-muted-foreground">
-                  Container
+                  {t("clipedit.container")}
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
                   <ModeButton
@@ -973,7 +970,7 @@ export function ClipEditor() {
                 disabled={exporting || !plan || tooLong || (!audioAll && tracks.length === 0)}
               >
                 {exporting ? <Loader2 className="animate-spin" /> : <Scissors />}
-                Export clip
+                {t("clipedit.exportClip")}
               </Button>
               <p className="text-micro text-muted-foreground">
             {t("clipedit.queueNote")}
@@ -985,9 +982,9 @@ export function ClipEditor() {
           <Card className="min-h-0">
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-2">
-                Transcript
+                {t("clipedit.transcript")}
                 {transcript.length > 0 && (
-                  <Badge variant="outline">{transcript.length} lines</Badge>
+                  <Badge variant="outline">{t("clipedit.lineCount", { n: transcript.length })}</Badge>
                 )}
               </CardTitle>
             </CardHeader>
@@ -1014,7 +1011,7 @@ export function ClipEditor() {
                   >
                     {visibleLines.length === 0 ? (
                       <p className="py-4 text-center text-tiny text-muted-foreground">
-                        Nothing matches.
+                        {t("clipedit.nothingMatches")}
                       </p>
                     ) : (
                       visibleLines.map((line, i) => (
@@ -1096,6 +1093,7 @@ function TimecodeField({
   valueMs: number;
   onCommit: (ms: number) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? timecode(valueMs);
   const commit = () => {
@@ -1110,7 +1108,7 @@ function TimecodeField({
       <Label className="text-micro uppercase tracking-wider text-muted-foreground">{label}</Label>
       <Input
         value={shown}
-        aria-label={`${label} point`}
+        aria-label={t("clipedit.pointAria", { label })}
         className="tnum w-36 font-mono"
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -1144,19 +1142,22 @@ function PlanPanel({
   const t = useT();
   const drift = plan?.inDriftMs ?? 0;
   const moved = Boolean(plan?.driftKnown) && drift !== 0;
+  // The server's mode identifiers, said in the words the Mode buttons use.
+  const modeLabel = (m: string) =>
+    m === "fast" ? t("clipedit.fast") : m === "precise" ? t("clipedit.precise") : m;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-1.5">
-          What this will do
+          {t("clipedit.whatThisWillDo")}
           {planning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {tooLong && (
           <p className="rounded-md border border-down bg-down-dim px-2 py-1.5 text-tiny">
-            That range is longer than the {Math.round(maxSeconds / 3600)} hour ceiling for one clip.
+            {t("clipedit.tooLong", { hours: Math.round(maxSeconds / 3600) })}
           </p>
         )}
         {error && !tooLong && (
@@ -1177,7 +1178,11 @@ function PlanPanel({
               <Stat
                 labelKey="clipedit.startMoved"
                 value={
-                  !plan.driftKnown ? "unknown" : drift === 0 ? "not at all" : driftText(drift)
+                  !plan.driftKnown
+                    ? t("clipedit.driftUnknown")
+                    : drift === 0
+                      ? t("clipedit.notAtAll")
+                      : driftText(drift)
                 }
                 tone={!plan.driftKnown ? "warn" : moved ? "warn" : "default"}
               />
@@ -1188,19 +1193,21 @@ function PlanPanel({
               />
               <Stat
                 labelKey="clipedit.reencoded"
-                value={plan.reEncodedMs > 0 ? `${plan.reEncodedMs} ms` : "nothing"}
+                value={plan.reEncodedMs > 0 ? `${plan.reEncodedMs} ms` : t("clipedit.nothing")}
                 tone={plan.reEncodedMs > 0 ? "warn" : "live"}
               />
             </div>
             {plan.mode !== plan.requestedMode && (
               <p className="text-tiny text-warn">
-                Asked for {plan.requestedMode}, will run as {plan.mode}.
+                {t("clipedit.askedFor", {
+                  requested: modeLabel(plan.requestedMode),
+                  mode: modeLabel(plan.mode),
+                })}
               </p>
             )}
             {plan.concat && (
               <p className="text-tiny text-muted-foreground">
-                The cut spans {plan.segments} recording files; they are joined before it is
-                trimmed.
+                {t("clipedit.concat", { n: plan.segments })}
               </p>
             )}
             {(plan.warnings ?? []).map((wmsg) => (
@@ -1329,7 +1336,7 @@ function JobRow({ job }: { job: ClipJob }) {
       {job.error && <p className="text-micro text-down">{job.error}</p>}
       {done && res?.driftKnown && (res.inDriftMs ?? 0) !== 0 && (
         <p className="text-micro text-warn">
-          Started {driftText(res.inDriftMs ?? 0)} from where it was asked for.
+          {t("clipedit.startedDrift", { drift: driftText(res.inDriftMs ?? 0) })}
         </p>
       )}
     </div>

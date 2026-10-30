@@ -2,13 +2,24 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { useDestinationUsage } from "@/lib/destinationUsage";
 import { usePreviewTiles } from "@/hooks/usePreviewTiles";
 import { previewLayout } from "@/lib/previewLayout";
-import { audioTrackCount, ingestAttribution, ingestBitrateKbps, processAbsence } from "@/lib/dashboardFacts";
+import {
+  attributableBitrate,
+  audioTrackCount,
+  ingestAttribution,
+  ingestBitrateKbps,
+  processAbsence,
+  programmeIngestLive,
+  programmeSnapshot,
+  relayRate,
+  type RelaySample,
+} from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
 import { topRowLayout } from "@/lib/dashboardLayout";
@@ -22,7 +33,7 @@ import { backupOnAir, ingestProblem } from "@/lib/ingestChip";
 import { publishRows } from "@/lib/publish-url";
 import { copyToClipboard } from "@/lib/clipboard";
 import { StatusReason } from "@/components/signature/StatusReason";
-import { trackLabels } from "@/lib/trackLabels";
+import { trackCount, trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -67,7 +78,9 @@ import type {
   FailoverSource,
   FailoverStatus,
   MetaField,
+  SourceInfo,
   SourceView,
+  Status,
   SystemInfo,
 } from "@/lib/types";
 import { useT, useStateLabel, type TranslationKey } from "@/lib/i18n";
@@ -667,10 +680,14 @@ function BulkDestinationControl({
   destinations,
   sources,
   onFinished,
+  openStopAllRef,
 }: Readonly<{
   destinations: readonly DestStatus[];
   sources: readonly SourceView[];
   onFinished: () => void;
+  /** Filled with this control's Stop all opener, so the on-air strip's End all
+   *  (A8) reaches the same dialog rather than a second stop path. */
+  openStopAllRef?: MutableRefObject<(() => void) | null>;
 }>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
@@ -714,6 +731,14 @@ function BulkDestinationControl({
       },
     );
   };
+
+  useEffect(() => {
+    if (!openStopAllRef) return;
+    openStopAllRef.current = openStopAll;
+    return () => {
+      openStopAllRef.current = null;
+    };
+  });
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -1106,6 +1131,21 @@ export function Dashboard() {
    * held -- at most one publish interval stale, which is what every other
    * reading on this page already is. */
   const [failoverState, setFailoverState] = useState<FailoverStatus | null>(null);
+  /* The status snapshot of the programme selected in the header, held the
+   * same way and for the same reason as failoverState: the socket alternates
+   * between every engine's frames, and the Ingest card printed whichever one
+   * spoke last. Null until the selected programme reports, so the card shows
+   * "—" rather than another show's figures. See programmeSnapshot(). */
+  const [programmeStatus, setProgrammeStatus] = useState<Status | null>(null);
+  /* That programme's own relay throughput, from the byte counter its frames
+   * carry. The bitrate series on the stats frames names no programme; this
+   * does. See relayRate(). */
+  const [relaySample, setRelaySample] = useState<RelaySample | null>(null);
+  /* Every programme's last-reported source layout, by id, from the same
+   * frames. A destination card sizes and names its track chips from ITS
+   * programme's layout, which on a lanes install is usually not the selected
+   * one. */
+  const [frameSources, setFrameSources] = useState<Record<number, SourceInfo>>({});
   const [failoverBusy, setFailoverBusy] = useState(false);
   // The recorder's and the meters' own settings, kept rather than discarded.
   //
@@ -1132,6 +1172,8 @@ export function Dashboard() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<DestinationId | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The Stop all opener, lent to the on-air strip's End all (A8).
+  const endAllRef = useRef<(() => void) | null>(null);
 
   // The programmes, so a destination card can say which one it carries. Named
   // only when there is more than one: on a single-source install every card
@@ -1172,7 +1214,6 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.system().then(setSystem).catch(() => {});
     api
       .getSettings()
       .then((s) => {
@@ -1210,6 +1251,41 @@ export function Dashboard() {
   // snapshot without it has to CLEAR the state rather than leave the last one
   // standing -- otherwise switching failover off in Settings would leave a live
   // control on the dashboard aimed at a tier that no longer exists.
+  // The publish address on the Ingest card is the SELECTED programme's. An
+  // unnamed /system answers for the default source, so on a multi-programme
+  // install an operator looking at Studio B copied Studio A's address.
+  useEffect(() => {
+    let live = true;
+    api
+      .system(programme)
+      .then((s) => {
+        if (live) setSystem(s);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [programme, refreshKey]);
+
+  useEffect(() => {
+    setProgrammeStatus((prev) => programmeSnapshot(prev, status, programme));
+  }, [status, programme]);
+  useEffect(() => {
+    const src = status?.source;
+    if (src?.id == null) return;
+    setFrameSources((prev) => (prev[src.id] === src ? prev : { ...prev, [src.id]: src }));
+  }, [status]);
+  const sourceOf = (id: number | null | undefined): SourceInfo | null =>
+    id == null ? null : (frameSources[id] ?? null);
+  // Per frame of the selected programme; a programme switch starts over, since
+  // the held baseline is the old programme's counter.
+  useEffect(() => {
+    setRelaySample(null);
+  }, [programme]);
+  useEffect(() => {
+    setRelaySample((prev) => relayRate(prev, programmeStatus?.relay?.rxBytes, Date.now()));
+  }, [programmeStatus]);
+
   useEffect(() => {
     if (!status || programme == null) return;
     if (status.source?.id !== programme) return;
@@ -1287,6 +1363,8 @@ export function Dashboard() {
   };
 
   const confirmDelete = useConfirm<{ id: DestinationId; name: string; live: boolean }>();
+  // What still points at the destination being deleted (A18).
+  const deleteUsage = useDestinationUsage(confirmDelete.open ? (confirmDelete.target?.id ?? null) : null);
 
   const remove = async (id: DestinationId) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
@@ -1294,7 +1372,10 @@ export function Dashboard() {
     setRefreshKey((k) => k + 1);
   };
 
-  const ingest = status?.ingest;
+  // The SELECTED programme's ingest, not the last engine to publish. See the
+  // programmeStatus declaration.
+  const ingest = programmeStatus?.ingest;
+  const source = programmeStatus?.source;
   // BYTES ARRIVING, not a process running -- the same question AppLayout's
   // header got wrong until it was fixed, asked a second time here. For SRT the
   // answer is inverted rather than imprecise: engine.reconcileIngest returns
@@ -1303,7 +1384,11 @@ export function Dashboard() {
   // over three live programmes in a demo capture. useIngestLive is the app's
   // one definition of "a broadcast is going out"; ingest?.state is only the
   // process, consulted below for the bitrate where it exists. See #514.
-  const ingestLive = useIngestLive();
+  // Narrowed to the selected programme where the install has more than one:
+  // the byte series behind useIngestLive names no programme, so there it is
+  // this programme's own probe and relay bytes. See programmeIngestLive().
+  const programmeKbps = relaySample?.kbps ?? null;
+  const ingestLive = programmeIngestLive(useIngestLive(), sourceCount, source, programmeKbps);
   // While the standby is on air the primary's "Offline" is true and misleading:
   // the show is going out. Say so instead of leaving a bare OFFLINE beside the
   // on-air banner. `failoverState` is the programme-scoped snapshot.
@@ -1314,7 +1399,6 @@ export function Dashboard() {
   // operator needs to fix it. The header chip, which speaks for the show,
   // hides it in that case.
   const ingestReason = ingestProblem(ingest, ingestLive, false);
-  const source = status?.source;
   // The word a pipeline row uses when it has no process. "—" for unknown: a
   // settings read that has not landed is not a fact about the feature.
   const absentLabel = (enabled: boolean | null | undefined) => {
@@ -1327,7 +1411,11 @@ export function Dashboard() {
   // genuinely ambiguous. See ingestAttribution().
   const attribution = ingestAttribution(sourceCount, source);
   const live = status?.destinations;
-  const renditions = status?.renditions ?? [];
+  // The Pipeline card's figures are the SELECTED programme's, like the Ingest
+  // card's: recorder, preview, meters, relay subscribers and the rendition
+  // ladder are all per engine, and the socket's last frame may be another
+  // programme's. See programmeSnapshot().
+  const renditions = programmeStatus?.renditions ?? [];
 
   // The socket republishes status on a two-second cadence, so a move applied
   // only on the server would leave the card sitting still after the click.
@@ -1383,12 +1471,14 @@ export function Dashboard() {
                  * lane, grid or orphan section — because the summary has no way
                  * to know which one a given destination landed in. */
                 domId={`dest-${d.id}`}
-                /* Names for the audio chips' tooltips, and null whenever the
-                 * live source snapshot is of a DIFFERENT programme than this
-                 * card's -- which on a lanes install is most of them. See
-                 * lib/trackLabels.ts for why a wrong name is worse here than
-                 * no name. */
-                trackLabels={trackLabels(source, d.sourceId)}
+                /* Names for the audio chips' tooltips, from THIS card's
+                 * programme's last frame (frameSources), and null until that
+                 * programme has reported. See lib/trackLabels.ts for why a
+                 * wrong name is worse here than no name. */
+                trackLabels={trackLabels(sourceOf(d.sourceId), d.sourceId)}
+                /* One chip per track of THIS card's programme's ingest; null
+                 * (no invented chips) until that programme has reported. */
+                trackCount={trackCount(sourceOf(d.sourceId), d.sourceId)}
                 busy={busyId === d.id}
                 canMoveEarlier={i > 0}
                 canMoveLater={i < destinations.length - 1}
@@ -1574,7 +1664,7 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} failover={failoverState} />
+      <OnAirBar status={status} failover={failoverState} onEndAll={() => endAllRef.current?.()} />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest
@@ -1647,8 +1737,9 @@ export function Dashboard() {
                 <StatusDot tone={ingestTone} />
                 {t("chrome.ingest")}
                 {/* WHOSE INGEST. Only on an install with more than one
-                    programme, where the answer is not obvious and the feed
-                    behind these figures is not scoped to either. */}
+                    programme, where the answer is not obvious. The figures
+                    are the selected programme's (programmeSnapshot), so this
+                    names the programme in the header. */}
                 {attribution && (
                   <Badge variant="outline" className="max-w-40 truncate">
                     {attribution.name}
@@ -1669,11 +1760,6 @@ export function Dashboard() {
                   {t("dash.ingestPrimaryOffline")}
                 </p>
               )}
-              {attribution && (
-                <p className="rounded border border-border bg-muted/40 px-2 py-1 text-micro leading-relaxed text-muted-foreground">
-                  {t("dash.ingestSharedFeed")}
-                </p>
-              )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Stat
                   labelKey="dash.bitrate"
@@ -1686,7 +1772,7 @@ export function Dashboard() {
                     const v = ingestBitrateKbps(
                       ingest?.state,
                       ingest?.progress?.bitrateKbps,
-                      bitrate,
+                      attributableBitrate(sourceCount, bitrate, programmeKbps),
                       ingestLive,
                     );
                     return v === null ? "—" : kbps(v);
@@ -1773,12 +1859,12 @@ export function Dashboard() {
                   silence when the settings read has not landed. */}
               {(
                 [
-                  ["Recorder", status?.recorder, absentLabel(featureEnabled?.recording)],
+                  ["Recorder", programmeStatus?.recorder, absentLabel(featureEnabled?.recording)],
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", status?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
-                  ["Meters", status?.meters, absentLabel(featureEnabled?.meters)],
+                  ["Preview", programmeStatus?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
+                  ["Meters", programmeStatus?.meters, absentLabel(featureEnabled?.meters)],
                 ] as const
               ).map(([label, proc, absent]) => {
                 const tone = proc ? toneForState(proc.state) : "idle";
@@ -1800,7 +1886,7 @@ export function Dashboard() {
                   {/* Not `?? 0`: before the first snapshot there is no
                       subscriber count, and zero subscribers is a meaningful,
                       alarming number to show someone who is broadcasting. #663. */}
-                  {snapshotKnown ? (status?.relay.subscribers?.length ?? 0) : "—"}
+                  {snapshotKnown && programmeStatus ? (programmeStatus.relay?.subscribers?.length ?? 0) : "—"}
                 </span>
               </div>
 
@@ -1878,6 +1964,7 @@ export function Dashboard() {
           destinations={destinations}
           sources={sources}
           onFinished={() => setRefreshKey((k) => k + 1)}
+          openStopAllRef={endAllRef}
         />
 
         {/* A card that jumps position is invisible to a screen reader unless
@@ -2024,16 +2111,27 @@ export function Dashboard() {
         requireTyping={confirmDelete.target?.live ?? false}
         title={t("confirm.deleteTitle", { name: confirmDelete.target?.name ?? "" })}
         description={
-          confirmDelete.target?.live ? (
-            <>
-              <span className="block font-medium text-down">
-                {t("dash.deleteDestLive")}
-              </span>
-              {t("dash.deleteDestDescription")}
-            </>
-          ) : (
-            t("dash.deleteDestDescription")
-          )
+          <>
+            {confirmDelete.target?.live && (
+              <span className="block font-medium text-down">{t("dash.deleteDestLive")}</span>
+            )}
+            {t("dash.deleteDestDescription")}
+            {deleteUsage.status === "ready" && deleteUsage.schedules > 0 && (
+              <span className="mt-1 block">{t("dash.deleteDestSchedulesNote")}</span>
+            )}
+            {deleteUsage.status === "failed" && (
+              <span className="mt-1 block text-muted-foreground">{t("dash.deleteDestUsageUnknown")}</span>
+            )}
+          </>
+        }
+        // Held shut only while the count is on its way; a failed read says so
+        // in the description and does not block a delete the operator asked for.
+        confirmDisabled={deleteUsage.status === "loading"}
+        consequencesLabel={t("dash.deleteDestUsedBy")}
+        consequences={
+          deleteUsage.status === "ready" && deleteUsage.schedules > 0
+            ? [{ label: t("dash.deleteDestSchedules"), count: deleteUsage.schedules }]
+            : undefined
         }
         confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {

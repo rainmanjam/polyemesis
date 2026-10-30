@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
+import { useT } from "@/lib/i18n";
 
 /* ==========================================================================
    The EXPERIMENTAL convention
@@ -62,9 +63,10 @@ import { Badge } from "@/components/ui/badge";
 /** The badge on its own, for a heading or a row that already carries the
  *  explanation somewhere the reader can see it. */
 export function ExperimentalBadge({ className }: { className?: string }) {
+  const t = useT();
   return (
     <Badge variant="outline" className={className}>
-      experimental
+      {t("experimental.badge")}
     </Badge>
   );
 }
@@ -77,7 +79,7 @@ export function Experimental({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-card-raised p-2">
       <ExperimentalBadge className="self-start" />
-      <span className="text-[10px] text-muted-foreground">{children}</span>
+      <span className="text-sm text-muted-foreground">{children}</span>
     </div>
   );
 }

@@ -2456,7 +2456,10 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 
 	args := ffmpeg.MetersArgs(ffmpeg.MetersSpec{RelayURL: url, TrackChannels: channels})
 
-	proc := supervisor.New(e.log, supervisor.Spec{
+	// Declared ahead of the Spec so the stdout handler can reach it: see the
+	// NoteMedia call below.
+	var proc *supervisor.Process
+	proc = supervisor.New(e.log, supervisor.Spec{
 		Name: "meters", Kind: "meters", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		// astats prints far faster than any UI can draw; throttle here rather
@@ -2466,6 +2469,10 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 		StdoutHandler: func(r io.Reader) error {
 			th := &meterThrottle{e: e}
 			return ffmpeg.ParseLevels(r, channels, func(l ffmpeg.Levels) {
+				// Levels arriving is media flowing. This stdout is not the
+				// -progress parser, so without it the supervisor never learns
+				// that, and the meters' uptime reads --:--:-- for ever.
+				proc.NoteMedia()
 				now := time.Now()
 				if !th.allow(now) {
 					return
@@ -4162,12 +4169,15 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	})
 
 	id, name, target := p.id, p.name, p.target
-	proc := supervisor.New(e.log, supervisor.Spec{
+	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
+	var proc *supervisor.Process
+	proc = supervisor.New(e.log, supervisor.Spec{
 		Name: subName, Kind: "loudness", Bin: e.tools.FFmpeg, Args: args,
 		AutoRestart: true,
 		StdoutHandler: func(r io.Reader) error {
 			var last time.Time
 			return meters.Parse(r, func(f meters.Frame) {
+				proc.NoteMedia() // as the meters do: a frame is media flowing
 				rep := meters.Observe(id, name, target, f, time.Now())
 				// Stored on every frame, published on a throttle: a browser
 				// that connects between pushes still gets the current number.

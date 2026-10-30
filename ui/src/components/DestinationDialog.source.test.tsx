@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* THE CONTROL THAT STOPS THE SERVER CHOOSING A PROGRAMME FOR YOU.
  *
@@ -55,6 +56,7 @@ function open(sources: unknown[], destination: unknown = null) {
       destination={destination as never}
       onSaved={() => {}}
     />,
+    { wrapper: MemoryRouter },
   );
 }
 

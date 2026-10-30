@@ -1,3 +1,4 @@
+import { translate, type Translator } from "./i18n";
 import type { MediaFile, MediaVerdict } from "./types";
 
 /* ===========================================================================
@@ -80,6 +81,7 @@ export type UploadNotice = {
 
 export function uploadNotice(
   u: Pick<MediaFile, "outcome" | "unverifiedReason">,
+  t: Translator = (key, params) => translate("en", key, params),
 ): UploadNotice | null {
   switch (u.outcome) {
     case "verified":
@@ -88,18 +90,19 @@ export function uploadNotice(
       return {
         outcome: "refused",
         tone: "refused",
-        label: "Refused",
+        label: t("media.uploadRefused"),
         // No "upload it again". That sentence belongs to the state below and is
         // actively wrong here: the file was read, and reading it a second time
         // reaches the same conclusion.
-        detail: `${u.unverifiedReason}. This file was inspected and is not media this server can use; sending it again will not change that. It cannot be used as a playlist item.`,
+        // The reason is the server's own text and stays as it arrived.
+        detail: t("media.uploadRefusedDetail", { reason: String(u.unverifiedReason) }),
       };
     case "unverified":
       return {
         outcome: "unverified",
         tone: "warn",
-        label: "Not checked",
-        detail: `${u.unverifiedReason}. Upload it again to have it checked; it cannot be used as a playlist item until it has been.`,
+        label: t("media.uploadNotChecked"),
+        detail: t("media.uploadUnverifiedDetail", { reason: String(u.unverifiedReason) }),
       };
     default:
       // `unrecorded`, and the default arm is deliberate: a state a newer server
@@ -107,9 +110,8 @@ export function uploadNotice(
       return {
         outcome: "unrecorded",
         tone: "warn",
-        label: "Not checked",
-        detail:
-          "This file was stored before uploads were checked, so nothing here describes what is in it.",
+        label: t("media.uploadNotChecked"),
+        detail: t("media.uploadUnrecordedDetail"),
       };
   }
 }

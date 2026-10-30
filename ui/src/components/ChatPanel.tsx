@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useT } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey } from "@/lib/i18n";
 import { toast } from "sonner";
 import {
   CornerUpLeft,
@@ -41,6 +41,7 @@ import type {
   ChatMessage,
   ChatPlatform,
   ChatSendResult,
+  ChatState,
   ChatStatus,
 } from "@/lib/types";
 
@@ -65,6 +66,16 @@ const NAME_TONES = [
   "text-warn",
   "text-secondary-foreground",
 ];
+
+/** The per-platform state badge. Shares the process-state words where they
+ *  mean the same thing; a state the server adds later falls back to its id. */
+const CHAT_STATE_KEY: Record<ChatState, TranslationKey> = {
+  connecting: "chatpage.stateConnecting",
+  live: "state.live",
+  degraded: "chatpage.stateDegraded",
+  failed: "state.failed",
+  stopped: "state.stopped",
+};
 
 function nameTone(name: string): string {
   let h = 0;
@@ -116,6 +127,7 @@ function MessageRow({
   onMenu?: (m: ChatMessage, at: { x: number; y: number }) => void;
   compact?: boolean;
 }) {
+  const t = useT();
   const accent = accentFor(m.platform);
   const Icon = accent.icon;
   const [busy, setBusy] = useState(false);
@@ -123,7 +135,7 @@ function MessageRow({
   // Whether this platform can delete at all, asked the same way the context
   // menu asks it. Not `onDelete !== undefined`: the handler being wired says
   // the OPERATOR may delete, never that the PLATFORM can.
-  const deletable = chatActionSupport(m.platform, "delete");
+  const deletable = chatActionSupport(m.platform, "delete", t);
 
   const del = async () => {
     if (!onDelete) return;
@@ -176,7 +188,7 @@ function MessageRow({
       )}
 
       {m.author.moderator && (
-        <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-armed" aria-label="Moderator" />
+        <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-armed" aria-label={t("chatpage.moderator")} />
       )}
 
       {/* The name is the way in to moderation, which is where every chat tool
@@ -187,14 +199,14 @@ function MessageRow({
         type="button"
         disabled={!onOpenUser || !m.author.id}
         onClick={() => onOpenUser?.(m)}
-        aria-label={m.author.id ? `Moderate ${m.author.name}` : m.author.name}
+        aria-label={m.author.id ? t("chatpage.moderateUser", { name: m.author.name }) : m.author.name}
         title={
           m.author.id
-            ? `What ${m.author.name} has said, and what to do about it`
+            ? t("chatpage.moderateUserTitle", { name: m.author.name })
             : // A platform that sent no author id cannot be addressed by any
               // moderation call, so the name is not a button. Saying why beats a
               // control that silently does nothing.
-              `${m.author.name} — ${m.platform} sent no user id for this message, so it cannot be moderated`
+              t("chatpage.noUserId", { name: m.author.name, platform: m.platform })
         }
         className={cn(
           "font-semibold",
@@ -236,9 +248,9 @@ function MessageRow({
           type="button"
           onClick={() => void del()}
           disabled={busy || !deletable.ok}
-          aria-label={`Delete message from ${m.author.name}`}
-          title={deletable.ok ? "Delete on the platform it came from" : deletable.reason}
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-subtle-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-subtle-foreground group-hover:flex"
+          aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
+          title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
@@ -265,6 +277,7 @@ export function ChatTimeline({
   compact?: boolean;
   empty?: React.ReactNode;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
   const [behind, setBehind] = useState(0);
@@ -323,7 +336,7 @@ export function ChatTimeline({
             ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" });
           }}
         >
-          {behind} new
+          {t("chatpage.newCount", { count: behind })}
         </Button>
       )}
     </div>
@@ -382,6 +395,7 @@ export function PlatformFilter({
  *  operator who typed something important needs to know that Twitch has it and
  *  YouTube does not — not that "sending failed". */
 function SendVerdict({ results }: { results: ChatSendResult[] }) {
+  const t = useT();
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
       {results.map((r) => {
@@ -392,7 +406,11 @@ function SendVerdict({ results }: { results: ChatSendResult[] }) {
             <StatusDot tone={tone} size="sm" />
             <span className={accent.text}>{accent.label}</span>
             <span className="text-muted-foreground">
-              {r.ok ? "sent" : r.skipped ? "cannot send" : "failed"}
+              {r.ok
+                ? t("chatpage.verdictSent")
+                : r.skipped
+                  ? t("chatpage.verdictCannotSend")
+                  : t("chatpage.verdictFailed")}
               {r.detail ? ` — ${r.detail}` : ""}
             </span>
           </span>
@@ -413,6 +431,7 @@ export function ChatComposer({
   configured: boolean;
   compact?: boolean;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<ChatSendResult[] | null>(null);
@@ -449,13 +468,13 @@ export function ChatComposer({
       if (res.failed > 0) {
         toast.error(
           res.sent > 0
-            ? `Sent to ${res.sent}, failed on ${res.failed}.`
-            : "No platform accepted the message.",
+            ? t("chatpage.sentPartial", { sent: res.sent, failed: res.failed })
+            : t("chatpage.noneAccepted"),
         );
       }
     } catch (err) {
       setResults(null);
-      toast.error(err instanceof Error ? err.message : "Could not send.");
+      toast.error(err instanceof Error ? err.message : t("chatpage.couldNotSend"));
     } finally {
       setSending(false);
     }
@@ -464,8 +483,7 @@ export function ChatComposer({
   if (!configured) {
     return (
       <p className="border-t border-border px-2 py-2 text-[11px] text-muted-foreground">
-        Chat is not running on this server, so there is nothing to send to. Connect a platform
-        account under Settings → Platform credentials.
+        {t("chatpage.composerNotRunning")}
       </p>
     );
   }
@@ -492,15 +510,17 @@ export function ChatComposer({
           rows={compact ? 1 : 2}
           placeholder={
             senders.length === 0
-              ? "No connected platform can send right now — you can still type."
-              : `Send to ${senders.map((s) => accentFor(s.platform).label).join(", ")}`
+              ? t("chatpage.noSender")
+              : t("chatpage.sendTo", {
+                  platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
+                })
           }
           className="min-h-0 resize-none text-[12px]"
-          aria-label="Message to send to every connected platform"
+          aria-label={t("chatpage.composerAria")}
         />
         <Button size="sm" onClick={() => void send()} disabled={sending || !text.trim()}>
           {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-          {!compact && "Send"}
+          {!compact && t("chatpage.send")}
         </Button>
       </div>
       {strictest > 0 && (
@@ -514,8 +534,15 @@ export function ChatComposer({
             {[...text].length}/{strictest}
           </span>{" "}
           {over
-            ? `${strictestPlatform ? accentFor(strictestPlatform).label : "One platform"} publishes a ${strictest}-character limit and will probably truncate or reject this. It will still be sent.`
-            : `strictest limit among the connected platforms${strictestPlatform ? ` (${accentFor(strictestPlatform).label})` : ""}`}
+            ? strictestPlatform
+              ? t("chatpage.overLimit", {
+                  platform: accentFor(strictestPlatform).label,
+                  limit: strictest,
+                })
+              : t("chatpage.overLimitUnknown", { limit: strictest })
+            : strictestPlatform
+              ? t("chatpage.strictestLimitOf", { platform: accentFor(strictestPlatform).label })
+              : t("chatpage.strictestLimit")}
         </p>
       )}
     </div>
@@ -535,6 +562,8 @@ export function ChatStatusList({
   statuses: ChatStatus[];
   compact?: boolean;
 }) {
+  const t = useT();
+  const tn = useTN();
   if (statuses.length === 0) return null;
   return (
     <div className={cn("flex flex-col gap-1", compact && "gap-0.5")}>
@@ -557,7 +586,7 @@ export function ChatStatusList({
                   <span className="truncate text-[11px] text-muted-foreground">{s.channel}</span>
                 )}
                 <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {s.state}
+                  {CHAT_STATE_KEY[s.state] ? t(CHAT_STATE_KEY[s.state]) : s.state}
                 </span>
               </div>
               {detail && (
@@ -565,29 +594,40 @@ export function ChatStatusList({
               )}
               {quota && (
                 <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                  <span className="tnum font-mono">
-                    {quota.used.toLocaleString()}/{quota.limit.toLocaleString()}
-                  </span>{" "}
-                  estimated API units used
-                  {quota.resetAt ? `, resets ${clockTime(quota.resetAt)}` : ""}
-                  {quota.paused ? " — polling is paused until then" : ""}
+                  {tn("chatpage.quotaUsed", {
+                    n: (
+                      <span className="tnum font-mono">
+                        {quota.used.toLocaleString()}/{quota.limit.toLocaleString()}
+                      </span>
+                    ),
+                  })}
+                  {quota.resetAt
+                    ? t("chatpage.quotaResets", { time: clockTime(quota.resetAt) })
+                    : ""}
+                  {quota.paused ? t("chatpage.quotaPaused") : ""}
                   {quota.intervalMs > 0
-                    ? `, polling every ${Math.round(quota.intervalMs / 1000)}s`
+                    ? t("chatpage.quotaPolling", { seconds: Math.round(quota.intervalMs / 1000) })
                     : ""}
                 </p>
               )}
               {!compact && (
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  <span className="tnum font-mono">{s.received.toLocaleString()}</span> received ·{" "}
-                  <span className="tnum font-mono">{s.sent.toLocaleString()}</span> sent
+                  {tn("chatpage.receivedCount", {
+                    n: <span className="tnum font-mono">{s.received.toLocaleString()}</span>,
+                  })}
+                  {" · "}
+                  {tn("chatpage.sentCount", {
+                    n: <span className="tnum font-mono">{s.sent.toLocaleString()}</span>,
+                  })}
                   {s.restarts > 0 && (
                     <>
                       {" · "}
-                      <span className="tnum font-mono">{s.restarts}</span> reconnect
-                      {s.restarts === 1 ? "" : "s"}
+                      {tn(s.restarts === 1 ? "chatpage.reconnectOne" : "chatpage.reconnectMany", {
+                        n: <span className="tnum font-mono">{s.restarts}</span>,
+                      })}
                     </>
                   )}
-                  {!s.canSend && " · receive-only"}
+                  {!s.canSend && ` · ${t("chatpage.receiveOnly")}`}
                 </p>
               )}
             </div>
@@ -608,6 +648,7 @@ export function ChatSearchBox({
   search: ChatSearchState;
   className?: string;
 }) {
+  const t = useT();
   return (
     <div
       className={cn(
@@ -629,8 +670,8 @@ export function ChatSearchBox({
             search.clear();
           }
         }}
-        placeholder="Search chat history…"
-        aria-label="Search chat history"
+        placeholder={t("chatpage.searchPlaceholder")}
+        aria-label={t("chatpage.searchAria")}
         className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-subtle-foreground"
       />
       {search.loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />}
@@ -638,7 +679,7 @@ export function ChatSearchBox({
         <button
           type="button"
           onClick={search.clear}
-          aria-label="Clear search"
+          aria-label={t("lib.clearSearch")}
           className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
         >
           <X className="h-3 w-3" />
@@ -671,11 +712,13 @@ export function ChatSearchResults({
       <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-muted-foreground">
         <span>
           {search.loading
-            ? "Searching…"
-            : `${search.results.length} match${search.results.length === 1 ? "" : "es"}`}
-          {search.truncated && " (showing the newest)"}
+            ? t("chatpage.searching")
+            : t(search.results.length === 1 ? "chatpage.matchOne" : "chatpage.matchMany", {
+                count: search.results.length,
+              })}
+          {search.truncated && ` ${t("chatpage.showingNewest")}`}
         </span>
-        <span className="ml-auto">newest first</span>
+        <span className="ml-auto">{t("chatpage.newestFirst")}</span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-1" role="log">
@@ -780,10 +823,10 @@ export function ChatPanel({
       } catch (err) {
         // The platform's own words — "polyemesis cannot delete twitch
         // messages; use the twitch dashboard" is the whole answer.
-        toast.error(err instanceof Error ? err.message : "Could not delete that message.");
+        toast.error(err instanceof Error ? err.message : t("chatpage.couldNotDeleteThatMessage"));
       }
     },
-    [remove],
+    [remove, t],
   );
 
   return (
@@ -814,15 +857,15 @@ export function ChatPanel({
       )}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
         <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-[12px] font-semibold">Chat</span>
+        <span className="text-[12px] font-semibold">{t("chatpage.title")}</span>
         {stored && (
-          <Badge variant="outline" title="Nothing is connected; this is the stored scrollback.">
-            history
+          <Badge variant="outline" title={t("chatpage.panelStoredTitle")}>
+            {t("chatpage.historyBadge")}
           </Badge>
         )}
         {configured && !connected && (
-          <Badge variant="warn" title="The live socket is closed; messages will resume when it reconnects.">
-            offline
+          <Badge variant="warn" title={t("chatpage.socketClosedTitle")}>
+            {t("chrome.socketOffline")}
           </Badge>
         )}
         {/* #13/#21: unlike a closed socket, a frame that failed to parse gives

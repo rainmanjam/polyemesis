@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   Activity,
@@ -40,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
 import { PullIngestFields } from "@/components/PullIngestFields";
@@ -58,6 +60,12 @@ import { cn } from "@/lib/utils";
 import { publishRows } from "@/lib/publish-url";
 import { ingestPhase, ingestSummary } from "@/lib/sourceIngest";
 import type { Source, SourceId, SourceView } from "@/lib/types";
+
+// hls.js is only needed once a card shows a receiving feed (A2), so it is
+// fetched then, the same way the Dashboard loads it.
+const PreviewPlayer = lazy(() =>
+  import("@/components/PreviewPlayer").then((m) => ({ default: m.PreviewPlayer })),
+);
 
 /* ===========================================================================
    Sources: one ingested programme each.
@@ -104,6 +112,17 @@ export function SourcesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Whether the preview encoder is switched on (Settings → Pipeline). A card
+  // only offers a thumbnail when there is one to fetch; a failed read is
+  // treated as off, which shows the line saying how to turn it on.
+  const [previewOn, setPreviewOn] = useState(false);
+  useEffect(() => {
+    api.getSettings().then(
+      (s) => setPreviewOn(!!s.preview?.enabled),
+      () => setPreviewOn(false),
+    );
+  }, []);
 
   const create = async () => {
     const name = newName.trim();
@@ -265,6 +284,7 @@ export function SourcesPage() {
               onPatch={(c) => patch(s, c)}
               onRotate={() => setRotating(s)}
               onDelete={() => setDeleting(s)}
+              previewOn={previewOn}
             />
           ))}
         </div>
@@ -349,12 +369,15 @@ export function SourceCard({
   onPatch,
   onRotate,
   onDelete,
+  previewOn = false,
 }: {
   source: SourceView;
   busy: boolean;
   onPatch: (changes: Partial<Source>) => void;
   onRotate: () => void;
   onDelete: () => void;
+  /** The preview encoder is on, so a receiving card can show a thumbnail. */
+  previewOn?: boolean;
 }) {
   const t = useT();
   // A LOCAL DRAFT, not a per-field commit.
@@ -451,7 +474,7 @@ export function SourceCard({
 
       <CardContent className="flex flex-col gap-3">
         {!source.running && (
-          <p className="flex items-start gap-1.5 text-[11px] text-warn">
+          <p className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             {t("sources.noEngine")}
           </p>
@@ -462,7 +485,7 @@ export function SourceCard({
             and why, and that sentence is the whole difference between noticing
             and fixing. */}
         {source.listenerHealth?.state === "degraded" && source.listenerHealth.detail && (
-          <p className="flex items-start gap-1.5 text-[11px] text-warn">
+          <p className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               <strong className="font-semibold">{t("sources.listenerDegraded")}</strong>{" "}
@@ -478,7 +501,7 @@ export function SourceCard({
             listenerHealth.detail is: the server is the only thing that knows,
             and a second copy of the sentence in the UI would drift from it. */}
         {source.pullUploadUnchecked && (
-          <p className="flex items-start gap-1.5 text-[11px] text-warn" data-testid="pull-unchecked">
+          <p className="flex items-start gap-1.5 text-sm text-warn" data-testid="pull-unchecked">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>
               <strong className="font-semibold">{t("sources.pullUnchecked")}</strong>{" "}
@@ -495,14 +518,14 @@ export function SourceCard({
             </Label>
             <Select value={ing.mode} onValueChange={(v) => setIngest({ mode: v as typeof ing.mode })}>
               <SelectTrigger
-                className="h-7 text-[11px]"
+                className="h-7 text-sm"
                 aria-label={t("sources.ingest")}
                 data-testid="ingest-mode"
               >
                 <SelectValue placeholder={t("sources.ingestPlaceholder")}>
                   {summary && (
                     <span className="flex items-center gap-2">
-                      <span className="font-mono text-[12px] font-semibold text-primary">
+                      <span className="font-mono text-[12px] font-semibold text-primary-bright">
                         {summary.proto}
                       </span>
                       {summary.detail && (
@@ -555,7 +578,7 @@ export function SourceCard({
                   <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
                 </Label>
                 <SecretInput
-                  className="h-7 text-[11px]"
+                  className="h-7 text-sm"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
                   onChange={(e) => setIngest({ srt: { ...ing.srt, passphrase: e.target.value } })}
@@ -572,7 +595,7 @@ export function SourceCard({
                   <InfoHint body="sources.help.app" title="sources.app" />
                 </Label>
                 <Input
-                  className="h-7 text-[11px]"
+                  className="h-7 text-sm"
                   value={ing.rtmp.app}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })}
                 />
@@ -583,7 +606,7 @@ export function SourceCard({
                   <InfoHint body="sources.help.streamKey" title="sources.streamKey" />
                 </Label>
                 <SecretInput
-                  className="h-7 text-[11px]"
+                  className="h-7 text-sm"
                   value={ing.rtmp.streamKey}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
                 />
@@ -599,10 +622,33 @@ export function SourceCard({
             role="status"
             className="flex items-start gap-3 rounded-md border border-live/30 bg-live-dim/20 px-3 py-2"
           >
-            <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
-            <div className="min-w-0">
+            {/* WHAT IS ARRIVING, not only that something is (A2). A small live
+                picture of this source's own feed, so the operator can see it is
+                the right camera before adding a destination. Muted, and only
+                while the card is in the receiving state. */}
+            {previewOn ? (
+              <div className="w-36 shrink-0 overflow-hidden rounded border border-border" data-testid="source-thumbnail">
+                <LazyBoundary fallback={<div className="aspect-video bg-muted" />}>
+                  <PreviewPlayer
+                    active
+                    sourceId={source.id}
+                    outputLive
+                    ingestLive
+                  />
+                </LazyBoundary>
+              </div>
+            ) : (
+              <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
+            )}
+            <div className="flex min-w-0 flex-col gap-1">
               <p className="text-[12px] font-semibold text-live">{t("sources.signalDetected")}</p>
               <p className="text-[12px] text-muted-foreground">{t("sources.signalDetectedBody")}</p>
+              {!previewOn && (
+                <p className="text-[12px] text-muted-foreground">{t("sources.thumbnailOff")}</p>
+              )}
+              <Button size="sm" variant="outline" className="w-fit" asChild>
+                <Link to="/">{t("firstRun.addDestination")}</Link>
+              </Button>
             </div>
           </div>
         )}
@@ -615,7 +661,7 @@ export function SourceCard({
              dialog is dismissed. */
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-warn/40 bg-warn-dim/20 px-2 py-1.5">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn" />
-            <span className="min-w-0 flex-1 text-[11px]">
+            <span className="min-w-0 flex-1 text-sm">
               {source.publishing ? t("sources.dirtyPublishing") : t("sources.dirtyIdle")}
             </span>
             <Button size="sm" variant="ghost" onClick={() => setDraft(source.ingest)} disabled={busy}>
@@ -655,7 +701,7 @@ export function SourceCard({
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
             <div key={proto} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="w-20 shrink-0 text-sm uppercase tracking-wider text-muted-foreground">
                 {proto}
               </span>
               {/* Gated on what the string CARRIES, not on the row's label.
@@ -670,7 +716,7 @@ export function SourceCard({
               {proto === "streamKey" || urlCarriesCredential(url) ? (
                 <SecretCode value={url} />
               ) : (
-                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-[10px]">
+                <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-sm">
                   {url}
                 </code>
               )}
@@ -692,20 +738,20 @@ export function SourceCard({
              and answering it per programme is something Restreamer's UI does
              not do. */
           <div className="flex flex-wrap items-center gap-3 rounded-md border border-live/30 bg-live-dim/20 px-2 py-1.5">
-            <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-live">
+            <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-live">
               <Activity className="h-3 w-3" /> {t("sources.publishing")}
             </span>
-            <span className="font-mono text-[10px] text-muted-foreground">{source.link.peer}</span>
-            <span className="tnum font-mono text-[10px]">{t("sources.rtt")} {source.link.rttMs.toFixed(1)} ms</span>
-            <span className="tnum font-mono text-[10px]">{t("sources.loss")} {source.link.lossPackets}</span>
-            <span className="tnum font-mono text-[10px]">{t("sources.retrans")} {source.link.retransPackets}</span>
+            <span className="font-mono text-sm text-muted-foreground">{source.link.peer}</span>
+            <span className="tnum font-mono text-sm">{t("sources.rtt")} {source.link.rttMs.toFixed(1)} ms</span>
+            <span className="tnum font-mono text-sm">{t("sources.loss")} {source.link.lossPackets}</span>
+            <span className="tnum font-mono text-sm">{t("sources.retrans")} {source.link.retransPackets}</span>
           </div>
         )}
 
         {/* The token, and the truth about it. */}
         <div className="flex flex-col gap-1.5 border-t border-border pt-2">
           <div className="flex items-center gap-2">
-            <span className="w-20 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="w-20 shrink-0 text-sm uppercase tracking-wider text-muted-foreground">
               {t("sources.token")}
             </span>
             <SecretCode value={source.token} />
@@ -739,7 +785,7 @@ export function SourceCard({
               tokenEnforced, which follows the running listener rather than the
               setting. */}
           {source.tokenEnforced ? (
-            <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+            <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
               <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
               <span>
                 <strong className="font-semibold">{t("sources.tokenIsCredential")}</strong>{" "}
@@ -754,7 +800,7 @@ export function SourceCard({
               </span>
             </p>
           ) : (
-            <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+            <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
               <span>
                 <strong className="font-semibold">{t("sources.tokenNotEnforced")}</strong>{" "}
@@ -809,7 +855,7 @@ function NumberField({
         {hint && <InfoHint body={hint} />}
       </Label>
       <Input
-        className={cn("tnum h-7 font-mono text-[11px]", bad && "border-down")}
+        className={cn("tnum h-7 font-mono text-sm", bad && "border-down")}
         type="number"
         inputMode="numeric"
         min={min}

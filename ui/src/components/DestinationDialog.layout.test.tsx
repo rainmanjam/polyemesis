@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* The add-destination dialog, first impression.
  *
@@ -36,6 +37,7 @@ afterEach(cleanup);
 function open() {
   return render(
     <DestinationDialog open onOpenChange={() => {}} destination={null as never} onSaved={() => {}} />,
+    { wrapper: MemoryRouter },
   );
 }
 
@@ -63,5 +65,24 @@ describe("DestinationDialog, first impression", () => {
     const lead = dialog.textContent?.slice(0, 400) ?? "";
     expect(lead).not.toContain("routing profile");
     expect(lead).not.toContain("rendition");
+  });
+});
+
+describe("DestinationDialog steps (A6)", () => {
+  it("opens on the platform step and moves with Next and Back", async () => {
+    open();
+    await waitFor(() => expect(screen.getByTestId("dest-step-1").getAttribute("aria-current")).toBe("step"));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByTestId("dest-step-2").getAttribute("aria-current")).toBe("step");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByTestId("dest-step-1").getAttribute("aria-current")).toBe("step");
+  });
+
+  it("creates from the last step, and an unnamed save goes back to step 1 and says why", async () => {
+    open();
+    fireEvent.click(screen.getByTestId("dest-step-4"));
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }));
+    expect(screen.getByTestId("dest-step-1").getAttribute("aria-current")).toBe("step");
+    expect(screen.getByRole("alert").textContent).toContain("Give the destination a name first");
   });
 });

@@ -2,6 +2,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* #610: THE KEY FIELD IS CLEARED WHEN THE TRANSPORT LEAVES RTMP.
  *
@@ -75,14 +76,18 @@ beforeAll(() => {
 });
 
 function openDialog(destination: unknown) {
-  return render(
+  const view = render(
     <DestinationDialog
       open
       onOpenChange={() => {}}
       destination={destination as never}
       onSaved={() => {}}
     />,
+    { wrapper: MemoryRouter },
   );
+  // Transport and key are on step 2 of the dialog (A6).
+  fireEvent.click(screen.getByTestId("dest-step-2"));
+  return view;
 }
 
 /** Drive the transport <Select> the way an operator does. */

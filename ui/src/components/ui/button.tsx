@@ -25,11 +25,15 @@ const buttonVariants = cva(
         // "live" and "down" are signal colours: only ever on actions that
         // start or stop a stream.
         live: "bg-live text-background hover:bg-live/85",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/85",
+        // Dark text on the red, as live has on the green: the light
+        // destructive-foreground measures 3.65:1 there, --background 4.98:1 (B2).
+        destructive: "bg-destructive text-background hover:bg-destructive/85",
         outline: "border border-border-strong bg-transparent hover:bg-accent hover:text-accent-foreground",
         secondary: "bg-secondary text-secondary-foreground hover:bg-card-raised",
         ghost: "hover:bg-accent hover:text-accent-foreground text-muted-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        // primary-bright, not primary: link text is small, and --primary on
+        // --card is 4.49:1, a hair under AA (B2). primary-bright is 7.13:1.
+        link: "text-primary-bright underline-offset-4 hover:underline",
       },
       size: {
         default: "h-8 px-3",

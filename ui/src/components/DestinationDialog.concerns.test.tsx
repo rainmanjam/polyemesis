@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* #661: THE WARNING BELONGS WHERE THE RENDITION IS CHOSEN.
  *
@@ -82,14 +83,18 @@ afterEach(() => {
 });
 
 function open(destination: unknown) {
-  return render(
+  const view = render(
     <DestinationDialog
       open
       onOpenChange={() => {}}
       destination={destination as never}
       onSaved={() => {}}
     />,
+    { wrapper: MemoryRouter },
   );
+  // The rendition picker is on step 4 of the dialog (A6).
+  fireEvent.click(screen.getByTestId("dest-step-4"));
+  return view;
 }
 
 describe("the rendition warning", () => {

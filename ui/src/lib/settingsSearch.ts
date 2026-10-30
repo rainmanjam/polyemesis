@@ -2,7 +2,7 @@ import type { TranslationKey } from "./i18n";
 
 /** The sub-rail's sections, in rail order. The values are the `?tab=` values
  *  the settings page already reads, so a link to a section keeps working. */
-export const SETTINGS_TABS = ["ingest", "pipeline", "platforms", "security", "debug"] as const;
+export const SETTINGS_TABS = ["ingest", "pipeline", "platforms", "security", "danger", "debug"] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -119,7 +119,9 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "security", key: "set.apiTokens" },
   { tab: "security", key: "set.name", card: "set.apiTokens", anchor: "tok-name" },
   { tab: "security", key: "set.tokenScope", card: "set.apiTokens", anchor: "tok-scope" },
-  // debug
+  // danger zone (A17)
+  { tab: "danger", key: "danger.title" },
+  // debug: on the System page since A17; a hit navigates there
   { tab: "debug", key: "debug.title" },
 ];
 

@@ -109,8 +109,8 @@ export function ChatUserCard({
   // ban rendered enabled here and failed at hub.go:803 on every press. A
   // control that lies to a moderator mid-raid is worse than one that is
   // missing. See lib/chatModeration.ts.
-  const ban = chatActionSupport(platform, "ban");
-  const hideUpstream = chatActionSupport(platform, "hideUpstream");
+  const ban = chatActionSupport(platform, "ban", t);
+  const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -120,10 +120,10 @@ export function ChatUserCard({
       // "hidden from viewers" and "hidden only here" — which the UI must not
       // paraphrase, because paraphrasing is how that distinction gets lost.
       const detail = res && "detail" in res ? res.detail : undefined;
-      toast.success(detail || `${what} applied`);
+      toast.success(detail || t("chatCard.actionApplied", { action: what }));
       load();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `${what} failed`);
+      toast.error(err instanceof Error ? err.message : t("chatCard.actionFailed", { action: what }));
     } finally {
       setBusy("");
     }
@@ -140,8 +140,8 @@ export function ChatUserCard({
   const nothingToHide =
     messages.length === 0
       ? failed
-        ? "The scrollback could not be read, so there is nothing here to hide."
-        : "Nothing from this person is in this server's scrollback, so there is nothing to hide."
+        ? t("chatCard.nothingToHideFailed")
+        : t("chatCard.nothingToHideEmpty")
       : "";
 
   /** Hides every message the card is holding, at one scope or the other.
@@ -161,16 +161,22 @@ export function ChatUserCard({
     // The COUNT, not just the fact. "Hidden" over a loop that ran zero times
     // was the original defect; a number the moderator can check against what
     // they were looking at is what makes the report falsifiable.
-    const n = `${count} message${count === 1 ? "" : "s"}`;
+    const one = count === 1;
     if (scope === "local") {
       return {
-        detail: `${n} hidden in polyemesis only. Everyone watching on ${platform} can still see them.`,
+        detail: t(one ? "chatCard.hiddenLocalOne" : "chatCard.hiddenLocalMany", { count, platform }),
       };
     }
     return {
       detail: hidden
-        ? `${n} hidden from viewers on ${accent.label}. Nothing was deleted — this can be undone.`
-        : `${n} shown to viewers on ${accent.label} again.`,
+        ? t(one ? "chatCard.hiddenUpstreamOne" : "chatCard.hiddenUpstreamMany", {
+            count,
+            platform: accent.label,
+          })
+        : t(one ? "chatCard.shownUpstreamOne" : "chatCard.shownUpstreamMany", {
+            count,
+            platform: accent.label,
+          }),
     };
   };
 
@@ -182,30 +188,28 @@ export function ChatUserCard({
             <span style={card?.color ? { color: card.color } : undefined}>
               {card?.name || authorName}
             </span>
-            {card?.broadcaster && <Badge variant="armed">Broadcaster</Badge>}
+            {card?.broadcaster && <Badge variant="armed">{t("chatCard.broadcaster")}</Badge>}
             {card?.moderator && (
               <Badge variant="armed">
                 <Shield className="mr-0.5 h-2.5 w-2.5" />
-                Moderator
+                {t("chatpage.moderator")}
               </Badge>
             )}
-            {card?.subscriber && <Badge variant="outline">Subscriber</Badge>}
+            {card?.subscriber && <Badge variant="outline">{t("chatCard.subscriber")}</Badge>}
             <Badge variant="outline" className={accent.text}>
               {accent.label}
             </Badge>
           </DialogTitle>
-          {/* Literal English, like every other sentence in this dialog. The
-              one keyed string here is the retention caveat, which predates
-              this card's prose; keying one new sentence beside fifteen
-              literal siblings would leave the paragraph half-translated. */}
+          {/* Keyed with the rest of this dialog's prose, so the paragraph is
+              never half-translated. */}
           <DialogDescription>
             {loading
-              ? "Reading this server's scrollback…"
+              ? t("chatCard.reading")
               : failed
-                ? "This server's scrollback could not be read."
-                : `${messages.length}${card?.truncated ? "+" : ""} message${
-                    messages.length === 1 ? "" : "s"
-                  } on record.`}
+                ? t("chatCard.readFailed")
+                : t(messages.length === 1 ? "chatCard.onRecordOne" : "chatCard.onRecordMany", {
+                    count: `${messages.length}${card?.truncated ? "+" : ""}`,
+                  })}
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +218,7 @@ export function ChatUserCard({
           {loading && messages.length === 0 ? (
             <p className="p-2 text-[11px] text-muted-foreground">
               <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-              Loading…
+              {t("common.loading")}
             </p>
           ) : failed ? (
             /* NOT the empty state. "Nothing from this person is in the
@@ -223,14 +227,11 @@ export function ChatUserCard({
                first offence. An unanswered question must not produce an
                answer, least of all the exonerating one. */
             <p className="p-2 text-[11px] text-warn">
-              This server's scrollback could not be read, so what this person has said here is
-              unknown. This is not an empty history — do not read it as a first offence. Try
-              again, or check the chat log on the server.
+              {t("chatCard.failedBody")}
             </p>
           ) : messages.length === 0 ? (
             <p className="p-2 text-[11px] text-muted-foreground">
-              Nothing from this person is in the scrollback. They may have spoken before this
-              server started, or before its retention window.
+              {t("chatCard.emptyBody")}
             </p>
           ) : (
             messages.map((m: ChatMessage) => (
@@ -258,27 +259,27 @@ export function ChatUserCard({
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Time out
+              {t("automod.actionTimeout")}
             </span>
-            {TIMEOUTS.map((t) => (
+            {TIMEOUTS.map((to) => (
               <Button
-                key={t.seconds}
+                key={to.seconds}
                 size="sm"
                 variant="secondary"
                 disabled={!ban.ok || busy !== ""}
-                title={ban.reason || `Time out for ${t.label}`}
+                title={ban.reason || t("chatCard.timeOutFor", { duration: t(to.label) })}
                 onClick={() =>
-                  run(`Timed out for ${t.label}`, () =>
-                    api.banChatUser({ platform, account, userId: authorId, seconds: t.seconds }),
+                  run(t("chatCard.timedOutFor", { duration: t(to.label) }), () =>
+                    api.banChatUser({ platform, account, userId: authorId, seconds: to.seconds }),
                   )
                 }
               >
-                {busy === `Timed out for ${t.label}` ? (
+                {busy === t("chatCard.timedOutFor", { duration: t(to.label) }) ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
                   <Timer className="mr-1 h-3 w-3" />
                 )}
-                {t.label}
+                {t(to.label)}
               </Button>
             ))}
           </div>
@@ -292,7 +293,7 @@ export function ChatUserCard({
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Hide
+              {t("secret.hide")}
             </span>
 
             {/* A CONTROL, and the WARNING beside it, because the two failures
@@ -316,12 +317,12 @@ export function ChatUserCard({
               disabled={busy !== "" || nothingToHide !== ""}
               title={
                 nothingToHide ||
-                "Remove their messages from this server only. Everyone watching still sees them."
+                t("chatCard.hideLocalTitle")
               }
-              onClick={() => run("Hidden here", hideAll("local", true))}
+              onClick={() => run(t("chatCard.hiddenHere"), hideAll("local", true))}
             >
               <EyeOff className="mr-1 h-3 w-3" />
-              Hide here only
+              {t("chatCard.hideHereOnly")}
             </Button>
 
             {/* THE OTHER SCOPE, which no operator could reach.
@@ -344,16 +345,16 @@ export function ChatUserCard({
               title={
                 hideUpstream.reason ||
                 nothingToHide ||
-                `Take their messages off the public thread on ${accent.label}. Viewers stop seeing them, nothing is deleted, and it can be undone.`
+                t("chatCard.hideUpstreamTitle", { platform: accent.label })
               }
-              onClick={() => run("Hidden from viewers", hideAll("platform", true))}
+              onClick={() => run(t("chatCard.hiddenFromViewers"), hideAll("platform", true))}
             >
-              {busy === "Hidden from viewers" ? (
+              {busy === t("chatCard.hiddenFromViewers") ? (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />
               ) : (
                 <EyeOff className="mr-1 h-3 w-3" />
               )}
-              Hide from viewers
+              {t("chatCard.hideFromViewers")}
             </Button>
 
             {/* THE UNDO, rendered rather than described. "Hiding is
@@ -367,19 +368,19 @@ export function ChatUserCard({
               title={
                 hideUpstream.reason ||
                 nothingToHide ||
-                `Put their messages back on the public thread on ${accent.label}.`
+                t("chatCard.showAgainTitle", { platform: accent.label })
               }
-              onClick={() => run("Shown again", hideAll("platform", false))}
+              onClick={() => run(t("chatCard.shownAgain"), hideAll("platform", false))}
             >
               <Eye className="mr-1 h-3 w-3" />
-              Show to viewers again
+              {t("chatCard.showToViewersAgain")}
             </Button>
 
             {nothingToHide !== "" && !loading && (
               <span className="text-[10px] text-muted-foreground">
                 {failed
-                  ? "Nothing to hide here — the scrollback could not be read."
-                  : "Nothing to hide here — none of their messages are in this server's scrollback."}
+                  ? t("chatCard.nothingHereFailed")
+                  : t("chatCard.nothingHereEmpty")}
               </span>
             )}
           </div>
@@ -389,30 +390,30 @@ export function ChatUserCard({
               and a world apart to the person pressing them, and the pane
               offers no way to find that out at the moment of the decision. */}
           <p className="text-[10px] leading-relaxed text-muted-foreground">
-            Hiding can be undone; deleting cannot.{" "}
+            {t("chatCard.undoNote")}{" "}
             {hideUpstream.ok
-              ? `On ${accent.label} a hidden message stays on the thread and stops being visible to anyone else, so an unfair call costs nothing to reverse.`
+              ? t("chatCard.upstreamNote", { platform: accent.label })
               : hideUpstream.reason}
           </p>
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Ban
+              {t("automod.actionBan")}
             </span>
 
             <Button
               size="sm"
               variant="secondary"
               disabled={!ban.ok || busy !== ""}
-              title={ban.reason || "Lift a ban or an unexpired timeout"}
+              title={ban.reason || t("chatCard.liftBanTitle")}
               onClick={() =>
-                run("Ban lifted", () =>
+                run(t("chatCard.banLifted"), () =>
                   api.unbanChatUser({ platform, account, userId: authorId }),
                 )
               }
             >
               <Undo2 className="mr-1 h-3 w-3" />
-              Lift ban
+              {t("chatCard.liftBan")}
             </Button>
 
             {/* Last, and asks again. The only irreversible action here. */}
@@ -423,7 +424,7 @@ export function ChatUserCard({
                   variant="destructive"
                   disabled={busy !== ""}
                   onClick={() =>
-                    run("Banned", async () => {
+                    run(t("chatCard.banned"), async () => {
                       const res = await api.banChatUser({
                         platform,
                         account,
@@ -434,12 +435,12 @@ export function ChatUserCard({
                     })
                   }
                 >
-                  {busy === "Banned" ? (
+                  {busy === t("chatCard.banned") ? (
                     <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                   ) : (
                     <Ban className="mr-1 h-3 w-3" />
                   )}
-                  Ban permanently — confirm
+                  {t("chatCard.banConfirm")}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmBan(false)}>
                   {t("common.cancel")}
@@ -451,11 +452,11 @@ export function ChatUserCard({
                 variant="outline"
                 disabled={!ban.ok || busy !== ""}
                 className={cn(ban.ok && "text-down hover:text-down")}
-                title={ban.reason || "Asks again before it does anything"}
+                title={ban.reason || t("chatCard.banAsksAgain")}
                 onClick={() => setConfirmBan(true)}
               >
                 <Ban className="mr-1 h-3 w-3" />
-                Ban permanently
+                {t("chatCard.banPermanently")}
               </Button>
             )}
           </div>

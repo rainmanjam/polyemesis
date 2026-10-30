@@ -23,7 +23,25 @@ function sourceFiles(dir: string): string[] {
     .filter((p) => /\.(tsx|ts)$/.test(p) && !/\.test\.(tsx|ts)$/.test(p));
 }
 
-const EXEMPT = /disabled|placeholder/;
+// A usage is exempt when it is itself scoped to a disabled or placeholder
+// state (`disabled:text-subtle-foreground`, `placeholder:…`), or the line
+// applies it under a disabled condition. A line that merely MENTIONS a
+// disabled: variant somewhere else no longer exempts an enabled colour beside
+// it, which is how a hover-revealed delete button kept 3.1:1 text (B2).
+const EXEMPT_PREFIX = /(disabled|placeholder)[\w-]*:(?:[\w-]+:)*$/;
+const EXEMPT_LINE = /\b(disabled|isDisabled|aria-disabled)\b(?!:)/;
+const EXEMPT = { test: (line: string) => usagesExempt(line) };
+
+function usagesExempt(line: string): boolean {
+  const re = /(\S*?)text-subtle-foreground\b/g;
+  let m: RegExpExecArray | null;
+  let any = false;
+  while ((m = re.exec(line))) {
+    any = true;
+    if (!EXEMPT_PREFIX.test(m[1]) && !EXEMPT_LINE.test(line)) return false;
+  }
+  return any;
+}
 
 describe("text-subtle-foreground is reserved for disabled and placeholder text", () => {
   const files = sourceFiles(SRC);
@@ -69,6 +87,31 @@ const CONFIG_SURFACES = [
   "components/AutomodConfig.tsx",
   "components/signature/TrackRows.tsx",
   "components/signature/MixMatrix.tsx",
+  // The rest of the places an operator configures something (B2).
+  "components/ChatRules.tsx",
+  "components/AutomodMatrix.tsx",
+  "components/PullIngestFields.tsx",
+  "components/PlaylistEditor.tsx",
+  "components/DeviceCodeDialog.tsx",
+  "pages/PlayoutPage.tsx",
+  "components/DebugSettings.tsx",
+  "components/ConfirmDestructive.tsx",
+  "components/DangerZone.tsx",
+  "components/PresetReviewDialog.tsx",
+  "components/SetupChecklist.tsx",
+  "components/signature/RoutingSaveBar.tsx",
+  "pages/SettingsPage.tsx",
+  "pages/SourcesPage.tsx",
+  "components/HooksCard.tsx",
+  "pages/JobsPage.tsx",
+  "pages/AutomationPage.tsx",
+  "components/MediaUploads.tsx",
+  // Shared pieces that render on those surfaces: the floor is per element, so
+  // a child drawn smaller on a config page breaks it as much as the page does.
+  "components/SecretCode.tsx",
+  "components/signature/FilterString.tsx",
+  "components/Experimental.tsx",
+  "pages/ChatPage.tsx",
 ];
 
 describe("config surfaces hold a 12px floor for labels and values", () => {

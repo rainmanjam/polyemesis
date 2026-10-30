@@ -193,3 +193,24 @@ export function modelStatus(model: { enabled: boolean; hasApiKey: boolean }): {
   if (!model.hasApiKey) return { key: "automod.statusNoKey", tone: "warn" };
   return { key: "automod.statusOn", tone: "live" };
 }
+
+/** The platforms on which a rule's matches are acted on right now: automod on,
+ *  the platform on, and the "rules" checker switched on for this rule's action
+ *  there. The delete confirmation counts these (A18), because deleting a rule
+ *  that acts on three channels is a different decision from deleting one that
+ *  only flags. */
+export function ruleReach(
+  automod: { enabled: boolean; platformEnabled?: Record<string, boolean>; on?: Record<string, boolean> },
+  rule: { action: string; enabled: boolean },
+): number {
+  if (!automod.enabled || !rule.enabled) return 0;
+  const platforms = new Set<string>();
+  for (const [key, on] of Object.entries(automod.on ?? {})) {
+    if (!on) continue;
+    const [platform, action, checker] = key.split("/");
+    if (checker !== "rules" || action !== rule.action) continue;
+    if (automod.platformEnabled?.[platform] === false) continue;
+    platforms.add(platform);
+  }
+  return platforms.size;
+}

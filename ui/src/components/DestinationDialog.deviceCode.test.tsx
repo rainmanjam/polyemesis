@@ -2,6 +2,7 @@
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 /* Connecting an account from inside the add form, where the platform has a
  * device flow. The code path stays on this page, so the operator does not lose
@@ -77,9 +78,13 @@ const twitch = {
 };
 
 function open() {
-  return render(
+  const view = render(
     <DestinationDialog open onOpenChange={() => {}} destination={twitch as never} onSaved={() => {}} />,
+    { wrapper: MemoryRouter },
   );
+  // Connecting an account is step 2 of the dialog (A6).
+  fireEvent.click(screen.getByTestId("dest-step-2"));
+  return view;
 }
 
 describe("DestinationDialog, connecting an account in place", () => {

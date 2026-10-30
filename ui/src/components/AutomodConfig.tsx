@@ -24,6 +24,7 @@ import {
   modelStatus,
   nextRuleId,
   ruleProblems,
+  ruleReach,
   serverRejection,
 } from "@/lib/automodConfig";
 import { useT } from "@/lib/i18n";
@@ -698,7 +699,14 @@ export function AutomodConfig({
         onOpenChange={(o) => !o && setDeleting(null)}
         subject={deleting?.name ?? ""}
         title={t("confirm.deleteTitle", { name: deleting?.name ?? "" })}
-        description={t("automod.deleteRuleDesc")}
+        // The shared pattern (A18): what stops, what is kept, how far it reaches,
+        // and a verb on the button.
+        description={`${t("automod.deleteRuleDesc")} ${t("automod.deleteRuleKept")}`}
+        consequencesLabel={t("automod.deleteRuleReachLabel")}
+        consequences={
+          deleting ? [{ label: t("automod.deleteRuleReach"), count: ruleReach(automod, deleting) }] : undefined
+        }
+        confirmLabel={t("automod.deleteRuleConfirm")}
         onConfirm={() => {
           if (deleting) setRules(rules.filter((r) => r.id !== deleting.id));
           setDeleting(null);

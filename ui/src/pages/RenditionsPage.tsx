@@ -66,7 +66,14 @@ import type {
   RenditionView,
   VideoStream,
 } from "@/lib/types";
-import { useT, type Translator, type TranslationKey, useStateLabel, type StateLabeller } from "@/lib/i18n";
+import {
+  useT,
+  useTN,
+  type Translator,
+  type TranslationKey,
+  useStateLabel,
+  type StateLabeller,
+} from "@/lib/i18n";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -88,8 +95,8 @@ const FALLBACK_DISCLAIMER: TranslationKey = "rend.presetStartingPoint";
 
 /** The sizes worth one click. "Keep source" is 0×0, the sentinel that means
  *  "do not scale", and it stays first because it is the cheapest answer. */
-const SIZES = [
-  { key: "source", label: "Keep source size", width: 0, height: 0 },
+const SIZES: { key: string; label: string; labelKey?: TranslationKey; width: number; height: number }[] = [
+  { key: "source", label: "", labelKey: "rend.keepSourceSize", width: 0, height: 0 },
   { key: "3840x2160", label: "3840 × 2160 — 2160p", width: 3840, height: 2160 },
   { key: "2560x1440", label: "2560 × 1440 — 1440p", width: 2560, height: 1440 },
   { key: "1920x1080", label: "1920 × 1080 — 1080p", width: 1920, height: 1080 },
@@ -110,20 +117,22 @@ const SOFTWARE_UNREALISTIC_PIXELS = 240e6;
 
 /** How each vendor is named in the list. "unknown" is deliberately shown as
  *  "hardware": we know it drives silicon, we just could not say whose. */
-const VENDOR_LABEL: Record<GpuVendor, string> = {
+const VENDOR_LABEL: Partial<Record<GpuVendor, string>> = {
   intel: "Intel",
   nvidia: "NVIDIA",
   amd: "AMD",
   apple: "Apple",
-  software: "software",
-  unknown: "hardware",
 };
 
 /** The one-line description beside an encoder's name in the dropdown. */
-function encoderLabel(e: EncoderInfo): string {
-  const parts = [VENDOR_LABEL[e.vendor] ?? "hardware"];
-  if (e.default) parts.push("default");
-  if (!e.works) parts.push("unavailable here");
+function encoderLabel(t: Translator, e: EncoderInfo): string {
+  const vendor =
+    e.vendor === "software"
+      ? t("rend.vendorSoftware")
+      : (VENDOR_LABEL[e.vendor] ?? t("rend.hardwareFallback"));
+  const parts = [vendor];
+  if (e.default) parts.push(t("rend.encoderDefault"));
+  if (!e.works) parts.push(t("rend.encoderUnavailable"));
   return parts.join(" · ");
 }
 
@@ -135,11 +144,11 @@ function encoderProblem(
   t: Translator,
 e: EncoderInfo | undefined): string {
   if (!e || e.works) return "";
-  if (!e.available) return e.reason || `This FFmpeg build has no ${e.name}.`;
+  if (!e.available) return e.reason || t("rend.encoderMissing", { name: e.name });
   const measured = e.measured
     ? t("rend.encoderTestFailed", { name: e.name })
     : t("rend.encoderRelatedFailed", { name: e.name });
-  return e.reason ? `${measured} FFmpeg said: ${e.reason}` : measured;
+  return e.reason ? t("rend.encoderFfmpegSaid", { measured, reason: e.reason }) : measured;
 }
 
 /** The encoder families whose per-encoder FLAGS have no evidence behind them.
@@ -253,10 +262,10 @@ function effectiveFps(fps: number, src?: VideoStream | null): number {
 }
 
 /** How the configured size reads on a card, sentinels and all. */
-function sizeLabel(r: { width: number; height: number }): string {
-  if (r.width === 0 && r.height === 0) return "source size";
-  if (r.width === 0) return `${r.height}p, aspect kept`;
-  if (r.height === 0) return `${r.width} wide, aspect kept`;
+function sizeLabel(t: Translator, r: { width: number; height: number }): string {
+  if (r.width === 0 && r.height === 0) return t("rend.sizeSource");
+  if (r.width === 0) return t("rend.sizeHeightOnly", { height: r.height });
+  if (r.height === 0) return t("rend.sizeWidthOnly", { width: r.width });
   return `${r.width}×${r.height}`;
 }
 
@@ -290,7 +299,7 @@ function encodeCost(
   }
 
   const rate = width * height * fps;
-  const label = `${width}\u00d7${height} at ${fps} fps`;
+  const label = t("rend.costLabel", { width, height, fps });
   const mpps = `${Math.round(rate / 1e6)} MP/s`;
   const machine = cores && cores > 0 ? t("rend.costMachineCores", { cores }) : "";
 
@@ -489,7 +498,7 @@ export function RenditionsPage() {
       const working = next.hardware?.length ?? 0;
       toast.success(
         working > 0
-          ? `Hardware re-detected: ${next.hardware?.join(", ")} passed a test encode.`
+          ? t("rend.redetectedHardware", { list: next.hardware?.join(", ") ?? "" })
           : t("rend.redetectedNoHardware"),
       );
     } catch (err) {
@@ -531,7 +540,7 @@ export function RenditionsPage() {
             {running > 0 && (
               <Badge variant="live">
                 <StatusDot tone="live" size="sm" />
-                {running} encoding
+                {t("rend.encodingCount", { count: running })}
               </Badge>
             )}
             <Button size="sm" onClick={openCreate}>
@@ -550,11 +559,8 @@ export function RenditionsPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-            <Badge variant="outline">passthrough</Badge>
-            <span className="text-sm text-muted-foreground">
-              Destinations with no rendition take the source untouched — no process, no CPU. That is
-              the default, and where every destination starts.
-            </span>
+            <Badge variant="outline">{t("rend.passthroughBadge")}</Badge>
+            <span className="text-sm text-muted-foreground">{t("rend.passthroughBody")}</span>
             <span className="tnum ml-auto font-mono text-sm">{passthrough.length}</span>
           </div>
           {passthrough.length > 0 && (
@@ -704,8 +710,8 @@ export function RenditionCard({
             <span className="truncate">{r.name}</span>
           </CardTitle>
           <CardDescription className="font-mono">
-            {sizeLabel(r)}
-            {r.fps > 0 ? ` · ${r.fps} fps` : " · source fps"} · {r.encoder}
+            {sizeLabel(t, r)}
+            {r.fps > 0 ? ` · ${r.fps} fps` : ` · ${t("rend.sourceFps")}`} · {r.encoder}
           </CardDescription>
         </div>
         <Badge variant={toneBadge[signal.tone]}>{signal.label}</Badge>
@@ -742,10 +748,10 @@ export function RenditionCard({
         <div>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-sm uppercase tracking-wider text-muted-foreground">
-              Feeds
+              {t("rend.feeds")}
             </span>
             <span className="tnum font-mono text-sm text-muted-foreground">
-              {enabled} of {total} enabled
+              {t("rend.enabledOfTotal", { enabled, total })}
             </span>
           </div>
           {total === 0 ? (
@@ -767,7 +773,7 @@ export function RenditionCard({
 
         {encoderProblemText && (
           <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
-            {encoderProblemText} Edit this rendition to choose one that works.
+            {encoderProblemText} {t("rend.editToFix")}
           </div>
         )}
         {live?.error && (
@@ -791,7 +797,7 @@ export function RenditionCard({
 
         <div className="flex items-center gap-1 border-t border-border pt-2">
           <Button variant="outline" size="sm" onClick={onEdit}>
-            <Pencil /> Edit
+            <Pencil /> {t("common.edit")}
           </Button>
           <Button
             variant="ghost"
@@ -800,7 +806,7 @@ export function RenditionCard({
             disabled={busy || !proc}
             title={proc ? t("rend.restartEncode") : t("rend.notRunning")}
           >
-            {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} Restart
+            {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} {t("common.restart")}
           </Button>
           {/* THE REASON, IN THE CARD. button.tsx sets
               `disabled:pointer-events-none`, so the title above never reaches a
@@ -819,7 +825,7 @@ export function RenditionCard({
             size="icon-sm"
             className="ml-auto text-muted-foreground hover:text-down"
             onClick={onDelete}
-            aria-label={`Delete ${r.name}`}
+            aria-label={t("sources.deleteAria", { name: r.name })}
           >
             <Trash2 />
           </Button>
@@ -896,6 +902,11 @@ const DEINTERLACE_MODES: { key: DeinterlaceKey; label: TranslationKey; hint: Tra
 // "nothing selected" and the trigger renders blank.
 const DEFAULT_FONT_KEY = "__default__";
 
+// Where the server looks for watermark images and extra fonts. Paths, not
+// prose, so they stay as written in every language.
+const OVERLAYS_DIR = "<data>/overlays/";
+const FONTS_DIR = "<data>/fonts/";
+
 type FontsResponse = {
   fonts: FontInfo[];
   defaultFont: string;
@@ -962,6 +973,7 @@ export function RenditionDialog({
   onSaved: () => void;
 }) {
   const t = useT();
+  const tn = useTN();
   const editing = rendition !== null;
   const encoders = useMemo(() => caps?.encoders ?? [], [caps]);
   const defaultEncoder = caps?.default ?? "libx264";
@@ -1175,8 +1187,11 @@ export function RenditionDialog({
         await api.updateRendition(rendition.id, payload);
         toast.success(
           enabledUsers > 0
-            ? `${payload.name} saved. The encode and its ${enabledUsers} destination${enabledUsers === 1 ? "" : "s"} are restarting.`
-            : `${payload.name} saved.`,
+            ? t(enabledUsers === 1 ? "rend.savedRestartingOne" : "rend.savedRestartingMany", {
+                name: payload.name ?? "",
+                count: enabledUsers,
+              })
+            : t("rend.saved", { name: payload.name ?? "" }),
         );
       } else {
         await api.createRendition(payload);
@@ -1196,18 +1211,14 @@ export function RenditionDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editing ? t("rend.editRendition") : t("rend.newRendition")}</DialogTitle>
-          <DialogDescription>
-            Video only. Every audio track is copied through untouched, and each destination applies
-            its own routing on top — so this changes the picture for everyone that selects it and
-            changes nobody's audio.
-          </DialogDescription>
+          <DialogDescription>{t("rend.dialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           {presets.length > 0 && (
             <div className="flex flex-col gap-1.5 rounded border border-border bg-background p-2">
               <span className="text-sm uppercase tracking-wider text-muted-foreground">
-                Starting points
+                {t("rend.startingPoints")}
               </span>
               <div className="flex flex-wrap gap-1">
                 {presets
@@ -1253,7 +1264,7 @@ export function RenditionDialog({
                 <SelectContent>
                   {SIZES.map((s) => (
                     <SelectItem key={s.key} value={s.key}>
-                      {s.label}
+                      {s.labelKey ? t(s.labelKey) : s.label}
                     </SelectItem>
                   ))}
                   <SelectItem value="custom">{t("rend.custom")}</SelectItem>
@@ -1272,7 +1283,7 @@ export function RenditionDialog({
                 onChange={(e) => set("fps", Number(e.target.value))}
               />
               <span className="text-sm text-muted-foreground">
-                fps, or 0 to keep the source's.
+                {t("rend.fpsHint")}
               </span>
             </div>
           </div>
@@ -1322,7 +1333,7 @@ export function RenditionDialog({
                 onChange={(e) => set("videoBitrate", Number(e.target.value))}
               />
               <span className={`text-sm ${bitrateOk ? "text-muted-foreground" : "text-down"}`}>
-                kbps, video only — audio is copied and costs nothing here.
+                {t("rend.bitrateHint")}
               </span>
             </div>
 
@@ -1338,7 +1349,7 @@ export function RenditionDialog({
                 onChange={(e) => set("gopSeconds", Number(e.target.value))}
               />
               <span className="text-sm text-muted-foreground">
-                seconds. Most live platforms want 1–4; 2 is the common answer.
+                {t("rend.gopHint")}
               </span>
             </div>
           </div>
@@ -1349,7 +1360,7 @@ export function RenditionDialog({
               See #341 and docs/ENCODING.md. */}
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-maxrate">Ceiling</Label>
+              <Label htmlFor="rend-maxrate">{t("clips.ceiling")}</Label>
               <Input
                 id="rend-maxrate"
                 type="number"
@@ -1361,13 +1372,13 @@ export function RenditionDialog({
               />
               <span className={`text-sm ${maxrateOk ? "text-muted-foreground" : "text-down"}`}>
                 {maxrateOk
-                  ? "kbps. 0 matches the target, which is CBR. Higher allows burst up to a platform's published maximum."
-                  : "must be 0, or at least the target bitrate — a ceiling below the target is a contradiction, not a preference."}
+                  ? t("rend.maxrateHint")
+                  : t("rend.maxrateInvalid")}
               </span>
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="rend-bufsize">Rate window</Label>
+              <Label htmlFor="rend-bufsize">{t("rend.rateWindow")}</Label>
               <Input
                 id="rend-bufsize"
                 type="number"
@@ -1376,10 +1387,7 @@ export function RenditionDialog({
                 value={form.bufsizeKbps}
                 onChange={(e) => set("bufsizeKbps", Number(e.target.value))}
               />
-              <span className="text-sm text-muted-foreground">
-                kbps. 0 is twice the ceiling. Smaller corrects faster and pumps
-                more visibly on a cut.
-              </span>
+              <span className="text-sm text-muted-foreground">{t("rend.bufsizeHint")}</span>
             </div>
           </div>
 
@@ -1448,8 +1456,10 @@ export function RenditionDialog({
                 onChange={(e) => set("padColor", e.target.value)}
               />
               <span className="text-sm text-muted-foreground">
-                Empty means black. One word — <code>{t("rend.colourBlack")}</code>, <code>0x101010</code> — because it
-                lands on a filter graph where a comma would end the argument.
+                {tn("rend.padColorHint", {
+                  black: <code>{t("rend.colourBlack")}</code>,
+                  hex: <code>0x101010</code>,
+                })}
               </span>
             </div>
           )}
@@ -1459,7 +1469,7 @@ export function RenditionDialog({
               <Label htmlFor="rend-overlay-image">{t("rend.watermarkImage")}</Label>
               {!aspectApplies && (
                 <span className="text-sm text-muted-foreground">
-                  needs a fixed width and height
+                  {t("rend.needsFixedSize")}
                 </span>
               )}
             </div>
@@ -1471,10 +1481,7 @@ export function RenditionDialog({
               onChange={(e) => set("overlayImage", e.target.value)}
             />
             <span className="text-sm text-muted-foreground">
-              A path inside the data directory — put the file in{" "}
-              <code>&lt;data&gt;/overlays/</code>. Leave empty for a clean feed. A watermark
-              re-encodes nothing extra: it costs a few percent CPU on an encode that is already
-              running.
+              {tn("rend.overlayHint", { dir: <code>{OVERLAYS_DIR}</code> })}
             </span>
 
             {overlayApplies && (
@@ -1545,12 +1552,12 @@ export function RenditionDialog({
               <Label htmlFor="rend-text-content">{t("rend.burnedText")}</Label>
               {!aspectApplies && (
                 <span className="text-sm text-muted-foreground">
-                  needs a fixed width and height
+                  {t("rend.needsFixedSize")}
                 </span>
               )}
               {aspectApplies && fonts && !fonts.textSupported && (
                 <span className="text-sm text-warn">
-                  this FFmpeg has no drawtext
+                  {t("rend.noDrawtextShort")}
                 </span>
               )}
             </div>
@@ -1563,14 +1570,11 @@ export function RenditionDialog({
               onChange={(e) => set("textContent", e.target.value)}
             />
             <span className="text-sm text-muted-foreground">
-              Drawn on top of the watermark. One line — a line break would end the filter argument.
-              The text is never interpreted, so a <code>%</code> is just a percent sign.
+              {tn("rend.textHint", { pct: <code>%</code> })}
             </span>
             {fonts && !fonts.textSupported && (
               <span className="text-sm text-warn">
-                This FFmpeg was built without libfreetype, so it has no <code>drawtext</code> filter
-                and text would never render. The setting is disabled rather than accepted and
-                silently ignored.
+                {tn("rend.noFreetype", { filter: <code>drawtext</code> })}
               </span>
             )}
 
@@ -1591,7 +1595,7 @@ export function RenditionDialog({
                         {(fonts?.fonts ?? []).map((f) => (
                           <SelectItem key={f.name} value={f.name}>
                             {f.name}
-                            {f.builtIn ? " (built in)" : ""}
+                            {f.builtIn ? ` ${t("rend.builtInSuffix")}` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1603,10 +1607,11 @@ export function RenditionDialog({
                   />
                 </div>
                 <span className="text-sm text-muted-foreground">
-                  Drop a <code>.ttf</code> or <code>.otf</code> into <code>&lt;data&gt;/fonts/</code>{" "}
-                  to add your own — any font works, including one downloaded from Google Fonts. The
-                  built-in ones are rewritten on every start, so replace those by adding a new file
-                  rather than editing them.
+                  {tn("rend.fontsHint", {
+                    ttf: <code>.ttf</code>,
+                    otf: <code>.otf</code>,
+                    dir: <code>{FONTS_DIR}</code>,
+                  })}
                 </span>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -1685,11 +1690,13 @@ export function RenditionDialog({
                     checked={form.textBox}
                     onChange={(e) => set("textBox", e.target.checked)}
                   />
-                  Draw a box behind the text
+                  {t("rend.drawBox")}
                 </label>
                 <span className="text-sm text-muted-foreground">
-                  The box is what keeps white text readable over a white shirt. Colours are one word
-                  — <code>{t("rend.colourWhite")}</code>, <code>0x101010</code> — because they land on a filter graph.
+                  {tn("rend.boxHint", {
+                    white: <code>{t("rend.colourWhite")}</code>,
+                    hex: <code>0x101010</code>,
+                  })}
                 </span>
               </>
             )}
@@ -1708,7 +1715,7 @@ export function RenditionDialog({
                   title={t("rend.redetectTitle")}
                 >
                   {redetecting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-                  Re-detect hardware
+                  {t("rend.redetectHardware")}
                 </Button>
               </div>
               <Select value={form.encoder} onValueChange={(v) => set("encoder", v)}>
@@ -1731,7 +1738,7 @@ export function RenditionDialog({
                       // disabled encoder has to be able to show.
                       className="data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed"
                     >
-                      {e.name} · {encoderLabel(e)}
+                      {e.name} · {encoderLabel(t, e)}
                       {!e.works && e.reason ? ` — ${shortReason(e.reason)}` : ""}
                     </SelectItem>
                   ))}
@@ -1756,12 +1763,7 @@ export function RenditionDialog({
                   still works. */}
               {flagsUnconfirmed(encoder?.name) && (
                 <Experimental>
-                  The command-line flags polyemesis hands {encoder?.name} have not been confirmed
-                  on real hardware. They were read off FFmpeg's own option tables inside a
-                  container, and no NVENC, QSV or VA-API encode has been observed running with
-                  them &mdash; including the capped-VBR fix, whose whole effect is on this argv.
-                  A probe verdict of &ldquo;works&rdquo; above means this encoder opened here; it
-                  does not mean the rate control below behaves as the numbers say it will.
+                  {t("rend.flagsUnconfirmed", { encoder: encoder?.name ?? "" })}
                 </Experimental>
               )}
               {!caps?.tested && choices.length > 0 && (
@@ -1782,7 +1784,7 @@ export function RenditionDialog({
                 placeholder={t("rend.presetPlaceholder")}
               />
               <span className="text-sm text-muted-foreground">
-                The encoder's own speed knob, and its vocabulary: veryfast for x264, p4 for nvenc.
+                {t("rend.presetHint")}
               </span>
             </div>
           </div>
@@ -1826,9 +1828,7 @@ export function RenditionDialog({
                 ))}
                 {permissionBlocked && (
                   <span className="text-sm text-muted-foreground">
-                    This is a permissions problem, not a missing driver — the device is there. Add
-                    the user polyemesis runs as to the group that owns the render node, or pass the
-                    node into the container, then re-detect.
+                    {t("rend.permissionHint")}
                   </span>
                 )}
               </div>
@@ -1881,7 +1881,15 @@ export function RenditionDialog({
               <span className="text-sm uppercase tracking-wider text-muted-foreground">
                 {consequence.kind === "unknown"
                   ? t("rend.usersUnknown")
-                  : `Feeds ${consequence.kind === "named" ? consequence.users.length : consequence.total} destination${(consequence.kind === "named" ? consequence.users.length : consequence.total) === 1 ? "" : "s"}`}
+                  : t(
+                      (consequence.kind === "named" ? consequence.users.length : consequence.total) === 1
+                        ? "rend.feedsDestinationsOne"
+                        : "rend.feedsDestinationsMany",
+                      {
+                        count:
+                          consequence.kind === "named" ? consequence.users.length : consequence.total,
+                      },
+                    )}
               </span>
               {consequence.kind === "named" && (
                 <div className="flex flex-wrap gap-1">
@@ -1895,9 +1903,9 @@ export function RenditionDialog({
               )}
               {consequence.kind !== "unknown" && consequence.enabled > 0 && (
                 <span className="text-sm text-warn">
-                  Saving restarts this encode, and with it the {consequence.enabled} enabled
-                  destination{consequence.enabled === 1 ? "" : "s"} above. Their audio routing is
-                  untouched.
+                  {t(consequence.enabled === 1 ? "rend.saveRestartsOne" : "rend.saveRestartsMany", {
+                    count: consequence.enabled,
+                  })}
                 </span>
               )}
             </div>
@@ -1946,7 +1954,7 @@ function DeleteRenditionDialog({
     setBusy(true);
     try {
       const res = await api.deleteRendition(rendition.id);
-      toast.success(`${rendition.name} deleted.`);
+      toast.success(t("rend.deleted", { name: rendition.name }));
       if (res.warning) toast.warning(res.warning, { duration: 10000 });
       onDeleted();
       onOpenChange(false);

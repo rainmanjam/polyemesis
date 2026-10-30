@@ -12,6 +12,7 @@ import {
 import { api } from "@/lib/api";
 import { authorReason, chatActionSupport, personActionSupport } from "@/lib/chatModeration";
 import { TIMEOUTS } from "@/lib/chat";
+import { useT } from "@/lib/i18n";
 import { openPlatformLink, platformLinkFor, platformNoun } from "@/lib/platformLinks";
 import type { Asks } from "@/hooks/useConfirm";
 import type { ChatMessage } from "@/lib/types";
@@ -75,6 +76,7 @@ export function ChatMessageMenu({
   // rather than a control. A zero-size fixed div at the cursor is the standard
   // shape for that: it anchors correctly, collision-flips near screen edges for
   // free, and there is nothing to see or tab to.
+  const t = useT();
   const [open, setOpen] = useState(true);
 
   useEffect(() => {
@@ -87,18 +89,18 @@ export function ChatMessageMenu({
   // The two reasons an action is unavailable are different and the operator
   // needs to tell them apart: the platform has no such API, versus this
   // particular message arrived without a user id to address.
-  const noAuthor = authorReason(message);
+  const noAuthor = authorReason(message, t);
 
   // Timeouts and a permanent ban are ONE question. Both route through Hub.Ban,
   // which type-asserts chat.Banner, so gating them separately would only invite
   // the two gates to drift apart.
-  const person = personActionSupport(message, "ban");
+  const person = personActionSupport(message, "ban", t);
 
   // Deleting a message is a DIFFERENT question, and deliberately not folded in
   // with the two above: it addresses a message rather than a person, so it does
   // not need an author id, and Facebook can do it while it cannot ban. Folding
   // them was the whole defect.
-  const del = chatActionSupport(message.platform, "delete");
+  const del = chatActionSupport(message.platform, "delete", t);
 
   // Which sentences to print, where, and each of them exactly once. Repeating
   // one reason five times is how a short menu turns back into a form, which is
@@ -119,15 +121,19 @@ export function ChatMessageMenu({
   const personReason = blanket === "" && noAuthor === "" ? person.reason : "";
   const deleteReason = blanket === "" ? del.reason : "";
 
-  const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
+  const run = async (
+    done: string,
+    failed: string,
+    fn: () => Promise<{ detail?: string } | void>,
+  ) => {
     try {
       const res = await fn();
       // The server's sentence wins. It knows the difference between "timed out
       // on Twitch" and "Kick rounded this to the nearest minute".
       const detail = res && "detail" in res ? res.detail : "";
-      toast.success(detail || `${what} — ${message.author.name}`);
+      toast.success(detail || done);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Could not ${what.toLowerCase()}.`);
+      toast.error(err instanceof Error ? err.message : failed);
     }
   };
 
@@ -161,7 +167,7 @@ export function ChatMessageMenu({
         <DropdownMenuLabel className="truncate">
           {message.author.name}
           <span className="ml-1 font-normal text-muted-foreground">
-            on {platformNoun(message.platform)}
+            {t("chatMenu.onPlatform", { platform: platformNoun(message.platform) })}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -197,10 +203,10 @@ export function ChatMessageMenu({
             onOpenCard(message);
           }}
           disabled={!authorId}
-          title={authorId ? "Everything they have said, and every action" : noAuthor}
+          title={authorId ? t("chatMenu.historyTitle") : noAuthor}
         >
           <UserSearch className="mr-2 h-3.5 w-3.5" />
-          View history &amp; all actions
+          {t("chatMenu.viewHistory")}
         </DropdownMenuItem>
 
         {link && (
@@ -209,10 +215,10 @@ export function ChatMessageMenu({
               close();
               openPlatformLink(link);
             }}
-            title={link.caveat}
+            title={t(link.caveat)}
           >
             <ExternalLink className="mr-2 h-3.5 w-3.5" />
-            {link.label}
+            {t(link.label)}
           </DropdownMenuItem>
         )}
 
@@ -228,25 +234,28 @@ export function ChatMessageMenu({
           </DropdownMenuLabel>
         )}
 
-        {TIMEOUTS.map((t) => (
+        {TIMEOUTS.map((to) => (
           <DropdownMenuItem
-            key={t.seconds}
+            key={to.seconds}
             disabled={!person.ok}
             title={person.reason}
             onSelect={() => {
               close();
-              void run(`Timed out for ${t.label}`, () =>
-                api.banChatUser({
-                  platform: message.platform,
-                  account: message.account,
-                  userId: authorId,
-                  seconds: t.seconds,
-                }),
+              void run(
+                t("chatMenu.timedOut", { duration: t(to.label), name: message.author.name }),
+                t("chatMenu.timeoutFailed", { duration: t(to.label), name: message.author.name }),
+                () =>
+                  api.banChatUser({
+                    platform: message.platform,
+                    account: message.account,
+                    userId: authorId,
+                    seconds: to.seconds,
+                  }),
               );
             }}
           >
             <Timer className="mr-2 h-3.5 w-3.5" />
-            Time out {t.label}
+            {t("chatMenu.timeOutItem", { duration: t(to.label) })}
           </DropdownMenuItem>
         ))}
 
@@ -260,7 +269,7 @@ export function ChatMessageMenu({
           disabled={!person.ok}
           title={
             person.reason ||
-            "Opens the user card, which confirms before banning: a permanent ban is not a menu click"
+            t("chatMenu.banTitle")
           }
           onSelect={() => {
             close();
@@ -268,7 +277,7 @@ export function ChatMessageMenu({
           }}
         >
           <Ban className="mr-2 h-3.5 w-3.5 text-down" />
-          Ban permanently…
+          {t("chatMenu.banPermanently")}
         </DropdownMenuItem>
 
         {/* STILL RENDERED when the platform cannot delete, and inert with the
@@ -284,14 +293,14 @@ export function ChatMessageMenu({
         {onDelete && (
           <DropdownMenuItem
             disabled={!del.ok}
-            title={del.reason || "Delete this one message on the platform it came from"}
+            title={del.reason || t("chatMenu.deleteTitle")}
             onSelect={() => {
               close();
               void onDelete(message);
             }}
           >
             <Trash2 className="mr-2 h-3.5 w-3.5 text-down" />
-            Delete message
+            {t("chatMenu.deleteMessage")}
           </DropdownMenuItem>
         )}
 

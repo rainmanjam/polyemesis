@@ -31,7 +31,9 @@ const page = src("../pages/SettingsPage.tsx");
 // Cards that live in their own components but render on the settings page.
 const elsewhere = [
   ...keysIn(src("../components/AutomodConfig.tsx"), ["CardTitle"]),
+  // On the System page since A17, and still found by the settings search.
   ...keysIn(src("../components/DebugSettings.tsx"), ["CardTitle"]),
+  ...keysIn(src("../components/DangerZone.tsx"), ["CardTitle"]),
 ];
 
 describe("settings search index", () => {

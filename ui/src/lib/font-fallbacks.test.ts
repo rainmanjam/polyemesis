@@ -58,3 +58,50 @@ describe("per-script font fallbacks", () => {
     expect(stack.at(-1)).toBe("sans-serif");
   });
 });
+
+/* EXTENDED LATIN AND CYRILLIC (B3). The base woff2 files are basic Latin only,
+ * so every letter of a translation outside U+0000-00FF must fall inside the
+ * unicode-range of an app-only -ext face, or it renders in a system font. */
+// Punctuation and symbols a system face may draw without it reading as a
+// different typeface. U+02BC, the Ukrainian apostrophe, is here because Plex
+// has no glyph for it at any width; the -ext range names it anyway, so a
+// future Plex that adds it is picked up.
+const EXTRA_OK = /[\u2000-\u206F\u2190-\u21FF\u2212\u2318\u2026\u00A0\u02BC]/;
+
+function rangesOf(file: string): [number, number][] {
+  const m = CSS.match(new RegExp(`@font-face\\s*\\{[^}]*url\\("/fonts/${file}"\\)[^}]*unicode-range:\\s*([^;]+);`));
+  if (!m) return [];
+  return m[1].split(",").map((r) => {
+    const [a, b] = r.trim().replace(/^U\+/i, "").split("-");
+    return [parseInt(a, 16), parseInt(b ?? a, 16)] as [number, number];
+  });
+}
+
+describe("extended Latin and Cyrillic faces", () => {
+  it.each(["ibm-plex-sans-ext.woff2", "jetbrains-mono-ext.woff2"])("%s is loaded with a unicode-range", (file) => {
+    expect(rangesOf(file).length).toBeGreaterThan(0);
+  });
+
+  it.each(PLEX_SCRIPTS)("every %s letter is in the base subset or an -ext range", (lang) => {
+    const ranges = rangesOf("ibm-plex-sans-ext.woff2");
+    const text = Object.values(JSON.parse(readFileSync(join(LOCALE_DIR, `${lang}.json`), "utf8")) as Record<string, string>).join("");
+    const uncovered = [...new Set(text)].filter((ch) => {
+      const cp = ch.codePointAt(0)!;
+      if (cp <= 0xff || EXTRA_OK.test(ch)) return false;
+      return !ranges.some(([a, b]) => cp >= a && cp <= b);
+    });
+    expect(uncovered).toEqual([]);
+  });
+});
+
+describe("CJK mono fallbacks", () => {
+  it.each(Object.entries(SCRIPT_FALLBACKS))("%s names a CJK face in --font-mono too", (lang, faces) => {
+    const decl = ruleFor(lang)?.match(/--font-mono:\s*([^;]+);/);
+    expect(decl, `${lang} rule sets no --font-mono`).toBeTruthy();
+    const stack = decl![1].split(",").map((s) => s.trim().replace(/"/g, ""));
+    expect(stack[0]).toBe("JetBrains Mono");
+    expect(stack.some((f) => faces.includes(f))).toBe(true);
+    expect(stack.at(-1)).toBe("monospace");
+  });
+});
+

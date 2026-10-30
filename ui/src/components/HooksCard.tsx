@@ -275,7 +275,7 @@ export function HooksCard() {
                             is {name} and nothing else, and a language whose
                             plural does not work by suffixing cannot be served
                             by concatenation. */}
-                        <div className="text-[10px] text-muted-foreground">
+                        <div className="text-sm text-muted-foreground">
                           {t(h.hasSecret ? "hooks.signed" : "hooks.unsigned")} ·{" "}
                           {t(h.maxAttempts === 1 ? "hooks.attemptsOne" : "hooks.attempts", {
                             count: h.maxAttempts,
@@ -285,14 +285,14 @@ export function HooksCard() {
                       </TableCell>
                       {/* The stored URL is never sent back; this is the mask,
                           and editing it is how you replace the endpoint. */}
-                      <TableCell className="max-w-56 truncate font-mono text-[10px] text-muted-foreground">
+                      <TableCell className="max-w-56 truncate font-mono text-sm text-muted-foreground">
                         {h.url}
                       </TableCell>
                       <TableCell>
                         {(h.triggers ?? []).length === 0 ? (
                           <Badge variant="outline">{t("hooks.allTriggers")}</Badge>
                         ) : (
-                          <span className="text-[11px] text-muted-foreground">
+                          <span className="text-sm text-muted-foreground">
                             {t(
                               (h.triggers ?? []).length === 1
                                 ? "hooks.triggerCountOne"
@@ -394,7 +394,7 @@ export function HooksCard() {
         {/* The test result, in full. The operator is verifying a machine
             contract, so the exact bytes and the exact signature are the answer. */}
         {testResult && (
-          <div className="space-y-1 rounded border border-border bg-muted/40 px-3 py-2 text-[11px]">
+          <div className="space-y-1 rounded border border-border bg-muted/40 px-3 py-2 text-sm">
             <div className="flex items-center gap-2">
               <Badge
                 variant={
@@ -426,9 +426,9 @@ export function HooksCard() {
             </CardHeader>
             <CardContent>
               {deliveries.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">{t("hooks.noDeliveries")}</p>
+                <p className="text-sm text-muted-foreground">{t("hooks.noDeliveries")}</p>
               ) : (
-                <ul className="space-y-1 text-[11px]">
+                <ul className="space-y-1 text-sm">
                   {deliveries.map((d) => (
                     <li key={d.id} className="flex items-center gap-2">
                       <Badge variant={d.error ? "down" : "outline"}>{d.trigger}</Badge>
@@ -457,7 +457,7 @@ export function HooksCard() {
                "Dropped 0" are the two readings an operator checks when a
                receiver has gone quiet, and rendering them for a read that
                never answered is the one answer that stops them looking. */
-            <p className="col-span-2 text-[11px] text-warn">{t("hooks.deliveryUnread")}</p>
+            <p className="col-span-2 text-sm text-warn">{t("hooks.deliveryUnread")}</p>
           ) : (
             <>
               <Stat labelKey="hooks.statSent" value={stats?.sent ?? 0} />
@@ -475,7 +475,7 @@ export function HooksCard() {
               />
               <Stat labelKey="hooks.statRetries" value={stats?.retries ?? 0} tone="muted" />
               {stats?.lastError && (
-                <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-[10px] text-down">
+                <p className="col-span-2 flex items-start gap-1.5 rounded border border-down/50 bg-down/5 p-2 text-sm text-down">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                   {stats.lastError}
                 </p>
@@ -484,7 +484,7 @@ export function HooksCard() {
                 /* One sentence, one key. It used to wrap the header name in a
                    <code>, which meant three fragments a translator cannot reorder --
                    and the header name is monospace-looking on its own. */
-                <p className="col-span-2 text-[10px] text-muted-foreground">
+                <p className="col-span-2 text-sm text-muted-foreground">
                   {t("hooks.payloadNote", {
                     version: meta.specVersion,
                     header: meta.headers.signature,
@@ -581,7 +581,7 @@ function HookDialog({
               placeholder="https://ci.example.com/hooks/polyemesis"
             />
             {editing && (
-              <p className="text-[10px] text-muted-foreground">{t("hooks.urlMasked")}</p>
+              <p className="text-sm text-muted-foreground">{t("hooks.urlMasked")}</p>
             )}
           </div>
 
@@ -602,8 +602,8 @@ function HookDialog({
               aria-label={t("common.allowPrivateTarget")}
             />
             <span className="flex flex-col gap-0.5">
-              <span className="text-[11px]">{t("common.allowPrivateTarget")}</span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm">{t("common.allowPrivateTarget")}</span>
+              <span className="text-sm text-muted-foreground">
                 {t("common.allowPrivateTargetHint")}
               </span>
             </span>
@@ -655,8 +655,8 @@ function HookDialog({
                   {t("hooks.rotateGenerate")}
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground">{t("hooks.rotateHint")}</p>
-              <p className="text-[10px] text-warn">{t("hooks.rotateCutover")}</p>
+              <p className="text-sm text-muted-foreground">{t("hooks.rotateHint")}</p>
+              <p className="text-sm text-warn">{t("hooks.rotateCutover")}</p>
             </div>
           )}
 
@@ -664,7 +664,7 @@ function HookDialog({
             <Label>{t("hooks.triggers")}</Label>
             <div className="grid grid-cols-2 gap-1">
               {(meta?.triggers ?? []).map((tr) => (
-                <label key={tr} className="flex items-center gap-1.5 text-[11px]">
+                <label key={tr} className="flex items-center gap-1.5 text-sm">
                   <Checkbox
                     checked={triggers.includes(tr)}
                     onCheckedChange={(v) => toggleTrigger(tr, Boolean(v))}
@@ -673,7 +673,7 @@ function HookDialog({
                 </label>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground">{t("hooks.triggersNoneHint")}</p>
+            <p className="text-sm text-muted-foreground">{t("hooks.triggersNoneHint")}</p>
           </div>
 
           <div className="flex gap-3">
@@ -702,7 +702,7 @@ function HookDialog({
               />
             </div>
           </div>
-          <p className="text-[10px] text-muted-foreground">{t("hooks.retriesHint")}</p>
+          <p className="text-sm text-muted-foreground">{t("hooks.retriesHint")}</p>
         </div>
 
         <DialogFooter>

@@ -364,7 +364,7 @@ export function AudioMeter({
           ref={canvasRef}
           className="w-full rounded-[2px]"
           style={{ height: cssHeight }}
-          aria-label="audio level meter"
+          aria-label={t("signature.meter.aria")}
         />
         {/* Mounted always and hidden by style, never conditionally rendered:
             the draw loop owns its visibility and has no way to mount a node.
@@ -376,7 +376,7 @@ export function AudioMeter({
           style={{ visibility: "hidden" }}
           className="pointer-events-none absolute right-0 top-0 rounded-bl-[2px] bg-down px-1 font-mono text-[9px] font-semibold leading-[1.4] tracking-wider text-background"
         >
-          CLIP
+          {t("signature.meter.clip")}
         </span>
       </div>
       <div className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
