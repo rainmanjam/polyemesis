@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Mostrar salida sin procesar",
   "monitor.hideRaw": "Ocultar salida sin procesar",
   "monitor.processErrors": "{count} errores",
-  "monitor.noMatchingLines": "Ninguna línea coincide con esta vista."
+  "monitor.noMatchingLines": "Ninguna línea coincide con esta vista.",
+  "timeline.title": "Cronología",
+  "timeline.empty": "Todavía no hay conmutaciones, reinicios ni cortes registrados.",
+  "timeline.loadFailed": "No se pudo cargar la cronología.",
+  "timeline.severityCritical": "Crítico",
+  "timeline.severityWarning": "Advertencia",
+  "timeline.severityInfo": "Info"
 }

@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Rohausgabe anzeigen",
   "monitor.hideRaw": "Rohausgabe ausblenden",
   "monitor.processErrors": "{count} Fehler",
-  "monitor.noMatchingLines": "Keine Zeilen passen zu dieser Ansicht."
+  "monitor.noMatchingLines": "Keine Zeilen passen zu dieser Ansicht.",
+  "timeline.title": "Verlauf",
+  "timeline.empty": "Noch keine Failover, Neustarts oder Ausfälle aufgezeichnet.",
+  "timeline.loadFailed": "Der Verlauf konnte nicht geladen werden.",
+  "timeline.severityCritical": "Kritisch",
+  "timeline.severityWarning": "Warnung",
+  "timeline.severityInfo": "Info"
 }

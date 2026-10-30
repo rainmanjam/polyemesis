@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Mostrar saída bruta",
   "monitor.hideRaw": "Ocultar saída bruta",
   "monitor.processErrors": "{count} erros",
-  "monitor.noMatchingLines": "Nenhuma linha corresponde a esta visualização."
+  "monitor.noMatchingLines": "Nenhuma linha corresponde a esta visualização.",
+  "timeline.title": "Linha do tempo",
+  "timeline.empty": "Nenhuma troca de fonte, reinício ou queda registrada ainda.",
+  "timeline.loadFailed": "Não foi possível carregar a linha do tempo.",
+  "timeline.severityCritical": "Crítico",
+  "timeline.severityWarning": "Aviso",
+  "timeline.severityInfo": "Info"
 }

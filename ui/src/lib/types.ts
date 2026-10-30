@@ -2069,6 +2069,17 @@ export interface CredentialCheck {
   detail: string;
 }
 
+/** One stream transition from the operator timeline. Titles are the server's
+ *  already-redacted text. */
+export interface TimelineRow {
+  id: number;
+  at: string;
+  type: string;
+  severity: "critical" | "warning" | "info" | string;
+  title: string;
+  detail?: string;
+}
+
 export interface LogLine {
   time: string;
   process: string;

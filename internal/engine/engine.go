@@ -756,7 +756,20 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// Both read their configuration from the database on every pass, so a rule
 	// or a schedule added later takes effect without a restart, and a server
 	// with neither configured does no work beyond one cheap sweep.
-	e.alerter = alerts.New(log, store)
+	// The timeline is written from the notifier's own goroutine, so the
+	// database may be slow without touching the reconcile loop. A nil store
+	// (tests that build an engine without one) records nothing.
+	e.alerter = alerts.New(log, store, alerts.WithRecorder(func(ev alerts.Event) {
+		if store == nil {
+			return
+		}
+		if err := store.RecordTimelineEvent(db.TimelineEvent{
+			At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
+			Title: ev.Title, Detail: ev.Text,
+		}); err != nil {
+			log.Warn("timeline record failed", "type", ev.Type, "err", err)
+		}
+	}))
 	e.alertWatch = alerts.NewWatcher(alerts.WatchConfig{})
 	// Named from the source row on the first sweep; SourceRef starts with the
 	// id alone so an event raised before that still identifies its programme.

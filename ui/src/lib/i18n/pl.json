@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Pokaż surowe dane wyjściowe",
   "monitor.hideRaw": "Ukryj surowe dane wyjściowe",
   "monitor.processErrors": "{count} błędów",
-  "monitor.noMatchingLines": "Żadna linia nie pasuje do tego widoku."
+  "monitor.noMatchingLines": "Żadna linia nie pasuje do tego widoku.",
+  "timeline.title": "Oś czasu",
+  "timeline.empty": "Nie zarejestrowano jeszcze przełączeń awaryjnych, restartów ani przerw.",
+  "timeline.loadFailed": "Nie udało się wczytać osi czasu.",
+  "timeline.severityCritical": "Krytyczne",
+  "timeline.severityWarning": "Ostrzeżenie",
+  "timeline.severityInfo": "Info"
 }

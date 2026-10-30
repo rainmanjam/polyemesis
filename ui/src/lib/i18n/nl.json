@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Ruwe uitvoer tonen",
   "monitor.hideRaw": "Ruwe uitvoer verbergen",
   "monitor.processErrors": "{count} fouten",
-  "monitor.noMatchingLines": "Geen regels die bij deze weergave passen."
+  "monitor.noMatchingLines": "Geen regels die bij deze weergave passen.",
+  "timeline.title": "Tijdlijn",
+  "timeline.empty": "Nog geen failovers, herstarts of storingen vastgelegd.",
+  "timeline.loadFailed": "De tijdlijn kon niet worden geladen.",
+  "timeline.severityCritical": "Kritiek",
+  "timeline.severityWarning": "Waarschuwing",
+  "timeline.severityInfo": "Info"
 }

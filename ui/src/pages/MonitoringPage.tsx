@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
@@ -747,7 +748,11 @@ export function MonitoringPage() {
       </Card>
 
       <div className="grid gap-3 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        {/* ---------- processes ---------- */}
+        <div className="mb-3">
+        <MonitorTimeline />
+      </div>
+
+      {/* ---------- processes ---------- */}
         <Card className="h-fit">
           <CardHeader>
             <CardTitle>{t("mon.processes")}</CardTitle>

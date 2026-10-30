@@ -1263,6 +1263,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 			r.Get("/processes", s.handleListProcesses)
 			r.Get("/processes/{name}/logs", s.handleProcessLogs)
+			r.Get("/timeline", s.handleListTimeline)
 
 			r.Get("/platforms/presets", s.handlePlatformPresets)
 			r.Get("/platforms/capabilities", s.handlePlatformCapabilities)

@@ -12,8 +12,8 @@
   "guardedFloor": 22,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 229,
-    "swept": 63,
+    "methodPatternPairs": 230,
+    "swept": 64,
     "excused": 50,
     "denied": 116,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 8,
-    "invariant": 50,
+    "invariant": 51,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 1,
     "unstable": 4
@@ -1128,6 +1128,12 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/timeline",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/tls",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1797,6 +1803,11 @@
       "sentinels": [
         "SENTINEL-source-srt-passphrase-9f3a"
       ]
+    },
+    {
+      "path": "/api/v1/timeline",
+      "pattern": "GET /api/v1/timeline",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/tls",

@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "원본 출력 보기",
   "monitor.hideRaw": "원본 출력 숨기기",
   "monitor.processErrors": "오류 {count}건",
-  "monitor.noMatchingLines": "이 보기와 일치하는 줄이 없습니다."
+  "monitor.noMatchingLines": "이 보기와 일치하는 줄이 없습니다.",
+  "timeline.title": "타임라인",
+  "timeline.empty": "아직 기록된 페일오버, 재시작, 중단이 없습니다.",
+  "timeline.loadFailed": "타임라인을 불러올 수 없습니다.",
+  "timeline.severityCritical": "심각",
+  "timeline.severityWarning": "경고",
+  "timeline.severityInfo": "정보"
 }

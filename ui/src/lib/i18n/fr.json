@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Afficher la sortie brute",
   "monitor.hideRaw": "Masquer la sortie brute",
   "monitor.processErrors": "{count} erreurs",
-  "monitor.noMatchingLines": "Aucune ligne ne correspond à cette vue."
+  "monitor.noMatchingLines": "Aucune ligne ne correspond à cette vue.",
+  "timeline.title": "Chronologie",
+  "timeline.empty": "Aucun basculement, redémarrage ni interruption enregistré pour l'instant.",
+  "timeline.loadFailed": "Impossible de charger la chronologie.",
+  "timeline.severityCritical": "Critique",
+  "timeline.severityWarning": "Avertissement",
+  "timeline.severityInfo": "Info"
 }

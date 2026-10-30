@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "Mostra output grezzo",
   "monitor.hideRaw": "Nascondi output grezzo",
   "monitor.processErrors": "{count} errori",
-  "monitor.noMatchingLines": "Nessuna riga corrisponde a questa vista."
+  "monitor.noMatchingLines": "Nessuna riga corrisponde a questa vista.",
+  "timeline.title": "Cronologia",
+  "timeline.empty": "Nessun failover, riavvio o interruzione registrato finora.",
+  "timeline.loadFailed": "Impossibile caricare la cronologia.",
+  "timeline.severityCritical": "Critico",
+  "timeline.severityWarning": "Avviso",
+  "timeline.severityInfo": "Info"
 }

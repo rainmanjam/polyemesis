@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "生の出力を表示",
   "monitor.hideRaw": "生の出力を隠す",
   "monitor.processErrors": "エラー {count} 件",
-  "monitor.noMatchingLines": "この表示に一致する行はありません。"
+  "monitor.noMatchingLines": "この表示に一致する行はありません。",
+  "timeline.title": "タイムライン",
+  "timeline.empty": "フェイルオーバー、再起動、停止はまだ記録されていません。",
+  "timeline.loadFailed": "タイムラインを読み込めませんでした。",
+  "timeline.severityCritical": "重大",
+  "timeline.severityWarning": "警告",
+  "timeline.severityInfo": "情報"
 }

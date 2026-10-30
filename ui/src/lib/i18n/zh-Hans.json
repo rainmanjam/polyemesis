@@ -1709,5 +1709,11 @@
   "monitor.showRaw": "显示原始输出",
   "monitor.hideRaw": "隐藏原始输出",
   "monitor.processErrors": "{count} 个错误",
-  "monitor.noMatchingLines": "没有符合此视图的日志行。"
+  "monitor.noMatchingLines": "没有符合此视图的日志行。",
+  "timeline.title": "时间线",
+  "timeline.empty": "尚未记录任何故障切换、重启或中断。",
+  "timeline.loadFailed": "无法加载时间线。",
+  "timeline.severityCritical": "严重",
+  "timeline.severityWarning": "警告",
+  "timeline.severityInfo": "信息"
 }

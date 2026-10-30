@@ -100,6 +100,7 @@ import type {
   VersionInfo,
   UpgradePlan,
   UpgradeResult,
+  TimelineRow,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -1053,6 +1054,7 @@ export const api = {
      MonitoringPage simply never passed one and the whole page was dead there. */
   listProcesses: (sourceId: number | null) =>
     get<ProcessInfo[]>("/processes" + sourceQuery(sourceId)),
+  listTimeline: (limit = 50) => get<TimelineRow[]>(`/timeline?limit=${limit}`),
   processLogs: (name: string, sourceId: number | null) =>
     get<{ name: string; command: string; lines: LogLine[] | null }>(
       `/processes/${encodeURIComponent(name)}/logs` + sourceQuery(sourceId),

@@ -43,6 +43,7 @@ vi.mock("@/lib/api", async () => {
       listProcesses: vi.fn().mockResolvedValue([]),
       processLogs: vi.fn().mockResolvedValue({ lines: [] }),
       listDestinations: vi.fn().mockResolvedValue([]),
+      listTimeline: vi.fn().mockResolvedValue([]),
     },
   };
 });

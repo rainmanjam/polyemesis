@@ -18,7 +18,10 @@ import (
 // alerts are rare and small, so the depth costs nothing, while a slow endpoint
 // must not be given more concurrency to be slow with.
 const (
-	defaultQueueDepth   = 512
+	defaultQueueDepth = 512
+	// defaultRecordDepth bounds the timeline queue. Timeline events are a few
+	// per incident, so this only fills when the sink is wedged.
+	defaultRecordDepth  = 256
 	defaultSendDepth    = 64
 	defaultFlushEvery   = 500 * time.Millisecond
 	defaultRulesTTL     = 5 * time.Second
@@ -98,6 +101,10 @@ type Option func(*Notifier)
 // WithDoer replaces the HTTP client.
 func WithDoer(d Doer) Option { return func(n *Notifier) { n.doer = d } }
 
+// WithRecorder registers a sink for the operator timeline (see IsTimelineType).
+// It is called from its own goroutine, never from Publish or the run loop.
+func WithRecorder(fn func(Event)) Option { return func(n *Notifier) { n.recorder = fn } }
+
 // WithClock replaces time.Now, for tests.
 func WithClock(fn func() time.Time) Option { return func(n *Notifier) { n.now = fn } }
 
@@ -156,6 +163,12 @@ type Notifier struct {
 	events chan Event
 	send   chan Delivery
 
+	// recorder hears the timeline subset of accepted events. It runs on its
+	// own goroutine behind record, a bounded queue the run loop fills without
+	// waiting: a slow database costs timeline rows, never the reconcile loop.
+	recorder func(Event)
+	record   chan Event
+
 	// co is touched only by the run loop, so it needs no lock of its own.
 	// That is a contract, not an observation -- see the doc on coalescer for
 	// what it costs a test to break it.
@@ -185,6 +198,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		rulesTTL:   defaultRulesTTL,
 		events:     make(chan Event, defaultQueueDepth),
 		send:       make(chan Delivery, defaultSendDepth),
+		record:     make(chan Event, defaultRecordDepth),
 		co:         newCoalescer(),
 		done:       make(chan struct{}),
 	}
@@ -223,6 +237,15 @@ func (n *Notifier) Publish(ev Event) {
 // the network.
 func (n *Notifier) Run(ctx context.Context) {
 	var wg sync.WaitGroup
+	if n.recorder != nil {
+		// Detached on purpose: a sink wedged on a slow write must not hold
+		// shutdown open, so it is not in wg. It ends when record is closed.
+		go func() {
+			for ev := range n.record {
+				n.recorder(ev)
+			}
+		}()
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -247,7 +270,10 @@ func (n *Notifier) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			n.closeOnce.Do(func() { close(n.send) })
+			n.closeOnce.Do(func() {
+				close(n.send)
+				close(n.record)
+			})
 			wg.Wait()
 			close(n.done)
 			return
@@ -255,6 +281,15 @@ func (n *Notifier) Run(ctx context.Context) {
 			rules := n.currentRules()
 			if took := n.co.Add(rules, ev, n.now()); took > 0 {
 				n.bump(func(s *Stats) { s.Coalesced++ })
+			}
+			if n.recorder != nil && IsTimelineType(ev.Type) {
+				select {
+				case n.record <- ev:
+				default:
+					// A full queue loses a timeline row, which is counted
+					// as a dropped event, not a stall.
+					n.bump(func(s *Stats) { s.Dropped++ })
+				}
 			}
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
