@@ -201,3 +201,21 @@ describe("the features page rooms (S6)", () => {
     expect(features).toMatch(/PROSE, NOT PAGES/);
   });
 });
+
+describe("the hero's link sentences keep their spaces (S1)", () => {
+  /* Astro drops the newline between a line of text and an element that opens
+   * the next line, so "are in the" + <a>quickstart</a> rendered as
+   * "are in thequickstart" and "Planning bandwidth first?Bandwidth
+   * calculator". The rest of the site already spells the space as {" "} for
+   * this reason (see the plan strip further down this page). */
+  const home = pages("index.astro");
+
+  it.each(["are in the", "Planning bandwidth first?"])(
+    "%s is followed by a space",
+    (lead) => {
+      const at = home.indexOf(lead);
+      expect(at, lead).toBeGreaterThan(-1);
+      expect(home.slice(at + lead.length, at + lead.length + 5)).toBe('{" "}');
+    },
+  );
+});
