@@ -1284,7 +1284,7 @@ export function Dashboard() {
     }
   };
 
-  const confirmDelete = useConfirm<{ id: DestinationId; name: string }>();
+  const confirmDelete = useConfirm<{ id: DestinationId; name: string; live: boolean }>();
 
   const remove = async (id: DestinationId) => {
     await act(id, () => api.deleteDestination(id), "delete the destination");
@@ -1398,7 +1398,13 @@ export function Dashboard() {
                   act(d.id, () => api.restartDestination(d.id), "restart the destination")
                 }
                 onEdit={() => openEdit(d.id)}
-                onDelete={() => confirmDelete.ask({ id: d.id, name: d.name })}
+                onDelete={() =>
+                  confirmDelete.ask({
+                    id: d.id,
+                    name: d.name,
+                    live: d.process?.state === "running",
+                  })
+                }
                 onRefreshKey={async () => {
                   await act(
                     d.id,
@@ -1997,8 +2003,23 @@ export function Dashboard() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
+        // A18: typed only while it is live. Deleting a running destination
+        // ends a broadcast people are watching, which does not come back;
+        // deleting an idle one is a profile that can be added again.
+        requireTyping={confirmDelete.target?.live ?? false}
         title={t("confirm.deleteTitle", { name: confirmDelete.target?.name ?? "" })}
-        description={t("dash.deleteDestDescription")}
+        description={
+          confirmDelete.target?.live ? (
+            <>
+              <span className="block font-medium text-down">
+                {t("dash.deleteDestLive")}
+              </span>
+              {t("dash.deleteDestDescription")}
+            </>
+          ) : (
+            t("dash.deleteDestDescription")
+          )
+        }
         confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {
           if (confirmDelete.target) await remove(confirmDelete.target.id);

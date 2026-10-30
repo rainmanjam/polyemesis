@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Kon de bestemmingen niet herordenen.",
   "dash.deleteDest": "Bestemming verwijderen",
   "dash.deleteDestDescription": "Dit verwijdert de bestemming en haar routingprofiel. Het platform blijft ongemoeid en je kunt haar weer toevoegen — maar de audiorouting die je ervoor had opgezet is weg.",
+  "dash.deleteDestLive": "Hij is nu live: verwijderen beëindigt deze uitzending.",
   "dash.descTooLong": "Te lang voor {platforms}; dat platform wordt als mislukt gemeld en de rest wordt alsnog bijgewerkt.",
   "dash.descriptionPlaceholder": "Waar deze stream over gaat.",
   "dash.destDeleted": "Bestemming verwijderd.",

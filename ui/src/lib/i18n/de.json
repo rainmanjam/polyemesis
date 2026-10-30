@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Die Ziele konnten nicht neu geordnet werden.",
   "dash.deleteDest": "Ziel löschen",
   "dash.deleteDestDescription": "Dies entfernt das Ziel und sein Routing-Profil. Die Plattform bleibt unberührt, und Sie können es wieder hinzufügen — das dafür eingerichtete Audiorouting ist jedoch weg.",
+  "dash.deleteDestLive": "Es ist gerade live: Löschen beendet diese Übertragung.",
   "dash.descTooLong": "Zu lang für {platforms}; diese Plattform wird als fehlgeschlagen gemeldet, die übrigen werden trotzdem aktualisiert.",
   "dash.descriptionPlaceholder": "Worum es in diesem Stream geht.",
   "dash.destDeleted": "Ziel gelöscht.",

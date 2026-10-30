@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "无法重新排序推流目标。",
   "dash.deleteDest": "删除推流目标",
   "dash.deleteDestDescription": "此操作会删除该推流目标及其路由配置。平台本身不受影响，你也可以把它加回来——但为它设置的音频路由会一并消失。",
+  "dash.deleteDestLive": "当前正在直播：删除将结束这场直播。",
   "dash.descTooLong": "对 {platforms} 来说太长；该平台会被报告为失败，其余平台仍会推送。",
   "dash.descriptionPlaceholder": "这场直播是什么。",
   "dash.destDeleted": "推流目标已删除。",

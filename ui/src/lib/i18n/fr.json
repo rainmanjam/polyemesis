@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Impossible de réordonner les destinations.",
   "dash.deleteDest": "Supprimer la destination",
   "dash.deleteDestDescription": "Ceci supprime la destination et son profil de routage. La plateforme n'est pas touchée, et vous pouvez la rajouter — mais le routage audio que vous aviez mis en place pour elle est perdu.",
+  "dash.deleteDestLive": "Elle est en direct : la supprimer arrête cette diffusion.",
   "dash.descTooLong": "Trop long pour {platforms} ; cette plateforme sera signalée en échec et les autres seront quand même mises à jour.",
   "dash.descriptionPlaceholder": "Ce qu'est ce flux.",
   "dash.destDeleted": "Destination supprimée.",

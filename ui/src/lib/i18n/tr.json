@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Hedefler yeniden sıralanamadı.",
   "dash.deleteDest": "Hedefi sil",
   "dash.deleteDestDescription": "Bu işlem hedefi ve yönlendirme profilini kaldırır. Platforma dokunulmaz ve hedefi geri ekleyebilirsiniz — ancak onun için kurduğunuz ses yönlendirmesi kaybolur.",
+  "dash.deleteDestLive": "Şu anda yayında: silmek bu yayını bitirir.",
   "dash.descTooLong": "{platforms} için çok uzun; o platform başarısız olarak bildirilecek, diğerleri yine de gönderilecek.",
   "dash.descriptionPlaceholder": "Bu yayının ne olduğu.",
   "dash.destDeleted": "Hedef silindi.",

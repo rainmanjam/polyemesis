@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Impossibile riordinare le destinazioni.",
   "dash.deleteDest": "Elimina destinazione",
   "dash.deleteDestDescription": "Questo rimuove la destinazione e il suo profilo di routing. La piattaforma resta intatta e puoi riaggiungerla — ma il routing audio che avevi impostato per essa è perduto.",
+  "dash.deleteDestLive": "È in diretta ora: eliminarla termina questa trasmissione.",
   "dash.descTooLong": "Troppo lungo per {platforms}; quella piattaforma verrà segnalata come fallita e le altre verranno comunque aggiornate.",
   "dash.descriptionPlaceholder": "Di cosa parla questo stream.",
   "dash.destDeleted": "Destinazione eliminata.",

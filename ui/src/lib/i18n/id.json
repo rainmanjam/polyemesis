@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Tidak dapat mengurutkan ulang tujuan.",
   "dash.deleteDest": "Hapus tujuan",
   "dash.deleteDestDescription": "Ini menghapus tujuan beserta profil routing-nya. Platformnya tidak diubah, dan Anda bisa menambahkannya kembali — tetapi routing audio yang Anda siapkan untuknya hilang.",
+  "dash.deleteDestLive": "Sedang live: menghapusnya mengakhiri siaran ini.",
   "dash.descTooLong": "Terlalu panjang untuk {platforms}; platform itu akan dilaporkan gagal dan yang lain tetap dikirim.",
   "dash.descriptionPlaceholder": "Tentang apa siaran ini.",
   "dash.destDeleted": "Tujuan dihapus.",

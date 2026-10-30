@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "대상 순서를 변경할 수 없습니다.",
   "dash.deleteDest": "대상 삭제",
   "dash.deleteDestDescription": "대상과 해당 라우팅 프로필을 제거합니다. 플랫폼 쪽은 그대로이며 다시 추가할 수 있지만, 그 대상을 위해 설정한 오디오 라우팅은 사라집니다.",
+  "dash.deleteDestLive": "지금 라이브 중입니다. 삭제하면 이 방송이 끝납니다.",
   "dash.descTooLong": "{platforms}에는 너무 깁니다. 해당 플랫폼은 실패로 보고되고 나머지는 그대로 전송됩니다.",
   "dash.descriptionPlaceholder": "이 방송이 무엇인지.",
   "dash.destDeleted": "대상을 삭제했습니다.",

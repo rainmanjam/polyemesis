@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "配信先の並び順を変更できませんでした。",
   "dash.deleteDest": "配信先を削除",
   "dash.deleteDestDescription": "配信先とそのルーティングプロファイルを削除します。プラットフォーム側はそのままで、後から追加し直せますが、その配信先のために設定した音声ルーティングは失われます。",
+  "dash.deleteDestLive": "現在ライブ中です。削除するとこの配信が終了します。",
   "dash.descTooLong": "{platforms} には長すぎます。そのプラットフォームは失敗として報告され、ほかへの送信は続きます。",
   "dash.descriptionPlaceholder": "この配信の内容。",
   "dash.destDeleted": "配信先を削除しました。",

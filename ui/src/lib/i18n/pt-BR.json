@@ -439,6 +439,7 @@
   "dash.couldNotReorderTheDestinations": "Não foi possível reordenar os destinos.",
   "dash.deleteDest": "Excluir destino",
   "dash.deleteDestDescription": "Isto remove o destino e o perfil de roteamento dele. A plataforma não é alterada, e você pode adicioná-lo de volta — mas o roteamento de áudio que você configurou para ele se perde.",
+  "dash.deleteDestLive": "Está ao vivo agora: excluir encerra esta transmissão.",
   "dash.descTooLong": "Longo demais para {platforms}; essa plataforma será relatada como falha e as demais serão enviadas mesmo assim.",
   "dash.descriptionPlaceholder": "O que é esta transmissão.",
   "dash.destDeleted": "Destino excluído.",
