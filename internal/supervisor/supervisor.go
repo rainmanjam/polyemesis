@@ -319,6 +319,8 @@ type Process struct {
 	nextRetry time.Time
 	progress  ffmpeg.Progress
 	logs      *ring
+	// warmup bounds the decoder warm-up after each spawn. See warmup.go.
+	warmup time.Duration
 	// liveArgs is the argv of the most recent spawn. Equal to spec.Args unless
 	// spec.NextArgs resolved something different for this run.
 	liveArgs []string
@@ -444,6 +446,7 @@ func New(log *slog.Logger, spec Spec) *Process {
 		grace:      graceFor(spec.Kind),
 		drain:      drainGrace,
 		stallAfter: StallAfter,
+		warmup:     decoderWarmup,
 	}
 }
 
@@ -1203,7 +1206,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 				continue
 			}
 			deliverReply(liveCur, line)
-			level := classify(line)
+			level := p.levelOf(line)
 			p.appendLog(line, level)
 			if level == "error" || level == "fatal" {
 				lastLines = append(lastLines, line)
