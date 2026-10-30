@@ -153,7 +153,7 @@ func TestAFailedTestRecordsNoPassAndNamesTheProblem(t *testing.T) {
 		{"checker": "primary", "protocol": "jev", "preset": "cerebras", "endpoint": flagsAll.URL},
 		{"checker": "primary", "protocol": "openai", "endpoint": "file:///etc/passwd"},
 		{"checker": "primary", "protocol": "openai", "endpoint": flagsAll.URL, "timeoutSeconds": 3600},
-		{"checker": "primary", "protocol": "openai", "endpoint": flagsAll.URL, "key": "smuggled"},
+		{"checker": "primary", "protocol": "openai", "endpoint": flagsAll.URL, "apiKey": "unknown field"},
 	} {
 		send(t, h, sign, http.MethodPost, "/api/v1/automod/test", bad, http.StatusBadRequest)
 	}
@@ -276,7 +276,14 @@ func TestNeitherModelKeyLeaksIntoSettingsResponsesLogsEventsOrTheDebugBundle(t *
 		map[string]any{"checker": "secondary", "key": sk}, http.StatusOK)))
 	for _, slot := range []string{"primary", "secondary"} {
 		for _, proto := range []string{"jev", "openai"} {
-			b := map[string]any{"checker": slot, "protocol": proto, "endpoint": echo.URL}
+			// The echo endpoint is not the stored one, so the stored key may
+			// not go there: the key is typed into the request, which is the
+			// path that has to keep it out of every response too.
+			key := pk
+			if slot == "secondary" {
+				key = sk
+			}
+			b := map[string]any{"checker": slot, "protocol": proto, "endpoint": echo.URL, "key": key}
 			out := string(send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK))
 			if !strings.Contains(out, "401") {
 				t.Fatalf("the test response does not report the failure: %s", out)
@@ -323,4 +330,118 @@ func newTestHub(t *testing.T) *chat.Hub {
 	h := chat.New()
 	t.Cleanup(h.Close)
 	return h
+}
+
+// recordingServer is smartOpenAI under another name, for the tests below that
+// need to tell two endpoints apart by what each was sent.
+func recordingServer(t *testing.T) (*httptest.Server, *[]string) { return smartOpenAI(t) }
+
+// THE STORED KEY GOES ONLY WHERE IT WAS GIVEN FOR. Two endpoints: the one
+// stored for the checker, and another. The Test button may send the sealed
+// key to the first and never to the second -- otherwise "point the test at my
+// server" would be a way to read a sealed key back out. A test of any other
+// address has to carry its own key, which is then the only key that address
+// ever sees, and a typed key that passes is sealed for the checker.
+func TestTheStoredKeyReachesOnlyTheEndpointItWasStoredFor(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	stored, storedAuth := recordingServer(t)
+	other, otherAuth := recordingServer(t)
+	putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) {
+		m["protocol"], m["preset"], m["endpoint"] = "openai", "custom", stored.URL
+	})
+	sealed := fakeKey("sealed")
+	send(t, h, sign, http.MethodPut, "/api/v1/settings/automod-key",
+		map[string]any{"checker": "secondary", "key": sealed}, http.StatusOK)
+
+	// Another address, no key: refused before anything is sent.
+	body := send(t, h, sign, http.MethodPost, "/api/v1/automod/test", testBody(other.URL), http.StatusBadRequest)
+	if !strings.Contains(string(body), "enter the key") || len(*otherAuth) != 0 {
+		t.Fatalf("refusal %s; the other endpoint saw %d requests", body, len(*otherAuth))
+	}
+	// The stored address, spelled differently (upper-case scheme, trailing
+	// slash): the sealed key goes there.
+	spelled := "HTTP" + strings.TrimPrefix(stored.URL, "http") + "/"
+	send(t, h, sign, http.MethodPost, "/api/v1/automod/test", testBody(spelled), http.StatusOK)
+	if len(*storedAuth) == 0 || (*storedAuth)[0] != "Bearer "+sealed {
+		t.Fatalf("the stored endpoint was sent %v", *storedAuth)
+	}
+	// Another address WITH a typed key: that key, and only that key.
+	typed := fakeKey("typed")
+	b := testBody(other.URL)
+	b["key"] = typed
+	send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK)
+	for _, a := range *otherAuth {
+		if a != "Bearer "+typed {
+			t.Fatalf("the other endpoint was sent %q", a)
+		}
+	}
+	if len(*otherAuth) == 0 {
+		t.Fatal("the typed key was never used")
+	}
+	// It passed, so the typed key is now the checker's key -- with its pass.
+	if got, _ := store.GetAutomodKeyFor(boxK(t), db.AutomodSlotSecondary); got != typed {
+		t.Fatalf("the passing typed key was not sealed")
+	}
+	if fp, _ := store.AutomodTestPass(db.AutomodSlotSecondary); fp == "" {
+		t.Fatal("sealing the typed key lost the pass it earned")
+	}
+}
+
+// Moving a checker's endpoint in a settings save clears its key: the key was
+// given for the old address, and carrying it to the new one is the same leak
+// by a different door. A save that leaves the endpoint alone keeps it.
+func TestMovingACheckersEndpointClearsItsStoredKey(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	send(t, h, sign, http.MethodPut, "/api/v1/settings/automod-key",
+		map[string]any{"checker": "secondary", "key": fakeKey("k")}, http.StatusOK)
+	putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) { m["maxCallsPerHour"] = 7 })
+	if has, _ := store.HasAutomodKeyFor(db.AutomodSlotSecondary); !has {
+		t.Fatal("an unrelated save cleared the key")
+	}
+	putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) {
+		m["endpoint"] = "https://elsewhere.example/v1/chat/completions"
+	})
+	if has, _ := store.HasAutomodKeyFor(db.AutomodSlotSecondary); has {
+		t.Fatal("the key survived its endpoint moving")
+	}
+
+	// The console's own flow is NOT cleared: type the new address and its
+	// key, Test (which seals that key with its pass), then Save the address.
+	fresh, _ := smartOpenAI(t)
+	b := testBody(fresh.URL)
+	b["key"] = fakeKey("for-fresh")
+	send(t, h, sign, http.MethodPost, "/api/v1/automod/test", b, http.StatusOK)
+	putSecondary(t, h, sign, http.StatusOK, func(m map[string]any) {
+		m["protocol"], m["preset"], m["endpoint"], m["model"] = "openai", "custom", fresh.URL, "fake-model"
+	})
+	if got, _ := store.GetAutomodKeyFor(boxK(t), db.AutomodSlotSecondary); got != fakeKey("for-fresh") {
+		t.Fatalf("the key typed and tested for the new endpoint was cleared by saving it: %q", got)
+	}
+}
+
+// The Test button is SESSION-ONLY. It is the one route that unseals a model
+// key and sends it out, so a machine credential -- even an admin one -- may
+// not drive it.
+func TestAnAPITokenCannotRunTheTestButton(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	fake, auths := smartOpenAI(t)
+	plaintext := createToken(t, h, sign, "automation")
+	r := jsonRequest(t, http.MethodPost, "/api/v1/automod/test", testBody(fake.URL))
+	r.Header.Set("Authorization", "Bearer "+plaintext)
+	if w := do(t, h, r); w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+		t.Fatalf("an admin token ran the Test: %d %s", w.Code, w.Body.String())
+	}
+	if len(*auths) != 0 {
+		t.Fatal("the endpoint was called on a token's behalf")
+	}
+}
+
+// boxK is the secret box sourceServer (via engineServer) seals with.
+func boxK(t *testing.T) *secrets.Box {
+	t.Helper()
+	b, err := secrets.New([]byte(strings.Repeat("k", 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

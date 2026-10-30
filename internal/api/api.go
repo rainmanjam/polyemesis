@@ -1156,9 +1156,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/automod/matrix", s.handleAutomodMatrix)
 			r.Get("/automod/stats", s.handleAutomodStats)
 			r.Put("/settings/automod-key", s.handlePutAutomodKey)
-			// The Test button. Writes a pass marker and spends three calls,
-			// so it is a write like the key it tests.
-			r.Post("/automod/test", s.handleAutomodTest)
+			// The Test button. SESSION-ONLY, like /debug/export: it is the
+			// one route that unseals a model key and sends it out of the
+			// process, so no API token -- admin or not -- may drive it
+			// without a human present. keyMayGoTo bounds where the key goes;
+			// this bounds who can make it go.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+				r.Post("/automod/test", s.handleAutomodTest)
+			})
 
 			// The read half of media. POST /media and DELETE /media/{name} are
 			// in the session-only group above, which is the fix for #140; this

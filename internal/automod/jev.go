@@ -108,7 +108,7 @@ func NewJev(cfg JevConfig, budget *Budget) *Jev {
 	if cfg.Model == "" {
 		cfg.Model = JevDefaultModel
 	}
-	return &Jev{cfg: cfg, budget: budget, client: &http.Client{Timeout: cfg.Timeout}, now: time.Now}
+	return &Jev{cfg: cfg, budget: budget, client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: refuseRedirect}, now: time.Now}
 }
 
 // Enabled reports whether this connector will make calls. Nil-safe.

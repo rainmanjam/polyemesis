@@ -195,3 +195,34 @@ func TestEngineVerdictCarriesWhichCheckerDecided(t *testing.T) {
 		t.Fatalf("engine stats %+v", st)
 	}
 }
+
+// A REDIRECT DOES NOT CARRY THE KEY. net/http keeps the Authorization header
+// on a redirect to the same host on another port, so an endpoint answering
+// 307 to its neighbour would hand the operator's key to an address nobody
+// configured. Neither connector follows a redirect: the 3xx is the answer,
+// it is a failure, and the second server is never called.
+func TestNeitherConnectorFollowsARedirectWithTheKey(t *testing.T) {
+	key := "redirect-" + strings.Repeat("x", 10)
+	var leaked atomic.Int32
+	target := modelServer(t, func(w http.ResponseWriter, r *http.Request) {
+		leaked.Add(1)
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("the redirect target was sent an Authorization header")
+		}
+	})
+	bounce := modelServer(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	})
+	for name, mc := range map[string]ModelChecker{
+		"openai": testModel(t, bounce, func(c *ModelConfig) { c.APIKey = key }),
+		"jev":    testJev(bounce, func(c *JevConfig) { c.APIKey = key }),
+	} {
+		_, err := mc.Check(context.Background(), "x")
+		if err == nil || !strings.Contains(err.Error(), "307") || strings.Contains(err.Error(), key) {
+			t.Errorf("%s: err = %v; want a 307 failure that does not name the key", name, err)
+		}
+	}
+	if leaked.Load() != 0 {
+		t.Fatalf("the redirect was followed %d times", leaked.Load())
+	}
+}

@@ -183,9 +183,22 @@ func NewModel(cfg ModelConfig, budget *Budget) *Model {
 	return &Model{
 		cfg:    cfg,
 		budget: budget,
-		client: &http.Client{Timeout: cfg.Timeout},
+		client: &http.Client{Timeout: cfg.Timeout, CheckRedirect: refuseRedirect},
 		now:    time.Now,
 	}
+}
+
+// refuseRedirect stops a connector following a redirect, for both protocols.
+//
+// The request carries the operator's key in its Authorization header, and
+// net/http keeps that header on a redirect to the same host -- any port, any
+// path -- so an endpoint that answers 307 to somewhere else on its host is
+// handed the key a second time, for a destination nobody configured. The
+// pattern internal/multitrack's refuseRedirect already uses for a platform
+// credential: ErrUseLastResponse hands back the 3xx, the status check reports
+// it, and nothing follows the Location header.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // modelVerdict is what the model is asked to return. A tiny fixed schema rather

@@ -17,9 +17,15 @@ import (
 // connection, and making the operator save an untested checker first would
 // mean storing exactly the thing the test exists to stop.
 //
-// The key is NOT in it. The test reads the checker's sealed key, so a key
-// travels once, through PUT /settings/automod-key, and never back out.
+// THE KEY. The checker's sealed key is used only when Endpoint is the
+// endpoint already stored for that checker (keyMayGoTo). For any other
+// address the request must carry the key itself -- the operator re-enters it
+// -- because otherwise this route would send a sealed secret to wherever the
+// caller pointed it, which is reading the secret back out by another name. A
+// key that passes is sealed for the checker, together with the pass, so the
+// operator does not have to type it twice.
 type automodTestRequest struct {
+	Key            string  `json:"key"`
 	Checker        string  `json:"checker"`
 	Protocol       string  `json:"protocol"`
 	Preset         string  `json:"preset"`
@@ -119,10 +125,25 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Instruction) != "" {
 		shared.Instruction = req.Instruction
 	}
-	key, err := s.store.GetAutomodKeyFor(s.box, string(slot))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
-		return
+	key := strings.TrimSpace(req.Key)
+	supplied := key != ""
+	if !supplied {
+		has, err := s.store.HasAutomodKeyFor(string(slot))
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if has {
+			if !keyMayGoTo(slotSettings(settings.Automod, slot), req.Endpoint) {
+				writeError(w, http.StatusBadRequest,
+					"the stored key was given for the saved endpoint; enter the key for this endpoint to test it")
+				return
+			}
+			if key, err = s.store.GetAutomodKeyFor(s.box, string(slot)); err != nil {
+				writeError(w, http.StatusInternalServerError, "the checker's key could not be read; set it again")
+				return
+			}
+		}
 	}
 	// No budget: a spent hourly allowance must not make a working endpoint
 	// look broken, and the per-checker lock above bounds what a test costs.
@@ -135,6 +156,15 @@ func (s *Server) handleAutomodTest(w http.ResponseWriter, r *http.Request) {
 
 	out := automodTestResponse{ProbeResult: res, Checker: slot}
 	if res.Passed {
+		// A key that was typed for this test is the key this pass is for, so
+		// it is sealed now -- BEFORE the pass, because setting a key forgets
+		// the checker's pass (db.PutAutomodKeyFor).
+		if supplied {
+			if err := s.store.PutAutomodKeyFor(s.box, string(slot), key); err != nil {
+				writeStoreError(w, err)
+				return
+			}
+		}
 		if err := s.store.PutAutomodTestPass(string(slot), checkerFingerprint(conn)); err != nil {
 			writeStoreError(w, err)
 			return
