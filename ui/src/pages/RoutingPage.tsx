@@ -65,6 +65,7 @@ import {
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
 import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
 import { toneForState } from "@/lib/signal";
+import { presetOptsFromRoles, presetPicks } from "@/lib/presetTrackDefaults";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -175,6 +176,10 @@ export function RoutingPage() {
     language: "",
     musicPolicy: "",
   });
+  // The pickers the operator set by hand. Kept apart from presetOpts (the
+  // server's defaults) so neither a re-read of the defaults nor a later
+  // annotation can move them. See lib/presetTrackDefaults.ts.
+  const [presetPicked, setPresetPicked] = useState<Partial<PresetOpts>>({});
   const [annotations, setAnnotations] = useState<TrackAnnotation[]>([]);
   const [annotating, setAnnotating] = useState(false);
   // Whether the server accepted an annotation write. Null means "not tried
@@ -512,6 +517,28 @@ export function RoutingPage() {
   // red error — with Save disabled underneath them — until the editor's own
   // debounce came round 180 ms and a round trip later. The editor still owns
   // `compiled`; this only lets it stop showing an answer it knows is out of date.
+  // What each preset picker shows and a preset is applied with: the server's
+  // defaults, replaced by the track annotated with the picker's role, with the
+  // operator's own picks over both. lib/presetTrackDefaults.ts.
+  const shownPresetOpts = useMemo(
+    () =>
+      presetOptsFromRoles(
+        presetOpts,
+        annotations,
+        tracks.map((tr) => tr.index),
+        presetPicked,
+      ),
+    [presetOpts, annotations, tracks, presetPicked],
+  );
+  // PresetRow's setter, recording whatever the edit changed as a pick.
+  const pickPresetOpts = useCallback(
+    (update: (o: PresetOpts) => PresetOpts) => {
+      const picked = presetPicks(shownPresetOpts, update(shownPresetOpts));
+      setPresetPicked((prev) => ({ ...prev, ...picked }));
+    },
+    [shownPresetOpts],
+  );
+
   const applyPresetTo = useCallback(
     async (mix: "live" | "vod", presetId: string): Promise<RoutingResult | null> => {
       const destAtClick = selectedIdRef.current;
@@ -519,7 +546,7 @@ export function RoutingPage() {
       try {
         // Against THIS destination's programme: a preset picks track indices,
         // and the default programme's layout is a different ingest (#497).
-        const res = await api.applyPreset(presetId, presetOpts, editedSourceId);
+        const res = await api.applyPreset(presetId, shownPresetOpts, editedSourceId);
         if (seq !== presetSeq.current[mix]) return null;
         if (selectedIdRef.current !== destAtClick) return null;
         if (mix === "vod" && !vodEnabledRef.current) return null;
@@ -560,7 +587,7 @@ export function RoutingPage() {
         return null;
       }
     },
-    [presetOpts, editedSourceId, t],
+    [shownPresetOpts, editedSourceId, t],
   );
 
   const applyPreset = useCallback(
@@ -806,8 +833,8 @@ export function RoutingPage() {
       annotationsStored,
       mixPresets,
       platformPresets,
-      presetOpts,
-      setPresetOpts,
+      presetOpts: shownPresetOpts,
+      setPresetOpts: pickPresetOpts,
       trackOptions,
       musicPlatformName: selectedPolicy?.name ?? "",
       musicDecision: selectedPolicy?.policy,
@@ -825,7 +852,8 @@ export function RoutingPage() {
       annotationsStored,
       mixPresets,
       platformPresets,
-      presetOpts,
+      shownPresetOpts,
+      pickPresetOpts,
       trackOptions,
       selectedPolicy,
       musicTracks,
