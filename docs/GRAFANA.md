@@ -138,16 +138,19 @@ taking data keeps its FFmpeg process running; it reads *Down* here anyway,
 because its output has stopped. A lost ingest is not counted against the
 destinations. See [MONITORING.md](MONITORING.md#queries-to-start-from).
 
-**"Receiving" is the bitrate, not `polyemesis_ingest_up`.** Currently, a push
-ingest on the shared SRT or RTMP port has no ingest process of its own, so
-`polyemesis_ingest_up` reads 0 for it even while the stream arrives. Whether
-anything is arriving is the honest signal, and the dashboard draws that.
+**"Receiving" is the bitrate, not `polyemesis_ingest_up`.** `_up` says the
+programme is able to receive: its ingest process is running, or, for an SRT
+source, the shared SRT listener is bound. Either way it stays 1 while the
+encoder is away, so it cannot say whether anything is arriving. The bitrate
+can, and the panel draws that, with `polyemesis_source_engine_up` beside it.
 
-**Between shows, destinations can currently read *Down*.** Once the encoder
-disconnects from a push ingest, a running destination's output stops and it is
-reported as stalled. That is why `PolyemesisDestinationDown`, and the
-*Enabled, not delivering* count on the overview, only count a destination while
-its programme is receiving.
+**Between shows, destinations read *Up*, not *Down*.** Once the encoder
+disconnects, a running destination's output stops because there is nothing to
+send. That is the ingest's news, so the destination is not reported as
+stalled. `PolyemesisDestinationDown`, and the *Enabled, not delivering* count
+on the overview, still count a destination only while its programme is
+receiving, so a destination that was stopped on purpose between shows does not
+page.
 
 **The failure cause is the one the destination card shows**, from
 [Why a destination is failing](MONITORING.md#why-a-destination-is-failing):
@@ -160,7 +163,7 @@ code, never FFmpeg's line, which may contain the stream key.
 | Alert | Fires when | For |
 |---|---|---|
 | `PolyemesisDestinationDown` | An enabled destination is not delivering **while its programme's ingest is receiving**. The description names the cause and says whether the destination is held. | 2 min |
-| `PolyemesisIngestDown` | A programme has no running engine, or its ingest process has failed and stopped retrying. | 1 min |
+| `PolyemesisIngestDown` | A programme has no running engine, or its ingest has failed: its ingest process stopped retrying, or, for an SRT source, the SRT port is configured and the listener is not bound. | 1 min |
 | `PolyemesisRecordingDiskLow` | The recordings volume has under 2 GiB or under 5% free, the same floor as the built-in `disk.low` alert. | 5 min |
 | `PolyemesisDestinationRestartStorm` | A destination restarted more than 5 times in 15 minutes. | — |
 | `PolyemesisIngestRestartStorm` | A programme's ingest restarted more than 5 times in 15 minutes. | — |

@@ -5363,9 +5363,10 @@ func (e *Engine) SetAlertGate(g *alerts.InstallGate) {
 // platform and error, never its URL or stream key.
 func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 	st := e.Status()
-	snap := alerts.Snapshot{At: now, IngestLive: ingestLive}
+	// Configured as Status decided it, not as "has an ingest process": an SRT
+	// source has an ingest and no child. See ingestConfigured.
+	snap := alerts.Snapshot{At: now, IngestLive: ingestLive, IngestConfigured: st.ingestConfigured}
 	if st.Ingest != nil {
-		snap.IngestConfigured = true
 		snap.IngestError = st.Ingest.LastError
 	}
 	for _, d := range st.Destinations {

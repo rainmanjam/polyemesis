@@ -189,6 +189,13 @@ and published to both. They follow the same dwells:
   spawned.
 - `down` comes after 10 seconds without delivery.
 - A stall is a `down` with `reason: "stalled"`.
+- A destination is not stalled because its source stopped. When the encoder
+  disconnects, every destination's output stops; that is
+  `ingest.disconnected`, said once, and no destination gets a `down`. This
+  holds for every ingest mode. Before this fix an SRT source, which has no
+  ingest process, sent a `destination.down` with `reason: "stalled"` for every
+  running destination after each show, and never sent `ingest.published` or
+  `ingest.disconnected`.
 
 `destination.held` is announced once per hold. A hold usually lands inside the
 10-second `down` dwell, so for a destination that was live the `held` follows

@@ -1242,6 +1242,38 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 	return md
 }
 
+// childlessIngestState is the scrape's ingest state for a programme whose
+// engine has no ingest process.
+//
+// AN SRT PROGRAMME NEVER HAS ONE. The manager's shared SRT listener hands
+// datagrams straight to the programme's relay hub, so reading the state off
+// the child alone reported every SRT programme stopped for its whole life:
+// polyemesis_ingest_up 0 while its encoder was pushing, and the "failed" half
+// of PolyemesisIngestDown unable to fire whatever happened to the port.
+//
+// The listener is that programme's ingest, so it carries the state, with the
+// same meaning an RTMP or pull child's state has: running while it is able to
+// receive -- waiting for the encoder or receiving it, which only the bitrate
+// tells apart -- failed when a port is configured and nothing is bound to it,
+// and stopped when the operator has turned the port off (port 0), which is a
+// decision rather than a fault and must not page.
+//
+// Every other mode's ingest IS its child, so with none it is stopped, as
+// before.
+func childlessIngestState(mode db.IngestMode, srtPort int, srtBound bool) supervisor.State {
+	if mode != db.IngestSRT {
+		return supervisor.StateStopped
+	}
+	switch {
+	case srtBound:
+		return supervisor.StateRunning
+	case srtPort == 0:
+		return supervisor.StateStopped
+	default:
+		return supervisor.StateFailed
+	}
+}
+
 // ingestSnapshots is one ingest-and-relay reading per running programme.
 //
 // Walked off the manager rather than read off the default engine, which is the
@@ -1281,6 +1313,13 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		if st.Ingest != nil {
 			in.State = string(st.Ingest.State)
 			in.Restarts = st.Ingest.Restarts
+		} else {
+			// No ingest process. For an SRT programme that is by design --
+			// the shared listener feeds the hub directly -- and the listener
+			// is then what carries the state. See childlessIngestState.
+			set := e.Settings()
+			in.State = string(childlessIngestState(set.Ingest.Mode, set.Listeners.SRTPort,
+				s.mgr.ListenerBound(db.IngestSRT)))
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps

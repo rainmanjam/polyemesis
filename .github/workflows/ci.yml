@@ -1970,6 +1970,26 @@ jobs:
       # and left a run with no jobs and no message.
       - run: actionlint -color -pyflakes= -shellcheck="$RUNNER_TEMP/shellcheck"
 
+  # The shipped Prometheus side, checked by promtool: deploy/prometheus/alerts.yml
+  # parses, its unit tests in alerts_test.yml pass, and every query on the
+  # Grafana dashboard parses as PromQL. internal/metrics/dashboard_drift_test.go
+  # checks the metric NAMES; nothing checked that the rules fire when they
+  # should and stay quiet between shows when they should, which is where the
+  # two engine bugs the #13 Grafana work found would have shown up first.
+  #
+  # The Prometheus image is pinned by its multi-arch index digest inside the
+  # script, so this job and a laptop run the same release; see the script for
+  # how to bump it. jq is on the runner image.
+  promtool:
+    name: prometheus rules
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/promtool-check.sh
+
   cross:
     name: cross-compile all release targets
     permissions:

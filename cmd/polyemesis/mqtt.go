@@ -12,6 +12,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/mqtt"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
+	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -50,6 +51,11 @@ type mqttEngine interface {
 	SourceName() string
 	Settings() db.Settings
 	Status() engine.Status
+	// IngestLive and Monitor are the bitrate-based reading of whether the
+	// programme is receiving, the one every other surface uses. An SRT source
+	// has no ingest process for Status().Ingest to describe.
+	IngestLive() bool
+	Monitor() *stats.Monitor
 
 	// ScrubDestinationText is on this interface, rather than being applied by
 	// the caller, because DestState.Error goes to a RETAINED topic (#160) and
@@ -315,17 +321,23 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 			Dests:       len(st.Destinations),
 			At:          now,
 		}
-		// Liveness from bytes on the relay, not from process state: an SRT or
-		// RTMP listener sits in "running" for as long as it waits for a
-		// publisher, which is a different question from whether the source is
-		// arriving.
-		src.Live = st.Relay.RxBytes > 0 && st.Ingest != nil &&
-			st.Ingest.State == supervisor.StateRunning
+		// Liveness from the relay's bitrate, not from process state: an RTMP
+		// ingest child sits in "running" for as long as it waits for a
+		// publisher, and an SRT source has no ingest process at all -- the
+		// shared listener feeds its hub directly. This was "RxBytes > 0 and the
+		// child is running", which read an SRT programme never live and an
+		// RTMP one live for ever after its first show (RxBytes is a total).
+		// IngestLive is the answer the dashboard, webhooks and alerts use.
+		src.Live = e.IngestLive()
 		if st.Ingest != nil {
 			src.IngestError = st.Ingest.LastError
 			src.UptimeSec = st.Ingest.UptimeSec
 			src.Restarts = st.Ingest.Restarts
 			src.BitrateKbps = st.Ingest.Progress.BitrateKbps
+		} else if b := e.Monitor().Bitrate(); len(b) > 0 {
+			// No child to report a bitrate: an SRT source. The relay's own
+			// 1 Hz sample, the figure the scrape publishes.
+			src.BitrateKbps = b[len(b)-1].Kbps
 		}
 		src.IngestMode = string(e.Settings().Ingest.Mode)
 		src.Recording = st.Recorder != nil && st.Recorder.State == supervisor.StateRunning

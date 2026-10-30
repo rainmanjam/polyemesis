@@ -265,13 +265,13 @@ func renderIngests(d *doc, ins []Ingest) {
 	sorted := sortedIngests(ins)
 
 	d.family("polyemesis_ingest_up", "gauge",
-		"1 when the programme's ingest process is running.")
+		"1 when the programme can receive: its ingest process is running, or for an SRT source the shared SRT listener is bound.")
 	for _, in := range sorted {
 		d.sample("polyemesis_ingest_up", boolValue(in.State == stateRunning), ingestIdent(in)...)
 	}
 
 	d.family("polyemesis_ingest_state", "gauge",
-		"Ingest process state; 1 for the state it is currently in.")
+		"Ingest state; 1 for the state it is currently in. An SRT source has no ingest process, and reads its shared listener: running while bound, failed when its port is not bound, stopped when the port is off.")
 	for _, in := range sorted {
 		for _, st := range processStates {
 			d.sample("polyemesis_ingest_state", boolValue(in.State == st),

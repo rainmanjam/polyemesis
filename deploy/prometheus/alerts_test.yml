@@ -82,8 +82,10 @@ tests:
         alertname: PolyemesisDestinationDown
         exp_alerts: []
 
-  # A programme with no engine, and one whose ingest failed. A listener waiting
-  # for its encoder (running, no bitrate) is neither.
+  # A programme with no engine, and one whose ingest failed (an ingest process
+  # that gave up, or an SRT programme whose listener is not bound -- the scrape
+  # reports both as state="failed"). A listener waiting for its encoder
+  # (running, no bitrate) is neither.
   - interval: 15s
     input_series:
       - series: 'polyemesis_source_engine_up{instance="pe",job="polyemesis",id="1",name="Main"}'
@@ -107,17 +109,17 @@ tests:
               summary: 'Programme "Main" cannot receive its stream'
               description: >-
                 Programme Main (id 1) has no running engine,
-                or its ingest process has failed and stopped retrying. Nothing an encoder
-                sends to it is being received. Check the server log and the programme's
-                ingest settings.
+                or its ingest has failed: its ingest process stopped retrying, or its
+                SRT listener is not bound. Nothing an encoder sends to it is being
+                received. Check the server log and the programme's ingest settings.
           - exp_labels: {severity: critical, instance: pe, job: polyemesis, id: "2", name: Studio B, state: failed}
             exp_annotations:
               summary: 'Programme "Studio B" cannot receive its stream'
               description: >-
                 Programme Studio B (id 2) has no running engine,
-                or its ingest process has failed and stopped retrying. Nothing an encoder
-                sends to it is being received. Check the server log and the programme's
-                ingest settings.
+                or its ingest has failed: its ingest process stopped retrying, or its
+                SRT listener is not bound. Nothing an encoder sends to it is being
+                received. Check the server log and the programme's ingest settings.
 
   # 1.5 GiB free of a 1 TiB volume: under the 2 GiB floor though far over 5%...
   # and 40 GiB of 1 TiB: under 5%. 100 GiB of 1 TiB: fine.

@@ -648,7 +648,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Whether anything is arriving for each programme, and whether the server has an engine running for it. Idle between shows is normal; a missing engine never is. Not polyemesis_ingest_up: a push ingest on the shared SRT/RTMP port has no ingest process of its own, so that series reads 0 while the stream arrives.",
+      "description": "Whether anything is arriving for each programme, and whether the server has an engine running for it. Idle between shows is normal; a missing engine never is. Not polyemesis_ingest_up: that says the programme is able to receive (its ingest process is running, or its SRT listener is bound) and stays 1 while the encoder is away.",
       "gridPos": {
         "h": 8,
         "w": 12,

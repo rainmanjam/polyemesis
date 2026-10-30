@@ -160,9 +160,7 @@ the one (`result`) that necessarily differs between its two sides, so it could
 never fire; it now reads `and ignoring(result)`, confirmed against this same
 Prometheus to actually match `failed` against `sent`.
 
-**The last is never normal.** `polyemesis_ingest_up` is 0 for a listener
-waiting on its streamer too, which is ordinary between shows.
-`polyemesis_source_engine_up` is 0 only when a configured programme has no
+**The last is never normal.** `polyemesis_source_engine_up` is 0 only when a configured programme has no
 engine at all: its ingest failed to build or to start, the server logged it and
 kept the other programmes on air. Nothing is receiving that programme's
 stream and no built-in alert can fire for it, because the alert watcher runs
@@ -190,9 +188,8 @@ stalled.
 **A lost ingest is not a destination stalling.** While the ingest is lost,
 every destination's output stops because there is nothing to send. That is
 `polyemesis_ingest_bitrate_bits_per_second` 0 for that programme, said once.
-It is not `polyemesis_ingest_up` 0: `_up` says the ingest process is running,
-and an SRT or RTMP listener goes on running while it waits for a publisher
-that has gone away. A destination stays `_up` 1 and
+It is not `polyemesis_ingest_up` 0: `_up` says the programme is able to
+receive, and it stays 1 while it waits for a publisher that has gone away. A destination stays `_up` 1 and
 `_stalled` 0 through it, and it has no warning, so the alert above does not
 fire once per destination for one missing source. The process itself still
 reports `"stalled": true` in `/api/v1/status`, and its bitrate reads 0, because
@@ -223,9 +220,20 @@ of it times 8 is the bitrate actually being sent now. Both reset with the
 process, which `rate()` handles.
 
 **The first watches the bitrate, not `polyemesis_ingest_up`.** `_up` is 1 while
-the ingest process is running, and an SRT or RTMP listener runs the whole time
-it waits for OBS. A publisher that disconnects leaves it at 1, so
+the programme is able to receive, which includes the whole time it waits for
+OBS. A publisher that disconnects leaves it at 1, so
 `polyemesis_ingest_up == 0` never fires for the most common way a stream ends.
+
+**What `_up` and `_state` mean for each ingest mode.** An RTMP or pull source
+has an FFmpeg ingest process, and the ingest series are that process's state.
+An SRT source has none: the shared SRT listener hands the stream straight to
+the programme. Its ingest series read the listener instead. They are
+`running` (`_up` 1) while the listener is bound, whether or not an encoder is
+connected. They are `failed` when the SRT port is configured but nothing is
+bound to it, for example because another process holds the port. They are
+`stopped` when the SRT port is turned off (`0`). Before this, an SRT
+programme read `_up` 0 and `stopped` even while its encoder was pushing, and
+`PolyemesisIngestDown` could not fire for it.
 The bitrate is what arrives at the relay, sampled every second, and it reads 0
 when nothing does.
 
@@ -461,7 +469,7 @@ difference between an alert and a mute button.
 
 | Event | Severity | Fires when |
 |---|---|---|
-| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state |
+| `ingest.lost` | `critical` | no data has arrived on a programme's ingest for **20 seconds**. Longer than a supervisor restart cycle on purpose: FFmpeg reconnecting to an RTMP endpoint is normal operation, not an incident. Nothing is raised when no ingest is configured at all — silence is then the expected state. An SRT source counts as configured although it has no ingest process, the same as an RTMP or pull source; before this fix `ingest.lost` never fired for SRT. Like RTMP and pull, it also fires once if nothing has arrived 20 seconds after the server starts |
 | `ingest.recovered` | `info` | the source is delivering again |
 | `destination.down` | `critical` | an **enabled** destination has not been delivering for **20 seconds**. A destination you turned off is not down, and turning it back on starts the clock fresh rather than firing on the time it spent disabled |
 | `destination.recovered` | `info` | it is delivering again |

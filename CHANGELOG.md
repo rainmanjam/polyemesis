@@ -201,6 +201,38 @@ its first tagged release.
 
 ### Fixed
 
+- **An SRT programme's healthy destinations no longer read as stalled after a
+  show.** An SRT source has no ingest process, because the shared SRT listener
+  feeds the programme directly, and the server took "no ingest process" to
+  mean "no ingest". So when the encoder disconnected, every running
+  destination was blamed for its own stopped output:
+  `polyemesis_destination_up` 0, `_stalled` 1 and a stall warning on its card,
+  and a `destination.down` with `reason: "stalled"` per destination on
+  webhooks and the events stream. A source that stops is now the ingest's
+  news for SRT as well as RTMP and pull. A destination that stops while its
+  source is still arriving is still reported as stalled.
+  - As a result, SRT sources now get the ingest events RTMP and pull sources
+    already had. These are the `ingest.lost` and `ingest.recovered` built-in
+    alerts, and the `ingest.published` and `ingest.disconnected` webhooks and
+    stream events. Like RTMP and pull, `ingest.lost` also fires once when
+    nothing has arrived 20 seconds after the server starts.
+
+- **An SRT programme's ingest metrics describe its listener.**
+  `polyemesis_ingest_up` was 0 and `polyemesis_ingest_state` was `stopped`
+  for every SRT programme, even while the stream was arriving, so the
+  `failed` half of `PolyemesisIngestDown` could never fire for one. They now
+  read the shared SRT listener: `running` while it is bound, `failed` when
+  the SRT port is configured and nothing is bound, and `stopped` when the port
+  is turned off. MQTT's `live` is now whether the stream is arriving. It had
+  read `false` for SRT throughout, and `true` for RTMP from the first show
+  onwards. An SRT programme's MQTT bitrate is the relay's.
+
+- **CI runs the Prometheus rule tests.** A `prometheus rules` job runs
+  `promtool check rules` and `promtool test rules` on
+  `deploy/prometheus/alerts.yml`, and checks that every query on the Grafana
+  dashboard parses (`scripts/promtool-check.sh`, Prometheus 3.15.0 pinned by
+  digest).
+
 - **The site no longer makes two different time-to-first-stream claims.** The
   home and download pages said about five minutes and the features page two,
   and neither was measured. Both figures are gone, and a guard keeps a step

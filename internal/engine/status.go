@@ -254,6 +254,12 @@ type Status struct {
 	// chose not to plan; its ABSENCE says only that this particular reason does
 	// not apply, never that a missing process is therefore a fault.
 	DestinationHold *HoldStatus `json:"destinationHold,omitempty"`
+
+	// ingestConfigured is decided once, in Status, for every reader of this
+	// snapshot: the destinations' stall verdict above and alertSnapshot, which
+	// feeds the alert, webhook and events watchers. Two derivations are how
+	// the card and the hook could come to disagree. See ingestConfigured.
+	ingestConfigured bool
 }
 
 // HoldStatus is why the engine is deliberately running no destinations.
@@ -388,6 +394,9 @@ func (e *Engine) Status() Status {
 		retiring[id] = d
 	}
 	source := e.sourceInfoLocked()
+	// Under the same lock as e.ingest, so the mode and the child are one
+	// instant: a mode change swaps both inside reconcileIngest.
+	configured := ingestConfigured(ingest != nil, e.settings.Ingest.Mode)
 	e.mu.RUnlock()
 
 	// Read outside the lock: it is published atomically by reconcileOutputs and
@@ -418,7 +427,7 @@ func (e *Engine) Status() Status {
 		primary = e.mon.Bitrate()
 	}
 	sourceLive := sourceLiveFor(primary, st.Failover, time.Now())
-	ingestConfigured := st.Ingest != nil
+	st.ingestConfigured = configured
 
 	names := make(map[int64]string, len(st.Renditions))
 	for _, r := range st.Renditions {
@@ -565,8 +574,8 @@ func (e *Engine) Status() Status {
 			if w := passthroughCodecWarning(row.Kind, row.Platform, row.RenditionID, source.Video); w != "" {
 				ds.Warnings = append(slices.Clip(ds.Warnings), w)
 			}
-			ds.Stalled = destinationStalled(ds.Process, ingestConfigured, sourceLive)
-			if ds.Reason = destinationReason(ds.Process, ingestConfigured, sourceLive, time.Now()); ds.Reason != nil &&
+			ds.Stalled = destinationStalled(ds.Process, st.ingestConfigured, sourceLive)
+			if ds.Reason = destinationReason(ds.Process, st.ingestConfigured, sourceLive, time.Now()); ds.Reason != nil &&
 				ds.Reason.Cause == failreason.KeyRejected {
 				// Only for a refused key: that is the one failure a rotated key
 				// explains, and the check costs a platform API call.
@@ -579,6 +588,25 @@ func (e *Engine) Status() Status {
 		}
 	}
 	return st
+}
+
+// ingestConfigured is whether this programme has an ingest that can be lost:
+// something that, while it is not arriving, explains every destination's
+// output standing still.
+//
+// AN SRT SOURCE HAS ONE AND HAS NO INGEST PROCESS. The shared SRT listener
+// hands datagrams straight to the relay hub (reconcileIngest returns early for
+// SRT), so st.Ingest is nil for it by design. Reading "configured" off that nil
+// was the defect: after an SRT encoder disconnected every healthy destination
+// read stalled -- up=0, _stalled=1 and a warning per card -- the webhooks and
+// the events stream sent destination.down "stalled" for each, and the alert
+// and hook ingest watchers never ran for SRT at all.
+//
+// RTMP and pull keep the old reading: their hub is fed only by the child, so a
+// source of either mode with no child (no publish token, a refused upload) has
+// nothing that could be arriving. Unset has nothing to listen with.
+func ingestConfigured(child bool, mode db.IngestMode) bool {
+	return child || mode == db.IngestSRT
 }
 
 // destinationStalled is DestStatus.Stalled: the process is running with its

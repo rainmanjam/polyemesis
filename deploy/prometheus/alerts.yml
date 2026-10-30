@@ -19,9 +19,9 @@ groups:
       # "running AND output moving", so a stalled sink counts.
       #
       # ONLY WHILE ITS PROGRAMME IS RECEIVING. Between shows nothing arrives
-      # and every destination is idle, which is not an outage; and a push
-      # ingest on the shared SRT/RTMP port can leave a destination reading
-      # up=0, stalled=1 once its encoder disconnects. The join goes through
+      # and a destination may be idle or stopped on purpose, which is not an
+      # outage. (A running destination whose encoder has gone reads up=1: a
+      # lost source is not a destination stalling.) The join goes through
       # _info's source_id because destination ids and programme ids are
       # different numbering.
       #
@@ -48,9 +48,11 @@ groups:
             Held: {{ with printf "polyemesis_destination_held{instance=%q,id=%q} == 1" $labels.instance $labels.id | query }}yes -- press Retry on its card once the cause is fixed{{ else }}no{{ end }}.
 
       # A programme the server is not able to receive at all: its engine failed
-      # to build or start, or its ingest process gave up. NOT ingest_up == 0
-      # alone, and not a zero bitrate: an SRT or RTMP listener runs while it
-      # waits for the encoder, and a zero bitrate is every gap between shows.
+      # to build or start, its ingest process gave up, or -- for an SRT source,
+      # which has no ingest process -- the shared SRT listener is not bound on
+      # its configured port. NOT ingest_up == 0 alone: a programme whose SRT
+      # port is turned off reads 0 on purpose. And not a zero bitrate: that is
+      # every gap between shows.
       - alert: PolyemesisIngestDown
         expr: |
           polyemesis_source_engine_up == 0
@@ -62,9 +64,9 @@ groups:
           summary: 'Programme "{{ $labels.name }}" cannot receive its stream'
           description: >-
             Programme {{ $labels.name }} (id {{ $labels.id }}) has no running engine,
-            or its ingest process has failed and stopped retrying. Nothing an encoder
-            sends to it is being received. Check the server log and the programme's
-            ingest settings.
+            or its ingest has failed: its ingest process stopped retrying, or its
+            SRT listener is not bound. Nothing an encoder sends to it is being
+            received. Check the server log and the programme's ingest settings.
 
       # The same floor as the built-in disk.low alert: 2 GiB free or under 5% of
       # the volume. Recording stops when the volume fills.
