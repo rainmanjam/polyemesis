@@ -57,10 +57,12 @@ var maxVolumeRE = regexp.MustCompile(`max_volume: (-?[0-9.]+|-inf) dB`)
 // maxVolume is the loudest sample of wav in [from, from+dur) seconds, in dB. A
 // negative from counts back from the end of the file.
 //
-// The END, for "after the format change", rather than a fixed time: the
-// production graph's aresample=...:async=1:first_pts=0 pads silence when the
-// graph is rebuilt, so the post-change audio lands later in the file than it
-// sits in the input, and a fixed window would measure that padding.
+// The END, for "after the format change", rather than a fixed time. The
+// production graph used to end in aresample=...:async=1:first_pts=0, which pads
+// silence when the graph is rebuilt and pushed the post-change audio later in
+// the file than it sits in the input. That padding was the audio-drift fault
+// (routing's reinit_drift_test.go). Measuring from the end stays correct either
+// way, and a multi-track graph's legs still pad.
 func maxVolume(t *testing.T, ffmpegBin, wav string, from, dur float64) float64 {
 	t.Helper()
 	seek := []string{"-ss", strconv.FormatFloat(from, 'f', 2, 64)}

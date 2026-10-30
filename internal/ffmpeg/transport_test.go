@@ -8,7 +8,7 @@ import (
 func transportDest(kind DestKind, target string, t TransportSpec) []string {
 	return DestinationArgs(DestSpec{
 		Kind: kind, Target: target, RelayURL: "udp://127.0.0.1:20001",
-		FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[a_t0]aresample=48000:async=1:first_pts=0[aout]",
+		FilterComplex: "[0:a:0]pan=stereo|c0=1*c0|c1=1*c1[a_t0];[a_t0]aresample=48000:async=1[aout]",
 		AudioBitrate:  160, CopyVideo: true, Transport: t,
 	})
 }
