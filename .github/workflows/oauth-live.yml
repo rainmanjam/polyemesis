@@ -17,8 +17,9 @@
 #   - Google stops advertising the refresh_token grant, or moves the token
 #     endpoint. Every connected YouTube account keeps working until its access
 #     token expires, and then all of them stop at once.
-#   - Twitch documents PKCE support, at which point twitch.go's reason for
-#     keeping it off stops being true.
+#   - Twitch stops advertising S256 PKCE. It began advertising it on
+#     2026-10-19 -- this workflow caught that and twitch.go turned PKCE on --
+#     so a withdrawal would start refusing every new Twitch sign-in.
 #   - Kick starts publishing authorization-server metadata, at which point its
 #     endpoints can be compared the way Google's are instead of probed.
 #

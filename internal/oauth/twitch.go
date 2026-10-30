@@ -80,15 +80,6 @@ func (t *Twitch) Scopes() []string {
 	}
 }
 
-// PKCE is off, and the challenge/verifier arguments below are deliberately
-// discarded. Twitch's authorization-code documentation enumerates an exact
-// parameter set (client_id, force_verify, redirect_uri, response_type, scope,
-// state) and says nothing about RFC 7636; nothing published tells us whether
-// its /authorize endpoint tolerates an unknown code_challenge or rejects the
-// request. Sending one on a hunch would break Twitch sign-in for everyone, so
-// this stays off until Twitch documents support. The flow is still a
-// confidential client: the secret never leaves the server, the code is bound to
-// a whitelisted redirect URI, and the state is single-use.
 // ScopeVersion 4 adds the three moderation scopes to the set: stream key,
 // channel write, the two chat scopes, message deletion, bans, and the
 // channel-wide chat settings (slow mode, follower-only, moderator delay).
@@ -100,9 +91,44 @@ func (t *Twitch) Scopes() []string {
 // button fails on the message they needed gone.
 func (t *Twitch) ScopeVersion() int { return 4 }
 
-func (t *Twitch) PKCE() bool { return false }
+// PKCE is on, and it is ADDITIVE: the flow stays a confidential client that
+// sends its client_secret on every token request, and the code_verifier rides
+// alongside it.
+//
+// It was off for as long as Twitch published nothing about RFC 7636, on the
+// argument that a code_challenge sent to an /authorize that validates its query
+// string strictly would lock every operator out of sign-in. That argument had a
+// premise, and scripts/acceptance-oauth.sh step 2 checked it weekly against
+// Twitch's own discovery document. On 2026-10-19 the document at
+// id.twitch.tv/oauth2/.well-known/openid-configuration started advertising
+// code_challenge_methods_supported: ["S256"], and the suite failed on main with
+// the instruction it was written to give: turn PKCE on.
+//
+// What is and is not written down, as of 2026-10-30, so the next reader does
+// not have to re-derive it:
+//
+//   - The discovery document (RFC 8414 / OIDC metadata, Twitch's machine-
+//     readable statement of what its authorization server accepts) lists S256
+//     as the one supported method.
+//   - The same document lists client_secret_post as the ONLY token endpoint
+//     auth method, and the prose token documentation marks client_secret
+//     required for this grant. So the secret is kept, not replaced -- PKCE with
+//     a secret is the only combination Twitch describes for a server app.
+//   - The prose "Authorization code grant flow" page still enumerates no PKCE
+//     parameter. It is silent, not contradictory.
+//
+// The live suite now asserts the conjunction -- S256 advertised, PKCE() true,
+// and the consent URL actually carrying code_challenge_method=S256 -- so the
+// week Twitch stops advertising it, this fails loudly instead of sign-in
+// failing quietly.
+//
+// Accounts connected before this change are untouched: PKCE binds an
+// authorization code and nothing else, Refresh below sends no verifier, and a
+// state issued before the deploy (stored with an empty verifier) still
+// exchanges without one -- see the guards in AuthURL and Exchange.
+func (t *Twitch) PKCE() bool { return true }
 
-func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {
+func (t *Twitch) AuthURL(clientID, redirectURI, state, challenge string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
@@ -113,17 +139,31 @@ func (t *Twitch) AuthURL(clientID, redirectURI, state, _ string) string {
 	// reuses the browser's logged-in account, so connecting a second channel is
 	// impossible.
 	q.Set("force_verify", "true")
+	// Guarded rather than unconditional: the handler passes no challenge for a
+	// provider that does not opt in, and an empty code_challenge= is a
+	// malformed request where an absent one is merely a non-PKCE one.
+	if challenge != "" {
+		q.Set("code_challenge", challenge)
+		q.Set("code_challenge_method", "S256")
+	}
 	return t.authBase(twitchIDBase) + "/oauth2/authorize?" + q.Encode()
 }
 
-func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, _ string) (*Token, error) {
-	return postForm(ctx, t.tokenEndpoint(), url.Values{
+func (t *Twitch) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error) {
+	form := url.Values{
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
 		"redirect_uri":  {redirectURI},
-	}, nil)
+	}
+	// Empty for a state issued before PKCE was switched on: that code was
+	// minted without a challenge, so sending an empty verifier would fail an
+	// exchange that omitting it lets through.
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
+	return postForm(ctx, t.tokenEndpoint(), form, nil)
 }
 
 func (t *Twitch) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
