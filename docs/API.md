@@ -386,6 +386,8 @@ tokens are for.
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
+| `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
+| `GET` | `/overlay/events` | A chat overlay's display stream (SSE). Needs its overlay key in `X-Overlay-Key` |
 
 Both of these, and the media origin at `/playout/*`, sit outside every
 authenticated group — a viewer has no account and never will — and are guarded
@@ -498,6 +500,9 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 | `POST` | `/auth/password` |
 | `GET` `POST` | `/auth/tokens` |
 | `DELETE` | `/auth/tokens/{id}` |
+| `GET` `POST` | `/overlays` |
+| `PUT` `DELETE` | `/overlays/{id}` |
+| `POST` `DELETE` | `/overlays/{id}/key` |
 | `GET` | `/tour` |
 | `POST` | `/tour/complete` |
 
@@ -505,6 +510,13 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 `{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
 `adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
 pairing client should say so when it is pasted. A status or meter plugin needs only a read token.
+
+`/overlays` manages chat overlays and their keys, and needs a signed-in
+session, like `/auth/tokens`: each overlay carries a credential. `POST
+/overlays/{id}/key` rotates the key and `DELETE` revokes it; either ends open
+overlays within seconds. The overlay key itself reaches only the two
+`/overlay/*` routes above, and no other route accepts it. See
+[OVERLAY.md](OVERLAY.md).
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not

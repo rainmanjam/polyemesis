@@ -28,6 +28,8 @@ type stubModerator struct {
 	// is cancelled -- which is how a real HTTP client behaves and what lets a
 	// test observe a worker mid-call.
 	modelBlock chan struct{}
+	// modelErr, when set, is what CheckModel fails with.
+	modelErr error
 }
 
 func (s *stubModerator) CheckFast(p db.Platform, authorID, text string) automod.Verdict {
@@ -44,7 +46,11 @@ func (s *stubModerator) CheckModel(ctx context.Context, p db.Platform, text stri
 	s.modelSeen = append(s.modelSeen, text)
 	block := s.modelBlock
 	v := s.modelVerdict
+	merr := s.modelErr
 	s.mu.Unlock()
+	if merr != nil {
+		return automod.Verdict{}, merr
+	}
 
 	if block != nil {
 		select {

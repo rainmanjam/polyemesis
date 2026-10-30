@@ -65,6 +65,18 @@ const PublicPlayer = lazy(() =>
   import("@/pages/PublicPlayer").then((m) => ({ default: m.PublicPlayer })),
 );
 
+const OverlayPage = lazy(() =>
+  import("@/pages/OverlayPage").then((m) => ({ default: m.OverlayPage })),
+);
+
+/** Whether this page load is the chat overlay or its dock (/overlay,
+ *  /overlay/dock): an OBS browser source with no session, decided before the
+ *  gate for the same reason as the player. */
+function isOverlayRoute(): boolean {
+  const p = window.location.pathname.replace(/\/+$/, "");
+  return p === "/overlay" || p === "/overlay/dock";
+}
+
 /** Whether this page load is the public player.
  *
  *  Read from the raw location rather than from a route, because the decision has
@@ -96,9 +108,10 @@ export default function App() {
   // Fixed for the life of the page: a viewer never navigates out of /watch, and
   // an admin never navigates into it without a full reload.
   const [watching] = useState(isWatchRoute);
+  const [overlaid] = useState(isOverlayRoute);
 
   const resolveGate = useCallback(async () => {
-    if (watching) return;
+    if (watching || overlaid) return;
     try {
       const { needsSetup } = await api.setupStatus();
       if (needsSetup) {
@@ -116,7 +129,7 @@ export default function App() {
       // "show the login screen" rather than a dead white page.
       setGate({ phase: "login" });
     }
-  }, [watching]);
+  }, [watching, overlaid]);
 
   useEffect(() => {
     void resolveGate();
@@ -147,6 +160,16 @@ export default function App() {
 
   // Ahead of every gate: no session, no setup check, no toaster, no live-data
   // socket. A viewer following a shared link gets the player and nothing else.
+  // The chat overlay: before every gate, like the player, and with no fallback
+  // spinner -- anything drawn here is drawn on stream.
+  if (overlaid) {
+    return (
+      <LazyBoundary fallback={null}>
+        <OverlayPage />
+      </LazyBoundary>
+    );
+  }
+
   if (watching) {
     return (
       <LazyBoundary fallback={<RouteFallback />}>

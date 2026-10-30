@@ -49,6 +49,9 @@ const (
 	TopicChat        Topic = "chat"
 	TopicAlert       Topic = "alert"
 	TopicStream      Topic = "stream"
+	// TopicOverlay is the display projection of chat that an OBS overlay key
+	// may read: see DisplayLine and OverlayVisible.
+	TopicOverlay Topic = "overlay"
 )
 
 // Event types. The destination and ingest names are the webhook trigger names
@@ -71,6 +74,8 @@ const (
 	TypeChatMessage           Type = "chat.message"
 	TypeChatRetract           Type = "chat.retract"
 	TypeChatModeration        Type = "chat.moderation"
+	TypeChatDisplay           Type = "chat.display"
+	TypeChatUndisplay         Type = "chat.undisplay"
 	TypeAlert                 Type = "alert"
 	TypeStreamGap             Type = "stream.gap"
 )
@@ -156,6 +161,14 @@ var catalogue = []Spec{
 	{TypeChatRetract, TopicChat, Withheld, "Chat messages that were delivered are gone: deleted, hidden, or swept by a ban.", nil},
 	{TypeChatModeration, TopicChat, Withheld, "A moderation action was taken, by an operator or by automod.", nil},
 
+	// The overlay's projection of chat (internal/overlay). A line is published
+	// only once automod has judged the message and let it stand, carries no
+	// author id, account, channel or moderation data, and is the one thing an
+	// overlay key can read (OverlayVisible). Withheld from read tokens because
+	// it is still chat a viewer wrote under their name.
+	{TypeChatDisplay, TopicOverlay, Withheld, "A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows.", nil},
+	{TypeChatUndisplay, TopicOverlay, Withheld, "Chat lines that were cleared for display are gone and must leave the screen.", nil},
+
 	// Operator alerts, fired and resolved, after alerts.Event.Redacted. A read
 	// token gets the ones GET /timeline already shows it and no others: the
 	// audit half of the alert catalogue is not on the timeline, and a stream
@@ -164,6 +177,53 @@ var catalogue = []Spec{
 
 	// The stream's own bookkeeping. Carries no data from anywhere else.
 	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST.", nil},
+}
+
+// overlayVisible is THE CLOSED SET an overlay key may read. Not derived from a
+// topic or from ReadScope: what a key pasted into an OBS URL can see is decided
+// here, by name, and TestOnlyTheOverlayRowsAreOverlayVisible pins it.
+var overlayVisible = map[Type]bool{
+	TypeChatDisplay:   true,
+	TypeChatUndisplay: true,
+}
+
+// OverlayVisible reports whether an overlay key may be sent t.
+func OverlayVisible(t Type) bool { return overlayVisible[t] }
+
+// DisplayLine is one chat line as an overlay shows it. AN ALLOWLIST, not a
+// chat.Message with fields blanked: anything not named here cannot reach an
+// overlay, whatever is added to the message later. There is deliberately no
+// author id, account, channel, reply target or moderation field.
+type DisplayLine struct {
+	// ID is opaque and per-process: a hash of the platform's message key, so
+	// the platform's ids and the operator's account refs stay off the wire.
+	ID       string `json:"id"`
+	Platform string `json:"platform"`
+	// Name is the author's display name, which every viewer already sees.
+	Name        string         `json:"name"`
+	Color       string         `json:"color,omitempty"`
+	Badges      []DisplayBadge `json:"badges,omitempty"`
+	Moderator   bool           `json:"moderator,omitempty"`
+	Subscriber  bool           `json:"subscriber,omitempty"`
+	Broadcaster bool           `json:"broadcaster,omitempty"`
+	Text        string         `json:"text"`
+	Action      bool           `json:"action,omitempty"`
+	At          time.Time      `json:"at"`
+}
+
+// DisplayBadge is a badge as the platform shows it publicly.
+type DisplayBadge struct {
+	ID      string `json:"id"`
+	Version string `json:"version,omitempty"`
+	Label   string `json:"label,omitempty"`
+}
+
+// DisplayRemoval takes lines off the screen. One platform per removal, so a
+// platform-filtered overlay is not even told how many lines another platform
+// lost.
+type DisplayRemoval struct {
+	Platform string   `json:"platform"`
+	IDs      []string `json:"ids"`
 }
 
 // Catalogue returns every emitted type, in the order docs/EVENTS.md lists them.

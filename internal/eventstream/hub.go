@@ -93,12 +93,13 @@ type Subscription struct {
 	// C carries events in order. It is CLOSED when the hub disconnects a
 	// client that fell DefaultClientBuffer behind; the handler then ends the
 	// response and the client resumes with Last-Event-ID.
-	C      <-chan Envelope
-	c      chan Envelope
-	topics map[Topic]bool
-	read   bool
-	hub    *Hub
-	closed bool
+	C       <-chan Envelope
+	c       chan Envelope
+	topics  map[Topic]bool
+	read    bool
+	overlay *overlayPolicy
+	hub     *Hub
+	closed  bool
 	// Overflowed reports, after C is closed, whether the hub closed it.
 	overflowed atomic.Bool
 }
@@ -113,6 +114,59 @@ type Filter struct {
 	Topics []Topic
 	// ReadScoped withholds every type whose Spec says Withheld.
 	ReadScoped bool
+	// Overlay, when set, makes this an overlay key's subscription: it is sent
+	// the OverlayVisible types for its platforms and NOTHING ELSE. It
+	// overrides Topics and ReadScoped rather than combining with them, so no
+	// combination of query parameters can widen it.
+	Overlay *OverlayView
+}
+
+// OverlayView is what one overlay may see.
+type OverlayView struct {
+	// Platforms limits the overlay to these platforms; empty means all.
+	Platforms []string
+}
+
+// overlayPolicy is an OverlayView compiled for the fan-out.
+type overlayPolicy struct{ platforms map[string]bool }
+
+func (f Filter) overlayPolicy() *overlayPolicy {
+	if f.Overlay == nil {
+		return nil
+	}
+	p := &overlayPolicy{}
+	if len(f.Overlay.Platforms) > 0 {
+		p.platforms = map[string]bool{}
+		for _, pl := range f.Overlay.Platforms {
+			p.platforms[pl] = true
+		}
+	}
+	return p
+}
+
+// displayPlatform reads the platform off a display payload, or "" when the
+// payload is not one -- which the overlay policy treats as "withhold".
+func displayPlatform(env Envelope) string {
+	switch d := env.Data.(type) {
+	case DisplayLine:
+		return d.Platform
+	case DisplayRemoval:
+		return d.Platform
+	}
+	return ""
+}
+
+// admits is the overlay policy, and it fails closed twice: a type outside the
+// closed set is withheld, and so is a payload whose platform cannot be read.
+func (p *overlayPolicy) admits(env Envelope) bool {
+	if !OverlayVisible(env.Type) {
+		return false
+	}
+	pl := displayPlatform(env)
+	if pl == "" {
+		return false
+	}
+	return p.platforms == nil || p.platforms[pl]
 }
 
 func (f Filter) topicSet() map[Topic]bool {
@@ -129,10 +183,13 @@ func (f Filter) topicSet() map[Topic]bool {
 // wants is the per-connection policy, and it FAILS CLOSED: a type with no
 // catalogue row is sent to nobody, read-scoped or not. Publish refuses such a
 // type before it reaches here, so this is the net under that guard.
-func wants(topics map[Topic]bool, readScoped bool, env Envelope) bool {
+func wants(topics map[Topic]bool, readScoped bool, overlay *overlayPolicy, env Envelope) bool {
 	spec, ok := Lookup(env.Type)
 	if !ok {
 		return false
+	}
+	if overlay != nil {
+		return overlay.admits(env)
 	}
 	if readScoped {
 		switch spec.ReadScope {
@@ -191,7 +248,7 @@ func (h *Hub) Publish(env Envelope) {
 	h.ring = append(h.ring, env)
 	h.pruneLocked(now)
 	for s := range h.subs {
-		if !wants(s.topics, s.read, env) {
+		if !wants(s.topics, s.read, s.overlay, env) {
 			continue
 		}
 		select {
@@ -254,19 +311,20 @@ func (h *Hub) Subscribe(f Filter, lastID string) (sub *Subscription, replay []En
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	topics := f.topicSet()
+	overlay := f.overlayPolicy()
 	if lastID != "" {
 		from, ok := h.resumeIndexLocked(lastID)
 		if !ok {
 			gap = true
 		}
 		for _, env := range h.ring[from:] {
-			if wants(topics, f.ReadScoped, env) {
+			if wants(topics, f.ReadScoped, overlay, env) {
 				replay = append(replay, env)
 			}
 		}
 	}
 	c := make(chan Envelope, h.buffer)
-	sub = &Subscription{C: c, c: c, topics: topics, read: f.ReadScoped, hub: h}
+	sub = &Subscription{C: c, c: c, topics: topics, read: f.ReadScoped, overlay: overlay, hub: h}
 	h.subs[sub] = struct{}{}
 	h.listeners.Add(1)
 	return sub, replay, gap
@@ -355,6 +413,19 @@ func (e Envelope) redacted() Envelope {
 		a = a.Redacted()
 		a.Key = alerts.Redact(a.Key)
 		e.Data = a
+		return e
+	}
+	// The display projection keeps its TYPE, because the overlay policy reads
+	// the platform off it and a map would be withheld from every overlay. Its
+	// free text gets the same text redactor the tree pass would apply; it has
+	// no field named after a secret for the tree pass to mask.
+	switch d := e.Data.(type) {
+	case DisplayLine:
+		d.Name = alerts.Redact(d.Name)
+		d.Text = alerts.Redact(d.Text)
+		e.Data = d
+		return e
+	case DisplayRemoval:
 		return e
 	}
 	if e.Data != nil {

@@ -600,3 +600,22 @@ CREATE TABLE IF NOT EXISTS timeline_events (
     subject  TEXT    NOT NULL DEFAULT ''  -- the alert key; MigrateTimelineSubject
 );
 CREATE INDEX IF NOT EXISTS idx_timeline_events_at ON timeline_events(at, id);
+
+-- Chat overlays (OBS browser sources and docks). One row per overlay: a name,
+-- the platforms it shows, its style, and the key its URL carries.
+--
+-- overlay_key is stored in plaintext, like sources.token and for the same
+-- reason: it is pasted into OBS as part of a URL and the operator comes back to
+-- copy that URL again. It is a DISPLAY-ONLY credential -- it reaches the
+-- overlay's own config and display stream and nothing else (internal/api,
+-- overlays.go) -- and an empty string means revoked.
+CREATE TABLE IF NOT EXISTS chat_overlays (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL,
+    overlay_key    TEXT    NOT NULL DEFAULT '',
+    platforms      TEXT    NOT NULL DEFAULT '[]',  -- JSON array; empty = every platform
+    style          TEXT    NOT NULL DEFAULT '{}',  -- JSON overlay.Style
+    created_at     INTEGER NOT NULL,
+    key_rotated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_overlays_key ON chat_overlays(overlay_key) WHERE overlay_key != '';

@@ -597,8 +597,11 @@ var excusedRoutes = map[string]coverageExcus{
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
 	"GET /api/v1/auth/tokens": sessionOnly(),
-	"GET /hls/*":              sessionOnly(),
-	"HEAD /hls/*":             sessionOnly(),
+	// The overlay list carries every overlay's key, so it is the tokens list's
+	// sibling and has the same posture.
+	"GET /api/v1/overlays": sessionOnly(),
+	"GET /hls/*":           sessionOnly(),
+	"HEAD /hls/*":          sessionOnly(),
 	// Source-qualified preview. Same posture as the bare alias above: a session
 	// is required and nothing else, because it serves one programme's preview
 	// segments rather than any record.
@@ -647,8 +650,29 @@ var excusedRoutes = map[string]coverageExcus{
 		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
 		Counterpart: "playoutManifestBytes",
 	},
-	"ANY /watch":     spa(),
-	"ANY /watch/*":   spa(),
+	"ANY /watch":   spa(),
+	"ANY /watch/*": spa(),
+	// The chat overlay and dock pages: the same SPA bundle, sessionless.
+	"GET /overlay":      spa(),
+	"GET /overlay/dock": spa(),
+	// The overlay key's two routes. Outside every auth group, and a read
+	// token is nothing to them: without the overlay's own key in its own
+	// header every principal gets the same 401. The counterparts open them
+	// WITH the key and show it reaches no credential.
+	"GET /api/v1/overlay/config": {
+		Why: "unauthenticated by necessity: an OBS browser source has no session, and " +
+			"the overlay key in X-Overlay-Key is the whole credential. Without it every " +
+			"principal, read token included, gets the same 401.",
+		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+		Counterpart: "overlayConfig",
+	},
+	"GET /api/v1/overlay/events": {
+		Why: "the overlay's display stream (SSE), keyed by X-Overlay-Key alone. Without " +
+			"the key every principal gets the same 401; with it the stream never ends, " +
+			"so the body sweep cannot read it and the counterpart does.",
+		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+		Counterpart: "overlayDisplayStream",
+	},
 	"ANY /playout/*": publicOrigin(),
 
 	// Unauthenticated by necessity: these are how a caller BECOMES a principal,
@@ -1166,6 +1190,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"notFoundSurfaceIsPrincipalIndependent": proveNotFoundSurface,
 	"sourcePreviewManifest":                 proveSourcePreviewManifest,
 	"previewTiles":                          provePreviewTiles,
+	"overlayConfig":                         proveOverlayConfig,
+	"overlayDisplayStream":                  proveOverlayDisplayStream,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

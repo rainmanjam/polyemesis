@@ -175,6 +175,8 @@ real producer, to actually be emitted.
 | `chat.message` | chat | no | A chat message arrived from any connected platform. |
 | `chat.retract` | chat | no | Chat messages that were delivered are gone: deleted, hidden, or swept by a ban. |
 | `chat.moderation` | chat | no | A moderation action was taken, by an operator or by automod. |
+| `chat.display` | overlay | no | A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows. |
+| `chat.undisplay` | overlay | no | Chat lines that were cleared for display are gone and must leave the screen. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
@@ -281,6 +283,22 @@ actions are not announced.
 
 `action` is one of `delete`, `hide`, `unhide`, `hide_local`, `ban`, `timeout`
 or `unban`. `by` is `operator` or `automod`.
+
+### Overlay
+
+The `overlay` topic is the chat overlay's display projection (see
+[OVERLAY.md](OVERLAY.md)). It is the only thing an overlay key can read, on
+`GET /api/v1/overlay/events`; an admin session or token can also subscribe to
+it here. Read tokens are refused it, as they are refused chat.
+
+- `chat.display` is `{id, platform, name, color?, badges?, moderator?,
+  subscriber?, broadcaster?, text, action?, at}`. There is no author id,
+  account, channel or moderation field. `id` is opaque and only means something
+  to a later `chat.undisplay`.
+- `chat.undisplay` is `{platform, ids}`.
+
+Unlike `chat.message`, a line is published only after automod has judged the
+message. A message automod removes is never published here.
 
 ### Alerts
 

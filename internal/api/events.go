@@ -80,7 +80,31 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			sessionUser, sessionEpoch = p.userID, p.epoch
 		}
 	}
+	s.serveEventStream(w, r, filter, streamGuard{
+		every: s.heartbeatEvery(),
+		valid: func() bool {
+			if s.tokenRevoked(tokenID) {
+				return false
+			}
+			return sessionUser == 0 || !s.sessionEpochChanged(sessionUser, sessionEpoch)
+		},
+	})
+}
 
+// streamGuard is how an open stream learns its credential is gone.
+type streamGuard struct {
+	// valid is asked every `every`; false ends the stream.
+	valid func() bool
+	every time.Duration
+	// kicked, when closed, ends the stream at once: rotation or revocation
+	// told us directly rather than waiting for the next check.
+	kicked <-chan struct{}
+}
+
+// serveEventStream is the SSE half shared by GET /events and the overlay's
+// display stream: subscribe, replay, then relay until the client leaves, falls
+// behind, or the guard says the credential is gone.
+func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter eventstream.Filter, guard streamGuard) {
 	// EventSource resends the last id it saw in this header on reconnect. The
 	// query form is for a client that cannot set headers on its first
 	// connection; it is an event id, not a credential.
@@ -131,9 +155,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	beat := time.NewTicker(s.heartbeatEvery())
 	defer beat.Stop()
+	every := guard.every
+	if every <= 0 {
+		every = s.heartbeatEvery()
+	}
+	check := time.NewTicker(every)
+	defer check.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-guard.kicked:
 			return
 		case env, ok := <-sub.C:
 			if !ok {
@@ -151,11 +183,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !write(frame(env)) {
 				return
 			}
-		case <-beat.C:
-			if s.tokenRevoked(tokenID) {
+		case <-check.C:
+			if guard.valid != nil && !guard.valid() {
 				return
 			}
-			if sessionUser != 0 && s.sessionEpochChanged(sessionUser, sessionEpoch) {
+		case <-beat.C:
+			if guard.valid != nil && !guard.valid() {
 				return
 			}
 			if !write([]byte(": heartbeat\n\n")) {

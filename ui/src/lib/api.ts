@@ -103,6 +103,7 @@ import type {
   UpgradeResult,
   TimelineRow,
 } from "./types";
+import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
 
 const BASE = "/api/v1";
 
@@ -570,6 +571,16 @@ export const api = {
   createToken: (name: string, scope: TokenScope) =>
     post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
+
+  // --- chat overlays (session-only) ---
+  listOverlays: () => get<OverlaysResponse>("/overlays"),
+  createOverlay: (o: OverlayInput) => post<ChatOverlay>("/overlays", o),
+  updateOverlay: (id: number, o: OverlayInput) => put<ChatOverlay>(`/overlays/${id}`, o),
+  deleteOverlay: (id: number) => del<void>(`/overlays/${id}`),
+  /** A new key; the old URL stops working and open overlays disconnect. */
+  rotateOverlayKey: (id: number) => post<ChatOverlay>(`/overlays/${id}/key`),
+  /** No key at all until rotated again. */
+  revokeOverlayKey: (id: number) => del<ChatOverlay>(`/overlays/${id}/key`),
 
   // --- onboarding tour ---
   /** Whether the tour should still be offered. */

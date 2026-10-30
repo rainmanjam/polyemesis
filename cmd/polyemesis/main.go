@@ -29,6 +29,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -397,6 +398,14 @@ func run(h *hooks) error {
 	streamHub := eventstream.NewHub()
 	go eventstream.BridgeBus(ctx, bus, streamHub)
 	eng.SetStream(streamHub)
+	// The chat overlay's display gate: holds each chat message until automod
+	// has judged it, then publishes the display projection (chat.display) into
+	// the same hub. Fed directly by the chat hub, not through the bus, because
+	// the bus drops for a slow subscriber and a dropped retraction would leave
+	// a removed message on stream. See internal/overlay.
+	overlayGate := overlay.New(streamHub)
+	hub.SetDisplay(overlayGate)
+	go overlayGate.Run(ctx)
 
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
@@ -407,6 +416,7 @@ func run(h *hooks) error {
 		AutomodBudget: automodBudget,
 		Hooks:         hookd,
 		Stream:        streamHub,
+		OverlayGate:   overlayGate,
 		SetupCode:     setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
@@ -445,6 +455,8 @@ func run(h *hooks) error {
 	if n := srv.StartChat(ctx); n > 0 {
 		log.Info("chat connected", "platforms", n)
 	}
+	// A no-op except in an e2echat test build (e2echat_on.go).
+	startE2EChat(ctx, hub, log)
 
 	httpServer := &http.Server{
 		Addr:      cfg.Addr,

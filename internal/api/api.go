@@ -39,6 +39,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -508,6 +509,12 @@ type Server struct {
 	// answers 503 there, and every publish through it is nil-safe.
 	stream *eventstream.Hub
 
+	// overlayGate is the chat overlay's display gate, read for its counters
+	// only. Optional. overlayKicks ends open overlay streams when a key is
+	// rotated or revoked (overlays.go).
+	overlayGate  *overlay.Gate
+	overlayKicks overlayKicker
+
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
 	// how several tests in this package build one.
@@ -689,6 +696,8 @@ type Options struct {
 
 	// Stream is the real-time events hub (GET /events). Optional.
 	Stream *eventstream.Hub
+	// OverlayGate is the chat overlay's display gate. Optional.
+	OverlayGate *overlay.Gate
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -724,6 +733,7 @@ func New(o Options) *Server {
 		automodBudget: o.AutomodBudget,
 		hooks:         o.Hooks,
 		stream:        o.Stream,
+		overlayGate:   o.OverlayGate,
 		version:       o.Version,
 		diag:          o.Diag,
 		diagLevel:     o.DiagLevel,
@@ -898,6 +908,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 				r.Get("/auth/tokens", s.handleListAPITokens)
 				r.Post("/auth/tokens", s.handleCreateAPIToken)
 				r.Delete("/auth/tokens/{id}", s.handleRevokeAPIToken)
+				// Chat overlays. Session-only for the reason tokens are: each
+				// overlay carries a credential, and minting, reading back or
+				// rotating one is the operator's business, not automation's.
+				r.Get("/overlays", s.handleListOverlays)
+				r.Post("/overlays", s.handleCreateOverlay)
+				r.Put("/overlays/{id}", s.handleUpdateOverlay)
+				r.Delete("/overlays/{id}", s.handleDeleteOverlay)
+				r.Post("/overlays/{id}/key", s.handleRotateOverlayKey)
+				r.Delete("/overlays/{id}/key", s.handleRevokeOverlayKey)
 
 				// The password. handleChangePassword already demands the
 				// CURRENT password, so a token alone could never have changed
@@ -1419,6 +1438,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// compares it before doing anything else. See chat_wiring.go.
 		r.HandleFunc("/chat/kick/{secret}", s.handleKickChatWebhook)
 
+		// The chat overlay's two reads. Outside every auth group because the
+		// overlay key is not an API credential and requireAuth must never
+		// learn to accept one; each handler resolves the key itself and
+		// answers 401 for anything else. See overlays.go.
+		r.Get("/overlay/config", s.handleOverlayConfig)
+		r.Get("/overlay/events", s.handleOverlayEvents)
+
 		// The WebSocket does its own auth; the browser cannot set headers on
 		// the upgrade request, so CSRF middleware would reject it.
 		r.Group(func(r chi.Router) {
@@ -1505,6 +1531,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 	watch := s.watchHandler()
 	r.Handle(WatchPath, watch)
 	r.Handle(WatchPath+"/*", watch)
+	// The chat overlay and its dock: the SPA, sessionless, GET only. Explicit
+	// patterns rather than a wildcard, so the access log records the pattern.
+	ovPage := s.overlayPageHandler()
+	r.Get(OverlayPath, ovPage)
+	r.Get(OverlayPath+"/dock", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)
@@ -1580,11 +1611,12 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 func loggedPath(r *http.Request) string {
 	rc := chi.RouteContext(r.Context())
 	if rc == nil {
-		return r.URL.Path
+		return redactOverlayKeys(r.URL.Path)
 	}
 	p := rc.RoutePattern()
 	if p == "" || strings.HasSuffix(p, "*") {
-		return r.URL.Path
+		// The raw path, minus any overlay key somebody pasted into it.
+		return redactOverlayKeys(r.URL.Path)
 	}
 	return p
 }

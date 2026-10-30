@@ -34,6 +34,7 @@ import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { DebugSettings } from "@/components/DebugSettings";
+import { OverlaySettings } from "@/components/OverlaySettings";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -341,6 +342,7 @@ export function SettingsPage() {
           ingest: t("set.ingest"),
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
+          overlays: t("set.tabOverlays"),
           security: t("set.tabSecurity"),
           debug: t("set.tabDebug"),
         }}
@@ -360,6 +362,10 @@ export function SettingsPage() {
           <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
+          {/* Chat overlays for OBS. Its own section rather than a card under
+              Platforms: it mints credentials, and it is where an operator goes
+              to rotate one. */}
+          <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
           {/* Last, and beside Security rather than filed by subject: the export
               is the only control here that hands a copy of this server's logs to
@@ -419,6 +425,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="platforms">
           <PlatformSettings />
+        </TabsContent>
+        <TabsContent value="overlays">
+          <OverlaySettings />
         </TabsContent>
         <TabsContent value="security">
           <SecuritySettings system={system} />
