@@ -904,7 +904,7 @@
       "description": "1 while degraded-link failover judges a programme's primary link degraded: still delivering, but below the bitrate, RTT or loss threshold for the sustain window. The selector then puts the backup, playlist or slate on air; the reason starts \"degraded: \". 0 when healthy or when failover is off.",
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 21
       },
@@ -990,8 +990,8 @@
       "description": "The primary encoder's SRT round-trip time and the share of packets found missing over the last interval -- the two figures degraded-link failover compares against its RTT and loss thresholds. Only an SRT or SRTLA primary has them, and only while degraded-link failover is on; RTMP and pull programmes show no line.",
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 21
       },
       "targets": [
@@ -1045,6 +1045,58 @@
             ]
           }
         ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bonded links (SRTLA)",
+      "id": 35,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How many network links each programme's encoder is bonding through the SRTLA receiver. An IRL encoder on two or three cellular modems drops to fewer as a modem loses signal -- usually before the bitrate falls far enough to trip degraded-link failover. 0 when the encoder is not bonding.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 21
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "polyemesis_srtla_links{id=~\"$programme\"}",
+          "refId": "A",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
       },
       "options": {
         "legend": {

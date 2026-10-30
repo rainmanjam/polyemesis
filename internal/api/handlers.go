@@ -1293,6 +1293,7 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 	}
 	engines := s.mgr.Engines()
 	out := make([]metrics.Ingest, 0, len(engines))
+	srtLinks, groups := s.mgr.SRTLinks(), s.mgr.SRTLAGroups()
 	for _, e := range engines {
 		st := e.Status()
 		in := metrics.Ingest{
@@ -1324,6 +1325,9 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps
+		}
+		if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
+			in.BondedLinks = len(g.Links)
 		}
 		if fo := st.Failover; fo != nil {
 			in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}

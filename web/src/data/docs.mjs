@@ -160,6 +160,8 @@ const DOCS_BY_SECTION = {
      * multitrack SRT out of OBS is configured on the RECORDING tab as a Custom
      * Output (FFmpeg), not on the Stream tab where everyone looks first. It is
      * also, conveniently, where "OBS SRT" belongs in a sentence. */
+    ["SRTLA.md", "SRTLA: bonded IRL encoders over several links",
+      "A native SRTLA receiver for BELABOX, Moblin and IRL Pro: several cellular links bonded into one SRT publish, with per-link stats on the source card."],
     ["OBS.md", "OBS SRT setup: multitrack audio to one ingest",
       "Sending OBS multitrack audio over SRT is a Custom Output on the Recording tab, not the Stream tab. Encoder settings that work, plus RTMP fallback."],
     ["TLS.md", "TLS certificates for a self-hosted SRT server",
@@ -203,6 +205,8 @@ const DOCS_BY_SECTION = {
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
     ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",
       "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
+    ["LINK-HEALTH.md", "Degraded-link failover, link stats and chat commands",
+      "Leave a primary that is still connected but failing: bitrate, RTT and loss thresholds, live link stats, and !bitrate, !switch and !fix in chat."],
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
       "A value on an FFmpeg command line replaces the process running it; track levels now change live instead. What a restart costs, and what a save tells you."],
     ["UPGRADING.md", "Upgrading polyemesis and its database",

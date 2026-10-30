@@ -756,6 +756,28 @@ export function SourceCard({
           </div>
         )}
 
+        {source.bonded && (source.bonded.links?.length ?? 0) > 0 && (
+          /* The SRTLA group behind the link above: one row per network link,
+             so an operator can see which modem is carrying the stream and
+             which has dropped to nothing. */
+          <div className="flex flex-col gap-1 rounded-md border border-border px-2 py-1.5">
+            <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("sources.bonded", { count: source.bonded.links?.length ?? 0 })}
+            </span>
+            {source.bonded.links?.map((l) => (
+              <div key={l.peer} className="flex flex-wrap items-center gap-3">
+                <span className="font-mono text-sm text-muted-foreground">{l.peer}</span>
+                <span className="tnum font-mono text-sm">
+                  {t("sources.bitrate")} {Math.round(l.bitrateKbps)} kbps
+                </span>
+                <span className="tnum font-mono text-sm">
+                  {t("sources.share")} {Math.round(l.share * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {source.degraded && (
           /* Degraded-link failover (#6) judged this programme's primary link
              degraded. Shown even when nothing switched -- with no backup or

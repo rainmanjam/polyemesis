@@ -10,6 +10,33 @@ its first tagged release.
 
 ### Added
 
+- **Degraded-link failover.** Failover can now leave a primary that is still
+  connected but failing. Set a bitrate floor, an RTT ceiling and a loss ceiling
+  (RTT and loss for SRT and SRTLA encoders only), and how long a breach must
+  last. The backup, the playlist or the slate then goes on air, and the reason
+  starts `degraded: ` and says what was measured. The link must read healthy
+  for the same time before it counts as recovered, and your return rule then
+  applies. Off by default. The reason reaches status, the timeline, the events
+  stream, a new appended `failover.switched` webhook trigger, MQTT
+  (`failoverReason`, `degraded`) and the Stream Deck. New metrics:
+  `polyemesis_failover_degraded`, `polyemesis_failover_active`,
+  `polyemesis_ingest_link_rtt_seconds`, `polyemesis_ingest_link_loss_ratio`
+  and `polyemesis_srtla_links`, graphed in the Grafana Ingest row. See
+  [docs/LINK-HEALTH.md](docs/LINK-HEALTH.md).
+- **SRTLA receiver for bonded IRL encoders.** Set **Settings → Ingest → SRTLA
+  bonding port**, for example 5000/udp, and BELABOX, Moblin or IRL Pro can bond
+  several cellular links into one SRT publish to a programme, using its usual
+  token. The source card shows each link's bitrate and share. Off by default.
+  It is native Go code, tested against BELABOX's reference `srtla_send`; no
+  AGPL code was copied. See [docs/SRTLA.md](docs/SRTLA.md).
+- **Chat commands.** `!bitrate` for anyone, and `!switch
+  primary|backup|playlist|slate|auto` and `!fix` for moderators and the
+  broadcaster, acting on one chosen programme and answered through the chat
+  send. Off by default. See
+  [docs/LINK-HEALTH.md](docs/LINK-HEALTH.md#chat-commands).
+- **Live link stats on the source card.** An SRT publisher now shows its
+  bitrate and its loss over the last second or so.
+
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends
@@ -290,6 +317,10 @@ its first tagged release.
   replaced by a crop of the real routing screen.
 
 ### Fixed
+
+- **The source card's "retrans" count was always 0.** It counted
+  retransmissions the listener had sent, which a receive-only listener never
+  does. It now counts the retransmitted packets received.
 
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now

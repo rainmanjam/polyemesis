@@ -669,7 +669,10 @@ const REFORMATS: Record<string, string> = {
   "Playout @Enable playout": "save-through: onCheckedChange calls savePlayoutSettings",
   "Playout @Serve viewers without a session": "save-through: onCheckedChange calls onSaveSettings",
   "Playout @Allow cross-origin playback": "save-through: onCheckedChange calls onSaveSettings",
-  "Playout @Enable zzq41": "save-through: a rendition row's switch, saved on change",
+  // The suffix is the row's name leaf's fingerprint, which counts leaves in
+  // types.ts order: it moves whenever a leaf is added above playout (#6 added
+  // listeners.srtlaPort).
+  "Playout @Enable zzq42": "save-through: a rendition row's switch, saved on change",
 };
 
 /** Controls the write pass cannot drive, with why.

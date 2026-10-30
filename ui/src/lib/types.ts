@@ -1226,6 +1226,22 @@ export interface SourceView extends Source {
     bitrateKbps: number;
     lossPercent: number;
   };
+  /** The SRTLA group behind `link` when the encoder is bonding several network
+   *  links: one row per link. `link` is then the merged session. */
+  bonded?: {
+    upstreamLocal: string;
+    since: string;
+    links: Array<{
+      peer: string;
+      since: string;
+      lastSeen: string;
+      packets: number;
+      bytes: number;
+      bitrateKbps: number;
+      /** This link's share of the group's bytes over the last interval, 0-1. */
+      share: number;
+    }> | null;
+  };
   /** Degraded-link explanation for this programme's primary, when judged
    *  degraded. See FailoverStatus.degraded. */
   degraded?: string;
@@ -1294,7 +1310,7 @@ export interface Settings {
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
    *  one. Optional so a client that predates the change can still PUT. */
-  listeners?: { srtPort: number; rtmpPort: number };
+  listeners?: ListenerSettings;
   /** Synthetic sources. Optional for the same reason. */
   synth?: {
     /** Synthesises a silent stereo track when the ingest probes with no audio
@@ -1561,6 +1577,15 @@ export interface FailoverSettings {
   /** Degraded-link failover (#6): leave a primary that is still delivering,
    *  but delivering badly. */
   degraded?: DegradedSettings;
+}
+
+/** The shared listeners. One SRT and one RTMP port serve every programme, told
+ *  apart by publish token; the SRTLA receiver (#6), off at 0, merges a bonded
+ *  encoder's links into one session on the SRT port. */
+export interface ListenerSettings {
+  srtPort: number;
+  rtmpPort: number;
+  srtlaPort?: number;
 }
 
 /** Chat commands: !bitrate for anyone, !switch and !fix for moderators and

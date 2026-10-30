@@ -103,8 +103,9 @@ var settingsReload = map[string]ReloadRule{
 	"ingest.pull.rtspTransport":            {ClassRespawn, "reconcileIngest", "an FFmpeg input option"},
 
 	// ------------------------------------------------------------- listeners
-	"listeners.srtPort":  {ClassRebind, "reconcileSharedIngest", "one bound socket for every source; the Manager stops it and binds the new number"},
-	"listeners.rtmpPort": {ClassRespawn, "reconcileIngest", "part of the ingest child's listen URL"},
+	"listeners.srtPort":   {ClassRebind, "reconcileSharedIngest", "one bound socket for every source; the Manager stops it and binds the new number"},
+	"listeners.srtlaPort": {ClassRebind, "reconcileSharedIngest", "the bonding receiver's one socket; the Manager stops it and binds the new number, and stops it at 0"},
+	"listeners.rtmpPort":  {ClassRespawn, "reconcileIngest", "part of the ingest child's listen URL"},
 
 	// ------------------------------------------------------------- recording
 	"recording.enabled":        {ClassRespawn, "reconcileRecorder", "starts or stops the child"},

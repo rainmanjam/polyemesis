@@ -221,7 +221,12 @@ HALTED: DISK has its own image, a drive on crimson.
 install has no programme to apply it to.
 
 **Failover:** **Primary on air**, **Backup on air**, **Playlist on air**,
-**Slate on air**, or **No feed info**.
+**Slate on air**, **Primary degraded**, or **No feed info**. **Primary degraded**
+is the warning face for a primary that
+[degraded-link failover](LINK-HEALTH.md#degraded-link-failover) judges degraded
+but had nowhere to switch to. The detail line says what was measured. When the
+link did send another source on air, that source's face carries the selector's
+`degraded: …` reason.
 
 **Meter:** a bar from -60 dBFS to full scale, **QUIET** at digital silence, or
 **NO FEED** when the server says the feed is not live. The plugin does not

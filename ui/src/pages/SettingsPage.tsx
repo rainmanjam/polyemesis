@@ -109,6 +109,7 @@ import type {
   TokenScope,
   CertInfo,
   ChatRetentionSettings,
+  ListenerSettings,
   CredentialCheck,
   FailoverReturn,
   IngestMode,
@@ -661,8 +662,8 @@ function ListenerPortsCard({
   setListeners,
   footer,
 }: {
-  listeners: { srtPort: number; rtmpPort: number };
-  setListeners: (patch: Partial<{ srtPort: number; rtmpPort: number }>) => void;
+  listeners: ListenerSettings;
+  setListeners: (patch: Partial<ListenerSettings>) => void;
   footer?: React.ReactNode;
 }) {
   const t = useT();
@@ -695,6 +696,18 @@ function ListenerPortsCard({
               value={listeners.rtmpPort}
               onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
             />
+          </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <Label htmlFor="listener-srtla">{t("set.srtlaPort")}</Label>
+            <Input
+              id="listener-srtla"
+              type="number"
+              min={0}
+              max={LIMITS.port.max}
+              value={listeners.srtlaPort ?? 0}
+              onChange={(e) => setListeners({ srtlaPort: Number(e.target.value) })}
+            />
+            <span className="text-sm text-muted-foreground">{t("set.srtlaPortNote")}</span>
           </div>
         </div>
         {footer}

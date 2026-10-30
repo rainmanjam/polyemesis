@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -19,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
+	"github.com/rainmanjam/polyemesis/internal/srtla"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -135,8 +138,13 @@ type Manager struct {
 	srtAddr  string
 	rtmp     *rtmpserver.Server
 	rtmpAddr string
-	engines  map[int64]*Engine
-	order    []int64 // source ids in display order, so Default is deterministic
+	// srtla is the bonding receiver (#6) in front of srt, nil while its port
+	// is 0 or the SRT listener is down -- it has nowhere to deliver without it.
+	srtla         *srtla.Server
+	srtlaAddr     string
+	srtlaUpstream string
+	engines       map[int64]*Engine
+	order         []int64 // source ids in display order, so Default is deterministic
 	// retiredAlerts and retiring keep a deleted programme's alert delivery
 	// counts in the install's totals. See RetiredAlertStats. Under mu.
 	retiredAlerts alerts.Stats
@@ -598,6 +606,7 @@ func (m *Manager) reconcileSharedIngest() {
 		(*srtserver.Server).Stop,
 		func(addr string) (*srtserver.Server, error) {
 			s := srtserver.New(m.log, addr, m.lookupToken)
+			s.SetPeerHost(m.srtPeerHost)
 			return s, s.Start()
 		})
 	// BOTH LISTENERS BIND, ALWAYS. The port is the switch, not the source list.
@@ -649,7 +658,62 @@ func (m *Manager) reconcileSharedIngest() {
 	m.mu.Lock()
 	m.srt, m.srtAddr = srt, srtAddr
 	m.rtmp, m.rtmpAddr = rtmp, rtmpAddr
+	bonded, bondedAddr, bondedUp := m.srtla, m.srtlaAddr, m.srtlaUpstream
 	m.mu.Unlock()
+
+	// The SRTLA receiver, AFTER the SRT listener because it forwards into it,
+	// and off whenever that listener is down: it would have nowhere to deliver.
+	// An SRT port change restarts it too -- the upstream is fixed at New -- or
+	// it would go on forwarding to a port nothing listens on.
+	upstream := ""
+	if srt != nil {
+		upstream = fmt.Sprintf("127.0.0.1:%d", st.Listeners.SRTPort)
+	}
+	if bonded != nil && bondedUp != upstream {
+		bonded.Stop()
+		m.log.Info("srtla receiver stopped", "reason", "the srt listener it forwards to moved")
+		bonded, bondedAddr = nil, ""
+	}
+	bonded, bondedAddr = reconcileListener(m.log, "srtla", st.Listeners.SRTLAPort,
+		st.Listeners.SRTLAPort != 0 && upstream != "", bonded, bondedAddr,
+		(*srtla.Server).Stop,
+		func(addr string) (*srtla.Server, error) {
+			s := srtla.New(m.log, srtla.Config{Listen: addr, Upstream: upstream})
+			return s, s.Start()
+		})
+	m.mu.Lock()
+	m.srtla, m.srtlaAddr, m.srtlaUpstream = bonded, bondedAddr, upstream
+	m.mu.Unlock()
+}
+
+// SRTLAGroups reports the bonding receiver's groups and links, nil when it is
+// off.
+func (m *Manager) SRTLAGroups() []srtla.GroupStats {
+	m.mu.RLock()
+	srv := m.srtla
+	m.mu.RUnlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Stats()
+}
+
+// srtPeerHost names a connecting SRT peer for the listener's wrong-token
+// lockout. A bonded publisher arrives from the SRTLA receiver's loopback
+// socket, so it is named after the sender that created its group instead --
+// otherwise one sender guessing tokens would lock every bonded encoder out.
+func (m *Manager) srtPeerHost(addr net.Addr) string {
+	if ua, ok := addr.(*net.UDPAddr); ok && ua.IP.IsLoopback() {
+		m.mu.RLock()
+		srv := m.srtla
+		m.mu.RUnlock()
+		if srv != nil {
+			if host, ok := srv.SenderHost(addr.String()); ok {
+				return "srtla:" + host
+			}
+		}
+	}
+	return authgate.PeerHost(addr)
 }
 
 // reconcileListener brings one shared listener to match its configured port,
@@ -1169,9 +1233,10 @@ func (m *Manager) StopWithin(ctx context.Context) {
 	// a source that has gone quiet" case measured above: 15s and still alive,
 	// killed as a group, recording left with no trailer. So it comes down at
 	// the bottom too.
-	srt, rtmp := m.srt, m.rtmp
+	srt, rtmp, bonded := m.srt, m.rtmp, m.srtla
 	m.srt, m.srtAddr = nil, ""
 	m.rtmp, m.rtmpAddr = nil, ""
+	m.srtla, m.srtlaAddr, m.srtlaUpstream = nil, "", ""
 	engines := make([]*Engine, 0, len(m.engines))
 	for _, eng := range m.engines {
 		engines = append(engines, eng)
@@ -1210,7 +1275,11 @@ func (m *Manager) StopWithin(ctx context.Context) {
 	}
 	wg.Wait()
 
-	// After the engines, so the children finalised against a live feed.
+	// After the engines, so the children finalised against a live feed; and
+	// the bonding receiver before the SRT listener it feeds.
+	if bonded != nil {
+		bonded.Stop()
+	}
 	if srt != nil {
 		srt.Stop()
 	}

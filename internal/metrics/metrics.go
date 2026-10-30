@@ -139,6 +139,9 @@ type Ingest struct {
 	NoEngine bool
 	// Failover is the programme's source-selector tier, nil while it is off.
 	Failover *Failover
+	// BondedLinks is how many network links the programme's encoder is
+	// bonding through the SRTLA receiver right now; 0 when it is not bonding.
+	BondedLinks int
 }
 
 // Failover is a programme's selector tier and the primary's link health (#6).
@@ -554,6 +557,12 @@ func renderFailover(d *doc, ins []Ingest) {
 		if in.Failover != nil && in.Failover.RTTMs != nil {
 			d.sample("polyemesis_ingest_link_rtt_seconds", *in.Failover.RTTMs/1000, ingestIdent(in)...)
 		}
+	}
+
+	d.family("polyemesis_srtla_links", "gauge",
+		"Network links the programme's encoder is bonding through the SRTLA receiver; 0 when it is not bonding.")
+	for _, in := range sorted {
+		d.sample("polyemesis_srtla_links", float64(in.BondedLinks), ingestIdent(in)...)
 	}
 
 	d.family("polyemesis_ingest_link_loss_ratio", "gauge",

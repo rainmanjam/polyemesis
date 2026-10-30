@@ -158,6 +158,9 @@ type Server struct {
 	// like guessing. Shared with internal/rtmpserver -- see internal/authgate
 	// for why this is not forked per protocol.
 	gate *authgate.Gate
+	// peerHost names the lockout bucket for a connecting peer; nil means
+	// authgate.PeerHost. See SetPeerHost.
+	peerHost atomic.Pointer[func(net.Addr) string]
 }
 
 // BindReport is which address families the listener asked for and which it got.
@@ -341,6 +344,27 @@ func (s *session) fresh(now time.Time) bool {
 		return now.Sub(s.started) < StaleAfter
 	}
 	return now.Sub(time.Unix(0, last)) < StaleAfter
+}
+
+// SetPeerHost replaces how a connecting peer is named for the wrong-token
+// lockout. The SRTLA receiver (#6) forwards every bonded publisher from its own
+// loopback socket, so keyed by peer host they would all share one bucket and one
+// sender's guesses would lock every bonded encoder out; the receiver knows the
+// real sender and the Manager wires that in here. fn returns the bucket name;
+// returning authgate.PeerHost(addr) is the default behaviour.
+func (s *Server) SetPeerHost(fn func(net.Addr) string) {
+	if fn == nil {
+		s.peerHost.Store(nil)
+		return
+	}
+	s.peerHost.Store(&fn)
+}
+
+func (s *Server) peerHostOf(addr net.Addr) string {
+	if fn := s.peerHost.Load(); fn != nil {
+		return (*fn)(addr)
+	}
+	return authgate.PeerHost(addr)
 }
 
 // New builds a server. Nothing binds until Start.
@@ -639,7 +663,7 @@ func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 	// Checked before the token is even looked at, so a peer already blocked
 	// for guessing wrong tokens does not get a fresh lookup on every retry.
 	// See internal/authgate for why this is scoped per peer rather than global.
-	host := authgate.PeerHost(req.RemoteAddr())
+	host := s.peerHostOf(req.RemoteAddr())
 	if s.gate.Blocked(host) {
 		s.log.Debug("srt connect refused: peer is rate-limited after repeated wrong tokens",
 			"peer", peer)

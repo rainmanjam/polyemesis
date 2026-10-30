@@ -14,7 +14,7 @@ import (
 func TestFailoverStateAndLinkHealthAreOnTheScrape(t *testing.T) {
 	rtt, loss := 240.0, 3.5
 	out := Render(Snapshot{Ingests: []Ingest{
-		{Process: Process{State: "running"}, ID: 1, Name: "IRL",
+		{Process: Process{State: "running"}, ID: 1, Name: "IRL", BondedLinks: 3,
 			Failover: &Failover{Active: "slate", Degraded: true, RTTMs: &rtt, LossPercent: &loss}},
 		{Process: Process{State: "running"}, ID: 2, Name: "Studio"},
 	}})
@@ -25,6 +25,8 @@ func TestFailoverStateAndLinkHealthAreOnTheScrape(t *testing.T) {
 		`polyemesis_failover_active{id="1",name="IRL",source="primary"} 0`,
 		`polyemesis_ingest_link_rtt_seconds{id="1",name="IRL"} 0.24`,
 		`polyemesis_ingest_link_loss_ratio{id="1",name="IRL"} 0.035`,
+		`polyemesis_srtla_links{id="1",name="IRL"} 3`,
+		`polyemesis_srtla_links{id="2",name="Studio"} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -41,7 +43,7 @@ func TestFailoverStateAndLinkHealthAreOnTheScrape(t *testing.T) {
 	}
 	empty := Render(Snapshot{})
 	for _, fam := range []string{"polyemesis_failover_degraded", "polyemesis_failover_active",
-		"polyemesis_ingest_link_rtt_seconds", "polyemesis_ingest_link_loss_ratio"} {
+		"polyemesis_ingest_link_rtt_seconds", "polyemesis_ingest_link_loss_ratio", "polyemesis_srtla_links"} {
 		if !strings.Contains(empty, "# TYPE "+fam+" gauge") {
 			t.Errorf("the %s family header is missing on an empty install", fam)
 		}

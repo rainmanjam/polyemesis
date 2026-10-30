@@ -1539,6 +1539,15 @@ type ListenerSettings struct {
 	// used to serve at most one, which was an artifact of `ffmpeg -listen 1`
 	// being unable to demultiplex by path rather than a decision anyone made.
 	RTMPPort int `json:"rtmpPort"`
+	// SRTLAPort is the UDP port of the SRTLA bonding receiver (#6), 0 for off.
+	// Bonded IRL encoders -- BELABOX, Moblin, IRL Pro, srtla_send -- spread one
+	// SRT session over several network links to this port; the receiver
+	// merges them and hands the session to the SRT listener above, so token
+	// authentication and everything after it are exactly the SRT path's.
+	//
+	// Off by default because it is one more open UDP port, and an install
+	// that has no bonded encoder gains nothing from it.
+	SRTLAPort int `json:"srtlaPort"`
 }
 
 func (l ListenerSettings) problems() []string {
@@ -1551,6 +1560,16 @@ func (l ListenerSettings) problems() []string {
 	}
 	if l.SRTPort == l.RTMPPort {
 		probs = append(probs, fmt.Sprintf("srt and rtmp listeners cannot share port %d", l.SRTPort))
+	}
+	if l.SRTLAPort < 0 || l.SRTLAPort > 65535 {
+		probs = append(probs, fmt.Sprintf("srtla receiver port %d out of range (0 turns it off)", l.SRTLAPort))
+	}
+	// Both are UDP, so the same number is a bind conflict, not a choice. RTMP
+	// is TCP and could share the number; it is refused anyway, because "the
+	// same port for two protocols" is a configuration nobody reads correctly
+	// from a firewall rule.
+	if l.SRTLAPort != 0 && (l.SRTLAPort == l.SRTPort || l.SRTLAPort == l.RTMPPort) {
+		probs = append(probs, fmt.Sprintf("the srtla receiver cannot share port %d with the srt or rtmp listener", l.SRTLAPort))
 	}
 	return probs
 }
