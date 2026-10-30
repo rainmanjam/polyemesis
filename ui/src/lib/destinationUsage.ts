@@ -35,7 +35,10 @@ export function useDestinationUsage(id: DestinationId | null): DestinationUsage 
     // exists to prevent.
     queueMicrotask(() => mine === seq.current && setUsage({ status: "loading" }));
     autoApi.get<{ destinationIds: number[] | null }[]>("/schedules").then(
-      (list) => mine === seq.current && setUsage({ status: "ready", schedules: schedulesUsing(list ?? [], id) }),
+      // Anything but a list is a read that did not answer the question.
+      (list) =>
+        mine === seq.current &&
+        setUsage(Array.isArray(list) ? { status: "ready", schedules: schedulesUsing(list, id) } : { status: "failed" }),
       () => mine === seq.current && setUsage({ status: "failed" }),
     );
   }, [id]);
