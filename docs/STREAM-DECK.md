@@ -21,7 +21,7 @@ The plugin's source, and the notes for working on it, are in
 
 - **Stream Deck app 7.1 or later**, on macOS 12+ or Windows 10+. The plugin
   runs on the Node 24 runtime the app ships.
-- **A Stream Deck+** for the Meter dial. Every other action is a key and works
+- **A Stream Deck+** for the Meter and Track gain dials. Every other action is a key and works
   on any model.
 - **A polyemesis install from this release or later.** The plugin relies on
   `GET /api/v1/auth/connection`, `GET /api/v1/destinations/stop-impact`,
@@ -63,7 +63,7 @@ the token does not travel with a profile export.
    | Scope | What the plugin can do with it |
    |---|---|
    | `read` | Show state: destination faces, the failover source, the Record switch, the meters. A key that would change something shows **Needs admin token**, and the plugin sends no write request at all. |
-   | `admin` | Everything above, and start, stop, Go live, Record, Routing preset and Failover. |
+   | `admin` | Everything above, and start, stop, Go live, Record, Routing preset, Failover, Mute track and Track gain. |
 
    An admin token can do anything the signed-in operator can, through the API,
    not only what the keys do. If the deck only has to show state, give it a read
@@ -122,15 +122,70 @@ Every other key acts on a tap, except Routing preset, which is also a hold.
 | **Record** | Tap | Shows the install-wide recording switch and toggles it. Recording is one switch for every programme, so this key takes no programme. Stopping a recording ends no broadcast, so it is a tap. | Read to show; admin to switch |
 | **Routing preset** | Hold | Applies a routing preset to the key's programme. Applying one can restart that programme's destinations. | Admin |
 | **Failover** | Tap | Shows which source is on air: primary, backup, playlist or slate. Tapping hands control back to automatic. | Read to show; admin to switch |
+| **Mute track** | Tap | Mutes or unmutes one track on one destination. See [Track mute and the gain dial](#track-mute-and-the-gain-dial). | Read to show; admin to switch |
 | **Meter** (dial) | — | The loudest channel on the key's programme, read from `GET /api/v1/levels` five times a second. | Read |
+| **Track gain** (dial) | Turn, push, touch | One track's gain on one destination. See below. | Read to show; admin to change |
 
 ### Track mute and the gain dial
 
-The backend applies a track's mute and gain to a running destination without
-restarting it ([HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel)),
-and the API route is `POST /api/v1/destinations/{id}/tracks/{track}/gain`
-([API.md](API.md)). A Mute key and a gain dial that use it are being added to
-the plugin. This section will describe them when they ship.
+The **Mute track** key and the **Track gain** dial each act on one audio track
+of one destination. Both call `POST /api/v1/destinations/{id}/tracks/{track}/gain`
+([API.md](API.md)), and both need an admin token to change anything.
+
+**Binding.** In the key's settings, pick the programme, then a destination on
+it, then a track. Only the tracks in that destination's selection are offered,
+because the server takes no level for any other. A track is named by its label
+from the install's Settings, by its title, or by its number.
+
+**What they show.** Both show the level the install has *stored*, read on the
+same two-second tick as the other keys, so a mute made in the UI or over the API
+shows on the deck too. A tap or a push reads the level fresh first, so it flips
+what the install has now, not what the key last showed.
+
+**The Mute track key.** It shows **MUTED** (a crossed speaker, on red) or
+**Unmuted**. Tap to switch.
+
+**The Track gain dial.** It needs a Stream Deck+.
+
+| Control | Does |
+|---|---|
+| Turn | 0.5 dB a step, from -40 dB to +6 dB |
+| Push | Mute or unmute |
+| Touch the strip | Back to 0 dB |
+
+The strip shows the destination and track, the level in dB, and a bar. The dial
+steps in decibels, not linear gain, so every tick is an audible change and none
+is a jump. +6 dB is the highest step under the server's cap of 2.0 (+6.02 dB). To
+silence a track, mute it: the level it had is kept for when you unmute. A fast
+spin sends one request a quarter of a second after the turning stops, not one
+per tick.
+
+**How a change applied.** After a change, the key shows for three seconds which
+way it reached the output:
+
+- **Applied live.** The running FFmpeg took the new level. Viewers hear the
+  change and nothing else.
+- **Applied by restart**, with the server's reason, on an orange face with a
+  circular arrow. The destination was restarted to take the level, so viewers
+  saw a reconnect. **A Windows server always restarts**, because live level
+  changes have no verified path there. A destination that is not running stores
+  the level, and the reason says it takes effect when the destination starts.
+
+The dial shows a restart the same way, and how a push applied, but it does not
+flash Applied live on every step of a turn.
+
+**When they do nothing.**
+
+| Face | Why |
+|---|---|
+| **Not available** (a barred circle, on grey) | The destination passes its audio through unchanged (audio copy), so there is no level to set. Also shown, with the server's reason, for a change the server refused |
+| **matrix: use UI** (dial only) | A matrix mix sets its gain per cell, and the server refuses a track gain there. Turning and touching send nothing. A push still mutes, and so does the Mute track key |
+| **Track not in mix** | The track is no longer in the destination's selection |
+| **Needs admin token** | The token is `read` |
+| **NO FEED** (dial only) | The install is unreachable, or its stored levels could not be read. The dial never holds an old level on screen |
+
+How the server applies a level live is in
+[HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel).
 
 ### What the faces mean
 
