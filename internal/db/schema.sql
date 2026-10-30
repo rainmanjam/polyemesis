@@ -190,6 +190,26 @@ CREATE TABLE IF NOT EXISTS automod_creds (
     updated_at INTEGER NOT NULL
 );
 
+-- The SECONDARY automod model checker's API key, sealed. A table of its own
+-- because automod_creds is a CHECK (id = 1) singleton, and widening that check
+-- is a table rebuild on every install for a column that already works.
+CREATE TABLE IF NOT EXISTS automod_secondary_creds (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc    BLOB NOT NULL,           -- secretbox sealed
+    updated_at INTEGER NOT NULL
+);
+
+-- Which connection each automod model checker last passed the Test button
+-- with. Not a secret: a digest of protocol, preset, endpoint and model. Kept
+-- out of the settings blob because every field of that blob is writable through
+-- PUT /settings, and a pass a client could write is not a pass. Setting a key
+-- deletes its checker's row, so a new key has to be tested too.
+CREATE TABLE IF NOT EXISTS automod_checker_tests (
+    slot        TEXT PRIMARY KEY CHECK (slot IN ('primary', 'secondary')),
+    fingerprint TEXT NOT NULL,
+    passed_at   INTEGER NOT NULL
+);
+
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick

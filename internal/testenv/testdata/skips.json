@@ -88,10 +88,11 @@
       "handEditedRatherThanRegenerated": "For the reason the entry above records: -update-skips round-trips this file through a struct with no field for these reasons and deletes every one of them. The four numbers were raised by hand. Regenerating also silently drops internal/supervisor, whose count has fallen to zero; that is left alone here rather than swept into an unrelated change."
     }
   ],
-  "total": 106,
+  "total": 107,
   "byPackage": {
     "cmd/polyemesis": 1,
     "internal/api": 7,
+    "internal/automod": 1,
     "internal/clipper": 4,
     "internal/clips": 4,
     "internal/config": 1,
@@ -195,6 +196,17 @@
         "internal/supervisor": "1 -> 3"
       },
       "why": "TWO new sites, both in the one test that proves a running FFmpeg changes a track's volume without a restart (live_ffmpeg_test.go), and both environmental. testing.Short(): the test runs a real FFmpeg for about 8 s, the same reason every other real-binary test in the tree honours -short. Windows: the live command channel is deliberately disabled there (destinations keep -nostdin and every level change restarts), so there is nothing to prove; the restart fallback Windows does take is covered by the engine's reconcile tests on every OS. A missing FFmpeg goes through testenv.FFmpegBinary, not a bare skip. Neither fires because the thing under test changed. Raised by hand: -update-skips would drop this provenance."
+    }
+  ],
+  "raisedBy8": [
+    {
+      "pr": "feat/wave2-automod (#21 model-checker providers)",
+      "from": 106,
+      "to": 107,
+      "packages": {
+        "internal/automod": "0 -> 1"
+      },
+      "why": "ONE site: TestJevLiveProbeAgainstTheHostedService, the single opt-in test that sends the three synthetic probe lines to the real hosted Jev through the production connector. It needs an operator's own API key (polyemesis ships none, by design: every operator brings their own), costs money, and sends text to a third party in the US, so it runs only when POLYEMESIS_JEV_LIVE_KEY is set. Environmental in the strictest sense: nothing about the code under test decides whether it runs, and every behaviour it touches is also pinned offline against a fake endpoint in jev_test.go and chain_test.go. Raised by hand: -update-skips would drop this provenance."
     }
   ]
 }

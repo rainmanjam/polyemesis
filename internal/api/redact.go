@@ -203,6 +203,7 @@ func readSafeSettings(s db.Settings) db.Settings {
 	s.Failover.Backup.Pull.URL = maskURL(s.Failover.Backup.Pull.URL)
 	s.MQTT.BrokerURL = maskURL(s.MQTT.BrokerURL)
 	s.Automod.Model.Endpoint = maskURL(s.Automod.Model.Endpoint)
+	s.Automod.Secondary.Endpoint = maskURL(s.Automod.Secondary.Endpoint)
 	return s
 }
 

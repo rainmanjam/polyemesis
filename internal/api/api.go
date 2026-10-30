@@ -501,6 +501,15 @@ type Server struct {
 	// than by the connector because ApplyAutomod rebuilds the connector on
 	// every settings save. See internal/automod/budget.go.
 	automodBudget *automod.Budget
+	// automodSecondaryBudget is the secondary model checker's, kept apart so
+	// a primary outage that sends every message to the secondary cannot spend
+	// the primary's allowance -- each checker's ceiling is the one the operator
+	// set for it.
+	automodSecondaryBudget *automod.Budget
+	// automodTestPrimary / automodTestSecondary allow one Test run per
+	// checker at a time. A Test is three paid calls, and an impatient
+	// double-click should not be six.
+	automodTestPrimary, automodTestSecondary sync.Mutex
 
 	// hooks is the shared lifecycle-webhook dispatcher. Optional like
 	// everything else in this block: a build with none wired still serves the
@@ -693,6 +702,10 @@ type Options struct {
 	// where the process starts and handed to every model built afterwards, so
 	// a settings save rebuilds the connector without refilling its allowance.
 	AutomodBudget *automod.Budget
+	// AutomodSecondaryBudget is the same, for the secondary model checker.
+	// Nil gets one created with the Server, which lives as long as the
+	// process -- the property that matters.
+	AutomodSecondaryBudget *automod.Budget
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
@@ -734,17 +747,23 @@ func New(o Options) *Server {
 		whisper:       o.Whisper,
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
-		hooks:         o.Hooks,
-		stream:        o.Stream,
-		overlayGate:   o.OverlayGate,
-		version:       o.Version,
-		diag:          o.Diag,
-		diagLevel:     o.DiagLevel,
-		startedAt:     time.Now(),
-		logins:        auth.NewThrottle(),
-		setups:        auth.NewThrottle(),
-		setupCode:     o.SetupCode,
-		kickKeys:      &chat.KickKeyFetcher{},
+		automodSecondaryBudget: func() *automod.Budget {
+			if o.AutomodSecondaryBudget != nil {
+				return o.AutomodSecondaryBudget
+			}
+			return automod.NewBudget()
+		}(),
+		hooks:       o.Hooks,
+		stream:      o.Stream,
+		overlayGate: o.OverlayGate,
+		version:     o.Version,
+		diag:        o.Diag,
+		diagLevel:   o.DiagLevel,
+		startedAt:   time.Now(),
+		logins:      auth.NewThrottle(),
+		setups:      auth.NewThrottle(),
+		setupCode:   o.SetupCode,
+		kickKeys:    &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -1137,6 +1156,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/automod/matrix", s.handleAutomodMatrix)
 			r.Get("/automod/stats", s.handleAutomodStats)
 			r.Put("/settings/automod-key", s.handlePutAutomodKey)
+			// The Test button. Writes a pass marker and spends three calls,
+			// so it is a write like the key it tests.
+			r.Post("/automod/test", s.handleAutomodTest)
 
 			// The read half of media. POST /media and DELETE /media/{name} are
 			// in the session-only group above, which is the fix for #140; this

@@ -371,13 +371,16 @@ func run(h *hooks) error {
 	// every settings save; the connector is rebuilt each time and the hourly
 	// allowance must not be. See internal/automod/budget.go.
 	automodBudget := automod.NewBudget()
+	// And the secondary model checker's, for the same reason and kept apart:
+	// each checker spends against the ceiling the operator set for it.
+	automodSecondaryBudget := automod.NewBudget()
 
 	if s, err := store.GetSettings(); err == nil {
 		api.ApplyChatRetention(hub, s.Chat)
 		// Automod, for the same reason: a matrix armed in the UI that quietly
 		// reverts on restart is worse than one that never worked, because the
 		// operator has already stopped checking it.
-		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget)
+		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget, automodSecondaryBudget)
 		// Alert delivery, for the third time and the same reason. Safe to call
 		// before the engines exist: the Manager remembers the budget and hands
 		// it to each engine as it is created, so this does not depend on
@@ -422,12 +425,13 @@ func run(h *hooks) error {
 		DiagLevel: diagSwitch,
 		Log:       log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
-		Chat:          hub,
-		AutomodBudget: automodBudget,
-		Hooks:         hookd,
-		Stream:        streamHub,
-		OverlayGate:   overlayGate,
-		SetupCode:     setupCode,
+		Chat:                   hub,
+		AutomodBudget:          automodBudget,
+		AutomodSecondaryBudget: automodSecondaryBudget,
+		Hooks:                  hookd,
+		Stream:                 streamHub,
+		OverlayGate:            overlayGate,
+		SetupCode:              setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.

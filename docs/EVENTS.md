@@ -292,7 +292,11 @@ actions are not announced.
 ```
 
 `action` is one of `delete`, `hide`, `unhide`, `hide_local`, `ban`, `timeout`
-or `unban`. `by` is `operator` or `automod`.
+or `unban`. `by` is `operator` or `automod`. When automod's model checker
+made the decision, `decidedBy` says which one: `primary`, or `secondary` when
+the primary could not answer and the fallback did (see
+[AUTOMOD.md](AUTOMOD.md#the-model-tier)). It is absent for an operator's action
+and for automod's rules and history checkers.
 
 ### Overlay
 

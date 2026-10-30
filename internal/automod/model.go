@@ -16,8 +16,16 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 )
 
-// The model checker: an external API, asked only about what the first two
-// checkers could not settle.
+// The model checker: an external API, asked about a message the free checkers
+// did not already remove.
+//
+// That sentence used to read "asked only about what the first two checkers
+// could not settle", and it was not true: internal/chat queued EVERY non-empty
+// message for the model whenever it was enabled, including one a rule had
+// just deleted -- a paid call whose answer could change nothing. The Hub now
+// skips the model for a message the fast verdict removes (see
+// internal/chat.checkAutomod). A message the fast checkers only FLAGGED is
+// still asked about, because a flag removes nothing and the model may want to.
 //
 // Three properties matter more than the classification itself, and all three
 // are about what happens when the API is having a bad day:
@@ -81,6 +89,20 @@ type ModelConfig struct {
 	// because "what counts as abuse here" is a property of a community and not
 	// something this product can decide for them.
 	Instruction string `json:"instruction"`
+
+	// Preset is the provider preset's ID, recorded on every finding so the
+	// review queue can say which provider answered. See provider.go.
+	Preset string `json:"preset,omitempty"`
+	// JSONMode is the response_format sent. Empty means json_object, which is
+	// what this connector always sent before presets existed.
+	JSONMode JSONMode `json:"jsonMode,omitempty"`
+	// ReasoningEffort is sent as reasoning_effort when non-empty.
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	// FlagOnly forces every finding to ActionFlag. Set for local presets.
+	FlagOnly bool `json:"flagOnly,omitempty"`
+	// CategoryActions is the operator's per-category table. A category it
+	// does not name gets Action. See categoryAction.
+	CategoryActions map[Category]Action `json:"categoryActions,omitempty"`
 }
 
 // DefaultModelConfig is off, with a conservative ceiling if switched on.
@@ -98,12 +120,36 @@ func DefaultModelConfig() ModelConfig {
 }
 
 // ModelStats is what the operator sees about spend and health.
+//
+// The top-level counters are the PRIMARY checker's, which is what they always
+// were -- a client written before there were two checkers keeps reading the
+// one it knew about. Primary and Secondary carry each checker's own counters,
+// and Fallbacks / FailedOpen say how often the second one was needed and how
+// often neither could answer.
 type ModelStats struct {
 	CallsThisHour int       `json:"callsThisHour"`
 	Ceiling       int       `json:"ceiling"`
 	Failures      int       `json:"failures"`
 	LastError     string    `json:"lastError,omitempty"`
 	LastCallAt    time.Time `json:"lastCallAt,omitzero"`
+
+	// Protocol and Preset say what this checker is.
+	Protocol Protocol `json:"protocol,omitempty"`
+	Preset   string   `json:"preset,omitempty"`
+	// Decisions counts the messages this checker answered -- clean or not --
+	// as opposed to Failures, the ones it could not.
+	Decisions int `json:"decisions"`
+
+	// Set on the engine's aggregate only.
+	Primary   *ModelStats `json:"primary,omitempty"`
+	Secondary *ModelStats `json:"secondary,omitempty"`
+	// Fallbacks counts messages the primary could not answer and the
+	// secondary did.
+	Fallbacks int `json:"fallbacks"`
+	// FailedOpen counts messages neither checker could answer, which passed.
+	FailedOpen int `json:"failedOpen"`
+	// LastDecidedBy is the checker that answered the most recent message.
+	LastDecidedBy Slot `json:"lastDecidedBy,omitempty"`
 }
 
 // Model is the connector.
@@ -218,7 +264,8 @@ func (m *Model) Check(ctx context.Context, text string) ([]Finding, error) {
 	}
 	return []Finding{{
 		Checker:        CheckerModel,
-		Action:         m.cfg.Action,
+		Action:         categoryAction(m.cfg.Action, m.cfg.CategoryActions, m.cfg.FlagOnly, cat),
+		Provider:       m.cfg.Preset,
 		TimeoutSeconds: m.cfg.TimeoutSeconds,
 		Confidence:     v.Confidence,
 		Category:       cat,
@@ -261,6 +308,10 @@ func modelNote(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// Enabled reports whether this connector will make calls. Nil-safe, like
+// Check, because the engine is handed a nil one whenever the checker is off.
+func (m *Model) Enabled() bool { return m != nil && m.cfg.Enabled }
 
 // reserve takes one call from the hourly budget, or reports that it cannot.
 func (m *Model) reserve() bool {
@@ -305,6 +356,8 @@ func (m *Model) Stats() ModelStats {
 		Failures:      m.failures,
 		LastError:     m.lastErr,
 		LastCallAt:    m.lastCall,
+		Protocol:      ProtocolOpenAI,
+		Preset:        m.cfg.Preset,
 	}
 }
 
@@ -318,10 +371,14 @@ func (m *Model) ask(ctx context.Context, text string) (modelVerdict, error) {
 			{"role": "system", "content": m.systemPrompt()},
 			{"role": "user", "content": text},
 		},
-		"temperature": 0,
-		"response_format": map[string]string{
-			"type": "json_object",
-		},
+		"temperature":     0,
+		"response_format": m.responseFormat(),
+	}
+	// Only when the preset names one. An endpoint that does not know the
+	// parameter may refuse the whole request over it, and the Custom preset
+	// promises nothing about the endpoint.
+	if m.cfg.ReasoningEffort != "" {
+		body["reasoning_effort"] = m.cfg.ReasoningEffort
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -434,6 +491,41 @@ func redactEndpoint(err error) error {
 	// said only "the request failed" would trade one silent failure for
 	// another.
 	return &url.Error{Op: ue.Op, URL: alerts.RedactURL(ue.URL), Err: ue.Err}
+}
+
+// responseFormat is the response_format for the preset's JSON mode.
+//
+// json_schema is STRICT and closed: the provider decodes against it, so a
+// reply cannot omit abusive or confidence, and category is an enum generated
+// from ModelCategories() -- the same list the prompt names and the parse
+// accepts. The parse still runs; a schema is a provider's promise, and the
+// presence check below is ours.
+func (m *Model) responseFormat() map[string]any {
+	if m.cfg.JSONMode != JSONModeSchema {
+		return map[string]any{"type": "json_object"}
+	}
+	cats := make([]string, 0, len(ModelCategories()))
+	for _, c := range ModelCategories() {
+		cats = append(cats, string(c))
+	}
+	return map[string]any{
+		"type": "json_schema",
+		"json_schema": map[string]any{
+			"name":   "moderation_verdict",
+			"strict": true,
+			"schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"abusive":    map[string]any{"type": "boolean"},
+					"confidence": map[string]any{"type": "number"},
+					"category":   map[string]any{"type": "string", "enum": cats},
+					"reason":     map[string]any{"type": "string"},
+				},
+				"required":             []string{"abusive", "confidence", "category", "reason"},
+				"additionalProperties": false,
+			},
+		},
+	}
 }
 
 // systemPrompt asks for the schema. Asking is rung zero -- ParseModelCategory

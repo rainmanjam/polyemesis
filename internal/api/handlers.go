@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -1392,6 +1393,16 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
 	}
+	if has, err := s.store.HasAutomodKeyFor(db.AutomodSlotSecondary); err == nil {
+		settings.Automod.Secondary.HasAPIKey = has
+	} else {
+		s.log.Warn("cannot tell whether a secondary automod model key is stored", "err", err)
+	}
+	// Whether each checker's CURRENT connection has passed Test -- derived
+	// from the pass table, never stored, for the reason newlyEnabledUntested
+	// gives. The console unlocks a checker's switch on it.
+	settings.Automod.Model.Tested = s.checkerTested(automod.SlotPrimary, settings.Automod.Model)
+	settings.Automod.Secondary.Tested = s.checkerTested(automod.SlotSecondary, settings.Automod.Secondary)
 	// The ingest credentials are sealed the same way the MQTT password and the
 	// automod key already were, except that they cannot be moved out of the
 	// blob -- the settings page reads and writes them -- so they are blanked on
@@ -1433,6 +1444,9 @@ type versionedSettings struct {
 func settingsVersion(st db.Settings) string {
 	st.MQTT.HasPassword = false
 	st.Automod.Model.HasAPIKey = false
+	st.Automod.Secondary.HasAPIKey = false
+	st.Automod.Model.Tested = false
+	st.Automod.Secondary.Tested = false
 	b, err := json.Marshal(st)
 	if err != nil {
 		return ""
@@ -1693,6 +1707,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// And the stored armed cells, which newlyArmedOnUnconfigured compares
 		// against. A map is shared memory too, so a clone.
 		storedOn := maps.Clone(settings.Automod.On)
+		// And the stored model-checker blocks, which newlyEnabledUntested
+		// compares against. Copies: only their connection fields are read.
+		storedAutomod := db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1769,6 +1786,19 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := newlyArmedOnUnconfigured(storedOn, settings.Automod); err != nil {
 			return err
 		}
+		// AND NO MODEL CHECKER MAY BE SWITCHED ON UNTESTED, nor given a preset
+		// or a category action this build does not have. See
+		// newlyEnabledUntested and automodProviderProblems.
+		if err := automodProviderProblems(settings.Automod); err != nil {
+			return err
+		}
+		if err := newlyEnabledUntested(storedAutomod, settings.Automod, s.store.AutomodTestPass); err != nil {
+			return err
+		}
+		// Derived on the way out, never stored: whatever a client sent for
+		// these is not a fact about this server.
+		settings.Automod.Model.Tested = false
+		settings.Automod.Secondary.Tested = false
 		// A save that touches the ingest section may not leave the mode unset.
 		//
 		// db.IngestUnset is storable on purpose — it is what a fresh install is
@@ -2000,7 +2030,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// deciding on the old cells is the silent no-op this file already warns
 	// about twice. Rebuilding the engine here is also what recompiles a changed
 	// rule -- without it a new pattern would not apply until the next restart.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget)
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
 	// And the same for alert delivery: a retry budget that stores, returns 200
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.

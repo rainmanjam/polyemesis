@@ -60,3 +60,102 @@ func (d *DB) HasAutomodKey() (bool, error) {
 	err := d.sql.QueryRow(`SELECT COUNT(*) FROM automod_creds WHERE id = 1`).Scan(&n)
 	return n > 0, err
 }
+
+// AutomodSlotSecondary names the second model checker in the per-slot calls
+// below. Anything else means the primary, whose key has always lived in
+// automod_creds and still does.
+const AutomodSlotSecondary = "secondary"
+
+// PutAutomodKeyFor seals and stores a checker's key; an empty key clears it.
+// Either way the checker's Test pass is forgotten: a pass was earned with the
+// key it was tested with, and a new key -- or none -- has not earned one.
+func (d *DB) PutAutomodKeyFor(box *secrets.Box, slot, key string) error {
+	if slot != AutomodSlotSecondary {
+		if err := d.PutAutomodKey(box, key); err != nil {
+			return err
+		}
+		return d.ClearAutomodTestPass("primary")
+	}
+	if key == "" {
+		if _, err := d.sql.Exec(`DELETE FROM automod_secondary_creds WHERE id = 1`); err != nil {
+			return err
+		}
+		return d.ClearAutomodTestPass(AutomodSlotSecondary)
+	}
+	enc, err := box.Seal(key)
+	if err != nil {
+		return err
+	}
+	if _, err := d.sql.Exec(`INSERT INTO automod_secondary_creds (id, key_enc, updated_at)
+		VALUES (1,?,?)
+		ON CONFLICT(id) DO UPDATE SET key_enc=excluded.key_enc,
+			updated_at=excluded.updated_at`,
+		enc, time.Now().Unix()); err != nil {
+		return err
+	}
+	return d.ClearAutomodTestPass(AutomodSlotSecondary)
+}
+
+// GetAutomodKeyFor returns a checker's plaintext key, or "" when none is set.
+func (d *DB) GetAutomodKeyFor(box *secrets.Box, slot string) (string, error) {
+	if slot != AutomodSlotSecondary {
+		return d.GetAutomodKey(box)
+	}
+	var enc []byte
+	err := d.sql.QueryRow(`SELECT key_enc FROM automod_secondary_creds WHERE id = 1`).Scan(&enc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return box.Open(enc)
+}
+
+// HasAutomodKeyFor reports whether a checker has a key, without decrypting it.
+func (d *DB) HasAutomodKeyFor(slot string) (bool, error) {
+	if slot != AutomodSlotSecondary {
+		return d.HasAutomodKey()
+	}
+	var n int
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM automod_secondary_creds WHERE id = 1`).Scan(&n)
+	return n > 0, err
+}
+
+// normSlot maps anything that is not the secondary to "primary", matching the
+// table's CHECK.
+func normSlot(slot string) string {
+	if slot == AutomodSlotSecondary {
+		return AutomodSlotSecondary
+	}
+	return "primary"
+}
+
+// PutAutomodTestPass records that a checker passed the Test button with the
+// connection fingerprint fp.
+func (d *DB) PutAutomodTestPass(slot, fp string) error {
+	_, err := d.sql.Exec(`INSERT INTO automod_checker_tests (slot, fingerprint, passed_at)
+		VALUES (?,?,?)
+		ON CONFLICT(slot) DO UPDATE SET fingerprint=excluded.fingerprint,
+			passed_at=excluded.passed_at`,
+		normSlot(slot), fp, time.Now().Unix())
+	return err
+}
+
+// AutomodTestPass returns the fingerprint a checker last passed with, or ""
+// when it has not passed since its key last changed.
+func (d *DB) AutomodTestPass(slot string) (string, error) {
+	var fp string
+	err := d.sql.QueryRow(`SELECT fingerprint FROM automod_checker_tests WHERE slot = ?`,
+		normSlot(slot)).Scan(&fp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return fp, err
+}
+
+// ClearAutomodTestPass forgets a checker's pass.
+func (d *DB) ClearAutomodTestPass(slot string) error {
+	_, err := d.sql.Exec(`DELETE FROM automod_checker_tests WHERE slot = ?`, normSlot(slot))
+	return err
+}

@@ -42,9 +42,23 @@ type Moderation struct {
 	// Reason is what the moderator gave, or automod's closed-set platform
 	// reason. Never the model checker's prose (#495).
 	Reason string `json:"reason,omitempty"`
+	// DecidedBy is which automod model checker made the decision: "primary",
+	// or "secondary" when the primary could not answer. Empty for an
+	// operator's action and for automod's rules and history checkers.
+	DecidedBy string `json:"decidedBy,omitempty"`
 }
 
 type actorKey struct{}
+
+type decidedByKey struct{}
+
+// withDecidedBy marks ctx with the model checker behind an automod action.
+func withDecidedBy(ctx context.Context, slot string) context.Context {
+	if slot == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, decidedByKey{}, slot)
+}
 
 // WithActor marks ctx as carrying an action taken by actor. The hub's
 // moderation methods read it; anything not marked is an operator's.
@@ -67,5 +81,8 @@ func (h *Hub) publishModeration(ctx context.Context, m Moderation) {
 		return
 	}
 	m.By = actorOf(ctx)
+	if d, ok := ctx.Value(decidedByKey{}).(string); ok {
+		m.DecidedBy = d
+	}
 	h.bus.Publish(events.TypeChatModeration, m)
 }
