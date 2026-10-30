@@ -53,7 +53,7 @@ import type {
   TranscriptTrack,
   TranscriptView,
 } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
 
 // The library is the session, not the file. A broadcast is one thing; that the
 // recorder wrote it as eleven MKV segments is an implementation detail, and the
@@ -66,6 +66,25 @@ import { useT } from "@/lib/i18n";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_LIMIT = 40;
+
+/** What each recording job's toasts say. Keys per kind rather than one label
+ *  spliced into a sentence: "{label} queued" fixes English word order, and
+ *  lower-casing a label breaks every language that capitalises nouns. */
+const JOB_TOASTS: Record<
+  "transcribe" | "media.proxy",
+  { queued: TranslationKey; already: TranslationKey; failed: TranslationKey }
+> = {
+  transcribe: {
+    queued: "lib.transcriptionQueued",
+    already: "lib.transcriptionAlreadyQueued",
+    failed: "lib.couldNotQueueTranscription",
+  },
+  "media.proxy": {
+    queued: "lib.proxyQueued",
+    already: "lib.proxyAlreadyQueued",
+    failed: "lib.couldNotQueueTheProxy",
+  },
+};
 
 function errText(err: unknown, fallback: string): string {
   if (err instanceof ApiError || err instanceof Error) return err.message;
@@ -158,7 +177,7 @@ export function LibraryPage() {
       return;
     }
     setSearching(true);
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       api
         .searchTranscripts({
           q,
@@ -177,12 +196,12 @@ export function LibraryPage() {
             setResults(null);
             return;
           }
-          toast.error(errText(err, "Search failed."));
+          toast.error(errText(err, t("lib.searchFailed")));
         })
         .finally(() => setSearching(false));
     }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [query, order, speaker, since, until]);
+    return () => window.clearTimeout(timer);
+  }, [query, order, speaker, since, until, t]);
 
   const sessions = useMemo(() => {
     const list = view?.sessions ?? [];
@@ -234,7 +253,11 @@ export function LibraryPage() {
               try {
                 const r = await api.regroupSessions();
                 toast.success(
-                  `Regrouped: ${r.created} new, ${r.assigned} segments assigned, ${r.extended} extended.`,
+                  t("lib.regrouped", {
+                    created: r.created,
+                    assigned: r.assigned,
+                    extended: r.extended,
+                  }),
                 );
                 await load();
               } catch (err) {
@@ -246,7 +269,7 @@ export function LibraryPage() {
             title={t("lib.regroupTitle")}
           >
             <Sparkles />
-            Regroup
+            {t("lib.regroup")}
           </Button>
         }
       />
@@ -313,8 +336,8 @@ export function LibraryPage() {
               {results && (
                 <span className="tnum ml-auto font-mono text-tiny text-muted-foreground">
                   {results.total < 0
-                    ? `${results.hits.length} shown`
-                    : `${results.hits.length} of ${results.total}`}
+                    ? t("lib.hitsShown", { n: results.hits.length })
+                    : t("lib.hitsOf", { n: results.hits.length, total: results.total })}
                 </span>
               )}
             </div>
@@ -327,12 +350,13 @@ export function LibraryPage() {
           <CardContent className="px-0 py-0">
             {results.hits.length === 0 ? (
               <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                Nothing said matches that.
+                {t("lib.noHits")}
                 {!view?.transcribeAvailable && (
                   <>
                     {" "}
-                    Transcription is unavailable on this machine
-                    {view?.transcribeNote ? `: ${view.transcribeNote}` : ""}.
+                    {view?.transcribeNote
+                      ? t("lib.searchTranscribeUnavailableNote", { note: view.transcribeNote })
+                      : t("lib.searchTranscribeUnavailable")}
                   </>
                 )}
               </div>
@@ -383,7 +407,7 @@ export function LibraryPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label htmlFor="lib-until">To</Label>
+          <Label htmlFor="lib-until">{t("lib.to")}</Label>
           <Input
             id="lib-until"
             type="date"
@@ -394,7 +418,7 @@ export function LibraryPage() {
         </div>
         <label className="flex items-center gap-2 pb-1 text-tiny">
           <Switch checked={onlyTranscribed} onCheckedChange={setOnlyTranscribed} />
-          Has a transcript
+          {t("lib.hasTranscript")}
         </label>
         {filtersActive && (
           <Button
@@ -407,11 +431,13 @@ export function LibraryPage() {
               setOnlyTranscribed(false);
             }}
           >
-            Clear filters
+            {t("lib.clearFilters")}
           </Button>
         )}
         <span className="tnum ml-auto pb-1 font-mono text-tiny text-muted-foreground">
-          {sessions.length} session{sessions.length === 1 ? "" : "s"}
+          {t(sessions.length === 1 ? "lib.sessionCountOne" : "lib.sessionCountMany", {
+            n: sessions.length,
+          })}
         </span>
       </div>
 
@@ -623,7 +649,9 @@ function SessionCard({
             <span className="tnum font-mono">{shortDuration(session.durationMs)}</span>
             <span className="tnum font-mono">{bytes(session.bytes)}</span>
             <span>
-              {session.recordings} segment{session.recordings === 1 ? "" : "s"}
+              {t(session.recordings === 1 ? "lib.segmentCountOne" : "lib.segmentCountMany", {
+                n: session.recordings,
+              })}
             </span>
             {session.transcribed > 0 && (
               <Badge variant="armed" title={t("lib.searchableOnly")}>
@@ -633,7 +661,7 @@ function SessionCard({
             )}
             {session.auto && (
               <Badge variant="outline" title={t("lib.autoGrouped")}>
-                auto
+                {t("lib.autoBadge")}
               </Badge>
             )}
             {(session.tags ?? []).map((t) => (
@@ -793,16 +821,17 @@ function RecordingList({
     );
   }
 
-  const submit = async (rec: LibraryRecording, kind: string, label: string) => {
+  const submit = async (rec: LibraryRecording, kind: keyof typeof JOB_TOASTS) => {
+    const say = JOB_TOASTS[kind];
     setBusy(rec.id);
     try {
       const res = await api.submitRecordingJob(rec.id, kind);
       // created=false means the queue folded this into work already running,
       // which is what stops a double click doing the job twice.
-      toast.success(res.created ? `${label} queued.` : `${label} was already queued.`);
+      toast.success(t(res.created ? say.queued : say.already));
       onChanged();
     } catch (err) {
-      toast.error(errText(err, `Could not queue ${label.toLowerCase()}.`));
+      toast.error(errText(err, t(say.failed)));
     } finally {
       setBusy(0);
     }
@@ -847,7 +876,7 @@ function RecordingList({
                 <span className="tnum block font-mono text-micro text-muted-foreground">
                   {timestamp(r.startedAt)} · {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"} ·{" "}
                   {bytes(r.bytes)}
-                  {r.tracks > 0 ? ` · ${r.tracks} tracks` : ""}
+                  {r.tracks > 0 ? ` · ${t("lib.trackCount", { n: r.tracks })}` : ""}
                 </span>
               </span>
             </button>
@@ -873,12 +902,14 @@ function RecordingList({
                     variant="ghost"
                     size="icon-sm"
                     disabled={working || !transcribeAvailable}
-                    onClick={() => submit(r, "transcribe", "Transcription")}
+                    onClick={() => submit(r, "transcribe")}
                     aria-label={t("lib.transcribe")}
                     title={
                       transcribeAvailable
                         ? t("lib.transcribeEachTrackOnIts")
-                        : `Transcription unavailable: ${transcribeNote ?? "whisper.cpp was not found"}`
+                        : t("lib.transcriptionUnavailableReason", {
+                            note: transcribeNote ?? t("lib.whisperNotFound"),
+                          })
                     }
                   >
                     <Captions />
@@ -887,7 +918,7 @@ function RecordingList({
                     variant="ghost"
                     size="icon-sm"
                     disabled={working}
-                    onClick={() => submit(r, "media.proxy", "Proxy")}
+                    onClick={() => submit(r, "media.proxy")}
                     aria-label={t("lib.generateProxy")}
                     title={t("lib.generateProxyTitle")}
                   >
@@ -1058,10 +1089,12 @@ export function PlayerDialog({
     setBusy(true);
     try {
       const res = await api.submitRecordingJob(target.recordingId, "transcribe");
-      toast.success(res.created ? "Transcription queued." : "Transcription was already queued.");
+      toast.success(
+        res.created ? t("lib.transcriptionQueued") : t("lib.transcriptionAlreadyQueued"),
+      );
       onChanged();
     } catch (err) {
-      toast.error(errText(err, "Could not queue transcription."));
+      toast.error(errText(err, t("lib.couldNotQueueTranscription")));
     } finally {
       setBusy(false);
     }
@@ -1075,7 +1108,7 @@ export function PlayerDialog({
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle className="truncate font-mono text-sm">
-            {rec?.title || rec?.filename || "Recording"}
+            {rec?.title || rec?.filename || t("lib.recordingFallback")}
           </DialogTitle>
         </DialogHeader>
 
@@ -1108,19 +1141,16 @@ export function PlayerDialog({
                 <div className="flex flex-col items-center gap-2 rounded border border-dashed border-border-strong px-3 py-8 text-center">
                   <Film className="h-5 w-5 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
-                    No proxy for this recording yet. Browsers cannot play the
-                    multitrack MKV master, so there is nothing to show until one
-                    is generated.
+                    {t("lib.noProxyForRecording")}
                   </p>
                   {jobsAvailable ? (
                     <Button size="sm" disabled={busy} onClick={queueProxy}>
                       <Film />
-                      Generate a proxy
+                      {t("lib.generateProxyButton")}
                     </Button>
                   ) : (
                     <p className="text-tiny text-muted-foreground">
-                      No job queue is running on this server, so one cannot be
-                      generated here.
+                      {t("lib.noJobQueue")}
                     </p>
                   )}
                 </div>
@@ -1132,7 +1162,7 @@ export function PlayerDialog({
                     <span className="tnum font-mono">{timestamp(rec.startedAt)}</span>
                     <span className="tnum font-mono">{shortDuration(rec.durationMs)}</span>
                     <span className="tnum font-mono">{bytes(rec.bytes)}</span>
-                    {rec.tracks > 0 && <span>{rec.tracks} audio tracks in the master</span>}
+                    {rec.tracks > 0 && <span>{t("lib.audioTracksInMaster", { n: rec.tracks })}</span>}
                     <a
                       className="ml-auto text-primary hover:underline"
                       href={api.downloadUrl(rec.id)}
@@ -1199,7 +1229,9 @@ export function PlayerDialog({
                       title={
                         transcribeAvailable
                           ? t("lib.transcribeEachTrackOnIts")
-                          : `Transcription unavailable: ${transcribeNote ?? "whisper.cpp was not found"}`
+                          : t("lib.transcriptionUnavailableReason", {
+                            note: transcribeNote ?? t("lib.whisperNotFound"),
+                          })
                       }
                     >
                       <Captions />
@@ -1212,7 +1244,7 @@ export function PlayerDialog({
               <div className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto rounded border border-border p-2">
                 {merged.length === 0 ? (
                   <p className="py-6 text-center text-tiny text-muted-foreground">
-                    No transcript for this recording yet.
+                    {t("lib.noTranscriptYet")}
                   </p>
                 ) : (
                   merged.map((seg) => {

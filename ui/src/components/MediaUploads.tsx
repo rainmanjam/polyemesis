@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { bytes, duration, timestamp } from "@/lib/format";
-import { useT } from "@/lib/i18n";
+import { useT, useTN } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -58,6 +58,7 @@ interface InFlight {
 
 export function MediaUploads() {
   const t = useT();
+  const tn = useTN();
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [inFlight, setInFlight] = useState<InFlight[]>([]);
   /* A LIST, not one slot. The single string was why three of five rejected
@@ -226,7 +227,7 @@ export function MediaUploads() {
           }}
           role="button"
           tabIndex={0}
-          aria-label="Upload a media file"
+          aria-label={t("media.uploadAria")}
           className={[
             "flex cursor-pointer flex-col items-center justify-center gap-2",
             "rounded-md border border-dashed p-6 text-center transition-colors",
@@ -235,11 +236,12 @@ export function MediaUploads() {
         >
           <Upload className="size-5 opacity-70" aria-hidden />
           <div className="text-sm">
-            Drop a file here, or <span className="underline">choose one</span>
+            {tn("media.dropOrChoose", {
+              choose: <span className="underline">{t("media.chooseOne")}</span>,
+            })}
           </div>
           <div className="text-xs text-muted-foreground">
-            MPEG-TS is the least surprising container. An MP4 works, but its
-            moov atom makes FFmpeg want the whole file before it starts.
+            {t("media.containerHint")}
           </div>
         </div>
         <input
@@ -271,7 +273,7 @@ export function MediaUploads() {
                   size="icon"
                   variant="ghost"
                   className="size-6"
-                  aria-label={`Cancel uploading ${f.name}`}
+                  aria-label={t("media.cancelUploading", { name: f.name })}
                   onClick={() => f.controller.abort()}
                 >
                   <X className="size-3" />
@@ -309,7 +311,7 @@ export function MediaUploads() {
 
         {files.length === 0 && inFlight.length === 0 ? (
           <div className="text-xs text-muted-foreground">
-            Nothing uploaded yet.
+            {t("media.nothingUploaded")}
           </div>
         ) : (
           <div className="grid gap-1">
@@ -397,12 +399,16 @@ export function MediaUploads() {
                         }
                         title={
                           f.media.audioTracks === 0
-                            ? "No audio. Every major platform refuses a video-only stream — turn on the silence tier in Settings → Synthetic."
+                            ? t("media.noAudioHint")
                             : undefined
                         }
                       >
-                        {f.media.audioTracks} audio{" "}
-                        {f.media.audioTracks === 1 ? "track" : "tracks"}
+                        {t(
+                          f.media.audioTracks === 1
+                            ? "media.audioTracksOne"
+                            : "media.audioTracksMany",
+                          { n: f.media.audioTracks },
+                        )}
                         {f.media.audioLayout ? ` (${f.media.audioLayout})` : ""}
                       </span>
                     </div>
@@ -440,17 +446,17 @@ export function MediaUploads() {
                     size="sm"
                     variant="ghost"
                     onClick={() => void copyPullUrl(f)}
-                    aria-label={`Copy the pull URL for ${f.name}`}
+                    aria-label={t("media.copyPullUrl", { name: f.name })}
                   >
                     <Copy className="size-3.5" />
-                    {copied === f.name ? "Copied" : "Pull URL"}
+                    {copied === f.name ? t("common.copied") : t("media.pullUrl")}
                   </Button>
                   <Button
                     size="icon"
                     variant="ghost"
                     className="size-8"
                     onClick={() => setPendingDelete(f)}
-                    aria-label={`Delete ${f.name}`}
+                    aria-label={t("media.deleteAria", { name: f.name })}
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
@@ -472,14 +478,14 @@ export function MediaUploads() {
             if (!o) setPendingDelete(null);
           }}
           subject={pendingDelete.name}
-          title="Delete this upload?"
+          title={t("media.deleteTitle")}
           // requireTyping, because this one genuinely does not come back and
           // may be the only copy: polyemesis did not produce this file and
           // cannot recreate it, unlike a recording it could in principle
           // capture again. That is the distinction the flag exists for.
           requireTyping
-          description="polyemesis did not create this file and cannot recover it. If this is your only copy, it is gone."
-          confirmLabel="Delete"
+          description={t("media.deleteDescription")}
+          confirmLabel={t("common.delete")}
           onConfirm={() => {
             const f = pendingDelete;
             setPendingDelete(null);

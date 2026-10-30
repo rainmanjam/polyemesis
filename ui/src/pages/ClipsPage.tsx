@@ -155,7 +155,9 @@ export function ClipsPage() {
     try {
       const res = await autoApi.captureClip<{ clip: Clip }>(seconds, programme);
       toast.success(
-        `Captured ${res.clip.seconds.toFixed(1)}s${res.clip.keyframeAligned ? "" : " (not keyframe-aligned — may start with a glitch)"}.`,
+        t(res.clip.keyframeAligned ? "clips.capturedToast" : "clips.capturedRoughToast", {
+          seconds: res.clip.seconds.toFixed(1),
+        }),
       );
       await load();
     } catch (err) {
@@ -197,7 +199,7 @@ export function ClipsPage() {
         subtitle={t("clips.subtitle")}
         actions={
           <Badge variant={buffer?.running ? "live" : buffer?.enabled ? "warn" : "outline"}>
-            {buffer?.running ? "buffering" : buffer?.enabled ? t("clips.waitingForStream") : t("clips.off")}
+            {buffer?.running ? t("clips.buffering") : buffer?.enabled ? t("clips.waitingForStream") : t("clips.off")}
           </Badge>
         }
       />
@@ -208,7 +210,7 @@ export function ClipsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-1.5">
-                <Scissors className="h-3.5 w-3.5" /> Capture
+                <Scissors className="h-3.5 w-3.5" /> {t("clips.capture")}
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
@@ -222,7 +224,7 @@ export function ClipsPage() {
                     onClick={() => capture(s)}
                   >
                     {capturing && <Loader2 className="animate-spin" />}
-                    Last {s}s
+                    {t("clips.lastSeconds", { n: s })}
                   </Button>
                 ))}
                 <Button
@@ -232,7 +234,7 @@ export function ClipsPage() {
                   onClick={() => capture(0)}
                   title={t("clips.everythingHeld")}
                 >
-                  Whole buffer
+                  {t("clips.wholeBuffer")}
                 </Button>
                 <span className="mx-1 h-5 w-px bg-border" />
                 <Input
@@ -250,7 +252,7 @@ export function ClipsPage() {
                   disabled={!programmeKnown || capturing || !buffer?.running || custom < 1}
                   onClick={() => capture(custom)}
                 >
-                  Capture
+                  {t("clips.capture")}
                 </Button>
               </div>
 
@@ -264,14 +266,15 @@ export function ClipsPage() {
                 </p>
               ) : (
                 <p className="text-tiny text-muted-foreground">
-                  Holding {held.toFixed(0)}s of the last {stats?.windowSeconds.toFixed(0) ?? "—"}s.
+                  {t("clips.holding", {
+                    held: held.toFixed(0),
+                    window: stats?.windowSeconds.toFixed(0) ?? "—",
+                  })}
                   {/* Asking for more than has arrived is not an error — the
                       capture is simply as long as the history allows. */}
-                  {" "}A longer request is trimmed to what is there.
-                  {stats?.truncated &&
-                    " The memory ceiling, not the window, is what limits it right now."}
-                  {stats && !stats.videoFound &&
-                    " No keyframe has been seen yet, so a clip may start with a glitch."}
+                  {" "}{t("clips.trimmedNote")}
+                  {stats?.truncated && ` ${t("clips.memoryLimits")}`}
+                  {stats && !stats.videoFound && ` ${t("clips.noKeyframeYet")}`}
                 </p>
               )}
             </CardContent>
@@ -316,7 +319,7 @@ export function ClipsPage() {
                               className="ml-1.5"
                               title={c.note || t("clips.theClipDoesNotStart")}
                             >
-                              rough start
+                              {t("clips.roughStart")}
                             </Badge>
                           )}
                         </TableCell>
@@ -446,7 +449,7 @@ export function ClipsPage() {
                     disabled={!programmeKnown || !buffer?.enabled}
                     onClick={() => setBuffer(true, windowSec)}
                   >
-                    Apply
+                    {t("common.apply")}
                   </Button>
                 </div>
                 {/* Apply stays greyed while the buffer is off -- there is
