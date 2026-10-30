@@ -178,8 +178,7 @@ step "2. The grants and PKCE methods polyemesis depends on are still advertised"
 # Proven able to fail against the committed tree by renaming the driver's
 # grant_types_supported JSON tag, which failed both grant checks and nothing
 # else; by returning false from YouTube.PKCE(), which failed the S256
-# conjunction alone; and by returning true from Twitch.PKCE(), which failed the
-# Twitch premise alone.
+# conjunction alone. (The Twitch PKCE check below records its own proofs.)
 if has "$(val "$GDISC" grantTypes)" refresh_token; then
   ok "Google still advertises the refresh_token grant, which every YouTube account depends on"
 else
@@ -207,31 +206,38 @@ else
   bad "S256 disagreement: google='$(val "$GDISC" codeChallengeMethods)' pkce=$(val "$YAUTH" pkce) sent='$(val "$YAUTH" codeChallengeMethod)'"
 fi
 
-# THE INVERSE, AND IT IS A REAL CHECK. twitch.go keeps PKCE off with a comment
-# whose entire argument is that Twitch documents no RFC 7636 support, so
-# sending a code_challenge on a hunch could lock every user out of sign-in.
-# That argument has a premise, and this is the premise: Twitch's own discovery
-# document still advertises no code_challenge_methods_supported. The day it
-# does, this fails -- and the failure is an instruction to turn PKCE on, not a
-# defect.
+# TWITCH, THE SAME THREE FACTS. This used to be the inverse -- an assertion
+# that Twitch's document advertised NO code_challenge_methods_supported, the
+# premise behind twitch.go keeping PKCE off -- and it did exactly what it was
+# written to do: on 2026-10-19 Twitch's discovery document began advertising
+# S256, this failed on main, and the failure was the instruction to turn PKCE
+# on. twitch.go now sends S256, so the check is the conjunction Google's is:
+# Twitch advertises S256, Twitch.PKCE() is on, and the consent URL the package
+# actually builds carries code_challenge_method=S256. The day Twitch drops S256
+# from its document this fails, and that failure means turn PKCE back off
+# before sign-in starts being refused.
 #
-# THE published=true CLAUSE IS LOAD-BEARING AND WAS ADDED AFTER THIS CHECK WAS
-# CAUGHT PASSING VACUOUSLY. This is an assertion about an ABSENCE, and an
-# absence is trivially satisfied by a document that was never fetched: pointing
-# the driver at a 404 made every other Twitch check fail and left this one
-# green, reporting "Twitch still documents no PKCE support" on the strength of
-# having read nothing at all. An absence is only evidence when something was
-# read.
+# THE published=true CLAUSE STAYS LOAD-BEARING. It was added after the old
+# absence check was caught passing vacuously against a 404. The conjunction
+# below cannot pass on a document that was never read (S256 would be missing),
+# but the separate branch keeps "Twitch's document did not parse" distinct from
+# "Twitch dropped S256" -- two different repairs.
+#
+# Proven able to fail against the committed tree three ways, each alone: by
+# returning false from Twitch.PKCE(); by deleting the code_challenge_method line
+# from Twitch.AuthURL, which leaves PKCE() true and only the URL half catches;
+# and by renaming the driver's code_challenge_methods_supported JSON tag.
 if [ "$(val "$TDISC" published)" = true ] \
-   && [ -z "$(val "$TDISC" codeChallengeMethods)" ] && [ "$(val "$TAUTH" pkce)" = false ]; then
-  ok "Twitch's document still advertises no PKCE support, so twitch.go keeping it off still matches"
+   && has "$(val "$TDISC" codeChallengeMethods)" S256 \
+   && [ "$(val "$TAUTH" pkce)" = true ] \
+   && [ "$(val "$TAUTH" codeChallengeMethod)" = S256 ]; then
+  ok "Twitch supports S256, Twitch.PKCE() is on, and the consent URL carries S256"
 elif [ "$(val "$TDISC" published)" != true ]; then
-  bad "Twitch's PKCE premise could not be checked: the discovery document did not parse"
+  bad "Twitch's PKCE support could not be checked: the discovery document did not parse"
 else
-  bad "PKCE disagreement: twitch advertises code_challenge_methods='$(val "$TDISC" codeChallengeMethods)' while Twitch.PKCE()=$(val "$TAUTH" pkce)"
-  note "if Twitch has documented S256, turn PKCE on in twitch.go; if PKCE() was turned on"
-  note "without Twitch documenting support, turn it back off -- that is the sign-in outage"
-  note "twitch.go's comment warns about."
+  bad "S256 disagreement: twitch='$(val "$TDISC" codeChallengeMethods)' pkce=$(val "$TAUTH" pkce) sent='$(val "$TAUTH" codeChallengeMethod)'"
+  note "if Twitch stopped advertising S256, turn PKCE off in twitch.go before sign-in is"
+  note "refused; if Twitch still advertises it, the package stopped sending the challenge."
 fi
 
 # ---------------------------------------------------------------------------

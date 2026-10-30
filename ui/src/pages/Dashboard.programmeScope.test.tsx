@@ -128,3 +128,41 @@ describe("Dashboard: the Pipeline card follows the programme selected in the hea
     expect(pipeline().queryByText("5")).toBeNull();
   });
 });
+
+/* A push on the shared SRT listener has no ingest process, so the Ingest
+ * card's uptime had nothing to time and read "—" for the whole of a healthy
+ * broadcast. The programme's hub reports how long its stream has been arriving
+ * (relay.receivingSec); the card prints that, and only for the selected
+ * programme -- never the uptime of another programme whose frame landed last. */
+describe("Dashboard: the Ingest card's uptime on the shared SRT listener", () => {
+  const srtFrame = (id: number, name: string, rxBytes: number, receivingSec?: number) =>
+    ({
+      renditions: [],
+      destinations: [],
+      relay: { ...relay(0), rxBytes, ...(receivingSec === undefined ? {} : { receivingSec }) },
+      source: { id, name, probed: true, tracks: [] },
+    }) as unknown as Status;
+
+  function ingestCard() {
+    const title = screen.getAllByText(translate("en", "chrome.ingest"))[0];
+    const card = title.closest("[data-slot='card'], .rounded-xl, .rounded-lg") as HTMLElement;
+    return within(card ?? document.body);
+  }
+
+  afterEach(() => vi.useRealTimers());
+
+  it("times the selected programme's push ingest from when its stream started arriving", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    const { rerender } = render(view(srtFrame(1, "Studio A", 1_000_000, 752)));
+    await ingestCard().findByText(translate("en", "dash.uptime"));
+    vi.setSystemTime(new Date("2026-10-30T12:00:01Z"));
+    // Studio B, receiving for longer, speaks in between and must not win.
+    rerender(view(srtFrame(2, "Studio B", 5_000_000, 3600)));
+    vi.setSystemTime(new Date("2026-10-30T12:00:02Z"));
+    rerender(view(srtFrame(1, "Studio A", 2_500_000, 754)));
+
+    expect(ingestCard().getByText("00:12:34"), "the SRT ingest's uptime read nothing").toBeTruthy();
+    expect(ingestCard().queryByText("01:00:00")).toBeNull();
+  });
+});

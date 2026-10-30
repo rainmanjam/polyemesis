@@ -66,3 +66,45 @@ export function presetPicks(shown: PresetOpts, next: PresetOpts): Partial<Preset
   }
   return out;
 }
+
+/** One programme's layout as the role defaults read it: what the operator said
+ *  each track is, and which tracks the ingest has. */
+export interface RoleLayout {
+  sourceId: number;
+  annotations: readonly TrackAnnotation[];
+  tracks: readonly number[];
+}
+
+/** The track indices of a programme's measured layout, or the six-stereo
+ *  placeholder useSourceTracks shows before the ingest is probed -- the same
+ *  pickers, offered the same options, whichever programme they describe. */
+export function layoutTrackIndices(tracks: readonly { index: number }[] | null | undefined): number[] {
+  if (tracks && tracks.length > 0) return tracks.map((tr) => tr.index);
+  return [0, 1, 2, 3, 4, 5];
+}
+
+/** Whose annotations and tracks the role defaults come from: the EDITED
+ *  DESTINATION'S programme, never the one selected in the header.
+ *
+ *  A preset picks track indices and the server applies it against the
+ *  destination's programme (applyPreset is sent its source id, #497). Reading
+ *  the roles from the header's programme instead opened the music picker on
+ *  another ingest's music track and applied the preset with it -- on a
+ *  two-programme install, Studio B's mic went out as its music bed.
+ *
+ *  `local` is what the page holds and the operator may be typing into, so it
+ *  wins while it describes that programme; otherwise `read`, that programme's
+ *  own layout from GET /source. Until one of them describes it there are no
+ *  role defaults at all -- the server's generic slots stand, which is a guess
+ *  rather than another programme's answer. A legacy destination with no
+ *  programme keeps the page's layout, as everything else on the page does. */
+export function roleLayoutFor(
+  editedSourceId: number | null,
+  local: RoleLayout | null,
+  read: RoleLayout | null,
+): Pick<RoleLayout, "annotations" | "tracks"> {
+  if (editedSourceId === null) return local ?? { annotations: [], tracks: [] };
+  if (local?.sourceId === editedSourceId) return local;
+  if (read?.sourceId === editedSourceId) return read;
+  return { annotations: [], tracks: [] };
+}

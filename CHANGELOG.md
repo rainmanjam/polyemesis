@@ -254,6 +254,18 @@ its first tagged release.
 
 ### Changed
 
+- **Twitch sign-in now uses PKCE.** Connecting a Twitch account sends an S256
+  `code_challenge`, and the token exchange sends the matching `code_verifier`
+  along with the client secret. A leaked authorization code is no use to anyone
+  but the server that asked for it. Twitch's discovery document began
+  advertising `code_challenge_methods_supported: ["S256"]` on 2026-10-19. The
+  weekly `oauth (live platforms)` check caught the change and has failed on
+  `main` since. That check now asserts S256 the way it does for Google: Twitch
+  advertises it, `Twitch.PKCE()` is on, and the consent URL carries it. It will
+  fail if Twitch withdraws S256. Accounts that were already connected are not
+  affected: refresh sends no verifier. A sign-in started before the upgrade and
+  finished after it still exchanges without a verifier.
+
 - **Deploying this release restarts every running destination once.** The
   destination argv changed: each mixed track gained its named `volume@` stage,
   and `-nostdin` is gone from destination processes everywhere except Windows.
@@ -343,6 +355,28 @@ its first tagged release.
   `deploy/prometheus/alerts.yml`, and checks that every query on the Grafana
   dashboard parses (`scripts/promtool-check.sh`, Prometheus 3.15.0 pinned by
   digest).
+- **An SRT ingest on the shared listener shows its uptime.** It has no ingest
+  process, so the dashboard's Ingest card and the header read "—" for the
+  whole broadcast. Each programme's relay hub now reports how long its stream
+  has been arriving, as `relay.receivingSec` on the status payload: from the
+  first datagram after a silence of more than 3 s, and absent while nothing
+  arrives. The card and the header print it where there is no process uptime.
+  The features page lists the ingest uptime again.
+
+- **The header's Ingest chip follows the programme selected in the header.**
+  It read the last status frame on the socket and the bitrate series, which
+  names no programme, so another programme's encoder turned it Live and put
+  that programme's uptime beside it. It now reads the selected programme's own
+  frames and relay bytes, through the same code as the dashboard's Ingest card.
+
+- **Routing preset pickers open on the edited destination's own programme.**
+  The role defaults (the music picker opens on the track annotated music)
+  came from the programme selected in the header. A preset is applied against
+  the destination's programme, so editing another programme's destination
+  could apply that programme's mic as its music bed. The roles are now read
+  from the destination's programme, and the server's defaults stand until
+  that read answers.
+
 - **A healthy install no longer shows "189 ERRORS".** Every process that
   decodes video from the relay joins it mid-GOP, and until the next keyframe
   FFmpeg's decoder complains once a frame. Those lines were counted as errors

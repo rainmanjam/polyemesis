@@ -234,8 +234,8 @@ func TestTwitchPollDeviceAuthSendsTheDocumentedGrant(t *testing.T) {
 	}
 	// The documented request carries no secret. The app stays confidential --
 	// it has to, or the code flow every existing operator uses stops working --
-	// but sending Twitch a parameter its own example omits is the gamble
-	// twitch.go's PKCE comment refuses to take.
+	// but sending Twitch a parameter its own example omits is a gamble.
+	// twitch.go took PKCE only once Twitch's discovery document listed it.
 	if calls.form.Has("client_secret") {
 		t.Error("PollDeviceAuth sent client_secret, which the documented device-flow request does not")
 	}

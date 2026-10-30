@@ -67,10 +67,16 @@ import (
 func TestTheHeaderAsksTheAppsOneQuestionAboutBeingLive(t *testing.T) {
 	src := testenv.StripJSComments(testenv.ReadUI(t, "components", "AppLayout.tsx"))
 
-	if !strings.Contains(src, "useIngestLive()") {
-		t.Error("AppLayout no longer calls useIngestLive. An SRT source has no ingest " +
-			"child by design, so a header reading the process state reports every " +
-			"healthy SRT install as Offline.")
+	// The header asks it through useProgrammeIngest, which narrows the answer to
+	// the programme selected in the header (the status socket and the bitrate
+	// series are install-wide) and is shared with the dashboard's Ingest card.
+	// Either way the question is useIngestLive's, so the hook is held to it too.
+	hook := testenv.StripJSComments(testenv.ReadUI(t, "hooks", "useProgrammeIngest.ts"))
+	if !strings.Contains(src, "useProgrammeIngest(") || !strings.Contains(hook, "useIngestLive()") {
+		t.Error("AppLayout no longer reads the ingest through useProgrammeIngest, or that " +
+			"hook no longer calls useIngestLive. An SRT source has no ingest child by " +
+			"design, so a header reading the process state reports every healthy SRT " +
+			"install as Offline.")
 	}
 	// The tone is what makes the dot green, and it is the part that was
 	// inverted. Deriving it from the process alone is the original bug.

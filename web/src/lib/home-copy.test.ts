@@ -259,3 +259,17 @@ describe("the hero's link sentences keep their spaces (S1)", () => {
     },
   );
 });
+
+/* THE DASHBOARD'S INGEST UPTIME. #924 took "uptime" out of the features copy
+ * because it read "—" on the one-port SRT/RTMP ingest, which has no ingest
+ * process to time. The programme's relay hub now times the stream from when it
+ * started arriving (relay.Stats.ReceivingSec), so the card shows it on every
+ * ingest mode and the copy says so again. */
+describe("the features page's dashboard copy", () => {
+  it("claims the ingest uptime the card now shows on every ingest mode", () => {
+    const features = pages("features.astro");
+    const dashboard = features.slice(features.indexOf("The programme you picked in the header"));
+    const sentence = dashboard.slice(0, dashboard.indexOf("\n"));
+    expect(sentence).toMatch(/its ingest — bitrate, uptime,/);
+  });
+});

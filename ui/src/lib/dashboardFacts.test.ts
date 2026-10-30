@@ -8,6 +8,7 @@ import {
   audioTrackCount,
   ingestAttribution,
   ingestBitrateKbps,
+  ingestUptimeSec,
   mergeStatusDestinations,
   processAbsence,
   programmeIngestLive,
@@ -115,8 +116,11 @@ describe("Dashboard, wired to these decisions", () => {
 
   it("scopes the Ingest card to the selected programme rather than the last writer", () => {
     const src = dashboard();
-    // The card's figures come from the held, programme-scoped snapshot...
-    expect(src).toContain("programmeSnapshot(prev, status, programme)");
+    // The card's figures come from the held, programme-scoped snapshot, which
+    // useProgrammeIngest holds for the card and the header chip alike...
+    expect(src).toContain("useProgrammeIngest(sourceCount)");
+    const hook = readFileSync(join(ROOT, "ui/src/hooks/useProgrammeIngest.ts"), "utf8");
+    expect(hook).toContain("programmeSnapshot(prev, status, programme)");
     expect(src).toContain("const ingest = programmeStatus?.ingest;");
     expect(src).toContain("const source = programmeStatus?.source;");
     // ...the publish address is the selected programme's, not the default's...
@@ -331,5 +335,43 @@ describe("programmeIngestLive", () => {
     expect(programmeIngestLive(true, 3, probed, 0)).toBe(false);
     expect(programmeIngestLive(true, 3, probed, null)).toBe(false);
     expect(programmeIngestLive(true, 3, unprobed, 900)).toBe(false);
+  });
+});
+
+/* The ingest uptime on the shared SRT listener. There is no ingest process
+ * there to time (engine.reconcileIngest returns early for SRT), so the card
+ * read "—" over a healthy broadcast. The programme's relay hub reports how long
+ * its stream has been arriving (relay.Stats.ReceivingSec); that stands in. */
+describe("ingestUptimeSec", () => {
+  const running = (uptimeSec: number) => ({ state: "running" as const, uptimeSec });
+
+  it("times a push ingest with no process from when its stream started arriving", () => {
+    expect(ingestUptimeSec(null, { receivingSec: 754 }, true)).toBe(754);
+  });
+
+  it("prefers the ingest process's own uptime where there is one", () => {
+    expect(ingestUptimeSec(running(120), { receivingSec: 118 }, true)).toBe(120);
+  });
+
+  /* An RTMP child that has started but not yet seen media reports 0: its
+   * mediaAt is unset. The hub has seen the bytes, so it answers. */
+  it("falls through to the relay when the process has not stamped its first media", () => {
+    expect(ingestUptimeSec(running(0), { receivingSec: 42 }, true)).toBe(42);
+  });
+
+  /* Gated on the programme-scoped live verdict, so the card cannot read
+   * Offline beside a running uptime. */
+  it("claims no uptime from the relay while the programme is not live", () => {
+    expect(ingestUptimeSec(null, { receivingSec: 42 }, false)).toBeNull();
+  });
+
+  it("is unknown while nothing is arriving and there is no process", () => {
+    expect(ingestUptimeSec(null, { receivingSec: undefined }, true)).toBeNull();
+    expect(ingestUptimeSec(undefined, undefined, false)).toBeNull();
+  });
+
+  it("keeps the old reading for a stopped process with nothing arriving", () => {
+    expect(ingestUptimeSec({ state: "stopped", uptimeSec: 0 }, {}, false)).toBeNull();
+    expect(ingestUptimeSec(running(0), {}, false)).toBe(0);
   });
 });

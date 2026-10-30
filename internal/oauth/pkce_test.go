@@ -163,7 +163,12 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 	// platform accepts RFC 7636 breaks sign-in for that platform entirely.
 	want := map[db.Platform]bool{
 		db.PlatformYouTube: true,
-		db.PlatformTwitch:  false,
+		// Twitch's discovery document advertises code_challenge_methods_supported
+		// [S256] (observed 2026-10-30; the weekly live suite first saw it on
+		// 2026-10-19). Its prose authorization-code page still lists no PKCE
+		// parameter, so the live suite's step 2 is what keeps this honest: it
+		// fails the week Twitch stops advertising S256.
+		db.PlatformTwitch: true,
 		// Meta's Login dialog does not document code_challenge; sending one is
 		// the lock-everyone-out risk Provider.PKCE exists to avoid.
 		db.PlatformFacebook: false,

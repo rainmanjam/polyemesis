@@ -533,6 +533,12 @@ current broadcast and carries every untouched field through on every write.
 3. Category: *Broadcasting Suite*. Client Type: **Confidential**.
 4. **Manage → New Secret**, then paste both values into polyemesis.
 
+Connect account sends a PKCE challenge (RFC 7636, S256) along with the client
+secret, which the app keeps; the client stays **Confidential**. Twitch's discovery
+document has advertised S256 since October 2026. There is nothing to configure.
+Accounts that were already connected keep refreshing as they did, because PKCE
+only applies to a new authorization.
+
 Scopes requested, all seven: `channel:read:stream_key` (the key),
 `channel:manage:broadcast` (title and category at go-live), `chat:read` and
 `chat:edit` (the unified chat pane), and the three that make the Moderation row

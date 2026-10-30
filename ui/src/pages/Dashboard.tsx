@@ -14,11 +14,8 @@ import {
   audioTrackCount,
   ingestAttribution,
   ingestBitrateKbps,
+  ingestUptimeSec,
   processAbsence,
-  programmeIngestLive,
-  programmeSnapshot,
-  relayRate,
-  type RelaySample,
 } from "@/lib/dashboardFacts";
 import { laneLayout } from "@/lib/sourceLanes";
 import { cn } from "@/lib/utils";
@@ -55,7 +52,8 @@ import { OnAirBar } from "@/components/OnAirBar";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
-import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { useLiveData } from "@/hooks/useLiveData";
+import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { api, isNoSource } from "@/lib/api";
 import {
   pollVerdict,
@@ -80,7 +78,6 @@ import type {
   MetaField,
   SourceInfo,
   SourceView,
-  Status,
   SystemInfo,
 } from "@/lib/types";
 import { useT, useStateLabel, type TranslationKey } from "@/lib/i18n";
@@ -1132,16 +1129,6 @@ export function Dashboard() {
    * held -- at most one publish interval stale, which is what every other
    * reading on this page already is. */
   const [failoverState, setFailoverState] = useState<FailoverStatus | null>(null);
-  /* The status snapshot of the programme selected in the header, held the
-   * same way and for the same reason as failoverState: the socket alternates
-   * between every engine's frames, and the Ingest card printed whichever one
-   * spoke last. Null until the selected programme reports, so the card shows
-   * "—" rather than another show's figures. See programmeSnapshot(). */
-  const [programmeStatus, setProgrammeStatus] = useState<Status | null>(null);
-  /* That programme's own relay throughput, from the byte counter its frames
-   * carry. The bitrate series on the stats frames names no programme; this
-   * does. See relayRate(). */
-  const [relaySample, setRelaySample] = useState<RelaySample | null>(null);
   /* Every programme's last-reported source layout, by id, from the same
    * frames. A destination card sizes and names its track chips from ITS
    * programme's layout, which on a lanes install is usually not the selected
@@ -1187,6 +1174,17 @@ export function Dashboard() {
   const [pending, setPending] = useState<DestinationId[] | null>(null);
   const [moveNote, setMoveNote] = useState("");
   const [sourceCount, setSourceCount] = useState<number | null>(null);
+  /* The selected programme's status frame, its relay throughput and whether it
+   * is live, held the same way and for the same reason as failoverState: the
+   * socket alternates between every engine's frames and the `stats` bitrate
+   * series names no programme, so the Ingest card printed whichever one spoke
+   * last. The header chip reads the same hook, so the two cannot disagree.
+   * See useProgrammeIngest. */
+  const {
+    snapshot: programmeStatus,
+    kbps: programmeKbps,
+    live: ingestLive,
+  } = useProgrammeIngest(sourceCount);
 
   // How many programmes exist, which is what decides whether this page shows a
   // pipeline or an empty state.
@@ -1269,23 +1267,12 @@ export function Dashboard() {
   }, [programme, refreshKey]);
 
   useEffect(() => {
-    setProgrammeStatus((prev) => programmeSnapshot(prev, status, programme));
-  }, [status, programme]);
-  useEffect(() => {
     const src = status?.source;
     if (src?.id == null) return;
     setFrameSources((prev) => (prev[src.id] === src ? prev : { ...prev, [src.id]: src }));
   }, [status]);
   const sourceOf = (id: number | null | undefined): SourceInfo | null =>
     id == null ? null : (frameSources[id] ?? null);
-  // Per frame of the selected programme; a programme switch starts over, since
-  // the held baseline is the old programme's counter.
-  useEffect(() => {
-    setRelaySample(null);
-  }, [programme]);
-  useEffect(() => {
-    setRelaySample((prev) => relayRate(prev, programmeStatus?.relay?.rxBytes, Date.now()));
-  }, [programmeStatus]);
 
   useEffect(() => {
     if (!status || programme == null) return;
@@ -1374,7 +1361,7 @@ export function Dashboard() {
   };
 
   // The SELECTED programme's ingest, not the last engine to publish. See the
-  // programmeStatus declaration.
+  // useProgrammeIngest call.
   const ingest = programmeStatus?.ingest;
   const source = programmeStatus?.source;
   // BYTES ARRIVING, not a process running -- the same question AppLayout's
@@ -1387,9 +1374,8 @@ export function Dashboard() {
   // process, consulted below for the bitrate where it exists. See #514.
   // Narrowed to the selected programme where the install has more than one:
   // the byte series behind useIngestLive names no programme, so there it is
-  // this programme's own probe and relay bytes. See programmeIngestLive().
-  const programmeKbps = relaySample?.kbps ?? null;
-  const ingestLive = programmeIngestLive(useIngestLive(), sourceCount, source, programmeKbps);
+  // this programme's own probe and relay bytes. See programmeIngestLive();
+  // `ingestLive` is useProgrammeIngest's, the same verdict the header chip uses.
   // While the standby is on air the primary's "Offline" is true and misleading:
   // the show is going out. Say so instead of leaving a bare OFFLINE beside the
   // on-air banner. `failoverState` is the programme-scoped snapshot.
@@ -1781,7 +1767,14 @@ export function Dashboard() {
                 />
                 <Stat
                   labelKey="dash.uptime"
-                  value={ingest?.state === "running" ? duration(ingest.uptimeSec) : "—"}
+                  value={(() => {
+                    // A push on the shared SRT listener has no ingest
+                    // process to time; its uptime is how long its stream has
+                    // been arriving at this programme's hub. See
+                    // ingestUptimeSec.
+                    const v = ingestUptimeSec(ingest, programmeStatus?.relay, ingestLive);
+                    return v === null ? "—" : duration(v);
+                  })()}
                 />
                 {/* "—" until the probe answers, not "0". See audioTrackCount(). */}
                 <Stat labelKey="dash.audioTracks" value={audioTrackCount(source)} />
