@@ -29,12 +29,13 @@ import (
 // somewhere else.
 var nilEngineAnswers = map[string]bool{
 	// The zero-source read contract.
-	"Status":      true,
-	"SourceInfo":  true,
-	"SourceKnown": true,
-	"Levels":      true,
-	"Processes":   true,
-	"Alerts":      true,
+	"Status":        true,
+	"SourceInfo":    true,
+	"SourceKnown":   true,
+	"Levels":        true,
+	"MeterInterval": true,
+	"Processes":     true,
+	"Alerts":        true,
 	// The delivery budget the manager pushed in. Zero is the honest answer on
 	// an install with no programme: nobody pushed one, so nothing is clamped
 	// and the alerts package default is what a delivery would use. Answering
@@ -213,6 +214,9 @@ func TestWhatANilEngineActuallyReports(t *testing.T) {
 	}
 	if _, at := e.Levels(); !at.IsZero() {
 		t.Errorf("Levels reported a measurement time of %v with nothing metering", at)
+	}
+	if d := e.MeterInterval(); d != 0 {
+		t.Errorf("MeterInterval = %v with nothing metering, want zero (the feed window then falls back to its floor)", d)
 	}
 	if c := e.ClipBuffer(); c.Enabled || c.Running {
 		t.Errorf("ClipBuffer = %+v, want the off card", c)
