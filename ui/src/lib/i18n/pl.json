@@ -2002,5 +2002,6 @@
   "reason.held": "Wstrzymano po {count} szybkich odrzuceniach. Ponawianie zatrzymane.",
   "reason.retry": "Ponów",
   "reason.keyChanged": "Klucz {platform} się zmienił — kliknij, aby zaktualizować",
-  "reason.ffmpegSaid": "FFmpeg zgłosił: {line}"
+  "reason.ffmpegSaid": "FFmpeg zgłosił: {line}",
+  "reason.retryNamed": "Ponów {name}"
 }

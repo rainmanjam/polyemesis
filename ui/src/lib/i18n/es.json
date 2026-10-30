@@ -2002,5 +2002,6 @@
   "reason.held": "En pausa tras {count} rechazos rápidos. Ya no se reintenta.",
   "reason.retry": "Reintentar",
   "reason.keyChanged": "La clave de {platform} cambió — haz clic para actualizarla",
-  "reason.ffmpegSaid": "FFmpeg dijo: {line}"
+  "reason.ffmpegSaid": "FFmpeg dijo: {line}",
+  "reason.retryNamed": "Reintentar {name}"
 }

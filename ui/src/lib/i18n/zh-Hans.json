@@ -2002,5 +2002,6 @@
   "reason.held": "连续 {count} 次被快速拒绝，已暂停。不再重试。",
   "reason.retry": "重试",
   "reason.keyChanged": "{platform} 的密钥已更改 — 点击更新",
-  "reason.ffmpegSaid": "FFmpeg 输出：{line}"
+  "reason.ffmpegSaid": "FFmpeg 输出：{line}",
+  "reason.retryNamed": "重试 {name}"
 }

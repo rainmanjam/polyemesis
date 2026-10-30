@@ -2002,5 +2002,6 @@
   "reason.held": "Held after {count} quick rejections. Retrying has stopped.",
   "reason.retry": "Retry",
   "reason.keyChanged": "{platform}'s key changed — click to update",
-  "reason.ffmpegSaid": "FFmpeg said: {line}"
+  "reason.ffmpegSaid": "FFmpeg said: {line}",
+  "reason.retryNamed": "Retry {name}"
 }

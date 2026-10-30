@@ -2002,5 +2002,6 @@
   "reason.held": "Остановлено после {count} быстрых отказов. Повторы прекращены.",
   "reason.retry": "Повторить",
   "reason.keyChanged": "Ключ {platform} изменился — нажмите, чтобы обновить",
-  "reason.ffmpegSaid": "Вывод FFmpeg: {line}"
+  "reason.ffmpegSaid": "Вывод FFmpeg: {line}",
+  "reason.retryNamed": "Повторить {name}"
 }

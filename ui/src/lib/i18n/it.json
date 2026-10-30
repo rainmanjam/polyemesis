@@ -2002,5 +2002,6 @@
   "reason.held": "In pausa dopo {count} rifiuti rapidi. I nuovi tentativi sono sospesi.",
   "reason.retry": "Riprova",
   "reason.keyChanged": "La chiave di {platform} è cambiata — fai clic per aggiornarla",
-  "reason.ffmpegSaid": "FFmpeg ha detto: {line}"
+  "reason.ffmpegSaid": "FFmpeg ha detto: {line}",
+  "reason.retryNamed": "Riprova {name}"
 }

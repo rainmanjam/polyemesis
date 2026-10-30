@@ -2002,5 +2002,6 @@
   "reason.held": "{count} hızlı retten sonra bekletiliyor. Yeniden deneme durdu.",
   "reason.retry": "Yeniden dene",
   "reason.keyChanged": "{platform} anahtarı değişti — güncellemek için tıklayın",
-  "reason.ffmpegSaid": "FFmpeg çıktısı: {line}"
+  "reason.ffmpegSaid": "FFmpeg çıktısı: {line}",
+  "reason.retryNamed": "{name} yeniden dene"
 }

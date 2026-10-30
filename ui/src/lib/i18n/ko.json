@@ -2002,5 +2002,6 @@
   "reason.held": "빠른 거부가 {count}회 이어져 보류되었습니다. 재시도가 중지되었습니다.",
   "reason.retry": "다시 시도",
   "reason.keyChanged": "{platform} 키가 변경되었습니다 — 클릭하여 업데이트",
-  "reason.ffmpegSaid": "FFmpeg 출력: {line}"
+  "reason.ffmpegSaid": "FFmpeg 출력: {line}",
+  "reason.retryNamed": "{name} 다시 시도"
 }

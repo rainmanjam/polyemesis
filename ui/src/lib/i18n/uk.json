@@ -2002,5 +2002,6 @@
   "reason.held": "Зупинено після {count} швидких відмов. Повтори припинено.",
   "reason.retry": "Повторити",
   "reason.keyChanged": "Ключ {platform} змінився — натисніть, щоб оновити",
-  "reason.ffmpegSaid": "Вивід FFmpeg: {line}"
+  "reason.ffmpegSaid": "Вивід FFmpeg: {line}",
+  "reason.retryNamed": "Повторити {name}"
 }

@@ -2002,5 +2002,6 @@
   "reason.held": "Gepauzeerd na {count} snelle weigeringen. Opnieuw proberen is gestopt.",
   "reason.retry": "Opnieuw proberen",
   "reason.keyChanged": "Sleutel van {platform} gewijzigd — klik om bij te werken",
-  "reason.ffmpegSaid": "FFmpeg meldde: {line}"
+  "reason.ffmpegSaid": "FFmpeg meldde: {line}",
+  "reason.retryNamed": "{name} opnieuw proberen"
 }

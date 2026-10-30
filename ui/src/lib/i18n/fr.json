@@ -2002,5 +2002,6 @@
   "reason.held": "En pause après {count} refus rapides. Les nouvelles tentatives sont arrêtées.",
   "reason.retry": "Réessayer",
   "reason.keyChanged": "La clé {platform} a changé — cliquez pour la mettre à jour",
-  "reason.ffmpegSaid": "FFmpeg a dit : {line}"
+  "reason.ffmpegSaid": "FFmpeg a dit : {line}",
+  "reason.retryNamed": "Réessayer {name}"
 }

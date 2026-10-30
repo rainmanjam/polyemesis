@@ -2002,5 +2002,6 @@
   "reason.held": "Nach {count} schnellen Ablehnungen angehalten. Es wird nicht mehr neu versucht.",
   "reason.retry": "Erneut versuchen",
   "reason.keyChanged": "Schlüssel bei {platform} geändert — zum Aktualisieren klicken",
-  "reason.ffmpegSaid": "FFmpeg meldete: {line}"
+  "reason.ffmpegSaid": "FFmpeg meldete: {line}",
+  "reason.retryNamed": "{name} erneut versuchen"
 }

@@ -2002,5 +2002,6 @@
   "reason.held": "Em espera após {count} recusas rápidas. As novas tentativas pararam.",
   "reason.retry": "Tentar de novo",
   "reason.keyChanged": "A chave do {platform} mudou — clique para atualizar",
-  "reason.ffmpegSaid": "O FFmpeg disse: {line}"
+  "reason.ffmpegSaid": "O FFmpeg disse: {line}",
+  "reason.retryNamed": "Tentar {name} de novo"
 }

@@ -2002,5 +2002,6 @@
   "reason.held": "{count} 回すぐに拒否されたため保留中です。再試行は停止しました。",
   "reason.retry": "再試行",
   "reason.keyChanged": "{platform} のキーが変更されました — クリックして更新",
-  "reason.ffmpegSaid": "FFmpeg の出力: {line}"
+  "reason.ffmpegSaid": "FFmpeg の出力: {line}",
+  "reason.retryNamed": "{name} を再試行"
 }

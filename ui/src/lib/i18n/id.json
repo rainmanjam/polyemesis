@@ -2002,5 +2002,6 @@
   "reason.held": "Ditahan setelah {count} penolakan cepat. Percobaan ulang dihentikan.",
   "reason.retry": "Coba lagi",
   "reason.keyChanged": "Kunci {platform} berubah — klik untuk memperbarui",
-  "reason.ffmpegSaid": "FFmpeg berkata: {line}"
+  "reason.ffmpegSaid": "FFmpeg berkata: {line}",
+  "reason.retryNamed": "Coba lagi {name}"
 }
