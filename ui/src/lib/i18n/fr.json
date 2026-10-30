@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "C'est un jeton administrateur. Il peut tout modifier, y compris arrêter des destinations. Si ce plugin n'affiche que l'état ou les niveaux, utilisez plutôt un jeton de lecture.",
   "pairing.refused": "L'installation a refusé ce jeton. Il est peut-être mal saisi ou révoqué.",
   "pairing.unreachable": "Impossible de joindre l'installation. Vérifiez l'adresse et réessayez.",
-  "pairing.failed": "L'installation a répondu, mais sans réponse exploitable."
+  "pairing.failed": "L'installation a répondu, mais sans réponse exploitable.",
+  "i18nSweep.deleteRendition": "Supprimer la rendition",
+  "i18nSweep.enabledOne": "{count} d'entre eux est activé et redémarrera immédiatement sur la vidéo source. Aucun n'est supprimé, et leur routage audio reste inchangé.",
+  "i18nSweep.enabledMany": "{count} d'entre eux sont activés et redémarreront immédiatement sur la vidéo source. Aucun n'est supprimé, et leur routage audio reste inchangé.",
+  "i18nSweep.resultsEmpty": "Les résultats apparaissent ici, une ligne par plateforme.",
+  "i18nSweep.matrixOut": "Sortie"
 }

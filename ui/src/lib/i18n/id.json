@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "Ini token admin. Token ini dapat mengubah apa saja, termasuk menghentikan tujuan. Jika plugin ini hanya menampilkan status atau level, berikan token baca saja.",
   "pairing.refused": "Instalasi menolak token ini. Mungkin salah ketik atau sudah dicabut.",
   "pairing.unreachable": "Instalasi tidak dapat dihubungi. Periksa alamatnya lalu coba lagi.",
-  "pairing.failed": "Instalasi menjawab, tetapi jawabannya tidak dapat dipakai."
+  "pairing.failed": "Instalasi menjawab, tetapi jawabannya tidak dapat dipakai.",
+  "i18nSweep.deleteRendition": "Hapus rendition",
+  "i18nSweep.enabledOne": "{count} di antaranya aktif dan akan langsung dimulai ulang pada video sumber. Tidak ada yang dihapus, dan routing audionya tidak berubah.",
+  "i18nSweep.enabledMany": "{count} di antaranya aktif dan akan langsung dimulai ulang pada video sumber. Tidak ada yang dihapus, dan routing audionya tidak berubah.",
+  "i18nSweep.resultsEmpty": "Hasil muncul di sini, satu baris per platform.",
+  "i18nSweep.matrixOut": "Keluar"
 }

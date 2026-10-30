@@ -2535,11 +2535,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={busy || !name.trim() || !sourceIsChosen(sourceId, choices)}>
             {busy && <Loader2 className="animate-spin" />}
-            {editing ? "Save" : "Create"}
+            {editing ? t("common.save") : t("hooks.create")}
           </Button>
         </DialogFooter>
         {deviceCodeOK && caps?.connect && (

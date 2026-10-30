@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "To token administratora. Może zmienić wszystko, także zatrzymać miejsca docelowe. Jeśli ta wtyczka pokazuje tylko stan lub poziomy, użyj tokenu tylko do odczytu.",
   "pairing.refused": "Instalacja odrzuciła ten token. Może być źle wpisany lub unieważniony.",
   "pairing.unreachable": "Nie można połączyć się z instalacją. Sprawdź adres i spróbuj ponownie.",
-  "pairing.failed": "Instalacja odpowiedziała, ale nie w użyteczny sposób."
+  "pairing.failed": "Instalacja odpowiedziała, ale nie w użyteczny sposób.",
+  "i18nSweep.deleteRendition": "Usuń rendycję",
+  "i18nSweep.enabledOne": "{count} z nich jest włączone i zostanie od razu uruchomione ponownie na wideo źródłowym. Żadne nie zostanie usunięte, a ich routing audio pozostaje bez zmian.",
+  "i18nSweep.enabledMany": "Włączone są {count} z nich i zostaną od razu uruchomione ponownie na wideo źródłowym. Żadne nie zostanie usunięte, a ich routing audio pozostaje bez zmian.",
+  "i18nSweep.resultsEmpty": "Wyniki pojawią się tutaj, po jednym wierszu na platformę.",
+  "i18nSweep.matrixOut": "Wyjście"
 }

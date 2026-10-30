@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "这是管理员令牌，可以更改任何内容，包括停止输出目标。如果此插件只显示状态或电平，请改用只读令牌。",
   "pairing.refused": "安装端拒绝了此令牌。可能是输错或已被吊销。",
   "pairing.unreachable": "无法连接到安装端。请检查地址后重试。",
-  "pairing.failed": "安装端有响应，但不是可用的结果。"
+  "pairing.failed": "安装端有响应，但不是可用的结果。",
+  "i18nSweep.deleteRendition": "删除渲染版本",
+  "i18nSweep.enabledOne": "其中 {count} 个已启用，将立即在源视频上重新开始。不会删除任何一个，它们的音频路由也保持不变。",
+  "i18nSweep.enabledMany": "其中 {count} 个已启用，将立即在源视频上重新开始。不会删除任何一个，它们的音频路由也保持不变。",
+  "i18nSweep.resultsEmpty": "结果会显示在这里，每个平台一行。",
+  "i18nSweep.matrixOut": "输出"
 }

@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "Bu bir yönetici jetonu. Her şeyi değiştirebilir, hedefleri durdurmak dahil. Bu eklenti yalnızca durum ya da seviye gösteriyorsa, bunun yerine okuma jetonu verin.",
   "pairing.refused": "Kurulum bu jetonu reddetti. Yanlış yazılmış ya da iptal edilmiş olabilir.",
   "pairing.unreachable": "Kuruluma ulaşılamadı. Adresi denetleyip yeniden deneyin.",
-  "pairing.failed": "Kurulum yanıt verdi ama kullanılabilir bir yanıt değildi."
+  "pairing.failed": "Kurulum yanıt verdi ama kullanılabilir bir yanıt değildi.",
+  "i18nSweep.deleteRendition": "Rendition'ı sil",
+  "i18nSweep.enabledOne": "Bunlardan {count} tanesi etkin ve kaynak videoda hemen yeniden başlayacak. Hiçbiri silinmeyecek ve ses yönlendirmeleri değişmeyecek.",
+  "i18nSweep.enabledMany": "Bunlardan {count} tanesi etkin ve kaynak videoda hemen yeniden başlayacak. Hiçbiri silinmeyecek ve ses yönlendirmeleri değişmeyecek.",
+  "i18nSweep.resultsEmpty": "Sonuçlar burada görünür, her platform için bir satır.",
+  "i18nSweep.matrixOut": "Çıkış"
 }

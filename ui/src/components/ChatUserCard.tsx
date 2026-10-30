@@ -442,7 +442,7 @@ export function ChatUserCard({
                   Ban permanently — confirm
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmBan(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
               </>
             ) : (

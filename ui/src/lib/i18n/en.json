@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "This is an admin token. It can change anything, including stopping destinations. If this plugin only shows status or meters, give it a read token instead.",
   "pairing.refused": "The install refused this token. It may be mistyped or revoked.",
   "pairing.unreachable": "Could not reach the install. Check the address and try again.",
-  "pairing.failed": "The install answered, but not with a usable answer."
+  "pairing.failed": "The install answered, but not with a usable answer.",
+  "i18nSweep.deleteRendition": "Delete rendition",
+  "i18nSweep.enabledOne": "{count} of them is enabled and will restart immediately on the source video. None of them is deleted, and their audio routing is untouched.",
+  "i18nSweep.enabledMany": "{count} of them are enabled and will restart immediately on the source video. None of them is deleted, and their audio routing is untouched.",
+  "i18nSweep.resultsEmpty": "Results appear here, one row per platform.",
+  "i18nSweep.matrixOut": "Out"
 }

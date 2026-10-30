@@ -1906,7 +1906,7 @@ export function RenditionDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={busy || !nameOk || !bitrateOk || !maxrateOk}>
             {busy && <Loader2 className="animate-spin" />}
@@ -1996,9 +1996,9 @@ function DeleteRenditionDialog({
             )}
             {consequence.enabled > 0 && (
               <p className="rounded border border-warn/50 bg-warn/5 px-2 py-1.5 text-sm text-warn">
-                {consequence.enabled} of them {consequence.enabled === 1 ? "is" : "are"} enabled and
-                will restart immediately on the source video. None of them is deleted, and their
-                audio routing is untouched.
+                {consequence.enabled === 1
+                  ? t("i18nSweep.enabledOne", { count: consequence.enabled })
+                  : t("i18nSweep.enabledMany", { count: consequence.enabled })}
               </p>
             )}
           </div>
@@ -2006,11 +2006,11 @@ function DeleteRenditionDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={remove} disabled={busy}>
             {busy && <Loader2 className="animate-spin" />}
-            Delete rendition
+            {t("i18nSweep.deleteRendition")}
           </Button>
         </DialogFooter>
       </DialogContent>

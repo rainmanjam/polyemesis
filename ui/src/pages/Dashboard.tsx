@@ -347,7 +347,7 @@ export function GoLiveComposer() {
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
-          Go live
+          {t("golive.title")}
         </CardTitle>
         <span className="font-mono text-micro text-muted-foreground">
           {targets.length === 1 ? "1 account" : `${targets.length} accounts`}
@@ -541,7 +541,7 @@ export function GoLiveComposer() {
           <div aria-live="polite" className="flex flex-col gap-1.5">
             {job === null ? (
               <p className="text-tiny text-muted-foreground">
-                Results appear here, one row per platform.
+                {t("i18nSweep.resultsEmpty")}
               </p>
             ) : (
               <>

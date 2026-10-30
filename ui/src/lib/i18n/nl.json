@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "Dit is een beheertoken. Het kan alles wijzigen, ook bestemmingen stoppen. Als deze plugin alleen status of niveaus toont, gebruik dan een leestoken.",
   "pairing.refused": "De installatie heeft dit token geweigerd. Het is mogelijk verkeerd getypt of ingetrokken.",
   "pairing.unreachable": "De installatie is niet bereikbaar. Controleer het adres en probeer het opnieuw.",
-  "pairing.failed": "De installatie antwoordde, maar niet met een bruikbaar antwoord."
+  "pairing.failed": "De installatie antwoordde, maar niet met een bruikbaar antwoord.",
+  "i18nSweep.deleteRendition": "Rendition verwijderen",
+  "i18nSweep.enabledOne": "{count} daarvan is ingeschakeld en start direct opnieuw op de bronvideo. Geen van hen wordt verwijderd en hun audiorouting blijft ongewijzigd.",
+  "i18nSweep.enabledMany": "{count} daarvan zijn ingeschakeld en starten direct opnieuw op de bronvideo. Geen van hen wordt verwijderd en hun audiorouting blijft ongewijzigd.",
+  "i18nSweep.resultsEmpty": "Resultaten verschijnen hier, één rij per platform.",
+  "i18nSweep.matrixOut": "Uit"
 }

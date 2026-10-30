@@ -736,7 +736,7 @@ function SessionEditor({
           )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               size="sm"
@@ -752,7 +752,7 @@ function SessionEditor({
                 })
               }
             >
-              Save
+              {t("common.save")}
             </Button>
           </div>
         </div>

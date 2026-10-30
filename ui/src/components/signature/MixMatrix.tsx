@@ -141,7 +141,7 @@ export function MixMatrix({ tracks, cells, onChange }: MixMatrixProps) {
                 unit rather than six unrelated channels. */}
             <tr>
               <th className="sticky left-0 z-10 bg-card px-2 py-1 text-left text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                Out
+                {t("i18nSweep.matrixOut")}
               </th>
               {tracks.map((t, ti) => (
                 <th

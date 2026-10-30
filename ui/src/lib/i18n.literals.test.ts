@@ -86,7 +86,25 @@ const FRAGMENTS = [
   "This FFmpeg build has no SRT support",
   // MediaUploads
   "for the default source",
+  // A19 sweep: the destructive rendition dialog's consequence copy and the
+  // Dashboard's results placeholder, both on operator-facing paths.
+  "will restart immediately on the source video",
+  "Results appear here, one row per platform",
 ];
+
+/* Bare single-word labels cannot be fragments: "Cancel" is a substring of
+ * "onCancel", so a substring hit would be a false positive on every handler.
+ * They are matched as exact JSX text instead, between tags, so a prop or an
+ * identifier never matches. Restricted to the two directories that are fully
+ * keyed; components/signature is the unkeyed family (see trackSignal.ts). */
+const JSX_LABELS = ["Cancel", "Save", "Create", "Delete rendition", "Out", "Go live"];
+
+function jsxLabelHits(body: string): string[] {
+  return JSX_LABELS.filter((label) => {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`>\\s*${esc}\\s*<`).test(body);
+  });
+}
 
 const SRC = fileURLToPath(new URL("..", import.meta.url));
 
@@ -119,6 +137,17 @@ describe("operator-facing sentences", () => {
       for (const f of FRAGMENTS) {
         if (body.includes(f)) hits.push(`${relative(SRC, file)}: ${f}`);
       }
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it("keeps bare labels out of JSX text in pages/ and components/", () => {
+    const hits: string[] = [];
+    for (const file of sources(SRC)) {
+      const rel = relative(SRC, file);
+      if (!/^(pages|components)\//.test(rel) || rel.startsWith("components/signature/")) continue;
+      const body = code(readFileSync(file, "utf8"));
+      for (const label of jsxLabelHits(body)) hits.push(`${rel}: ${label}`);
     }
     expect(hits).toEqual([]);
   });

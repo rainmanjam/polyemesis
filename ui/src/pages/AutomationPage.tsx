@@ -856,7 +856,7 @@ function RuleDialog({
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
             {saving && <Loader2 className="animate-spin" />}
@@ -1332,7 +1332,7 @@ function ScheduleDialog({
             <span className="mr-auto text-left text-micro text-warn">{t(blocked.reason)}</span>
           )}
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" onClick={save} disabled={saving || blocked.kind !== "ok"}>
             {saving && <Loader2 className="animate-spin" />}

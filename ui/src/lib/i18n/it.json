@@ -1823,5 +1823,10 @@
   "pairing.adminWarning": "È un token amministratore. Può cambiare qualsiasi cosa, incluso fermare le destinazioni. Se questo plugin mostra solo stato o livelli, usa invece un token di lettura.",
   "pairing.refused": "L'installazione ha rifiutato questo token. Potrebbe essere digitato male o revocato.",
   "pairing.unreachable": "Impossibile raggiungere l'installazione. Controlla l'indirizzo e riprova.",
-  "pairing.failed": "L'installazione ha risposto, ma senza una risposta utilizzabile."
+  "pairing.failed": "L'installazione ha risposto, ma senza una risposta utilizzabile.",
+  "i18nSweep.deleteRendition": "Elimina rendition",
+  "i18nSweep.enabledOne": "{count} di essi è attivo e ripartirà subito sul video della sorgente. Nessuno viene eliminato e il routing audio resta invariato.",
+  "i18nSweep.enabledMany": "{count} di essi sono attivi e ripartiranno subito sul video della sorgente. Nessuno viene eliminato e il routing audio resta invariato.",
+  "i18nSweep.resultsEmpty": "I risultati compaiono qui, una riga per piattaforma.",
+  "i18nSweep.matrixOut": "Uscita"
 }
