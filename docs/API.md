@@ -387,7 +387,7 @@ tokens are for.
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
 | `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
-| `GET` | `/overlay/events` | A chat overlay's display stream (SSE). Needs its overlay key in `X-Overlay-Key` |
+| `GET` | `/overlay/events` | A chat overlay's display stream (SSE), including the poll widget's `poll.display`. Needs its overlay key in `X-Overlay-Key` |
 
 Both of these, and the media origin at `/playout/*`, sit outside every
 authenticated group — a viewer has no account and never will — and are guarded
@@ -1371,6 +1371,31 @@ One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
 the channel and returns success. polyemesis refuses an empty id before the URL
 is built.
+
+### Chat polls
+
+| Method | Path |
+|---|---|
+| `GET` | `/polls`, `/polls/{id}`, `/polls/export` |
+| `POST` | `/polls`, `/polls/{id}/end` |
+
+`POST /polls` starts a poll and answers `201` with it:
+
+```json
+{"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
+ "mirrorTwitch": true}
+```
+
+A second poll while one runs is `409`; a question, option or duration outside
+the limits is `400`. `POST /polls/{id}/end` ends it early (`409` if that poll
+is not the one running). `GET /polls` is `{"current": …, "history": […]}`,
+newest first, with `?since=`, `?until=` (RFC 3339) and `?limit=`.
+`GET /polls/export` is CSV by default (`?format=json`, `?id=N`).
+
+A poll is counts per option and per platform, and never names a voter, so the
+three `GET`s are open to `read` tokens. Starting and ending post into every
+chat as you and need `admin`. The rules, the poll widget and native Twitch polls
+are in [POLLS.md](POLLS.md).
 
 ## WebSocket
 

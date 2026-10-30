@@ -10,6 +10,20 @@ its first tagged release.
 
 ### Added
 
+- **Chat polls across every platform.** Ask a question with 2 to 6 options
+  from the console's Polls panel, a Stream Deck key or an AI assistant over
+  MCP (`start_poll`). Polyemesis posts it into every connected chat. Viewers
+  vote by typing the number or `!vote N`, one vote per viewer per platform,
+  and the last vote counts. Automod-blocked messages are not votes, and a
+  banned or timed-out viewer's vote is dropped for the rest of the poll. The
+  result shows live with a per-platform breakdown. History is kept and can be
+  exported as CSV or JSON. Results are counts only and never name a voter, so
+  `read` tokens can see them. A logo-free poll widget for OBS uses your chat
+  overlay's key and style. The `poll.started`, `poll.vote`, `poll.ended` and
+  `poll.display` events are on the events stream. Optionally, a poll is
+  mirrored as a native Twitch poll and its votes are merged in. This adds the
+  `channel:manage:polls` scope, so **connected Twitch accounts are marked
+  "reconnect needed" once.** See [docs/POLLS.md](docs/POLLS.md).
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends

@@ -31,6 +31,18 @@ Restyling an overlay doesn't change its URL. An open overlay picks up the new
 style the next time it reconnects; you can force that by refreshing the source
 in OBS.
 
+## The poll widget
+
+Each overlay also has a poll widget: a second OBS browser source, on the same
+key and style, that draws the running [chat poll](POLLS.md) and nothing else.
+Select **Copy poll widget URL** and add it as its own Browser source, so you
+can place it apart from the chat lines. Its path is `/overlay/poll`, or
+`/overlay/poll/k/{key}` with the key in the path.
+
+The widget shows totals only, with no platform logos or per-platform
+breakdown, so it appears on every overlay key whatever its platform filter.
+It never shows who voted.
+
 ## Platform filter: a Twitch-safe scene
 
 Each overlay has its own platform filter. Some platforms don't want other
@@ -171,7 +183,7 @@ The overlay key reaches these two routes, sent in `X-Overlay-Key`:
 | Method | Path | Returns |
 |---|---|---|
 | `GET` | `/api/v1/overlay/config` | `{name, platforms, style}` |
-| `GET` | `/api/v1/overlay/events` | Server-Sent Events: `chat.display` and `chat.undisplay` only |
+| `GET` | `/api/v1/overlay/events` | Server-Sent Events: `chat.display`, `chat.undisplay` and `poll.display` only |
 
 The event payloads are described in [EVENTS.md](EVENTS.md#overlay).
 
@@ -179,7 +191,8 @@ The event payloads are described in [EVENTS.md](EVENTS.md#overlay).
 
 - A newly opened overlay starts empty. It shows messages that arrive after it
   connects.
-- Alerts and polls aren't part of the overlay.
+- Alerts aren't part of the overlay. Polls are drawn by the separate
+  [poll widget](#the-poll-widget), not on the chat overlay.
 - The overlay was tested in headless Chromium, the engine OBS's browser source
   uses, with a transparent background at 1920 × 1080. It hasn't been tested in
   OBS itself.
