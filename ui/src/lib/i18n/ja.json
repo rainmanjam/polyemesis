@@ -1696,5 +1696,20 @@
   "nav.group.content": "コンテンツ",
   "nav.group.community": "コミュニティ",
   "nav.group.operations": "運用",
-  "nav.group.settings": "設定"
+  "nav.group.settings": "設定",
+  "pairing.title": "ペアリングトークンを確認",
+  "pairing.hint": "トークンを貼り付けると、その種類と権限が分かります。インストール先は何も変更されません。",
+  "pairing.tokenLabel": "トークン",
+  "pairing.test": "接続を確認",
+  "pairing.testing": "確認中…",
+  "pairing.result": "{name} · {scope} · 接頭辞 {prefix}…",
+  "pairing.scopeRead": "読み取り",
+  "pairing.scopeAdmin": "管理者",
+  "pairing.scopeSession": "セッション",
+  "pairing.lastUsed": "最終使用: {date}",
+  "pairing.neverUsed": "この確認の前には使われていません。",
+  "pairing.adminWarning": "これは管理者トークンです。ペアリングプラグインには読み取りだけで十分なので、代わりに読み取り専用トークンを作成してください。",
+  "pairing.refused": "インストール先がこのトークンを拒否しました。入力ミスか、取り消し済みの可能性があります。",
+  "pairing.unreachable": "インストール先に接続できません。アドレスを確認してもう一度お試しください。",
+  "pairing.failed": "インストール先は応答しましたが、使える応答ではありませんでした。"
 }

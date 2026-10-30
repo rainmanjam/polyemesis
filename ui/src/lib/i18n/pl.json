@@ -1696,5 +1696,20 @@
   "nav.group.content": "Treści",
   "nav.group.community": "Społeczność",
   "nav.group.operations": "Operacje",
-  "nav.group.settings": "Ustawienia"
+  "nav.group.settings": "Ustawienia",
+  "pairing.title": "Przetestuj token parowania",
+  "pairing.hint": "Wklej token, aby zobaczyć, czym jest i co może robić. Nic na instalacji się nie zmienia.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Testuj połączenie",
+  "pairing.testing": "Testowanie…",
+  "pairing.result": "{name} · {scope} · prefiks {prefix}…",
+  "pairing.scopeRead": "odczyt",
+  "pairing.scopeAdmin": "administrator",
+  "pairing.scopeSession": "sesja",
+  "pairing.lastUsed": "Ostatnio użyty: {date}",
+  "pairing.neverUsed": "Nigdy nie użyty przed tym testem.",
+  "pairing.adminWarning": "To token administratora. Wtyczka parowania potrzebuje tylko odczytu, więc lepiej utwórz dla niej token tylko do odczytu.",
+  "pairing.refused": "Instalacja odrzuciła ten token. Może być źle wpisany lub unieważniony.",
+  "pairing.unreachable": "Nie można połączyć się z instalacją. Sprawdź adres i spróbuj ponownie.",
+  "pairing.failed": "Instalacja odpowiedziała, ale nie w użyteczny sposób."
 }

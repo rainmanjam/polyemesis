@@ -1696,5 +1696,20 @@
   "nav.group.content": "Contenuti",
   "nav.group.community": "Community",
   "nav.group.operations": "Operazioni",
-  "nav.group.settings": "Impostazioni"
+  "nav.group.settings": "Impostazioni",
+  "pairing.title": "Prova un token di abbinamento",
+  "pairing.hint": "Incolla un token per vedere cos'è e cosa può fare. Nulla nell'installazione cambia.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Prova connessione",
+  "pairing.testing": "Prova in corso…",
+  "pairing.result": "{name} · {scope} · prefisso {prefix}…",
+  "pairing.scopeRead": "lettura",
+  "pairing.scopeAdmin": "amministratore",
+  "pairing.scopeSession": "sessione",
+  "pairing.lastUsed": "Ultimo utilizzo: {date}",
+  "pairing.neverUsed": "Mai usato prima di questa prova.",
+  "pairing.adminWarning": "È un token amministratore. Un plugin di abbinamento ha bisogno solo della lettura: crea invece un token di lettura per lui.",
+  "pairing.refused": "L'installazione ha rifiutato questo token. Potrebbe essere digitato male o revocato.",
+  "pairing.unreachable": "Impossibile raggiungere l'installazione. Controlla l'indirizzo e riprova.",
+  "pairing.failed": "L'installazione ha risposto, ma senza una risposta utilizzabile."
 }

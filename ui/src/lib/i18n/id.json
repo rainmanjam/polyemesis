@@ -1696,5 +1696,20 @@
   "nav.group.content": "Konten",
   "nav.group.community": "Komunitas",
   "nav.group.operations": "Operasi",
-  "nav.group.settings": "Pengaturan"
+  "nav.group.settings": "Pengaturan",
+  "pairing.title": "Uji token pairing",
+  "pairing.hint": "Tempel token untuk melihat apa itu dan apa yang boleh dilakukannya. Tidak ada yang berubah di instalasi.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Uji koneksi",
+  "pairing.testing": "Menguji…",
+  "pairing.result": "{name} · {scope} · awalan {prefix}…",
+  "pairing.scopeRead": "baca",
+  "pairing.scopeAdmin": "admin",
+  "pairing.scopeSession": "sesi",
+  "pairing.lastUsed": "Terakhir dipakai: {date}",
+  "pairing.neverUsed": "Belum pernah dipakai sebelum uji ini.",
+  "pairing.adminWarning": "Ini token admin. Plugin pairing hanya perlu akses baca, jadi buatkan token baca untuknya.",
+  "pairing.refused": "Instalasi menolak token ini. Mungkin salah ketik atau sudah dicabut.",
+  "pairing.unreachable": "Instalasi tidak dapat dihubungi. Periksa alamatnya lalu coba lagi.",
+  "pairing.failed": "Instalasi menjawab, tetapi jawabannya tidak dapat dipakai."
 }

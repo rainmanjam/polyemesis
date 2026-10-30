@@ -33,6 +33,7 @@ import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { DebugSettings } from "@/components/DebugSettings";
+import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -3343,6 +3344,11 @@ function ApiTokens() {
             ))}
           </div>
         )}
+        {/* Paste a token here to see what it is before a plugin uses it. The
+            check is read-only and changes nothing on the install. */}
+        <div className="border-t pt-4">
+          <PairingCheck />
+        </div>
       </CardContent>
 
       <ConfirmDestructive

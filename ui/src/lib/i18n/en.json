@@ -1696,5 +1696,20 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Operations",
-  "nav.group.settings": "Settings"
+  "nav.group.settings": "Settings",
+  "pairing.title": "Test a pairing token",
+  "pairing.hint": "Paste a token to see what it is and what it may do. Nothing on the install changes.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Test connection",
+  "pairing.testing": "Testing…",
+  "pairing.result": "{name} · {scope} · prefix {prefix}…",
+  "pairing.scopeRead": "read",
+  "pairing.scopeAdmin": "admin",
+  "pairing.scopeSession": "session",
+  "pairing.lastUsed": "Last used {date}",
+  "pairing.neverUsed": "Never used before this check.",
+  "pairing.adminWarning": "This is an admin token. A pairing plugin needs only read access, so make a read token for it instead.",
+  "pairing.refused": "The install refused this token. It may be mistyped or revoked.",
+  "pairing.unreachable": "Could not reach the install. Check the address and try again.",
+  "pairing.failed": "The install answered, but not with a usable answer."
 }

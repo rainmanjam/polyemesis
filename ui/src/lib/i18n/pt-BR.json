@@ -1696,5 +1696,20 @@
   "nav.group.content": "Conteúdo",
   "nav.group.community": "Comunidade",
   "nav.group.operations": "Operações",
-  "nav.group.settings": "Configurações"
+  "nav.group.settings": "Configurações",
+  "pairing.title": "Testar um token de pareamento",
+  "pairing.hint": "Cole um token para ver o que ele é e o que pode fazer. Nada na instalação muda.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Testar conexão",
+  "pairing.testing": "Testando…",
+  "pairing.result": "{name} · {scope} · prefixo {prefix}…",
+  "pairing.scopeRead": "leitura",
+  "pairing.scopeAdmin": "administrador",
+  "pairing.scopeSession": "sessão",
+  "pairing.lastUsed": "Último uso: {date}",
+  "pairing.neverUsed": "Nunca usado antes desta verificação.",
+  "pairing.adminWarning": "Este é um token de administrador. Um plugin de pareamento só precisa de leitura; crie um token de leitura para ele.",
+  "pairing.refused": "A instalação recusou este token. Pode estar digitado errado ou revogado.",
+  "pairing.unreachable": "Não foi possível alcançar a instalação. Verifique o endereço e tente novamente.",
+  "pairing.failed": "A instalação respondeu, mas sem uma resposta utilizável."
 }

@@ -1379,3 +1379,47 @@ export const api = {
     deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
   },
 };
+
+/** What the install says about a token: see GET /auth/connection. */
+export interface ConnectionInfo {
+  name: string;
+  prefix: string;
+  scope: string;
+  adminScope: boolean;
+  /** The token's previous use, absent when it has never been used. */
+  lastUsedAt?: string;
+}
+
+/**
+ * The answer to a pasted token. `refused` is the install saying no (a bad or
+ * revoked token); `unreachable` is the request never arriving; `failed` is
+ * anything else. They are separate because the operator fixes each differently.
+ */
+export type ConnectionOutcome =
+  | { ok: true; info: ConnectionInfo }
+  | { ok: false; reason: "refused" | "unreachable" | "failed" };
+
+/**
+ * Asks the install what a pasted API token is. It uses fetch directly rather
+ * than request(): a refused token must not send the console to the sign-in
+ * screen (noteResponseStatus), and the browser session must not be sent along,
+ * so the answer is about the token alone.
+ */
+export async function checkConnection(token: string): Promise<ConnectionOutcome> {
+  let resp: Response;
+  try {
+    resp = await fetch(BASE + "/auth/connection", {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "omit",
+    });
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+  if (resp.status === 401 || resp.status === 403) return { ok: false, reason: "refused" };
+  if (!resp.ok) return { ok: false, reason: "failed" };
+  try {
+    return { ok: true, info: (await resp.json()) as ConnectionInfo };
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
+}

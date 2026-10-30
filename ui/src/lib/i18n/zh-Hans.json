@@ -1696,5 +1696,20 @@
   "nav.group.content": "内容",
   "nav.group.community": "社区",
   "nav.group.operations": "运维",
-  "nav.group.settings": "设置"
+  "nav.group.settings": "设置",
+  "pairing.title": "测试配对令牌",
+  "pairing.hint": "粘贴令牌，即可查看它是什么、能做什么。安装端的任何内容都不会改变。",
+  "pairing.tokenLabel": "令牌",
+  "pairing.test": "测试连接",
+  "pairing.testing": "测试中…",
+  "pairing.result": "{name} · {scope} · 前缀 {prefix}…",
+  "pairing.scopeRead": "只读",
+  "pairing.scopeAdmin": "管理员",
+  "pairing.scopeSession": "会话",
+  "pairing.lastUsed": "上次使用：{date}",
+  "pairing.neverUsed": "在本次检查前从未使用。",
+  "pairing.adminWarning": "这是管理员令牌。配对插件只需要读取权限，请为它另建一个只读令牌。",
+  "pairing.refused": "安装端拒绝了此令牌。可能是输错或已被吊销。",
+  "pairing.unreachable": "无法连接到安装端。请检查地址后重试。",
+  "pairing.failed": "安装端有响应，但不是可用的结果。"
 }

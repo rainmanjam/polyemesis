@@ -1696,5 +1696,20 @@
   "nav.group.content": "Contenu",
   "nav.group.community": "Communauté",
   "nav.group.operations": "Exploitation",
-  "nav.group.settings": "Réglages"
+  "nav.group.settings": "Réglages",
+  "pairing.title": "Tester un jeton d'appairage",
+  "pairing.hint": "Collez un jeton pour voir ce qu'il est et ce qu'il permet. Rien ne change sur l'installation.",
+  "pairing.tokenLabel": "Jeton",
+  "pairing.test": "Tester la connexion",
+  "pairing.testing": "Test en cours…",
+  "pairing.result": "{name} · {scope} · préfixe {prefix}…",
+  "pairing.scopeRead": "lecture",
+  "pairing.scopeAdmin": "administrateur",
+  "pairing.scopeSession": "session",
+  "pairing.lastUsed": "Dernière utilisation : {date}",
+  "pairing.neverUsed": "Jamais utilisé avant ce test.",
+  "pairing.adminWarning": "C'est un jeton administrateur. Un plugin d'appairage n'a besoin que de la lecture : créez plutôt un jeton de lecture pour lui.",
+  "pairing.refused": "L'installation a refusé ce jeton. Il est peut-être mal saisi ou révoqué.",
+  "pairing.unreachable": "Impossible de joindre l'installation. Vérifiez l'adresse et réessayez.",
+  "pairing.failed": "L'installation a répondu, mais sans réponse exploitable."
 }

@@ -1696,5 +1696,20 @@
   "nav.group.content": "İçerik",
   "nav.group.community": "Topluluk",
   "nav.group.operations": "İşletim",
-  "nav.group.settings": "Ayarlar"
+  "nav.group.settings": "Ayarlar",
+  "pairing.title": "Eşleştirme jetonunu sına",
+  "pairing.hint": "Jetonun ne olduğunu ve neler yapabileceğini görmek için yapıştırın. Kurulumda hiçbir şey değişmez.",
+  "pairing.tokenLabel": "Jeton",
+  "pairing.test": "Bağlantıyı sına",
+  "pairing.testing": "Sınanıyor…",
+  "pairing.result": "{name} · {scope} · önek {prefix}…",
+  "pairing.scopeRead": "okuma",
+  "pairing.scopeAdmin": "yönetici",
+  "pairing.scopeSession": "oturum",
+  "pairing.lastUsed": "Son kullanım: {date}",
+  "pairing.neverUsed": "Bu sınamadan önce hiç kullanılmadı.",
+  "pairing.adminWarning": "Bu bir yönetici jetonu. Bir eşleştirme eklentisinin yalnızca okuma erişimine ihtiyacı var; ona bunun yerine okuma jetonu oluşturun.",
+  "pairing.refused": "Kurulum bu jetonu reddetti. Yanlış yazılmış ya da iptal edilmiş olabilir.",
+  "pairing.unreachable": "Kuruluma ulaşılamadı. Adresi denetleyip yeniden deneyin.",
+  "pairing.failed": "Kurulum yanıt verdi ama kullanılabilir bir yanıt değildi."
 }

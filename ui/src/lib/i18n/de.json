@@ -1696,5 +1696,20 @@
   "nav.group.content": "Inhalt",
   "nav.group.community": "Community",
   "nav.group.operations": "Betrieb",
-  "nav.group.settings": "Einstellungen"
+  "nav.group.settings": "Einstellungen",
+  "pairing.title": "Pairing-Token testen",
+  "pairing.hint": "Füge ein Token ein, um zu sehen, was es ist und was es darf. Auf dem Gerät ändert sich nichts.",
+  "pairing.tokenLabel": "Token",
+  "pairing.test": "Verbindung testen",
+  "pairing.testing": "Wird getestet…",
+  "pairing.result": "{name} · Zugriff {scope} · Präfix {prefix}…",
+  "pairing.scopeRead": "Lesen",
+  "pairing.scopeAdmin": "Admin",
+  "pairing.scopeSession": "Sitzung",
+  "pairing.lastUsed": "Zuletzt verwendet {date}",
+  "pairing.neverUsed": "Vor dieser Prüfung nie verwendet.",
+  "pairing.adminWarning": "Dies ist ein Admin-Token. Ein Pairing-Plugin braucht nur Lesezugriff. Erstelle dafür besser ein Lese-Token.",
+  "pairing.refused": "Das Gerät hat dieses Token abgelehnt. Es ist möglicherweise falsch eingegeben oder widerrufen.",
+  "pairing.unreachable": "Das Gerät ist nicht erreichbar. Prüfe die Adresse und versuche es erneut.",
+  "pairing.failed": "Das Gerät hat geantwortet, aber nicht mit einer brauchbaren Antwort."
 }
