@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { Dashboard } from "./Dashboard";
@@ -238,5 +238,37 @@ describe("Dashboard: the first-run checklist replaces the empty-destinations sen
       "an operator with a source and no destination gets one sentence and no next step",
     ).toBeTruthy();
     expect(screen.queryByText(translate("en", "dash.noDestinations"))).toBeNull();
+  });
+});
+
+describe("Dashboard: bulk start goes through the Go live sheet, bulk stop stays confirmed", () => {
+  const oneDest = {
+    id: 1,
+    name: "Twitch — no music",
+    kind: "rtmp",
+    platform: "twitch",
+    enabled: false,
+    summary: "",
+    tracks: null,
+    filterComplex: "",
+    normalization: "off",
+    warnings: null,
+    sourceId: 1,
+  };
+
+  it("offers Go live instead of Start all, and no start fires from the bar itself", async () => {
+    draw(live({ status: status({ destinations: [oneDest as never] }) }));
+
+    expect(
+      await screen.findByRole("button", { name: translate("en", "golive.trigger") }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: translate("en", "dash.startAll") })).toBeNull();
+  });
+
+  it("keeps Stop all behind its confirmation", async () => {
+    draw(live({ status: status({ destinations: [{ ...oneDest, enabled: true } as never] }) }));
+
+    fireEvent.click(await screen.findByRole("button", { name: translate("en", "dash.stopAll") }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });

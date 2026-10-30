@@ -1,4 +1,5 @@
 import type { AttentionItem, OnAir } from "@/lib/attention";
+import type { DestinationId } from "@/lib/types";
 
 /** The one-line answer to "is every destination healthy, and what needs me?".
  *
@@ -9,7 +10,7 @@ import type { AttentionItem, OnAir } from "@/lib/attention";
  *  the rows. */
 export type HealthVerdict =
   | { kind: "healthy"; count: number; uptimeSec: number | null }
-  | { kind: "attention"; count: number; total: number; firstDestinationId: string };
+  | { kind: "attention"; count: number; total: number; firstDestinationId: DestinationId };
 
 export function healthVerdict(
   air: OnAir,
@@ -22,12 +23,12 @@ export function healthVerdict(
   if (destItems.length > 0) {
     // Counted per destination, not per row: one destination with two problems
     // is one destination that needs attention.
-    const ids = new Set(destItems.map((i) => i.destinationId as string));
+    const ids = new Set(destItems.map((i) => i.destinationId));
     return {
       kind: "attention",
       count: ids.size,
       total: air.enabled,
-      firstDestinationId: destItems[0].destinationId as string,
+      firstDestinationId: destItems[0].destinationId as DestinationId,
     };
   }
 

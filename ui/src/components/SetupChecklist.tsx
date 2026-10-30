@@ -45,7 +45,6 @@ export function SetupChecklist({
   onAddDestination: () => void;
 }>) {
   const t = useT();
-  const total = checklist.steps.length;
   const stateOf = (id: ChecklistStepId) => checklist.steps.find((s) => s.id === id)!.state;
 
   const titles: Record<ChecklistStepId, TranslationKey> = {
@@ -120,7 +119,7 @@ export function SetupChecklist({
                     state === "done" && "border-live bg-live-dim text-live",
                     state === "next" && "border-primary text-foreground",
                     (state === "todo" || state === "waiting") && "border-border-strong text-muted-foreground",
-                    state === "locked" && "border-dashed border-border-strong text-subtle-foreground",
+                    state === "locked" && "border-dashed border-border-strong text-muted-foreground",
                   )}
                   aria-hidden="true"
                 >
@@ -132,7 +131,7 @@ export function SetupChecklist({
                     className={cn(
                       "text-sm font-semibold",
                       state === "done" && "font-medium text-muted-foreground",
-                      state === "locked" && "text-subtle-foreground",
+                      state === "locked" && "text-muted-foreground",
                     )}
                   >
                     {t(titles[id])}

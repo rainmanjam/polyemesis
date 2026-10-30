@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Tambah tujuan",
   "firstRun.tour": "Tunjukkan kepada saya",
   "firstRun.ingestHeading": "Alamat ingest",
-  "firstRun.badgeWaiting": "Menunggu"
+  "firstRun.badgeWaiting": "Menunggu",
+  "firstRun.needSource": "Tambahkan sumber terlebih dahulu."
 }

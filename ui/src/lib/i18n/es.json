@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Añadir destino",
   "firstRun.tour": "Muéstrame cómo funciona",
   "firstRun.ingestHeading": "Dirección de ingesta",
-  "firstRun.badgeWaiting": "Esperando"
+  "firstRun.badgeWaiting": "Esperando",
+  "firstRun.needSource": "Añade primero una fuente."
 }

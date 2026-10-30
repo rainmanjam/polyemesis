@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Hedef ekle",
   "firstRun.tour": "Bana gezdir",
   "firstRun.ingestHeading": "Alım adresi",
-  "firstRun.badgeWaiting": "Bekliyor"
+  "firstRun.badgeWaiting": "Bekliyor",
+  "firstRun.needSource": "Önce bir kaynak ekleyin."
 }

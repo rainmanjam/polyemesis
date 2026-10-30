@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Додати напрямок",
   "firstRun.tour": "Покажіть, як це працює",
   "firstRun.ingestHeading": "Адреса прийому",
-  "firstRun.badgeWaiting": "Очікування"
+  "firstRun.badgeWaiting": "Очікування",
+  "firstRun.needSource": "Спочатку додайте джерело."
 }

@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Adicionar destino",
   "firstRun.tour": "Me mostre o painel",
   "firstRun.ingestHeading": "Endereço de ingestão",
-  "firstRun.badgeWaiting": "Aguardando"
+  "firstRun.badgeWaiting": "Aguardando",
+  "firstRun.needSource": "Adicione primeiro uma fonte."
 }

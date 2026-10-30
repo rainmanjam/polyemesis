@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Add destination",
   "firstRun.tour": "Show me around",
   "firstRun.ingestHeading": "Ingest address",
-  "firstRun.badgeWaiting": "Waiting"
+  "firstRun.badgeWaiting": "Waiting",
+  "firstRun.needSource": "Add a source first."
 }

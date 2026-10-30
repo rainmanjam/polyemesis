@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Dodaj miejsce docelowe",
   "firstRun.tour": "Pokaż mi",
   "firstRun.ingestHeading": "Adres ingest",
-  "firstRun.badgeWaiting": "Oczekuje"
+  "firstRun.badgeWaiting": "Oczekuje",
+  "firstRun.needSource": "Najpierw dodaj źródło."
 }

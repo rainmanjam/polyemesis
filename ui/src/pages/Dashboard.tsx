@@ -31,6 +31,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
+import { GoLiveSheet } from "@/components/GoLiveSheet";
+import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLive";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
@@ -654,13 +656,22 @@ const bulkTone: Record<BulkDestOutcome, SignalTone> = {
 };
 
 function BulkDestinationControl({
-  count,
+  destinations,
+  sources,
   onFinished,
-}: Readonly<{ count: number; onFinished: () => void }>) {
+}: Readonly<{
+  destinations: readonly DestStatus[];
+  sources: readonly SourceView[];
+  onFinished: () => void;
+}>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
-  const [busy, setBusy] = useState<"start" | "stop" | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The sheet's rows, frozen when it opens. See GoLiveSheet.
+  const [sheetRows, setSheetRows] = useState<GoLiveRow[] | null>(null);
   const confirmStopAll = useConfirm<true>();
+  const count = destinations.length;
+  const youtube = youtubeBroadcastsAtRisk(destinations);
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -670,84 +681,65 @@ function BulkDestinationControl({
     skipped: t("dash.bulkSkipped"),
   };
 
-  const run = async (action: "start" | "stop") => {
-    setBusy(action);
-    // Cleared rather than left standing: a list from the previous press sitting
-    // under a spinner reads as this press's answer, and the row that has not
-    // been touched yet is exactly the one an operator would misread.
+  // STOP ALL ONLY. Starting moved to the Go live sheet, which lists every
+  // destination before anything fires and starts each one through the same
+  // per-destination path the card uses (see lib/goLive.ts).
+  const stopAll = async () => {
+    setBusy(true);
     setReport(null);
     try {
-      const res =
-        action === "start" ? await api.startAllDestinations() : await api.stopAllDestinations();
+      const res = await api.stopAllDestinations();
       setReport(res);
-      // The count, not a verdict. "Six of eight started" is a sentence an
-      // operator can act on; "failed" over eight destinations of which two
-      // refused is one they have to go and decode.
-      const done = res.results.filter(
-        (r) => r.outcome === "started" || r.outcome === "stopped",
-      ).length;
+      const done = res.results.filter((r) => r.outcome === "stopped").length;
       const params = { done, total: res.results.length };
       if (done === res.results.length) {
-        toast.success(
-          action === "start" ? t("dash.bulkStartDone", params) : t("dash.bulkStopDone", params),
-        );
+        toast.success(t("dash.bulkStopDone", params));
       } else {
-        // Not an error toast: the request succeeded and every destination has
-        // an answer. The rows below say which ones did not take.
-        toast.warning(
-          action === "start"
-            ? t("dash.bulkStartPartial", params)
-            : t("dash.bulkStopPartial", params),
-        );
+        toast.warning(t("dash.bulkStopPartial", params));
       }
       onFinished();
     } catch (err) {
-      // A refusal of the WHOLE request -- no engine, no permission. Nothing was
-      // reported per destination because nothing got that far.
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : action === "start"
-            ? t("dash.bulkStartFailed")
-            : t("dash.bulkStopFailed"),
-      );
+      toast.error(err instanceof Error ? err.message : t("dash.bulkStopFailed"));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
   if (count === 0) return null;
 
+  const stopDescription =
+    youtube > 0
+      ? `${t("dash.stopAllConsequence", { count: String(count) })} ${t("golive.stopYoutube", { count: youtube })}`
+      : t("dash.stopAllConsequence", { count: String(count) });
+
   return (
     <div className="mb-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={busy !== null} onClick={() => void run("start")}>
-          <Play /> {busy === "start" ? t("dash.bulkStarting") : t("dash.startAll")}
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => {
+            setSheetRows(goLiveRows(destinations, sources));
+          }}
+        >
+          <Play /> {t("golive.trigger")}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          disabled={busy !== null}
+          disabled={busy}
           onClick={() => confirmStopAll.ask(true)}
         >
-          <Square /> {busy === "stop" ? t("dash.bulkStopping") : t("dash.stopAll")}
+          <Square /> {busy ? t("dash.bulkStopping") : t("dash.stopAll")}
         </Button>
-        <span className="text-micro text-muted-foreground">
-          {t("dash.bulkAppliesTo", { count })}
-        </span>
       </div>
 
-      {/* Starts are paced on the server, so the button stays busy for a while
-          on a long list. Saying why turns a stuck-looking dashboard into one
-          that is visibly working. */}
-      <p className="text-micro text-muted-foreground">{t("dash.bulkPacingNote")}</p>
-
-      {/* ---------- what each destination did ---------- */}
-      <div aria-live="polite" className="flex flex-col gap-1.5">
-        {report === null ? (
-          <p className="text-tiny text-muted-foreground">{t("dash.bulkResultsEmpty")}</p>
-        ) : (
-          report.results.map((res) => {
+      {/* Results appear only once there are some. An empty "results appear
+          here" line sat under the buttons on every visit, and the sheet already
+          says what a press is about to do. */}
+      {report !== null && (
+        <div aria-live="polite" className="flex flex-col gap-1.5">
+          {report.results.map((res) => {
             const tone = bulkTone[res.outcome];
             return (
               <div
@@ -764,9 +756,7 @@ function BulkDestinationControl({
                   </div>
                   <Badge variant={toneBadge[tone]}>{bulkLabel[res.outcome]}</Badge>
                 </div>
-                {/* WHY, on every row that is not a clean start or stop. A row
-                    that only says "Failed" sends the operator to the card to
-                    find out what this request already knows. */}
+                {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
                   <p
                     className={`text-micro ${
@@ -778,9 +768,21 @@ function BulkDestinationControl({
                 )}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
+
+      <GoLiveSheet
+        open={sheetRows !== null}
+        onOpenChange={(o) => {
+          if (!o) setSheetRows(null);
+        }}
+        rows={sheetRows ?? []}
+        live={destinations}
+        youtubeAtRisk={youtube}
+        onStart={(id) => api.startDestination(id).then(() => undefined)}
+        onFinished={onFinished}
+      />
 
       <ConfirmDestructive
         open={confirmStopAll.open}
@@ -790,9 +792,9 @@ function BulkDestinationControl({
         // the verb "Stop all".
         subject={{ unnamed: true }}
         title={t("dash.stopAllTitle", { count })}
-        description={t("dash.stopAllConsequence", { count: String(count) })}
+        description={stopDescription}
         confirmLabel={t("dash.stopAll")}
-        onConfirm={() => run("stop")}
+        onConfirm={() => stopAll()}
       />
     </div>
   );
@@ -1778,7 +1780,8 @@ export function Dashboard() {
             below the buttons needs the full width to put a destination name and
             a refusal on one line. */}
         <BulkDestinationControl
-          count={destinations.length}
+          destinations={destinations}
+          sources={sources}
           onFinished={() => setRefreshKey((k) => k + 1)}
         />
 

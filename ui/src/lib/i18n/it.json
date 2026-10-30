@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Aggiungi destinazione",
   "firstRun.tour": "Fammi fare un giro",
   "firstRun.ingestHeading": "Indirizzo di ingest",
-  "firstRun.badgeWaiting": "In attesa"
+  "firstRun.badgeWaiting": "In attesa",
+  "firstRun.needSource": "Aggiungi prima una sorgente."
 }

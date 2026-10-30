@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { healthVerdict } from "./healthVerdict";
 import type { AttentionItem } from "./attention";
+import type { DestinationId } from "./types";
 
 const air = (over: Partial<{ live: number; enabled: number; degraded: number; failed: number }> = {}) => ({
   live: 0,
@@ -10,11 +11,12 @@ const air = (over: Partial<{ live: number; enabled: number; degraded: number; fa
   ...over,
 });
 
+const did = (n: number) => n as unknown as DestinationId;
 const destItem = (id: string): AttentionItem => ({
   key: `dest:${id}`,
   tone: "down",
   subject: id,
-  destinationId: id,
+  destinationId: did(id.length),
 } as AttentionItem);
 
 describe("healthVerdict", () => {
@@ -28,13 +30,13 @@ describe("healthVerdict", () => {
 
   it("says how many destinations need attention, out of how many there are", () => {
     const v = healthVerdict(air({ live: 4, enabled: 5, failed: 1 }), [destItem("twitch")], 760);
-    expect(v).toEqual({ kind: "attention", count: 1, total: 5, firstDestinationId: "twitch" });
+    expect(v).toEqual({ kind: "attention", count: 1, total: 5, firstDestinationId: did(6) });
   });
 
   it("counts a destination once even when it has more than one problem row", () => {
     const v = healthVerdict(
       air({ live: 3, enabled: 5, failed: 2 }),
-      [destItem("a"), { ...destItem("a"), key: "dest:a:2" }, destItem("b")],
+      [destItem("a"), { ...destItem("a"), key: "dest:a:2" }, destItem("bb")],
       0,
     );
     expect(v).toMatchObject({ kind: "attention", count: 2, total: 5 });

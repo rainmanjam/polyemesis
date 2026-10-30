@@ -1744,5 +1744,6 @@
   "firstRun.addDestination": "Bestemming toevoegen",
   "firstRun.tour": "Laat me rondkijken",
   "firstRun.ingestHeading": "Ingest-adres",
-  "firstRun.badgeWaiting": "Wacht"
+  "firstRun.badgeWaiting": "Wacht",
+  "firstRun.needSource": "Voeg eerst een bron toe."
 }
