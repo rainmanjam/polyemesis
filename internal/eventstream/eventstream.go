@@ -59,7 +59,7 @@ const (
 const (
 	TypeDestinationUp         Type = Type(hooks.TriggerDestinationUp)
 	TypeDestinationDown       Type = Type(hooks.TriggerDestinationDown)
-	TypeDestinationHeld       Type = "destination.held"
+	TypeDestinationHeld       Type = Type(hooks.TriggerDestinationHeld)
 	TypeDestinationRestarted  Type = "destination.restarted"
 	TypeDestinationLevel      Type = "destination.level"
 	TypeDestinationRolledOver Type = Type(hooks.TriggerDestinationRolledOver)

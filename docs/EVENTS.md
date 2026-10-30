@@ -199,7 +199,10 @@ and published to both. They follow the same dwells:
   running destination after each show, and never sent `ingest.published` or
   `ingest.disconnected`.
 
-`destination.held` is announced once per hold. A hold usually lands inside the
+`destination.held` is announced once per hold. It is the
+[webhook](HOOKS.md) trigger of the same name, converted like `up` and `down`:
+one derivation feeds both, so the stream and a webhook never disagree about a
+hold or announce it twice. A hold usually lands inside the
 10-second `down` dwell, so for a destination that was live the `held` follows
 its `down` instead of arriving first. A destination that never went live has no
 `down` coming, so its `held` is announced at once. After Retry, the next

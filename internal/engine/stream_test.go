@@ -276,3 +276,43 @@ func TestAnOpenStreamIsReasonEnoughToSweep(t *testing.T) {
 		t.Error("the gate stayed open after the last connection closed")
 	}
 }
+
+// edgeLog is a LifecycleObserver that keeps every edge: the same slice of
+// hooks.Event the webhook dispatcher is handed in the same loop.
+type edgeLog struct{ got []hooks.Event }
+
+func (l *edgeLog) Observe(ev hooks.Event) { l.got = append(l.got, ev) }
+func (l *edgeLog) Wanted() bool           { return true }
+
+// TestAHoldIsOneWebhookAndOneStreamEventAcrossManySweeps: destination.held is
+// derived once, by the webhook watcher, and the stream converts that edge.
+// Sweeping a held destination repeatedly must produce exactly one held edge for
+// the dispatcher and exactly one destination.held on the stream -- not one per
+// sweep, and not one from each watcher.
+func TestAHoldIsOneWebhookAndOneStreamEventAcrossManySweeps(t *testing.T) {
+	e, sub := streamEngine(t)
+	edges := &edgeLog{}
+	e.SetLifecycle(edges)
+
+	e.observeEdges(sweepAt(0, true, alerts.DestState{ID: 9, Name: "YouTube", Enabled: true, Running: true, OutTimeMS: 1000}))
+	held := alerts.DestState{ID: 9, Name: "YouTube", Enabled: true, Error: "publish refused",
+		Reason: &failreason.Reason{Cause: failreason.KeyRejected, Held: true, Rejections: 3}}
+	for sec := 2; sec <= 20; sec += 2 {
+		e.observeEdges(sweepAt(sec, true, held))
+	}
+
+	n := 0
+	for _, ev := range edges.got {
+		if ev.Trigger == hooks.TriggerDestinationHeld {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d destination.held edges reached the dispatcher over ten sweeps of one hold, want 1", n)
+	}
+	h := streamtest.Expect(t, sub, eventstream.TypeDestinationHeld)
+	if h.Failure == nil || !h.Held || h.Destination == nil || h.Destination.ID != 9 {
+		t.Fatalf("destination.held = %+v", h)
+	}
+	streamtest.None(t, sub, eventstream.TypeDestinationHeld, 300*time.Millisecond)
+}

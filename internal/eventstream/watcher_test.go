@@ -31,55 +31,47 @@ func heldReason() *failreason.Reason {
 	return &failreason.Reason{Cause: failreason.KeyRejected, Held: true, Rejections: 3, KeyChanged: true}
 }
 
-// TestHeldFollowsTheDownOfADestinationThatWasLive: the hold usually lands
-// inside the webhook watcher's ten-second down dwell. Announcing it then would
-// tell a script "held" about a destination it still believes is delivering, so
-// it waits for the down and follows it in the same sweep.
-func TestHeldFollowsTheDownOfADestinationThatWasLive(t *testing.T) {
-	w := NewWatcher()
-	w.Observe(prog, snapAt(0, alerts.DestState{ID: 3, Enabled: true}), []hooks.Event{edge(hooks.TriggerDestinationUp, 3)})
+// destination.held is the webhook watcher's edge, converted. The rules of WHEN
+// (once per hold, after the down of a destination that was live, at once for
+// one that never was) moved to hooks.Watcher with their tests -- see
+// internal/hooks/held_test.go -- so that one derivation feeds both surfaces.
+// What is left here is what the stream adds, and what it must not.
 
+// TestTheHeldEdgeIsConvertedWithTheWholeFailure: the same name on both surfaces,
+// the flat fields from the edge, and the whole classified reason beside them,
+// read off the snapshot as a down's is.
+func TestTheHeldEdgeIsConvertedWithTheWholeFailure(t *testing.T) {
+	if TypeDestinationHeld != Type(hooks.TriggerDestinationHeld) {
+		t.Fatalf("the stream calls it %q and the webhook %q; one fact, one name", TypeDestinationHeld, hooks.TriggerDestinationHeld)
+	}
+	w := NewWatcher()
 	held := alerts.DestState{ID: 3, Enabled: true, Reason: heldReason()}
-	if got := w.Observe(prog, snapAt(4, held), nil); len(got) != 0 {
-		t.Fatalf("held was announced inside the down dwell: %v", typesOf(got))
-	}
-	got := w.Observe(prog, snapAt(12, held), []hooks.Event{edge(hooks.TriggerDestinationDown, 3)})
-	if want := []Type{TypeDestinationDown, TypeDestinationHeld}; !sameTypes(typesOf(got), want) {
-		t.Fatalf("got %v, want %v", typesOf(got), want)
-	}
-	if got[0].Failure == nil || !got[0].Failure.Held || got[1].Source.Name != "Studio" {
-		t.Errorf("events = %+v", got)
-	}
-	if !got[1].KeyChanged || got[1].Cause != failreason.KeyRejected {
-		t.Errorf("held = %+v, want cause and keyChanged carried flat", got[1])
-	}
-	// Once per hold.
-	if again := w.Observe(prog, snapAt(14, held), nil); len(again) != 0 {
-		t.Errorf("a hold was announced twice: %v", typesOf(again))
-	}
-}
-
-// TestHeldIsAnnouncedAtOnceForADestinationThatNeverWentLive: the webhook
-// watcher starts every destination OFF, so one with a bad key from its first
-// attempt never gets a down -- and its hold must not wait for one.
-func TestHeldIsAnnouncedAtOnceForADestinationThatNeverWentLive(t *testing.T) {
-	w := NewWatcher()
-	got := w.Observe(prog, snapAt(0, alerts.DestState{ID: 3, Enabled: true, Reason: heldReason()}), nil)
+	ev := edge(hooks.TriggerDestinationHeld, 3)
+	ev.Cause, ev.Held, ev.KeyChanged = failreason.KeyRejected, true, true
+	got := w.Observe(prog, snapAt(0, held), []hooks.Event{ev})
 	if !sameTypes(typesOf(got), []Type{TypeDestinationHeld}) {
 		t.Fatalf("got %v", typesOf(got))
 	}
+	h := got[0]
+	if !h.Held || h.Cause != failreason.KeyRejected || !h.KeyChanged || h.Source.Name != "Studio" {
+		t.Errorf("held = %+v, want cause and keyChanged carried flat", h)
+	}
+	if h.Failure == nil || h.Failure.Rejections != 3 {
+		t.Errorf("held = %+v, want the whole failure beside the flat fields", h)
+	}
 }
 
-// TestAHoldIsAnnouncedAgainAfterItIsLifted: Retry lifts it; a second failure is
-// a new hold and a script must hear about it.
-func TestAHoldIsAnnouncedAgainAfterItIsLifted(t *testing.T) {
+// TestTheStreamAnnouncesNoHoldOfItsOwn: a held destination in the snapshot with
+// no held edge from the webhook watcher produces nothing. This watcher used to
+// derive the hold itself; doing that as well as converting the edge is the
+// double emission this pins.
+func TestTheStreamAnnouncesNoHoldOfItsOwn(t *testing.T) {
 	w := NewWatcher()
 	held := alerts.DestState{ID: 3, Enabled: true, Reason: heldReason()}
-	w.Observe(prog, snapAt(0, held), nil)
-	w.Observe(prog, snapAt(2, alerts.DestState{ID: 3, Enabled: true}), nil) // Retry
-	got := w.Observe(prog, snapAt(4, held), nil)
-	if !sameTypes(typesOf(got), []Type{TypeDestinationHeld}) {
-		t.Fatalf("a second hold was not announced: %v", typesOf(got))
+	for sec := 0; sec < 10; sec += 2 {
+		if got := w.Observe(prog, snapAt(sec, held), nil); len(got) != 0 {
+			t.Fatalf("the stream derived %v on its own at %ds", typesOf(got), sec)
+		}
 	}
 }
 

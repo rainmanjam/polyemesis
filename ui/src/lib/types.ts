@@ -3315,7 +3315,12 @@ export type HookTrigger =
    *  NOT a destination.down: the stream is fine and is still being delivered —
    *  what failed is the platform's idea of the broadcast. A script that mirrors
    *  "what are we live to" must not tear anything down when it hears this. */
-  | "broadcast.fault";
+  | "broadcast.fault"
+  | "destination.rolledover"
+  /** Polyemesis stopped retrying a destination after repeated quick
+   *  rejections; nothing happens until Retry. Sent once per hold, after the
+   *  destination's down if it was live. */
+  | "destination.held";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot

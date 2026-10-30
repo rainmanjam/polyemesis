@@ -184,6 +184,7 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "debug.exported": "auto.evDebugExported",
   "alerts.rule_changed": "auto.evAlertRuleChanged",
   "mcp.action": "auto.evMCPAction",
+  "destination.held": "auto.destinationHeld",
 };
 
 /** The stored event name is the fallback: an unknown type renders as itself

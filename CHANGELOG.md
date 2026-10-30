@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Added
 
+- **`destination.held`: page on the stops that won't fix themselves.** When
+  polyemesis stops retrying a destination after repeated quick rejections, it
+  now raises a `destination.held` alert (`critical`, on the timeline) and sends
+  a `destination.held` webhook. Both fire once per hold, not on every check.
+  Both are subscribable in the alert-rule and webhook pickers. The events
+  stream's existing `destination.held` is now the same edge, so it is never
+  announced twice. Before this, a hold appeared only as `held` inside
+  `destination.down`, which is unchanged. A rule or hook whose event list is
+  empty means "everything", so it starts receiving these on upgrade. See
+  [docs/MONITORING.md](docs/MONITORING.md) and [docs/HOOKS.md](docs/HOOKS.md).
 - **Chat overlay URLs with the key in the path.** Some OBS browser sources drop
   the part of a URL after `#`, where the overlay key is, and the overlay stays
   empty. `/overlay/k/{key}` and `/overlay/dock/k/{key}` serve the same pages,

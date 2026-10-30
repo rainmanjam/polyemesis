@@ -291,8 +291,8 @@ started. It hears the recovery, and every later occurrence. `audio.clipping`
 is the exception, because its counter resets after it fires, so a rule added
 during clipping hears the next full run. To see what is already wrong when
 you add a rule, read the Monitoring page. [The stream timeline](#the-stream-timeline)
-records its seven event types whether or not any rule exists, so it shows an
-ingest loss, a down destination or a falling-behind destination that started
+records its eight event types whether or not any rule exists, so it shows an
+ingest loss, a down or held destination or a falling-behind destination that started
 before your rule. It does not record `disk.low`, loudness or clipping.
 
 A debounce or interval out of range is **clamped rather than refused**, because
@@ -463,7 +463,7 @@ way in, so nothing here has ever been near a stream key.
 
 ### The stream conditions, and what trips them
 
-Ten of the subscribable types are the stream conditions. The thresholds are
+Eleven of the subscribable types are the stream conditions. The thresholds are
 stated because an operator picking events in the rule editor needs to know what
 is behind each name, and because a dwell time is not a delay — it is the
 difference between an alert and a mute button.
@@ -474,6 +474,7 @@ difference between an alert and a mute button.
 | `ingest.recovered` | `info` | the source is delivering again |
 | `destination.down` | `critical` | an **enabled** destination has not been delivering for **20 seconds**. A destination you turned off is not down, and turning it back on starts the clock fresh rather than firing on the time it spent disabled |
 | `destination.recovered` | `info` | it is delivering again |
+| `destination.held` | `critical` | polyemesis stopped retrying an enabled destination after repeated quick rejections, and nothing happens until you press **Retry**. Fires **once per hold**, at the sweep the hold begins and without waiting for the `destination.down` dwell, because a hold is the verdict that no reconnect is coming. The `destination.down` still fires on its own clock and still says "held" in its text. Carries the same `reason`, `cause` and `detail` fields as the down, and is the one to page on if you want only the stops that will not fix themselves |
 | `failover.switched` | `warning`, or `info` when the switch is *back to* primary | the source selector changed tier. On every switch, because discovering at the end of a broadcast that you streamed the backup all night is the failure this exists to prevent. The first snapshot after a restart adopts the running count rather than greeting you with every switch since boot |
 | `audio.clipping` | `warning` | an ingest channel has been at or above **-0.1 dBFS for 3 consecutive observations**. Digital full scale is 0, and -0.1 is where a limiter is already working; one sample is a snare hit, several in a row is a level problem. The counter resets after firing, so the next alert needs another full run |
 | `disk.low` | `warning`, or `critical` once the recorder has already halted | free space on the recordings volume is under **2 GiB** *or* under **5%** — either one trips it, because a small volume runs out of percent slowly and a large one runs out of gigabytes slowly, and both end the same way. No dwell time: disk space does not flap, and a recorder that has already stopped writing should not wait twenty seconds to say so. A volume that cannot be measured says nothing rather than alerting on the zero it reads |
@@ -701,10 +702,11 @@ The Monitoring page has a **Timeline** card: what happened to the stream,
 newest first, in words. It answers "when did it fail over?" and "how often did
 Twitch drop?" after the alert has gone.
 
-It keeps seven event types, the stream-shaped subset of the alerts above:
+It keeps eight event types, the stream-shaped subset of the alerts above:
 
 - `failover.switched`
 - `destination.down` and `destination.recovered`
+- `destination.held`
 - `destination.falling_behind` and `destination.caught_up`
 - `ingest.lost` and `ingest.recovered`
 

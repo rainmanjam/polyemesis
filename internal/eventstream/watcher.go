@@ -8,31 +8,28 @@ import (
 )
 
 // Watcher turns one programme's sweep into stream events: the webhook edges the
-// engine already derived, plus the two destination facts no webhook carries --
-// held and restarted.
+// engine already derived, plus the one destination fact no webhook carries --
+// restarted.
 //
-// IT DERIVES NOTHING THE WEBHOOK WATCHER DERIVES. UP and DOWN arrive as the
-// hooks.Event values hooks.Watcher.Observe returned for the same snapshot, and
-// are converted, not recomputed: a stream that announced a destination down at
+// IT DERIVES NOTHING THE WEBHOOK WATCHER DERIVES. UP, DOWN and HELD arrive as
+// the hooks.Event values hooks.Watcher.Observe returned for the same snapshot,
+// and are converted, not recomputed. HELD used to be derived here, when no
+// webhook carried it; it became the destination.held trigger, its rule moved to
+// hooks.Watcher with its tests, and deriving it here as well would announce
+// every hold twice: a stream that announced a destination down at
 // a different moment from the webhook would be a second opinion, and the
 // disagreement would be about exactly the event somebody is scripting against.
 //
 // Like hooks.Watcher, it is deterministic: the same snapshots and edges give
 // the same events, so every rule below is a table test rather than a stopwatch.
 type Watcher struct {
-	// on mirrors the webhook watcher's verdict per destination, read off the
-	// edges it emitted.
-	on map[int64]bool
-	// held is whether destination.held has been announced for the current
-	// hold.
-	held map[int64]bool
 	// restarts is the respawn count at the previous sweep.
 	restarts map[int64]int
 }
 
 // NewWatcher builds a watcher for one programme.
 func NewWatcher() *Watcher {
-	return &Watcher{on: map[int64]bool{}, held: map[int64]bool{}, restarts: map[int64]int{}}
+	return &Watcher{restarts: map[int64]int{}}
 }
 
 // Observe converts one sweep of programme src. edges are what
@@ -49,13 +46,7 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 		if ev.Destination != nil {
 			id := ev.Destination.ID
 			switch ev.Trigger {
-			case hooks.TriggerDestinationUp:
-				w.on[id] = true
-				// A destination delivering again is not held, whatever lifted
-				// it; the next hold is a new one and is announced.
-				w.held[id] = false
-			case hooks.TriggerDestinationDown:
-				w.on[id] = false
+			case hooks.TriggerDestinationDown, hooks.TriggerDestinationHeld:
 				// The whole classified reason, beside the flat fields. Only
 				// for a failure, under the rule hooks.Watcher applies to the
 				// flat ones: a disabled destination's leftover cause would tell
@@ -97,38 +88,12 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 			env.Source = &hooks.SourceRef{ID: src.ID, Name: src.Name}
 			out = append(out, env)
 		}
-
-		// HELD: announced once per hold. A destination the webhook watcher
-		// still calls ON has not been announced down yet -- its dwell is
-		// running -- so the hold waits for that down and follows it, rather
-		// than telling a script "held" about a destination it still believes
-		// is delivering. One that was never ON (it failed from its first
-		// attempt) has no down coming, and is announced at once.
-		isHeld := d.Enabled && d.Reason != nil && d.Reason.Held
-		switch {
-		case !isHeld:
-			w.held[id] = false
-		case !w.held[id] && !w.on[id]:
-			w.held[id] = true
-			r := *d.Reason
-			env := Envelope{
-				Type: TypeDestinationHeld, At: snap.At, Destination: ref,
-				Reason: "held after repeated quick rejections; press Retry when it is fixed",
-				Error:  d.Error,
-				Cause:  r.Cause, Held: true, KeyChanged: r.KeyChanged,
-				Failure: &r,
-			}
-			env.Source = &hooks.SourceRef{ID: src.ID, Name: src.Name}
-			out = append(out, env)
-		}
 	}
 
 	// Forget rows that are gone, so an id reused later starts afresh.
 	for id := range w.restarts {
 		if _, ok := rows[id]; !ok {
 			delete(w.restarts, id)
-			delete(w.held, id)
-			delete(w.on, id)
 		}
 	}
 	return out

@@ -98,7 +98,14 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 		// from measurements rather than from anything an operator typed, which
 		// is the property that makes them uninteresting to a leak test -- and
 		// it is a property worth re-checking before adding to this list.
+		//
+		// destination.held belongs here with destination.down: the same watcher,
+		// the same fields. Its two strings this process did not write -- the
+		// child's error and FFmpeg's line -- are planted with a stream key and
+		// driven through Redacted and every encoder by
+		// TestADestinationHeldAlertNeverCarriesTheStreamKey in internal/alerts.
 		case alerts.TypeDestinationDown, alerts.TypeDestinationRecovered,
+			alerts.TypeDestinationHeld,
 			alerts.TypeDestinationFallingBehind, alerts.TypeDestinationCaughtUp,
 			alerts.TypeIngestLost, alerts.TypeIngestRecovered,
 			alerts.TypeFailoverSwitched, alerts.TypeClipping,

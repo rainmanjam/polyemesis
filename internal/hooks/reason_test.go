@@ -29,7 +29,9 @@ func TestAFailedDestinationsDownHookCarriesTheCause(t *testing.T) {
 		Reason: &failreason.Reason{Cause: failreason.KeyRejected, Held: true, Rejections: 3, KeyChanged: true},
 	}}
 	got := w.Observe(down)
-	if !same(triggers(got), []Trigger{TriggerDestinationDown}) {
+	// The hold follows as its own trigger (held_test.go); the down still
+	// carries held=true flat, as it always has.
+	if !same(triggers(got), []Trigger{TriggerDestinationDown, TriggerDestinationHeld}) {
 		t.Fatalf("triggers = %v", triggers(got))
 	}
 	ev := got[0]
