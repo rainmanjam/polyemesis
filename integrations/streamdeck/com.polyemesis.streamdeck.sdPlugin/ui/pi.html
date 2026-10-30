@@ -8,9 +8,9 @@
   <link rel="stylesheet" href="pi.css">
 </head>
 <body>
-  <!-- No text is written in this page. Every label arrives from the plugin in
-       the Stream Deck app's language (see pi.js), so there is no English to
-       fall back to. -->
+  <!-- No text is written in this page. Every label comes from strings.js, which
+       the build generates from the plugin's catalogs, in the Stream Deck app's
+       language (see pi.js). -->
   <section class="block">
     <label for="url" data-i18n="streamdeck.pi.url"></label>
     <input id="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://">
@@ -46,6 +46,7 @@
     <p id="admin-warning" class="warning" hidden></p>
   </section>
 
+  <script src="strings.js"></script>
   <script src="pi.js"></script>
 </body>
 </html>

@@ -9,6 +9,21 @@
   let strings = {};
 
   const $ = (id) => document.getElementById(id);
+
+  // Stream Deck names Chinese zh_CN; the catalogs use zh-Hans. Anything the
+  // inspector has no catalog for falls back to English.
+  function localeFrom(sdkLanguage) {
+    const name = String(sdkLanguage || "en").replace("_", "-");
+    const mapped = name === "zh-CN" ? "zh-Hans" : name;
+    const all = window.POLYEMESIS_STRINGS || {};
+    return all[mapped] ? mapped : "en";
+  }
+
+  function loadStrings(sdkLanguage) {
+    const all = window.POLYEMESIS_STRINGS || {};
+    strings = Object.assign({}, all.en || {}, all[localeFrom(sdkLanguage)] || {});
+    applyStrings();
+  }
   const fields = ["url", "token", "caPem"];
 
   function send(message) {
@@ -20,7 +35,6 @@
       const value = strings[el.getAttribute("data-i18n")];
       if (value !== undefined) el.textContent = value;
     });
-    $("test").textContent = strings["streamdeck.pi.test"] || "";
   }
 
   function saveGlobal() {
@@ -98,17 +112,14 @@
     else if (msg.event === "didReceiveSettings") showAction(msg.payload.settings || {});
     else if (msg.event === "sendToPropertyInspector") {
       const payload = msg.payload || {};
-      if (payload.type === "strings") {
-        strings = payload.strings || {};
-        applyStrings();
-      } else if (payload.type === "test") {
-        onTestResult(payload);
-      }
+      if (payload.type === "test") onTestResult(payload);
     }
   }
 
   window.connectElgatoStreamDeckSocket = function (port, uuid, registerEvent, info, actionInfo) {
     const action = JSON.parse(actionInfo);
+    const registration = typeof info === "string" ? JSON.parse(info) : info || {};
+    loadStrings(registration.application && registration.application.language);
     pluginUUID = uuid;
     actionType = action.action;
     actionContext = action.context;
@@ -118,7 +129,6 @@
       send({ event: registerEvent, uuid: uuid });
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
-      send({ action: actionType, event: "sendToPlugin", context: actionContext, payload: { type: "hello" } });
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
