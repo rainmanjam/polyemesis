@@ -748,8 +748,8 @@ of the per-destination button and can never be more destructive than it.
 `delaySeconds` is 0 to 900. `POST /destinations/{id}/stop` on a delayed
 destination lets its buffered tail air before it stops, and the answer carries
 `drainingSeconds`. `POST /destinations/{id}/stop?now=true` cuts the tail
-instead, and also cuts a tail that is already airing; the answer then has
-`"cut": true`. `now` must be `true` or `false`; anything else is `400`.
+instead. It also cuts a tail that is already airing from an earlier stop, and
+then the answer has `"cut": true`. `now` must be `true` or `false`; anything else is `400`.
 `stop-all` and `DELETE` always cut.
 
 **`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
