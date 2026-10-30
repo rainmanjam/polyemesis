@@ -37,6 +37,7 @@ export interface HoldStatus {
 export interface StatusPayload {
   destinations?: DestStatus[];
   destinationHold?: HoldStatus | null;
+  failover?: FailoverStatus | null;
 }
 
 export type SourceKind = "" | "primary" | "backup" | "playlist" | "slate";
