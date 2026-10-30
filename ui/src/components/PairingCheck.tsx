@@ -46,7 +46,12 @@ export function PairingCheck() {
             autoComplete="off"
             spellCheck={false}
             value={token}
-            onChange={(e) => setToken(e.target.value)}
+            onChange={(e) => {
+              setToken(e.target.value);
+              // The last answer describes the token it was asked about. Once the
+              // field holds a different one, showing it would misreport the token.
+              setOutcome(null);
+            }}
           />
         </div>
         <Button type="submit" variant="outline" disabled={busy || token.trim() === ""}>

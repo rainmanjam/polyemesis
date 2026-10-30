@@ -69,6 +69,16 @@ describe("PairingCheck", () => {
     expect(await screen.findByTestId("pairing-unreachable")).toBeTruthy();
   });
 
+  it("drops the last answer as soon as the token changes, so it never describes a different token", async () => {
+    checkConnection.mockResolvedValue({ ok: true, info: readInfo });
+    render(<PairingCheck />);
+    testToken("pmk_abcdefgh-secret");
+    expect(await screen.findByTestId("pairing-result")).toBeTruthy();
+    const input = screen.getByLabelText("Token", { exact: true }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "pmk_other-secret" } });
+    expect(screen.queryByTestId("pairing-result")).toBeNull();
+  });
+
   it("does not offer a check for an empty token", () => {
     render(<PairingCheck />);
     expect((screen.getByRole("button", { name: /test connection/i }) as HTMLButtonElement).disabled).toBe(true);
