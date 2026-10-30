@@ -10,6 +10,24 @@ its first tagged release.
 
 ### Added
 
+- **Broadcast delay per destination.** One destination can hold its output
+  back by up to 15 minutes (`delaySeconds`, 0 to 900) so you can cut
+  something before it airs there. Every other destination is unaffected and
+  video is still copied. The card shows "Delayed 30 s" and the buffer filling,
+  and the Stream Deck key shows a delay marker. Stop plays the buffered tail
+  out before the destination ends. The card then says "Airing delayed buffer:
+  N s left" with **Cut now**. **Stop now** (`?now=true` on the stop route, or
+  `now: true` on the MCP tool), Stop all and delete cut the tail at once.
+  Failover passes through the delay. Changing the delay while live restarts
+  the destination. YouTube goes live, and is ended, only when the delayed data
+  arrives and when the tail has played out. Up to 64 MiB per destination is
+  held in RAM, and the rest spills to the data directory. Disk use is capped
+  at the delay at 50 Mbit/s and must leave the recording guard's free-space
+  floor. When the buffer runs out of room it drops data and keeps the delay.
+  New: `destination.delay` events, `polyemesis_destination_delay_*` metrics,
+  and the delay in MCP status tools. See
+  [BROADCAST-DELAY.md](docs/BROADCAST-DELAY.md).
+
 - **`destination.held`: page on the stops that won't fix themselves.** When
   polyemesis stops retrying a destination after repeated quick rejections, it
   now raises a `destination.held` alert (`critical`, on the timeline) and sends

@@ -203,6 +203,8 @@ const DOCS_BY_SECTION = {
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
     ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",
       "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
+    ["BROADCAST-DELAY.md", "Broadcast delay: hold one destination back up to 15 minutes",
+      "Delay one platform's copy of the stream to cut something before it airs. Stop plays the tail out; Stop now, Stop all and delete cut it. RAM and disk are bounded."],
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
       "A value on an FFmpeg command line replaces the process running it; track levels now change live instead. What a restart costs, and what a save tells you."],
     ["UPGRADING.md", "Upgrading polyemesis and its database",

@@ -99,10 +99,10 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | Tool | What it does | Confirm? | Route |
 |---|---|---|---|
 | `start_destination` | Start one destination | | `POST /destinations/{id}/start` |
-| `stop_destination` | Stop one destination | **yes** | `POST /destinations/{id}/stop` |
+| `stop_destination` | Stop one destination. A delayed destination airs its buffered tail first; `now: true` cuts it | **yes** | `POST /destinations/{id}/stop`, `?now=true` with `now` |
 | `retry_destination` | Restart one destination now, clearing a retry hold | | `POST /destinations/{id}/restart` |
 | `go_live` | Start every destination of a programme, paced | **yes** | `POST /destinations/start-all` |
-| `stop_all_destinations` | Stop every destination of a programme | **yes** | `POST /destinations/stop-all` |
+| `stop_all_destinations` | Stop every destination of a programme, cutting every broadcast delay | **yes** | `POST /destinations/stop-all` |
 | `set_track_level` | Mute, unmute or set the gain of one track in one destination's live mix | | `POST /destinations/{id}/tracks/{track}/gain` |
 | `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
 | `set_recording` | Recording on or off | **yes, to turn off** | `POST /recording` |
