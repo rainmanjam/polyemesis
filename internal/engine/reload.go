@@ -8,13 +8,6 @@ import (
 
 // What happens when an operator changes a setting while the stream is up.
 //
-// Per-track gain and mute on a destination are a separate case, and live. They
-// are not settings fields, so they have no entry in the table below. A level is
-// the only thing that changes, and it is delivered by applyLiveLevels
-// (live_gains.go) over the stdin command channel, falling back to a restart with
-// a reported reason. See docs/HOT-RELOAD.md.
-//
-//
 // This file is the answer, written down as data rather than as prose, because
 // prose does not fail a build. Every silent no-op this repo has shipped had the
 // same shape: a field added to db.Settings, validated, stored, returned by the
@@ -23,14 +16,25 @@ import (
 //
 // The dividing line is mechanical, and it is the only reason any of this is
 // safe: DOES THE VALUE REACH AN FFMPEG ARGV? If it does, the child is replaced,
-// because FFmpeg 8.1.2 has no way to change a muxer, an encoder, an output URL
-// or a stream mapping in flight, and the two channels it does offer -- zmq and
-// sendcmd -- address only filters that were instantiated with a command
-// interface and give no readable confirmation that a command was accepted. A
-// half-applied graph nobody can read back is worse than a restart.
+// because FFmpeg has no way to change a muxer, an encoder, an output URL or a
+// stream mapping in flight. If it does not reach an argv, it must be delivered
+// to the running process, and the rule names the function that delivers it.
 //
-// If it does not reach an argv, it must be delivered to the running process,
-// and the rule names the function that delivers it.
+// THE ONE IN-FLIGHT CHANNEL THIS REPO USES: FFmpeg's stdin command channel,
+// for the level of a named volume filter. An earlier version of this comment
+// declined every in-flight channel, because zmq and sendcmd address only
+// filters instantiated with a command interface and give no readable
+// confirmation. The stdin channel does confirm: `c<target> -1 volume <level>`
+// is answered on stderr with `Command reply for stream N: ret:R`, and only an
+// anchored ret:0 from graph 0 counts (internal/supervisor/live.go). So
+// per-track gain and mute on a destination are LIVE -- ClassLive in kind --
+// and delivered by applyLiveLevels (live_gains.go), with a restart, and a
+// reported reason, as the fallback for a refusal, a timeout, a process that
+// is not running, or Windows, where the path is unverified. They are profile
+// fields, not db.Settings fields, so they have no row in the table below; the
+// restart signature masks the levels instead (ffmpeg.MaskLiveVolumes), and the
+// reconcile's stop phase decides live or restart. zmq and sendcmd remain
+// unused. See docs/HOT-RELOAD.md.
 
 // ReloadClass is what a change to one settings field costs.
 type ReloadClass string

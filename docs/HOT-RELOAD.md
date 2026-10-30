@@ -159,6 +159,18 @@ This is how a destination's per-track gain and mute are applied live:
   (2 s), a refusal, or a platform that has not been verified (Windows) falls back
   to a restart, and the reason is reported.
 
+How it reports: `POST /api/v1/destinations/{id}/tracks/{track}/gain` answers
+`applied: "live"` or `applied: "restart"` with a `reason`, and the destination's
+status carries the same outcome as `levelChange` (`"applied live"` or
+`"applied by restart: <reason>"`). A reply counts only as a whole stderr line
+from filter graph 0; a reply from any other graph is ambiguous and restarts. A
+copy destination has no volume stage, so the endpoint refuses it (`409`).
+
+Mute and ducking: a ducking trigger that is in the mix is keyed **after** its
+volume stage (the same place its gain always acted), so a muted trigger no
+longer ducks the others. A trigger that is not in the mix is tapped at source
+level and is unaffected by any level.
+
 What it does **not** cover: anything that changes the command line. A muxer,
 encoder, output URL, stream mapping, track added or removed, a normaliser that
 flips, or a matrix cell gain all still restart the destination. A gain edit that
@@ -173,7 +185,11 @@ measured way to change them. The `zmq`/`sendcmd` filters are still not used.
 Stated here rather than discovered later.
 
 - **No overlay, geometry, bitrate, routing-graph or transport change is applied
-  live.** All of them still respawn. The live set is deliberately small.
+  live.** All of them still respawn. The one exception is a destination's
+  per-track gain and mute, above. The live set is deliberately small.
+- **Upgrading restarts every destination once.** The graph gained its named
+  volume stages, so every destination's signature moves on the first reconcile
+  after the upgrade.
 - **The ingest is never hot-reloaded.** Any ingest edit drops the publisher.
 - **`listeners.srtPort` interrupts every programme**, not just the one being
   edited — it is a shared socket.
