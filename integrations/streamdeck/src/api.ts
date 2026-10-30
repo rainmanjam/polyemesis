@@ -1,4 +1,4 @@
-import type { ConnectionInfo, StatusPayload, StopImpact } from "./model.js";
+import type { ConnectionInfo, Feed, LevelsReading, StatusPayload, StopImpact } from "./model.js";
 
 // The polyemesis REST client. It knows the routes and the error taxonomy and
 // nothing about Stream Deck. The transport is injected, so the tests run
@@ -73,6 +73,25 @@ export class PolyemesisClient {
   /** Destination state and the failover selector, scoped to one programme when given. */
   status(sourceId?: number): Promise<StatusPayload> {
     return this.call("GET", "/status", sourceId);
+  }
+
+  /**
+   * The programme's latest levels and the server's own verdict on whether they are current.
+   * Polled per programme rather than read from the WebSocket: a levels frame on /ws carries
+   * no engine id, so on a multi-programme install the socket interleaves every programme.
+   */
+  async levels(sourceId?: number): Promise<LevelsReading> {
+    const body = await this.call<{ levels?: unknown; feed?: unknown }>("GET", "/levels", sourceId);
+    const feed = body.feed;
+    if (feed !== "none" && feed !== "live" && feed !== "stale") {
+      throw new ApiError("malformed", 200, "levels carry no feed state");
+    }
+    const grid = (v: unknown): v is number[][] =>
+      Array.isArray(v) && v.every((row) => Array.isArray(row) && row.every((n) => typeof n === "number"));
+    const raw = body.levels as { peak?: unknown; rms?: unknown } | undefined;
+    const levels =
+      raw && grid(raw.peak) && grid(raw.rms) ? { peak: raw.peak, rms: raw.rms } : null;
+    return { levels, feed: feed as Feed };
   }
 
   /** The metering interval the server pushes levels at, in milliseconds. */

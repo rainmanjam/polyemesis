@@ -317,17 +317,132 @@ describe("failover key", () => {
 });
 
 describe("dial meter", () => {
-  it("shows NO FEED with no frame, and a bar once a frame arrives", async () => {
-    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": READ, "GET /api/v1/status": json(200, STATUS_7) });
+  it("shows NO FEED with no answer from the server, and a bar once the server reports a live reading", async () => {
+    let levels: Route = () => ({ status: 500, body: '{"error":"no levels"}' });
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/levels": (req) => levels(req),
+    });
     rt.configure(PAIRED);
-    const dial = surface("m", "meter", {});
+    const dial = surface("m", "meter", { sourceId: 7 });
     rt.add(dial);
     await rt.tick();
+    await rt.tickMeters();
     expect(dial.feedback.at(-1)).toMatchObject({ value: "NO FEED", indicator: 0 });
 
-    rt.ingestFrame({ peak: [[-30]], rms: [[-30]] });
-    await rt.tick();
+    levels = json(200, { levels: { peak: [[-30]], rms: [[-30]] }, feed: "live" });
+    await rt.tickMeters();
     expect(dial.feedback.at(-1)).toMatchObject({ value: "-30 dB", indicator: 50 });
+    expect(net.sent.find((r) => r.url.pathname === "/api/v1/levels")!.url.searchParams.get("source")).toBe("7");
+  });
+
+  it("shows NO FEED when the server says the feed is stale, even if the last reading is still on the wire", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/levels": json(200, { levels: { peak: [[-10]], rms: [[-10]] }, feed: "stale" }),
+    });
+    rt.configure(PAIRED);
+    const dial = surface("m", "meter", { sourceId: 7 });
+    rt.add(dial);
+    await rt.tick();
+    await rt.tickMeters();
+    expect(dial.feedback.at(-1)).toMatchObject({ value: "NO FEED", indicator: 0 });
+  });
+
+  it("sends a repaint only when the face changes", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/levels": json(200, { levels: { peak: [[-30]], rms: [[-30]] }, feed: "live" }),
+    });
+    rt.configure(PAIRED);
+    const dial = surface("m", "meter", { sourceId: 7 });
+    rt.add(dial);
+    await rt.tick();
+    await rt.tickMeters();
+    await rt.tickMeters();
+    await rt.tickMeters();
+    expect(dial.feedback).toHaveLength(1);
+  });
+});
+
+describe("status that goes stale", () => {
+  it("drops a destination from Live to unreachable when a later status read fails", async () => {
+    let statusOk = true;
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": (req) => (statusOk ? json(200, STATUS_7)(req) : new Error("connect ECONNREFUSED")),
+    });
+    rt.configure(PAIRED);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.live);
+
+    statusOk = false;
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).toMatch(/^Unreachable/);
+    expect(key.titles.at(-1)).not.toMatch(/^Live/);
+  });
+});
+
+describe("connection that starts unreachable", () => {
+  it("retries the check on a later tick and shows live state once the install answers", async () => {
+    let reachable = false;
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": (req) => (reachable ? READ(req) : new Error("connect ECONNREFUSED")),
+      "GET /api/v1/status": json(200, STATUS_7),
+    });
+    rt.configure(PAIRED);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.titles.at(-1)).toContain("Unreachable");
+
+    reachable = true;
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.live);
+    expect(key.titles.at(-1)).toBe("Live");
+  });
+
+  it("does not retry a refused token, so a bad credential is not re-sent every tick", async () => {
+    let attempts = 0;
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": () => {
+        attempts++;
+        return { status: 401, body: '{"error":"no such token"}' };
+      },
+    });
+    rt.configure(PAIRED);
+    rt.add(surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
+    await rt.tick();
+    await rt.tick();
+    expect(attempts).toBe(1);
+  });
+});
+
+describe("armed stop face", () => {
+  it("keeps the count and the held state through a periodic repaint", async () => {
+    const { rt, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/destinations/stop-impact": json(200, { destinations: 3, youtubeBroadcasts: 2 }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const stop = surface("s", "stopAll", { sourceId: 7 });
+    rt.add(stop);
+    await rt.pressStopDown("s");
+    expect(stop.titles.at(-1)).toContain("2 YouTube will end");
+
+    await rt.tick();
+    expect(stop.titles.at(-1)).toContain("2 YouTube will end");
+    expect(stop.states.at(-1)).toBe(KEY_STATE.held);
+    expect(sched.count()).toBe(1);
   });
 });
 

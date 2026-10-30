@@ -1,11 +1,10 @@
 import { ApiError, PolyemesisClient, type Transport } from "./api.js";
 import { ConfigError, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
-import type { StreamDeckKey } from "./keys.js";
 import { destinationFace, failoverFace, type KeyFace } from "./keyFace.js";
 import { HoldToConfirm, type Scheduler } from "./holdToConfirm.js";
-import { LevelsFeed, meterFace } from "./levelsFeed.js";
-import type { ConnectionInfo, LevelsFrame, StatusPayload, StopImpact } from "./model.js";
+import { meterFace } from "./levelsFeed.js";
+import type { ConnectionInfo, LevelsReading, StatusPayload, StopImpact } from "./model.js";
 import { KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
 import { nodeTransport } from "./transport.js";
 
@@ -13,6 +12,11 @@ import { nodeTransport } from "./transport.js";
 // each key does on press. It knows nothing about the Stream Deck SDK: a
 // Surface is the one thing the SDK adapter provides per key, and the tests
 // supply fakes. That split is what lets every rule here run under vitest.
+//
+// Two clocks drive it. tick() runs every couple of seconds and refreshes the
+// status cache and the faces built from it. tickMeters() runs several times a
+// second and refreshes the dials from GET /levels, which the server answers
+// with its own freshness verdict.
 
 export type SurfaceKind = "destination" | "goLive" | "stopAll" | "failover" | "meter";
 
@@ -29,7 +33,7 @@ export interface Surface {
 }
 
 /** The translated message for a failed connection check. The server's own words travel separately. */
-export function authKeyFor(err: ApiError): StreamDeckKey {
+export function authKeyFor(err: ApiError): "streamdeck.auth.refused" | "streamdeck.auth.unreachable" {
   if (err.kind === "unauthorized") return "streamdeck.auth.refused";
   return "streamdeck.auth.unreachable";
 }
@@ -41,16 +45,28 @@ export function clientFor(globals: GlobalSettings, makeTransport: (ca?: string) 
   return new PolyemesisClient(base, token, makeTransport(globals.caPem));
 }
 
+const ALL_SCOPE = "*";
+function scopeKey(sourceId: number | undefined): string {
+  return sourceId === undefined ? ALL_SCOPE : String(sourceId);
+}
+
+/** A hold is 1.5 s: long enough that a tap cannot trigger a stop by accident. */
+export const HOLD_MS = 1500;
+
 export class Runtime {
   private globals: GlobalSettings = {};
   private client: PolyemesisClient | undefined;
   private pairingError: ConfigError | undefined;
   private connection: ConnectionInfo | undefined;
+  /** Why the install cannot be reached right now. Cleared by a successful check. */
   private connectionError: ApiError | undefined;
+  /** A failed status read for one programme. Its keys show unreachable, never the old state. */
+  private readonly scopeErrors = new Map<string, ApiError>();
   private readonly surfaces = new Map<string, Surface>();
   private readonly holds = new Map<string, HoldToConfirm>();
   private readonly statuses = new Map<string, StatusPayload>();
-  private readonly feed = new LevelsFeed(100);
+  private readonly levels = new Map<string, LevelsReading | { error: true }>();
+  private readonly lastMeterPaint = new Map<string, string>();
 
   constructor(
     private readonly locale: string,
@@ -68,12 +84,15 @@ export class Runtime {
     this.connection = undefined;
     this.connectionError = undefined;
     this.pairingError = undefined;
+    this.statuses.clear();
+    this.scopeErrors.clear();
+    this.levels.clear();
     this.client = undefined;
     try {
       this.client = clientFor(globals, this.makeTransport);
     } catch (err) {
-      this.pairingError = err instanceof ConfigError ? err : undefined;
-      if (!this.pairingError) throw err;
+      if (!(err instanceof ConfigError)) throw err;
+      this.pairingError = err;
     }
   }
 
@@ -95,32 +114,18 @@ export class Runtime {
     return this.connection?.adminScope === true;
   }
 
-  /** The meters interval the server pushes at, so the freshness window matches it. */
-  async refreshMeterInterval(): Promise<void> {
-    if (!this.client) return;
-    try {
-      this.feed.setInterval(await this.client.meterIntervalMs());
-    } catch {
-      // Keep the last known interval. A dial falls back to NO FEED on its own.
-    }
+  /** The stop key's state while a hold is loading or armed. The periodic repaint must not overwrite it. */
+  private holdInProgress(id: string): boolean {
+    const phase = this.holds.get(id)?.current;
+    return phase === "loading" || phase === "arming";
   }
-
-  ingestFrame(frame: LevelsFrame): void {
-    this.feed.onFrame(frame);
-  }
-
-  // ---- surfaces ----------------------------------------------------------
 
   add(surface: Surface): void {
     this.surfaces.set(surface.id, surface);
     if (surface.kind === "stopAll") {
       this.holds.set(
         surface.id,
-        new HoldToConfirm(
-          HOLD_MS,
-          this.schedule,
-          () => void this.confirmStop(surface),
-        ),
+        new HoldToConfirm(HOLD_MS, this.schedule, () => void this.confirmStop(surface)),
       );
     }
   }
@@ -129,74 +134,112 @@ export class Runtime {
     this.holds.get(id)?.release();
     this.holds.delete(id);
     this.surfaces.delete(id);
+    this.lastMeterPaint.delete(id);
   }
 
-  /** Repaints every surface from the latest cache. Call on a timer and after any press. */
+  // ---- status clock ------------------------------------------------------
+
+  /** Refreshes the status cache and repaints every key. Runs every couple of seconds. */
   async tick(): Promise<void> {
     if (!this.client) {
-      await this.paintAll(undefined);
+      await this.paintAll();
       return;
     }
-    if (!this.connection && !this.connectionError) {
+    // A bad token is not retried: each attempt is a credential check the install logs.
+    // An unreachable install is retried on every tick, so keys recover when it returns.
+    if (!this.connection && this.connectionError?.kind !== "unauthorized") {
       await this.verify().catch(() => undefined);
     }
-    if (this.connectionError) {
-      await this.paintAll(undefined);
+    if (!this.connection) {
+      await this.paintAll();
       return;
     }
     await this.refreshStatuses();
-    await this.paintAll(this.statuses);
+    await this.paintAll();
   }
 
   private async refreshStatuses(): Promise<void> {
     const scopes = new Set<string>();
-    for (const s of this.surfaces.values()) scopes.add(scopeKey(s.settings.sourceId));
+    for (const s of this.surfaces.values()) if (s.kind !== "meter") scopes.add(scopeKey(s.settings.sourceId));
     for (const key of scopes) {
       try {
         const sourceId = key === ALL_SCOPE ? undefined : Number(key);
         this.statuses.set(key, (await this.client!.status(sourceId)) as StatusPayload);
+        this.scopeErrors.delete(key);
       } catch (err) {
-        if (err instanceof ApiError && (err.kind === "unauthorized" || err.kind === "untrusted")) {
-          this.connectionError = err;
+        // The old answer is not evidence of the present. Drop it and say unreachable.
+        this.statuses.delete(key);
+        const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
+        this.scopeErrors.set(key, apiErr);
+        if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
+          this.connection = undefined;
+          this.connectionError = apiErr;
         }
       }
     }
   }
 
+  // ---- meter clock -------------------------------------------------------
+
+  /** Refreshes each programme's levels and repaints the dials whose face changed. Runs several times a second. */
+  async tickMeters(): Promise<void> {
+    if (!this.client || !this.connection) return;
+    const scopes = new Set<string>();
+    for (const s of this.surfaces.values()) if (s.kind === "meter") scopes.add(scopeKey(s.settings.sourceId));
+    for (const key of scopes) {
+      try {
+        const sourceId = key === ALL_SCOPE ? undefined : Number(key);
+        this.levels.set(key, await this.client.levels(sourceId));
+      } catch {
+        // No answer is NO FEED, not the last reading held on screen.
+        this.levels.set(key, { error: true });
+      }
+    }
+    await this.paintMeters();
+  }
+
   // ---- painting ----------------------------------------------------------
 
-  private async paintAll(statuses: Map<string, StatusPayload> | undefined): Promise<void> {
+  private async paintAll(): Promise<void> {
     for (const s of this.surfaces.values()) {
-      if (s.kind === "meter") {
-        await this.paintMeter(s);
-        continue;
-      }
-      if (!statuses) {
+      if (s.kind === "meter") continue;
+      if (s.kind === "stopAll" && this.holdInProgress(s.id)) continue;
+      const key = scopeKey(s.settings.sourceId);
+      const scopeErr = this.scopeErrors.get(key);
+      const payload = this.statuses.get(key);
+      if (!this.client) {
+        await this.paintFace(s, { tone: "idle", label: "streamdeck.auth.notPaired" });
+      } else if (this.connectionError || !this.connection) {
         await this.paintFace(s, this.unavailableFace());
-        continue;
-      }
-      const payload = statuses.get(scopeKey(s.settings.sourceId));
-      if (s.kind === "destination") {
-        const dest = payload?.destinations?.find((d) => d.id === s.settings.destinationId);
+      } else if (scopeErr || !payload) {
+        await this.paintFace(s, this.unavailableFace(scopeErr));
+      } else if (s.kind === "destination") {
+        const dest = payload.destinations?.find((d) => d.id === s.settings.destinationId);
         const face: KeyFace =
           s.settings.destinationId === undefined
             ? { tone: "unbound", label: "streamdeck.state.missing" }
-            : destinationFace(dest, s.settings.sourceId, payload?.destinationHold);
+            : destinationFace(dest, s.settings.sourceId, payload.destinationHold);
         await this.paintFace(s, face);
       } else if (s.kind === "failover") {
-        await this.paintFace(s, failoverFace(payload?.failover));
+        await this.paintFace(s, failoverFace(payload.failover));
       } else if (s.kind === "goLive") {
-        await this.paintFace(s, { tone: this.isAdmin ? "idle" : "warn", label: this.isAdmin ? "streamdeck.go.live" : "streamdeck.auth.needsAdmin" });
+        await this.paintFace(s, this.adminGated("streamdeck.go.live"));
       } else {
-        await this.paintFace(s, { tone: this.isAdmin ? "idle" : "warn", label: this.isAdmin ? "streamdeck.stop.hold" : "streamdeck.auth.needsAdmin" });
+        await this.paintFace(s, this.adminGated("streamdeck.stop.hold"));
       }
     }
   }
 
-  private unavailableFace(): KeyFace {
-    if (!this.client) return { tone: "idle", label: "streamdeck.auth.notPaired" };
-    const err = this.connectionError;
-    return { tone: "error", label: err ? authKeyFor(err) : "streamdeck.auth.unreachable", detail: err?.message };
+  private adminGated(label: "streamdeck.go.live" | "streamdeck.stop.hold"): KeyFace {
+    return this.isAdmin
+      ? { tone: "idle", label }
+      : { tone: "warn", label: "streamdeck.auth.needsAdmin" };
+  }
+
+  private unavailableFace(scopeErr?: ApiError): KeyFace {
+    const err = scopeErr ?? this.connectionError;
+    if (!err) return { tone: "error", label: "streamdeck.auth.unreachable" };
+    return { tone: "error", label: authKeyFor(err), detail: err.message };
   }
 
   private async paintFace(s: Surface, face: KeyFace): Promise<void> {
@@ -204,10 +247,21 @@ export class Runtime {
     await s.setTitle(titleFor(face, this.locale));
   }
 
-  private async paintMeter(s: Surface): Promise<void> {
-    const face = meterFace(this.feed.state(), this.feed.current());
-    const value = face.peakDb !== undefined ? `${face.peakDb.toFixed(0)} dB` : t(this.locale, face.label ?? "streamdeck.meter.noFeed");
-    await s.setFeedback({ title: "", value, indicator: Math.round(face.value * 100) });
+  private async paintMeters(): Promise<void> {
+    for (const s of this.surfaces.values()) {
+      if (s.kind !== "meter") continue;
+      const entry = this.levels.get(scopeKey(s.settings.sourceId));
+      const reading = entry && !("error" in entry) ? entry : undefined;
+      const face = reading ? meterFace(reading.feed, reading.levels) : meterFace("none", null);
+      const value =
+        face.peakDb !== undefined ? `${face.peakDb.toFixed(0)} dB` : t(this.locale, face.label ?? "streamdeck.meter.noFeed");
+      const payload = { title: "", value, indicator: Math.round(face.value * 100) };
+      // Send only when the face changed, so a steady bar is not re-sent several times a second.
+      const signature = JSON.stringify(payload);
+      if (this.lastMeterPaint.get(s.id) === signature) continue;
+      this.lastMeterPaint.set(s.id, signature);
+      await s.setFeedback(payload);
+    }
   }
 
   // ---- presses -----------------------------------------------------------
@@ -217,7 +271,7 @@ export class Runtime {
     const s = this.surfaces.get(id);
     if (!s || !this.client || s.settings.destinationId === undefined) return;
     if (!(await this.requireAdmin(s))) return;
-    const dest = this.destinationOf(s);
+    const dest = this.statuses.get(scopeKey(s.settings.sourceId))?.destinations?.find((d) => d.id === s.settings.destinationId);
     if (!dest || dest.enabled) return;
     await this.run(s, () => this.client!.startDestination(s.settings.destinationId!, s.settings.sourceId));
   }
@@ -263,17 +317,12 @@ export class Runtime {
     const s = this.surfaces.get(id);
     if (!s || !this.client) return;
     if (!(await this.requireAdmin(s))) return;
-    const active = (this.statuses.get(scopeKey(s.settings.sourceId))?.failover as { active?: string } | undefined)?.active;
+    const active = this.statuses.get(scopeKey(s.settings.sourceId))?.failover?.active;
     if (active === undefined || active === "" || active === "primary") return;
     await this.run(s, () => this.client!.switchSource("auto", s.settings.sourceId));
   }
 
   // ---- helpers -----------------------------------------------------------
-
-  private destinationOf(s: Surface): { enabled: boolean } | undefined {
-    const payload = this.statuses.get(scopeKey(s.settings.sourceId));
-    return payload?.destinations?.find((d) => d.id === s.settings.destinationId);
-  }
 
   /** Write keys need an admin token. The check is made BEFORE any request, so a read token never sends one. */
   private async requireAdmin(s: Surface): Promise<boolean> {
@@ -291,13 +340,4 @@ export class Runtime {
       await s.showAlert();
     }
   }
-
-}
-
-/** A hold is 1.5 s: long enough that a tap cannot trigger a stop by accident. */
-export const HOLD_MS = 1500;
-
-const ALL_SCOPE = "*";
-function scopeKey(sourceId: number | undefined): string {
-  return sourceId === undefined ? ALL_SCOPE : String(sourceId);
 }

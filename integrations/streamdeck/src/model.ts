@@ -64,3 +64,11 @@ export interface LevelsFrame {
   peak: number[][];
   rms: number[][];
 }
+
+/** The feed state the server computes for GET /levels. See internal/api/levels_feed.go. */
+export type Feed = "none" | "live" | "stale";
+
+export interface LevelsReading {
+  levels: LevelsFrame | null;
+  feed: Feed;
+}

@@ -13,9 +13,8 @@ import streamDeck, {
 import type { JsonObject, JsonValue } from "@elgato/utils";
 import { ApiError, PolyemesisClient } from "./api.js";
 import { ConfigError, keySettings, parseServerUrl, type GlobalSettings, type KeySettings } from "./config.js";
-import { startFeed } from "./feedClient.js";
-import { localeFor, t } from "./i18n.js";
-import { STREAM_DECK_KEYS, type StreamDeckKey } from "./keys.js";
+import { localeFor } from "./i18n.js";
+import type { StreamDeckKey } from "./keys.js";
 import { Runtime, authKeyFor, clientFor, type Surface, type SurfaceKind } from "./runtime.js";
 import { nodeTransport } from "./transport.js";
 
@@ -24,7 +23,11 @@ import { nodeTransport } from "./transport.js";
 // tests cover what it calls.
 
 const PLUGIN = "com.polyemesis.streamdeck";
+// Status refreshes every couple of seconds; dials poll /levels five times a second.
+// The server answers levels with its own freshness verdict, so the dial needs no
+// faster clock than this to show NO FEED within about a window of silence.
 const REFRESH_MS = 2000;
+const METER_MS = 200;
 
 let runtime: Runtime | undefined;
 /** Created lazily: streamDeck.info is only populated once the plugin has connected. */
@@ -33,30 +36,14 @@ function rt(): Runtime {
   return runtime;
 }
 
-let stopFeed: (() => void) | undefined;
-
 function text(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-/** Applies the global pairing settings: the runtime, the meter feed, and an immediate repaint. */
+/** Applies the global pairing settings, then repaints from a fresh check. */
 function applyGlobals(raw: Record<string, unknown>): void {
   const globals: GlobalSettings = { url: text(raw.url), token: text(raw.token), caPem: text(raw.caPem) };
   rt().configure(globals);
-  stopFeed?.();
-  stopFeed = undefined;
-  try {
-    const base = parseServerUrl(globals.url);
-    stopFeed = startFeed({
-      base,
-      token: globals.token ?? "",
-      caPem: globals.caPem,
-      onFrame: (frame) => rt().ingestFrame(frame),
-    });
-  } catch (err) {
-    if (!(err instanceof ConfigError)) streamDeck.logger.error(String(err));
-  }
-  void rt().refreshMeterInterval();
   void rt().tick();
 }
 
@@ -169,17 +156,6 @@ export class MeterDial extends SingletonAction {
   }
 }
 
-/** The strings the inspector needs, in the locale the Stream Deck app is using. */
-function inspectorStrings(locale: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const key of STREAM_DECK_KEYS) {
-    if (key.startsWith("streamdeck.pi.") || key.startsWith("streamdeck.auth.") || key.startsWith("streamdeck.err.")) {
-      out[key] = t(locale, key);
-    }
-  }
-  return out;
-}
-
 /** A connection check on the values the inspector is showing, not the saved ones. */
 async function testConnection(g: GlobalSettings) {
   try {
@@ -204,13 +180,10 @@ streamDeck.settings.onDidReceiveGlobalSettings((ev: DidReceiveGlobalSettingsEven
 });
 
 streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>) => {
+  // The inspector's labels come from a catalog it ships itself (ui/strings.js), so
+  // the only message it sends is a connection check on the values it is showing.
   const msg = ev.payload as { type?: unknown; url?: unknown; token?: unknown; caPem?: unknown };
-  if (msg.type === "hello") {
-    await streamDeck.ui.sendToPropertyInspector({
-      type: "strings",
-      strings: inspectorStrings(localeFor(streamDeck.info?.application?.language)),
-    });
-  } else if (msg.type === "test") {
+  if (msg.type === "test") {
     const result = await testConnection({ url: text(msg.url), token: text(msg.token), caPem: text(msg.caPem) });
     await streamDeck.ui.sendToPropertyInspector({ type: "test", ...result });
   }
@@ -221,3 +194,4 @@ await streamDeck.connect();
 const globals = (await streamDeck.settings.getGlobalSettings()) as Record<string, unknown>;
 applyGlobals(globals);
 setInterval(() => void rt().tick(), REFRESH_MS);
+setInterval(() => void rt().tickMeters(), METER_MS);
