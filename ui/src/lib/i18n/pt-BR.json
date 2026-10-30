@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Não foi possível carregar a linha do tempo.",
   "timeline.severityCritical": "Crítico",
   "timeline.severityWarning": "Aviso",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Pesquisar configurações",
+  "settings.noMatches": "Nenhuma configuração corresponde."
 }

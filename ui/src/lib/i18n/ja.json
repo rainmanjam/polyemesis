@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "タイムラインを読み込めませんでした。",
   "timeline.severityCritical": "重大",
   "timeline.severityWarning": "警告",
-  "timeline.severityInfo": "情報"
+  "timeline.severityInfo": "情報",
+  "settings.search": "設定を検索",
+  "settings.noMatches": "一致する設定はありません。"
 }

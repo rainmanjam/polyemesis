@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Der Verlauf konnte nicht geladen werden.",
   "timeline.severityCritical": "Kritisch",
   "timeline.severityWarning": "Warnung",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Einstellungen durchsuchen",
+  "settings.noMatches": "Keine Einstellungen gefunden."
 }

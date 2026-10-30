@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Zaman çizelgesi yüklenemedi.",
   "timeline.severityCritical": "Kritik",
   "timeline.severityWarning": "Uyarı",
-  "timeline.severityInfo": "Bilgi"
+  "timeline.severityInfo": "Bilgi",
+  "settings.search": "Ayarlarda ara",
+  "settings.noMatches": "Eşleşen ayar yok."
 }

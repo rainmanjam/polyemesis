@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import { useSearchParams } from "react-router";
+import { SettingsSectionSearch } from "@/components/SettingsSectionSearch";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -334,8 +335,27 @@ export function SettingsPage() {
         actions={<TourReplayButton />}
       />
 
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <TabsList>
+      <SettingsSectionSearch
+        labels={{
+          ingest: t("set.ingest"),
+          pipeline: t("set.tabPipeline"),
+          platforms: t("set.tabPlatforms"),
+          security: t("set.tabSecurity"),
+          debug: t("set.tabDebug"),
+        }}
+        onPick={(v) => setParams({ tab: v })}
+      />
+
+      {/* The sections run down a left rail on wide screens and stack on narrow
+          ones. The rail is the same tab list, so a rail link and a search result
+          both set the same ?tab= value. */}
+      <Tabs
+        value={tab}
+        orientation="vertical"
+        onValueChange={(v) => setParams({ tab: v })}
+        className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-4 [&>[role=tablist]]:lg:row-span-full [&>[role=tabpanel]]:lg:col-start-2"
+      >
+        <TabsList className="lg:flex-col lg:items-stretch">
           <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
           <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
           <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>

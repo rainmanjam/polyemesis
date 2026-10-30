@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Nie udało się wczytać osi czasu.",
   "timeline.severityCritical": "Krytyczne",
   "timeline.severityWarning": "Ostrzeżenie",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Szukaj w ustawieniach",
+  "settings.noMatches": "Brak pasujących ustawień."
 }

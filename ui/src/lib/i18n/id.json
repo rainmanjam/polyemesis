@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Linimasa tidak dapat dimuat.",
   "timeline.severityCritical": "Kritis",
   "timeline.severityWarning": "Peringatan",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Cari pengaturan",
+  "settings.noMatches": "Tidak ada pengaturan yang cocok."
 }

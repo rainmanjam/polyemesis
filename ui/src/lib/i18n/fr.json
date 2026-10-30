@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Impossible de charger la chronologie.",
   "timeline.severityCritical": "Critique",
   "timeline.severityWarning": "Avertissement",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Rechercher dans les réglages",
+  "settings.noMatches": "Aucun réglage ne correspond."
 }

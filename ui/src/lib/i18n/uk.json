@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Не вдалося завантажити хронологію.",
   "timeline.severityCritical": "Критично",
   "timeline.severityWarning": "Попередження",
-  "timeline.severityInfo": "Інфо"
+  "timeline.severityInfo": "Інфо",
+  "settings.search": "Пошук у налаштуваннях",
+  "settings.noMatches": "Немає відповідних налаштувань."
 }

@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "타임라인을 불러올 수 없습니다.",
   "timeline.severityCritical": "심각",
   "timeline.severityWarning": "경고",
-  "timeline.severityInfo": "정보"
+  "timeline.severityInfo": "정보",
+  "settings.search": "설정 검색",
+  "settings.noMatches": "일치하는 설정이 없습니다."
 }

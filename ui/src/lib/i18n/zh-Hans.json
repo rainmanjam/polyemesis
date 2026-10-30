@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "无法加载时间线。",
   "timeline.severityCritical": "严重",
   "timeline.severityWarning": "警告",
-  "timeline.severityInfo": "信息"
+  "timeline.severityInfo": "信息",
+  "settings.search": "搜索设置",
+  "settings.noMatches": "没有匹配的设置。"
 }

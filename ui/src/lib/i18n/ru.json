@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "Не удалось загрузить хронологию.",
   "timeline.severityCritical": "Критично",
   "timeline.severityWarning": "Предупреждение",
-  "timeline.severityInfo": "Инфо"
+  "timeline.severityInfo": "Инфо",
+  "settings.search": "Поиск в настройках",
+  "settings.noMatches": "Нет подходящих настроек."
 }

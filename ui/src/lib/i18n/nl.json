@@ -1715,5 +1715,7 @@
   "timeline.loadFailed": "De tijdlijn kon niet worden geladen.",
   "timeline.severityCritical": "Kritiek",
   "timeline.severityWarning": "Waarschuwing",
-  "timeline.severityInfo": "Info"
+  "timeline.severityInfo": "Info",
+  "settings.search": "Instellingen doorzoeken",
+  "settings.noMatches": "Geen instellingen gevonden."
 }
