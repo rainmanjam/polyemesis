@@ -272,10 +272,18 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 	for _, c := range liveTry {
 		err := liveApplyTo(c.d.proc, c.d.graph, c.p.compiled)
 		e.mu.Lock()
-		if err == nil && e.dests[c.id] == c.d {
-			next := *c.d
-			next.compiled = c.p.compiled
-			e.dests[c.id] = &next
+		if err == nil {
+			// The running process took the level, so that is what happened,
+			// whether or not the entry is still the one in the map. It is
+			// republished only if it is; one that was replaced mid-apply (a
+			// shutdown) is not resurrected, and there is nothing to restart.
+			// Recording "restart" here, as this once did, told the operator a
+			// restart happened -- with an empty reason -- when none had.
+			if e.dests[c.id] == c.d {
+				next := *c.d
+				next.compiled = c.p.compiled
+				e.dests[c.id] = &next
+			}
 			e.setLiveNoteLocked(c.id, liveNote{applied: liveApplied})
 			e.mu.Unlock()
 			continue
