@@ -60,22 +60,12 @@ test("dashboard — the hero shot", async ({ page }) => {
     { text: "Offline", exact: true },
   ]);
 
-  // The fan-out, framed on its own.
-  //
-  // THE SHOT ABOVE IS THE TOP OF THE PAGE AND THE TOP OF THE PAGE IS THE
-  // INGEST CARD, which reports OFFLINE with no bitrate while 200 MB of video
-  // is demonstrably on the relay. That is not this harness getting it wrong:
-  // engine.Status() fills `ingest` from the ingest CHILD PROCESS, and under the
-  // one-port design there is no such process -- the Go SRT listener delivers
-  // straight to the hub. AppLayout already computes liveness from the relay
-  // instead and says "Live" in the header of the same screenshot; the
-  // dashboard card does not. web/src/pages/features.astro has been omitting
-  // the dashboard capture over exactly this.
-  //
-  // So the differentiator gets a frame that tells the truth: thirteen
-  // destinations across five platforms and three rendition tiers, which is the
-  // claim that is actually being made and the one every card in it supports.
-  // Delete this shot, not that one, when the ingest card is fixed.
+  // The fan-out, framed on its own: thirteen destinations across five
+  // platforms and three rendition tiers, each card with its own tracks. This
+  // used to stand in for the hero above, whose ingest card first read OFFLINE
+  // over a live relay and then showed whichever programme reported last; both
+  // are fixed (lib/dashboardFacts programmeSnapshot), and the site now shows
+  // 01-dashboard.png itself. This frame stays for the per-destination claim.
   // The heading, by role and prefix. Its text is "Destinations" followed by the
   // count in a sibling span, so an exact text match on the word alone matches
   // nothing at all -- and a locator that matches nothing waits out its timeout
@@ -426,39 +416,68 @@ test("renditions — the ladder, shared across destinations", async ({ page }) =
 test("monitoring — every process, with its own FFmpeg output", async ({ page }) => {
   await page.goto("/monitoring");
   await settle(page, 2500);
-  // FRAMED ABOVE THE PROCESS LIST, and the reason is a product defect rather
-  // than taste -- same shape as the 18-destinations frame above.
+  // THE WHOLE PAGE NOW, process list and log included. This frame used to stop
+  // above the process list, because every child that decodes video from the
+  // relay joins it mid-GOP and, until the next keyframe, FFmpeg's h264 decoder
+  // complains once a frame -- and the supervisor counted that burst as errors,
+  // so a healthy install showed "189 ERRORS" on whichever process started last.
+  // The supervisor now logs a video decoder's lines as info until the process's
+  // first output frame (internal/supervisor/warmup.go), so a healthy install
+  // shows no errors, and the page can be photographed as it is.
   //
-  // Every child that decodes video from the relay (preview, renditions, the
-  // loudness probes) joins it mid-GOP: the relay has no idea where a GOP
-  // starts. Until the next keyframe FFmpeg's h264 decoder prints "non-existing
-  // PPS 0 referenced" and "decode_slice_header error" once a frame, and
-  // supervisor.classify files the second as an error. The log backfill then
-  // puts an "N ERRORS" chip on whichever process started last -- usually the
-  // preview, which restarts whenever a dashboard opens -- with 189 errors, all
-  // in the same second, on a stream that is perfectly healthy. A real install
-  // shows the same thing, so it is not the seed's fault, and no publisher
-  // setting removes it short of an all-intra stream.
-  //
-  // Hiding the chip, or stubbing /processes, would be photographing a product
-  // that does not exist. So the frame stops above the process list: host
-  // resources, relay throughput, ingest loss and the bitrate history, all of
-  // them real. Delete the clip, and photograph the whole page again, when the
-  // supervisor treats decoder errors before a process's first output frame as
-  // warm-up rather than as faults.
-  const chartTitle = page.getByText(/^Ingest bitrate/).first();
-  await expect(chartTitle).toBeVisible({ timeout: 20_000 });
-  await settle(page, 1200);
-  // The bottom edge of the chart's own card, so the frame ends on its border.
-  const chartBottom = await chartTitle.evaluate((el) => {
-    const card = el.closest(".rounded-xl, .rounded-lg, [class*='rounded']:not(span)");
-    const r = (card ?? el).getBoundingClientRect();
-    return r.bottom;
-  });
-  await page.screenshot({
-    path: `${OUT}/07-monitoring.png`,
-    clip: { x: 0, y: 0, width: page.viewportSize()!.width, height: Math.round(chartBottom + 8) },
-  });
+  // Framed on the process list, with the log filtered to one process: the
+  // claim is "every process, with its own FFmpeg output", and the filtered log
+  // is the "its own".
+  const processes = page.getByText("Processes", { exact: true }).first();
+  await topOfFrame(page, processes);
+
+  // The log opens on Errors, and on a healthy install that view is empty --
+  // which is the point, and is also a picture of nothing. All shows the lines.
+  await page.getByRole("button", { name: "All", exact: true }).click();
+
+  // One process's own output. The preview first: it restarts whenever a
+  // dashboard opens, so its join-time decoder warm-up is the most recent
+  // thing in the log, now as info lines rather than errors -- the case this
+  // frame exists to show honestly. The console keeps the last 800 lines across
+  // every process, so a child that started minutes ago may have scrolled out;
+  // any process that still has lines will do.
+  const empty = page.getByText("No lines match this view.", { exact: true });
+  const select = page.getByRole("combobox").filter({ hasText: /All processes|:|^preview$|^meters$/ }).first();
+  await select.click();
+  const names = (await page.getByRole("option").allInnerTexts()).filter((n) => n !== "All processes");
+  await page.keyboard.press("Escape");
+  const order = [...names.filter((n) => n === "preview"), ...names.filter((n) => n !== "preview")];
+  let shown = "";
+  for (const name of order) {
+    await select.click();
+    await page.getByRole("option", { name, exact: true }).click();
+    await settle(page, 600);
+    if ((await empty.count()) === 0) {
+      shown = name;
+      break;
+    }
+  }
+  expect(shown, "no process has any lines left in the console's log").not.toBe("");
+  await settle(page, 1500);
+
+  // NO FALSE ERRORS: no per-process error chip, and the log's own count at 0.
+  // Asserted rather than hoped: a frame showing "N errors" on a healthy stream
+  // is the product looking broken, which this harness refuses to photograph.
+  const falseErrors = page.getByText(/^\d+ errors?$/);
+  await expect(falseErrors).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText("Errors 0", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^No errors in the last \d+ s$/)).toBeVisible();
+  // And the filtered log has lines in it: an empty log would be a picture of
+  // nothing, whatever its count says.
+  await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
+  // Every running process has an uptime: the meters used to read --:--:--
+  // for their whole life, because their stdout is level data and the
+  // supervisor never heard that media was flowing.
+  await shoot(page, `${OUT}/07-monitoring.png`, [
+    { text: "No lines match this view.", exact: true },
+    { text: "--:--:--", exact: true },
+  ]);
+  await expect(falseErrors).toHaveCount(0);
 });
 
 /* The video. One take, no cuts, following the same argument as the stills:

@@ -72,15 +72,20 @@ and its logic are genuine; whose channel it is, is not.
 The website's "Platform sign-in" section shows the connected state, with the
 empty form beneath it as the one-time setup.
 
-### `02-routing-hero.png` and `07-monitoring.png` are clips
+### `02-routing-hero.png` is a clip; `07-monitoring.png` is framed on the processes
 
 `02-routing-hero.png` is a clip of the routing screen, the track rows and the
 music-rights switch for the selected destination, taken for the home page hero
-so it can be read at that size. `07-monitoring.png` stops above the process
-list. Every child that decodes the relay joins it mid-GOP and logs a burst of
-h264 decoder errors until the first keyframe. The supervisor counts that burst
-as errors, so a healthy install wears an "N ERRORS" chip. The comment in
-`ui/e2e/capture.spec.ts` says when to photograph the whole page again.
+so it can be read at that size. `07-monitoring.png` is framed on the process
+list, with the FFmpeg log filtered to one process (the preview, when it still
+has lines). Every child that decodes the relay joins it mid-GOP and logs a burst
+of h264 decoder errors until the first keyframe; the supervisor logs that burst
+as info until the process's first output frame, so the shot shows it with
+errors and warnings at zero. The capture asserts no per-process error chip and
+no `--:--:--` uptime before it fires.
+
+`tour.webm` is the tour test's own recording, re-encoded to VP9 at CRF 42 to
+keep it small; `tour.mp4` is the H.264 copy GitHub can inline.
 
 Server and publisher run as two containers on one Docker network, dialling each
 other by name. That sidesteps [#28](https://github.com/rainmanjam/polyemesis/issues/28),

@@ -65,15 +65,12 @@ const SHOT_WIDTHS = [420, 690, 960, 1440];
 
 
 /* Each section pairs a claim with the screenshot that evidences it. The
- * dashboard capture is still deliberately absent, though for a different reason
- * than it used to be. It no longer reads "Offline" while audio flows -- the
- * ingest card now says LIVE. But on an install with several programmes the card
- * is not scoped to the one the header has selected: the header says "Main
- * Programme" while the card underneath is titled with whichever programme
- * reported last, above a box explaining that the figures are not scoped. That
- * is the product's state reporting, not the capture, and the UX Council's S5
- * condition -- fix the ingest state reporting, then show the dashboard -- is not
- * met yet. Add it here when the card follows the selected programme.
+ * dashboard was left out for a long time, for two successive state-reporting
+ * defects: its ingest card read "Offline" while audio flowed, and then, on an
+ * install with several programmes, showed whichever programme had reported
+ * last rather than the one selected in the header. Both are fixed in the
+ * product (lib/dashboardFacts programmeSnapshot), which was the UX Council's S5
+ * condition for showing it, so it now opens the page.
  *
  * `note` is the EXPERIMENTAL convention from the product, carried onto the
  * site. It exists because this page — not a Go doc comment, not a card in the
@@ -85,6 +82,19 @@ const SHOT_WIDTHS = [420, 690, 960, 1440];
  * what the feature does. */
 
 const sections = [
+  {
+    id: "dashboard",
+    provenBy: "startDestination",
+    eyebrow: "Dashboard",
+    title: "The show, on one screen",
+    body: [
+      "The programme you picked in the header, its ingest — bitrate, uptime and how many audio tracks arrived — the live picture, and every destination it feeds, each with the tracks it carries and a button to start or stop it.",
+      "On an install with several programmes, everything on the screen belongs to the one you selected. Switch programme and the ingest card, the picture and the destinations switch with it.",
+    ],
+    shot: "01-dashboard.png",
+    caption: "The programme selected in the header, on air: its ingest live at 7.2 Mbps with four audio tracks, the on-air strip with End all, and its destinations, each showing the four ingest tracks and which of them it carries. The platform destinations are seeded demo data, created stopped.",
+    alt: "polyemesis dashboard: the selected programme's ingest card reading live, the preview, and its destinations with their audio tracks",
+  },
   {
     id: "routing",
     provenBy: "compileRouting",
@@ -199,8 +209,8 @@ const sections = [
       "Prometheus metrics and in-process alert rules with webhook delivery, so a stream that stops can page you rather than wait to be noticed.",
     ],
     shot: "07-monitoring.png",
-    caption: "Host CPU, memory, relay throughput and ingest loss, above the last 30 minutes of ingest bitrate. Each process and its FFmpeg log sit further down the same page.",
-    alt: "polyemesis monitoring page: host CPU, memory, relay-in, relay-drops and ingest-loss tiles above a 30-minute ingest bitrate chart",
+    caption: "Each process with its uptime and restart count, beside the FFmpeg log filtered to one of them: the preview's join-time decoder warm-up, logged as information, with errors and warnings at zero. Host CPU, memory, relay throughput and ingest loss sit above, on the same page.",
+    alt: "polyemesis monitoring page: the process list with uptimes beside the FFmpeg log filtered to the preview process, showing zero errors and zero warnings",
   },
   {
     id: "recording",
