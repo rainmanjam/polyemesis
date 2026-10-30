@@ -233,6 +233,41 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.12.0
+
+> **Not released yet.** This note describes what is on `main` under
+> `[Unreleased]` in the [CHANGELOG](../CHANGELOG.md). The version number is the
+> one the next release is expected to take, and it may change when the release
+> is cut.
+
+**Every running destination restarts once.** The command line a destination's
+FFmpeg runs has changed in two ways. Each mixed track has a named
+`volume@trk<N>` stage, and `-nostdin` is gone from destination processes on
+every platform except Windows, because the process now takes live level changes
+on its standard input. Every destination's restart signature therefore moves on
+the first reconcile after the new binary starts, and each running destination
+restarts once: one reconnect per platform. Upgrade when nothing is live, or
+accept that reconnect. After that first reconcile, nothing restarts for this
+reason again.
+
+**Live gain and mute do not apply on a Windows server.** On Linux and macOS, a
+change to a track's gain or mute alone reaches the running destination without
+a restart. On Windows the live path is not verified, so every such change still
+restarts the destination, as it did before. The API's answer and the
+destination's `levelChange` status say which happened.
+[HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel)
+has the details.
+
+**Schema:** one table is added, `timeline_events`, for the stream timeline. It
+is created with `CREATE TABLE IF NOT EXISTS`, and the schema version stamped
+into the database is still `1`, so a 0.11.0 binary opens the database and
+ignores the table. One thing does not survive reinstalling the 0.11.0 binary:
+a track muted with the new mute control. 0.11.0 does not know the `muted`
+field, so that track is heard again. Restoring the backup you took is still the
+rollback this page recommends.
+
+Nothing else to do beyond the short version above.
+
 ### Upgrading to 0.11.0
 
 **No schema change.** The schema version stamped into the database is still

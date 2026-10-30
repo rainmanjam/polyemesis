@@ -7,7 +7,7 @@ deliberately does not do, and how to get it running. These are the details.
 
 | Document | For |
 |---|---|
-| [QUICKSTART.md](QUICKSTART.md) | First stream in about five minutes |
+| [QUICKSTART.md](QUICKSTART.md) | Install, add a source and a destination, then stream |
 | [INSTALL.md](INSTALL.md) | Per-platform installation, including what to do when your distro's FFmpeg is too old |
 | [CONFIGURATION.md](CONFIGURATION.md) | `config.yaml`, flags, and — more usefully — *which* settings live in a file and which live in the UI |
 | [HOT-RELOAD.md](HOT-RELOAD.md) | Which settings drop a connection when you change them mid-stream, and which do not |
@@ -19,6 +19,7 @@ deliberately does not do, and how to get it running. These are the details.
 | Document | For |
 |---|---|
 | [OBS.md](OBS.md) | Multitrack over SRT step by step, and the two configurations that are not it |
+| [STREAM-DECK.md](STREAM-DECK.md) | The Stream Deck plugin: install, pairing with a read or admin token, each key, and what its faces mean |
 | [AUDIO-ROUTING.md](AUDIO-ROUTING.md) | Simple mode, the mix matrix, clip protection, loudness and delay |
 | [RENDITIONS.md](RENDITIONS.md) | Shared video encodes, ref counting, presets and hardware encoders |
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |

@@ -40,6 +40,14 @@ hot. One upload, one video encode, different audio per platform.
 - **Per-destination audio routing** — the differentiator. Checkbox-per-track
   simple mode, or a full channel-to-output mix matrix with a gain per cell.
   [→ AUDIO-ROUTING.md](docs/AUDIO-ROUTING.md)
+- **Live track mute and gain.** Muting a track on one destination, or changing
+  its gain, is sent to that destination's running FFmpeg, so the platform
+  connection stays up. FFmpeg must confirm the change; if it refuses or does not
+  answer within two seconds, the destination restarts and says why. A matrix
+  cell's gain, a track added or removed, and anything else that changes the
+  command line still restart, and on Windows every level change restarts,
+  because the live path is not verified there.
+  [→ HOT-RELOAD.md](docs/HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel)
 - **Video is copied, not re-encoded.** `-c:v copy` on every destination, so CPU
   cost is nearly independent of resolution. Only audio is decoded, mixed and
   re-encoded to AAC.
@@ -71,6 +79,17 @@ hot. One upload, one video encode, different audio per platform.
   queue, Whisper transcription with full-text search, and a clipper.
 - **Prometheus metrics** and in-process alert rules with webhook delivery.
   [→ MONITORING.md](docs/MONITORING.md)
+- **A stream timeline** on the Monitoring page: failovers, destinations going
+  down, recovering or falling behind, and ingest loss, newest first, kept for
+  30 days. [→ MONITORING.md](docs/MONITORING.md#the-stream-timeline)
+- **A Stream Deck plugin.** Keys show each destination's state and start it,
+  go live, hold to stop one destination or all of them (with a count of the
+  YouTube broadcasts the stop would end), switch recording, apply a routing
+  preset, hand failover back to automatic, and mute one track on one
+  destination. On a Stream Deck+, one dial shows the meters and another sets a
+  track's gain. A read token shows state; the controls that change something
+  need an admin token.
+  [→ STREAM-DECK.md](docs/STREAM-DECK.md)
 - **Lifecycle webhooks** — a signed POST the moment the stream starts or stops,
   or a destination goes up or down. One delivery per transition, in order, so a
   script can act on it; alerts coalesce for a human, these deliberately do not.
@@ -78,7 +97,9 @@ hot. One upload, one video encode, different audio per platform.
 - **Most settings apply without dropping anything.** The dividing line is
   mechanical — a value that reaches an FFmpeg command line replaces the process
   that runs it, and a value that does not is delivered to the process still
-  running. Saving tells you which happened. [→ HOT-RELOAD.md](docs/HOT-RELOAD.md)
+  running. A destination's track levels are the one exception: they are on the
+  command line and still applied live, as above. Saving tells you which
+  happened. [→ HOT-RELOAD.md](docs/HOT-RELOAD.md)
 - **Retained MQTT telemetry** with Home Assistant discovery, so the stream shows
   up as entities in a dashboard you already run. [→ MQTT.md](docs/MQTT.md)
 - **TLS that configures itself** — Let's Encrypt when the box has a public name,
@@ -175,8 +196,8 @@ make build            # builds the UI, embeds it, produces ./polyemesis
 ./polyemesis -data ./data
 ```
 
-Then follow [docs/QUICKSTART.md](docs/QUICKSTART.md) — first stream in about
-five minutes. Per-platform installation, service files and the GPU images are in
+Then follow [docs/QUICKSTART.md](docs/QUICKSTART.md), from install to a first
+stream. Per-platform installation, service files and the GPU images are in
 [docs/INSTALL.md](docs/INSTALL.md).
 
 ### Requirements
@@ -224,9 +245,10 @@ most:
 
 | | |
 |---|---|
-| [Quickstart](docs/QUICKSTART.md) | First stream in about five minutes |
+| [Quickstart](docs/QUICKSTART.md) | Install, add a source and a destination, then stream |
 | [Install](docs/INSTALL.md) | Per-platform, including a too-old FFmpeg |
 | [OBS setup](docs/OBS.md) | Multitrack over SRT, step by step |
+| [Stream Deck](docs/STREAM-DECK.md) | The plugin: install, pairing, each key |
 | [Audio routing](docs/AUDIO-ROUTING.md) | The mix matrix, clip protection, loudness |
 | [Renditions](docs/RENDITIONS.md) | Shared video encodes and hardware encoders |
 | [Platforms](docs/PLATFORMS.md) | What each platform's API allows, and OAuth setup |

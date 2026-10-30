@@ -148,7 +148,7 @@ const SECTION_ROWS = [
 const DOCS_BY_SECTION = {
   start: [
     ["QUICKSTART.md", "Quickstart: from nothing to a live restream",
-      "Five minutes: run it, set a password, point OBS at the SRT ingest, name the tracks, add one destination, and check the fan-out is actually right."],
+      "Run it, set a password, point OBS at the SRT ingest, name the tracks, add one destination, and check the fan-out is actually right."],
     /* "SRT server" in the title, and it is not a keyword bolted on: an SRT
      * listener that ingests and fans out is what this is, and it is the phrase
      * people type. The project's own documents never once call it that — 49
@@ -199,8 +199,10 @@ const DOCS_BY_SECTION = {
       "YouTube, Twitch, Kick, Facebook and Rumble. Anything taking RTMP or SRT works with a pasted key; this is what each platform's API lets you automate."],
     ["SCHEDULED-BROADCAST.md", "Broadcasting from a file, on a schedule",
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
+    ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",
+      "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
-      "The rule is mechanical: a value that reaches an FFmpeg command line replaces the process running it. What a restart costs, and what a save now tells you."],
+      "A value on an FFmpeg command line replaces the process running it; track levels now change live instead. What a restart costs, and what a save tells you."],
     ["UPGRADING.md", "Upgrading polyemesis and its database",
       "Stop, replace the binary, start — the database migrates itself forward. What to back up first, the version-specific notes, and how to roll back."],
     ["TROUBLESHOOTING.md", "Troubleshooting: SRT, RTMP and audio problems",

@@ -665,6 +665,39 @@ deletion is in the log. What an attacker who deletes your only rule still
 leaves unrecorded is everything they do *after* it. If you need a record that
 survives the incident, the receiving end of the webhook is where to keep it.
 
+The [stream timeline](#the-stream-timeline) below is a table, but it is not
+this record either. It keeps only stream events, never a sign-in, a token or a
+settings change.
+
+---
+
+## The stream timeline
+
+The Monitoring page has a **Timeline** card: what happened to the stream,
+newest first, in words. It answers "when did it fail over?" and "how often did
+Twitch drop?" after the alert has gone.
+
+It keeps seven event types, the stream-shaped subset of the alerts above:
+
+- `failover.switched`
+- `destination.down` and `destination.recovered`
+- `destination.falling_behind` and `destination.caught_up`
+- `ingest.lost` and `ingest.recovered`
+
+A destination restart shows as a down followed by a recovered. A stream
+ending is not on it, because nothing raises that event.
+
+The rows are the notifier's text, already redacted, kept in the database. The
+store holds at most 1000 rows and nothing older than 30 days; both caps apply
+on every write. Rows are written from their own bounded queue. If the database
+is too slow to keep up, a row is dropped and counted in the notifier's
+`dropped` counter, rather than delaying the streaming path. A gap in the
+timeline is therefore possible under load, and the counter is how you would
+know.
+
+A script reads the same rows from `GET /api/v1/timeline?limit=N`
+([API.md](API.md)). A read token is enough.
+
 ---
 
 ## Automation
