@@ -306,3 +306,51 @@ func TestADegradedSwitchIsDeliveredAsAFailoverWebhookWithItsReason(t *testing.T)
 		t.Errorf("the webhook's reason does not say what was measured: %s", body)
 	}
 }
+
+// Chat's !fix: the pin is cleared and the on-air feed is a NEW process, not the
+// one that was running -- otherwise "refresh" refreshed nothing. Measured where
+// it is hardest: the same source stays on air, so nothing but the refresh
+// itself can produce a new feed.
+//
+// Mutation: selector.go FixSource, delete `sel.feedAt = time.Time{}`.
+// Expected to fail: ensureFeed holds the restart back as a start inside its
+// backoff, and nothing is on air until a later sweep.
+func TestFixClearsThePinAndReplacesTheFeedOnAir(t *testing.T) {
+	e, _ := startDegradedTier(t, failoverOnSettings())
+	pace(t, e, time.Now(), time.Second, 50, nil)
+	if err := e.SwitchSource("primary"); err != nil {
+		t.Fatalf("SwitchSource: %v", err)
+	}
+	e.mu.RLock()
+	before := e.sel.feed
+	e.mu.RUnlock()
+	if before == nil {
+		t.Fatal("setup: no feed on air")
+	}
+
+	deliverTS(t, e.hub, 50)
+	if err := e.FixSource(); err != nil {
+		t.Fatalf("FixSource: %v", err)
+	}
+	st := e.Failover()
+	if st.Pinned != sourceNone {
+		t.Errorf("!fix left the pin on %q", st.Pinned)
+	}
+	if st.Active != sourcePrimary {
+		t.Errorf("after !fix with the primary delivering, %q is on air", st.Active)
+	}
+	e.mu.RLock()
+	after := e.sel.feed
+	e.mu.RUnlock()
+	if after == nil || after == before {
+		t.Fatalf("!fix did not replace the feed (before %p after %p)", before, after)
+	}
+}
+
+func TestFixWithFailoverOffSaysThereIsNothingToRefresh(t *testing.T) {
+	e := failoverEngine(t)
+	setSettings(e, db.DefaultSettings())
+	if err := e.FixSource(); err == nil {
+		t.Fatal("!fix with failover off reported success")
+	}
+}

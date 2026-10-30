@@ -1017,7 +1017,16 @@ async function walkEveryScreen(leaves: Leaf[]): Promise<Walk> {
       return [...(await hunt(paths.slice(0, half))), ...(await hunt(paths.slice(half)))];
     };
 
-    const bound = await hunt([...unreached.keys()]);
+    // NOT_A_CONTROL leaves are left out of the hunt, and not only because
+    // they have nothing to find. A server-assigned id can be WHERE other
+    // controls get their identity: automod's rule row is keyed
+    // `automod-rule-${rule.id}-…`, so a probe set holding rules[].id renames
+    // every control in the row, `differs` rightly refuses to compare controls
+    // that "came or went", and the whole set -- rules[].enabled with it -- is
+    // pruned as unbound. Whether that happens depended only on which half of a
+    // split the id landed in, so adding unrelated leaves anywhere above it
+    // (degraded-link failover's thresholds, #6) moved it and failed the file.
+    const bound = await hunt([...unreached.keys()].filter((p) => !(p in NOT_A_CONTROL)));
     for (const path of bound) {
       reached.set(path, `${screen.name} (probe)`);
       unreached.delete(path);

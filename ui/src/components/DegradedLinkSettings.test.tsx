@@ -14,10 +14,10 @@ import type { DegradedSettings } from "@/lib/types";
 afterEach(cleanup);
 
 describe("DegradedLinkSettings", () => {
-  it("shows only the switch while off, so an unused feature is one line", () => {
+  it("shows the thresholds while off too, so they can be read before switching on", () => {
     render(<DegradedLinkSettings value={{ enabled: false }} onChange={() => {}} />);
-    expect(screen.getByRole("switch")).toBeTruthy();
-    expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
+    expect((screen.getByRole("switch") as HTMLElement).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(4);
   });
 
   it("shows the server's defaults when switched on with nothing stored", () => {

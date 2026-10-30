@@ -2808,6 +2808,44 @@ func (e *Engine) SwitchSource(kind string) error {
 	return nil
 }
 
+// FixSource is chat's `!fix` (#6): return source selection to automatic and
+// restart the feed that is on air, so a stuck remux is replaced by a fresh one
+// reading the same source.
+//
+// The IRL convention behind the word is "refresh the media source": the
+// picture froze or went wrong, and tearing the reader down and starting it
+// again is the cheap thing that usually mends it. Here the reader is the
+// selector's feed. Its replacement is started by this call -- not left to the
+// next sweep -- with a fresh timeline offset, exactly as the sweep would
+// respawn a feed that died; destinations ride it, as they ride any switch.
+//
+// The pin is cleared first because somebody reaching for !fix wants the
+// selector deciding again, and a pin left on a source that is the problem
+// would make the refresh pointless.
+func (e *Engine) FixSource() error {
+	if err := e.SwitchSource("auto"); err != nil {
+		return err
+	}
+	s := e.Settings()
+	e.selMu.Lock()
+	defer e.selMu.Unlock()
+	e.mu.Lock()
+	sel := e.sel
+	if sel == nil || sel.hub == nil {
+		e.mu.Unlock()
+		return fmt.Errorf("failover is not enabled, so there is no feed to refresh")
+	}
+	feed := sel.feed
+	sel.feed = nil
+	// Cleared so ensureFeed does not hold the restart back as a failed start
+	// still inside its backoff.
+	sel.feedAt = time.Time{}
+	e.mu.Unlock()
+	stopErr := e.teardownFeed(feed)
+	e.log.Info("source feed refreshed on request", "source", e.sourceID, "stopErr", stopErr)
+	return e.applySourceChoice(s, e.heldSilence(), time.Now())
+}
+
 // FailoverStatus is the tier as the dashboard reports it. Absent entirely when
 // the tier is not running, which is the default.
 type FailoverStatus struct {

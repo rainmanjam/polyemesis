@@ -1667,6 +1667,25 @@ type Settings struct {
 	Chat       ChatSettings       `json:"chat"`
 	Automod    AutomodSettings    `json:"automod"`
 	Alerts     AlertSettings      `json:"alerts"`
+	// ChatCommands is the chat-driven control of #6: !bitrate, and the
+	// moderator-only !switch and !fix. Top level rather than inside Chat because
+	// it is a control surface over a programme, not a property of the chat
+	// pipeline, and because Chat's fields are spread field by field in the UI.
+	ChatCommands ChatCommandSettings `json:"chatCommands"`
+}
+
+// ChatCommandSettings turns chat commands on and picks the programme they act
+// on.
+//
+// OFF BY DEFAULT, because !switch and !fix put the broadcast in the hands of
+// every moderator of every connected channel -- a decision an operator has to
+// make, not one an upgrade makes for them.
+type ChatCommandSettings struct {
+	Enabled bool `json:"enabled"`
+	// SourceID is the programme the commands report on and switch. 0 means the
+	// default programme. Chat is install-wide and a command names no programme,
+	// so on a multi-programme install exactly one of them answers to chat.
+	SourceID int64 `json:"sourceId"`
 }
 
 // AutomodSettings is everything about automatic chat moderation except the
@@ -2308,6 +2327,9 @@ func (s Settings) Validate() error {
 	}
 	for _, p := range s.Failover.problems(s.Ingest) {
 		add("%s", p)
+	}
+	if s.ChatCommands.SourceID < 0 {
+		add("chat commands programme %d is not a programme", s.ChatCommands.SourceID)
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)

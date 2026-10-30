@@ -1354,6 +1354,9 @@ export interface Settings {
   /** Alert delivery policy. Optional so a client that predates it can still
    *  PUT settings. See AlertSettings below. */
   alerts?: AlertSettings;
+  /** Chat commands (#6). Optional so a client that predates it can still PUT
+   *  settings. */
+  chatCommands?: ChatCommandSettings;
   /** The version of the document this was read at, as GET /settings served it.
    *
    *  Sent back on the next PUT, which the server refuses (409,
@@ -1558,6 +1561,15 @@ export interface FailoverSettings {
   /** Degraded-link failover (#6): leave a primary that is still delivering,
    *  but delivering badly. */
   degraded?: DegradedSettings;
+}
+
+/** Chat commands: !bitrate for anyone, !switch and !fix for moderators and
+ *  the broadcaster. Off by default, because it gives every moderator of every
+ *  connected channel control of what is on air. */
+export interface ChatCommandSettings {
+  enabled: boolean;
+  /** The programme the commands act on; 0 is the default programme. */
+  sourceId?: number;
 }
 
 /** Link-health thresholds. Each is independent and 0 switches it off. RTT and

@@ -256,9 +256,11 @@ var settingsReload = map[string]ReloadRule{
 	"multitrack.gpus.driverVersion":        {ClassOnDemand, "negotiateFor", "read at go-live; Twitch refuses an out-of-date driver naming the version to upgrade to"},
 
 	// ------------------------------------------------------------ chat + automod
-	"chat.retentionHours": {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
-	"chat.keepMessages":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
-	"chat.purgeMinutes":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chatCommands.enabled":  {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
+	"chatCommands.sourceId": {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
+	"chat.retentionHours":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
+	"chat.keepMessages":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chat.purgeMinutes":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
 
 	// THIS TABLE IS WHY THESE TWO ARE LIVE. #732 wired the operator's allowance
 	// into NewYouTube, which is read once per adapter, and chatAdapter runs once

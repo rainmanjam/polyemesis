@@ -100,6 +100,7 @@ import {
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
+import { ChatCommandSettings } from "@/components/ChatCommandSettings";
 import type {
   AcmeCheckId,
   AcmeCheckStatus,
@@ -1015,6 +1016,11 @@ function PipelineSettings({
       </Card>
 
       <MultitrackHardware draft={draft} setDraft={setDraft} />
+
+      <ChatCommandSettings
+        value={draft.chatCommands}
+        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
 
       <Card>
         <CardHeader>

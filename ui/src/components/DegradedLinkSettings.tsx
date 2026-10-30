@@ -41,18 +41,19 @@ export function DegradedLinkSettings({
         <Switch id="fo-degraded" checked={v.enabled} onCheckedChange={(enabled) => set({ enabled })} />
       </div>
       <span className="text-sm text-muted-foreground">{t("set.degradedDesc")}</span>
-      {v.enabled && (
-        <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {num("minBitrateKbps", "fo-degraded-bitrate", t("set.degradedMinBitrate"), 800)}
-            {num("sustainSeconds", "fo-degraded-sustain", t("set.degradedSustain"), 5)}
-            {num("maxRttMs", "fo-degraded-rtt", t("set.degradedMaxRtt"), 1500)}
-            {num("maxLossPercent", "fo-degraded-loss", t("set.degradedMaxLoss"), 15, 0.1)}
-          </div>
-          <span className="text-sm text-muted-foreground">{t("set.degradedSrtOnly")}</span>
-          <span className="text-sm text-muted-foreground">{t("set.degradedClearNote")}</span>
-        </>
-      )}
+      {/* Always shown, not revealed by the switch: the thresholds are worth
+          reading before deciding to turn this on, and a section that mounts
+          and unmounts under the switch renumbers every unnamed control below
+          it on the page, which the settings-reachability walk reads by
+          position. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {num("minBitrateKbps", "fo-degraded-bitrate", t("set.degradedMinBitrate"), 800)}
+        {num("sustainSeconds", "fo-degraded-sustain", t("set.degradedSustain"), 5)}
+        {num("maxRttMs", "fo-degraded-rtt", t("set.degradedMaxRtt"), 1500)}
+        {num("maxLossPercent", "fo-degraded-loss", t("set.degradedMaxLoss"), 15, 0.1)}
+      </div>
+      <span className="text-sm text-muted-foreground">{t("set.degradedSrtOnly")}</span>
+      <span className="text-sm text-muted-foreground">{t("set.degradedClearNote")}</span>
     </div>
   );
 }
