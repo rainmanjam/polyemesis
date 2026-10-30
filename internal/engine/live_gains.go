@@ -120,6 +120,11 @@ const (
 // unchanged, so the level is stored and reaches nothing.
 const copyNoEffect = "copy destinations pass audio through unchanged, so the level is stored and has no effect on this output"
 
+// structuralRestart is said of a level change that arrived with a change a
+// command cannot carry: a track added or removed, a normaliser that flipped, a
+// matrix cell, an encoder or an upstream move.
+const structuralRestart = "the change alters more than a level, so the destination was restarted with it"
+
 // copyPathOf reports whether a destination's argv ignores its graph. Such an
 // output has no volume stage to move.
 func copyPathOf(row *db.Destination) bool {

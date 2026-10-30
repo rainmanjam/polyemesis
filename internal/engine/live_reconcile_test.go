@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
@@ -212,5 +213,39 @@ func TestDestinationRunning(t *testing.T) {
 	liveRunningDest(e, row, planFor(t, e, row), proc)
 	if !e.DestinationRunning(row.ID) {
 		t.Fatal("a destination with a process reads as not running")
+	}
+}
+
+// A level change that rides with a structural one (here a second track
+// joining the mix) restarts, and the outcome says so. Without a note the API
+// could not tell this apart from a change that touched nothing running.
+//
+// MUTATION: drop the structural-restart note in stopDestinations. Observed:
+// FAIL, "no outcome recorded".
+func TestALevelChangeWithAStructuralOneRecordsTheRestart(t *testing.T) {
+	e, store := storeEngine(t)
+	row := liveRow(t, store, false)
+	before := planFor(t, e, row)
+
+	proc := shellChild(t, `while read l; do echo "Command reply for stream 0: ret:0 res:" >&2; done`)
+	t.Cleanup(func() { _ = proc.Stop(t.Context()) })
+	liveRunningDest(e, row, before, proc)
+
+	wider := *row
+	wider.Profile = mixProfile(0)
+	wider.Profile.Tracks[0].Muted = true
+	wider.Profile.Tracks = append(wider.Profile.Tracks, routing.TrackSel{Track: 1, Enabled: true, Gain: 1})
+	after := planFor(t, e, &wider)
+	if after.spec == before.spec {
+		t.Fatal("adding a track did not move the signature; the test is not testing a structural change")
+	}
+	e.stopDestinations(map[int64]destPlan{row.ID: after})
+
+	applied, reason, ok := e.DestinationLive(row.ID)
+	if !ok {
+		t.Fatal("no outcome recorded for a level change that restarted")
+	}
+	if applied != liveRestart || reason == "" {
+		t.Errorf("applied = %q reason = %q, want restart with a reason", applied, reason)
 	}
 }

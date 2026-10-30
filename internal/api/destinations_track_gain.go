@@ -121,7 +121,11 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	case eng == nil || !eng.DestinationRunning(id):
 		applied, reason = "restart", "the destination is not running; the level is stored and takes effect when it starts"
 	default:
-		applied, reason = "restart", "this change alters more than a level, so the destination was restarted"
+		// Running, and the engine saw no level move: a level change it sent or
+		// restarted for would have left a note. The stored value reaches no
+		// stage of the running mix (a track that is selected but not enabled,
+		// or absent from the ingest), so nothing was restarted.
+		applied, reason = "live", "the track is not part of the running mix, so the level is stored and changes nothing on the output yet"
 	}
 	resp := map[string]any{"applied": applied, "destination": updated}
 	if reason != "" {

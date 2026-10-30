@@ -239,6 +239,13 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 				liveTry = append(liveTry, liveCandidate{id: id, d: d, p: p})
 			}
 		}
+		if !keep && wanted && d.proc != nil && d.graph != nil && p.row != nil && p.err == "" &&
+			levelsDiffer(d.graph.get().FilterComplex, p.compiled.FilterComplex) {
+			// The levels moved, but so did something a command cannot carry, so
+			// the level reaches the output by this restart. Recorded so the
+			// operator is told a restart happened rather than nothing.
+			e.setLiveNoteLocked(id, liveNote{applied: liveRestart, reason: structuralRestart})
+		}
 		if !keep {
 			toStop = append(toStop, d)
 			delete(e.dests, id)
