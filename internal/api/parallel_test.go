@@ -7,9 +7,15 @@ package api
 // past the 20-minute -race deadline in CI (it panicked at 1200s with nothing
 // stuck), so the slowest tests that build their own server and touch no
 // package state now call t.Parallel(): the five MCP tool sweeps, the two pull
-// URL spelling sweeps, the encoder list, the library re-check, the refused
-// upload spelling and the slow-reader events test. Together they took about
-// 220s in sequence under -race locally and about 100s in parallel.
+// URL spelling sweeps, the encoder list, the library re-check and the refused
+// upload spelling. With the slow-reader events test, which has since left the
+// set, they took about 220s in sequence under -race locally and about 100s in
+// parallel.
+//
+// A test that asserts a WALL-CLOCK bound does not belong here. The slow-reader
+// events test asserts that a stuck client's socket is closed within 20s; run
+// beside the rest of this set on a macOS runner it missed that bound, because
+// the bound measured the runner's load rather than the deadline.
 //
 // What made that safe, and what a new member of the set must keep true:
 //

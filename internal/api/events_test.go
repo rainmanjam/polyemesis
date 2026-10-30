@@ -342,9 +342,9 @@ func TestAClientThatStopsReadingIsDisconnected(t *testing.T) {
 // the handler goroutine and the connection would be held for ever. Measured on
 // the connection itself, not on the hub.
 func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
-	// Parallel: it builds its own server and touches no package state. See
-	// "THE PARALLEL SET" in parallel_test.go.
-	t.Parallel()
+	// NOT in the parallel set (parallel_test.go), though it was briefly: it
+	// asserts a wall-clock bound on a socket deadline, and beside the other
+	// parallel tests on a macOS runner the close took longer than its 20s.
 	h, _, sign := renditionServer(t, defaultTools())
 	s := serverUnderTest(t, h)
 	hub := eventstream.NewHub(eventstream.WithClientBuffer(4))
