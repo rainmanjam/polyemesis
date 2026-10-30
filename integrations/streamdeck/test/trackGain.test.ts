@@ -51,6 +51,11 @@ describe("track gain dial: the display", () => {
     expect(dial.feedback.at(-1)).toEqual({ title: "Twitch · Guest mic", value: "0.0 dB", indicator: 87 });
   });
 
+  it("shows a stored gain of 0 as minus infinity, never NaN or Infinity", async () => {
+    const { dial } = await dialOn(routes({ "GET /api/v1/destinations": json(200, [dest({}, { gain: 0 })]) }));
+    expect(dial.feedback.at(-1)).toMatchObject({ value: "-∞ dB", indicator: 0 });
+  });
+
   it("says MUTED beside the level of a muted track", async () => {
     const { dial } = await dialOn(routes({ "GET /api/v1/destinations": json(200, [dest({}, { muted: true, gain: 0.5 })]) }));
     expect(dial.feedback.at(-1)!.value).toBe("MUTED · -6.0 dB");

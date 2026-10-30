@@ -62,6 +62,13 @@ describe("the dial's display", () => {
     expect(formatDb(-12)).toBe("-12.0 dB");
   });
 
+  it("prints a stored gain of 0 as minus infinity, with an empty bar, and turns it up to the dial's floor", () => {
+    expect(formatDb(gainToDb(0))).toBe("-∞ dB");
+    expect(barFor(gainToDb(0))).toBe(0);
+    expect(stepDb(gainToDb(0), 1)).toBe(DB_MIN);
+    expect(stepDb(gainToDb(0), -1)).toBe(Number.NEGATIVE_INFINITY);
+  });
+
   it("draws the bar across the dial's range", () => {
     expect(barFor(DB_MIN)).toBe(0);
     expect(barFor(DB_MAX)).toBe(100);

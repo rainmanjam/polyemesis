@@ -68,8 +68,10 @@ export function barFor(db: number): number {
   return Math.round(((clampDb(db) - DB_MIN) / (DB_MAX - DB_MIN)) * 100);
 }
 
-/** A level as the dial prints it: one decimal, with its sign, e.g. "+1.5 dB", "0.0 dB", "-12.0 dB". */
+/** A level as the dial prints it: one decimal, with its sign, e.g. "+1.5 dB", "0.0 dB", "-12.0 dB", "-∞ dB". */
 export function formatDb(db: number): string {
+  // The server stores a gain of 0 for a track kept out of the mix: 20*log10(0) is -Infinity.
+  if (db === Number.NEGATIVE_INFINITY) return "-∞ dB";
   const rounded = Math.round(db * 10) / 10;
   if (rounded === 0) return "0.0 dB";
   return `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)} dB`;

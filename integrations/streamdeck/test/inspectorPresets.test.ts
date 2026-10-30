@@ -168,12 +168,15 @@ const settingsSent = (sent: unknown[]) =>
   sent.filter((m) => (m as { event?: string }).event === "setSettings").map((m) => (m as { payload: unknown }).payload);
 
 describe("inspector track picker", () => {
-  it("shows only the track block on a track key, and asks the plugin for its programme's destinations", () => {
+  it("shows only the track block on a track key, and asks for the key's programme's destinations once its settings arrive", () => {
     const { els, sent, receive } = loadInspector(MUTE);
     expect(els["block-track"]!.hidden).toBe(false);
     expect(els["block-destination"]!.hidden).toBe(true);
     expect(els["block-source"]!.hidden).toBe(false);
-    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations" } }));
+    // Not before: the form does not hold the programme yet, and the list would be every programme's.
+    expect(sent.some((m) => (m as { payload?: { type?: string } }).payload?.type === "destinations")).toBe(false);
+    receive("didReceiveSettings", { settings: { sourceId: 7 } });
+    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations", sourceId: 7 } }));
     receive("sendToPropertyInspector", DESTS);
     expect(els.trackDestination!.children.map((c) => c.textContent)).toEqual(["Choose a destination", "Twitch", "YouTube"]);
   });
@@ -233,8 +236,9 @@ describe("inspector track picker", () => {
   });
 
   it("shows the same pickers on the gain dial", () => {
-    const { els, sent } = loadInspector(GAIN);
+    const { els, sent, receive } = loadInspector(GAIN);
     expect(els["block-track"]!.hidden).toBe(false);
+    receive("didReceiveSettings", { settings: {} });
     expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "destinations" } }));
   });
 

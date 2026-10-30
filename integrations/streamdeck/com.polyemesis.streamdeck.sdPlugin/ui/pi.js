@@ -207,6 +207,9 @@
       savedDestinationId = typeof settings.destinationId === "number" ? String(settings.destinationId) : "";
       savedTrack = typeof settings.track === "number" ? String(settings.track) : "";
       renderDestinations();
+      // Asked HERE, not when the socket opens: only now does the form hold the key's programme, and a
+      // list asked for before it would offer every programme's destinations, named by number.
+      requestDestinations();
     }
   }
 
@@ -274,7 +277,6 @@
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
       if (!$("block-preset").hidden) requestPresets();
-      if (isTrackAction()) requestDestinations();
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
