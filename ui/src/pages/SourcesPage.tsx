@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import {
@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/AppLayout";
+import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
 import { PullIngestFields } from "@/components/PullIngestFields";
@@ -627,14 +628,14 @@ export function SourceCard({
                 while the card is in the receiving state. */}
             {previewOn ? (
               <div className="w-36 shrink-0 overflow-hidden rounded border border-border" data-testid="source-thumbnail">
-                <Suspense fallback={<div className="aspect-video bg-muted" />}>
+                <LazyBoundary fallback={<div className="aspect-video bg-muted" />}>
                   <PreviewPlayer
                     active
                     sourceId={source.id}
                     outputLive
                     ingestLive
                   />
-                </Suspense>
+                </LazyBoundary>
               </div>
             ) : (
               <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
