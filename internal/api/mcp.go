@@ -122,6 +122,14 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 				"the MCP endpoint takes an API token (Authorization: Bearer ...), not a browser session")
 			return
 		}
+		// /mcp is outside requireScope, and mcpEndpoint hands any scope that
+		// is not admin the READ server. An obs token is not a read token: it
+		// reaches one route (obsScopePatterns), and the tool list is not it.
+		if p.token.Scope == db.ScopeOBS {
+			writeError(w, http.StatusForbidden,
+				"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

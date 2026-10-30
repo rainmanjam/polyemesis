@@ -390,6 +390,13 @@ func leakRoutes() []string {
 		// The Record key's state: enabled, a state word and a human reason for a
 		// disk halt. A read a read-scoped token may make; no credential is in it.
 		"/api/v1/recording",
+		// The OBS bridge's configuration and status (#16). A read a read-scoped
+		// token may make, with the obs-websocket address blanked for it. The
+		// obs-websocket password is not one of this sweep's sentinels because
+		// NO body carries it, admin included, so the sentinel witness could
+		// never see it; TestTheOBSWebsocketPasswordAppearsInNoResponseLogEvent
+		// AuditOrMetric is its leak test.
+		"/api/v1/obs",
 		"/api/v1/status",
 		"/api/v1/source",
 		"/api/v1/destinations",

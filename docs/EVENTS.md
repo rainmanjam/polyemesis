@@ -178,6 +178,9 @@ real producer, to actually be emitted.
 | `chat.display` | overlay | no | A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows. |
 | `chat.undisplay` | overlay | no | Chat lines that were cleared for display are gone and must leave the screen. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
+| `obs.connection` | obs | yes | Polyemesis's link to obs-websocket connected, dropped, or was refused. |
+| `obs.stream` | obs | yes | OBS started or stopped streaming, as reported by obs-websocket or the OBS script. |
+| `obs.scene` | obs | yes | OBS switched its program scene, and what the scene's routing rule did about it. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
 ### Destinations

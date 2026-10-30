@@ -190,6 +190,23 @@ CREATE TABLE IF NOT EXISTS automod_creds (
     updated_at INTEGER NOT NULL
 );
 
+-- The OBS bridge (#16). Its configuration is a JSON document of its own rather
+-- than a block in the settings blob: nothing else reads it, and keeping it out
+-- of the blob keeps it out of every settings save and settings shape guard.
+CREATE TABLE IF NOT EXISTS obs_bridge (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    config     TEXT NOT NULL,           -- obsbridge.Config, JSON
+    updated_at INTEGER NOT NULL
+);
+
+-- The obs-websocket password, sealed. Same reasoning as mqtt_creds: the bridge
+-- configuration is served to the page, so the password cannot live in it.
+CREATE TABLE IF NOT EXISTS obs_creds (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    password_enc BLOB NOT NULL,         -- secretbox sealed
+    updated_at   INTEGER NOT NULL
+);
+
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
 CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick

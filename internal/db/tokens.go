@@ -28,9 +28,12 @@ const tokenDisplayLength = len(TokenPrefix) + 8
 
 // Token scopes. What a token may do, as opposed to who it is.
 //
-// Two values rather than a permission per feature, because the enforcement has
-// to be a rule a reader can restate: ScopeRead is GET and HEAD, ScopeAdmin is
-// everything the signed-in operator can do. A model with a permission per route
+// Two broad values rather than a permission per feature, because the
+// enforcement has to be a rule a reader can restate: ScopeRead is GET and HEAD,
+// ScopeAdmin is everything the signed-in operator can do. ScopeOBS is the one
+// narrow exception, and it is narrow in the only direction that keeps the rule
+// restatable: it reaches ONE route and nothing else, not even a read (see
+// requireScope's obsScopePatterns). A model with a permission per route
 // needs every one of the API's routes classified, and every route added
 // afterwards classified correctly by whoever adds it -- which is the same
 // remember-to-do-it failure #140 was.
@@ -41,6 +44,12 @@ const (
 	// ScopeAdmin is everything, which is what every token was before scopes
 	// existed.
 	ScopeAdmin = "admin"
+	// ScopeOBS reaches POST /api/v1/obs/events and nothing else (#16). It is
+	// the credential pasted into the OBS script, whose settings OBS stores in
+	// plain text in the scene collection's profile directory: whoever can read
+	// that file gets a token that can report "OBS started streaming" and can
+	// read nothing, change nothing and start nothing directly.
+	ScopeOBS = "obs"
 )
 
 // ValidScope reports whether s is a scope this build knows.
@@ -50,7 +59,7 @@ const (
 // so a typo stored in the column would silently mint a weaker token than the
 // operator asked for rather than a stronger one. That is the safe direction to
 // fail, and it is still worth refusing outright so nobody has to discover it.
-func ValidScope(s string) bool { return s == ScopeRead || s == ScopeAdmin }
+func ValidScope(s string) bool { return s == ScopeRead || s == ScopeAdmin || s == ScopeOBS }
 
 // APIToken is a long-lived credential for automation. It deliberately has no
 // field for the secret: after creation the plaintext exists nowhere.
@@ -106,7 +115,7 @@ func (d *DB) CreateAPIToken(name, scope string) (*APIToken, string, error) {
 		scope = ScopeRead
 	}
 	if !ValidScope(scope) {
-		return nil, "", fmt.Errorf("unknown token scope %q; use %q or %q", scope, ScopeRead, ScopeAdmin)
+		return nil, "", fmt.Errorf("unknown token scope %q; use %q, %q or %q", scope, ScopeRead, ScopeAdmin, ScopeOBS)
 	}
 
 	b := make([]byte, 32)

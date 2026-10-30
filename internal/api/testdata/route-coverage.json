@@ -12,17 +12,17 @@
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 249,
-    "swept": 67,
+    "methodPatternPairs": 253,
+    "swept": 68,
     "excused": 58,
-    "denied": 124,
+    "denied": 127,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 53,
+    "invariant": 54,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -782,6 +782,30 @@
       "method": "GET",
       "pattern": "/api/v1/oauth/{platform}/start",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/obs",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/obs",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/obs/events",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/obs/password",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -1734,6 +1758,11 @@
       "path": "/api/v1/metrics",
       "pattern": "GET /api/v1/metrics",
       "class": "unstable"
+    },
+    {
+      "path": "/api/v1/obs",
+      "pattern": "GET /api/v1/obs",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/platforms/accounts",

@@ -72,7 +72,7 @@ func (s *Server) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Scope != "" && !db.ValidScope(req.Scope) {
-		writeError(w, http.StatusBadRequest, "unknown token scope; use \"read\" or \"admin\"")
+		writeError(w, http.StatusBadRequest, "unknown token scope; use \"read\", \"admin\" or \"obs\"")
 		return
 	}
 

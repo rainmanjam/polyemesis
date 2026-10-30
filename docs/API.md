@@ -43,6 +43,7 @@ Every token carries a scope, chosen when it is created:
 |---|---|
 | `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text; whoever reads that file can report "OBS started streaming" and nothing more. See [OBS.md](OBS.md). |
 
 The middleware also lets `HEAD` through, and no route in this API is registered
 for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
@@ -631,6 +632,48 @@ Inter that ship embedded, plus anything you drop in `<data-directory>/fonts/`,
 with the built-in ones marked. The route exists so the UI offers what this
 install actually has rather than a hard-coded list a build or a data directory
 could contradict.
+
+### OBS bridge
+
+| Method | Path |
+|---|---|
+| `GET` `PUT` | `/obs` |
+| `PUT` | `/obs/password` |
+| `POST` | `/obs/events` |
+
+The OBS bridge starts and stops destinations when OBS starts and stops
+streaming, and applies a routing preset when OBS switches scene. Setup, and
+the two ways polyemesis learns about OBS, are in [OBS.md](OBS.md).
+
+`GET /obs` answers `{"config": {...}, "status": {...}}`. `config` is what `PUT
+/obs` stores: `enabled`, `connect`, `url`, `hasPassword`, `sourceId`,
+`destinations`, `startOnStream`, `stopOnStream`, `stopAcknowledged`,
+`stopGraceSeconds` and `scenes` (`[{scene, preset, opts?, destinations?}]`).
+`status` is the live state: the obs-websocket `connection` (`state` is `off`,
+`connecting`, `connected`, `unreachable`, `refused` or `incompatible`, with a
+`detail` sentence), whether OBS is `streaming` (`null` until something has
+said), the current `scene`, `stopPendingUntil` while a grace period runs, and
+the last ten `lastActions` with one row per destination. A read token may call
+it, and is sent `url` blanked.
+
+`PUT /obs` replaces the whole configuration; a field you leave out is off. It is
+refused with `400` when `stopOnStream` is set without `stopAcknowledged`. That
+is the same warning `POST /destinations/stop-all` gives: stopping a YouTube
+destination ends its broadcast for good. It is also refused when a destination
+does not exist or is on another programme than `sourceId`, when `url` is not
+`ws://` or `wss://`, or when `url` carries a user, a password or a query
+string. `hasPassword` cannot be set this way. Admin scope.
+
+`PUT /obs/password` with `{"password": "..."}` seals the obs-websocket
+password, as `/settings/mqtt-password` does for the broker. `GET /obs` never
+returns it, and an empty password clears it. Admin scope.
+
+`POST /obs/events` is how the OBS script reports a fact:
+`{"event": "stream.started"}`, `{"event": "stream.stopped"}` or `{"event":
+"scene.changed", "scene": "Just Chatting"}`. It answers `202` once the fact is
+accepted; what the bridge then did appears on `GET /obs` and as `obs.*` events
+on `/events`. It answers `409` while the bridge is switched off and `400` for
+anything else. An `obs` or `admin` token may call it.
 
 ### Sources
 
