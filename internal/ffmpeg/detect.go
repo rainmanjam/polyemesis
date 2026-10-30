@@ -285,6 +285,43 @@ func (t *Tools) SRTWarning() string {
 			"(single audio track) on the Sources page.", t.FFmpeg, t.Version)
 }
 
+// revertedSchedulerRe matches the 9.0 releases that shipped the scheduler
+// change 9.0.2 reverted: 9.0 itself, 9.0.0 and 9.0.1, as a bare version, a
+// git-tag build ("n9.0.1"), a distro revision ("9.0.1-1", with or without a
+// Debian epoch) or a release-branch snapshot ("n9.0.1-11-g<hash>"). The group
+// is the patch number; "9.0.10" and "9.0.2" do not match.
+var revertedSchedulerRe = regexp.MustCompile(`^(?:\d+:)?n?9\.0(?:\.([01]))?(?:$|[^.\d])`)
+
+// KnownRegressionWarning returns the message to show when the detected FFmpeg
+// is a release with a known regression in the shape polyemesis runs, or ""
+// when it is not.
+//
+// One entry today. FFmpeg 9.0 and 9.0.1 carry "fftools/ffmpeg_sched: allow
+// throttling decoder outputs" (03dfac5630), which 9.0.2 reverted (9d4ca2122)
+// because it misorders the output interleave, ends streams early and runs
+// memory up. A destination is one input, several audio decoders and one
+// filtergraph, which is the shape that goes through that code. Both releases
+// clear the 6.0 floor, so without this the first sign would be a destination
+// that drops out on air.
+//
+// A warning, not a refusal, for the same reason as SRTWarning: the regression
+// depends on the input, so refusing would take down an install that may be
+// working, with no way to fix it from inside the product. A release-branch
+// snapshot after 9.0.1 may already contain the revert; it is named anyway,
+// because its version string cannot say which side of the revert it is on.
+func (t *Tools) KnownRegressionWarning() string {
+	m := revertedSchedulerRe.FindStringSubmatch(strings.TrimSpace(t.Version))
+	if m == nil {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s is FFmpeg %s. FFmpeg 9.0 and 9.0.1 shipped a scheduler change that can misorder "+
+			"output, end streams early and use extreme memory; 9.0.2 reverted it (FFmpeg commit "+
+			"9d4ca2122). A destination mixing several audio tracks is the shape it affects. "+
+			"Install 9.0.2 or later, or an 8.1 release, and point ffmpeg.binary in config.yaml at it.",
+		t.FFmpeg, t.Version)
+}
+
 // checkEncoders records which video encoders this machine can actually use.
 //
 // Two steps, and only the second one is evidence. `ffmpeg -encoders` gives the
