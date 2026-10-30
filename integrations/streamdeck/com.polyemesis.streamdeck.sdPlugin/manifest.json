@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
   "Name": "polyemesis",
-  "Description": "Destination state, go live, stop with confirmation, failover and dial meters for a polyemesis install.",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
@@ -54,6 +54,12 @@
         },
         {
           "Image": "imgs/keys/destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/destination/halted"
+        },
+        {
+          "Image": "imgs/keys/destination/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -86,6 +92,12 @@
         },
         {
           "Image": "imgs/keys/go-live/unbound"
+        },
+        {
+          "Image": "imgs/keys/go-live/halted"
+        },
+        {
+          "Image": "imgs/keys/go-live/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -118,6 +130,12 @@
         },
         {
           "Image": "imgs/keys/stop-all/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-all/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -151,6 +169,12 @@
         },
         {
           "Image": "imgs/keys/failover/unbound"
+        },
+        {
+          "Image": "imgs/keys/failover/halted"
+        },
+        {
+          "Image": "imgs/keys/failover/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -183,6 +207,12 @@
         },
         {
           "Image": "imgs/keys/stop-destination/unbound"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/halted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -216,6 +246,12 @@
         },
         {
           "Image": "imgs/keys/record/unbound"
+        },
+        {
+          "Image": "imgs/keys/record/halted"
+        },
+        {
+          "Image": "imgs/keys/record/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,
@@ -248,6 +284,12 @@
         },
         {
           "Image": "imgs/keys/preset/unbound"
+        },
+        {
+          "Image": "imgs/keys/preset/halted"
+        },
+        {
+          "Image": "imgs/keys/preset/needsAdmin"
         }
       ],
       "DisableAutomaticStates": true,

@@ -67,9 +67,16 @@ node scripts/icons.mjs   # redraws every icon under com.polyemesis.streamdeck.sd
 ```
 
 The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, and
-the PNGs are committed. The key faces are tiles in the state colours. The action
-icons are white monochrome glyphs at 20 and 40 px. The plugin and category marks use
-the polyemesis accent from the UI theme.
+the PNGs are committed. Each key action has eight faces at 72 and 144 px, one per
+state in `KEY_STATE` order (`src/render.ts`): a tile in the state colour with the
+action's glyph in the corner, clear of the title. Held uses the UI's accent
+(`--primary`). Two states draw a status mark instead of the action glyph, so they
+can never be mistaken for another state: **HALTED: DISK** (a drive, on crimson; only
+the Record key uses it) and **Needs admin token** (a padlock, on violet). The action
+icons are white monochrome glyphs on transparent at 20 and 40 px, the category icon
+the same at 28 and 56 px. The plugin icon (256 and 512 px) is the emblem in the UI's
+`--primary-bright` on its dark ground. The dial uses the built-in `$B1` layout, so
+there is no encoder background image.
 
 Strings live in `src/locales/*.json`, in the same fifteen locales the UI ships.
 The inspector reads `ui/strings.js`, which the build generates from those files.

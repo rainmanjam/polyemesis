@@ -68,13 +68,14 @@ describe("manifest", () => {
   // Each key action has its own face set: imgs/keys/<action>/<state>, with the action's own glyph.
   const shortName = (uuid: string) => uuid.replace(`${manifest.UUID}.`, "");
 
-  it("gives every key action the same six states, in KEY_STATE order, from its own face set", () => {
+  it("gives every key action the same eight states, in KEY_STATE order, from its own face set", () => {
     const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
     expect(keys.length).toBeGreaterThan(0);
-    const expected = ["idle", "live", "warn", "error", "held", "unbound"];
+    const expected = ["idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin"];
     expect(Object.keys(KEY_STATE)).toEqual(expected);
     for (const a of keys) {
       // The device draws States[index]; the runtime sends KEY_STATE[tone] as index.
+      expect(a.States, a.UUID).toHaveLength(expected.length);
       for (const name of expected) {
         const index = KEY_STATE[name as keyof typeof KEY_STATE];
         expect(a.States[index]?.Image, `${a.UUID} state ${name}`).toBe(
@@ -84,7 +85,7 @@ describe("manifest", () => {
     }
   });
 
-  it("gives each key action's six states an image on disk, at both sizes", () => {
+  it("gives each key action's states an image on disk, at both sizes", () => {
     const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
     for (const a of keys) {
       for (const n of Object.keys(KEY_STATE)) {

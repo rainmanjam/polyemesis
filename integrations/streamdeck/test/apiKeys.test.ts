@@ -25,7 +25,7 @@ const BASE = new URL("https://studio.example:443");
 const ok = (body: unknown): TransportResponse => ({ status: 200, body: JSON.stringify(body) });
 
 describe("stopImpactFor", () => {
-  it("asks for one destination by id and sends no programme", async () => {
+  it("asks for one destination by id, with no programme when the key names none", async () => {
     const { transport, sent } = fakeTransport([ok({ destinations: 1, youtubeBroadcasts: 1 })]);
     const impact = await new PolyemesisClient(BASE, "t", transport).stopImpactFor(42);
     expect(impact).toEqual({ destinations: 1, youtubeBroadcasts: 1 });
@@ -33,6 +33,13 @@ describe("stopImpactFor", () => {
     expect(sent[0]!.url.pathname).toBe("/api/v1/destinations/stop-impact");
     expect(sent[0]!.url.searchParams.get("destination")).toBe("42");
     expect(sent[0]!.url.searchParams.has("source")).toBe(false);
+  });
+
+  it("names the key's programme, so the server can refuse a destination on another", async () => {
+    const { transport, sent } = fakeTransport([ok({ destinations: 1, youtubeBroadcasts: 0 })]);
+    await new PolyemesisClient(BASE, "t", transport).stopImpactFor(42, 7);
+    expect(sent[0]!.url.searchParams.get("destination")).toBe("42");
+    expect(sent[0]!.url.searchParams.get("source")).toBe("7");
   });
 
   it("refuses to answer when the server says the destination is unknown", async () => {

@@ -123,11 +123,12 @@ export class PolyemesisClient {
   }
 
   /**
-   * What stopping ONE destination would end. Scoped by the destination id, not by a programme:
-   * the server answers 404 for an id it does not hold, which the key treats as a refusal.
+   * What stopping ONE destination would end. With a programme, the server also checks the
+   * destination is on it. It answers 404 for an id it does not hold, or one on another
+   * programme, and the key treats either as a refusal.
    */
-  stopImpactFor(destinationId: number): Promise<StopImpact> {
-    return this.call("GET", "/destinations/stop-impact", undefined, undefined, {
+  stopImpactFor(destinationId: number, sourceId?: number): Promise<StopImpact> {
+    return this.call("GET", "/destinations/stop-impact", sourceId, undefined, {
       destination: String(destinationId),
     });
   }

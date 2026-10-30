@@ -37,8 +37,12 @@ function oklch(L, C, hDeg) {
   return lin.map((x) => Math.round(gamma(x) * 255));
 }
 
-/** The polyemesis accent: --primary in ui/src/index.css. */
+/** The polyemesis accent fill: --primary in ui/src/index.css, the colour of every primary button. */
 const ACCENT = oklch(0.602, 0.1177, 263.2);
+/** The accent for marks drawn on a dark ground: --primary-bright in ui/src/index.css. */
+const ACCENT_BRIGHT = oklch(0.719, 0.109, 257.4);
+/** The UI's dark surface, the ground the bright accent is meant to sit on. */
+const GROUND = [28, 31, 38];
 const INK = [255, 255, 255];
 
 /** Key face colours by state, in the order KEY_STATE in src/render.ts defines them. */
@@ -47,8 +51,13 @@ const KEY_COLOURS = {
   live: [31, 157, 85],
   warn: [214, 158, 46],
   error: [197, 48, 48],
-  held: [49, 130, 206],
+  // Held is the confirm-in-progress face: the app's own accent, as on its primary buttons.
+  held: ACCENT,
   unbound: [45, 55, 72],
+  // HALTED: DISK. Crimson, not the error red, so it is told apart at a glance from "unreachable".
+  halted: [150, 36, 84],
+  // A write key on a read token. Muted violet: not a fault, not a state of the stream.
+  needsAdmin: [86, 74, 128],
 };
 
 // ---- shapes, in unit coordinates (0..1 across the icon) -------------------
@@ -89,6 +98,8 @@ const inTriangle = (pts) => (x, y) => {
   return !(neg && pos);
 };
 const any = (...fns) => (x, y) => fns.some((f) => f(x, y));
+/** Inside a, outside b: cut-outs, so a glyph reads at 20 px as one silhouette. */
+const minus = (a, b) => (x, y) => a(x, y) && !b(x, y);
 
 // ---- rasteriser ----------------------------------------------------------
 
@@ -144,10 +155,10 @@ function keyTile(base) {
   };
 }
 
-/** The accent tile with a white mark, for the plugin icon. */
+/** The plugin icon: the UI's dark ground with the emblem in the bright accent, as the app draws accent marks. */
 function brandTile(mark) {
   const tile = inRoundRect(0, 0, 1, 1, 0.2);
-  return (x, y) => (tile(x, y) ? (mark(x, y) ? INK : ACCENT) : null);
+  return (x, y) => (tile(x, y) ? (mark(x, y) ? ACCENT_BRIGHT : GROUND) : null);
 }
 
 // ---- glyphs --------------------------------------------------------------
@@ -206,8 +217,25 @@ const GLYPH = {
 // The category and plugin marks: a ring with a centre dot, the broadcast emblem.
 const EMBLEM = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.11));
 
-// A disc: the halted-disk mark on the record key's error face.
-const DISC = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.07));
+// Status marks that replace the action glyph on two faces, so the face says the state, not the action.
+const STATUS_GLYPH = {
+  // HALTED: DISK -- a drive, with its slot and activity light cut out.
+  halted: minus(
+    inRoundRect(0.08, 0.28, 0.92, 0.72, 0.1),
+    any(inCapsule(0.22, 0.5, 0.56, 0.5, 0.09), inCircle(0.75, 0.5, 0.07)),
+  ),
+  // Needs admin -- a padlock: shackle over a body with a keyhole.
+  needsAdmin: any(
+    inArc(0.5, 0.42, 0.2, 0.1, 270, 360),
+    inArc(0.5, 0.42, 0.2, 0.1, 0, 90),
+    inCapsule(0.3, 0.42, 0.3, 0.52, 0.1),
+    inCapsule(0.7, 0.42, 0.7, 0.52, 0.1),
+    minus(
+      inRoundRect(0.2, 0.5, 0.8, 0.9, 0.07),
+      any(inCircle(0.5, 0.64, 0.07), inCapsule(0.5, 0.64, 0.5, 0.78, 0.06)),
+    ),
+  ),
+};
 
 // ---- png -----------------------------------------------------------------
 
@@ -258,10 +286,12 @@ function write(rel, size, paint) {
 
 // ---- the set -------------------------------------------------------------
 
-// Each key action has its own set of six state faces. A face is the state tile with the
-// action's glyph as a badge in the top-left corner, clear of the centred title text. The
-// record key's error face (HALTED: DISK) carries a disc, not the record dot, so the halted
-// state is a face of its own rather than the generic error tile.
+// Each key action has its own set of eight state faces, in KEY_STATE order (src/render.ts).
+// A face is the state tile with the action's glyph as a badge in the top-left corner, clear
+// of the centred title text. The halted and needs-admin faces carry a status mark instead
+// (a drive, a padlock), so those two states are faces of their own and never the generic
+// error or warn tile. Only the record key ever shows halted; every key has the face so the
+// state indices line up across actions.
 const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
@@ -281,7 +311,7 @@ function badged(base, shape) {
 
 for (const action of KEY_ACTIONS) {
   for (const [state, colour] of Object.entries(KEY_COLOURS)) {
-    const shape = action === "record" && state === "error" ? DISC : GLYPH[action];
+    const shape = STATUS_GLYPH[state] ?? GLYPH[action];
     write(`keys/${action}/${state}.png`, 72, badged(colour, shape));
     write(`keys/${action}/${state}@2x.png`, 144, badged(colour, shape));
   }

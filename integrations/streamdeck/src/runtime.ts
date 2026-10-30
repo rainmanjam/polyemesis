@@ -306,31 +306,21 @@ export class Runtime {
     for (const s of this.surfaces.values()) {
       if (s.kind === "meter") continue;
       if (this.holds.has(s.id) && this.holdInProgress(s.id)) continue;
-      if (!this.client) {
-        await this.paintFace(s, { tone: "idle", label: "streamdeck.auth.notPaired" });
-        continue;
-      }
-      if (this.connectionError || !this.connection) {
-        await this.paintFace(s, this.unavailableFace());
-        continue;
-      }
-      if (s.kind === "record") {
-        await this.paintFace(s, this.recordFace());
-        continue;
-      }
-      if (s.kind === "preset") {
-        await this.paintFace(s, this.presetFace(s));
-        continue;
-      }
-      const key = scopeKey(s.settings.sourceId);
-      const scopeErr = this.scopeErrors.get(key);
-      const payload = this.statuses.get(key);
-      if (scopeErr || !payload) {
-        await this.paintFace(s, this.unavailableFace(scopeErr));
-        continue;
-      }
-      await this.paintFace(s, this.programmeFace(s, payload));
+      await this.paintFace(s, this.faceFor(s));
     }
+  }
+
+  /** What a key shows right now, from the cached answers. The one place a key face is decided. */
+  private faceFor(s: Surface): KeyFace {
+    if (!this.client) return { tone: "idle", label: "streamdeck.auth.notPaired" };
+    if (this.connectionError || !this.connection) return this.unavailableFace();
+    if (s.kind === "record") return this.recordFace();
+    if (s.kind === "preset") return this.presetFace(s);
+    const key = scopeKey(s.settings.sourceId);
+    const scopeErr = this.scopeErrors.get(key);
+    const payload = this.statuses.get(key);
+    if (scopeErr || !payload) return this.unavailableFace(scopeErr);
+    return this.programmeFace(s, payload);
   }
 
   /** The face of a key that reads one programme's status. Every kind that does is named here. */
@@ -382,7 +372,7 @@ export class Runtime {
       case "not_running":
         return { tone: "warn", label: "streamdeck.record.notRunning" };
       case "halted_disk":
-        return { tone: "error", label: "streamdeck.record.haltedDisk", detail: r.reason };
+        return { tone: "halted", label: "streamdeck.record.haltedDisk", detail: r.reason };
       default:
         return this.unavailableFace();
     }
@@ -400,7 +390,7 @@ export class Runtime {
   private adminGated(label: StreamDeckKey): KeyFace {
     return this.isAdmin
       ? { tone: "idle", label }
-      : { tone: "warn", label: "streamdeck.auth.needsAdmin" };
+      : { tone: "needsAdmin", label: "streamdeck.auth.needsAdmin" };
   }
 
   private unavailableFace(scopeErr?: ApiError): KeyFace {
@@ -478,7 +468,7 @@ export class Runtime {
       return;
     }
     this.armed.set(id, { destinationId, sourceId: s.settings.sourceId });
-    await this.armStop(s, () => this.client!.stopImpactFor(destinationId));
+    await this.armStop(s, () => this.client!.stopImpactFor(destinationId, s.settings.sourceId));
   }
 
   /**
@@ -549,17 +539,16 @@ export class Runtime {
     await this.paintFace(s, this.recordFace());
   }
 
-  /** Key up, or the key leaving the screen: cancels any pending confirmation and restores the idle face. */
+  /**
+   * Key up, or the key leaving the screen: cancels any pending confirmation and repaints the key's
+   * own face. Not a fixed idle face: a stop-one key names its destination, and a read token's key
+   * says it needs admin.
+   */
   async pressHoldUp(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     this.holds.get(id)?.release();
     if (!s) return;
-    if (s.kind === "preset") {
-      await this.paintFace(s, this.presetFace(s));
-      return;
-    }
-    await s.setState(KEY_STATE.idle);
-    await s.setTitle(t(this.locale, "streamdeck.stop.hold"));
+    await this.paintFace(s, this.faceFor(s));
   }
 
   /** Runs when a hold completes. Acts on what was armed at key down, never on the settings as they are now. */
@@ -604,6 +593,7 @@ export class Runtime {
   /** Write keys need an admin token. The check is made BEFORE any request, so a read token never sends one. */
   private async requireAdmin(s: Surface): Promise<boolean> {
     if (this.isAdmin) return true;
+    await s.setState(KEY_STATE.needsAdmin);
     await s.setTitle(t(this.locale, "streamdeck.auth.needsAdmin"));
     await s.showAlert();
     return false;

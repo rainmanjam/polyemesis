@@ -543,7 +543,8 @@ describe("per-destination stop key", () => {
     expect(key.titles.at(-1)).toContain("1 YouTube will end");
     const impact = net.sent.find((r) => r.url.pathname === "/api/v1/destinations/stop-impact");
     expect(impact?.url.searchParams.get("destination")).toBe("5");
-    expect(impact?.url.searchParams.has("source")).toBe(false);
+    // Scoped to the key's programme, so the server refuses a destination that moved off it.
+    expect(impact?.url.searchParams.get("source")).toBe("7");
 
     sched.fireAll();
     await flush();
@@ -700,8 +701,21 @@ describe("record key", () => {
     const key = surface("r", "record");
     rt.add(key);
     await rt.tick();
-    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.states.at(-1)).toBe(KEY_STATE.halted);
     expect(key.titles.at(-1)).toBe("HALTED: DISK\ndisk full");
+  });
+
+  it("never draws the halted-disk face for an install it cannot reach", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/recording": () => new Error("ECONNREFUSED"),
+    });
+    rt.configure(PAIRED);
+    const key = surface("r", "record");
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).not.toContain("HALTED");
   });
 
   it("shows off and not running as their own faces, never as recording", async () => {
@@ -883,5 +897,67 @@ describe("authKeyFor", () => {
     expect(authKeyFor(new ApiError("unauthorized", 401, "x"))).toBe("streamdeck.auth.refused");
     expect(authKeyFor(new ApiError("unreachable", undefined, "x"))).toBe("streamdeck.auth.unreachable");
     expect(authKeyFor(new ApiError("untrusted", undefined, "x"))).toBe("streamdeck.auth.unreachable");
+  });
+});
+
+describe("needs-admin face", () => {
+  it("is its own state on every write key, not the warn tile", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/routing/presets": json(200, { presets: [{ id: "music", name: "Music" }] }),
+    });
+    rt.configure(PAIRED);
+    const keys = [
+      surface("g", "goLive", { sourceId: 7 }),
+      surface("s", "stopAll", { sourceId: 7 }),
+      surface("o", "stopOne", { sourceId: 7, destinationId: 5 }),
+      surface("p", "preset", { sourceId: 7, presetId: "music" }),
+    ];
+    for (const k of keys) rt.add(k);
+    await rt.tick();
+    for (const k of keys) {
+      expect(k.states.at(-1), k.kind).toBe(KEY_STATE.needsAdmin);
+      expect(k.titles.at(-1), k.kind).toBe("Needs admin token");
+    }
+  });
+});
+
+describe("releasing a held key", () => {
+  it("repaints the key's own face, naming its destination, not a generic stop face", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/destinations/stop-impact": json(200, { destinations: 1, youtubeBroadcasts: 0 }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    const idleTitle = key.titles.at(-1);
+    expect(idleTitle).toBe("Hold to stop\nTwitch");
+
+    await rt.pressStopOneDown("k");
+    expect(key.states.at(-1)).toBe(KEY_STATE.held);
+    await rt.pressHoldUp("k");
+    expect(key.states.at(-1)).toBe(KEY_STATE.idle);
+    expect(key.titles.at(-1)).toBe(idleTitle);
+  });
+
+  it("asks the server for the count of the key's destination on the key's programme", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, STATUS_7),
+      "GET /api/v1/destinations/stop-impact": json(200, { destinations: 1, youtubeBroadcasts: 1 }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("k", "stopOne", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
+    await rt.pressStopOneDown("k");
+    const req = net.sent.find((r) => r.url.pathname.endsWith("/stop-impact"))!;
+    expect(req.url.searchParams.get("destination")).toBe("5");
+    expect(req.url.searchParams.get("source")).toBe("7");
   });
 });
