@@ -128,6 +128,31 @@ The family headers are emitted even on an install with nothing configured, for
 the same reason: a `# TYPE polyemesis_ingest_up gauge` with no samples under it
 is what lets you write the alert before the first source exists.
 
+### Failover and link health
+
+[Degraded-link failover](LINK-HEALTH.md#degraded-link-failover) and the
+[SRTLA receiver](SRTLA.md) add five per-programme families, labelled `id` and
+`name` like the ingest series:
+
+- `polyemesis_failover_degraded` is 1 while the primary's link is judged
+  degraded, and 0 otherwise. It is 0, not absent, for a programme with failover
+  off, so an alert on it can be written before the first degradation.
+- `polyemesis_failover_active` has a `source` label (`primary`, `backup`,
+  `playlist`, `slate`) and is 1 for the source on air. It is absent while
+  failover is off.
+- `polyemesis_ingest_link_rtt_seconds` and `polyemesis_ingest_link_loss_ratio`
+  are the primary encoder's SRT round-trip time and its share of missing packets
+  over the last interval (0–1). Only an SRT or SRTLA primary has them, and only
+  while degraded-link failover is on. They are **absent**, not 0, otherwise:
+  0 ms and 0% are claims about a link, and an RTMP primary has made none.
+- `polyemesis_srtla_links` is how many network links the programme's encoder
+  is bonding through the SRTLA receiver, and 0 when it is not bonding.
+
+```promql
+polyemesis_failover_degraded == 1                           # a link is breaking up
+polyemesis_failover_active{source!="primary"} == 1          # not broadcasting the primary
+```
+
 ## Queries to start from
 
 ```promql

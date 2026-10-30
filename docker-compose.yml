@@ -47,6 +47,10 @@ services:
                            # told apart by stream key — same as SRT above.
                            # Classic RTMP carries one stereo pair; Enhanced
                            # RTMP carries more on FFmpeg 7.1+.
+      # - "5000:5000/udp"  # SRTLA bonding receiver for BELABOX, Moblin and
+                           # IRL Pro. Off until Settings -> Ingest -> SRTLA
+                           # bonding port is set (5000 is the usual choice);
+                           # publish it only then. See docs/SRTLA.md.
 
       # ACME ONLY. Uncomment together with the config mount below if you want
       # polyemesis to obtain its own Let's Encrypt certificate: HTTP-01

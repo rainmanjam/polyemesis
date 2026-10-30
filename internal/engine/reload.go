@@ -103,8 +103,9 @@ var settingsReload = map[string]ReloadRule{
 	"ingest.pull.rtspTransport":            {ClassRespawn, "reconcileIngest", "an FFmpeg input option"},
 
 	// ------------------------------------------------------------- listeners
-	"listeners.srtPort":  {ClassRebind, "reconcileSharedIngest", "one bound socket for every source; the Manager stops it and binds the new number"},
-	"listeners.rtmpPort": {ClassRespawn, "reconcileIngest", "part of the ingest child's listen URL"},
+	"listeners.srtPort":   {ClassRebind, "reconcileSharedIngest", "one bound socket for every source; the Manager stops it and binds the new number"},
+	"listeners.srtlaPort": {ClassRebind, "reconcileSharedIngest", "the bonding receiver's one socket; the Manager stops it and binds the new number, and stops it at 0"},
+	"listeners.rtmpPort":  {ClassRespawn, "reconcileIngest", "part of the ingest child's listen URL"},
 
 	// ------------------------------------------------------------- recording
 	"recording.enabled":        {ClassRespawn, "reconcileRecorder", "starts or stops the child"},
@@ -145,6 +146,11 @@ var settingsReload = map[string]ReloadRule{
 	"failover.graceSeconds":                         {ClassLive, "failoverGrace", "read by sweepSelector every 500ms"},
 	"failover.return":                               {ClassLive, "applySourceChoice", "read by sweepSelector every 500ms"},
 	"failover.returnStableSeconds":                  {ClassLive, "applySourceChoice", "read by sweepSelector every 500ms"},
+	"ingest.degraded.enabled":                       {ClassLive, "sampleSources", "read by sweepSelector every 500ms; switching it off resets the monitor and releases a degraded primary"},
+	"ingest.degraded.minBitrateKbps":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
+	"ingest.degraded.maxRttMs":                      {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
+	"ingest.degraded.maxLossPercent":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms"},
+	"ingest.degraded.sustainSeconds":                {ClassLive, "sampleSources", "read by sweepSelector every 500ms; a breach or recovery already in progress is measured against the new window"},
 	"failover.backup.enabled":                       {ClassRespawn, "reconcileBackupIngest", "starts or stops the second listener"},
 	"failover.backup.mode":                          {ClassRespawn, "backupIngestSig", "the backup ingest's argv"},
 	"failover.backup.srt.passphrase":                {ClassRespawn, "backupIngestSig", "an SRT socket option"},
@@ -251,9 +257,11 @@ var settingsReload = map[string]ReloadRule{
 	"multitrack.gpus.driverVersion":        {ClassOnDemand, "negotiateFor", "read at go-live; Twitch refuses an out-of-date driver naming the version to upgrade to"},
 
 	// ------------------------------------------------------------ chat + automod
-	"chat.retentionHours": {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
-	"chat.keepMessages":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
-	"chat.purgeMinutes":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chatCommands.enabled":  {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
+	"chatCommands.sourceId": {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
+	"chat.retentionHours":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
+	"chat.keepMessages":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chat.purgeMinutes":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
 
 	// THIS TABLE IS WHY THESE TWO ARE LIVE. #732 wired the operator's allowance
 	// into NewYouTube, which is read once per adapter, and chatAdapter runs once

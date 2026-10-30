@@ -120,6 +120,18 @@ type IngestSettings struct {
 	// omitempty so a settings blob written before roles existed round-trips
 	// byte-identically.
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
+	// Degraded is this programme's link-health thresholds for degraded-link
+	// failover (#6): leave a primary that is still delivering, but badly.
+	//
+	// ON THE INGEST, NOT ON FAILOVER, BECAUSE IT IS PER PROGRAMME. Failover's
+	// own settings are install-wide; an ingest block is stored per source, and
+	// link quality is a property of one encoder's uplink -- a bonded cellular
+	// rig and a studio fibre line on the same install want different floors.
+	// The selector reads it from the programme's own ingest.
+	//
+	// A zero value is "off, with no thresholds": it validates, and it is what
+	// a row from before #6 decodes to.
+	Degraded DegradedSettings `json:"degraded"`
 }
 
 // problems reports everything wrong with one ingest configuration.
@@ -197,6 +209,7 @@ func (i IngestSettings) problems() []string {
 		add("rtmp app name is required (it is the /live in the publish URL; " +
 			"the source is addressed by its token, not by this)")
 	}
+	probs = append(probs, i.Degraded.problems()...)
 	return probs
 }
 
@@ -657,6 +670,83 @@ type FailoverSettings struct {
 	// its own top-level section, because it is one more answer to the same
 	// question the slate answers -- what feeds the hub when nothing else does.
 	Playlist PlaylistSettings `json:"playlist"`
+}
+
+// DegradedSettings are a programme's link-health thresholds.
+//
+// Each threshold is independent and 0 switches it off, so an operator can
+// fail over on bitrate alone -- which is the one every ingest mode can measure.
+// RTT and loss come from the SRT protocol's own statistics and are only
+// evaluated for an SRT (or SRTLA-bonded) primary; for RTMP and pull they never
+// trip, and they never read as zero either.
+//
+// A breach has to persist for SustainSeconds before it counts, and a tripped
+// link has to read healthy for the same SustainSeconds before it clears. The
+// second half is the hysteresis: the slate and playlist branches return to a
+// primary at once, without consulting the return mode, so a link hovering at a
+// threshold would otherwise flap the broadcast between the two every sweep.
+type DegradedSettings struct {
+	Enabled bool `json:"enabled"`
+	// MinBitrateKbps trips when the primary delivers less than this.
+	MinBitrateKbps int `json:"minBitrateKbps"`
+	// MaxRTTMs trips when the SRT round-trip time rises above this.
+	MaxRTTMs int `json:"maxRttMs"`
+	// MaxLossPercent trips when the share of SRT packets reported missing over
+	// the last sample interval rises above this.
+	MaxLossPercent float64 `json:"maxLossPercent"`
+	// SustainSeconds is how long a breach, or a recovery, must last. 0 means
+	// DefaultDegradedSustainSeconds, so a row saved before #6 existed -- which
+	// carries a zero here -- is not a validation error on its next save.
+	SustainSeconds int `json:"sustainSeconds"`
+}
+
+// Degraded-link bounds.
+const (
+	DefaultDegradedSustainSeconds = 5
+	MaxDegradedSustainSeconds     = 300
+	MaxDegradedBitrateKbps        = 200_000
+	MaxDegradedRTTMs              = 10_000
+)
+
+// DefaultDegradedSettings is the thresholds a programme starts with: off.
+func DefaultDegradedSettings() DegradedSettings {
+	return DegradedSettings{
+		MinBitrateKbps: 800,
+		MaxRTTMs:       1500,
+		MaxLossPercent: 15,
+		SustainSeconds: DefaultDegradedSustainSeconds,
+	}
+}
+
+// Sustain is SustainSeconds with the zero value resolved.
+func (d DegradedSettings) Sustain() int {
+	if d.SustainSeconds <= 0 {
+		return DefaultDegradedSustainSeconds
+	}
+	return d.SustainSeconds
+}
+
+func (d DegradedSettings) problems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+	if v := d.MinBitrateKbps; v < 0 || v > MaxDegradedBitrateKbps {
+		add("degraded-link bitrate threshold %d kbps out of range (0-%d)", v, MaxDegradedBitrateKbps)
+	}
+	if v := d.MaxRTTMs; v < 0 || v > MaxDegradedRTTMs {
+		add("degraded-link RTT threshold %d ms out of range (0-%d)", v, MaxDegradedRTTMs)
+	}
+	// NaN fails both comparisons, so it is refused by name rather than let
+	// through as "in range".
+	if v := d.MaxLossPercent; v != v || v < 0 || v > 100 {
+		add("degraded-link loss threshold %v%% out of range (0-100)", v)
+	}
+	if v := d.SustainSeconds; v < 0 || v > MaxDegradedSustainSeconds {
+		add("degraded-link sustain time %ds out of range (0-%d)", v, MaxDegradedSustainSeconds)
+	}
+	if d.Enabled && d.MinBitrateKbps == 0 && d.MaxRTTMs == 0 && d.MaxLossPercent == 0 {
+		add("degraded-link failover is on but every threshold is off; set at least one")
+	}
+	return probs
 }
 
 // SlateImageProblem reports why the configured still cannot be used, or nil.
@@ -1468,6 +1558,15 @@ type ListenerSettings struct {
 	// used to serve at most one, which was an artifact of `ffmpeg -listen 1`
 	// being unable to demultiplex by path rather than a decision anyone made.
 	RTMPPort int `json:"rtmpPort"`
+	// SRTLAPort is the UDP port of the SRTLA bonding receiver (#6), 0 for off.
+	// Bonded IRL encoders -- BELABOX, Moblin, IRL Pro, srtla_send -- spread one
+	// SRT session over several network links to this port; the receiver
+	// merges them and hands the session to the SRT listener above, so token
+	// authentication and everything after it are exactly the SRT path's.
+	//
+	// Off by default because it is one more open UDP port, and an install
+	// that has no bonded encoder gains nothing from it.
+	SRTLAPort int `json:"srtlaPort"`
 }
 
 func (l ListenerSettings) problems() []string {
@@ -1480,6 +1579,16 @@ func (l ListenerSettings) problems() []string {
 	}
 	if l.SRTPort == l.RTMPPort {
 		probs = append(probs, fmt.Sprintf("srt and rtmp listeners cannot share port %d", l.SRTPort))
+	}
+	if l.SRTLAPort < 0 || l.SRTLAPort > 65535 {
+		probs = append(probs, fmt.Sprintf("srtla receiver port %d out of range (0 turns it off)", l.SRTLAPort))
+	}
+	// Both are UDP, so the same number is a bind conflict, not a choice. RTMP
+	// is TCP and could share the number; it is refused anyway, because "the
+	// same port for two protocols" is a configuration nobody reads correctly
+	// from a firewall rule.
+	if l.SRTLAPort != 0 && (l.SRTLAPort == l.SRTPort || l.SRTLAPort == l.RTMPPort) {
+		probs = append(probs, fmt.Sprintf("the srtla receiver cannot share port %d with the srt or rtmp listener", l.SRTLAPort))
 	}
 	return probs
 }
@@ -1596,6 +1705,25 @@ type Settings struct {
 	Chat       ChatSettings       `json:"chat"`
 	Automod    AutomodSettings    `json:"automod"`
 	Alerts     AlertSettings      `json:"alerts"`
+	// ChatCommands is the chat-driven control of #6: !bitrate, and the
+	// moderator-only !switch and !fix. Top level rather than inside Chat because
+	// it is a control surface over a programme, not a property of the chat
+	// pipeline, and because Chat's fields are spread field by field in the UI.
+	ChatCommands ChatCommandSettings `json:"chatCommands"`
+}
+
+// ChatCommandSettings turns chat commands on and picks the programme they act
+// on.
+//
+// OFF BY DEFAULT, because !switch and !fix put the broadcast in the hands of
+// every moderator of every connected channel -- a decision an operator has to
+// make, not one an upgrade makes for them.
+type ChatCommandSettings struct {
+	Enabled bool `json:"enabled"`
+	// SourceID is the programme the commands report on and switch. 0 means the
+	// default programme. Chat is install-wide and a command names no programme,
+	// so on a multi-programme install exactly one of them answers to chat.
+	SourceID int64 `json:"sourceId"`
 }
 
 // AutomodSettings is everything about automatic chat moderation except the
@@ -1969,6 +2097,11 @@ func DefaultSettings() Settings {
 			// grandfather clause from ever colliding with a source created
 			// afterwards.
 			RTMP: RTMPSettings{App: "live"},
+			// Off, with thresholds already filled in so switching it on is one
+			// tick: 800 kbps is where a 720p30 picture visibly falls apart, and
+			// the RTT and loss figures are the ones IRL cellular links cross
+			// when they are about to drop.
+			Degraded: DefaultDegradedSettings(),
 			Pull: PullSettings{
 				ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -2227,6 +2360,9 @@ func (s Settings) Validate() error {
 	}
 	for _, p := range s.Failover.problems(s.Ingest) {
 		add("%s", p)
+	}
+	if s.ChatCommands.SourceID < 0 {
+		add("chat commands programme %d is not a programme", s.ChatCommands.SourceID)
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)

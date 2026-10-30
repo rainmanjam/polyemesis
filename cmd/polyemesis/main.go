@@ -440,6 +440,9 @@ func run(h *hooks) error {
 		Log: log.With("component", "obs"), Pub: streamHub, Load: api.OBSLoader(store, box),
 	})
 	defer obsBridge.Close()
+	// Chat commands (#6): !bitrate, and the moderator-only !switch and !fix.
+	// Off until an operator turns them on; see startChatCommands.
+	startChatCommands(ctx, log, store, eng, hub, bus)
 
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,

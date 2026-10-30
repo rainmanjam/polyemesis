@@ -47,6 +47,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "ingest", key: "set.listeners" },
   { tab: "ingest", key: "set.srtPort", card: "set.listeners", anchor: "listener-srt" },
   { tab: "ingest", key: "set.rtmpPort", card: "set.listeners", anchor: "listener-rtmp" },
+  { tab: "ingest", key: "set.srtlaPort", card: "set.listeners", anchor: "listener-srtla" },
   { tab: "ingest", key: "set.ffmpegTitle" },
   // pipeline
   { tab: "pipeline", key: "set.displayTitle" },

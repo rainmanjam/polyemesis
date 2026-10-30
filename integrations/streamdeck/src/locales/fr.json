@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist à l'antenne",
   "streamdeck.failover.slate": "Carton à l'antenne",
   "streamdeck.failover.unknown": "Aucune info de flux",
+  "streamdeck.failover.degraded": "Principal dégradé",
   "streamdeck.meter.noFeed": "AUCUN FLUX",
   "streamdeck.meter.quiet": "SILENCE",
   "streamdeck.auth.connected": "Connecté",

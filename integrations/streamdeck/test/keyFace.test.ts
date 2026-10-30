@@ -137,6 +137,23 @@ describe("failoverFace", () => {
     expect(failoverFace({ active: "slate" })).toMatchObject({ tone: "warn", label: "streamdeck.failover.slate" });
   });
 
+  it("warns about a degraded primary that is still on air, with what was measured", () => {
+    expect(failoverFace({ active: "primary", degraded: "bitrate 640 kbps below 800 kbps for 5s" })).toMatchObject({
+      tone: "warn",
+      label: "streamdeck.failover.degraded",
+      detail: "bitrate 640 kbps below 800 kbps for 5s",
+    });
+  });
+
+  it("carries the degraded: reason when the link sent the slate on air", () => {
+    const reason = "degraded: the primary ingest's link is degraded and no backup is on air (bitrate 300 kbps below 800 kbps for 5s)";
+    expect(failoverFace({ active: "slate", reason, degraded: "bitrate 300 kbps below 800 kbps for 5s" })).toMatchObject({
+      tone: "warn",
+      label: "streamdeck.failover.slate",
+      detail: reason,
+    });
+  });
+
   it("says there is no feed info when the server has not answered", () => {
     expect(failoverFace(null)).toEqual({ tone: "idle", label: "streamdeck.failover.unknown" });
   });

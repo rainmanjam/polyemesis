@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist in onda",
   "streamdeck.failover.slate": "Slate in onda",
   "streamdeck.failover.unknown": "Nessuna info sul segnale",
+  "streamdeck.failover.degraded": "Principale degradato",
   "streamdeck.meter.noFeed": "NESSUN SEGNALE",
   "streamdeck.meter.quiet": "SILENZIO",
   "streamdeck.auth.connected": "Connesso",

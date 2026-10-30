@@ -264,14 +264,31 @@ delayed programme reached the platform.
 
 ### Ingest and failover
 
-`ingest.published` and `ingest.disconnected` are the webhook triggers.
+`ingest.published` and `ingest.disconnected` are the webhook triggers, and so
+is `failover.switched`.
 
 `failover.switched` carries `reason` (why it moved) and:
 
 ```json
-{"active": "slate", "pinned": "", "switches": 3, "primaryLive": false,
- "backupLive": false, "backupEnabled": true, "slateEnabled": true}
+{"active": "slate", "pinned": "", "switches": 3, "primaryLive": true,
+ "backupLive": false, "backupEnabled": true, "slateEnabled": true,
+ "degraded": "bitrate 640 kbps below 800 kbps for 5s"}
 ```
+
+**A degraded link.** With
+[degraded-link failover](LINK-HEALTH.md#degraded-link-failover) on, the selector
+also leaves a primary that is still delivering but below the operator's
+bitrate, RTT or loss thresholds. That switch's `reason` starts `degraded: `,
+then says what the selector did and, in brackets, what was measured:
+
+```
+degraded: the primary ingest's link is degraded and no backup is on air (bitrate 640 kbps below 800 kbps for 5s)
+```
+
+`data.degraded` is the bracketed part on its own, and is `""` while the link
+is healthy, so a consumer need not parse the sentence. `primaryLive` stays
+`true`: the encoder never stopped, which is what separates this from a
+disconnect.
 
 ### Go-live and stop
 
@@ -532,7 +549,7 @@ stream works over HTTP/1.1 and HTTP/2 unchanged. The server sets no write
 timeout, which would end every stream. Each write has its own deadline instead,
 so a client that stops reading does not hold a connection open for ever.
 
-## Coming with #4 and #6
+## Coming with #4
 
 These are agreed but **not emitted yet**. The features that produce them do not
 exist in this build. Each will be added to the catalogue by the feature that
@@ -542,7 +559,6 @@ consumer against them yet.
 | Planned | Comes with | What it will carry |
 |---|---|---|
 | `viewers.sample` | #4 cross-platform analytics | the periodic per-platform viewer sample |
-| a `degraded: …` reason on failover switches | #6 degraded-link failover | why a link was judged degraded |
 
 ## Known limitations
 

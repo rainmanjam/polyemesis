@@ -1143,6 +1143,12 @@ export interface FailoverStatus {
   slateEnabled: boolean;
   feed?: ProcessStatus | null;
   backup?: ProcessStatus | null;
+  /** Set while the primary's link is judged degraded: the measured
+   *  explanation, e.g. "bitrate 640 kbps below 800 kbps for 5s". Present even
+   *  when the primary stayed on air because there was nowhere to switch to. */
+  degraded?: string;
+  /** Present while degraded-link failover is on. */
+  primaryLink?: LinkReading;
 }
 
 /** peak[track][channel] and rms[track][channel], in dBFS. */
@@ -1246,7 +1252,29 @@ export interface SourceView extends Source {
     rttMs: number;
     lossPackets: number;
     retransPackets: number;
+    /** Over the last interval; 0 until one has elapsed. */
+    bitrateKbps: number;
+    lossPercent: number;
   };
+  /** The SRTLA group behind `link` when the encoder is bonding several network
+   *  links: one row per link. `link` is then the merged session. */
+  bonded?: {
+    upstreamLocal: string;
+    since: string;
+    links: Array<{
+      peer: string;
+      since: string;
+      lastSeen: string;
+      packets: number;
+      bytes: number;
+      bitrateKbps: number;
+      /** This link's share of the group's bytes over the last interval, 0-1. */
+      share: number;
+    }> | null;
+  };
+  /** Degraded-link explanation for this programme's primary, when judged
+   *  degraded. See FailoverStatus.degraded. */
+  degraded?: string;
   /** Uplink for a source on the RTMP listener, when a publisher is connected.
    *  TCP has no RTT or loss to report, so only who and since are here. */
   rtmpLink?: {
@@ -1308,11 +1336,15 @@ export interface Settings {
     rtmp: { app: string; streamKey: string };
     /** Optional so a client that predates pull can still PUT settings. */
     pull?: PullSettings;
+    /** This programme's degraded-link failover thresholds (#6). On the ingest
+     *  because it is per programme: failover itself is install-wide, but link
+     *  quality belongs to one encoder's uplink. */
+    degraded?: DegradedSettings;
   };
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
    *  one. Optional so a client that predates the change can still PUT. */
-  listeners?: { srtPort: number; rtmpPort: number };
+  listeners?: ListenerSettings;
   /** Synthetic sources. Optional for the same reason. */
   synth?: {
     /** Synthesises a silent stereo track when the ingest probes with no audio
@@ -1372,6 +1404,9 @@ export interface Settings {
   /** Alert delivery policy. Optional so a client that predates it can still
    *  PUT settings. See AlertSettings below. */
   alerts?: AlertSettings;
+  /** Chat commands (#6). Optional so a client that predates it can still PUT
+   *  settings. */
+  chatCommands?: ChatCommandSettings;
   /** The version of the document this was read at, as GET /settings served it.
    *
    *  Sent back on the next PUT, which the server refuses (409,
@@ -1573,6 +1608,44 @@ export interface FailoverSettings {
   /** A file playlist as a failover candidate beside the slate: something that
    *  plays, rather than something that just holds. */
   playlist?: PlaylistSettings;
+}
+
+/** The shared listeners. One SRT and one RTMP port serve every programme, told
+ *  apart by publish token; the SRTLA receiver (#6), off at 0, merges a bonded
+ *  encoder's links into one session on the SRT port. */
+export interface ListenerSettings {
+  srtPort: number;
+  rtmpPort: number;
+  srtlaPort?: number;
+}
+
+/** Chat commands: !bitrate for anyone, !switch and !fix for moderators and
+ *  the broadcaster. Off by default, because it gives every moderator of every
+ *  connected channel control of what is on air. */
+export interface ChatCommandSettings {
+  enabled: boolean;
+  /** The programme the commands act on; 0 is the default programme. */
+  sourceId?: number;
+}
+
+/** Link-health thresholds. Each is independent and 0 switches it off. RTT and
+ *  loss are measured for SRT and SRTLA primaries only; an RTMP or pull primary
+ *  is judged on bitrate alone. */
+export interface DegradedSettings {
+  enabled: boolean;
+  minBitrateKbps?: number;
+  maxRttMs?: number;
+  maxLossPercent?: number;
+  /** How long a breach -- and a recovery -- must last. 0 means the default. */
+  sustainSeconds?: number;
+}
+
+/** The primary's last measurement. Each figure is absent until measured, and
+ *  RTT and loss are absent for an RTMP or pull primary: absent is not zero. */
+export interface LinkReading {
+  bitrateKbps?: number;
+  rttMs?: number;
+  lossPercent?: number;
 }
 
 // -------------------------------------------------------------------- mqtt
@@ -3381,7 +3454,10 @@ export type HookTrigger =
   /** Polyemesis stopped retrying a destination after repeated quick
    *  rejections; nothing happens until Retry. Sent once per hold, after the
    *  destination's down if it was live. */
-  | "destination.held";
+  | "destination.held"
+  /** A programme's source selector put another source on air. A switch caused
+   *  by a degraded link has a reason starting "degraded: ". */
+  | "failover.switched";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot

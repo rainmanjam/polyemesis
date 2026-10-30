@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "Playlist no ar",
   "streamdeck.failover.slate": "Slate no ar",
   "streamdeck.failover.unknown": "Sem info de sinal",
+  "streamdeck.failover.degraded": "Principal degradado",
   "streamdeck.meter.noFeed": "SEM SINAL",
   "streamdeck.meter.quiet": "SILÊNCIO",
   "streamdeck.auth.connected": "Conectado",

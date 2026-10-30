@@ -100,6 +100,8 @@ import {
   type ReadState,
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
+import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
+import { ChatCommandSettings } from "@/components/ChatCommandSettings";
 import type {
   AcmeCheckId,
   AcmeCheckStatus,
@@ -108,6 +110,7 @@ import type {
   TokenScope,
   CertInfo,
   ChatRetentionSettings,
+  ListenerSettings,
   CredentialCheck,
   FailoverReturn,
   IngestMode,
@@ -603,6 +606,15 @@ function IngestSettings({
             </>
           )}
 
+          {/* Degraded-link failover's thresholds (#6) are this programme's, so
+              they sit with its ingest. They take effect without a restart; see
+              docs/LINK-HEALTH.md. */}
+          <DegradedLinkSettings
+            idPrefix="ingest-degraded"
+            value={draft.ingest.degraded}
+            onChange={(degraded) => setDraft({ ...draft, ingest: { ...draft.ingest, degraded } })}
+          />
+
           {/* Saving ingest settings reconciles the ingest, which restarts the
               FFmpeg child and drops every viewer. That is sometimes exactly
               what an operator means to do -- so this is a warning stating the
@@ -669,8 +681,8 @@ function ListenerPortsCard({
   setListeners,
   footer,
 }: {
-  listeners: { srtPort: number; rtmpPort: number };
-  setListeners: (patch: Partial<{ srtPort: number; rtmpPort: number }>) => void;
+  listeners: ListenerSettings;
+  setListeners: (patch: Partial<ListenerSettings>) => void;
   footer?: React.ReactNode;
 }) {
   const t = useT();
@@ -703,6 +715,18 @@ function ListenerPortsCard({
               value={listeners.rtmpPort}
               onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
             />
+          </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <Label htmlFor="listener-srtla">{t("set.srtlaPort")}</Label>
+            <Input
+              id="listener-srtla"
+              type="number"
+              min={0}
+              max={LIMITS.port.max}
+              value={listeners.srtlaPort ?? 0}
+              onChange={(e) => setListeners({ srtlaPort: Number(e.target.value) })}
+            />
+            <span className="text-sm text-muted-foreground">{t("set.srtlaPortNote")}</span>
           </div>
         </div>
         {footer}
@@ -1024,6 +1048,11 @@ function PipelineSettings({
       </Card>
 
       <MultitrackHardware draft={draft} setDraft={setDraft} />
+
+      <ChatCommandSettings
+        value={draft.chatCommands}
+        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
 
       <Card>
         <CardHeader>

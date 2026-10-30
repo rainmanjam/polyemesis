@@ -34,6 +34,7 @@ script needed.
 | `broadcast.fault` | a platform refused to start or end a broadcast | none |
 | `destination.rolledover` | a file destination's recording continued into a different file | none |
 | `destination.held` | polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry | none; after the `down` if the destination was live |
+| `failover.switched` | a programme's source selector put a different source on air (primary, backup, playlist or slate). `reason` says why; a switch caused by a degraded link starts `degraded: ` and names what was measured | none |
 
 "Delivering" is read from FFmpeg's own progress report: the destination's
 output time has to advance between two sweeps, two seconds apart. A destination
@@ -100,7 +101,7 @@ default for the first hook somebody creates, and it is a trap on the second: an
 operator who clears the list in the editor meaning "stop sending me things"
 subscribes to the firehose instead. It also means the subscription grows
 underneath you — `broadcast.fault`, `destination.rolledover` and
-`destination.held` were all appended to the table above after the fact, and every hook that had never
+`destination.held` and `failover.switched` were all appended to the table above after the fact, and every hook that had never
 narrowed its `triggers` started receiving them on upgrade. If you want two
 triggers, name two.
 

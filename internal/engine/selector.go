@@ -32,6 +32,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -164,6 +165,8 @@ type selector struct {
 
 	// live is per-source liveness, sampled from each hub's byte counter.
 	live map[sourceKind]*liveness
+	// degrade judges the primary's link health (#6). See degrade.go.
+	degrade degradeMonitor
 }
 
 // sourceFeed is the one process publishing into the selector's hub.
@@ -411,7 +414,23 @@ type sourceChoice struct {
 	grace           time.Duration
 	autoReturn      bool
 	returnStable    time.Duration
+	// primaryDegraded says the primary's link health has been below the
+	// operator's thresholds for the sustain window (#6). It is meaningful only
+	// while the primary is delivering: a silent primary is dead, not degraded,
+	// and is decided as dead whatever this says.
+	//
+	// One bit, collapsed by the caller from the degrade monitor, for the same
+	// reason playlistRunning is one bit: the golden table can only claim to be
+	// exhaustive over inputs it can enumerate. The measured detail -- which
+	// metric, what value, what threshold -- is appended to the reason outside
+	// this pure layer, by applySourceChoice.
+	primaryDegraded bool
 }
+
+// degradedPrefix starts every reason that a degraded link caused. Status,
+// webhooks, MQTT, the timeline and the Stream Deck all key on it, so it is a
+// contract exactly as the reasons themselves are.
+const degradedPrefix = "degraded: "
 
 // candidate is one source the selector may choose, and whether it can be
 // chosen right now.
@@ -424,6 +443,13 @@ type sourceChoice struct {
 type candidate struct {
 	kind      sourceKind
 	available bool
+	// pinnable is what an operator's pin asks: would this deliver bytes if it
+	// were on air. It differs from available for exactly one case -- a primary
+	// that is delivering over a degraded link. The ladder must not choose that
+	// primary (it is why the tier left), but an operator who pinned it has
+	// looked at the picture and chosen it anyway, and the selector must not
+	// override them. For every other candidate the two are the same.
+	pinnable bool
 	// rank orders the list. Lower is preferred. It is a field rather than the
 	// slice position so a future caller can build the list in any order and
 	// still get a stable decision.
@@ -438,8 +464,11 @@ type candidate struct {
 // is how a reordering ends up half-applied — the list reads one way, the
 // decision goes the other, and nothing fails until an outage.
 func candidatesFor(c sourceChoice) []candidate {
+	primaryAlive := c.primary.alive(c.now, c.grace)
 	out := []candidate{
-		{kind: sourcePrimary, available: c.primary.alive(c.now, c.grace)},
+		// A degraded primary is unavailable to the ladder and still pinnable.
+		// See candidate.pinnable.
+		{kind: sourcePrimary, available: primaryAlive && !c.primaryDegraded, pinnable: primaryAlive},
 		// A backup that is delivering into a hub nobody enabled is still not a
 		// place to send viewers, so the setting gates availability rather than
 		// membership: the candidate stays in the list and stays unavailable.
@@ -477,6 +506,9 @@ func candidatesFor(c sourceChoice) []candidate {
 	}
 	for i := range out {
 		out[i].rank = i
+		if out[i].kind != sourcePrimary {
+			out[i].pinnable = out[i].available
+		}
 	}
 	return out
 }
@@ -520,6 +552,19 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		}
 		return false
 	}
+
+	pinnable := func(k sourceKind) bool {
+		for _, cand := range ranked {
+			if cand.kind == k {
+				return cand.pinnable
+			}
+		}
+		return false
+	}
+	// degraded is the primary delivering over a link the operator's
+	// thresholds have ruled out. Only then does a reason start "degraded: ";
+	// a primary that has stopped delivering is dead, and says so.
+	degraded := c.primaryDegraded && c.primary.alive(c.now, c.grace)
 
 	// best is the ladder itself: the first available candidate wins, and says
 	// the sentence that goes with having won. fallbackKind is where the
@@ -569,7 +614,7 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 	// An operator's pin outranks the ladder, but only while the pinned source
 	// is available: a pin that outlived its source would strand the broadcast
 	// on a dead input.
-	if reason, ok := pinReason(c.pinned); ok && available(c.pinned) {
+	if reason, ok := pinReason(c.pinned); ok && pinnable(c.pinned) {
 		return c.pinned, reason
 	}
 
@@ -587,6 +632,16 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		// Manual return means "do not flap", not "never recover": with the
 		// backup gone there is nothing to flap between. The backup is known
 		// unavailable here, so it cannot win its own branch.
+		if degraded {
+			// The primary is delivering, so "neither ingest is delivering"
+			// would be false; it is ruled out by its link, and the reason
+			// has to say that or the operator sees a slate over a live
+			// encoder with no explanation.
+			return best(map[sourceKind]string{
+				sourcePlaylist: degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded, so the playlist is on air",
+				sourceSlate:    degradedPrefix + "the backup ingest stopped delivering and the primary's link is degraded",
+			}, sourcePrimary, "the backup ingest stopped delivering and the primary is back")
+		}
 		return best(map[sourceKind]string{
 			sourcePrimary:  "the backup ingest stopped delivering and the primary is back",
 			sourcePlaylist: "neither ingest is delivering, so the playlist is on air",
@@ -643,6 +698,18 @@ func chooseFrom(cands []candidate, c sourceChoice) (sourceKind, string) {
 		noOther := ""
 		if c.cur != sourcePrimary {
 			noOther = "there is no other source to run"
+		}
+		if degraded {
+			// The primary is still delivering, just badly. Every reason here
+			// names the link rather than a stop, and the fallback -- nothing
+			// else to run -- keeps the degraded primary on air: a poor picture
+			// beats none, and it stays silent when the primary was already on
+			// air because nothing moved.
+			return best(map[sourceKind]string{
+				sourceBackup:   degradedPrefix + "the primary ingest's link is degraded",
+				sourcePlaylist: degradedPrefix + "the primary ingest's link is degraded and the playlist is running",
+				sourceSlate:    degradedPrefix + "the primary ingest's link is degraded and no backup is on air",
+			}, sourcePrimary, noOther)
 		}
 		return best(map[sourceKind]string{
 			sourcePrimary:  onPrimary,
@@ -818,15 +885,23 @@ func (e *Engine) sweepSelector(now time.Time) {
 	if e.selectorHub() == nil {
 		return
 	}
-	e.sampleSources(s, now)
+	edge := e.sampleSources(s, now)
 	// Ignored on purpose: the ticker has no caller to fail to. A decision that
 	// could not be made holds the current source and logs, and the next tick
 	// tries again 500ms later.
 	_ = e.applySourceChoice(s, e.heldSilence(), now)
+	// A trip or clear that moved no source still changed what the status says
+	// -- a degraded primary with nowhere to go stays on air, and the operator
+	// is told. A switch has already published; once more is harmless.
+	if edge != 0 {
+		e.publishStatus()
+	}
 }
 
-// sampleSources folds each candidate hub's byte counter into its liveness.
-func (e *Engine) sampleSources(s db.Settings, now time.Time) {
+// sampleSources folds each candidate hub's byte counter into its liveness, and
+// the primary's link health into the degrade monitor. It returns the monitor's
+// edge: +1 on the sweep the primary's link trips, -1 on the sweep it clears.
+func (e *Engine) sampleSources(s db.Settings, now time.Time) int {
 	// The PRIMARY's own hub, never the selector's or the silence tier's: the
 	// question is whether the operator's encoder is delivering, and the selector
 	// hub carries bytes whichever source is on air.
@@ -850,14 +925,24 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) {
 		playlistRx = h.RxBytes()
 	}
 	grace := failoverGrace(s)
+	// Asked BEFORE e.mu: the probe takes the SRT listener's own lock, and
+	// nothing about one publisher's statistics needs the engine's.
+	deg := s.Ingest.Degraded
+	var link *linkHealth
+	if deg.Enabled && e.linkProbe != nil {
+		if lh, ok := e.linkProbe(e.sourceID, false); ok {
+			link = &lh
+		}
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.sel == nil {
-		return
+		return 0
 	}
 	e.sel.live[sourcePrimary].sample(primaryRx, now, grace)
 	e.sel.live[sourceBackup].sample(backupRx, now, grace)
+	edge := e.sampleDegradeLocked(deg, primaryRx, link, now, grace)
 
 	// The playlist's counter is the one that goes BACKWARDS, and it has to be
 	// handled rather than fed to sample(), which takes a counter that only ever
@@ -884,6 +969,33 @@ func (e *Engine) sampleSources(s db.Settings, now time.Time) {
 		*pl = liveness{}
 	}
 	pl.sample(playlistRx, now, grace)
+	return edge
+}
+
+// sampleDegradeLocked runs the degrade monitor for one sweep. Caller holds e.mu.
+//
+// THE STABLE CLOCK IS RESET ON A CLEAR, and the automatic return depends on
+// it. liveness.since restarts only after a gap in DELIVERY, and a degraded link
+// never stopped delivering -- so without this, the moment the link cleared its
+// stableFor would read as the whole time it had been connected, and an
+// automatic return would go straight back to it instead of waiting
+// returnStable to see whether the recovery holds.
+func (e *Engine) sampleDegradeLocked(deg db.DegradedSettings, rx uint64, link *linkHealth, now time.Time, grace time.Duration) int {
+	m := &e.sel.degrade
+	if !deg.Enabled {
+		*m = degradeMonitor{}
+		return 0
+	}
+	primary := e.sel.live[sourcePrimary]
+	edge := m.observe(thresholdsFor(deg), now, primary.alive(now, grace), rx, link)
+	switch edge {
+	case +1:
+		e.log.Warn("primary ingest link degraded", "source", e.sourceID, "detail", m.detail)
+	case -1:
+		primary.since = now
+		e.log.Info("primary ingest link recovered", "source", e.sourceID)
+	}
+	return edge
 }
 
 func failoverGrace(s db.Settings) time.Duration {
@@ -934,10 +1046,19 @@ func (e *Engine) applySourceChoice(s db.Settings, silenceSig string, now time.Ti
 		grace:           failoverGrace(s),
 		autoReturn:      s.Failover.Return == db.FailoverReturnAuto,
 		returnStable:    time.Duration(s.Failover.ReturnStableSeconds) * time.Second,
+		primaryDegraded: s.Ingest.Degraded.Enabled && sel.degrade.tripped,
 	}
+	degradedDetail := sel.degrade.detail
 	e.mu.Unlock()
 
 	want, reason, decided := e.decideSource(c)
+	// The pure decision says THAT the link was degraded; the monitor knows
+	// what was measured. Joined here so the golden table can stay a table of
+	// enumerable inputs while the operator still reads which threshold, what
+	// value and for how long.
+	if strings.HasPrefix(reason, degradedPrefix) && degradedDetail != "" {
+		reason += " (" + degradedDetail + ")"
+	}
 	// want == sourceNone can ONLY happen here on a recovered panic with
 	// nothing to hold: chooseFrom's own best() never returns sourceNone on a
 	// real decision (its fallback is always sourcePrimary -- see the comment
@@ -1241,6 +1362,15 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	fo := e.Failover()
 	e.bus.Publish(eventFailover, fo)
 	e.streamFailover(fo)
+	// The lifecycle webhook. Reason is redacted by the dispatcher like every
+	// other; a degraded-link switch carries the "degraded: " sentence here
+	// exactly as it does on the stream and the alert.
+	e.Hooks().Publish(hooks.Event{
+		Trigger: hooks.TriggerFailoverSwitched,
+		At:      now,
+		Source:  hooks.SourceRef{ID: e.sourceID, Name: e.SourceName()},
+		Reason:  reason,
+	})
 	e.publishStatus()
 }
 
@@ -2678,6 +2808,45 @@ func (e *Engine) SwitchSource(kind string) error {
 	return nil
 }
 
+// FixSource is chat's `!fix` (#6): return source selection to automatic and
+// restart the feed that is on air, so a stuck remux is replaced by a fresh one
+// reading the same source.
+//
+// The IRL convention behind the word is "refresh the media source": the
+// picture froze or went wrong, and tearing the reader down and starting it
+// again is the cheap thing that usually mends it. Here the reader is the
+// selector's feed. Its replacement is started by this call -- not left to the
+// next sweep -- with a fresh timeline offset, exactly as the sweep would
+// respawn a feed that died; destinations ride it, as they ride any switch.
+//
+// The pin is cleared first because somebody reaching for !fix wants the
+// selector deciding again, and a pin left on a source that is the problem
+// would make the refresh pointless.
+func (e *Engine) FixSource() error {
+	e.requireEngine("FixSource")
+	if err := e.SwitchSource("auto"); err != nil {
+		return err
+	}
+	s := e.Settings()
+	e.selMu.Lock()
+	defer e.selMu.Unlock()
+	e.mu.Lock()
+	sel := e.sel
+	if sel == nil || sel.hub == nil {
+		e.mu.Unlock()
+		return fmt.Errorf("failover is not enabled, so there is no feed to refresh")
+	}
+	feed := sel.feed
+	sel.feed = nil
+	// Cleared so ensureFeed does not hold the restart back as a failed start
+	// still inside its backoff.
+	sel.feedAt = time.Time{}
+	e.mu.Unlock()
+	stopErr := e.teardownFeed(feed)
+	e.log.Info("source feed refreshed on request", "source", e.sourceID, "stopErr", stopErr)
+	return e.applySourceChoice(s, e.heldSilence(), time.Now())
+}
+
 // FailoverStatus is the tier as the dashboard reports it. Absent entirely when
 // the tier is not running, which is the default.
 type FailoverStatus struct {
@@ -2689,7 +2858,16 @@ type FailoverStatus struct {
 	SwitchedAt time.Time  `json:"switchedAt"`
 	Switches   int        `json:"switches"`
 	Error      string     `json:"error,omitempty"`
-	RelayPort  int        `json:"relayPort,omitempty"`
+	// Degraded is set while the primary's link is judged degraded (#6): the
+	// measured explanation, e.g. "bitrate 640 kbps below 800 kbps for 5s".
+	// Separate from Reason, which is why the LAST switch happened: a degraded
+	// primary with nowhere to go stays on air and moves nothing, and this is
+	// how the operator is still told.
+	Degraded string `json:"degraded,omitempty"`
+	// PrimaryLink is the primary's last measured bitrate, RTT and loss, each
+	// absent until measured. Nil while degraded-link failover is off.
+	PrimaryLink *LinkReading `json:"primaryLink,omitempty"`
+	RelayPort   int          `json:"relayPort,omitempty"`
 
 	PrimaryLive   bool `json:"primaryLive"`
 	BackupLive    bool `json:"backupLive"`
@@ -2733,6 +2911,11 @@ func (e *Engine) Failover() *FailoverStatus {
 		Error:         sel.err,
 		BackupEnabled: s.Failover.Backup.Enabled,
 		SlateEnabled:  s.Failover.Slate.Enabled,
+		Degraded:      sel.degrade.detail,
+	}
+	if s.Ingest.Degraded.Enabled {
+		r := sel.degrade.last
+		st.PrimaryLink = &r
 	}
 	if sel.hub != nil {
 		st.RelayPort = sel.hub.Port()

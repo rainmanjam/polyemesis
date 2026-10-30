@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "播放列表在线",
   "streamdeck.failover.slate": "垫片在线",
   "streamdeck.failover.unknown": "无信号信息",
+  "streamdeck.failover.degraded": "主源链路劣化",
   "streamdeck.meter.noFeed": "无信号",
   "streamdeck.meter.quiet": "静音",
   "streamdeck.auth.connected": "已连接",

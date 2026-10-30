@@ -71,7 +71,7 @@ const (
 	TypeDestinationDelay      Type = "destination.delay"
 	TypeIngestPublished       Type = Type(hooks.TriggerIngestPublished)
 	TypeIngestDisconnected    Type = Type(hooks.TriggerIngestDisconnected)
-	TypeFailoverSwitched      Type = "failover.switched"
+	TypeFailoverSwitched      Type = Type(hooks.TriggerFailoverSwitched)
 	TypeBroadcastLive         Type = "broadcast.live"
 	TypeBroadcastComplete     Type = "broadcast.complete"
 	TypeBroadcastFault        Type = Type(hooks.TriggerBroadcastFault)
@@ -138,10 +138,11 @@ func alertOnTheTimeline(env Envelope) bool {
 // TheCatalogue) and the requirement that each type is shown, by a test that
 // drives its real producer, to actually be emitted (TestEveryCatalogued
 // TypeHasAnEmissionTest). A type for a feature that does not exist yet --
-// polls (#14), viewer samples (#4), the failover degraded reason (#6) -- is
-// added HERE, by that feature, together with the test that proves its producer
-// emits it. Until then it is documented under "Coming with …" and nowhere else.
-// Polls did exactly that.
+// viewer samples (#4) -- is added HERE, by that feature, together with the test
+// that proves its producer emits it. Until then it is documented under "Coming
+// with …" and nowhere else. Polls (#14) did exactly that. The failover degraded
+// reason (#6) needed no new type: it is the "degraded: " reason on
+// failover.switched.
 var catalogue = []Spec{
 	// Destinations. Status is readable by a read token over REST and /ws
 	// already; none of these carries a URL or a stream key, and every free-text

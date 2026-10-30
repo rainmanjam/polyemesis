@@ -73,7 +73,15 @@ type SourceState struct {
 	// Failover names which input is on air, empty when the tier is off. A
 	// failover nobody notices is how an operator finds out at the end of a
 	// broadcast that they streamed the backup all night.
-	Failover string    `json:"failover,omitempty"`
+	Failover string `json:"failover,omitempty"`
+	// FailoverReason is why the selector last moved, in its own words. A move
+	// caused by a degraded link (#6) starts "degraded: " and names what was
+	// measured. Free text from the selector, never from an encoder or a URL.
+	FailoverReason string `json:"failoverReason,omitempty"`
+	// Degraded is set while the primary's link is judged degraded, even when
+	// there was nowhere to switch to and the primary is still on air -- which
+	// is exactly the case Failover alone would hide.
+	Degraded string    `json:"degraded,omitempty"`
 	At       time.Time `json:"at"`
 }
 

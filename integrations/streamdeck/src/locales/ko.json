@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "플레이리스트 송출 중",
   "streamdeck.failover.slate": "슬레이트 송출 중",
   "streamdeck.failover.unknown": "신호 정보 없음",
+  "streamdeck.failover.degraded": "메인 회선 저하",
   "streamdeck.meter.noFeed": "신호 없음",
   "streamdeck.meter.quiet": "무음",
   "streamdeck.auth.connected": "연결됨",

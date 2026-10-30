@@ -30,6 +30,7 @@
   "streamdeck.failover.playlist": "プレイリスト出力中",
   "streamdeck.failover.slate": "スレート出力中",
   "streamdeck.failover.unknown": "信号情報なし",
+  "streamdeck.failover.degraded": "メイン回線劣化",
   "streamdeck.meter.noFeed": "信号なし",
   "streamdeck.meter.quiet": "無音",
   "streamdeck.auth.connected": "接続済み",
