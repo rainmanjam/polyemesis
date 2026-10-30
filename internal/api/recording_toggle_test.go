@@ -9,10 +9,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
@@ -181,5 +185,149 @@ func TestRecordingToggleRefusesAMissingEnabledField(t *testing.T) {
 	sign(r)
 	if w := do(t, h, r); w.Code != http.StatusBadRequest {
 		t.Fatalf("POST /recording with no enabled field: status = %d, want 400, body %s", w.Code, w.Body.String())
+	}
+}
+
+// Enabled with the floor clear: "recording" when an engine has its recorder
+// child up, "not_running" when none does. The fixture with engines starts a
+// recorder on the reconcile the toggle triggers; the one without engines has
+// nothing to start it on.
+func TestRecordingStateFollowsTheRecorderChild(t *testing.T) {
+	t.Run("an engine with a recorder up is recording", func(t *testing.T) {
+		s, h, _, sign := managerServer(t, defaultTools())
+		if setRecording(t, h, sign, true) != http.StatusOK {
+			t.Fatal("POST /recording enabled=true was not accepted")
+		}
+		up := false
+		for _, e := range s.mgr.Engines() {
+			up = up || e.RecorderRunning()
+		}
+		if !up {
+			t.Fatal("no engine reports a recorder after the toggle's reconcile, so this case is not reached")
+		}
+		if _, body := getRecording(t, h, sign); body.State != "recording" || body.Halted {
+			t.Errorf("enabled with a recorder up = %+v, want state recording, not halted", body)
+		}
+	})
+	t.Run("no engine means no recorder: not_running", func(t *testing.T) {
+		// Derived directly: this fixture's stored document does not validate
+		// (it has no source to take an ingest from), so a write through the
+		// store would be refused for reasons that have nothing to do with this.
+		s, _, _, _ := managerServerWithoutEngines(t, defaultTools())
+		body := s.recordingStateFor(true)
+		if body.State != recordingStateNotRunning || !body.Enabled || body.Halted {
+			t.Errorf("enabled with no recorder up = %+v, want state not_running, enabled, not halted", body)
+		}
+	})
+}
+
+// A toggle is a settings change, so it is audited the way a settings save is:
+// once when the bit moves, never for a press that changed nothing.
+func TestRecordingToggleIsAuditedOnlyWhenItChangesTheSetting(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	if setRecording(t, h, sign, false) != http.StatusOK {
+		t.Fatal("fixture: could not switch recording off")
+	}
+	got := captureAudit(t, s)
+
+	if setRecording(t, h, sign, false) != http.StatusOK {
+		t.Fatal("POST /recording enabled=false was not accepted")
+	}
+	if len(*got) != 0 {
+		t.Fatalf("a toggle that changed nothing raised %v", typesOf(*got))
+	}
+
+	if setRecording(t, h, sign, true) != http.StatusOK {
+		t.Fatal("POST /recording enabled=true was not accepted")
+	}
+	if len(*got) != 1 || (*got)[0].Type != alerts.TypeSettingsChanged {
+		t.Fatalf("switching recording on raised %v, want one %s", typesOf(*got), alerts.TypeSettingsChanged)
+	}
+	if !strings.Contains(fmt.Sprint((*got)[0].Fields), "recording") {
+		t.Errorf("the audit event does not name the recording section: %+v", (*got)[0].Fields)
+	}
+}
+
+// The settings page saves with the version it read. A toggle made after that
+// read moves the version, so the page's save is refused as stale rather than
+// writing its old recording bit back over the key's press.
+func TestASettingsSaveFromBeforeAToggleIsRefusedAsStale(t *testing.T) {
+	_, h, _, sign := managerServer(t, defaultTools())
+	if setRecording(t, h, sign, false) != http.StatusOK {
+		t.Fatal("fixture: could not switch recording off")
+	}
+	doc := settingsDocument(t, h, sign)
+	version, _ := doc["version"].(string)
+	if version == "" {
+		t.Fatal("GET /settings carried no version, so a stale save cannot be detected")
+	}
+
+	if setRecording(t, h, sign, true) != http.StatusOK {
+		t.Fatal("POST /recording enabled=true was not accepted")
+	}
+
+	r := jsonRequest(t, http.MethodPut, "/api/v1/settings", map[string]any{
+		"version":   version,
+		"recording": doc["recording"],
+	})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusConflict {
+		t.Fatalf("save from a read taken before the toggle: status = %d, want 409, body %s", w.Code, w.Body.String())
+	}
+	if _, body := getRecording(t, h, sign); !body.Enabled {
+		t.Error("a refused stale save still switched recording back off")
+	}
+}
+
+// The toggle and a settings save run at the same time and BOTH survive. The
+// save here is partial and unversioned (a script), so it decodes over the
+// stored document; the toggle writes only its bit. A toggle that read the
+// document, changed the bit and wrote the whole thing back outside the
+// settings locks would, under interleaving, put back the time zone it read
+// and lose the save -- which is what this catches.
+func TestRecordingToggleAndASettingsSaveRacingBothSurvive(t *testing.T) {
+	_, h, _, sign := managerServer(t, defaultTools())
+	zones := []string{"Europe/London", "America/New_York", "Asia/Tokyo", "Australia/Sydney"}
+
+	for i := 0; i < 24; i++ {
+		zone := zones[i%len(zones)]
+		enabled := i%2 == 0
+
+		var wg sync.WaitGroup
+		var toggleCode, saveCode int
+		var saveBody string
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			r := jsonRequest(t, http.MethodPost, "/api/v1/recording", map[string]any{"enabled": enabled})
+			sign(r)
+			toggleCode = do(t, h, r).Code
+		}()
+		go func() {
+			defer wg.Done()
+			r := jsonRequest(t, http.MethodPut, "/api/v1/settings", map[string]any{
+				"display": map[string]any{"timeZone": zone},
+			})
+			sign(r)
+			w := do(t, h, r)
+			saveCode, saveBody = w.Code, w.Body.String()
+		}()
+		wg.Wait()
+		if toggleCode != http.StatusOK {
+			t.Fatalf("round %d: toggle status = %d", i, toggleCode)
+		}
+		if saveCode != http.StatusOK {
+			t.Fatalf("round %d: settings save status = %d, body %s", i, saveCode, saveBody)
+		}
+
+		doc := settingsDocument(t, h, sign)
+		rec, _ := doc["recording"].(map[string]any)
+		disp, _ := doc["display"].(map[string]any)
+		if rec["enabled"] != enabled {
+			t.Fatalf("round %d: recording.enabled = %v, want %v: the save wrote the toggle back", i, rec["enabled"], enabled)
+		}
+		if disp["timeZone"] != zone {
+			t.Fatalf("round %d: display.timeZone = %v, want %q: the toggle wrote the save back", i, disp["timeZone"], zone)
+		}
 	}
 }

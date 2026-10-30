@@ -18,16 +18,18 @@ import (
 //	halted_disk  enabled, but the free-space floor has stopped the recorder
 //	recording    enabled, the floor is clear, and an engine has a recorder child
 //	not_running  enabled and the floor is clear, but no recorder child is up
-//	             (no ingest is live, or the recorder has not been started yet)
+//	             (no programme has an engine, or the recorder has not been
+//	             started yet)
 //
 // Off is checked first: a switch that is off is off whatever the disk says.
 //
 // POST writes Recording.Enabled and nothing else. It goes through UpdateSettings,
 // which holds the store's settings lock across read, merge and write, so it
 // cannot lose a concurrent PUT /settings that changed another block, and it
-// takes settingsMu the same way the settings save does. It then runs the same
-// reconcile the settings save runs, so the recorder starts or stops now rather
-// than on the next restart.
+// takes settingsMu the same way the settings save does. A change is audited as
+// a settings change, as a save would be; a press that changed nothing is not.
+// It then runs the same reconcile the settings save runs, so the recorder
+// starts or stops now rather than on the next restart.
 //
 // The write is admin-scoped by method, like every other POST in this group.
 
@@ -108,12 +110,17 @@ func (s *Server) handleSetRecording(w http.ResponseWriter, r *http.Request) {
 	defer s.settingsMu.Unlock()
 
 	enabled := *req.Enabled
+	changed := false
 	if _, err := s.store.UpdateSettings(func(st *db.Settings) error {
+		changed = st.Recording.Enabled != enabled
 		st.Recording.Enabled = enabled
 		return nil
 	}); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	if changed {
+		s.publishAudit(auditSettingsChanged([]string{"recording"}, s.clientIP(r)))
 	}
 	if rw := s.reconcileNow("the recording"); rw != "" {
 		writeError(w, http.StatusInternalServerError, rw)
