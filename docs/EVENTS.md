@@ -397,10 +397,9 @@ matter:
 
 - **Buffering off.** polyemesis sends `X-Accel-Buffering: no`, which nginx
   honours. [`deploy/nginx.conf.example`](../deploy/nginx.conf.example) also
-  sets `proxy_buffering off` for the whole site. Other proxies need their
-  equivalent:
-  - Caddy flushes `text/event-stream` immediately.
-  - Traefik flushes streaming responses by default.
+  sets `proxy_buffering off` for the whole site. Any other proxy needs its own
+  equivalent; check that the first event arrives within a second of
+  `curl -N` connecting through it.
 - **A read timeout over 15 seconds.** The example's `proxy_read_timeout 3600s`
   is plenty.
 
