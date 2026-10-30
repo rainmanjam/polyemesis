@@ -99,25 +99,30 @@ func TestTheChatHubDrivesAPollEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	say(tw, "t5", "mallory", "2") // ignored: banned
+	// A sentinel vote on the same channel AFTER mallory's: once it is counted,
+	// mallory's has certainly been offered too, so the count below is not a
+	// race against the adapter goroutine.
+	say(tw, "t6", "zed", "1")
 
+	waitUntil(t, "the moderated count and the sentinel", func() bool {
+		c, _ := e.Current()
+		return c.Total == 4
+	})
 	mu.Lock()
 	now = now.Add(time.Second)
 	mu.Unlock()
-	waitUntil(t, "a poll.vote with the moderated count", func() bool {
-		e.Tick()
-		c, _ := e.Current()
-		return c.Total == 3
-	})
-	if v := asResult(t, streamtest.Expect(t, sub, eventstream.TypePollVote)); v.Total != 3 {
-		t.Errorf("poll.vote carried %d votes, want 3", v.Total)
+	e.Tick()
+	if v := asResult(t, streamtest.Expect(t, sub, eventstream.TypePollVote)); v.Total != 4 {
+		t.Errorf("poll.vote carried %d votes, want 4", v.Total)
 	}
 
 	if _, err := e.End(r.ID); err != nil {
 		t.Fatal(err)
 	}
 	final := asResult(t, streamtest.Expect(t, sub, eventstream.TypePollEnded))
-	// alice(twitch) 2, bob 2, alice(youtube) 1; carol deleted, mallory banned.
-	if !eq(votes(final), []int{1, 2}) || final.ByPlatform["twitch"] != 2 || final.ByPlatform["youtube"] != 1 {
+	// alice(twitch) 2, bob 2, alice(youtube) 1, zed 1; carol deleted, mallory
+	// banned and her later vote ignored.
+	if !eq(votes(final), []int{2, 2}) || final.ByPlatform["twitch"] != 3 || final.ByPlatform["youtube"] != 1 {
 		t.Errorf("final = %v by %v", votes(final), final.ByPlatform)
 	}
 }
