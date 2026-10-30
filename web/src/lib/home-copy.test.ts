@@ -103,3 +103,46 @@ describe("the home hero (S1)", () => {
     expect(heroBody).toMatch(/src=\{routing\}/);
   });
 });
+
+/* THE PLAN STRIP (S3). Every figure here must trace to the dated evidence
+ * file, and scripts/check-build.mjs requires a page that cites that file to
+ * show a check date the file itself claims. The two Restream qualifiers the
+ * file records as UNSUPPORTED ("personal profiles only", "excludes Facebook
+ * Pages") must not be published, and the word "watermark" is the page's own
+ * word for Restream's branding, not the evidence file's. */
+describe("the home plan strip (S3)", () => {
+  const source = pages("index.astro");
+  // Only what renders: the explanatory comments legitimately quote the words
+  // the page must not print.
+  const home = source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  it("cites the dated competitor evidence file it sources from", () => {
+    expect(source).toMatch(/competitor-facts-2026-08-15\.md/);
+  });
+
+  it("states the Restream tier figures the evidence file confirms", () => {
+    for (const figure of ["$19/mo", "$49/mo", "$239/mo", "$0"]) {
+      expect(home, figure).toContain(figure);
+    }
+    expect(home).toMatch(/2 channels/);
+    expect(home).toMatch(/8 on Business/);
+  });
+
+  it("does not publish the unsupported Restream qualifiers", () => {
+    expect(home).not.toMatch(/personal profiles/i);
+    expect(home).not.toMatch(/Facebook Pages/i);
+    expect(home).not.toMatch(/watermark/i);
+  });
+
+  it("says plainly that self-hosting needs a server", () => {
+    expect(home).toMatch(/server/i);
+  });
+
+  it("states that Castr has no free tier, as the evidence file does", () => {
+    expect(home).toMatch(/Castr,[^.]*no free tier/);
+  });
+
+  it("shows the check date next to the figures", () => {
+    expect(home).toMatch(/Checked 16 September 2026/);
+  });
+});

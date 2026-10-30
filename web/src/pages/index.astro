@@ -163,6 +163,74 @@ const features = [
 
   <SpecStrip />
 
+  {/* ------------------------------------------------------- plan comparison */}
+  {/* WHAT A FREE SELF-HOSTED TOOL SAVES, AND WHAT IT COSTS YOU (S3, approved).
+      Hosted restreamers lead with a price ladder, and a visitor comparing them
+      has nothing to set beside the ladder. This strip gives the one comparison
+      only this product can make: the same number of destinations, priced and
+      limited differently.
+
+      EVERY FIGURE HERE COMES FROM docs/evidence/competitor-facts-2026-08-15.md,
+      re-read on the date shown below. The file is the rule: a figure it does
+      not state is not printed, which is why the two Restream qualifiers it
+      records as unsupported (personal profiles only; Facebook Pages excluded)
+      are absent, and so is the word "watermark" -- the pricing page's own word
+      is "Restream branding". The Business tier is on the page and in the file's
+      re-check, so it is printed; the file's tier table is not a complete list.
+
+      THE COST OF SELF-HOSTING IS STATED, NOT HIDDEN: the software is free, and
+      the server it runs on is not. A server is named in the first row. */}
+  <section class="wrap py-16 sm:py-20" data-reveal>
+    <div class="max-w-2xl">
+      <p class="eyebrow">What it saves, and what it costs you</p>
+      <h2 class="mt-3 text-balance text-3xl font-medium">
+        Hosted restreamers charge by destination. This one charges for a server.
+      </h2>
+    </div>
+    <div class="mt-10 overflow-x-auto rounded-token border border-line">
+      <table class="w-full min-w-[36rem] border-collapse text-left text-sm">
+        <caption class="sr-only">polyemesis compared with Restream's hosted plans</caption>
+        <thead class="bg-surface">
+          <tr>
+            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-subtle">&nbsp;</th>
+            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-fg">polyemesis</th>
+            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-subtle">Restream, hosted</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line">
+          <tr>
+            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Price</th>
+            <td class="px-5 py-4 align-top text-muted">$0 for the software, plus a server you run it on.</td>
+            <td class="px-5 py-4 align-top text-muted">Free $0 · Standard $19/mo · Professional $49/mo · Business $239/mo.</td>
+          </tr>
+          <tr>
+            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Destinations</th>
+            <td class="px-5 py-4 align-top text-muted">No plan limit. Each one costs uplink, which the <a href="/calculator" class="underline decoration-line underline-offset-4 hover:text-fg">bandwidth calculator</a> works out.</td>
+            <td class="px-5 py-4 align-top text-muted">2 channels on Free, 3 on Standard, 5 on Professional, 8 on Business.</td>
+          </tr>
+          <tr>
+            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Audio per destination</th>
+            <td class="px-5 py-4 align-top text-muted">A different mix for each, summed from the tracks you send.</td>
+            <td class="px-5 py-4 align-top text-muted">One stereo track, sent to every destination.</td>
+          </tr>
+          <tr>
+            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Who runs it</th>
+            <td class="px-5 py-4 align-top text-muted">You, on hardware you control.</td>
+            <td class="px-5 py-4 align-top text-muted">Restream.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-sm leading-relaxed text-muted">
+      Castr, the other hosted option most people compare, has no free tier. Its
+      Starter plan is $19.99 a month.
+    </p>
+    <p class="mt-3 text-sm text-subtle">
+      Checked 16 September 2026 against restream.io/pricing and castr.com/pricing.
+      Prices move, so confirm them on those pages before you decide.
+    </p>
+  </section>
+
   {/* ------------------------------------------------------------- problem */}
   <section class="wrap py-20 sm:py-24" data-reveal>
     <div class="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
