@@ -46,6 +46,54 @@ describe("routingChanges (A7)", () => {
     expect(kinds).toEqual(["delay", "ducking", "secondMix"]);
   });
 
+  it("says nothing without a draft", () => {
+    expect(routingChanges({ stored: base, draft: null })).toEqual([]);
+    expect(routingChanges({ stored: base, draft: undefined })).toEqual([]);
+  });
+
+  it("treats a new destination's draft against defaults: mode, normaliser and empty tracks", () => {
+    // No stored profile: simple mode, auto normaliser, no rows. A draft that
+    // matches those defaults changes nothing but the tracks it turns on, and
+    // a sample rate is not reported for a profile that never existed.
+    const draft: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] };
+    expect(routingChanges({ stored: null, draft })).toEqual([{ kind: "trackAdded", track: 0 }]);
+    expect(routingChanges({ stored: undefined, draft: { ...draft, mode: "matrix" } }).map((c) => c.kind)).toEqual([
+      "trackAdded",
+      "mode",
+    ]);
+  });
+
+  it("does not report a level change on a track that stays out of the mix", () => {
+    const draft = structuredClone(base);
+    draft.tracks[2].gain = 0.25;
+    draft.tracks[2].muted = true;
+    expect(routingChanges({ stored: base, draft })).toEqual([]);
+  });
+
+  it("reads a missing gain as unity and a missing mute as unmuted", () => {
+    const stored: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true }] };
+    const same: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true, gain: 1, muted: false }] };
+    expect(routingChanges({ stored, draft: same })).toEqual([]);
+    const quieter: RoutingProfile = { ...structuredClone(base), tracks: [{ track: 0, enabled: true, gain: 0.5 }] };
+    expect(routingChanges({ stored, draft: quieter })).toEqual([{ kind: "trackLevel", track: 0 }]);
+  });
+
+  it("reports the loudness normaliser and its target", () => {
+    const off = { ...structuredClone(base), normalize: "off" } as RoutingProfile;
+    expect(routingChanges({ stored: base, draft: off }).map((c) => c.kind)).toEqual(["loudness"]);
+    const target = { ...structuredClone(base), loudness: { targetLufs: -14 } } as unknown as RoutingProfile;
+    expect(routingChanges({ stored: base, draft: target }).map((c) => c.kind)).toEqual(["loudness"]);
+  });
+
+  it("reports a music-rights change, but not an empty list against none", () => {
+    const music = { ...structuredClone(base), excludeRoles: ["music"] } as RoutingProfile;
+    expect(routingChanges({ stored: base, draft: music }).map((c) => c.kind)).toEqual(["music"]);
+    expect(routingChanges({ stored: music, draft: { ...structuredClone(base), excludeRoles: [] } }).map((c) => c.kind)).toEqual([
+      "music",
+    ]);
+    expect(routingChanges({ stored: { ...structuredClone(base), excludeRoles: [] }, draft: base })).toEqual([]);
+  });
+
   it("collects the touched tracks once, in order", () => {
     expect(
       changedTracks([
