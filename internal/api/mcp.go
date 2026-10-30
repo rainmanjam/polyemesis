@@ -93,8 +93,12 @@ type mcpOuter struct {
 	remoteAddr string
 	forwarded  http.Header
 	tokenName  string
-	scope      string
-	address    string
+	// scope is the token's BASE tier (db.BaseScope): what it may do through
+	// MCP. Never the stored "mcp-..." value, which no tier check recognises.
+	scope   string
+	address string
+	// access is the MCP switch and levels as read for this request.
+	access db.MCPAccess
 }
 
 func mcpOuterFrom(ctx context.Context) (*mcpOuter, bool) {
@@ -129,16 +133,18 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 // mcpEndpoint builds the /mcp handler. root is the router the dispatched
 // requests are served on -- the same one this handler is mounted in.
 func (s *Server) mcpEndpoint(root http.Handler) http.Handler {
-	readSrv := s.newMCPServer(root, false)
-	adminSrv := s.newMCPServer(root, true)
+	servers := &mcpServers{}
 	sdk := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		if o, ok := mcpOuterFrom(r.Context()); ok && o.scope == db.ScopeAdmin {
-			return adminSrv
+		o, ok := mcpOuterFrom(r.Context())
+		if !ok {
+			// Unreachable behind the handler below; an empty access is a
+			// server with no tools rather than a guess.
+			return servers.get(s, root, false, db.MCPAccess{})
 		}
-		// Anything that is not admin gets the read server, including a scope
+		// Anything that is not admin gets the read tier, including a scope
 		// string this build does not know -- the same narrowing requireScope
-		// applies.
-		return readSrv
+		// applies. The levels narrow it further (mcp_access.go).
+		return servers.get(s, root, o.scope == db.ScopeAdmin, o.access)
 	}, &mcp.StreamableHTTPOptions{
 		// Stateless: no Mcp-Session-Id, every request stands alone and is
 		// authenticated on its own. A session would be a second place a
@@ -165,13 +171,31 @@ func (s *Server) mcpEndpoint(root http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "not signed in")
 			return
 		}
+		// Only an MCP token. The Stream Deck's token, a monitoring script's,
+		// an admin token minted for CI: none of them was issued for an
+		// assistant, and none is accepted here. The message says how to get
+		// the right one, because the operator holding the wrong one is the
+		// one person this answer is for.
+		if !db.IsMCPScope(p.token.Scope) {
+			writeError(w, http.StatusForbidden,
+				"this API token is not an MCP token; create one with the MCP scope under Settings > API tokens")
+			return
+		}
+		access := s.mcpAccess()
+		if !access.Enabled {
+			// Switched off between the gate and here. Same answer as the gate
+			// would have given a moment later.
+			http.NotFound(w, r)
+			return
+		}
 		outer := &mcpOuter{
 			authz:      r.Header.Get("Authorization"),
 			remoteAddr: r.RemoteAddr,
 			forwarded:  http.Header{},
 			tokenName:  p.token.Name,
-			scope:      p.token.Scope,
+			scope:      db.BaseScope(p.token.Scope),
 			address:    s.clientIP(r),
+			access:     access,
 		}
 		for _, h := range forwardedHeaders {
 			if v := r.Header.Values(h); len(v) > 0 {
@@ -192,18 +216,21 @@ const mcpMaxRequestBytes = 64 << 10
 // size is a bug or an install far larger than a tool result should describe.
 const mcpMaxResponseBytes = 2 << 20
 
-func (s *Server) newMCPServer(root http.Handler, admin bool) *mcp.Server {
+func (s *Server) newMCPServer(root http.Handler, admin bool, access db.MCPAccess) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "polyemesis", Title: "polyemesis", Version: s.version}, &mcp.ServerOptions{
 		Instructions: mcpInstructions,
 	})
 	for _, t := range mcpCatalogue() {
-		if t.tier != mcpRead && !admin {
+		if !mcpToolAllowed(t, admin, access) {
 			continue
 		}
 		srv.AddTool(t.descriptor(), s.mcpToolHandler(root, t))
 	}
-	for _, res := range mcpResources() {
-		srv.AddResource(res.descriptor(), s.mcpResourceHandler(root, res))
+	// The resources are the Read level: each one runs a read tool.
+	if access.Has(db.MCPLevelRead) {
+		for _, res := range mcpResources() {
+			srv.AddResource(res.descriptor(), s.mcpResourceHandler(root, res))
+		}
 	}
 	return srv
 }

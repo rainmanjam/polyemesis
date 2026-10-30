@@ -100,18 +100,28 @@ type mcpRig struct {
 	s     *Server
 	read  string
 	admin string
-	audit *[]alerts.Event
+	// restAdmin is an ordinary admin API token, for a REST positive control:
+	// an MCP token is refused on every REST route.
+	restAdmin string
+	audit     *[]alerts.Event
 }
 
 func newMCPRig(t *testing.T) mcpRig {
 	t.Helper()
 	h, store, sign := plantedServer(t)
 	s := serverUnderTest(t, h)
+	// MCP is off on a fresh install; these tests are about what it does when
+	// it is on, with every level. mcp_access_test.go is where off, and each
+	// level, are exercised.
+	if _, err := store.PutMCPAccess(true, db.MCPLevels()); err != nil {
+		t.Fatal(err)
+	}
 	return mcpRig{
 		h: h, store: store, sign: sign, s: s,
-		read:  createScopedToken(t, h, sign, "assistant-read", db.ScopeRead),
-		admin: createScopedToken(t, h, sign, "assistant-admin", db.ScopeAdmin),
-		audit: captureAudit(t, s),
+		read:      createScopedToken(t, h, sign, "assistant-read", db.ScopeMCPRead),
+		admin:     createScopedToken(t, h, sign, "assistant-admin", db.ScopeMCPAdmin),
+		restAdmin: createScopedToken(t, h, sign, "rest-admin", db.ScopeAdmin),
+		audit:     captureAudit(t, s),
 	}
 }
 
@@ -508,7 +518,7 @@ func TestNoMCPToolOrResourceReturnsACredentialToAnyToken(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("plant chat: %v", err)
 	}
-	if high := bodyOf(t, rig.h, bearer(rig.admin), "/api/v1/destinations"); !strings.Contains(high, sentinelDestKey) {
+	if high := bodyOf(t, rig.h, bearer(rig.restAdmin), "/api/v1/destinations"); !strings.Contains(high, sentinelDestKey) {
 		t.Fatal("positive control: the admin's REST view of /destinations does not carry the key")
 	}
 
@@ -687,7 +697,7 @@ func TestTheMCPMarkerMasksSerialisationButLeavesTheTokensScopeAlone(t *testing.T
 	if isReadScopedToken(viaMCP) {
 		t.Fatal("an admin token behind MCP was reported as read-scoped")
 	}
-	if !strings.Contains(bodyOf(t, rig.h, bearer(rig.admin), "/api/v1/destinations"), sentinelDestKey) {
+	if !strings.Contains(bodyOf(t, rig.h, bearer(rig.restAdmin), "/api/v1/destinations"), sentinelDestKey) {
 		t.Fatal("REST stopped giving the admin token its keys")
 	}
 }
@@ -919,7 +929,10 @@ func TestChatAndTranscriptTextIsFencedAsUntrustedAndCannotCloseTheFence(t *testi
 // Transcripts are fenced the same way; non-content tools are not.
 func TestTranscriptSearchIsFencedAndStatusIsNot(t *testing.T) {
 	h, sign, _ := apitailLibraryFixture(t)
-	admin := createScopedToken(t, h, sign, "assistant-admin", db.ScopeAdmin)
+	if _, err := serverUnderTest(t, h).store.PutMCPAccess(true, db.MCPLevels()); err != nil {
+		t.Fatal(err)
+	}
+	admin := createScopedToken(t, h, sign, "assistant-admin", db.ScopeMCPAdmin)
 	cs := mcpClient(t, h, admin)
 	text, isErr := callText(t, cs, "search_transcripts", map[string]any{"query": strings.Fields(apitailSpokenFirst)[0]})
 	if isErr || !strings.HasPrefix(text, mcpUntrustedNote) || !strings.Contains(text, `"hits"`) {
@@ -991,8 +1004,13 @@ func TestApplyingAPresetOverMCPKeepsAMutedTrackMuted(t *testing.T) {
 // proveMCPToolOutputs is POST /mcp's counterpart proof: every read tool, as a
 // read token, over a real MCP client, on the planted fixture.
 func proveMCPToolOutputs(t *testing.T) proofResult {
-	h, _, sign := plantedServer(t)
-	read := createScopedToken(t, h, sign, "ledger-mcp", db.ScopeRead)
+	h, store, sign := plantedServer(t)
+	// The fixture the sweep sees has MCP off, as every install does; the proof
+	// turns it on, with every level, and drives it as an MCP read token.
+	if _, err := store.PutMCPAccess(true, db.MCPLevels()); err != nil {
+		t.Fatal(err)
+	}
+	read := createScopedToken(t, h, sign, "ledger-mcp", db.ScopeMCPRead)
 	cs := mcpClient(t, h, read)
 	var b strings.Builder
 	for _, name := range mcpWantReadTools {

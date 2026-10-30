@@ -324,6 +324,12 @@ func (s *Server) mcpToolHandler(root http.Handler, t mcpTool) mcp.ToolHandler {
 		if t.tier != mcpRead && outer.scope != db.ScopeAdmin {
 			return c.refusal("this tool needs an API token with the \"admin\" scope; this one is read-only", nil)
 		}
+		// And the level, read when this request arrived. The server this call
+		// reached was built without the tool if its level is off, so this is
+		// the second line, not the first.
+		if !mcpToolAllowed(t, outer.scope == db.ScopeAdmin, outer.access) {
+			return c.refusal("this tool's level is switched off in the MCP settings", nil)
+		}
 		var args json.RawMessage
 		if req != nil && req.Params != nil {
 			args = req.Params.Arguments

@@ -360,3 +360,54 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 type nopWriteCloser struct{ bytes.Buffer }
 
 func (nopWriteCloser) Close() error { return nil }
+
+// relayAnswer sends one initialize through the relay to baseURL and returns
+// the line the client is answered with.
+func relayAnswer(t *testing.T, baseURL string) string {
+	t.Helper()
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	var stderr bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- runMCPProxy(ctx, []string{"-url", baseURL}, inR, outW, &stderr,
+			func(k string) string { return map[string]string{"POLYEMESIS_TOKEN": relayTestToken}[k] })
+		_ = outW.Close()
+	}()
+	go func() {
+		_, _ = io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}`+"\n")
+	}()
+	line, err := bufio.NewReader(outR).ReadString('\n')
+	if err != nil {
+		t.Fatalf("no answer from the relay: %v (stderr %s)", err, stderr.String())
+	}
+	_ = inW.Close()
+	cancel()
+	<-done
+	return line
+}
+
+// MCP switched off is a 404 from /mcp, and the operator is told it is the
+// switch rather than left with "404 Not Found". A non-MCP token is the
+// server's 403, and its message -- which says how to get the right token --
+// reaches the client.
+//
+// Mutation: drop the 404 case in tokenTransport.RoundTrip. Observed FAIL.
+func TestTheStdioRelaySaysWhenMCPIsOffOrTheTokenIsNotAnMCPToken(t *testing.T) {
+	off := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(off.Close)
+	if got := relayAnswer(t, off.URL); !strings.Contains(got, "MCP is disabled on this server") || !strings.Contains(got, `"id":1`) {
+		t.Errorf("a switched-off server was relayed as %q", got)
+	}
+	wrong := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":"this API token is not an MCP token; create one with the MCP scope under Settings > API tokens"}`)
+	}))
+	t.Cleanup(wrong.Close)
+	if got := relayAnswer(t, wrong.URL); !strings.Contains(got, "not an MCP token") {
+		t.Errorf("a non-MCP token's refusal was relayed as %q", got)
+	}
+}

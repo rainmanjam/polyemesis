@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -177,7 +178,40 @@ func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+t.token)
-	return t.base.RoundTrip(r)
+	resp, err := t.base.RoundTrip(r)
+	if err != nil {
+		return nil, err
+	}
+	// The two refusals an operator can fix, said in words. Without this the
+	// SDK reports a bare status, and "404 Not Found" on a URL the operator
+	// just typed reads as a typo rather than as the switch it is.
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		_ = resp.Body.Close()
+		return nil, errMCPDisabled
+	case http.StatusForbidden:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("the server refused this token: %s", serverMessage(b))
+	}
+	return resp, nil
+}
+
+// errMCPDisabled is a 404 from /mcp: the server answers an unknown endpoint
+// that way, and it answers /mcp that way while MCP is switched off.
+var errMCPDisabled = errors.New("MCP is disabled on this server, or the URL is wrong. A signed-in admin " +
+	"turns it on under Automation > AI assistants (MCP)")
+
+// serverMessage is the "error" field of a polyemesis JSON error body, or the
+// body itself, on one line.
+func serverMessage(b []byte) string {
+	var body struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(b, &body) == nil && body.Error != "" {
+		return oneLine(body.Error)
+	}
+	return oneLine(strings.TrimSpace(string(b)))
 }
 
 func isLoopbackHost(host string) bool {

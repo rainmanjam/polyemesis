@@ -43,6 +43,15 @@ Every token carries a scope, chosen when it is created:
 |---|---|
 | `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+| `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
+| `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
+
+An `mcp-` token is accepted at `POST /mcp` and nowhere else. Every route in this
+document, `/ws` and `/events` answer it exactly as they answer no token at all,
+so a token minted for an AI assistant cannot be used as an API token, and an API
+token (a Stream Deck's, a script's) is refused at `/mcp`. When an MCP tool runs,
+it calls the routes in this document with the token's base tier, `read` or
+`admin`, and the rules on this page apply to those calls unchanged.
 
 The middleware also lets `HEAD` through, and no route in this API is registered
 for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
@@ -503,6 +512,7 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 | `GET` `POST` | `/overlays` |
 | `PUT` `DELETE` | `/overlays/{id}` |
 | `POST` `DELETE` | `/overlays/{id}/key` |
+| `GET` `PUT` | `/mcp/access` |
 | `GET` | `/tour` |
 | `POST` | `/tour/complete` |
 
@@ -510,6 +520,14 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 `{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
 `adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
 pairing client should say so when it is pasted. A status or meter plugin needs only a read token.
+
+`/mcp/access` is the MCP switch and its levels: `{enabled, levels}`, where
+`levels` holds any of `read`, `content` and `control`. It is session-only so
+that no API token, an admin one included, can turn MCP on for itself. MCP is
+off until somebody turns it on, and the first enable that names no levels turns
+on `read` only. Every change is a `settings.changed` audit event naming the
+setting before and after; turning on `control` is `critical`. See
+[MCP.md](MCP.md#setup).
 
 `/overlays` manages chat overlays and their keys, and needs a signed-in
 session, like `/auth/tokens`: each overlay carries a credential. `POST
@@ -548,9 +566,11 @@ does not get to change what another operator's console shows them.
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
 | `GET` | `/events` | The real-time events API, as Server-Sent Events: destination, ingest, failover, go-live and stop, recording, chat and alert events in the webhook envelope, numbered, with `Last-Event-ID` replay for 5 minutes. `?topics=` filters. A bearer token or the session cookie; no token in the query string. A `read` token is sent everything but `chat` and the audit alerts. Install-wide, so it takes no `?source=`. See [EVENTS.md](EVENTS.md) |
 
-`POST /mcp` (outside `/api/v1`) is the [MCP server](MCP.md): a bearer token
-only, and every tool is a call to one of the routes in this table, made with the
-caller's token, so the scopes above apply to it unchanged.
+`POST /mcp` (outside `/api/v1`) is the [MCP server](MCP.md). It exists only
+while MCP is switched on: until then every method answers the `404` an unknown
+endpoint gets. It takes an `mcp-` token only, and every tool is a call to one of
+the routes in this table, made with the token's base tier, so the scopes above
+apply to it unchanged.
 
 `/status`, `/source`, `/source/annotations`, `/levels`, `/processes`,
 `/processes/{name}/logs` and `/ws` are programme-scoped: on an install with

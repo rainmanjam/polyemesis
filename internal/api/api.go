@@ -826,6 +826,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// Applies to the embedded UI and the HLS preview as well as the API, which
 	// is the point: the CSP only protects the pages the browser renders.
 	r.Use(securityHeaders(s.cfg.ResolvedTLSMode(), s.cfg.TLS.HSTS))
+	// After the logger and the headers, so a switched-off /mcp is logged and
+	// headed exactly as an unknown path is; before routing, so it covers every
+	// method. See mcp_access.go. notFound is filled in at the bottom of this
+	// function, where the router's own not-found handler is chosen.
+	var notFound http.Handler
+	r.Use(s.mcpGate(&notFound))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// --- unauthenticated ---
@@ -920,6 +926,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 				r.Delete("/overlays/{id}", s.handleDeleteOverlay)
 				r.Post("/overlays/{id}/key", s.handleRotateOverlayKey)
 				r.Delete("/overlays/{id}/key", s.handleRevokeOverlayKey)
+				// AI assistant access (MCP). Session-only so that no API
+				// token -- an admin one included -- can switch MCP on for
+				// itself. See mcp_access.go.
+				r.Get("/mcp/access", s.handleGetMCPAccess)
+				r.Put("/mcp/access", s.handlePutMCPAccess)
 
 				// The password. handleChangePassword already demands the
 				// CURRENT password, so a token alone could never have changed
@@ -1565,6 +1576,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)
+		notFound = h
 	} else {
 		s.log.Error("embedded UI unavailable", "err", err)
 	}
@@ -1790,6 +1802,27 @@ func (s *Server) authenticate(r *http.Request) (*principal, error) {
 		tok, err := s.store.LookupAPIToken(raw)
 		if err != nil {
 			return nil, auth.ErrUnauthorized
+		}
+		// AN MCP TOKEN IS A CREDENTIAL FOR /mcp AND NOWHERE ELSE. On any other
+		// route it is exactly as good as no token -- the same 401 an unknown
+		// one gets -- so an assistant's token cannot be replayed against the
+		// REST API, the WebSocket or the events stream.
+		//
+		// The one exception is a request the MCP endpoint itself built to run
+		// a tool (mcpDispatch). It carries mcpCallKey in its context, which no
+		// client can set: context values do not cross the network. That
+		// request acts with the token's BASE tier, and this is the only place
+		// the base tier is applied -- every scope check downstream compares
+		// against db.ScopeAdmin and sees an ordinary read or admin token.
+		if db.IsMCPScope(tok.Scope) {
+			if _, dispatched := mcpCallFrom(r.Context()); dispatched {
+				base := *tok
+				base.Scope = db.BaseScope(tok.Scope)
+				return &principal{token: &base}, nil
+			}
+			if r.URL.Path != MCPPath {
+				return nil, auth.ErrUnauthorized
+			}
 		}
 		return &principal{token: tok}, nil
 	}

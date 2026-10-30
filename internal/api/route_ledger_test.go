@@ -573,14 +573,17 @@ var excusedRoutes = map[string]coverageExcus{
 		Counterpart: "eventStream",
 	},
 	"POST /mcp": {
-		Why: "the MCP endpoint (#12): a JSON-RPC envelope, not a REST body, so the sweep's " +
-			"{} is not a message and the transport refuses it with a 400 before any tool " +
-			"runs -- which is what the Want below observes. Every tool is a dispatch of " +
+		Why: "the MCP endpoint (#12). MCP is off on a fresh install, and the sweep's fixture " +
+			"is one, so every caller gets the router's not-found answer -- the 404 an unknown " +
+			"endpoint gets, which is what the Want below observes and what keeps the route " +
+			"from being discoverable while it is off (mcp_access.go). Switched on, it takes " +
+			"only an MCP-scope token, and an MCP token is refused on every other route. " +
+			"Every tool is a dispatch of " +
 			"routes this ledger already classifies; the counterpart drives every read tool " +
 			"through a real MCP client as a read token against the planted fixture. The " +
 			"admin token's MCP output is held to the same absence by " +
 			"TestNoMCPToolOrResourceReturnsACredentialToAnyToken.",
-		Want:        &routeWant{As: "read", Status: http.StatusBadRequest},
+		Want:        &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
 		Counterpart: "mcpToolOutputs",
 	},
 	"GET /api/v1/playout/public": {
@@ -611,8 +614,11 @@ var excusedRoutes = map[string]coverageExcus{
 	// The overlay list carries every overlay's key, so it is the tokens list's
 	// sibling and has the same posture.
 	"GET /api/v1/overlays": sessionOnly(),
-	"GET /hls/*":           sessionOnly(),
-	"HEAD /hls/*":          sessionOnly(),
+	// The MCP switch and its levels. Session-only so that no API token, an
+	// admin one included, can turn MCP on for itself (mcp_access.go).
+	"GET /api/v1/mcp/access": sessionOnly(),
+	"GET /hls/*":             sessionOnly(),
+	"HEAD /hls/*":            sessionOnly(),
 	// Source-qualified preview. Same posture as the bare alias above: a session
 	// is required and nothing else, because it serves one programme's preview
 	// segments rather than any record.

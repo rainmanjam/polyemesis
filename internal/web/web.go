@@ -142,7 +142,12 @@ func HandlerFor(sub fs.FS) http.Handler {
 		// and a mistyped, removed or wrongly-versioned endpoint is
 		// indistinguishable from a working one. /api/v2/anything answered 200
 		// with the UI. Fail as JSON, with the status the caller expects.
-		if p == "api" || strings.HasPrefix(p, "api/") {
+		//
+		// /mcp is in the same family. It is a JSON-RPC endpoint, and the API
+		// answers it with this handler while MCP is switched off (see
+		// internal/api/mcp_access.go): a client that asked for JSON-RPC gets
+		// the 404 an unknown endpoint gets, not the console's HTML.
+		if p == "api" || strings.HasPrefix(p, "api/") || p == "mcp" {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusNotFound)
