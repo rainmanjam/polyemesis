@@ -14,7 +14,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@astrojs/check": "^0.9.4",
+    "@astrojs/check": "^0.9.12",
     "@astrojs/markdown-satteri": "0.4.3",
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.1.18",
