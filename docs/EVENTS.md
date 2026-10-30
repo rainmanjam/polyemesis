@@ -230,6 +230,10 @@ destination card shows. See [HOT-RELOAD.md](HOT-RELOAD.md).
 On a destination with a broadcast delay, `data` also has `"delaySeconds"`:
 the process has the change now, and viewers hear it that many seconds later.
 
+On a destination with a broadcast delay, `destination.up`, `.down`, `.held`
+and `.restarted` carry `"delaySeconds"` in `data`. `up` then means the
+delayed programme reached the platform.
+
 `destination.delay` follows a destination's broadcast delay
 ([BROADCAST-DELAY.md](BROADCAST-DELAY.md)). `reason` is the phase it entered:
 

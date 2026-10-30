@@ -441,6 +441,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	// FIRST, so it is in the log above the noise of everything coming up.
 	m.warnAboutUnreadableStreamKeys()
 
+	// Before any engine can start a delayed destination: a previous process's
+	// delay spill is an old programme, and nothing may ever release it (#11).
+	sweepDelayRoot(m.cfg.DataDir)
+
 	// Before the engines and outside the error paths below: the resource
 	// sampler describes the box, so it is worth having on an install where not
 	// one source came up -- that is exactly the install an operator is staring

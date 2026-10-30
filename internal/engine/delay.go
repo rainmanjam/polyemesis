@@ -617,6 +617,10 @@ func (m *Manager) CutOnStop(id int64) {
 	}
 }
 
+// DelayAiring reports whether destination id is stopped and still airing its
+// delayed tail, in any programme.
+func (m *Manager) DelayAiring(id int64) bool { return m.drains.owner(id) != nil }
+
 // CutDelay is Stop now across the install: it cuts a drain of id wherever one
 // is playing. Reports whether there was one.
 func (m *Manager) CutDelay(id int64) bool {

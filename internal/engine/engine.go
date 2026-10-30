@@ -5437,7 +5437,8 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 			// for the last delayed second. See delayStillPublishing.
 			ID: d.ID, Name: d.Name, Enabled: d.Enabled || delayStillPublishing(d),
 			// Filling its delay: enabled, not running, and not down either.
-			Buffering: delayHoldsBack(d),
+			Buffering:    delayHoldsBack(d),
+			DelaySeconds: d.DelaySeconds,
 			// A destination whose graph would not compile has no process at
 			// all, and that is as down as a failed one.
 			Running:  d.Error == "" && d.Process != nil && d.Process.State == supervisor.StateRunning,
@@ -5537,7 +5538,16 @@ func (e *Engine) RestartRendition(id int64) error {
 func (e *Engine) RestartDestination(id int64) error {
 	e.mu.RLock()
 	d := e.dests[id]
+	// A delayed destination still filling its buffer has no FFmpeg BY DESIGN
+	// (#11). Restarting one would start it now, on an idle private hub, for the
+	// whole delay -- read as stalled, and with #20's quick-rejection clock
+	// running against a socket that is not the attempt. The buffer is kept and
+	// the start comes when the delayed data is due, as it would anyway.
+	waiting := d != nil && d.delay != nil && !d.delay.due
 	e.mu.RUnlock()
+	if waiting {
+		return nil
+	}
 	if d == nil || d.proc == nil {
 		return e.Reconcile()
 	}

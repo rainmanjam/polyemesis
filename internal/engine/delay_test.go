@@ -694,3 +694,80 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 		}
 	}
 }
+
+// RETRY WHILE BUFFERING STARTS NOTHING. A delayed destination has no FFmpeg
+// until its delayed data is due; a Retry (REST /restart, MCP retry_destination)
+// in that window must not start one onto an idle hub, where it would read as
+// stalled and spend #20's quick-rejection budget on nothing.
+//
+// Mutation: delete the `if waiting { return nil }` guard in RestartDestination.
+// The process is then started inside a ten-minute delay.
+func TestRetryingADelayedDestinationThatIsStillBufferingDoesNotStartItsFFmpeg(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	feed(e.hub, 20)
+	d := destOf(e, row.ID)
+	if err := e.RestartDestination(row.ID); err != nil {
+		t.Fatalf("RestartDestination: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if st := d.proc.Status().State; st != supervisor.StateStopped {
+		t.Fatalf("Retry started the FFmpeg (%q) inside a ten-minute delay", st)
+	}
+	if destOf(e, row.ID).delay != d.delay {
+		t.Fatal("Retry replaced the buffer")
+	}
+	e.Stop()
+}
+
+// THE ENCODER GOING AWAY STOPS NOTHING. With no new datagrams arriving, the
+// buffer keeps releasing what it holds at its own pace, so viewers see the end
+// of the programme Delay after the encoder stopped -- not a cut.
+func TestWhenTheFeedStopsTheBufferKeepsReleasingForTheDelay(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := delayedRow(t, e)
+	row.DelaySeconds = 2
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	d := destOf(e, row.ID)
+	feed(e.hub, 300) // ~0.3 s of feed, then the encoder is gone
+	stopped := time.Now()
+	if got := d.delay.hub.Stats().RxPackets; got != 0 {
+		t.Fatalf("%d datagrams released before the delay was up", got)
+	}
+	eventually(t, "the held programme to play out after the feed stopped", 6*time.Second, func() bool {
+		return d.delay.hub.Stats().RxPackets >= 300
+	})
+	if took := time.Since(stopped); took < 1500*time.Millisecond {
+		t.Fatalf("the tail came out %s after the feed stopped; the delay is 2 s", took)
+	}
+	if destOf(e, row.ID) != d || d.delay.line.Status().Draining {
+		t.Fatal("the encoder going away tore the destination down or started a drain")
+	}
+	e.Stop()
+}
+
+// AN UNMEASURED-INGEST RECONCILE DRAINS, IT DOES NOT CUT. When the encoder's
+// layout is cleared, the next reconcile holds destinations with an empty plan;
+// a delayed destination whose row is still enabled and still there is a plain
+// stop, so its tail plays out rather than being discarded.
+func TestAHeldReconcileDrainsAnEnabledDelayedDestinationRatherThanCuttingIt(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := longDelayRow(t, e)
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	feed(e.hub, 20)
+	e.stopDestinations(map[int64]destPlan{}) // what a held reconcile passes
+	if drainingOf(e, row.ID) == nil {
+		t.Fatal("a held reconcile cut an enabled delayed destination's tail")
+	}
+	e.Stop()
+}

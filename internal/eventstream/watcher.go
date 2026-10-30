@@ -56,6 +56,12 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 					env.Failure = &r
 				}
 			}
+			// A delayed destination's edges carry its delay (#11): "up" on one
+			// means the DELAYED programme reached the platform, and a script
+			// lining events up against the live feed needs to know by how much.
+			if d, ok := rows[id]; ok && d.DelaySeconds > 0 && env.Data == nil {
+				env.Data = map[string]int{"delaySeconds": d.DelaySeconds}
+			}
 		}
 		out = append(out, env)
 	}
@@ -83,8 +89,12 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 				Type: TypeDestinationRestarted, At: snap.At, Destination: ref,
 				Reason: "the process exited and was started again",
 				Error:  d.Error,
-				Data:   map[string]int{"restarts": d.Restarts, "since": d.Restarts - prev},
 			}
+			data := map[string]int{"restarts": d.Restarts, "since": d.Restarts - prev}
+			if d.DelaySeconds > 0 {
+				data["delaySeconds"] = d.DelaySeconds
+			}
+			env.Data = data
 			env.Source = &hooks.SourceRef{ID: src.ID, Name: src.Name}
 			out = append(out, env)
 		}

@@ -125,3 +125,31 @@ func sameTypes(a, b []Type) bool {
 	}
 	return true
 }
+
+// #11: A DELAYED DESTINATION'S EDGES SAY SO. "up" on one means the DELAYED
+// programme reached the platform; up, down and restarted carry delaySeconds, and
+// an undelayed destination's edges carry nothing new.
+//
+// Mutation: make the edge branch's `ok && d.DelaySeconds > 0` condition false.
+// The up edge then has no delaySeconds.
+func TestADelayedDestinationsEdgesCarryItsDelay(t *testing.T) {
+	w := NewWatcher()
+	delayed := alerts.DestState{ID: 3, Enabled: true, Running: true, DelaySeconds: 30, Restarts: 1}
+	plain := alerts.DestState{ID: 4, Enabled: true, Running: true}
+	got := w.Observe(prog, snapAt(0, delayed, plain),
+		[]hooks.Event{edge(hooks.TriggerDestinationUp, 3), edge(hooks.TriggerDestinationUp, 4)})
+	if len(got) != 2 {
+		t.Fatalf("got %v", typesOf(got))
+	}
+	if data, _ := got[0].Data.(map[string]int); data["delaySeconds"] != 30 {
+		t.Errorf("the delayed destination's up carries %v, want delaySeconds 30", got[0].Data)
+	}
+	if got[1].Data != nil {
+		t.Errorf("an undelayed destination's up carries %v", got[1].Data)
+	}
+	delayed.Restarts = 2
+	got = w.Observe(prog, snapAt(2, delayed, plain), nil)
+	if data, _ := got[0].Data.(map[string]int); got[0].Type != TypeDestinationRestarted || data["delaySeconds"] != 30 {
+		t.Errorf("restarted = %v %v", got[0].Type, got[0].Data)
+	}
+}
