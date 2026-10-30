@@ -31,8 +31,8 @@
 #                  flash's, as the median over the whole session. This is lip
 #                  sync as a platform that honours timestamps would play it. It
 #                  does NOT see the fault on its own: the muxer clamps the
-#                  padding onto one timestamp, so main reads 0 ms here too. The
-#                  two measurements below are the ones main fails.
+#                  padding onto one timestamp, so main reads 0 ms here too.
+#                  Hidden audio and the longest gap are what main fails.
 #   longest gap    the longest silence on the SAMPLE timeline, i.e. as heard.
 # The subject must also have exactly one session at the sink.
 #
