@@ -60,6 +60,15 @@
         },
         {
           "Image": "imgs/keys/destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/destination/muted"
+        },
+        {
+          "Image": "imgs/keys/destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/destination/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -98,6 +107,15 @@
         },
         {
           "Image": "imgs/keys/go-live/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/go-live/muted"
+        },
+        {
+          "Image": "imgs/keys/go-live/restarted"
+        },
+        {
+          "Image": "imgs/keys/go-live/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -136,6 +154,15 @@
         },
         {
           "Image": "imgs/keys/stop-all/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-all/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-all/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -175,6 +202,15 @@
         },
         {
           "Image": "imgs/keys/failover/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/failover/muted"
+        },
+        {
+          "Image": "imgs/keys/failover/restarted"
+        },
+        {
+          "Image": "imgs/keys/failover/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -213,6 +249,15 @@
         },
         {
           "Image": "imgs/keys/stop-destination/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/muted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/restarted"
+        },
+        {
+          "Image": "imgs/keys/stop-destination/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -252,6 +297,15 @@
         },
         {
           "Image": "imgs/keys/record/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/record/muted"
+        },
+        {
+          "Image": "imgs/keys/record/restarted"
+        },
+        {
+          "Image": "imgs/keys/record/unavailable"
         }
       ],
       "DisableAutomaticStates": true,
@@ -290,6 +344,15 @@
         },
         {
           "Image": "imgs/keys/preset/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/preset/muted"
+        },
+        {
+          "Image": "imgs/keys/preset/restarted"
+        },
+        {
+          "Image": "imgs/keys/preset/unavailable"
         }
       ],
       "DisableAutomaticStates": true,

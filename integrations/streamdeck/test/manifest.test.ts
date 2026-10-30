@@ -68,10 +68,12 @@ describe("manifest", () => {
   // Each key action has its own face set: imgs/keys/<action>/<state>, with the action's own glyph.
   const shortName = (uuid: string) => uuid.replace(`${manifest.UUID}.`, "");
 
-  it("gives every key action the same eight states, in KEY_STATE order, from its own face set", () => {
+  it("gives every key action the same states, in KEY_STATE order, from its own face set", () => {
     const keys = manifest.Actions.filter((a) => a.Controllers.includes("Keypad"));
     expect(keys.length).toBeGreaterThan(0);
-    const expected = ["idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin"];
+    const expected = [
+      "idle", "live", "warn", "error", "held", "unbound", "halted", "needsAdmin", "muted", "restarted", "unavailable",
+    ];
     expect(Object.keys(KEY_STATE)).toEqual(expected);
     for (const a of keys) {
       // The device draws States[index]; the runtime sends KEY_STATE[tone] as index.
