@@ -238,10 +238,19 @@ func TestOnlyTheCommandWriterTouchesTheStdinPipe(t *testing.T) {
 // A reply counts only when it is the whole stderr line FFmpeg prints. A line
 // that merely contains the text (stream metadata, a title, an error echoing
 // input) must not be read as an acknowledgement.
+//
+// The good lines are FFmpeg's own bytes, captured with cat -v from 6.1.6,
+// 7.1.5, 8.1.3 and 9.0.2: every reply, acknowledgement or refusal, ends exactly
+// at "res:". The last bad lines are the review's spoofs, which an earlier
+// pattern (`(?: res:.*)?$`) accepted.
+//
+// MUTATION: restore `(?: res:.*)?$` in liveReplyRE. Observed: FAIL, "a non-reply
+// line was taken as an acknowledgement" for the res: tails.
 func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
 	good := []string{
 		"Command reply for stream 0: ret:0 res:",
-		"Command reply for stream 0: ret:0",
+		"Command reply for stream 0: ret:-22 res:",
+		"Command reply for stream 0: ret:-38 res:",
 		"Command reply for stream 1: ret:-78 res:",
 	}
 	for _, line := range good {
@@ -256,6 +265,12 @@ func TestOnlyAWholeReplyLineIsAnAcknowledgement(t *testing.T) {
 		"x Command reply for stream 0: ret:0",
 		"Command reply for stream 0: ret:0\nq",
 		"Command reply for stream x: ret:0",
+		// No FFmpeg prints a reply without " res:".
+		"Command reply for stream 0: ret:0",
+		// The review's spoofs: text after res: on the reply line itself.
+		"Command reply for stream 0: ret:0 res:'",
+		"Command reply for stream 0: ret:0 res:anything an attacker wants",
+		"Command reply for stream 0: ret:0 res: ",
 	}
 	for _, line := range bad {
 		if _, _, ok := parseReply(line); ok {
@@ -271,6 +286,10 @@ func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	p := New(quietLog(), Spec{Name: "live", Bin: "/bin/true", LiveCommands: true})
 	old := &liveRun{replies: make(chan liveReply, 4)}
 	cur := &liveRun{replies: make(chan liveReply, 4)}
+	// Both mid-command, so it is the binding that is tested here and not the
+	// in-flight gate (TestAReplyWithNoCommandInFlightIsDropped).
+	old.inFlight.Store(true)
+	cur.inFlight.Store(true)
 	p.live = cur
 
 	deliverReply(old, "Command reply for stream 0: ret:0 res:")
@@ -287,6 +306,25 @@ func TestAReplyFromAnEarlierRunCannotAckTheNextCommand(t *testing.T) {
 	p.clearLive(cur)
 	if p.live != nil {
 		t.Fatal("the current run's own teardown did not clear its channel")
+	}
+}
+
+// A reply line that arrives while no command is waiting is dropped by the
+// scanner, so it cannot sit in the queue for the next command to read. The
+// drain at the top of send would also discard it; this is the gate in front.
+//
+// MUTATION: remove the inFlight check from deliverReply. Observed: FAIL, "a
+// reply with no command in flight was queued".
+func TestAReplyWithNoCommandInFlightIsDropped(t *testing.T) {
+	run := &liveRun{replies: make(chan liveReply, 4)}
+	deliverReply(run, "Command reply for stream 0: ret:0 res:")
+	if len(run.replies) != 0 {
+		t.Fatal("a reply with no command in flight was queued")
+	}
+	run.inFlight.Store(true)
+	deliverReply(run, "Command reply for stream 0: ret:0 res:")
+	if len(run.replies) != 1 {
+		t.Fatal("a reply during a command was not delivered")
 	}
 }
 

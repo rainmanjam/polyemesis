@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -54,7 +55,15 @@ var (
 // liveReplyRE matches FFmpeg's reply as the WHOLE stderr line. Anchored at both
 // ends: stderr can echo text an operator or a stream controls (metadata, titles),
 // and a line that merely contains the words is not an acknowledgement.
-var liveReplyRE = regexp.MustCompile(`^Command reply for stream (\d+): ret:(-?\d+)(?: res:.*)?$`)
+//
+// The line ends EXACTLY at "res:". FFmpeg prints the reply as
+// "Command reply for stream %d: ret:%d res:\n%s" -- the filter's response text,
+// if any, goes on the FOLLOWING line -- so nothing can follow "res:" on the reply
+// line itself. Verified byte for byte (cat -v) on 6.1.6, 7.1.5, 8.1.3 and 9.0.2,
+// for an acknowledgement (ret:0) and for refusals (ret:-22, ret:-38, ret:-78).
+// An earlier spelling accepted any text after "res:", which let a stderr line
+// that merely began like a reply ("...ret:0 res:anything") stand as one.
+var liveReplyRE = regexp.MustCompile(`^Command reply for stream (\d+): ret:(-?\d+) res:$`)
 
 // liveGraphIndex is the filter graph a destination's volume stages live in.
 // FFmpeg numbers a reply by graph, not by output stream, and a destination has
@@ -130,6 +139,13 @@ type liveRun struct {
 	// poisoned is set by a timeout or a write failure. Accessed only under the
 	// owning Process's liveWriteMu.
 	poisoned bool
+	// inFlight is true from just before a command is written until its wait
+	// ends. The scanner drops any reply that arrives outside that window: no
+	// command is waiting for it, so it can only be a line that looks like a
+	// reply, and the drain at the top of send is then the second line of
+	// defence rather than the only one. Atomic because the scanner reads it
+	// without liveWriteMu.
+	inFlight atomic.Bool
 }
 
 // send writes one command and waits for its reply. It is the ONLY method that
@@ -154,6 +170,8 @@ func (r *liveRun) send(line string) (int, error) {
 	if d, ok := r.stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
 		_ = d.SetWriteDeadline(time.Now().Add(liveReplyTimeout))
 	}
+	r.inFlight.Store(true)
+	defer r.inFlight.Store(false)
 	if _, err := io.WriteString(r.stdin, "c"+line); err != nil {
 		r.poisoned = true
 		return 0, fmt.Errorf("write live command: %w", err)
@@ -214,6 +232,9 @@ func (p *Process) SetVolume(instance string, level float64) error {
 // waiter. It never blocks: the scanner is the only reader of stderr.
 func deliverReply(run *liveRun, line string) {
 	if run == nil {
+		return
+	}
+	if !run.inFlight.Load() {
 		return
 	}
 	stream, ret, ok := parseReply(line)
