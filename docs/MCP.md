@@ -3,21 +3,23 @@
 **Let Claude, or any other [Model Context Protocol][mcp] client, read what is
 on air and, if you allow it, act on it.**
 
-polyemesis serves MCP at `POST /mcp`. An assistant connected there can answer
-"why is the Twitch destination failing?" from the same classified failure cause
-the console shows. With an admin token it can also start and stop destinations,
-go live, mute a track, cut a clip or schedule a start, all under the same rules
-as the HTTP API.
+polyemesis serves MCP at `POST /mcp`, **once you turn it on**. An assistant
+connected there can answer "why is the Twitch destination failing?" from the
+same classified failure cause the console shows. If you allow it, it can also
+start and stop destinations, go live, mute a track, cut a clip or schedule a
+start, all under the same rules as the HTTP API.
 
 [mcp]: https://modelcontextprotocol.io/
 
-> **This gives software control of a live broadcast.** Start with a `read`
-> token. Give an assistant an `admin` token only if you would give it the
-> console, and revoke the token when you are done.
+> **MCP is off until you turn it on.** It is opt-in in three layers: a switch,
+> three capability levels under it (Read, Content, Control), and a token scope
+> of its own. Start with Read. Turn on Control only if you would give the
+> assistant the console, and revoke its token when you are done.
 
 ## Contents
 
 - [How it works](#how-it-works)
+- [The switch and the levels](#the-switch-and-the-levels)
 - [Tokens and what each can do](#tokens-and-what-each-can-do)
 - [Tools](#tools)
 - [Resources](#resources)
@@ -31,33 +33,67 @@ as the HTTP API.
 
 | | |
 |---|---|
-| Endpoint | `POST https://your-server/mcp` |
+| Endpoint | `POST https://your-server/mcp`. While MCP is switched off, every method answers the `404` an unknown endpoint gets |
 | Transport | MCP streamable HTTP, stateless: no `Mcp-Session-Id`, one JSON answer per request. `GET` and `DELETE` answer `405`; clients send that `GET` on every connect, so it is logged at debug rather than as a warning |
 | Protocol versions | `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` (official Go SDK v1.8.0) |
-| Authentication | `Authorization: Bearer <API token>`. A browser session cookie is refused with `403` |
+| Authentication | `Authorization: Bearer <MCP token>`: a token with the `mcp-read` or `mcp-admin` scope. Any other API token is refused with `403`, and so is a browser session cookie |
 | Origin | A request carrying an `Origin` header for another host is refused with `403`, as the MCP spec requires against DNS rebinding |
 | Stdio | `polyemesis mcp` relays stdio to `/mcp`, for clients that only start local servers |
 
 **Every tool is a call to the [HTTP API](API.md).** When an assistant calls
 `stop_destination`, polyemesis serves `POST /api/v1/destinations/{id}/stop`
-internally, with the assistant's own token. Authentication, the token's scope,
+internally, with the assistant's own token acting at its base tier (`read` or
+`admin`). Authentication, the token's scope,
 `?source=`, the API's own confirmations and its audit events all apply exactly
 as they do to `curl`. MCP is not a second way in.
 
 Because the transport is stateless, every request authenticates again. A token
 you revoke stops working on its next tool call.
 
+## The switch and the levels
+
+**Automation → AI assistants** holds the switch and three levels. Only a
+signed-in operator can change them: the settings route is session-only, so no
+API token, an admin one included, can turn MCP on for itself. Every change is a
+`settings.changed` [audit event](MONITORING.md#security-and-configuration-events)
+naming the setting before and after, and turning on Control is `critical`. The
+System page shows the same status line, for example `MCP: on (Read + Control)`.
+
+| Level | Tools | Who can use it |
+|---|---|---|
+| **Read** | `get_status`, `list_destinations`, `get_destination`, `list_sources`, `list_routing_presets`, `get_levels`, `list_recordings`, `get_timeline`, `get_stop_impact`, and both [resources](#resources) | `mcp-read` and `mcp-admin` tokens |
+| **Content** | `search_chat`, `get_chat_user`, `search_transcripts` | `mcp-admin` tokens |
+| **Control** | `go_live`, `stop_destination`, `stop_all_destinations`, `start_destination`, `retry_destination`, `set_track_level`, `apply_routing_preset`, `set_recording`, `switch_failover_source`, `create_clip`, `schedule_broadcast` | `mcp-admin` tokens |
+
+The switch is off on a fresh install and after an upgrade. Turning it on the
+first time turns on **Read** and nothing else. A level that is off does not
+exist for any token: its tools are not in `tools/list`, and a call to one by
+name gets the same unknown-tool error a read token gets for a write tool.
+Changes apply to the next request, without a restart.
+
+Content and Control carry a warning in the card. Chat is written by viewers,
+and anything said on stream ends up in transcripts, so text there can try to
+give the assistant instructions. See [Untrusted viewer
+content](#untrusted-viewer-content).
+
+The levels apply to every programme. They cannot be set per programme.
+
 ## Tokens and what each can do
 
-Create a token under **Settings → API tokens**. Its scope decides which tools
-the assistant is shown.
+Create a token under **Settings → API tokens**, with an MCP scope. An MCP token
+works at `/mcp` and **nowhere else**: the REST API, `/ws` and `/events` treat
+it as no token at all. The reverse holds too: an ordinary API token, such as a
+Stream Deck's or a script's, is refused at `/mcp`. So a token minted for an
+assistant cannot be replayed against the API, and a token minted for anything
+else cannot drive an assistant.
 
 | Token | Tools listed | Can it change anything? |
 |---|---|---|
-| `read` | the 9 read tools | No |
-| `admin` | all 23: read, chat and transcripts, and the 11 write tools | Yes |
+| `mcp-read` | the Read level, whatever else is switched on | No |
+| `mcp-admin` | every level that is switched on: up to all 23 tools | Only if Control is on |
 
-A `read` token is not shown the chat and transcript tools. The HTTP API
+What a token reaches is its tier **and** the enabled levels. An `mcp-read`
+token is not shown the chat and transcript tools even with Content on. The HTTP API
 withholds what viewers wrote and said from `read` tokens (see
 [API.md](API.md#token-scopes)), and MCP follows the API. A `read` token
 that calls a write tool by name gets an error, and so would its request to the
@@ -69,7 +105,7 @@ The route column is the request each tool makes. Every tool that acts on a
 programme takes an optional `source` (programme id). On an install with more
 than one programme it is required, as `?source=` is in the API.
 
-### Read: `read` and `admin` tokens
+### Read level: `mcp-read` and `mcp-admin` tokens
 
 | Tool | What it answers | Route |
 |---|---|---|
@@ -83,7 +119,7 @@ than one programme it is required, as `?source=` is in the API.
 | `get_timeline` | Recent events and alerts. `limit` (1–500), `minSeverity` | `GET /timeline` |
 | `get_stop_impact` | What a stop would end, including live YouTube broadcasts | `GET /destinations/stop-impact` |
 
-### Content: `admin` token only
+### Content level: `mcp-admin` token only
 
 The answers below contain text written by viewers or spoken on stream. That text
 is [fenced as untrusted](#untrusted-viewer-content).
@@ -94,7 +130,7 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `search_chat` | Search the retained chat. `query`, `platform`, `limit` (1–100) | `GET /chat/search` |
 | `get_chat_user` | One chat author's card. `platform`, `authorId` | `GET /chat/users` |
 
-### Write: `admin` token only
+### Control level: `mcp-admin` token only
 
 | Tool | What it does | Confirm? | Route |
 |---|---|---|---|
@@ -223,17 +259,26 @@ Read tools are not audited. A confirmation preview is not audited, because
 nothing happened.
 
 To cut an assistant off, revoke its token under **Settings → API tokens**. Its
-next call fails.
+next call fails. To cut every assistant off at once, turn the switch off.
 
 ## Setup
 
-### 1. Create a token
+### 1. Turn MCP on and pick the levels
+
+**Automation → AI assistants.** Turn on **Allow MCP connections**. Read is on;
+add Content or Control only if you want the assistant to read chat and
+transcripts, or to act.
+
+### 2. Create an MCP token
 
 **Settings → API tokens → New token.** Name it after the assistant
 (`claude-desktop`), because that name is what the audit trail shows. Choose
-`read` unless you want the assistant to act. The token is shown once. Copy it.
+**MCP, read** unless you want the assistant to reach Content or Control, which
+need **MCP, admin**. The token is shown once. Copy it.
 
-### 2a. Claude Code (HTTP)
+### 3. Connect a client
+
+#### Claude Code (HTTP)
 
 ```sh
 export POLYEMESIS_TOKEN='pk_...'
@@ -259,7 +304,7 @@ To keep the token out of the stored config, add the server to a project's
 With [selfsigned TLS](TLS.md), the client must trust polyemesis's CA. Install
 it as described in TLS.md, or use the stdio relay below with `-ca`.
 
-### 2b. Claude Desktop (stdio relay)
+#### Claude Desktop (stdio relay)
 
 Claude Desktop's config starts local servers. Point it at `polyemesis mcp`. On
 macOS the file is `~/Library/Application Support/Claude/claude_desktop_config.json`.
@@ -287,13 +332,17 @@ Restart Claude Desktop. The tools appear under the polyemesis connector.
 | `-ca` | A PEM CA to trust in addition to the system's: polyemesis's own CA in `selfsigned` TLS mode. Download it from **Settings → TLS** or `GET /api/v1/tls/ca` |
 | `-token-file` | Read the token from a file instead of `POLYEMESIS_TOKEN` |
 
+If MCP is switched off, the relay answers every request with "MCP is disabled
+on this server". If the token is not an MCP token, it passes on the server's
+message saying so.
+
 The token is **never** an argument. Arguments show up in `ps` and in config
 files that get shared. `http://` is refused unless the host is `localhost` or a
 loopback address, because the token would cross the network in clear. The
 relay writes only JSON-RPC to stdout and its own errors to stderr. It is the
 same binary as the server, so any machine with a polyemesis download has it.
 
-### 2c. Any other client
+#### Any other client
 
 Point an MCP client that supports streamable HTTP at `https://your-server/mcp`
 with the header `Authorization: Bearer <token>`.
@@ -337,7 +386,7 @@ clients: they do not send `Origin`.
   polyemesis cannot push events to an assistant. For a live feed, use the
   [events API](EVENTS.md).
 - **One server, all programmes.** Tools take `source` and are not split per
-  programme.
+  programme, and the levels apply to every programme.
 - **The untrusted-content fence is advisory.** It tells the model what the
   text is. It cannot make a model obey that. The server-side confirmations are
   what stop a single injected message from ending a broadcast.

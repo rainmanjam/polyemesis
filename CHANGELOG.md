@@ -27,22 +27,33 @@ its first tagged release.
   stays the default, because a reverse proxy logs paths. Polyemesis's own log
   never records the key, and the pages send `Referrer-Policy: no-referrer`. See
   [docs/OVERLAY.md](docs/OVERLAY.md#the-key-in-the-path).
-- **MCP server.** `POST /mcp` lets Claude Desktop, Claude Code or any Model
-  Context Protocol client read what is on air and, with an admin token, act on
-  it. Setup, with config examples, is in [docs/MCP.md](docs/MCP.md).
+- **MCP server, off until you turn it on.** `POST /mcp` lets Claude Desktop,
+  Claude Code or any Model Context Protocol client read what is on air and, if
+  you allow it, act on it. Setup, with config examples, is in
+  [docs/MCP.md](docs/MCP.md).
+  - Opt-in in three layers. A switch under **Automation → AI assistants** is
+    off on new and upgraded installs, and while it is off every method on
+    `/mcp` answers the `404` an unknown endpoint gets. Under the switch are
+    three levels: Read, Content (chat and transcripts) and Control (every
+    write tool). The first enable turns on Read only. Only a signed-in
+    operator can change these; no API token can, an admin one included. Every
+    change is audited, and turning on Control is `critical`.
   - Streamable HTTP, stateless, on the official Go SDK (v1.8.0; protocol
     `2026-07-28` back to `2024-11-05`). `polyemesis mcp -url ...` relays stdio
     to it for clients that only start local servers. The token comes from
     `POLYEMESIS_TOKEN` or a file, never the command line.
-  - Authenticated with existing API tokens; a browser session is refused. A
-    `read` token is listed 9 read tools: status, destinations and their failure
-    causes, sources and link stats, routing presets, levels, recordings,
-    timeline and alerts, and stop impact. An `admin` token adds chat and
-    transcript search, the chat user card, and 11 write tools: start, stop,
-    retry, go live, stop all, mute and gain, apply a routing preset, recording
-    on/off, failover switch, create a clip, and schedule a start or stop.
-  - Every tool is a call to the HTTP API with the caller's own token, so scopes,
-    `?source=` and the API's own checks apply unchanged.
+  - Authenticated with MCP tokens: the new `mcp-read` and `mcp-admin` scopes.
+    `/mcp` refuses every other API token, and an MCP token works nowhere but
+    `/mcp`. A browser session is refused. An `mcp-read` token reaches the Read
+    level: 9 tools for status, destinations and their failure causes, sources
+    and link stats, routing presets, levels, recordings, timeline and alerts,
+    and stop impact. An `mcp-admin` token reaches every level that is on,
+    adding chat and transcript search, the chat user card, and 11 write tools:
+    start, stop, retry, go live, stop all, mute and gain, apply a routing
+    preset, recording on/off, failover switch, create a clip, and schedule a
+    start or stop.
+  - Every tool is a call to the HTTP API with the caller's own token at its
+    base tier, so scopes, `?source=` and the API's own checks apply unchanged.
   - Stop tools, go live, retry, routing presets, recording off and scheduled
     stops do nothing without `confirm: true`, and answer with what they would
     do: what a stop ends, whether a retry interrupts a live output or lifts a
