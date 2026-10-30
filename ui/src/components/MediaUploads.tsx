@@ -324,12 +324,12 @@ export function MediaUploads() {
                   <div className="flex items-center gap-2">
                     {/* The origin tag. Uploaded files are never swept by
                         retention; recordings are. */}
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-sm uppercase tracking-wide text-muted-foreground">
                       {f.origin}
                     </span>
                     <span className="truncate font-mono text-xs">{f.name}</span>
                   </div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-sm text-muted-foreground">
                     {bytes(f.bytes)} · {timestamp(f.modified)}
                   </div>
                   {/* THE THIRD STATE, said out loud.
@@ -363,7 +363,7 @@ export function MediaUploads() {
                       notice.tone === "refused" ? ShieldX : ShieldAlert;
                     return (
                       <div
-                        className={`mt-0.5 flex items-center gap-1 text-[11px] ${
+                        className={`mt-0.5 flex items-center gap-1 text-sm ${
                           notice.tone === "refused"
                             ? "text-destructive"
                             : "text-warn"
@@ -382,7 +382,7 @@ export function MediaUploads() {
                       Absent for anything stored before uploads were probed,
                       which renders as nothing rather than as zeroes. */}
                   {f.media && (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
                       {f.media.durationSeconds > 0 && (
                         <span>{duration(f.media.durationSeconds)}</span>
                       )}

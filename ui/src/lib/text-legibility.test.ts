@@ -100,6 +100,12 @@ const CONFIG_SURFACES = [
   "components/PresetReviewDialog.tsx",
   "components/SetupChecklist.tsx",
   "components/signature/RoutingSaveBar.tsx",
+  "pages/SettingsPage.tsx",
+  "pages/SourcesPage.tsx",
+  "components/HooksCard.tsx",
+  "pages/JobsPage.tsx",
+  "pages/AutomationPage.tsx",
+  "components/MediaUploads.tsx",
 ];
 
 describe("config surfaces hold a 12px floor for labels and values", () => {

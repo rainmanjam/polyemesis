@@ -475,12 +475,12 @@ export function JobsPage() {
       />
 
       {!view.whisper.available && (
-        <p className="mt-3 text-tiny text-muted-foreground">
+        <p className="mt-3 text-sm text-muted-foreground">
           {t("jobs.transcriptionUnavailable", { reason: view.whisper.unavailable ?? "" })}
         </p>
       )}
       {gates && !governed && (
-        <p className="mt-3 text-tiny text-warn">
+        <p className="mt-3 text-sm text-warn">
           {t("jobs.policyOffNote")}
         </p>
       )}
@@ -570,7 +570,7 @@ function GatePanel({ view }: { view: JobsOverview }) {
           <div className="w-full border-t border-border pt-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {blocked.map((v) => (
-                <span key={v.kind} className="text-tiny text-muted-foreground">
+                <span key={v.kind} className="text-sm text-muted-foreground">
                   <span className="font-mono text-foreground">{v.kind}</span> — {v.reason}
                 </span>
               ))}
@@ -629,7 +629,7 @@ function JobTable({
           return (
             <Fragment key={j.id}>
               <TableRow>
-                <TableCell className="text-tiny">
+                <TableCell className="text-sm">
                   <button
                     type="button"
                     className={cn(
@@ -641,7 +641,7 @@ function JobTable({
                     aria-expanded={expanded}
                   >
                     <span className="block">{j.label ?? j.kind}</span>
-                    <span className="block font-mono text-micro text-muted-foreground">
+                    <span className="block font-mono text-sm text-muted-foreground">
                       #{j.id}
                       {j.attempts > 1
                         ? ` · ${t("jobs.attempt", { n: j.attempts, max: j.maxAttempts })}`
@@ -649,7 +649,7 @@ function JobTable({
                     </span>
                   </button>
                 </TableCell>
-                <TableCell className="max-w-[16rem] truncate font-mono text-tiny text-muted-foreground">
+                <TableCell className="max-w-[16rem] truncate font-mono text-sm text-muted-foreground">
                   {j.recording ?? j.target}
                 </TableCell>
                 <TableCell>
@@ -658,7 +658,7 @@ function JobTable({
                 <TableCell>
                   <ProgressCell job={j} />
                 </TableCell>
-                <TableCell className="text-tiny text-muted-foreground">
+                <TableCell className="text-sm text-muted-foreground">
                   {j.error ? (
                     <span className="flex items-start gap-1 text-down">
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -726,13 +726,13 @@ function JobTable({
                 <TableRow>
                   <TableCell colSpan={6} className="bg-card-raised/40">
                     <div className="flex flex-col gap-1 py-1.5">
-                      {j.error && <p className="text-tiny text-down">{j.error}</p>}
+                      {j.error && <p className="text-sm text-down">{j.error}</p>}
                       {(j.log?.length ?? 0) > 0 && (
-                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-micro leading-relaxed text-muted-foreground">
+                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-sm leading-relaxed text-muted-foreground">
                           {j.log?.join("\n")}
                         </pre>
                       )}
-                      <p className="text-micro text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {t("jobs.queuedAt", { time: timestamp(j.createdAt) })}
                         {j.startedAt
                           ? ` · ${t("jobs.startedAt", { time: timestamp(j.startedAt) })}`
@@ -756,10 +756,10 @@ function JobTable({
 function ProgressCell({ job }: { job: JobView }) {
   const t = useT();
   if (job.state === "done") {
-    return <span className="text-tiny text-muted-foreground">{t("jobs.complete")}</span>;
+    return <span className="text-sm text-muted-foreground">{t("jobs.complete")}</span>;
   }
   if (job.state !== "running") {
-    return <span className="text-tiny text-muted-foreground">—</span>;
+    return <span className="text-sm text-muted-foreground">—</span>;
   }
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
   return (
@@ -767,11 +767,11 @@ function ProgressCell({ job }: { job: JobView }) {
       <div className="h-1 flex-1 overflow-hidden rounded-full bg-secondary">
         <div className="h-full bg-live transition-[width]" style={{ width: `${pct}%` }} />
       </div>
-      <span className="tnum w-8 shrink-0 text-right font-mono text-micro">{pct}%</span>
+      <span className="tnum w-8 shrink-0 text-right font-mono text-sm">{pct}%</span>
       {/* The ETA is withheld below a few per cent, where the extrapolation is
           nonsense. A wildly wrong ETA is worse than none. */}
       {job.etaSeconds ? (
-        <span className="tnum w-14 shrink-0 text-right font-mono text-micro text-muted-foreground">
+        <span className="tnum w-14 shrink-0 text-right font-mono text-sm text-muted-foreground">
           {duration(job.etaSeconds)}
         </span>
       ) : (
@@ -837,7 +837,7 @@ function PolicyEditor({
           at the top is a bar an operator editing the last card cannot see. */}
       {dirty && (
         <div className="sticky top-0 z-10 flex items-center justify-end gap-2 rounded-md border border-warn/40 bg-background/95 px-2 py-1.5 backdrop-blur">
-          <span className="mr-auto text-tiny text-warn">{t("jobs.unsavedChanges")}</span>
+          <span className="mr-auto text-sm text-warn">{t("jobs.unsavedChanges")}</span>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onRevert}>
             {t("jobs.revert")}
           </Button>
@@ -859,9 +859,9 @@ function PolicyEditor({
                 <CardHeader className="flex-row items-start justify-between gap-2">
                   <div className="min-w-0">
                     <CardTitle>{k.label}</CardTitle>
-                    <p className="mt-0.5 text-tiny text-muted-foreground">{k.description}</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">{k.description}</p>
                     {!k.available && (
-                      <p className="mt-1 text-tiny text-warn">{k.unavailable}</p>
+                      <p className="mt-1 text-sm text-warn">{k.unavailable}</p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -890,7 +890,7 @@ function PolicyEditor({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-                  <p className="text-tiny text-muted-foreground">{t(JOB_MODE_HINT[mode])}</p>
+                  <p className="text-sm text-muted-foreground">{t(JOB_MODE_HINT[mode])}</p>
 
                   {mode === "scheduled" && (
                     <WindowEditor
@@ -901,14 +901,14 @@ function PolicyEditor({
                   )}
 
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-                    <label className="flex items-center gap-2 text-tiny">
+                    <label className="flex items-center gap-2 text-sm">
                       <Switch
                         checked={row?.usesGpu ?? k.usesGpu}
                         onCheckedChange={(v) => setKind(k.kind, { usesGpu: v })}
                       />
                       {t("jobs.competesWithGpu")}
                     </label>
-                    <label className="flex items-center gap-2 text-tiny">
+                    <label className="flex items-center gap-2 text-sm">
                       <Switch
                         checked={row?.ignoreIngest ?? k.ignoreIngest}
                         onCheckedChange={(v) => setKind(k.kind, { ignoreIngest: v })}
@@ -936,7 +936,7 @@ function PolicyEditor({
                   onCheckedChange={(v) => onPatch({ enabled: v })}
                 />
               </label>
-              <p className="-mt-2 text-micro text-muted-foreground">
+              <p className="-mt-2 text-sm text-muted-foreground">
                 {t("jobs.resourcePolicyOffHint")}
               </p>
 
@@ -1085,7 +1085,7 @@ function PolicyEditor({
                 {t("jobs.gpuInUse")}
                 <Switch checked={draft.gpuBusy} onCheckedChange={(v) => onPatch({ gpuBusy: v })} />
               </label>
-              <p className="-mt-2 text-micro text-muted-foreground">
+              <p className="-mt-2 text-sm text-muted-foreground">
                 {t("jobs.gpuInUseHint")}
               </p>
               <NumberField
@@ -1131,18 +1131,18 @@ function PolicyEditor({
                   </option>
                 ))}
               </select>
-              <span className="text-micro text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {tn("jobs.defaultModelHint", {
                   model: <strong>{whisper.defaultModel || t("jobs.defaultModelNone")}</strong>,
                 })}
               </span>
               {!whisper.available && (
-                <span className="text-micro text-warn">
+                <span className="text-sm text-warn">
             {t("jobs.whisperMissing")}
                 </span>
               )}
               {(whisper.models ?? []).length === 0 && whisper.available && (
-                <span className="text-micro text-warn">
+                <span className="text-sm text-warn">
             {t("jobs.noModels")}
                 </span>
               )}
@@ -1213,7 +1213,7 @@ function NumberField({
           onChange(Number.isNaN(n) ? min : n);
         }}
       />
-      {hint && <p className="text-micro text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -1256,7 +1256,7 @@ function WindowEditor({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-card-raised/40 p-2">
       {windows.length === 0 && (
-        <p className="text-tiny text-warn">
+        <p className="text-sm text-warn">
           {t("jobs.noWindows")}
         </p>
       )}
@@ -1264,15 +1264,15 @@ function WindowEditor({
         <div key={i} className="flex flex-wrap items-center gap-2">
           <Input
             type="time"
-            className="tnum h-7 w-24 font-mono text-tiny"
+            className="tnum h-7 w-24 font-mono text-sm"
             value={minutesToClock(w.startMinutes)}
             onChange={(e) => set(i, { startMinutes: clockToMinutes(e.target.value) })}
             aria-label={t("jobs.windowStart")}
           />
-          <span className="text-tiny text-muted-foreground">{t("jobs.windowTo")}</span>
+          <span className="text-sm text-muted-foreground">{t("jobs.windowTo")}</span>
           <Input
             type="time"
-            className="tnum h-7 w-24 font-mono text-tiny"
+            className="tnum h-7 w-24 font-mono text-sm"
             value={minutesToClock(w.endMinutes >= 1440 ? 1439 : w.endMinutes)}
             onChange={(e) => set(i, { endMinutes: clockToMinutes(e.target.value) })}
             aria-label={t("jobs.windowEnd")}
@@ -1288,7 +1288,7 @@ function WindowEditor({
                   aria-pressed={on}
                   onClick={() => toggleDay(i, day)}
                   className={cn(
-                    "h-6 w-6 rounded text-micro font-semibold transition-colors",
+                    "h-6 w-6 rounded text-sm font-semibold transition-colors",
                     on
                       ? "bg-primary-dim text-foreground"
                       : "text-muted-foreground hover:bg-accent",
@@ -1317,7 +1317,7 @@ function WindowEditor({
               nearly always wanted without shutting out the third. */}
           <Input
             list={zoneListId}
-            className="h-7 w-44 font-mono text-[11px]"
+            className="h-7 w-44 font-mono text-sm"
             value={w.tz ?? ""}
             spellCheck={false}
             placeholder="UTC"
@@ -1334,7 +1334,7 @@ function WindowEditor({
           >
             <X />
           </Button>
-          <span className="w-full text-micro text-muted-foreground">{windowSummary(t, w)}</span>
+          <span className="w-full text-sm text-muted-foreground">{windowSummary(t, w)}</span>
         </div>
       ))}
       {/* One list for every row in this editor, which is why the id carries the
@@ -1344,7 +1344,7 @@ function WindowEditor({
         <option value={tz} />
       </datalist>
       {windows.length > 0 && (
-        <p className="text-[10px] text-muted-foreground">{t("jobs.windowZoneHint")}</p>
+        <p className="text-sm text-muted-foreground">{t("jobs.windowZoneHint")}</p>
       )}
       <Button
         variant="outline"
