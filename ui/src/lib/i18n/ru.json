@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "повтор через {seconds} с",
   "i18nSweep.commandLine": "командная строка",
   "i18nSweep.follow": "Следить",
+  "i18nSweep.monCores": "Ядер: {cores} · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "Подписчиков: {count} · порт {port}",
+  "i18nSweep.monTsMissing": "Потеряно {lost} из {total} пакетов TS · разрывов: {breaks}",
   "dash.stopCountLoading": "Подсчёт трансляций YouTube, которые завершит эта остановка…",
   "dash.stopCountFailed": "Не удалось загрузить число трансляций, которые завершит эта остановка, поэтому «Остановить всё» недоступно. Закройте окно и попробуйте снова."
 }

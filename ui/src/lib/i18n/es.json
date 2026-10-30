@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "reintentando en {seconds} s",
   "i18nSweep.commandLine": "línea de comandos",
   "i18nSweep.follow": "Seguir",
+  "i18nSweep.monCores": "{cores} núcleos · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} suscriptores · puerto {port}",
+  "i18nSweep.monTsMissing": "faltan {lost} de {total} paquetes TS · {breaks} cortes",
   "dash.stopCountLoading": "Contando las transmisiones de YouTube que este stop terminaría…",
   "dash.stopCountFailed": "No se pudo cargar el recuento de transmisiones que terminaría este stop, así que «Detener todo» no está disponible. Cierra y vuelve a intentarlo."
 }

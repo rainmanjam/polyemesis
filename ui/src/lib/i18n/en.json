@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "retrying in {seconds}s",
   "i18nSweep.commandLine": "command line",
   "i18nSweep.follow": "Follow",
+  "i18nSweep.monCores": "{cores} cores · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} subscribers · port {port}",
+  "i18nSweep.monTsMissing": "{lost} of {total} TS packets missing · {breaks} breaks",
   "dash.stopCountLoading": "Counting the YouTube broadcasts this stop would end…",
   "dash.stopCountFailed": "The count of broadcasts this stop would end could not be loaded, so Stop all is unavailable. Close and try again."
 }

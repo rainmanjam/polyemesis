@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "nuovo tentativo tra {seconds} s",
   "i18nSweep.commandLine": "riga di comando",
   "i18nSweep.follow": "Segui",
+  "i18nSweep.monCores": "{cores} core · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} sottoscrittori · porta {port}",
+  "i18nSweep.monTsMissing": "{lost} pacchetti TS mancanti su {total} · {breaks} interruzioni",
   "dash.stopCountLoading": "Conteggio delle dirette YouTube che questo stop terminerebbe…",
   "dash.stopCountFailed": "Non è stato possibile caricare il conteggio delle dirette che questo stop terminerebbe, quindi «Ferma tutto» non è disponibile. Chiudi e riprova."
 }

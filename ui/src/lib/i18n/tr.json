@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "{seconds} sn sonra yeniden denenecek",
   "i18nSweep.commandLine": "komut satırı",
   "i18nSweep.follow": "Takip et",
+  "i18nSweep.monCores": "{cores} çekirdek · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} abone · bağlantı noktası {port}",
+  "i18nSweep.monTsMissing": "{total} TS paketinden {lost} tanesi eksik · {breaks} kesinti",
   "dash.stopCountLoading": "Bu durdurmanın sonlandıracağı YouTube yayınları sayılıyor…",
   "dash.stopCountFailed": "Bu durdurmanın sonlandıracağı yayın sayısı yüklenemedi, bu yüzden 'Tümünü durdur' kullanılamıyor. Kapatıp yeniden deneyin."
 }

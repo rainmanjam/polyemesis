@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "opnieuw over {seconds} s",
   "i18nSweep.commandLine": "opdrachtregel",
   "i18nSweep.follow": "Volgen",
+  "i18nSweep.monCores": "{cores} kernen · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} afnemers · poort {port}",
+  "i18nSweep.monTsMissing": "{lost} van {total} TS-pakketten ontbreken · {breaks} onderbrekingen",
   "dash.stopCountLoading": "Tellen van de YouTube-uitzendingen die deze stop zou beëindigen…",
   "dash.stopCountFailed": "Het aantal uitzendingen dat deze stop zou beëindigen kon niet worden geladen, dus 'Alles stoppen' is niet beschikbaar. Sluit en probeer opnieuw."
 }

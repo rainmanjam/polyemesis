@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "nouvel essai dans {seconds} s",
   "i18nSweep.commandLine": "ligne de commande",
   "i18nSweep.follow": "Suivre",
+  "i18nSweep.monCores": "{cores} cœurs · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} abonnés · port {port}",
+  "i18nSweep.monTsMissing": "{lost} paquets TS manquants sur {total} · {breaks} ruptures",
   "dash.stopCountLoading": "Décompte des diffusions YouTube que cet arrêt terminerait…",
   "dash.stopCountFailed": "Le décompte des diffusions que cet arrêt terminerait n'a pas pu être chargé : « Tout arrêter » est indisponible. Fermez et réessayez."
 }

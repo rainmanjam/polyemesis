@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "ponowna próba za {seconds} s",
   "i18nSweep.commandLine": "wiersz poleceń",
   "i18nSweep.follow": "Śledź",
+  "i18nSweep.monCores": "Rdzenie: {cores} · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "Odbiorcy: {count} · port {port}",
+  "i18nSweep.monTsMissing": "Brakuje {lost} z {total} pakietów TS · przerwy: {breaks}",
   "dash.stopCountLoading": "Liczenie transmisji YouTube, które to zatrzymanie zakończy…",
   "dash.stopCountFailed": "Nie udało się wczytać liczby transmisji, które to zatrzymanie zakończy, więc „Zatrzymaj wszystko” jest niedostępne. Zamknij i spróbuj ponownie."
 }

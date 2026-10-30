@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "tentando de novo em {seconds} s",
   "i18nSweep.commandLine": "linha de comando",
   "i18nSweep.follow": "Acompanhar",
+  "i18nSweep.monCores": "{cores} núcleos · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} assinantes · porta {port}",
+  "i18nSweep.monTsMissing": "{lost} de {total} pacotes TS ausentes · {breaks} quebras",
   "dash.stopCountLoading": "Contando as transmissões do YouTube que esta parada encerraria…",
   "dash.stopCountFailed": "Não foi possível carregar a contagem de transmissões que esta parada encerraria, então 'Parar tudo' não está disponível. Feche e tente de novo."
 }

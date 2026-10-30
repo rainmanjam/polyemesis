@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "{seconds}초 후 재시도",
   "i18nSweep.commandLine": "명령줄",
   "i18nSweep.follow": "따라가기",
+  "i18nSweep.monCores": "코어 {cores}개 · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "구독자 {count} · 포트 {port}",
+  "i18nSweep.monTsMissing": "TS 패킷 {total}개 중 {lost}개 누락 · 끊김 {breaks}회",
   "dash.stopCountLoading": "이 중지로 종료될 YouTube 방송을 세는 중…",
   "dash.stopCountFailed": "이 중지로 종료될 방송 수를 불러오지 못해 '모두 중지'를 사용할 수 없습니다. 닫은 뒤 다시 시도하세요."
 }

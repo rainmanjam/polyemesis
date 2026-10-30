@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "{seconds} 秒後に再試行",
   "i18nSweep.commandLine": "コマンドライン",
   "i18nSweep.follow": "追従",
+  "i18nSweep.monCores": "{cores} コア · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "購読者 {count} · ポート {port}",
+  "i18nSweep.monTsMissing": "TS パケット {total} 中 {lost} 欠落 · 途切れ {breaks}",
   "dash.stopCountLoading": "このストップで終了する YouTube 配信を数えています…",
   "dash.stopCountFailed": "このストップで終了する配信数を読み込めなかったため、「すべて停止」は利用できません。閉じてからもう一度お試しください。"
 }

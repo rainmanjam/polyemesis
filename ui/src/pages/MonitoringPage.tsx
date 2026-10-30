@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/InfoHint";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -630,7 +631,8 @@ export function MonitoringPage() {
               tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {system?.numCpu ?? 0} cores · polyemesis {pct(system?.procCpuPercent ?? 0)}
+              {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
+              <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -644,6 +646,7 @@ export function MonitoringPage() {
             <div className="mt-1 text-micro text-muted-foreground">
               {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
               {bytes(system?.procMemBytes ?? 0)}
+              <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -651,7 +654,11 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
             <div className="mt-1 text-micro text-muted-foreground">
-              {status?.relay.subscribers?.length ?? 0} subscribers · port {status?.relay.port ?? "—"}
+              {t("i18nSweep.monSubscribers", {
+                count: status?.relay.subscribers?.length ?? 0,
+                port: status?.relay.port ?? "—",
+              })}
+              <InfoHint body="mon.relayIn.hint" title="mon.relayIn" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -664,6 +671,7 @@ export function MonitoringPage() {
             />
             <div className="mt-1 text-micro text-muted-foreground">
               {t("mon.relayDropsNote")}
+              <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
           </CardContent>
         </Card>
@@ -675,9 +683,12 @@ export function MonitoringPage() {
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
-              {(status?.relay.tsLost ?? 0).toLocaleString()} of{" "}
-              {((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString()} TS
-              packets missing · {(status?.relay.discontinuities ?? 0).toLocaleString()} breaks
+              {t("i18nSweep.monTsMissing", {
+                lost: (status?.relay.tsLost ?? 0).toLocaleString(),
+                total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
+                breaks: (status?.relay.discontinuities ?? 0).toLocaleString(),
+              })}
+              <InfoHint body="mon.ingestLoss.hint" title="mon.ingestLoss" className="ml-1" />
             </div>
           </CardContent>
         </Card>

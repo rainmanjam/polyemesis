@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "neuer Versuch in {seconds} s",
   "i18nSweep.commandLine": "Befehlszeile",
   "i18nSweep.follow": "Mitlaufen",
+  "i18nSweep.monCores": "{cores} Kerne · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} Abnehmer · Port {port}",
+  "i18nSweep.monTsMissing": "{lost} von {total} TS-Paketen fehlen · {breaks} Brüche",
   "dash.stopCountLoading": "Die YouTube-Übertragungen, die dieser Stopp beenden würde, werden gezählt…",
   "dash.stopCountFailed": "Die Anzahl der Übertragungen, die dieser Stopp beenden würde, konnte nicht geladen werden. „Alle stoppen“ ist daher nicht verfügbar. Schließen und erneut versuchen."
 }

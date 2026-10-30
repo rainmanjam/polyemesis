@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "{seconds} 秒后重试",
   "i18nSweep.commandLine": "命令行",
   "i18nSweep.follow": "跟随",
+  "i18nSweep.monCores": "{cores} 核 · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} 个订阅者 · 端口 {port}",
+  "i18nSweep.monTsMissing": "{total} 个 TS 包中缺失 {lost} 个 · 中断 {breaks} 次",
   "dash.stopCountLoading": "正在统计此次停止将结束的 YouTube 直播…",
   "dash.stopCountFailed": "无法加载此次停止将结束的直播数量，因此“全部停止”不可用。请关闭后重试。"
 }

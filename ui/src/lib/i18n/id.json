@@ -1943,6 +1943,9 @@
   "i18nSweep.retryingIn": "mencoba lagi dalam {seconds} dtk",
   "i18nSweep.commandLine": "baris perintah",
   "i18nSweep.follow": "Ikuti",
+  "i18nSweep.monCores": "{cores} inti · polyemesis {pct}",
+  "i18nSweep.monSubscribers": "{count} pelanggan · port {port}",
+  "i18nSweep.monTsMissing": "{lost} dari {total} paket TS hilang · {breaks} putus",
   "dash.stopCountLoading": "Menghitung siaran YouTube yang akan dihentikan…",
   "dash.stopCountFailed": "Jumlah siaran yang akan dihentikan tidak dapat dimuat, jadi Hentikan semua tidak tersedia. Tutup lalu coba lagi."
 }
