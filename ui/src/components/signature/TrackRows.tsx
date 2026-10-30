@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import { AudioMeter } from "./AudioMeter";
 import { channelLabels } from "@/lib/channels";
 import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
 import { useT } from "@/lib/i18n";
+import { formatPeakDb } from "@/lib/meterScale";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { trackChipTitle } from "@/lib/trackLabels";
@@ -87,6 +89,27 @@ interface TrackRowsProps {
   duckTarget?: number[];
 }
 
+/** A15: the role chip is bounded by its column, cuts its text rather than
+ *  wrapping into the meter, and keeps the full name on hover. */
+export function RoleBadge({
+  role,
+  excluded,
+}: {
+  role: Exclude<TrackRole, "">;
+  excluded: boolean;
+}) {
+  const name = ROLE_LABEL[role];
+  return (
+    <Badge
+      variant={excluded ? "warn" : "outline"}
+      className="min-w-0 max-w-full truncate"
+      title={name}
+    >
+      {name}
+    </Badge>
+  );
+}
+
 export function TrackRows({
   idPrefix,
   tracks,
@@ -103,6 +126,21 @@ export function TrackRows({
   duckTarget = [],
 }: TrackRowsProps) {
   const t = useT();
+  const translate = useT();
+  /* A10: the last measured peak per track, and when it was measured. Kept in a
+     ref so a quiet row can say what it last did instead of going blank. Only a
+     connected feed can add to it, so a frozen frame is never recorded as new. */
+  const lastRef = useRef(new Map<number, { db: number; at: number }>());
+  useEffect(() => {
+    if (!meterFeedLive) return;
+    const at = Date.now();
+    for (const tr of tracks) {
+      const peak = levels?.peak?.[tr.index] ?? [];
+      if (peak.length === 0) continue;
+      const db = Math.max(...peak);
+      if (Number.isFinite(db)) lastRef.current.set(tr.index, { db, at });
+    }
+  }, [levels, tracks, meterFeedLive]);
   const selFor = (index: number): TrackSel =>
     selection.find((s) => s.track === index) ?? { track: index, enabled: false, gain: 1 };
 
@@ -140,6 +178,7 @@ export function TrackRows({
         const excluded = role !== "" && excludeRoles.includes(role);
         const sending = sel.enabled && !excluded;
         const label = ann.label || t.title || "";
+        const last = lastRef.current.get(t.index);
 
         return (
           <div
@@ -153,7 +192,7 @@ export function TrackRows({
                   : "border-border bg-card opacity-55 hover:opacity-80",
             )}
           >
-            <div className="grid grid-cols-[auto_7.5rem_1fr_9rem] items-center gap-3">
+            <div className="grid grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem] items-center gap-3">
               <Checkbox
                 id={`${idPrefix}-track-${t.index}`}
                 checked={sel.enabled}
@@ -165,14 +204,12 @@ export function TrackRows({
                 htmlFor={`${idPrefix}-track-${t.index}`}
                 className="min-w-0 cursor-pointer select-none"
               >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[12px] font-semibold leading-tight">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-[12px] font-semibold leading-tight">
                     Track {t.index + 1}
                   </span>
                   {role !== "" && (
-                    <Badge variant={excluded ? "warn" : "outline"} className="shrink-0">
-                      {ROLE_LABEL[role]}
-                    </Badge>
+                    <RoleBadge role={role as Exclude<TrackRole, "">} excluded={excluded} />
                   )}
                 </div>
                 <div className="truncate font-mono text-sm leading-tight text-muted-foreground">
@@ -199,9 +236,23 @@ export function TrackRows({
                      metering. On the page where routing is decided, "this
                      track carries nothing" is the reading that gets a track
                      left out of the mix. */
+                  <>
                   <div className="font-mono text-sm text-muted-foreground">
                     {TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">]}
                   </div>
+                  {last && (
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {translate("routing.meters.lastPeak", {
+                        db: formatPeakDb(last.db),
+                        time: new Date(last.at).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        }),
+                      })}
+                    </div>
+                  )}
+                  </>
                 )}
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                   {label && (

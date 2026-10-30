@@ -33,12 +33,17 @@ import { PageHeader } from "@/components/AppLayout";
 import { Experimental, ExperimentalBadge } from "@/components/Experimental";
 import { TrackRows } from "@/components/signature/TrackRows";
 import { MixMatrix } from "@/components/signature/MixMatrix";
+import { RoutingSaveBar } from "@/components/signature/RoutingSaveBar";
 import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { musicRailMark, musicRailReason } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
+import { storedMixes } from "@/lib/storedMixes";
+import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
+import { routedTracks, toggleTrackSelection } from "@/lib/routeOverview";
+import { toneForState } from "@/lib/signal";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -122,7 +127,7 @@ export function RoutingPage() {
   const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
-  const { connected, levels, source } = useLiveData();
+  const { connected, levels, source, status } = useLiveData();
   const tracks = useSourceTracks();
 
   const [list, setList] = useState<DestinationWithRouting[]>([]);
@@ -357,6 +362,24 @@ export function RoutingPage() {
     }
   };
 
+  // Throws away the pending edit and puts back what the server holds (A7). The
+  // same reads the destination-select effect does, so a discard and a fresh
+  // selection cannot disagree about what "stored" means.
+  const discardChanges = () => {
+    const found = list.find((d) => d.destination.id === selected?.id);
+    if (!found) return;
+    // A preset still in flight would land after this and re-dirty the form, so
+    // every outstanding apply is retired here, the same way a destination switch
+    // retires it (A7).
+    presetSeq.current = { live: presetSeq.current.live + 1, vod: presetSeq.current.vod + 1 };
+    const { profile: stored, vodProfile: storedVod } = storedMixes(found.destination);
+    setProfile(stored);
+    setVodProfile(storedVod);
+    vodEnabledRef.current = storedVod !== null;
+    stashedVod.current = null;
+    setDirty(false);
+  };
+
   // Shared by both mixes. `mix` says which profile asked, so an archive preset
   // can be dropped on the second mix without the first one moving — which is
   // most of the point of having a second mix at all.
@@ -533,6 +556,56 @@ export function RoutingPage() {
     );
   }
 
+  /* A4: the Overview tab. Its rows read the same routing the editor edits: the
+     live draft for the selected destination, and each other destination's stored
+     mixes. A cell edit goes through `patch`, the path the Simple view uses, so the
+     save bar and the dirty state treat both the same. */
+  const [view, setView] = useState<"overview" | "editor">("editor");
+  const overviewRows = useMemo<OverviewRow[]>(
+    () =>
+      list.map(({ destination: d }) => {
+        const isSel = d.id === selected?.id;
+        const stored = storedMixes(d);
+        const live = isSel && profile ? profile : stored.profile;
+        const vodMix = isSel ? vodProfile : stored.vodProfile;
+        return {
+          id: d.id,
+          name: d.name,
+          tone: d.enabled
+            ? toneForState(status?.destinations?.find((x) => x.id === d.id)?.process?.state)
+            : "idle",
+          kind: !isSel ? "select" : live.mode === "matrix" ? "matrix" : "editable",
+          routed: routedTracks(live),
+          vodBound: vodMix !== null,
+          vodRouted: vodMix ? routedTracks(vodMix) : [],
+          guardedMusic: (live.excludeRoles ?? []).includes("music"),
+          vodGuardedMusic: (vodMix?.excludeRoles ?? []).includes("music"),
+        };
+      }),
+    [list, selected, profile, vodProfile, status],
+  );
+  const overviewTracks = useMemo<OverviewTrack[]>(
+    () =>
+      ctx.tracks.map((tr) => ({
+        index: tr.index,
+        title: ctx.annotations.find((a) => a.track === tr.index)?.label || tr.title || undefined,
+      })),
+    [ctx.tracks, ctx.annotations],
+  );
+  const toggleCell = useCallback(
+    (track: number) => {
+      patch({ tracks: toggleTrackSelection(profile?.tracks ?? [], track) });
+    },
+    [profile, patch],
+  );
+  /* The fix acts on the VOD mix: that is the archive the risk reaches, and each
+     mix keeps its own guard. Muting the live mix would not clear the amber cell. */
+  const keepMusicOutOfVod = useCallback(() => {
+    if (!vodProfile) return;
+    const roles = [...new Set([...(vodProfile.excludeRoles ?? []), "music" as TrackRole])];
+    patchVod({ excludeRoles: roles });
+  }, [vodProfile, patchVod]);
+
   return (
     <div className="p-3">
       <PageHeader
@@ -540,7 +613,6 @@ export function RoutingPage() {
         subtitle={t("route.audioRoutingDesc")}
         actions={
           <>
-            {dirty && <Badge variant="warn">unsaved</Badge>}
             <Button size="sm" onClick={save} disabled={!dirty || saving || !!blockingError}>
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
               Save
@@ -549,7 +621,36 @@ export function RoutingPage() {
         }
       />
 
-      <div className="grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]">
+      <Tabs value={view} onValueChange={(v) => setView(v as "overview" | "editor")} className="mb-3">
+        <TabsList>
+          <TabsTrigger value="overview">{t("routing.overview.tab")}</TabsTrigger>
+          <TabsTrigger value="editor">{t("routing.overview.editor")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {view === "overview" && (
+        <Card className="mb-3">
+          <CardContent className="pt-3">
+            <RouteOverview
+              rows={overviewRows}
+              tracks={overviewTracks}
+              music={musicTracks}
+              onToggle={toggleCell}
+              onSelect={(id) => navigate(`/routing/${id}`)}
+              onFix={(id) => {
+                if (id === selected?.id) keepMusicOutOfVod();
+              }}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      <div
+        className={cn(
+          "grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]",
+          view === "overview" && "hidden",
+        )}
+      >
         {/* ---------- destination picker ---------- */}
         <Card className="h-fit">
           <CardHeader>
@@ -708,6 +809,17 @@ export function RoutingPage() {
           </div>
         )}
       </div>
+
+      {/* ---------- pending change (A7) ---------- */}
+      <RoutingSaveBar
+        dirty={dirty}
+        saving={saving}
+        blocked={!!blockingError}
+        destinationName={selected?.name ?? ""}
+        restarts={!!selected?.enabled}
+        onSave={save}
+        onDiscard={discardChanges}
+      />
     </div>
   );
 }
