@@ -30,7 +30,9 @@ install the socket interleaves every programme's meters.
    address and token. Press **Test connection**.
 3. For an install with a self-signed certificate, copy the CA from
    `GET /api/v1/tls/ca` and paste it into the **Certificate** field. The CA is
-   added to the system trust store. Verification is never switched off.
+   added to the roots the plugin's own requests trust, alongside Node's bundled
+   public roots. The operating system's trust store is not touched.
+   Verification is never switched off.
 
 The token is saved in the plugin's global settings only. It is never stored in
 action settings, so it does not travel with a profile export.
