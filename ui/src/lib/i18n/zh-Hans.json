@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "添加目标",
   "firstRun.tour": "带我参观",
   "firstRun.ingestHeading": "接入地址",
+  "firstRun.copyAddress": "复制 {proto} 地址",
   "firstRun.badgeWaiting": "等待中",
   "firstRun.needSource": "请先添加源。",
   "confirm.deleteTitle": "删除“{name}”？",

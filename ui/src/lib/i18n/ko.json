@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "대상 추가",
   "firstRun.tour": "둘러보기",
   "firstRun.ingestHeading": "수집 주소",
+  "firstRun.copyAddress": "{proto} 주소 복사",
   "firstRun.badgeWaiting": "대기 중",
   "firstRun.needSource": "먼저 소스를 추가하세요.",
   "confirm.deleteTitle": "“{name}”을(를) 삭제하시겠습니까?",

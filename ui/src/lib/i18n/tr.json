@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Hedef ekle",
   "firstRun.tour": "Bana gezdir",
   "firstRun.ingestHeading": "Alım adresi",
+  "firstRun.copyAddress": "{proto} adresini kopyala",
   "firstRun.badgeWaiting": "Bekliyor",
   "firstRun.needSource": "Önce bir kaynak ekleyin.",
   "confirm.deleteTitle": "“{name}” silinsin mi?",

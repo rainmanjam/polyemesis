@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "配信先を追加",
   "firstRun.tour": "ご案内します",
   "firstRun.ingestHeading": "取り込みアドレス",
+  "firstRun.copyAddress": "{proto} アドレスをコピー",
   "firstRun.badgeWaiting": "待機中",
   "firstRun.needSource": "先にソースを追加してください。",
   "confirm.deleteTitle": "「{name}」を削除しますか？",

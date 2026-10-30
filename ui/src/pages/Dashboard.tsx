@@ -19,6 +19,8 @@ import {
   failoverSinceClock,
 } from "@/lib/failoverBanner";
 import { backupOnAir, ingestProblem } from "@/lib/ingestChip";
+import { publishRows } from "@/lib/publish-url";
+import { copyToClipboard } from "@/lib/clipboard";
 import { StatusReason } from "@/components/signature/StatusReason";
 import { trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -1484,6 +1486,14 @@ export function Dashboard() {
     }
   };
 
+  // A1: the selected programme's publish addresses for the checklist, one per
+  // protocol, host filled in. The stream-key row is a credential, not an
+  // address, and stays on the Sources page.
+  const checklistSource = sources.find((x) => x.id === programme) ?? sources[0];
+  const checklistAddresses = checklistSource
+    ? publishRows(checklistSource.publishUrls, window.location.hostname).filter((r) => r.proto !== "streamKey")
+    : [];
+
   const copyIngest = async () => {
     if (!system?.ingestUrl) return;
     try {
@@ -1519,6 +1529,8 @@ export function Dashboard() {
           <div className="mt-3">
             <SetupChecklist
               checklist={checklist}
+              addresses={checklistAddresses}
+              onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto.toUpperCase())}
               ingestUrl={system?.ingestUrl ?? ""}
               onCopyIngest={copyIngest}
               onAddDestination={() => {
@@ -1894,6 +1906,8 @@ export function Dashboard() {
         ) : destinations.length === 0 && checklist ? (
           <SetupChecklist
             checklist={checklist}
+            addresses={checklistAddresses}
+            onCopyAddress={(a) => copyToClipboard(t, a.url, a.proto.toUpperCase())}
             ingestUrl={system?.ingestUrl ?? ""}
             onCopyIngest={copyIngest}
             onAddDestination={() => {

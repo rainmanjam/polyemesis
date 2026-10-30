@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Aggiungi destinazione",
   "firstRun.tour": "Fammi fare un giro",
   "firstRun.ingestHeading": "Indirizzo di ingest",
+  "firstRun.copyAddress": "Copia l’indirizzo {proto}",
   "firstRun.badgeWaiting": "In attesa",
   "firstRun.needSource": "Aggiungi prima una sorgente.",
   "confirm.deleteTitle": "Eliminare «{name}»?",

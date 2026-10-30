@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Tambah tujuan",
   "firstRun.tour": "Tunjukkan kepada saya",
   "firstRun.ingestHeading": "Alamat ingest",
+  "firstRun.copyAddress": "Salin alamat {proto}",
   "firstRun.badgeWaiting": "Menunggu",
   "firstRun.needSource": "Tambahkan sumber terlebih dahulu.",
   "confirm.deleteTitle": "Hapus “{name}”?",

@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Ziel hinzufügen",
   "firstRun.tour": "Zeig mir die Oberfläche",
   "firstRun.ingestHeading": "Ingest-Adresse",
+  "firstRun.copyAddress": "{proto}-Adresse kopieren",
   "firstRun.badgeWaiting": "Wartet",
   "firstRun.needSource": "Fügen Sie zuerst eine Quelle hinzu.",
   "confirm.deleteTitle": "„{name}“ löschen?",

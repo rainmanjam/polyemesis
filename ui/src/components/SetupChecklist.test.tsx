@@ -84,3 +84,28 @@ describe("SetupChecklist", () => {
     expect(screen.getByRole("button", { name: T("firstRun.tour") })).toBeTruthy();
   });
 });
+
+describe("SetupChecklist: per-protocol addresses at step 2 (A1)", () => {
+  it("offers a copy button for each protocol the source publishes", () => {
+    const checklist = setupChecklist({ sourceCount: 1, signal: false, destinations: 0 })!;
+    const onCopyAddress = vi.fn();
+    render(
+      <MemoryRouter>
+        <SetupChecklist
+          checklist={checklist}
+          ingestUrl="rtmp://box:1935/live/a"
+          onCopyIngest={() => {}}
+          onAddDestination={() => {}}
+          addresses={[
+            { proto: "rtmp", url: "rtmp://box:1935/live" },
+            { proto: "srt", url: "srt://box:9000?streamid=a" },
+          ]}
+          onCopyAddress={onCopyAddress}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: T("firstRun.copyAddress", { proto: "SRT" }) }));
+    expect(onCopyAddress).toHaveBeenCalledWith({ proto: "srt", url: "srt://box:9000?streamid=a" });
+    expect(screen.getByRole("button", { name: T("firstRun.copyAddress", { proto: "RTMP" }) })).toBeTruthy();
+  });
+});

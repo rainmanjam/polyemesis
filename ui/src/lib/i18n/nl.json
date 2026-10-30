@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Bestemming toevoegen",
   "firstRun.tour": "Laat me rondkijken",
   "firstRun.ingestHeading": "Ingest-adres",
+  "firstRun.copyAddress": "{proto}-adres kopiëren",
   "firstRun.badgeWaiting": "Wacht",
   "firstRun.needSource": "Voeg eerst een bron toe.",
   "confirm.deleteTitle": "“{name}” verwijderen?",

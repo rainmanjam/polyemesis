@@ -1755,6 +1755,7 @@
   "firstRun.addDestination": "Добавить направление",
   "firstRun.tour": "Покажите, как всё устроено",
   "firstRun.ingestHeading": "Адрес приёма",
+  "firstRun.copyAddress": "Копировать адрес {proto}",
   "firstRun.badgeWaiting": "Ожидание",
   "firstRun.needSource": "Сначала добавьте источник.",
   "confirm.deleteTitle": "Удалить «{name}»?",
