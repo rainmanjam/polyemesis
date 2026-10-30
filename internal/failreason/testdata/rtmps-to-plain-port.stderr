@@ -1,0 +1,5 @@
+[tls @ 0xffffaf10cf30] IO error: Connection reset by peer
+[rtmps @ 0xffffabef5d00] Cannot open connection tls://pe-w1-nginx:1935
+[out#0/flv @ 0xffffae5eae60] Error opening output rtmps://pe-w1-nginx:1935/live/goodkey: Connection reset by peer
+Error opening output file rtmps://pe-w1-nginx:1935/live/goodkey.
+Error opening output files: Connection reset by peer

@@ -23,6 +23,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 )
 
@@ -168,6 +169,24 @@ type Spec struct {
 	// would mean a retune applied to a running destination had no effect.
 	MaxRestarts int
 
+	// HoldAfterQuickRejections stops retrying after this many CONSECUTIVE runs
+	// that failed quickly (failreason.QuickWindow) for a holdable cause -- a
+	// refused stream key or a refused codec. 0 never holds, which is what
+	// every process but a destination wants.
+	//
+	// It exists because those two causes cannot clear by themselves. A
+	// platform that refused a key will refuse it on the fourth attempt and the
+	// fortieth; retrying only hammers its ingest with a credential it keeps
+	// rejecting, and buries the one sentence that matters under a reconnect
+	// countdown. Held, the destination says "key rejected" and waits for the
+	// one click that retries it.
+	//
+	// SEPARATE FROM MaxRestarts, which counts every failure. Network causes
+	// and a platform that is not ready yet reset this count and keep the
+	// normal backoff: they DO clear by themselves, and holding them would
+	// leave a destination off air after the network came back.
+	HoldAfterQuickRejections int
+
 	// StartDelay holds the FIRST spawn back. Restarts are unaffected: a
 	// destination that drops at 3am must come back immediately, not wait its
 	// turn behind processes that are already healthy.
@@ -276,6 +295,31 @@ type Status struct {
 	// erasing the grace period destinationStalled depends on to tell a
 	// destination's own stall from one inherited from the outage.
 	LiveForSec float64 `json:"-"`
+	// Reason is why the most recent run failed: a cause from
+	// internal/failreason, the stderr line it rests on (scrubbed), and whether
+	// the supervisor has held the process after repeated quick rejections.
+	// Nil while nothing has failed since the last start, and cleared once a run
+	// moves media again -- a verdict about a run that has been superseded is
+	// not a fact about this one.
+	Reason *failreason.Reason `json:"reason,omitempty"`
+	// Rate is the realtime ratio over the last RateWindow of this run, with
+	// RateKnown false until there is that much history. NOT JSON: it is the
+	// input to the engine's running-state "upload too slow" verdict, which is
+	// the engine's to make because only the engine knows whether the source
+	// was arriving at the time.
+	Rate      float64 `json:"-"`
+	RateKnown bool    `json:"-"`
+}
+
+// RateWindow is how much recent history Status.Rate is measured over. Long
+// enough that one keyframe burst does not swing it, short enough that a
+// collapse shows within the time an operator is still looking.
+const RateWindow = 10 * time.Second
+
+// rateSample is one progress reading for the windowed rate.
+type rateSample struct {
+	at    time.Time
+	outMS int64
 }
 
 // Process is one supervised child.
@@ -318,7 +362,13 @@ type Process struct {
 	lastErr   string
 	nextRetry time.Time
 	progress  ffmpeg.Progress
-	logs      *ring
+	// reason is the classified failure of the most recent run; see
+	// Status.Reason. Its Line is already scrubbed.
+	reason *failreason.Reason
+	// rate is this run's recent progress, oldest first, for Status.Rate.
+	// Reset on every respawn with mediaAt.
+	rate []rateSample
+	logs *ring
 	// liveArgs is the argv of the most recent spawn. Equal to spec.Args unless
 	// spec.NextArgs resolved something different for this run.
 	liveArgs []string
@@ -885,6 +935,15 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 	// run, not by a successful spawn: a process that starts and dies in two
 	// seconds has not recovered from anything.
 	consecutive := 0
+	// Consecutive QUICK failures with a holdable cause (see
+	// Spec.HoldAfterQuickRejections). Reset by any other outcome.
+	quickRejects := 0
+	// A new loop is a fresh attempt -- Start, or the Retry an operator pressed
+	// on a held destination -- so the previous loop's verdict is dropped rather
+	// than left beside a process that is connecting again.
+	p.mu.Lock()
+	p.reason = nil
+	p.mu.Unlock()
 
 	// Before the first spawn only, and interruptible: a stop that arrives
 	// during the stagger window must not wait it out.
@@ -904,13 +963,15 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 
 		p.setState(StateStarting, "")
 		started := time.Now()
-		err := p.runOnce(ctx)
+		tail, err := p.runOnce(ctx)
 		ranFor := time.Since(started)
 
 		if ctx.Err() != nil {
 			p.setState(StateStopped, "")
 			return
 		}
+
+		reason := p.noteExit(tail, err, ranFor, &quickRejects)
 
 		msg := ""
 		if err != nil {
@@ -947,6 +1008,26 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 			consecutive = 0
 		}
 		consecutive++
+
+		// HELD: refused quickly, for a cause retrying cannot fix, N times in a
+		// row. StateFailed for the reason the give-up below uses it -- the
+		// alert watcher treats it as down, and Start leaves it alone, so a
+		// reconcile does not quietly undo the hold; Restart is the one door,
+		// which is what the Retry button calls. Checked BEFORE the give-up so
+		// that a destination meeting both limits on the same exit says the
+		// more useful of the two things.
+		if reason != nil && reason.Held {
+			held := fmt.Sprintf("held after %d quick rejections (%s); press Retry once it is fixed",
+				reason.Rejections, reason.Cause.Label())
+			if msg != "" {
+				held += ": " + msg
+			}
+			p.log.Error("holding process: it keeps being refused quickly", "cause", reason.Cause,
+				"rejections", reason.Rejections, "err", p.scrub(msg))
+			p.appendLog(held, "error")
+			p.setState(StateFailed, held)
+			return
+		}
 
 		// Out of patience. StateFailed rather than StateStopped: stopped is
 		// what an operator asked for, failed is what happened to them, and the
@@ -1000,7 +1081,15 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 }
 
 // runOnce spawns the child and blocks until it exits.
-func (p *Process) runOnce(ctx context.Context) error {
+//
+// It returns the last tailLines lines of stderr, raw and of every level, beside
+// the error. RAW because failreason reads the text and the reason it produces is
+// scrubbed on the way into p.reason; EVERY LEVEL because the line that tells
+// one failure from another is usually the lower-layer one -- "[rtmp @] Cannot
+// read RTMP handshake response" is not error-level at all -- and FFmpeg's
+// generic three-line "Error opening output" summary would push it out of the
+// error-only window LastError is built from.
+func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	argv := p.spec.Args
 	if p.spec.NextArgs != nil {
 		argv = p.spec.NextArgs()
@@ -1027,7 +1116,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	if p.spec.LiveCommands && runtime.GOOS != "windows" {
 		w, err := cmd.StdinPipe()
 		if err != nil {
-			return fmt.Errorf("stdin pipe: %w", err)
+			return nil, fmt.Errorf("stdin pipe: %w", err)
 		}
 		liveStdin = w
 	}
@@ -1051,13 +1140,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// from here, which unblocks a drain that is waiting on an inherited writer.
 	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
+		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	stderr, stderrW, err := os.Pipe()
 	if err != nil {
 		_ = stdout.Close()
 		_ = stdoutW.Close()
-		return fmt.Errorf("stderr pipe: %w", err)
+		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	cmd.Stdout, cmd.Stderr = stdoutW, stderrW
 
@@ -1089,7 +1178,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 		if liveStdin != nil {
 			_ = liveStdin.Close()
 		}
-		return fmt.Errorf("start %s: %w", p.spec.Bin, startErr)
+		return nil, fmt.Errorf("start %s: %w", p.spec.Bin, startErr)
 	}
 
 	exited := make(chan struct{})
@@ -1151,6 +1240,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.movedAt = time.Time{}
 	p.liveSince = time.Time{}
 	p.progress = ffmpeg.Progress{}
+	p.rate = nil
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
 	p.log.Info("process started", "pid", cmd.Process.Pid)
@@ -1187,6 +1277,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// FFmpeg's last words before dying are on stderr, so the tail of this
 	// buffer is what tells a user *why* a destination is failing.
 	var lastLines []string
+	var tail []string
 	go func() {
 		defer wg.Done()
 		sc := bufio.NewScanner(stderr)
@@ -1205,6 +1296,10 @@ func (p *Process) runOnce(ctx context.Context) error {
 			deliverReply(liveCur, line)
 			level := classify(line)
 			p.appendLog(line, level)
+			tail = append(tail, line)
+			if len(tail) > tailLines {
+				tail = tail[1:]
+			}
 			if level == "error" || level == "fatal" {
 				lastLines = append(lastLines, line)
 				if len(lastLines) > 3 {
@@ -1275,9 +1370,93 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.mu.Unlock()
 
 	if waitErr != nil && len(lastLines) > 0 {
-		return fmt.Errorf("%v: %s", waitErr, strings.Join(lastLines, " | "))
+		return tail, fmt.Errorf("%v: %s", waitErr, strings.Join(lastLines, " | "))
 	}
-	return waitErr
+	return tail, waitErr
+}
+
+// tailLines is how much of stderr runOnce hands the classifier. Every capture in
+// internal/failreason/testdata fits in a dozen; the margin is for a child that
+// prints a few warnings of its own on the way down.
+const tailLines = 24
+
+// noteExit classifies a run that ended and records the verdict, counting it
+// toward the hold. It returns the stored reason, nil for a clean exit.
+//
+// Classified on the RAW tail and stored SCRUBBED: the line that explains a
+// refused key is the line FFmpeg prints with the publish URL in it, and the
+// reason is copied to a retained MQTT topic, webhooks, alerts and the timeline.
+// Scrubbing once, here, with this process's own secret set, is what keeps every
+// one of those outlets from having to remember.
+func (p *Process) noteExit(tail []string, err error, ranFor time.Duration, quickRejects *int) *failreason.Reason {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	in := failreason.Input{
+		Stderr: tail,
+		Failed: err != nil,
+		RanFor: ranFor,
+		Moved:  !p.mediaAt.IsZero(),
+	}
+	if err != nil {
+		in.Exit = err.Error()
+	}
+	in.Rate, in.RateKnown = p.rateLocked(time.Now())
+	r, ok := failreason.Classify(in)
+	if !ok {
+		*quickRejects = 0
+		p.reason = nil
+		return nil
+	}
+	if r.Quick && r.Cause.Holdable() {
+		*quickRejects++
+		r.Rejections = *quickRejects
+	} else {
+		*quickRejects = 0
+	}
+	if n := p.spec.HoldAfterQuickRejections; n > 0 && *quickRejects >= n {
+		r.Held = true
+	}
+	r.Line = p.scrub(r.Line)
+	r.At = time.Now()
+	p.reason = &r
+	return &r
+}
+
+// sampleRateLocked records one progress reading for the windowed rate. Called
+// with p.mu held. Samples older than the window are dropped, except the newest
+// of them, which is kept as the base the window is measured from.
+func (p *Process) sampleRateLocked(at time.Time, outMS int64) {
+	p.rate = append(p.rate, rateSample{at: at, outMS: outMS})
+	cut := 0
+	for cut+1 < len(p.rate) && at.Sub(p.rate[cut+1].at) >= RateWindow {
+		cut++
+	}
+	if cut > 0 {
+		p.rate = append(p.rate[:0], p.rate[cut:]...)
+	}
+}
+
+// rateLocked is the realtime ratio over the window ending at now. Called with
+// p.mu held.
+//
+// Measured to NOW, not to the last sample. A muxer blocked on a socket stops
+// printing progress altogether, and a rate measured only between the samples it
+// did print would read its last healthy second for as long as it stayed
+// blocked.
+func (p *Process) rateLocked(now time.Time) (float64, bool) {
+	if len(p.rate) < 2 {
+		return 0, false
+	}
+	first, last := p.rate[0], p.rate[len(p.rate)-1]
+	span := now.Sub(first.at)
+	if span < RateWindow/2 {
+		return 0, false
+	}
+	moved := float64(last.outMS-first.outMS) / 1000
+	if moved < 0 {
+		return 0, false
+	}
+	return moved / span.Seconds(), true
 }
 
 // noteProgress records one progress block and, the first time that block shows
@@ -1319,8 +1498,12 @@ func (p *Process) noteProgress(pr ffmpeg.Progress) {
 		p.movedAt = time.Now()
 	}
 	p.progress = pr
+	p.sampleRateLocked(time.Now(), pr.OutTimeMS)
 	if p.mediaAt.IsZero() && pr.OutTimeMS > 0 {
 		p.mediaAt = time.Now()
+		// Delivering again: whatever the previous run failed of is history,
+		// and the card must stop saying it.
+		p.reason = nil
 	}
 }
 
@@ -1643,6 +1826,13 @@ func (p *Process) Status() Status {
 		Restarts:  p.restarts,
 		LastError: p.scrub(p.lastErr),
 		Progress:  p.progress,
+	}
+	if p.reason != nil {
+		r := *p.reason
+		st.Reason = &r
+	}
+	if p.state == StateRunning {
+		st.Rate, st.RateKnown = p.rateLocked(time.Now())
 	}
 	if p.state == StateRunning && !p.startedAt.IsZero() {
 		t := p.startedAt

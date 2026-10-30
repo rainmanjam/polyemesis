@@ -1,0 +1,5 @@
+[tls @ 0xffff870a7f30] error:0A000086:SSL routines::certificate verify failed
+[rtmps @ 0xffff83559cb0] Cannot open connection tls://pe-w1-mediamtx:1936
+[out#0/flv @ 0xffff86585e60] Error opening output rtmps://pe-w1-mediamtx:1936/open: I/O error
+Error opening output file rtmps://pe-w1-mediamtx:1936/open.
+Error opening output files: I/O error

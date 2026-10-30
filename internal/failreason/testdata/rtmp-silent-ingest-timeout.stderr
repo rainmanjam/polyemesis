@@ -1,0 +1,4 @@
+[rtmp @ 0xffff8cdf6cb0] Cannot read RTMP handshake response
+[out#0/flv @ 0xffff8fe22e60] Error opening output rtmp://pe-w1-blackhole:1935/live/goodkey: Operation timed out
+Error opening output file rtmp://pe-w1-blackhole:1935/live/goodkey.
+Error opening output files: Operation timed out

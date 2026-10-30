@@ -1,0 +1,7 @@
+[vist#0:0/wrapped_avframe @ 0xffffb81adc90] Resumed reading at pts 0.567 with rate 1.050 after a lag of 6.777s
+[vist#0:0/wrapped_avframe @ 0xffffb81adc90] Resumed reading at pts 0.900 with rate 1.050 after a lag of 8.705s
+[vist#0:0/wrapped_avframe @ 0xffffb81adc90] Resumed reading at pts 0.933 with rate 1.050 after a lag of 10.949s
+[vist#0:0/wrapped_avframe @ 0xffffb81adc90] Resumed reading at pts 0.967 with rate 1.050 after a lag of 15.457s
+[vist#0:0/wrapped_avframe @ 0xffffb81adc90] Resumed reading at pts 1.000 with rate 1.050 after a lag of 25.255s
+[flv @ 0xffffb5a011a0] Failed to update header with correct duration.
+[flv @ 0xffffb5a011a0] Failed to update header with correct filesize.
