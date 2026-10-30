@@ -1848,7 +1848,7 @@ export function Dashboard() {
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
         subject={confirmDelete.target?.name ?? ""}
-        title={`Delete “${confirmDelete.target?.name}”?`}
+        title={t("confirm.deleteTitle", { name: confirmDelete.target?.name ?? "" })}
         description={t("dash.deleteDestDescription")}
         confirmLabel={t("dash.deleteDest")}
         onConfirm={async () => {

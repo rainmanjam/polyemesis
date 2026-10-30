@@ -77,6 +77,10 @@ const FRAGMENTS = [
   "Retention keeps at most",
   // PreviewPlayer
   "Start your encoder to see the preview",
+  // Destructive confirmations (A18): the title is built from the name in a
+  // template literal, which is the one way an English title slips past the
+  // catalogue unnoticed. Keyed as confirm.deleteTitle with {name}.
+  "Delete “",
   // Dashboard
   "Starts are spread out rather than fired together",
   "This FFmpeg build has no SRT support",

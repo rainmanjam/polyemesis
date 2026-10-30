@@ -126,7 +126,9 @@ describe("AutomodConfig: the rule list", () => {
     await waitFor(() => expect(stats).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "Delete rule caps" }));
-    expect(screen.getByText("Delete this rule?")).toBeTruthy();
+    // The title names the rule being removed, the same shape as every other
+    // destructive confirmation (confirm.deleteTitle), not a generic question.
+    expect(screen.getByText("Delete “caps”?")).toBeTruthy();
     expect(onChange).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));

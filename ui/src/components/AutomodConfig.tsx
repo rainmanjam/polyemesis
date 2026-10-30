@@ -692,7 +692,7 @@ export function AutomodConfig({
         open={deleting !== null}
         onOpenChange={(o) => !o && setDeleting(null)}
         subject={deleting?.name ?? ""}
-        title={t("automod.deleteRuleTitle")}
+        title={t("confirm.deleteTitle", { name: deleting?.name ?? "" })}
         description={t("automod.deleteRuleDesc")}
         onConfirm={() => {
           if (deleting) setRules(rules.filter((r) => r.id !== deleting.id));
