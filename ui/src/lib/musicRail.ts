@@ -38,3 +38,16 @@ export function musicRailReason(guarded: boolean, policyExcludes: boolean): Tran
   if (policyExcludes) return "foundation.route.musicOnReason";
   return null;
 }
+
+/** The colour class for a rail row's secondary text: the music mark and the
+ *  routing summary under the name.
+ *
+ *  A selected row is filled with --primary-dim, where --muted-foreground
+ *  measures 4.29:1, under the 4.5:1 floor for small text. On that fill the
+ *  quiet text steps up to --secondary-foreground (about 8.5:1). The warn tone
+ *  already clears it (about 6:1) and keeps its colour, because the colour ranks
+ *  the word. See musicRail.contrast.test.ts. */
+export function railTextClass(tone: MusicMark["tone"], selected: boolean): string {
+  if (tone === "warn") return "text-warn";
+  return selected ? "text-secondary-foreground" : "text-muted-foreground";
+}

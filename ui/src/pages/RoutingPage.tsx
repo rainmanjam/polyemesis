@@ -38,7 +38,7 @@ import { FilterString } from "@/components/signature/FilterString";
 import { useLiveData, useSourceTracks } from "@/hooks/useLiveData";
 import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { musicRailMark, musicRailReason } from "@/lib/musicRail";
+import { musicRailMark, musicRailReason, railTextClass } from "@/lib/musicRail";
 import { duckSeed } from "@/lib/duckSeed";
 import { storedMixes } from "@/lib/storedMixes";
 import { RouteOverview, type OverviewRow, type OverviewTrack } from "@/components/signature/RouteOverview";
@@ -681,7 +681,7 @@ export function RoutingPage() {
                         title={markReason ? t(markReason) : undefined}
                         className={cn(
                           "ml-auto flex shrink-0 items-center gap-1 text-sm",
-                          mark.tone === "warn" ? "text-warn" : "text-muted-foreground",
+                          railTextClass(mark.tone, d.id === selected?.id),
                         )}
                       >
                         <Music className="h-3 w-3 shrink-0" />
@@ -692,7 +692,12 @@ export function RoutingPage() {
                       </span>
                     )}
                   </span>
-                  <span className="truncate font-mono text-sm text-muted-foreground">
+                  <span
+                    className={cn(
+                      "truncate font-mono text-sm",
+                      railTextClass("muted", d.id === selected?.id),
+                    )}
+                  >
                     {routing?.summary ?? "—"}
                   </span>
                 </button>
