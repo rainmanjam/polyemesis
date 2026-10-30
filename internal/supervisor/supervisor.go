@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -139,6 +140,12 @@ type Spec struct {
 	// Choosing the path per spawn is the only option that neither destroys the
 	// footage nor wedges the destination.
 	NextArgs func() []string
+
+	// LiveCommands opts the child into the stdin command channel (see live.go).
+	// It gives the child a stdin pipe, which only this package writes to, and
+	// routes FFmpeg's command replies to SetVolume. A child that did not opt in
+	// is spawned exactly as before, with no pipe.
+	LiveCommands bool
 
 	// MaxRestarts gives up after this many CONSECUTIVE restarts that did not
 	// reach stableAfter. 0 is unlimited, which is what every process here did
@@ -330,6 +337,13 @@ type Process struct {
 	// invariant defended by nothing, and it could only be consulted after the
 	// escalator had already slept the whole grace period.
 	exited chan struct{}
+
+	// liveMu guards live, the command channel of the current run; liveWriteMu
+	// serialises SetVolume callers so one command is in flight at a time. See
+	// live.go for the whole contract.
+	liveMu      sync.Mutex
+	live        *liveRun
+	liveWriteMu sync.Mutex
 	// signalled records that THIS cmd has already been sent its SIGTERM, so a
 	// second terminate() for the same spawn is a no-op. Cleared where cmd is
 	// published, which makes it per-run exactly as `exited` is.
@@ -1005,6 +1019,19 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// children out from under the supervisor.
 	setProcessGroup(cmd)
 
+	// The command channel's write end is created with the child's own pipe, so a
+	// failure here leaves nothing else open. Windows has no verified path for it
+	// (see live.go), so there it is simply not made and every live command is
+	// refused, which sends the caller to a restart.
+	var liveStdin io.WriteCloser
+	if p.spec.LiveCommands && runtime.GOOS != "windows" {
+		w, err := cmd.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("stdin pipe: %w", err)
+		}
+		liveStdin = w
+	}
+
 	// os.Pipe rather than cmd.StdoutPipe/StderrPipe, and the reason is the whole
 	// of this function's shape.
 	//
@@ -1059,6 +1086,9 @@ func (p *Process) runOnce(ctx context.Context) error {
 	if startErr != nil {
 		_ = stdout.Close()
 		_ = stderr.Close()
+		if liveStdin != nil {
+			_ = liveStdin.Close()
+		}
 		return fmt.Errorf("start %s: %w", p.spec.Bin, startErr)
 	}
 
@@ -1068,6 +1098,13 @@ func (p *Process) runOnce(ctx context.Context) error {
 	p.exited = exited
 	p.signalled = false
 	p.cmdMu.Unlock()
+	if liveStdin != nil {
+		// A new run, so a reply or a poisoned state from an earlier spawn cannot
+		// carry over to this one.
+		p.liveMu.Lock()
+		p.live = &liveRun{stdin: liveStdin, replies: make(chan int, 4), exited: exited}
+		p.liveMu.Unlock()
+	}
 
 	// A STOP THAT LANDED WHILE THIS SPAWN WAS IN FLIGHT SIGNALLED NOTHING, and
 	// until this line nothing ever went back for it.
@@ -1163,6 +1200,9 @@ func (p *Process) runOnce(ctx context.Context) error {
 			if line == "" {
 				continue
 			}
+			if liveStdin != nil && strings.Contains(line, "Command reply for stream") {
+				p.deliverReply(line)
+			}
 			level := classify(line)
 			p.appendLog(line, level)
 			if level == "error" || level == "fatal" {
@@ -1183,6 +1223,9 @@ func (p *Process) runOnce(ctx context.Context) error {
 	// enrol after cmd.Start(); deliberately NOT in the drain below, which waits
 	// on descendants this process never started and can outlive the child.
 	childcensus.Discharge(cmd.Process.Pid)
+	if liveStdin != nil {
+		p.clearLive()
+	}
 	// Announce the reap before the drain, because that is what terminate()'s
 	// escalation is asking about: a child that has been reaped needs no SIGKILL,
 	// whether or not its grandchild is still writing.
