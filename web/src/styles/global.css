@@ -151,9 +151,10 @@
 
   /* --- 30 / THE ONE ACCENT --- */
   --color-primary: var(--primary);
-  /* Site-only: a lighter step of the accent for link text and hover, which the
-     console has no use for — a button there is the accent or it is not. */
-  --color-primary-bright: oklch(71.9% 0.1090 257.4);
+  /* A lighter step of the accent for link text and hover. The console now has
+     the same step as --primary-bright (ui/src/index.css), so the site reads it
+     rather than restating it: design-tokens.test.ts holds the two together. */
+  --color-primary-bright: var(--primary-bright);
   --color-primary-dim: var(--primary-dim);
 
   /* --- 10 / SIGNAL, SATURATED. Every token below spends real meaning — see

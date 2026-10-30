@@ -33,6 +33,11 @@
   --primary: oklch(60.2% 0.1177 263.2);
   --primary-foreground: oklch(15.9% 0.0091 264.3);
   --primary-dim: oklch(31.3% 0.0447 262.9);
+  /* The brighter accent for text and hover on dark surfaces, in the baseline
+     the new layouts draw from. Computed from these token values, not measured
+     in a browser: 7.13:1 on --card, 7.80:1 on --background, 5.23:1 on
+     --primary-dim. Use it for accent text, never for large fills. */
+  --primary-bright: oklch(71.9% 0.1090 257.4);
 
   --secondary: oklch(25.2% 0.0245 264.0);
   --secondary-foreground: oklch(85.9% 0.0225 263.2);
@@ -90,18 +95,6 @@
   --destructive-foreground: oklch(97.8% 0.0107 17.3);
 
   --radius: 0.375rem;
-
-  /* --- SPACING, a 4px grid named by step. New layout gaps and padding take
-     these so that a density change moves one row here and not forty call
-     sites. Tailwind's own spacing utilities keep working unchanged; these are
-     for the places that need a token name, such as a grid template or a
-     component's inline style. --- */
-  --space-1: 0.25rem; /* 4px */
-  --space-2: 0.5rem; /* 8px */
-  --space-3: 0.75rem; /* 12px */
-  --space-4: 1rem; /* 16px */
-  --space-5: 1.5rem; /* 24px */
-  --space-6: 2rem; /* 32px */
 
   /* --- TYPE SCALE. Six steps, and six is the point: a seventh gets chosen by
      accident and the scale stops being one. Tighter at the small end than a
