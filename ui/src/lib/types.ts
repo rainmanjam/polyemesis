@@ -1752,7 +1752,7 @@ export interface StorageState {
  *  because narrowing a credential a running script is holding would break it
  *  without anyone being told.
  */
-export type TokenScope = "read" | "admin";
+export type TokenScope = "read" | "admin" | "obs";
 
 export interface ApiToken {
   id: number;
@@ -3426,4 +3426,73 @@ export interface RenditionConcern {
   detail: string;
   source: string;
   checked: string;
+}
+
+/* ------------------------------------------------------------- OBS bridge */
+
+/** One OBS scene mapped to a routing preset (#16). Applied as live mutes on
+ *  the tracks already in each destination's mix; see docs/OBS-BRIDGE.md. */
+export interface ObsSceneRule {
+  scene: string;
+  preset: string;
+  opts?: PresetOpts;
+  /** Empty means all of the bridge's destinations. */
+  destinations?: number[];
+}
+
+/** GET and PUT /api/v1/obs's configuration. The obs-websocket password is not
+ *  here: it is write-only, on PUT /obs/password, and `hasPassword` is all the
+ *  page is told. */
+export interface ObsConfig {
+  enabled: boolean;
+  connect: boolean;
+  /** Blank for a read token. */
+  url: string;
+  hasPassword: boolean;
+  sourceId: number | null;
+  destinations: number[];
+  startOnStream: boolean;
+  stopOnStream: boolean;
+  stopAcknowledged: boolean;
+  stopGraceSeconds: number;
+  scenes: ObsSceneRule[];
+}
+
+export type ObsConnState = "off" | "connecting" | "connected" | "unreachable" | "refused" | "incompatible";
+
+/** What one bridge action did to one destination. */
+export interface ObsOutcome {
+  id: number;
+  name: string;
+  /** started | stopped | warned | failed | skipped | applied */
+  outcome: string;
+  message?: string;
+}
+
+export interface ObsActionRecord {
+  at: string;
+  action: "start" | "stop" | "scene";
+  via: "websocket" | "script";
+  scene?: string;
+  preset?: string;
+  results: ObsOutcome[];
+}
+
+export interface ObsStatus {
+  connection: {
+    state: ObsConnState;
+    detail?: string;
+    since: string;
+    obsStudioVersion?: string;
+    obsWebSocketVersion?: string;
+  };
+  streaming: boolean | null;
+  scene?: string;
+  stopPendingUntil?: string;
+  lastActions: ObsActionRecord[];
+}
+
+export interface ObsResponse {
+  config: ObsConfig;
+  status: ObsStatus;
 }

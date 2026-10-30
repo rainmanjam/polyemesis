@@ -34,6 +34,7 @@ import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { OverlaySettings } from "@/components/OverlaySettings";
+import { ObsBridgeSettings } from "@/components/ObsBridgeSettings";
 import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -347,6 +348,7 @@ export function SettingsPage() {
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
           overlays: t("set.tabOverlays"),
+          obs: t("obs.tab"),
           security: t("set.tabSecurity"),
           danger: t("danger.title"),
           debug: t("set.tabDebug"),
@@ -372,6 +374,11 @@ export function SettingsPage() {
               Platforms: it mints credentials, and it is where an operator goes
               to rotate one. */}
           <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
+          {/* The OBS bridge (#16): OBS starting, stopping and switching scene
+              drives destinations. Its own section because it holds a
+              credential (the obs-websocket password) and a stop switch that
+              ends broadcasts. */}
+          <TabsTrigger value="obs">{t("obs.tab")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
           {/* Last, set apart and in the down tone (A17): the section that only
               holds what cannot be undone. Debug, which used to sit here, is on
@@ -435,6 +442,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="overlays">
           <OverlaySettings />
+        </TabsContent>
+        <TabsContent value="obs">
+          <ObsBridgeSettings />
         </TabsContent>
         <TabsContent value="security">
           <SecuritySettings system={system} />
@@ -3296,6 +3306,7 @@ function ApiTokens() {
               <SelectContent>
                 <SelectItem value="read">{t("set.tokenScopeRead")}</SelectItem>
                 <SelectItem value="admin">{t("set.tokenScopeAdmin")}</SelectItem>
+                <SelectItem value="obs">{t("set.tokenScopeObs")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -3304,7 +3315,11 @@ function ApiTokens() {
           </Button>
         </form>
         <span className="text-sm text-muted-foreground">
-          {scope === "read" ? t("set.tokenScopeReadHint") : t("set.tokenScopeAdminHint")}
+          {scope === "read"
+            ? t("set.tokenScopeReadHint")
+            : scope === "obs"
+              ? t("set.tokenScopeObsHint")
+              : t("set.tokenScopeAdminHint")}
         </span>
 
         {minted && (
