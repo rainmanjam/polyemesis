@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Scarta",
   "routing.saveBar.save": "Salva",
   "routing.matrix.undoClear": "Annulla cancellazione",
+  "routing.matrix.stateOff": "off",
   "routing.saveBar.restarts": "Salvando, {name} viene riavviato con questo mix."
 }

@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Odrzuć",
   "routing.saveBar.save": "Zapisz",
   "routing.matrix.undoClear": "Cofnij czyszczenie",
+  "routing.matrix.stateOff": "wył.",
   "routing.saveBar.restarts": "Zapisanie uruchomi ponownie {name} z tym miksem."
 }

@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Weggooien",
   "routing.saveBar.save": "Opslaan",
   "routing.matrix.undoClear": "Wissen ongedaan maken",
+  "routing.matrix.stateOff": "uit",
   "routing.saveBar.restarts": "Opslaan start {name} opnieuw met deze mix."
 }

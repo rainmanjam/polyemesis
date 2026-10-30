@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Discard",
   "routing.saveBar.save": "Save",
   "routing.matrix.undoClear": "Undo clear",
+  "routing.matrix.stateOff": "off",
   "routing.saveBar.restarts": "Saving restarts {name} with this mix."
 }

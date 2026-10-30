@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Descartar",
   "routing.saveBar.save": "Salvar",
   "routing.matrix.undoClear": "Desfazer limpeza",
+  "routing.matrix.stateOff": "desligado",
   "routing.saveBar.restarts": "Salvar reinicia {name} com esta mixagem."
 }

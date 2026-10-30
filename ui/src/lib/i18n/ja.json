@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "破棄",
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "クリアを元に戻す",
+  "routing.matrix.stateOff": "オフ",
   "routing.saveBar.restarts": "保存すると、このミックスで {name} が再起動します。"
 }

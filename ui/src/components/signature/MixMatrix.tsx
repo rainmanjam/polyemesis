@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { channelLabels } from "@/lib/channels";
 import type { MatrixCell, SourceTrack } from "@/lib/types";
 import { RotateCcw, Undo2 } from "lucide-react";
 import { useT } from "@/lib/i18n";
+import { gainDbLabel, gainState } from "@/lib/matrixGain";
 
 /* ===========================================================================
    Advanced mode: the full mix matrix.
@@ -238,10 +239,16 @@ function MatrixCellInput({
   onNavigate: (out: number, col: number) => void;
   label: string;
 }) {
+  const t = useT();
+  const stateId = useId();
   const active = value > 0;
+  const state = gainState(value);
   // The fill bar makes the matrix scannable: you read the routing shape from
   // the pattern of lit cells before reading a single number.
   const fill = Math.min(1, value / MAX_GAIN);
+  // A15: the state is a word and a dB reading, not only a tint, so the grid can
+  // be read without colour. Off reads as a word; everything else reads in dB.
+  const stateText = state === "off" ? t("routing.matrix.stateOff") : gainDbLabel(value);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     const step = NAV_STEP[e.key];
@@ -255,15 +262,18 @@ function MatrixCellInput({
 
   return (
     <div
+      data-state={state}
       className={cn(
-        "relative h-7 w-11 overflow-hidden rounded-[3px] border transition-colors",
+        "relative flex h-12 w-[4.5rem] flex-col overflow-hidden rounded-[3px] border transition-colors",
         "focus-within:ring-2 focus-within:ring-ring",
-        active ? "border-primary/40" : "border-border bg-muted/40",
+        state === "unity" && "border-primary/60 bg-primary/10",
+        state === "custom" && "border-primary/40",
+        state === "off" && "border-border bg-muted/40",
       )}
     >
       {active && (
         <div
-          className="absolute inset-y-0 left-0 bg-primary/30"
+          className="absolute inset-y-0 left-0 bg-primary/25"
           style={{ width: `${fill * 100}%` }}
           aria-hidden
         />
@@ -276,6 +286,7 @@ function MatrixCellInput({
         step={0.05}
         value={active ? Number(value.toFixed(4)) : 0}
         aria-label={label}
+        aria-describedby={stateId}
         // THE SAME SENTENCE, ON HOVER. It was already written for a screen
         // reader and reached nobody using a mouse -- the same asymmetry the
         // icon buttons had, in a grid where every cell is an unlabelled box of
@@ -288,11 +299,20 @@ function MatrixCellInput({
           onChange(Number.isFinite(v) ? v : 0);
         }}
         className={cn(
-          "tnum relative h-full w-full bg-transparent text-center font-mono text-sm outline-none",
+          "tnum relative h-6 w-full bg-transparent text-center font-mono text-sm outline-none",
           "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
           active ? "text-foreground" : "text-muted-foreground",
         )}
       />
+      <span
+        id={stateId}
+        className={cn(
+          "tnum relative block truncate text-center font-mono text-xs leading-none",
+          active ? "text-foreground/80" : "text-muted-foreground",
+        )}
+      >
+        {stateText}
+      </span>
     </div>
   );
 }

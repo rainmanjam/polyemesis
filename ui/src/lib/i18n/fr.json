@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Annuler",
   "routing.saveBar.save": "Enregistrer",
   "routing.matrix.undoClear": "Annuler l'effacement",
+  "routing.matrix.stateOff": "désactivé",
   "routing.saveBar.restarts": "L'enregistrement redémarre {name} avec ce mix."
 }

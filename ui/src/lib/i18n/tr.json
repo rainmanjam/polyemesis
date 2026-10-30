@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Vazgeç",
   "routing.saveBar.save": "Kaydet",
   "routing.matrix.undoClear": "Temizlemeyi geri al",
+  "routing.matrix.stateOff": "kapalı",
   "routing.saveBar.restarts": "Kaydetmek {name} öğesini bu miksle yeniden başlatır."
 }

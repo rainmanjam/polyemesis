@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "취소",
   "routing.saveBar.save": "저장",
   "routing.matrix.undoClear": "지우기 취소",
+  "routing.matrix.stateOff": "끔",
   "routing.saveBar.restarts": "저장하면 이 믹스로 {name}이(가) 다시 시작됩니다."
 }

@@ -87,6 +87,27 @@ interface TrackRowsProps {
   duckTarget?: number[];
 }
 
+/** A15: the role chip is bounded by its column, cuts its text rather than
+ *  wrapping into the meter, and keeps the full name on hover. */
+export function RoleBadge({
+  role,
+  excluded,
+}: {
+  role: Exclude<TrackRole, "">;
+  excluded: boolean;
+}) {
+  const name = ROLE_LABEL[role];
+  return (
+    <Badge
+      variant={excluded ? "warn" : "outline"}
+      className="min-w-0 max-w-full truncate"
+      title={name}
+    >
+      {name}
+    </Badge>
+  );
+}
+
 export function TrackRows({
   idPrefix,
   tracks,
@@ -153,7 +174,7 @@ export function TrackRows({
                   : "border-border bg-card opacity-55 hover:opacity-80",
             )}
           >
-            <div className="grid grid-cols-[auto_7.5rem_1fr_9rem] items-center gap-3">
+            <div className="grid grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem] items-center gap-3">
               <Checkbox
                 id={`${idPrefix}-track-${t.index}`}
                 checked={sel.enabled}
@@ -165,14 +186,12 @@ export function TrackRows({
                 htmlFor={`${idPrefix}-track-${t.index}`}
                 className="min-w-0 cursor-pointer select-none"
               >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[12px] font-semibold leading-tight">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 text-[12px] font-semibold leading-tight">
                     Track {t.index + 1}
                   </span>
                   {role !== "" && (
-                    <Badge variant={excluded ? "warn" : "outline"} className="shrink-0">
-                      {ROLE_LABEL[role]}
-                    </Badge>
+                    <RoleBadge role={role as Exclude<TrackRole, "">} excluded={excluded} />
                   )}
                 </div>
                 <div className="truncate font-mono text-sm leading-tight text-muted-foreground">

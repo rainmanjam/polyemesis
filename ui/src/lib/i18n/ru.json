@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Отменить",
   "routing.saveBar.save": "Сохранить",
   "routing.matrix.undoClear": "Отменить очистку",
+  "routing.matrix.stateOff": "выкл.",
   "routing.saveBar.restarts": "Сохранение перезапустит {name} с этим микшем."
 }

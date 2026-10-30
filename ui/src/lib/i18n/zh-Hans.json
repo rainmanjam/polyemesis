@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "放弃",
   "routing.saveBar.save": "保存",
   "routing.matrix.undoClear": "撤销清除",
+  "routing.matrix.stateOff": "关",
   "routing.saveBar.restarts": "保存会以此混音重新启动 {name}。"
 }

@@ -1701,5 +1701,6 @@
   "routing.saveBar.discard": "Buang",
   "routing.saveBar.save": "Simpan",
   "routing.matrix.undoClear": "Batalkan hapus",
+  "routing.matrix.stateOff": "mati",
   "routing.saveBar.restarts": "Menyimpan akan memulai ulang {name} dengan mix ini."
 }
