@@ -250,7 +250,7 @@ function MessageRow({
           disabled={busy || !deletable.ok}
           aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
           title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-subtle-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-subtle-foreground group-hover:flex"
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>

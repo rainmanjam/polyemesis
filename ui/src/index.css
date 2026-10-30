@@ -626,15 +626,17 @@
   color: var(--muted-foreground);
 }
 
+/* muted, not subtle (B2): "3 of 7" and the close button are enabled text and
+   an enabled control, and --subtle-foreground on the popover is 3.1:1. */
 .polyemesis-tour .driver-popover-progress-text {
   font-size: var(--text-micro);
   line-height: var(--text-micro-lh);
-  color: var(--subtle-foreground);
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 
 .polyemesis-tour .driver-popover-close-btn {
-  color: var(--subtle-foreground);
+  color: var(--muted-foreground);
   transition: color var(--motion-instant) var(--ease-out);
 }
 .polyemesis-tour .driver-popover-close-btn:hover,

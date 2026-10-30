@@ -146,7 +146,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
       <div className="flex items-center gap-2">
         <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] font-semibold">{t("chatRules.title")}</span>
-        <span className={`text-[10px] ${accentFor("twitch" as ChatPlatform).text}`}>
+        <span className={`text-sm ${accentFor("twitch" as ChatPlatform).text}`}>
           {t("chatRules.twitchOnly")}
         </span>
       </div>
@@ -154,7 +154,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <div className="flex items-center gap-1.5">
           <Switch id="rule-slow" checked={slow} onCheckedChange={setSlow} disabled={busy} />
-          <Label htmlFor="rule-slow" className="text-[11px]">
+          <Label htmlFor="rule-slow" className="text-sm">
             {t("chatRules.slowMode")}
           </Label>
           {slow && (
@@ -166,10 +166,10 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               disabled={busy}
               onChange={(e) => setSlowSeconds(Math.max(1, Number(e.target.value) || 1))}
               aria-label={t("chatRules.slowSecondsAria")}
-              className="tnum h-6 w-14 rounded border border-border bg-card-raised px-1 text-[11px]"
+              className="tnum h-6 w-14 rounded border border-border bg-card-raised px-1 text-sm"
             />
           )}
-          {slow && <span className="text-[10px] text-muted-foreground">{t("chatRules.seconds")}</span>}
+          {slow && <span className="text-sm text-muted-foreground">{t("chatRules.seconds")}</span>}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -179,7 +179,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             onCheckedChange={setFollowers}
             disabled={busy}
           />
-          <Label htmlFor="rule-followers" className="text-[11px]">
+          <Label htmlFor="rule-followers" className="text-sm">
             {t("chatRules.followersOnly")}
           </Label>
           {/* THE AGE, which is the whole point of the mode during a raid.
@@ -203,11 +203,11 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
                 )
               }
               aria-label={t("chatRules.followMinutesAria")}
-              className="tnum h-6 w-16 rounded border border-border bg-card-raised px-1 text-[11px]"
+              className="tnum h-6 w-16 rounded border border-border bg-card-raised px-1 text-sm"
             />
           )}
           {followers && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {followerMinutes === 0 ? t("chatRules.minutesAnyFollower") : t("chatRules.minutes")}
             </span>
           )}
@@ -215,7 +215,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
 
         <div className="flex items-center gap-1.5">
           <Switch id="rule-subs" checked={subsOnly} onCheckedChange={setSubsOnly} disabled={busy} />
-          <Label htmlFor="rule-subs" className="text-[11px]">
+          <Label htmlFor="rule-subs" className="text-sm">
             {t("chatRules.subscribersOnly")}
           </Label>
         </div>
@@ -229,14 +229,14 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             onCheckedChange={setEmotesOnly}
             disabled={busy}
           />
-          <Label htmlFor="rule-emotes" className="text-[11px]">
+          <Label htmlFor="rule-emotes" className="text-sm">
             {t("chatRules.emotesOnly")}
           </Label>
         </div>
 
         <div className="flex items-center gap-1.5">
           <Switch id="rule-unique" checked={unique} onCheckedChange={setUnique} disabled={busy} />
-          <Label htmlFor="rule-unique" className="text-[11px]">
+          <Label htmlFor="rule-unique" className="text-sm">
             {t("chatRules.noRepeats")}
           </Label>
         </div>
@@ -252,7 +252,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             onCheckedChange={setModDelay}
             disabled={busy}
           />
-          <Label htmlFor="rule-mod-delay" className="text-[11px]">
+          <Label htmlFor="rule-mod-delay" className="text-sm">
             {t("chatRules.modDelay")}
           </Label>
           {modDelay && (
@@ -266,7 +266,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               disabled={busy}
               onChange={(e) => setModDelaySeconds(Number(e.target.value))}
               aria-label={t("chatRules.modDelayAria")}
-              className="tnum h-6 rounded border border-border bg-card-raised px-1 text-[11px]"
+              className="tnum h-6 rounded border border-border bg-card-raised px-1 text-sm"
             >
               {MOD_DELAYS.map((s) => (
                 <option key={s} value={s}>
@@ -275,7 +275,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               ))}
             </select>
           )}
-          {modDelay && <span className="text-[10px] text-muted-foreground">{t("chatRules.seconds")}</span>}
+          {modDelay && <span className="text-sm text-muted-foreground">{t("chatRules.seconds")}</span>}
         </div>
       </div>
 
@@ -288,7 +288,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
           {t("chatRules.turnAllOff")}
         </Button>
         {/* The limitation, said out loud. See the note at the top of this file. */}
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {t("chatRules.limitation")}
         </span>
       </div>

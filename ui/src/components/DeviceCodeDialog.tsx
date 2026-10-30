@@ -218,12 +218,12 @@ export function DeviceCodeDialog({
               {/* The address in full as well as behind the button: the second
                   device is usually not the one showing this dialog, so it has
                   to be readable and typeable, not only clickable. */}
-              <code className="break-all text-center text-[10px] text-muted-foreground">
+              <code className="break-all text-center text-sm text-muted-foreground">
                 {phase.auth.verificationUri}
               </code>
             </div>
 
-            <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-3 animate-spin" aria-hidden />
               <span>{t("device.waiting")}</span>
               {remaining !== null && (

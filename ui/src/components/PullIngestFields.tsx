@@ -72,10 +72,10 @@ export function PullIngestFields({
           onChange={(e) => set({ url: e.target.value })}
         />
         {pull.url !== "" && !known ? (
-          <span className="text-[10px] text-warn">
+          <span className="text-sm text-warn">
             {t("set.dialsOnly", { schemes: PULL_SCHEMES.join(", ") })}</span>
         ) : (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             {t("set.pullSchemesNote", { schemes: PULL_SCHEMES.join(", ") })}
           </span>
         )}
@@ -90,7 +90,7 @@ export function PullIngestFields({
             value={pull.reconnectDelayMaxSeconds}
             onChange={(e) => set({ reconnectDelayMaxSeconds: Number(e.target.value) })}
           />
-          <span className="text-[10px] text-muted-foreground">{t("set.reconnectCapNote")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.reconnectCapNote")}</span>
         </div>
         <div className="flex flex-col gap-1">
           <Label>{t("set.rtspTransport")}</Label>
@@ -106,7 +106,7 @@ export function PullIngestFields({
               ))}
             </SelectContent>
           </Select>
-          <span className="text-[10px] text-muted-foreground">{t("set.rtspNote")}</span>
+          <span className="text-sm text-muted-foreground">{t("set.rtspNote")}</span>
         </div>
       </div>
     </>

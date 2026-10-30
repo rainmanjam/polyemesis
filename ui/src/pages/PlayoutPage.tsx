@@ -198,7 +198,7 @@ export function PlayoutPage() {
         subtitle={t("play.subtitle")}
         actions={
           <div className="flex items-center gap-2">
-            <span className="text-tiny text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {play.enabled ? t("common.enabled") : t("common.disabled")}
             </span>
             <Switch
@@ -243,12 +243,12 @@ export function PlayoutPage() {
               <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
             </div>
             {analytics.uncounted > 0 && (
-              <p className="mt-3 text-tiny text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 {t("play.uncountedViewers", { count: analytics.uncounted })}
               </p>
             )}
             {usage.overLimit && (
-              <p className="mt-3 flex items-start gap-1.5 text-tiny text-down">
+              <p className="mt-3 flex items-start gap-1.5 text-sm text-down">
                 <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
                 {t("play.diskCapBelowWindow")}
               </p>
@@ -482,7 +482,7 @@ function CopyField({
           readOnly
           value={value}
           onFocus={(e) => e.currentTarget.select()}
-          className={cn("text-tiny", mono && "font-mono")}
+          className={cn("text-sm", mono && "font-mono")}
         />
         <Button
           variant="secondary"
@@ -501,7 +501,7 @@ function CopyField({
           {copied ? <Check /> : <Copy />}
         </Button>
       </div>
-      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -566,10 +566,10 @@ export function ShareCard({
             rows={3}
             value={view.urls.embed}
             onFocus={(e) => e.currentTarget.select()}
-            className="font-mono text-tiny"
+            className="font-mono text-sm"
           />
           {!play.allowCrossOrigin && (
-            <p className="text-tiny text-warn">
+            <p className="text-sm text-warn">
               {t("play.embedNeedsCrossOrigin", { setting: t("play.allowCrossOrigin") })}
             </p>
           )}
@@ -585,7 +585,7 @@ export function ShareCard({
               <KeyRound />
               {t("play.rotate")}
             </Button>
-            <p className="mt-1 text-tiny text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               {t("play.rotateHint")}
             </p>
             <ConfirmDestructive
@@ -658,7 +658,7 @@ function ProtectionCard({
               </SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-tiny text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {view.protection === "token"
               ? t("play.basicPasswordNote") : t("play.noCredentialNote")}
           </p>
@@ -667,7 +667,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.public")}</p>
-            <p className="text-tiny text-muted-foreground">{t("play.publicNote")}</p>
+            <p className="text-sm text-muted-foreground">{t("play.publicNote")}</p>
           </div>
           <Switch
             checked={play.public}
@@ -680,7 +680,7 @@ function ProtectionCard({
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>
             <p className="text-sm font-medium">{t("play.allowCrossOrigin")}</p>
-            <p className="text-tiny text-muted-foreground">{t("play.crossOriginNote")}</p>
+            <p className="text-sm text-muted-foreground">{t("play.crossOriginNote")}</p>
           </div>
           <Switch
             checked={play.allowCrossOrigin}
@@ -787,7 +787,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.name")}</Label>
+                <Label className="text-sm">{t("play.name")}</Label>
                 {/* Uncontrolled, and committed on blur rather than on every
                     keystroke: a rename is a directory move and a muxer
                     restart, so saving mid-word would cycle the stream once per
@@ -806,7 +806,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.videoSource")}</Label>
+                <Label className="text-sm">{t("play.videoSource")}</Label>
                 <Select
                   value={v.renditionId == null ? "source" : String(v.renditionId)}
                   disabled={busy}
@@ -829,7 +829,7 @@ export function VariantsCard({
               </div>
 
               <div className="grid gap-1">
-                <Label className="text-micro">{t("play.audioTrack")}</Label>
+                <Label className="text-sm">{t("play.audioTrack")}</Label>
                 {/* Committed on blur for the same reason the name is: each
                     save restarts this rung's muxer. */}
                 <Input
@@ -852,13 +852,13 @@ export function VariantsCard({
 
               <div className="flex items-center gap-1 pb-1">
                 {st?.running && st.bandwidth > 0 && (
-                  <Badge variant="outline" className="font-mono text-micro">
+                  <Badge variant="outline" className="font-mono text-sm">
                     {Math.round(st.bandwidth / 1000)}k
                     {st.height ? ` · ${st.height}p` : ""}
                   </Badge>
                 )}
                 {st?.viewers ? (
-                  <Badge variant="outline" className="text-micro">
+                  <Badge variant="outline" className="text-sm">
                     {t("stats.watching", { count: st.viewers })}
                   </Badge>
                 ) : null}
@@ -876,7 +876,7 @@ export function VariantsCard({
               </div>
 
               {st?.error && (
-                <p className="text-tiny text-down sm:col-span-5">{st.error}</p>
+                <p className="text-sm text-down sm:col-span-5">{st.error}</p>
               )}
             </div>
           );
@@ -959,7 +959,7 @@ function NumberField({
           else setDraft(String(value));
         }}
       />
-      {hint && <p className="text-tiny text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -1000,7 +1000,7 @@ function PackagingCard({
               <SelectItem value="hls+dash">{t("play.hlsDash")}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-tiny text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {t("play.dashNote")}
           </p>
         </div>
