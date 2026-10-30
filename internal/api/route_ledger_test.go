@@ -572,6 +572,17 @@ var excusedRoutes = map[string]coverageExcus{
 		Want:        &routeWant{As: "read", Status: http.StatusServiceUnavailable},
 		Counterpart: "eventStream",
 	},
+	"POST /mcp": {
+		Why: "the MCP endpoint (#12): a JSON-RPC envelope, not a REST body, so the sweep's " +
+			"{} is not a message and the transport refuses it with a 400 before any tool " +
+			"runs -- which is what the Want below observes. Every tool is a dispatch of " +
+			"routes this ledger already classifies; the counterpart drives every read tool " +
+			"through a real MCP client as a read token against the planted fixture. The " +
+			"admin token's MCP output is held to the same absence by " +
+			"TestNoMCPToolOrResourceReturnsACredentialToAnyToken.",
+		Want:        &routeWant{As: "read", Status: http.StatusBadRequest},
+		Counterpart: "mcpToolOutputs",
+	},
 	"GET /api/v1/playout/public": {
 		Why: "gated by authorizePlayout; a read token receives exactly what a stranger " +
 			"does. The old text said \"no body at all\", which is false when driven -- " +
@@ -1160,6 +1171,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"runningDestinationLogs":                proveRunningDestinationLogs,
 	"websocketFrames":                       proveWebsocketFrames,
 	"eventStream":                           proveEventStream,
+	"mcpToolOutputs":                        proveMCPToolOutputs,
 	"hookDeliveries":                        proveHookDeliveries,
 	"playoutPublicView":                     provePlayoutPublicView,
 	"playoutManifestBytes":                  provePlayoutManifest,

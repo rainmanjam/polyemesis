@@ -132,9 +132,11 @@ type sourceView struct {
 //
 // Session principals and admin tokens are unaffected: the console needs the
 // token to show the operator, and an admin token could rotate it anyway.
+//
+// An MCP tool's dispatched request is withheld them too, whatever its token's
+// scope: see credentialsWithheld, which this now is.
 func readScopeCannotSeePublishTokens(r *http.Request) bool {
-	p, ok := principalFrom(r.Context())
-	return ok && p.token != nil && p.token.Scope != db.ScopeAdmin
+	return credentialsWithheld(r)
 }
 
 func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) sourceView {

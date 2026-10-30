@@ -40,6 +40,16 @@ import (
 var version = "dev"
 
 func main() {
+	// `polyemesis mcp` is a client, not a server: it relays MCP over stdio to a
+	// running server's /mcp endpoint (see mcp_proxy.go). Dispatched before
+	// anything else -- no config, no service handshake, no flag.Parse of the
+	// server's flags -- and nothing but JSON-RPC may reach stdout.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		code := runMCPProxy(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr, os.Getenv)
+		stop()
+		os.Exit(code)
+	}
 	// Windows may have been started by the Service Control Manager, which needs
 	// its own handshake before any work begins. Everywhere else, and on a
 	// Windows console, runService reports "not mine" and we run interactively.

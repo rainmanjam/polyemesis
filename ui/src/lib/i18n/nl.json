@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Clip vastgelegd",
   "auto.evDebugExported": "Foutopsporingspakket geëxporteerd",
   "auto.evAlertRuleChanged": "Waarschuwingsregel gewijzigd",
+  "auto.evMCPAction": "Actie van AI-assistent (MCP)",
   "auto.evDiskLow": "Schijf raakt vol",
   "auto.evDiskRecovered": "Schijf hersteld",
   "auto.evIngestLost": "Ingang verloren",

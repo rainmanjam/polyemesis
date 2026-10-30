@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Clipe capturado",
   "auto.evDebugExported": "Pacote de depuração exportado",
   "auto.evAlertRuleChanged": "Regra de alerta alterada",
+  "auto.evMCPAction": "Ação de assistente de IA (MCP)",
   "auto.evDiskLow": "Espaço em disco acabando",
   "auto.evDiskRecovered": "Disco recuperado",
   "auto.evIngestLost": "Entrada perdida",

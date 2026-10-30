@@ -52,6 +52,13 @@ the software actually promises.
   No token of either scope can manage tokens, change the password, upload or
   delete media, or complete an OAuth connect flow. Those are session-only.
 
+  The [MCP server](docs/MCP.md) (`POST /mcp`) takes these tokens and nothing
+  else: a browser session is refused there. Each MCP tool is served as a
+  request to the API with the caller's own token, so the same scope rules
+  decide it; a `read` token is not even listed the write tools. MCP answers
+  never carry a credential, for an `admin` token either, and every MCP write
+  raises an `mcp.action` audit event naming the token.
+
   **A rule about the HTTP verb cannot see what a response contains.** That is a
   real limit rather than a theoretical one, and it is the second half of this
   feature. A `read` token is additionally refused every stored CREDENTIAL, in
