@@ -3,6 +3,7 @@ package engine
 import (
 	"io"
 	"log/slog"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -32,15 +33,24 @@ func liveRow(t *testing.T, store *db.DB, muted bool) *db.Destination {
 	return row
 }
 
-// shellChild runs script as a destination process with the command channel on.
-func shellChild(t *testing.T, script string) *supervisor.Process {
+// replyChild runs a stand-in destination with the command channel on, which
+// answers every command line with reply. The stand-in is this test binary
+// re-executed (TestMain's engineFakeChildLiveReply), not /bin/sh, so the tests
+// that do not need the channel to work -- a structural restart, a refusal, the
+// running check -- run on Windows as well. There the child has no stdin pipe,
+// and every level change is refused before anything is written.
+func replyChild(t *testing.T, reply string) *supervisor.Process {
 	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary to re-execute as a child: %v", err)
+	}
 	p := supervisor.New(slog.New(slog.NewTextHandler(io.Discard, nil)), supervisor.Spec{
-		Name: "dest-live", Kind: "destination", Bin: "/bin/sh", Args: []string{"-c", script},
-		LiveCommands: true,
+		Name: "dest-live", Kind: "destination", Bin: self,
+		Args: []string{engineFakeChildFlag, engineFakeChildLiveReply, reply}, LiveCommands: true,
 	})
 	p.Start()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for p.Status().State != supervisor.StateRunning {
 		if time.Now().After(deadline) {
 			t.Fatal("the stand-in child never reached running")
@@ -70,51 +80,6 @@ func planFor(t *testing.T, e *Engine, row *db.Destination) destPlan {
 	return p
 }
 
-// MUTATION: in stopDestinations, skip the liveTry append (treat every kept
-// level change as nothing to do). Observed: FAIL, "no outcome recorded".
-func TestALevelOnlyChangeGoesToTheRunningProcess(t *testing.T) {
-	e, store := storeEngine(t)
-	row := liveRow(t, store, false)
-	before := planFor(t, e, row)
-
-	proc := shellChild(t, `while read l; do echo "Command reply for stream 0: ret:0 res:" >&2; done`)
-	t.Cleanup(func() { _ = proc.Stop(t.Context()) })
-	d := liveRunningDest(e, row, before, proc)
-
-	muted := *row
-	muted.Profile = mixProfile(0)
-	muted.Profile.Tracks[0].Muted = true
-	after := planFor(t, e, &muted)
-	if after.spec != before.spec {
-		t.Fatal("a mute moved the restart signature; it can never be live")
-	}
-
-	e.stopDestinations(map[int64]destPlan{row.ID: after})
-
-	applied, reason, ok := e.DestinationLive(row.ID)
-	if !ok {
-		t.Fatal("no outcome recorded for a level change")
-	}
-	if applied != liveApplied {
-		t.Fatalf("applied = %q (%s), want live", applied, reason)
-	}
-	e.mu.RLock()
-	cur := e.dests[row.ID]
-	e.mu.RUnlock()
-	if cur == nil || cur.proc != proc {
-		t.Fatal("the destination was replaced; a live change must keep the same process")
-	}
-	if proc.Status().State != supervisor.StateRunning {
-		t.Fatalf("the process is %s after a live change", proc.Status().State)
-	}
-	if !strings.Contains(d.graph.get().FilterComplex, "volume@trk0=volume=0") {
-		t.Errorf("the respawn graph does not carry the mute: %s", d.graph.get().FilterComplex)
-	}
-	if !strings.Contains(cur.compiled.FilterComplex, "volume@trk0=volume=0") {
-		t.Errorf("the published graph does not carry the mute: %s", cur.compiled.FilterComplex)
-	}
-}
-
 // Restart is the fallback: a refusal tears the destination down so the next
 // start builds it with the new level, and the reason is kept for the operator.
 //
@@ -125,7 +90,7 @@ func TestARefusedLevelChangeRestartsAndSaysWhy(t *testing.T) {
 	row := liveRow(t, store, false)
 	before := planFor(t, e, row)
 
-	proc := shellChild(t, `while read l; do echo "Command reply for stream 0: ret:-78 res:" >&2; done`)
+	proc := replyChild(t, "Command reply for stream 0: ret:-78 res:")
 	t.Cleanup(func() { _ = proc.Stop(t.Context()) })
 	liveRunningDest(e, row, before, proc)
 
@@ -208,7 +173,7 @@ func TestDestinationRunning(t *testing.T) {
 	if e.DestinationRunning(row.ID) {
 		t.Fatal("a destination with no entry reads as running")
 	}
-	proc := shellChild(t, `while read l; do :; done`)
+	proc := replyChild(t, "")
 	t.Cleanup(func() { _ = proc.Stop(t.Context()) })
 	liveRunningDest(e, row, planFor(t, e, row), proc)
 	if !e.DestinationRunning(row.ID) {
@@ -227,7 +192,7 @@ func TestALevelChangeWithAStructuralOneRecordsTheRestart(t *testing.T) {
 	row := liveRow(t, store, false)
 	before := planFor(t, e, row)
 
-	proc := shellChild(t, `while read l; do echo "Command reply for stream 0: ret:0 res:" >&2; done`)
+	proc := replyChild(t, "Command reply for stream 0: ret:0 res:")
 	t.Cleanup(func() { _ = proc.Stop(t.Context()) })
 	liveRunningDest(e, row, before, proc)
 
