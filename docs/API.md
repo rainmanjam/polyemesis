@@ -43,6 +43,15 @@ Every token carries a scope, chosen when it is created:
 |---|---|
 | `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
+| `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
+| `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
+
+An `mcp-` token is accepted at `POST /mcp` and nowhere else. Every route in this
+document, `/ws` and `/events` answer it exactly as they answer no token at all,
+so a token minted for an AI assistant cannot be used as an API token, and an API
+token (a Stream Deck's, a script's) is refused at `/mcp`. When an MCP tool runs,
+it calls the routes in this document with the token's base tier, `read` or
+`admin`, and the rules on this page apply to those calls unchanged.
 
 The middleware also lets `HEAD` through, and no route in this API is registered
 for it, so `HEAD` on any of them is `405` whatever scope you hold. Use `GET`.
@@ -153,7 +162,9 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
-arrive).
+arrive). The [events stream](EVENTS.md) gives the same answer: a `read` token
+may open `GET /events` and is sent everything except the `chat` topic and the
+audit alerts that `GET /timeline` does not show it.
 
 `GET /library/search` is the one worth reading twice. It looks like a metadata
 query and is not: iterating common words would rebuild whole
@@ -384,6 +395,8 @@ tokens are for.
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
+| `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
+| `GET` | `/overlay/events` | A chat overlay's display stream (SSE). Needs its overlay key in `X-Overlay-Key` |
 
 Both of these, and the media origin at `/playout/*`, sit outside every
 authenticated group — a viewer has no account and never will — and are guarded
@@ -496,6 +509,10 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 | `POST` | `/auth/password` |
 | `GET` `POST` | `/auth/tokens` |
 | `DELETE` | `/auth/tokens/{id}` |
+| `GET` `POST` | `/overlays` |
+| `PUT` `DELETE` | `/overlays/{id}` |
+| `POST` `DELETE` | `/overlays/{id}/key` |
+| `GET` `PUT` | `/mcp/access` |
 | `GET` | `/tour` |
 | `POST` | `/tour/complete` |
 
@@ -503,6 +520,21 @@ waits two seconds, then four, and so on. Honour `Retry-After`, or call
 `{name, prefix, scope, adminScope}`. It carries no secret, and a read token may call it.
 `adminScope` is `true` for an admin token. An admin token can also stop destinations, so a
 pairing client should say so when it is pasted. A status or meter plugin needs only a read token.
+
+`/mcp/access` is the MCP switch and its levels: `{enabled, levels}`, where
+`levels` holds any of `read`, `content` and `control`. It is session-only so
+that no API token, an admin one included, can turn MCP on for itself. MCP is
+off until somebody turns it on, and the first enable that names no levels turns
+on `read` only. Every change is a `settings.changed` audit event naming the
+setting before and after; turning on `control` is `critical`. See
+[MCP.md](MCP.md#setup).
+
+`/overlays` manages chat overlays and their keys, and needs a signed-in
+session, like `/auth/tokens`: each overlay carries a credential. `POST
+/overlays/{id}/key` rotates the key and `DELETE` revokes it; either ends open
+overlays within seconds. The overlay key itself reaches only the two
+`/overlay/*` routes above, and no other route accepts it. See
+[OVERLAY.md](OVERLAY.md).
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not
@@ -529,9 +561,16 @@ does not get to change what another operator's console shows them.
 | `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
 | `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
-| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?}`. Install-wide, so it takes no `?source=` |
+| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?, process?, sourceId?}`. `process` names the supervised process whose log holds the detail (`dest:3`, `ingest`), when there is exactly one, and `sourceId` names the programme it belongs to. A destination deleted since the event names neither. Install-wide, so it takes no `?source=` |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
+| `GET` | `/events` | The real-time events API, as Server-Sent Events: destination, ingest, failover, go-live and stop, recording, chat and alert events in the webhook envelope, numbered, with `Last-Event-ID` replay for 5 minutes. `?topics=` filters. A bearer token or the session cookie; no token in the query string. A `read` token is sent everything but `chat` and the audit alerts. Install-wide, so it takes no `?source=`. See [EVENTS.md](EVENTS.md) |
+
+`POST /mcp` (outside `/api/v1`) is the [MCP server](MCP.md). It exists only
+while MCP is switched on: until then every method answers the `404` an unknown
+endpoint gets. It takes an `mcp-` token only, and every tool is a call to one of
+the routes in this table, made with the token's base tier, so the scopes above
+apply to it unchanged.
 
 `/status`, `/source`, `/source/annotations`, `/levels`, `/processes`,
 `/processes/{name}/logs` and `/ws` are programme-scoped: on an install with
@@ -1370,6 +1409,11 @@ apart on `status.source.id`. What a UI cannot do is keep one status series and
 one bitrate series for the socket — those get redrawn from whichever engine
 spoke last — which is why a multi-source grid polls `GET /previews` instead of
 deriving one from this feed.
+
+`/ws` is the console's own feed and its frames are not a stable contract. A
+program that wants to be told what happened should read the [events
+stream](EVENTS.md) (`GET /events`) instead: a versioned envelope, numbered
+events and replay after a disconnect.
 
 ## A worked example
 

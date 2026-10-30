@@ -327,6 +327,12 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// timeline_events.subject, the alert key a timeline row is about, so the
+	// Monitoring timeline can link a row to that subject's log (A13).
+	if err := d.MigrateTimelineSubject(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// The partial unique index that makes two active jobs for one unique target
 	// impossible. A migration rather than a line in schema.sql because the rule
 	// is partial and because an install that already holds a duplicate pair

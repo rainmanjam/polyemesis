@@ -110,7 +110,8 @@ server {
         proxy_read_timeout  3600s;
         proxy_send_timeout  3600s;
 
-        # Buffering delays HLS segments and WebSocket frames.
+        # Buffering delays HLS segments, WebSocket frames and the events stream
+        # (GET /api/v1/events, which also sends X-Accel-Buffering: no).
         proxy_buffering off;
     }
 

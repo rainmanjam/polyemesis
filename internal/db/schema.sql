@@ -596,6 +596,43 @@ CREATE TABLE IF NOT EXISTS timeline_events (
     type     TEXT    NOT NULL,
     severity TEXT    NOT NULL,
     title    TEXT    NOT NULL,
-    detail   TEXT    NOT NULL DEFAULT ''
+    detail   TEXT    NOT NULL DEFAULT '',
+    subject  TEXT    NOT NULL DEFAULT ''  -- the alert key; MigrateTimelineSubject
 );
 CREATE INDEX IF NOT EXISTS idx_timeline_events_at ON timeline_events(at, id);
+
+-- Chat overlays (OBS browser sources and docks). One row per overlay: a name,
+-- the platforms it shows, its style, and the key its URL carries.
+--
+-- overlay_key is stored in plaintext, like sources.token and for the same
+-- reason: it is pasted into OBS as part of a URL and the operator comes back to
+-- copy that URL again. It is a DISPLAY-ONLY credential -- it reaches the
+-- overlay's own config and display stream and nothing else (internal/api,
+-- overlays.go) -- and an empty string means revoked.
+CREATE TABLE IF NOT EXISTS chat_overlays (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL,
+    overlay_key    TEXT    NOT NULL DEFAULT '',
+    platforms      TEXT    NOT NULL DEFAULT '[]',  -- JSON array; empty = every platform
+    style          TEXT    NOT NULL DEFAULT '{}',  -- JSON overlay.Style
+    created_at     INTEGER NOT NULL,
+    key_rotated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_overlays_key ON chat_overlays(overlay_key) WHERE overlay_key != '';
+
+-- MCP access: whether the /mcp endpoint exists at all, and which capability
+-- levels an MCP token may reach. One row, id 1, written only by the
+-- session-only settings route (internal/api/mcp_access.go). NO ROW MEANS OFF,
+-- which is what a fresh install and every upgraded database read: MCP is
+-- opt-in, and an install that never chose it must not start answering on /mcp
+-- because a build added the table.
+--
+-- Its own table rather than a section of the settings document, because an
+-- admin API token may PUT /settings and must not be able to switch MCP on for
+-- itself. Here there is no route a token can reach that writes it.
+CREATE TABLE IF NOT EXISTS mcp_access (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    levels     TEXT    NOT NULL DEFAULT '["read"]',  -- JSON array of read|content|control
+    updated_at INTEGER NOT NULL DEFAULT 0
+);

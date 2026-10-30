@@ -33,7 +33,8 @@ var approvedFields = map[string][]string{
 	},
 	"DestState": {
 		"id", "name", "slug", "platform", "kind", "enabled", "running",
-		"error", "bitrateKbps", "uptimeSec", "restarts", "rendition", "at",
+		"error", "cause", "held", "causeDetail",
+		"bitrateKbps", "uptimeSec", "restarts", "rendition", "at",
 	},
 	"RenditionState": {
 		"id", "name", "slug", "consumers", "running", "width", "height",

@@ -33,6 +33,7 @@ script needed.
 | `destination.down` | a destination stops — failed, disabled, deleted, or stalled with its process still running | 10s |
 | `broadcast.fault` | a platform refused to start or end a broadcast | none |
 | `destination.rolledover` | a file destination's recording continued into a different file | none |
+| `destination.held` | polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry | none; after the `down` if the destination was live |
 
 "Delivering" is read from FFmpeg's own progress report: the destination's
 output time has to advance between two sweeps, two seconds apart. A destination
@@ -47,6 +48,16 @@ destination's output stops, and that is reported once, as
 `"stalled": true` on the destination, and `polyemesis_destination_up` 0. They
 apply the same ingest exception, so a lost source leaves every destination up.
 See [MONITORING.md](MONITORING.md).
+
+`destination.held` is sent **once per hold**. A hold usually lands inside the
+10-second `down` dwell, so for a destination that was live it follows that
+destination's `destination.down`, in the same sweep, instead of arriving first.
+A destination that never went live has no `down` coming, so its `held` is sent
+at once. It carries `cause`, `held: true` and `keyChanged` like the down, and
+`error` is redacted the same way. After Retry, the next `destination.up` is
+the recovery, and a later hold is sent again. The `held` field on
+`destination.down` is unchanged: a script that already reads it keeps working,
+and one that only wants holds can now subscribe to this trigger alone.
 
 `destination.rolledover` is also **not** a `destination.down`. Nothing stopped:
 the destination is delivering and the recording is continuing. What changed is
@@ -88,8 +99,8 @@ since boot never announces a disconnection that never happened.
 default for the first hook somebody creates, and it is a trap on the second: an
 operator who clears the list in the editor meaning "stop sending me things"
 subscribes to the firehose instead. It also means the subscription grows
-underneath you — `broadcast.fault` and `destination.rolledover` were both
-appended to the table above after the fact, and every hook that had never
+underneath you — `broadcast.fault`, `destination.rolledover` and
+`destination.held` were all appended to the table above after the fact, and every hook that had never
 narrowed its `triggers` started receiving them on upgrade. If you want two
 triggers, name two.
 
@@ -125,13 +136,41 @@ stop every hook on the install to punish one stale name.
 `destination` is absent on the two ingest triggers. `reason` is free text meant
 for a human reading a log; **branch on `trigger`, not on `reason`.**
 
+A `destination.down` caused by a failure also carries WHY, as a code you can
+branch on:
+
+```json
+{
+  "trigger": "destination.down",
+  "reason": "stopped",
+  "cause": "key_rejected",
+  "held": true,
+  "keyChanged": true,
+  "error": "…"
+}
+```
+
+- `cause` is one of `key_rejected`, `platform_not_ready`, `dns`,
+  `connection_refused`, `timeout`, `tls`, `codec_rejected`, `upload_too_slow`
+  or `unknown`. These are the same codes the status JSON, MQTT and alerts use.
+  See [Why a destination is failing](MONITORING.md#why-a-destination-is-failing).
+- `held` means polyemesis has stopped retrying after repeated quick
+  rejections.
+- `keyChanged` means the connected platform account reports a stream key that
+  differs from the stored one.
+
+All three are absent on every other delivery, including a `destination.down`
+for a destination you disabled. They sit beside `reason` rather than inside it
+because `reason` already means `stopped`, `disabled`, `removed` or `stalled`,
+and scripts branch on those words.
+
 `id` is **32 lowercase hex characters** — 16 bytes of `crypto/rand`, no prefix
 and no separators — and it is what `X-Polyemesis-Delivery` carries. Size an
 idempotency-key column for 32 characters, and do not validate it against a
 narrower shape.
 
 **Fields with nothing to say are absent, not empty.** `reason`, `error`,
-`missed` and `test` are all omitted when they are empty or zero, so a healthy
+`cause`, `held`, `keyChanged`, `missed` and `test` are all omitted when they are empty or zero, so a healthy
 delivery has no `error` key at all. Test for presence — in JavaScript
 `body.error` is `undefined`, not `""` — rather than comparing against an empty
 string.

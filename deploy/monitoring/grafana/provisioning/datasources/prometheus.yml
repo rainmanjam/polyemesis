@@ -1,0 +1,14 @@
+# The Prometheus this compose file runs. timeInterval matches the scrape
+# interval in ../../prometheus.yml so $__rate_interval is never shorter than
+# two scrapes.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s

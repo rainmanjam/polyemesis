@@ -193,6 +193,8 @@ const DOCS_BY_SECTION = {
   operating: [
     ["AUTOMOD.md", "Automatic moderation: rules, and a model if you want one",
       "Regex and rate checkers that run in-process, an optional external model that is off by default, and a per-platform matrix that grants each of them permission."],
+    ["OVERLAY.md", "Chat overlay and OBS dock for every platform",
+      "One display-only chat overlay for OBS across Twitch, YouTube, Kick, Facebook and Rumble. Per-scene platform filters, style presets, and a key that reads nothing else."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
@@ -212,8 +214,14 @@ const DOCS_BY_SECTION = {
   automation: [
     ["MONITORING.md", "Monitoring: Prometheus metrics and alerts",
       "Everything the dashboard draws, as metrics. The endpoint and why it needs authentication, metric conventions, queries to start from, and built-in alerts."],
+    ["GRAFANA.md", "Grafana dashboard and Prometheus alerts",
+      "A shipped Grafana dashboard with failure causes per destination, Prometheus alert rules, and a compose file that runs both pre-provisioned."],
     ["HOOKS.md", "Lifecycle webhooks: one signed POST per event",
       "A signed JSON POST when a stream starts or stops and when a destination goes live or drops. The envelope, verifying a signature, ordering and gaps."],
+    ["EVENTS.md", "Real-time events API: Server-Sent Events",
+      "GET /api/v1/events streams destination, ingest, failover, go-live, recording, chat and alert events as SSE, with replay. Event catalogue and examples."],
+    ["MCP.md", "MCP server: connect an AI assistant",
+      "POST /mcp lets Claude Desktop, Claude Code or any MCP client read status and failure causes, and with an admin token start, stop and go live. Tools, scopes, confirmations, setup."],
     ["MQTT.md", "MQTT telemetry and Home Assistant",
       "Retained state on an MQTT 5.0 broker, so a consumer that was offline still gets the current answer. The topic tree, the payloads, and Home Assistant."],
     ["API.md", "HTTP API reference — polyemesis /api/v1",

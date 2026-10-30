@@ -206,3 +206,52 @@ keywords = ["key", "api", "token", "secret", "client", "passwd", "password", "au
     paths = [
       '''ui/src/lib/settingsSearch\.ts''',
     ]
+
+    # A FIFTH block, for three Wave 1 fixtures that are no longer in the tree.
+    #
+    # Each was a made-up value written as a literal beside a key-shaped name:
+    # a stream key in the Prometheus scrape guard and the supervisor's
+    # reason-line guard, and the overlay key in the settings page's test. The
+    # tip now assembles each at run time, so the SOURCE holds no
+    # credential-shaped literal while the tests see the same string -- but the
+    # commits that added them (781b8dc, 84fafd5, c89de76) are in this PR's
+    # range, and the range scan reads them.
+    #
+    # Value AND path, like every block above, rather than the commits: those
+    # are large feature commits, and exempting one whole would hide anything
+    # else in it. Here only these three strings, only in these three files.
+    [[rules.allowlists]]
+    description = "Wave 1 fixtures since assembled at run time"
+    condition = "AND"
+    regexTarget = "match"
+    regexes = [
+      '''live_8812_SECRETKEYabcdef''',
+      '''live_8f3a9c2e71b4''',
+      '''pov_testkey123456789''',
+    ]
+    paths = [
+      '''internal/api/metrics_reason_test\.go''',
+      '''internal/supervisor/reason_test\.go''',
+      '''ui/src/components/OverlaySettings\.test\.tsx''',
+    ]
+
+# The same for stripe-access-token, which has no block of its own above: the
+# overlay's redaction test (c89de76) used `sk_live_abcdefghijklmnop` as the
+# credential-shaped text a chat line must not carry through redaction. The tip
+# uses a key that resembles no provider's; this exempts that one invented string
+# in that one file, in the commit range that still contains it. Declared with
+# its id and allowlist only, which EXTENDS the default rule rather than
+# replacing its pattern.
+[[rules]]
+id = "stripe-access-token"
+
+  [[rules.allowlists]]
+  description = "the overlay redaction test's made-up Stripe-shaped string"
+  condition = "AND"
+  regexTarget = "match"
+  regexes = [
+    '''sk_live_abcdefghijklmnop''',
+  ]
+  paths = [
+    '''internal/eventstream/overlay_test\.go''',
+  ]

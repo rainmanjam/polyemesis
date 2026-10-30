@@ -1,0 +1,5 @@
+[tls @ 0x7a76830380] IO error: End of file
+[rtmps @ 0x7a76c075c0] Cannot open connection tls://127.0.0.1:19350
+[out#0/flv @ 0x7a77004d80] Error opening output rtmps://127.0.0.1:19350/live/goodkey: End of file
+Error opening output file rtmps://127.0.0.1:19350/live/goodkey.
+Error opening output files: End of file

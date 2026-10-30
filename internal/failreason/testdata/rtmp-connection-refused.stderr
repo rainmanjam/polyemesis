@@ -1,0 +1,5 @@
+[tcp @ 0xffff90e38a30] Connection to tcp://pe-w1-nginx:1936?tcp_nodelay=0 failed: Connection refused
+[rtmp @ 0xffff90e38d00] Cannot open connection tcp://pe-w1-nginx:1936?tcp_nodelay=0
+[out#0/flv @ 0xffff9352de60] Error opening output rtmp://pe-w1-nginx:1936/live/goodkey: Connection refused
+Error opening output file rtmp://pe-w1-nginx:1936/live/goodkey.
+Error opening output files: Connection refused

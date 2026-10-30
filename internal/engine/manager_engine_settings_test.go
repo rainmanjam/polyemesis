@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
@@ -48,7 +49,9 @@ type managerSettingsProbe struct {
 	niceMark  string
 	attempts  int
 	hooks     *hooks.Dispatcher
+	stream    *eventstream.Hub
 	lifecycle LifecycleObserver
+	keys      KeyChecker
 	// gate is not pushed by any SetX -- NewManager builds it -- so it is read
 	// back off the manager rather than created here. What is asserted is
 	// that every engine holds the SAME one, which is the whole of its job.
@@ -64,14 +67,18 @@ func pushEveryManagerSetting(t *testing.T, m *Manager) managerSettingsProbe {
 		attempts:  7,
 		hooks: hooks.NewDispatcher(slog.New(slog.NewTextHandler(io.Discard, nil)),
 			hooks.SourceFunc(func() ([]hooks.Hook, error) { return nil, nil })),
+		stream:    eventstream.NewHub(),
 		lifecycle: &stubLifecycle{},
+		keys:      &stubKeyChecker{release: make(chan struct{})},
 	}
 	m.SetTranscriber(p.tw, p.modelsDir, func(name string, args []string) (string, []string) {
 		return p.niceMark, args
 	})
 	m.SetAlertRetry(p.attempts)
 	m.SetHooks(p.hooks)
+	m.SetStream(p.stream)
 	m.SetLifecycle(p.lifecycle)
+	m.SetKeyChecker(p.keys)
 	p.gate = m.engineSettingsSnapshot().alertGate
 	if p.gate == nil {
 		t.Fatal("NewManager built no install alert gate, so every engine would " +
@@ -92,8 +99,18 @@ func checkEngineHasEverySetting(t *testing.T, eng *Engine, p managerSettingsProb
 	eng.mu.RLock()
 	whisper, dir, nice := eng.whisper, eng.whisperDir, eng.whisperNice
 	attempts, hookd, lifecycle := eng.alertAttempts, eng.hooks, eng.lifecycle
-	gate := eng.alertGate
+	gate, keys, stream := eng.alertGate, eng.keyChecker, eng.stream
 	eng.mu.RUnlock()
+
+	if stream != p.stream {
+		t.Errorf("%s: events hub = %p, want the shared %p: this programme's "+
+			"destinations, recorder and failover would never reach GET /events", what, stream, p.stream)
+	}
+
+	if keys != p.keys {
+		t.Errorf("%s: key checker = %v, want the API's: this programme's refused "+
+			"destinations would never be told their platform rotated the key", what, keys)
+	}
 
 	if gate != p.gate {
 		t.Errorf("%s: alert gate = %p, want the manager's %p: this programme "+
@@ -277,7 +294,7 @@ func TestTheAlertBudgetReachesTheNotifierAndNotJustTheEngine(t *testing.T) {
 // that the field lands with a failing test naming exactly what else to do,
 // rather than silently.
 func TestEveryEngineSettingIsCoveredByTheSyncTests(t *testing.T) {
-	covered := []string{"alertAttempts", "alertGate", "hooks", "lifecycle", "modelsDir", "nice", "tw"}
+	covered := []string{"alertAttempts", "alertGate", "hooks", "keyChecker", "lifecycle", "modelsDir", "nice", "stream", "tw"}
 
 	typ := reflect.TypeOf(engineSettings{})
 	got := make([]string, 0, typ.NumField())

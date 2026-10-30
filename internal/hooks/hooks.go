@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 )
 
@@ -96,6 +97,19 @@ const (
 	// Reason carries the path actually written. It is a filename, not a
 	// credential, but it goes through the same redaction as every other Reason.
 	TriggerDestinationRolledOver Trigger = "destination.rolledover"
+	// TriggerDestinationHeld fires once when polyemesis stops retrying a
+	// destination after repeated quick rejections (failreason.Reason.Held):
+	// nothing more happens to it until somebody presses Retry.
+	//
+	// A SEPARATE TRIGGER RATHER THAN ONLY THE held FLAG ON A destination.down.
+	// The flag is still there, and still means what it meant; but a down fires
+	// on every stop, a hold is the one stop that will not fix itself, and a
+	// script that pages a human wants exactly the second without filtering the
+	// first. It is announced once per hold, after the destination's down if it
+	// was live (see watchDestinations), and the events stream's
+	// destination.held is this same edge converted, so the two surfaces cannot
+	// disagree about when, or say it twice.
+	TriggerDestinationHeld Trigger = "destination.held"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -119,6 +133,11 @@ func AllTriggers() []Trigger {
 		// an install whose hook never narrowed its Triggers list starts
 		// receiving this one on upgrade.
 		TriggerDestinationRolledOver,
+		// APPENDED, the third time, for the same two reasons. It is the one an
+		// install with an empty Triggers list is likeliest to notice: every
+		// hold now arrives as a destination.held after the destination.down it
+		// used to arrive folded into.
+		TriggerDestinationHeld,
 	}
 }
 
@@ -161,6 +180,12 @@ type Event struct {
 	// routinely contains a full rtmps:// URL with the stream key on the end.
 	// Redacted on the way in, in Dispatcher.Publish, never here.
 	Error string
+	// Cause, Held and KeyChanged are the classified failure behind a
+	// destination.down (internal/failreason), empty for every other edge. See
+	// Envelope.Cause.
+	Cause      failreason.Cause
+	Held       bool
+	KeyChanged bool
 }
 
 // Delivery bounds. The retry budget is short on purpose: retries block the

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/failreason"
 )
 
 // Watcher defaults.
@@ -106,6 +108,11 @@ type DestState struct {
 	Running  bool
 	Platform string
 	Error    string
+	// Reason is the engine's classified failure (engine.DestStatus.Reason),
+	// nil when nothing was classified -- a destination that could not be
+	// built has an Error and no run to classify. Its Line is already scrubbed
+	// by the supervisor; the text it lands in is redacted again on Publish.
+	Reason *failreason.Reason
 	// OutTimeMS is the output timestamp from this destination's latest FFmpeg
 	// progress block, in milliseconds, and 0 when there is no process or it
 	// has not moved any media yet. The watcher derives the delivery rate from
@@ -129,6 +136,11 @@ type DestState struct {
 	// padding, so the source is starving. Same symptom, opposite fixes.
 	DropFrames int64
 	DupFrames  int64
+	// Restarts is the supervisor's respawn count for this destination's
+	// current process. No alert judges it; the real-time events API turns an
+	// increase into destination.restarted, from this same snapshot, so a
+	// respawn is announced from the one sampler every other edge comes from.
+	Restarts int
 }
 
 // FailoverState is the source-selector tier, absent when it is off.
@@ -274,6 +286,11 @@ type Watcher struct {
 	// rate is the delivery-rate history slow is judged on, keyed the same way.
 	rate map[int64]*rateWindow
 	loud map[int64]*downState
+	// held is whether destination.held has been raised for the current hold,
+	// keyed the same way. A latch rather than a dwell: the hold is already a
+	// verdict (failreason decided it after repeated quick rejections), so there
+	// is nothing to wait out, only a repeat to suppress.
+	held map[int64]bool
 	// clipHits counts consecutive observations on the ceiling, per channel.
 	clipHits map[string]int
 	ingest   downState
@@ -330,6 +347,7 @@ func NewWatcher(cfg WatchConfig) *Watcher {
 		slow:     map[int64]*downState{},
 		rate:     map[int64]*rateWindow{},
 		loud:     map[int64]*downState{},
+		held:     map[int64]bool{},
 		clipHits: map[string]int{},
 	}
 }
@@ -412,6 +430,9 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			*st = downState{}
 			*slow = downState{}
 			rate.reset()
+			// Disabled is not held, whatever reason the row still carries;
+			// re-enabling into a hold is a new one.
+			w.held[d.ID] = false
 			continue
 		}
 		fire, recovered := st.observe(!d.Running, now, w.cfg.DownFor)
@@ -506,6 +527,18 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 				Text:  d.Name + " has not been delivering for " + short(now.Sub(st.since)) + ".",
 				At:    now,
 			}
+			// THE REASON GOES IN THE TEXT, not only in a field. The timeline
+			// records Title and Text and drops Fields (engine.go's recorder),
+			// so a reason carried only as a field would reach Slack and be
+			// missing from the history page an operator reads afterwards.
+			// "cause" is the same machine-readable name the status JSON, MQTT
+			// and the webhook envelope use.
+			if r := d.Reason; r != nil {
+				ev.Text += " Reason: " + r.Sentence() + "."
+				ev = ev.WithField("reason", r.Cause.Label()).
+					WithField("cause", string(r.Cause)).
+					WithField("detail", r.Line)
+			}
 			out = append(out, ev.WithField("destination", d.Name).
 				WithField("platform", d.Platform).
 				WithField("error", d.Error))
@@ -516,12 +549,39 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 				Text:  d.Name + " is delivering again.", At: now,
 			}.WithField("destination", d.Name))
 		}
+		// HELD: once per hold, on the sweep it begins. Not behind the down's
+		// dwell: that dwell exists to ride out a reconnect, and a hold is the
+		// verdict that there will be no reconnect. The down still fires on its
+		// own clock and still says "held" in its text, for a rule that
+		// subscribes to it alone. Critical, like the down: nothing recovers
+		// this without a person.
+		if r := d.Reason; r != nil && r.Held {
+			if !w.held[d.ID] {
+				w.held[d.ID] = true
+				out = append(out, Event{
+					Type: TypeDestinationHeld, Severity: SeverityCritical, Key: key + ":held",
+					Title: "Destination held: " + d.Name,
+					// The reason in the TEXT, for the reason destination.down
+					// gives above: the timeline drops Fields.
+					Text: d.Name + " is no longer being retried. Reason: " + r.Sentence() + ".",
+					At:   now,
+				}.WithField("reason", r.Cause.Label()).
+					WithField("cause", string(r.Cause)).
+					WithField("detail", r.Line).
+					WithField("destination", d.Name).
+					WithField("platform", d.Platform).
+					WithField("error", d.Error))
+			}
+		} else {
+			w.held[d.ID] = false
+		}
 	}
 	for id := range w.dest {
 		if !live[id] {
 			delete(w.dest, id)
 			delete(w.slow, id)
 			delete(w.rate, id)
+			delete(w.held, id)
 		}
 	}
 	return out

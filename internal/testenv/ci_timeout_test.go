@@ -11,7 +11,7 @@ import (
 
 // THE JOB CEILING HAS TO CLEAR THE TEST DEADLINE PLUS EVERYTHING BEFORE IT.
 //
-// ci.yml runs `go test -race -timeout 20m` inside a job with its own
+// ci.yml runs `go test -race -timeout 25m` inside a job with its own
 // `timeout-minutes`. Which of the two fires first decides what an operator gets
 // out of a hang: Go's deadline prints a goroutine dump naming the stuck test,
 // GitHub's prints "cancelled" and nothing else -- and `gh pr checks` renders

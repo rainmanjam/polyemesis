@@ -564,6 +564,28 @@ var excusedRoutes = map[string]coverageExcus{
 		Want:        &routeWant{As: "read", Status: http.StatusBadRequest},
 		Counterpart: "websocketFrames",
 	},
+	"GET /api/v1/events": {
+		Why: "a Server-Sent Events stream: the response never ends, so the body sweep " +
+			"cannot read it to completion any more than it can read /ws. The sweep's " +
+			"fixture wires no events hub, so the GET is a 503 at once, which is what the " +
+			"Want below observes; the counterpart opens a real stream as a read token.",
+		Want:        &routeWant{As: "read", Status: http.StatusServiceUnavailable},
+		Counterpart: "eventStream",
+	},
+	"POST /mcp": {
+		Why: "the MCP endpoint (#12). MCP is off on a fresh install, and the sweep's fixture " +
+			"is one, so every caller gets the router's not-found answer -- the 404 an unknown " +
+			"endpoint gets, which is what the Want below observes and what keeps the route " +
+			"from being discoverable while it is off (mcp_access.go). Switched on, it takes " +
+			"only an MCP-scope token, and an MCP token is refused on every other route. " +
+			"Every tool is a dispatch of " +
+			"routes this ledger already classifies; the counterpart drives every read tool " +
+			"through a real MCP client as a read token against the planted fixture. The " +
+			"admin token's MCP output is held to the same absence by " +
+			"TestNoMCPToolOrResourceReturnsACredentialToAnyToken.",
+		Want:        &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
+		Counterpart: "mcpToolOutputs",
+	},
 	"GET /api/v1/playout/public": {
 		Why: "gated by authorizePlayout; a read token receives exactly what a stranger " +
 			"does. The old text said \"no body at all\", which is false when driven -- " +
@@ -589,8 +611,14 @@ var excusedRoutes = map[string]coverageExcus{
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
 	"GET /api/v1/auth/tokens": sessionOnly(),
-	"GET /hls/*":              sessionOnly(),
-	"HEAD /hls/*":             sessionOnly(),
+	// The overlay list carries every overlay's key, so it is the tokens list's
+	// sibling and has the same posture.
+	"GET /api/v1/overlays": sessionOnly(),
+	// The MCP switch and its levels. Session-only so that no API token, an
+	// admin one included, can turn MCP on for itself (mcp_access.go).
+	"GET /api/v1/mcp/access": sessionOnly(),
+	"GET /hls/*":             sessionOnly(),
+	"HEAD /hls/*":            sessionOnly(),
 	// Source-qualified preview. Same posture as the bare alias above: a session
 	// is required and nothing else, because it serves one programme's preview
 	// segments rather than any record.
@@ -639,8 +667,35 @@ var excusedRoutes = map[string]coverageExcus{
 		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
 		Counterpart: "playoutManifestBytes",
 	},
-	"ANY /watch":     spa(),
-	"ANY /watch/*":   spa(),
+	"ANY /watch":   spa(),
+	"ANY /watch/*": spa(),
+	// The chat overlay and dock pages: the same SPA bundle, sessionless.
+	"GET /overlay":      spa(),
+	"GET /overlay/dock": spa(),
+	// The path-key forms of the same two pages. {key} is never read by the
+	// server -- the page reads it from its own URL and sends it in
+	// X-Overlay-Key -- so the bytes are the SPA bundle whatever is in the path,
+	// for every principal including one holding a valid overlay key there.
+	"GET /overlay/k/{key}":      spa(),
+	"GET /overlay/dock/k/{key}": spa(),
+	// The overlay key's two routes. Outside every auth group, and a read
+	// token is nothing to them: without the overlay's own key in its own
+	// header every principal gets the same 401. The counterparts open them
+	// WITH the key and show it reaches no credential.
+	"GET /api/v1/overlay/config": {
+		Why: "unauthenticated by necessity: an OBS browser source has no session, and " +
+			"the overlay key in X-Overlay-Key is the whole credential. Without it every " +
+			"principal, read token included, gets the same 401.",
+		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+		Counterpart: "overlayConfig",
+	},
+	"GET /api/v1/overlay/events": {
+		Why: "the overlay's display stream (SSE), keyed by X-Overlay-Key alone. Without " +
+			"the key every principal gets the same 401; with it the stream never ends, " +
+			"so the body sweep cannot read it and the counterpart does.",
+		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+		Counterpart: "overlayDisplayStream",
+	},
 	"ANY /playout/*": publicOrigin(),
 
 	// Unauthenticated by necessity: these are how a caller BECOMES a principal,
@@ -1151,12 +1206,16 @@ type counterpartProof func(t *testing.T) proofResult
 var counterpartProofs = map[string]counterpartProof{
 	"runningDestinationLogs":                proveRunningDestinationLogs,
 	"websocketFrames":                       proveWebsocketFrames,
+	"eventStream":                           proveEventStream,
+	"mcpToolOutputs":                        proveMCPToolOutputs,
 	"hookDeliveries":                        proveHookDeliveries,
 	"playoutPublicView":                     provePlayoutPublicView,
 	"playoutManifestBytes":                  provePlayoutManifest,
 	"notFoundSurfaceIsPrincipalIndependent": proveNotFoundSurface,
 	"sourcePreviewManifest":                 proveSourcePreviewManifest,
 	"previewTiles":                          provePreviewTiles,
+	"overlayConfig":                         proveOverlayConfig,
+	"overlayDisplayStream":                  proveOverlayDisplayStream,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a
@@ -2001,9 +2060,16 @@ func shapeRegistry() []shapeRow {
 		// a scan that FINDS NOTHING, in the same run in which the same scan
 		// finds the eight media types this package does emit. That second half
 		// is not decoration: an absence proved by a broken scanner is free.
-		{Shape: "sse", Note: "ABSENT: this API emits no server-sent events, and " +
-			"assertDerivedPayloadShapesAreRegistered fails if text/event-stream ever " +
-			"appears in this package's source"},
+		// NO LONGER ABSENT. GET /events (#17) emits it, and the census that
+		// used to discharge the negative claim is what found the handler.
+		{Shape: "sse", Emitted: true, Inspector: inspectSSE,
+			Note: "the real-time events API. One catalogue row per eventstream.Type over a " +
+				"CLOSED table; an uncatalogued type is refused at Publish, and a Withheld " +
+				"type is never sent to a read scope, live or replayed"},
+		{Shape: "response-header/X-Accel-Buffering", Emitted: true,
+			Inspector: inspectXAccelBufferingHeader,
+			Note: "`no`, on the event stream only: nginx buffers proxied responses by " +
+				"default, and a buffered stream delivers nothing until the buffer fills"},
 		{Shape: "mqtt-retained-topic", Emitted: true, Issue: "#160",
 			Jurisdiction: &shapeJurisdiction{
 				Package: "cmd/polyemesis", Test: "TestTheRetainedDestTopicIsScrubbedAtTheSink",

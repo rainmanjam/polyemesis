@@ -48,6 +48,14 @@ func TestNoStreamKeyReachesTheWire(t *testing.T) {
 			Destination: &DestinationRef{ID: 3, Name: "Twitch", Platform: "twitch"},
 			Error:       dirty,
 		},
+		// destination.held carries the failing child's last words exactly as
+		// a down does, so it goes through the same pass.
+		{
+			Trigger:     TriggerDestinationHeld,
+			Source:      SourceRef{ID: 1, Name: "Main"},
+			Destination: &DestinationRef{ID: 3, Name: "Twitch", Platform: "twitch"},
+			Error:       dirty, Held: true,
+		},
 		{Trigger: TriggerIngestPublished, Source: SourceRef{ID: 1, Name: dirty}},
 		{
 			Trigger:     TriggerDestinationUp,

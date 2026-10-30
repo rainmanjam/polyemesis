@@ -1,0 +1,4 @@
+[rtmp @ 0xffff93674d00] Server error: Already publishing
+[out#0/flv @ 0xffff95d69e60] Error opening output rtmp://pe-w1-nginx/live/goodheld: Operation not permitted
+Error opening output file rtmp://pe-w1-nginx/live/goodheld.
+Error opening output files: Operation not permitted

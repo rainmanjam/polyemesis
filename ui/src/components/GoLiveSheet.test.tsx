@@ -54,6 +54,7 @@ function draw(
       live={opts.live ?? destinations}
       youtubeAtRisk={(opts.live ?? destinations).filter((d) => d.enabled && d.platform === "youtube").length}
       onStart={onStart}
+      onRetry={async () => {}}
       onFinished={() => {}}
       paceMs={opts.paceMs ?? 0}
     />,
@@ -175,6 +176,7 @@ describe("GoLiveSheet: what a press shows while it runs", () => {
       live: [dest({ id: did(1) })],
       youtubeAtRisk: 0,
       onStart,
+      onRetry: async () => {},
       onFinished: () => {},
       paceMs: 0,
     };
@@ -208,6 +210,7 @@ describe("Go live sheet: audio and scope (A3)", () => {
         live={destinations}
         youtubeAtRisk={0}
         onStart={onStart}
+        onRetry={async () => {}}
         onFinished={() => {}}
         paceMs={0}
       />,

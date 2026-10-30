@@ -2,7 +2,15 @@ import type { TranslationKey } from "./i18n";
 
 /** The sub-rail's sections, in rail order. The values are the `?tab=` values
  *  the settings page already reads, so a link to a section keeps working. */
-export const SETTINGS_TABS = ["ingest", "pipeline", "platforms", "security", "danger", "debug"] as const;
+export const SETTINGS_TABS = [
+  "ingest",
+  "pipeline",
+  "platforms",
+  "overlays",
+  "security",
+  "danger",
+  "debug",
+] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 

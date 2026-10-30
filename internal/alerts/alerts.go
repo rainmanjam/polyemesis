@@ -167,6 +167,24 @@ const (
 	// itself, on its way out (see the API's handleDeleteAlertRule), so the
 	// channel that goes quiet is told why.
 	TypeAlertRuleChanged Type = "alerts.rule_changed"
+	// TypeMCPAction fires when an AI assistant connected over MCP (#12) uses a
+	// write tool: start, stop, go live, a mute, a preset, a clip, a schedule.
+	// The REST routes those tools dispatch to mostly publish no audit event of
+	// their own -- a person pressing Stop in the console is not news -- but an
+	// agent acting on a live broadcast with a long-lived token is exactly what
+	// the operator needs a record of, and the token's name is how they find
+	// the one to revoke. Warning for the stop family, info otherwise.
+	TypeMCPAction Type = "mcp.action"
+	// TypeDestinationHeld fires once when polyemesis stops retrying a
+	// destination after repeated quick rejections, and nothing more will
+	// happen to it until somebody presses Retry.
+	//
+	// Separate from TypeDestinationDown, which still says "held" in its text.
+	// Every stop is a down, and most fix themselves; a hold is the one that
+	// will not, and an operator who wants to be paged for it alone could not
+	// say so while it was only a sentence inside a down. It closes with the
+	// down's destination.recovered when Retry brings the destination back.
+	TypeDestinationHeld Type = "destination.held"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -221,6 +239,11 @@ func AllTypes() []Type {
 		// Appended for the fifth time. It is an audit event, like the block
 		// above, and it goes where every new row goes.
 		TypeAlertRuleChanged,
+		// The sixth append: an audit event, after the rest.
+		TypeMCPAction,
+		// The seventh, and a destination event after an audit one, which is
+		// the convention working as stated rather than an accident.
+		TypeDestinationHeld,
 	}
 }
 
@@ -278,6 +301,7 @@ var timelineTypes = map[Type]bool{
 	TypeDestinationRecovered:     true,
 	TypeDestinationFallingBehind: true,
 	TypeDestinationCaughtUp:      true,
+	TypeDestinationHeld:          true,
 	TypeIngestLost:               true,
 	TypeIngestRecovered:          true,
 }

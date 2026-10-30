@@ -147,3 +147,30 @@ describe("attention", () => {
     expect(attention(null)).toEqual([]);
   });
 });
+
+/* A9: an attention row about a failing destination carries the CLASSIFIED
+ * cause (#20), so the summary says "Stream key rejected" rather than the tail
+ * of an FFmpeg exit status. The row leads to the card, where the remedy is. */
+describe("attention rows carry the classified cause", () => {
+  it("a failed destination's row carries its reason's cause", () => {
+    const items = attention(
+      status({
+        destinations: [
+          dest({
+            id: 4,
+            process: proc("failed", { lastError: "exit status 251" }),
+            reason: { cause: "key_rejected", held: true, at: "2026-10-30T10:00:00Z" },
+          }),
+        ],
+      }),
+    );
+    expect(items[0]).toMatchObject({ cause: "key_rejected", detail: "exit status 251" });
+  });
+
+  it("a reconnecting destination's row carries its reason's cause too", () => {
+    const items = attention(
+      status({ destinations: [dest({ id: 5, process: proc("reconnecting"), reason: { cause: "dns", at: "x" } })] }),
+    );
+    expect(items[0]?.cause).toBe("dns");
+  });
+});

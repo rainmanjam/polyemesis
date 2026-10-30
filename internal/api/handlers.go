@@ -1216,7 +1216,15 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Enabled:  d.Enabled,
 		SourceID: d.SourceID,
 	}
+	// The cause CODE and the hold flag only. d.Reason.Line is FFmpeg's stderr,
+	// scrubbed for the status payload but not something to copy into a label:
+	// see metrics.Destination.Cause.
+	if d.Reason != nil {
+		md.Cause = d.Reason.Cause
+		md.Held = d.Reason.Held
+	}
 	if d.Process != nil {
+		md.Failures = d.Process.Failures
 		md.Process = metrics.Process{
 			State:       string(d.Process.State),
 			Restarts:    d.Process.Restarts,
@@ -1232,6 +1240,39 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		md.OutputBytes = d.Process.Progress.TotalSize
 	}
 	return md
+}
+
+// childlessIngestState is the scrape's ingest state for a programme whose
+// engine has no ingest process.
+//
+// AN SRT PROGRAMME NEVER HAS ONE. The manager's shared SRT listener hands
+// datagrams straight to the programme's relay hub, so reading the state off
+// the child alone reported every SRT programme stopped for its whole life:
+// polyemesis_ingest_up 0 while its encoder was pushing, and the "failed" half
+// of PolyemesisIngestDown unable to fire whatever happened to the port.
+//
+// The listener is that programme's ingest, so it carries the state, with the
+// same meaning an RTMP or pull child's state has: running while it is able to
+// receive -- waiting for the encoder or receiving it, which only the bitrate
+// tells apart -- failed when a port is configured and nothing is bound to it,
+// and stopped when the operator has turned the port off (port 0) or disabled
+// the source (the listener refuses a disabled source's encoder). Those two are
+// decisions rather than faults and must not page.
+//
+// Every other mode's ingest IS its child, so with none it is stopped, as
+// before.
+func childlessIngestState(mode db.IngestMode, enabled bool, srtPort int, srtBound bool) supervisor.State {
+	if mode != db.IngestSRT || !enabled {
+		return supervisor.StateStopped
+	}
+	switch {
+	case srtBound:
+		return supervisor.StateRunning
+	case srtPort == 0:
+		return supervisor.StateStopped
+	default:
+		return supervisor.StateFailed
+	}
 }
 
 // ingestSnapshots is one ingest-and-relay reading per running programme.
@@ -1273,6 +1314,13 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		if st.Ingest != nil {
 			in.State = string(st.Ingest.State)
 			in.Restarts = st.Ingest.Restarts
+		} else {
+			// No ingest process. For an SRT programme that is by design --
+			// the shared listener feeds the hub directly -- and the listener
+			// is then what carries the state. See childlessIngestState.
+			set := e.Settings()
+			in.State = string(childlessIngestState(set.Ingest.Mode, e.SourceEnabled(),
+				set.Listeners.SRTPort, s.mgr.ListenerBound(db.IngestSRT)))
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps

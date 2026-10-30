@@ -147,6 +147,18 @@ func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
 				PayloadOn:     "ON",
 				PayloadOff:    "OFF",
 			})
+			// Why it is down, as the cause code, so an automation can tell a
+			// refused key (nothing will change until somebody fixes it) from
+			// a network blip (it will be back). "none" while nothing is wrong:
+			// the field is omitted then, and an absent attribute would leave
+			// the entity "unknown", which reads as a fault.
+			add(src+"_"+dest.Slug+"_cause", haComponent{
+				Platform:      "sensor",
+				Name:          dest.Name + " failure",
+				StateTopic:    t.topics.Dest(src, dest.Slug),
+				ValueTemplate: "{{ value_json.cause | default('none') }}",
+				Icon:          "mdi:alert-circle-outline",
+			})
 		}
 	}
 

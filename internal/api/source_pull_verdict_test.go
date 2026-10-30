@@ -125,6 +125,9 @@ func TestTheInheritedReportTellsARefusalApartToo(t *testing.T) {
 // third state is about OUTCOME; they are independent, so a spelling that walks
 // past the gate reaches a refused upload exactly as it reached an unchecked one.
 func TestABypassSpellingCannotReachARefusedUploadEither(t *testing.T) {
+	// Parallel: it builds its own server and touches no package state. See
+	// "THE PARALLEL SET" in parallel_test.go.
+	t.Parallel()
 	const name = "refused-abcd1234.ts"
 	const refusedWhy = "no video or audio stream this server can play"
 

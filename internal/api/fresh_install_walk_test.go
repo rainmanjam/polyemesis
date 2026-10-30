@@ -323,6 +323,11 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
+	"GET /api/v1/events": "the events hub is not wired into this fixture (Options.Stream " +
+		"is nil), so the route answers 503 at once. That is about the BUILD, not a source: " +
+		"in production main wires the hub unconditionally, and with no source the stream " +
+		"opens and simply carries nothing until something happens -- there is no empty " +
+		"state for the dashboard to draw. The stream itself is driven by events_test.go.",
 	"GET /api/v1/health": "this is not a refusal at all -- it is health REPORTING, " +
 		"and reporting a true thing. The walk's fixture is an install with a source " +
 		"and no engine running, which is precisely the state handleHealth exists to " +
@@ -461,7 +466,7 @@ func enginelessServer(t *testing.T, rows func(*testing.T, *db.DB)) (*Server, htt
 	t.Cleanup(s.chat.Close)
 
 	h := s.Handler()
-	lastTestServer = s
+	setTestServer(s, h)
 	if s.eng() != nil {
 		t.Fatal("the fixture came up with an engine, so nothing walked through it would " +
 			"be testing an install with no programme")

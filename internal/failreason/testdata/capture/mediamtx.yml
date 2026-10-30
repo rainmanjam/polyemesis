@@ -1,0 +1,39 @@
+# MediaMTX standing in for a second, stricter platform ingest.
+#
+# Only two paths exist. "secured" needs a publish user and password, so a wrong
+# pair is a rejected key. "open" takes anyone, and is the target for the codec
+# capture, because MediaMTX refuses codecs it cannot carry. Every other path is
+# "not configured", which is the closest local stand-in for an ingest that is up
+# but has nowhere to put this stream yet.
+logLevel: info
+rtsp: no
+hls: no
+webrtc: no
+srt: yes
+srtAddress: :8890
+rtmp: yes
+rtmpAddress: :1935
+rtmpEncryption: optional
+rtmpsAddress: :1936
+rtmpServerKey: /certs/server.key
+rtmpServerCert: /certs/server.crt
+
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+      - action: playback
+      - action: publish
+        path: open
+  - user: publisher
+    pass: goodpass
+    ips: []
+    permissions:
+      - action: publish
+        path: secured
+
+paths:
+  secured:
+  open:

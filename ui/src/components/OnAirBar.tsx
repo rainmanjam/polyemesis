@@ -203,6 +203,13 @@ export function OnAirBar({
                       {stateLabel(item.state)}
                     </span>
                   )}
+                  {/* #20: the server's classified cause, translated. The row
+                      leads to the card, where its remedy is (A9). */}
+                  {item.cause && (
+                    <span className="block text-[11px] text-foreground">
+                      {t(`reason.cause.${item.cause}`)}
+                    </span>
+                  )}
                   {/* The server's own sentence, never a summary of it. */}
                   {item.detail && (
                     <span className="block truncate text-[11px] text-muted-foreground">

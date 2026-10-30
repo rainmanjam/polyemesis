@@ -339,6 +339,9 @@ func (e *Engine) setLiveNoteLocked(id int64, n liveNote) {
 		e.liveNotes = map[int64]liveNote{}
 	}
 	e.liveNotes[id] = n
+	// The one sink every level-change outcome passes through, live or by
+	// restart, so the stream is told exactly what the status line says.
+	e.streamLevelLocked(id, n)
 }
 
 // DestinationLive returns what the most recent level change did to a

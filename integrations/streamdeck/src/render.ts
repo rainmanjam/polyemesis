@@ -32,9 +32,10 @@ export function clip(text: string, max = TITLE_MAX): string {
   return chars.length <= max ? chars.join("") : `${chars.slice(0, max - 1).join("")}…`;
 }
 
-/** The text under a destination key: its state, then the server's words, clipped. */
+/** The text under a destination key: its state, the classified cause, then the server's words, clipped. */
 export function titleFor(face: KeyFace, locale: string): string {
   const lines = [t(locale, face.label)];
+  if (face.reason) lines.push(clip(t(locale, face.reason)));
   if (face.detail) lines.push(clip(face.detail));
   if (face.warning) lines.push(clip(t(locale, face.warning)));
   return lines.join("\n");
