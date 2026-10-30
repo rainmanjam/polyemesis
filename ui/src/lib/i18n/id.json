@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Zoom otomatis",
   "routing.meters.streamingMark": "referensi streaming",
   "routing.meters.clipMark": "ambang clip",
+  "routing.meters.lastPeak": "puncak terakhir {db} pada {time}",
   "routing.saveBar.restarts": "Menyimpan akan memulai ulang {name} dengan mix ini."
 }

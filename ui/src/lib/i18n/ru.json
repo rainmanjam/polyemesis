@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Авто-масштаб",
   "routing.meters.streamingMark": "эталон стриминга",
   "routing.meters.clipMark": "порог клиппинга",
+  "routing.meters.lastPeak": "последний пик {db} в {time}",
   "routing.saveBar.restarts": "Сохранение перезапустит {name} с этим микшем."
 }

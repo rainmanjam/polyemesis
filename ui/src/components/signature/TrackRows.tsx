@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import { AudioMeter } from "./AudioMeter";
 import { channelLabels } from "@/lib/channels";
 import { trackSignal, TRACK_SIGNAL_TEXT, type TrackSignal } from "@/lib/trackSignal";
 import { useT } from "@/lib/i18n";
+import { formatPeakDb } from "@/lib/meterScale";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { trackChipTitle } from "@/lib/trackLabels";
@@ -124,6 +126,21 @@ export function TrackRows({
   duckTarget = [],
 }: TrackRowsProps) {
   const t = useT();
+  const translate = useT();
+  /* A10: the last measured peak per track, and when it was measured. Kept in a
+     ref so a quiet row can say what it last did instead of going blank. Only a
+     connected feed can add to it, so a frozen frame is never recorded as new. */
+  const lastRef = useRef(new Map<number, { db: number; at: number }>());
+  useEffect(() => {
+    if (!meterFeedLive) return;
+    const at = Date.now();
+    for (const tr of tracks) {
+      const peak = levels?.peak?.[tr.index] ?? [];
+      if (peak.length === 0) continue;
+      const db = Math.max(...peak);
+      if (Number.isFinite(db)) lastRef.current.set(tr.index, { db, at });
+    }
+  }, [levels, tracks, meterFeedLive]);
   const selFor = (index: number): TrackSel =>
     selection.find((s) => s.track === index) ?? { track: index, enabled: false, gain: 1 };
 
@@ -161,6 +178,7 @@ export function TrackRows({
         const excluded = role !== "" && excludeRoles.includes(role);
         const sending = sel.enabled && !excluded;
         const label = ann.label || t.title || "";
+        const last = lastRef.current.get(t.index);
 
         return (
           <div
@@ -218,9 +236,23 @@ export function TrackRows({
                      metering. On the page where routing is decided, "this
                      track carries nothing" is the reading that gets a track
                      left out of the mix. */
+                  <>
                   <div className="font-mono text-sm text-muted-foreground">
                     {TRACK_SIGNAL_TEXT[signal as Exclude<TrackSignal, "meter">]}
                   </div>
+                  {last && (
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {translate("routing.meters.lastPeak", {
+                        db: formatPeakDb(last.db),
+                        time: new Date(last.at).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        }),
+                      })}
+                    </div>
+                  )}
+                  </>
                 )}
                 <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                   {label && (

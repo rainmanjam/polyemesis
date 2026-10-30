@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Auto zoom",
   "routing.meters.streamingMark": "odniesienie streamingu",
   "routing.meters.clipMark": "próg przesterowania",
+  "routing.meters.lastPeak": "ostatni szczyt {db} o {time}",
   "routing.saveBar.restarts": "Zapisanie uruchomi ponownie {name} z tym miksem."
 }

@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "自动缩放",
   "routing.meters.streamingMark": "直播参考线",
   "routing.meters.clipMark": "削波阈值",
+  "routing.meters.lastPeak": "最近峰值 {db}，{time}",
   "routing.saveBar.restarts": "保存会以此混音重新启动 {name}。"
 }

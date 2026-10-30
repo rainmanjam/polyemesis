@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Auto-Zoom",
   "routing.meters.streamingMark": "Streaming-Referenz",
   "routing.meters.clipMark": "Clipping-Schwelle",
+  "routing.meters.lastPeak": "letzter Spitzenwert {db} um {time}",
   "routing.saveBar.restarts": "Beim Speichern wird {name} mit diesem Mix neu gestartet."
 }

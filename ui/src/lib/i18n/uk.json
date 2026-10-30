@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Авто-масштаб",
   "routing.meters.streamingMark": "еталон стримінгу",
   "routing.meters.clipMark": "поріг кліпування",
+  "routing.meters.lastPeak": "останній пік {db} о {time}",
   "routing.saveBar.restarts": "Збереження перезапустить {name} з цим мікшем."
 }

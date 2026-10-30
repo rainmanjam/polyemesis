@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "自動ズーム",
   "routing.meters.streamingMark": "配信の基準",
   "routing.meters.clipMark": "クリップのしきい値",
+  "routing.meters.lastPeak": "直近のピーク {db}（{time}）",
   "routing.saveBar.restarts": "保存すると、このミックスで {name} が再起動します。"
 }

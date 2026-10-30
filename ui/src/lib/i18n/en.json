@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Auto zoom",
   "routing.meters.streamingMark": "streaming reference",
   "routing.meters.clipMark": "clip threshold",
+  "routing.meters.lastPeak": "last peak {db} at {time}",
   "routing.saveBar.restarts": "Saving restarts {name} with this mix."
 }

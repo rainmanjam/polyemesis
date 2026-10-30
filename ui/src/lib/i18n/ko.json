@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "자동 확대/축소",
   "routing.meters.streamingMark": "스트리밍 기준",
   "routing.meters.clipMark": "클립 임계값",
+  "routing.meters.lastPeak": "마지막 피크 {db}, {time}",
   "routing.saveBar.restarts": "저장하면 이 믹스로 {name}이(가) 다시 시작됩니다."
 }

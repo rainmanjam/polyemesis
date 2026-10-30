@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Zoom auto",
   "routing.meters.streamingMark": "référence streaming",
   "routing.meters.clipMark": "seuil d’écrêtage",
+  "routing.meters.lastPeak": "dernier pic {db} à {time}",
   "routing.saveBar.restarts": "L'enregistrement redémarre {name} avec ce mix."
 }

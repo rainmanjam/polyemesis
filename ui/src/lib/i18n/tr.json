@@ -1708,5 +1708,6 @@
   "routing.meters.autoZoom": "Otomatik yakınlaştırma",
   "routing.meters.streamingMark": "yayın referansı",
   "routing.meters.clipMark": "kırpma eşiği",
+  "routing.meters.lastPeak": "son tepe {db}, saat {time}",
   "routing.saveBar.restarts": "Kaydetmek {name} öğesini bu miksle yeniden başlatır."
 }
