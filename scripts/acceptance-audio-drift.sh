@@ -126,6 +126,19 @@ publish() {
     -t 3600 -f flv "rtmp://127.0.0.1:$INGEST/live/$2" > "publisher-$1.log" 2>&1 &
 }
 
+# unpublish <tag>: stop encoders and SEE them gone. The failover is timed from
+# the primary's disappearance, and a primary still delivering would make the
+# wait for the switch below measure the wrong thing.
+unpublish() {
+  local i
+  pkill -f "drift-publisher-${P}$1" 2>/dev/null
+  for i in $(seq 1 50); do
+    pgrep -f "drift-publisher-${P}$1" >/dev/null || return 0
+    sleep 0.2
+  done
+  bad "an encoder (drift-publisher-${P}$1) did not exit"
+}
+
 # measure <flv>: "<hidden-ms> <av-offset-ms> <beeps> <longest-gap-s> <audio-s>"
 measure() {
   local f="$1" dec a g sync
@@ -201,7 +214,7 @@ drive gain restarted 0.5 | grep -q GAIN_OK && ok "live gain change applied to th
 
 step "3. ${RUNTIME}s on the primary, then the primary disappears"
 sleep "$RUNTIME"
-pkill -f "drift-publisher-${P}primary"
+unpublish primary
 wait_active "$FAILTO" 30 && ok "the $FAILTO took over" || bad "the selector never moved to the $FAILTO"
 sleep "$AFTER"
 
@@ -215,7 +228,7 @@ sleep "$AFTER"
 # encoder and its last packets reach the sink rather than being cut off.
 drive stopall | grep -q STOPPED || bad "could not stop the destinations cleanly"
 sleep 3
-pkill -f "drift-publisher-${P}" 2>/dev/null
+unpublish ""
 docker rm -f "$SRV" >/dev/null 2>&1
 sleep 2
 docker cp "$SINK:/sink" "$WORK/sink" >/dev/null 2>&1
