@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -737,7 +738,7 @@ func (d DegradedSettings) problems() []string {
 	}
 	// NaN fails both comparisons, so it is refused by name rather than let
 	// through as "in range".
-	if v := d.MaxLossPercent; v != v || v < 0 || v > 100 {
+	if v := d.MaxLossPercent; math.IsNaN(v) || v < 0 || v > 100 {
 		add("degraded-link loss threshold %v%% out of range (0-100)", v)
 	}
 	if v := d.SustainSeconds; v < 0 || v > MaxDegradedSustainSeconds {
