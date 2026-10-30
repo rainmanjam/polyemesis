@@ -1,4 +1,5 @@
 import { capabilityFor, supportOf } from "@/lib/capabilities";
+import { translate, type Translator } from "@/lib/i18n";
 import { platformNoun } from "@/lib/platformLinks";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
@@ -68,6 +69,11 @@ export interface ChatActionSupport {
 
 const YES: ChatActionSupport = { ok: true, reason: "" };
 
+/** The reasons are sentences for the screen, so callers in a component pass
+ *  their `t`. The English default is for callers with no language to hand —
+ *  the drift test among them. */
+const english: Translator = (key, params) => translate("en", key, params);
+
 /** What each platform's chat adapter actually implements.
  *
  *  Keyed by the raw platform string rather than ChatPlatform because RUMBLE IS
@@ -115,6 +121,7 @@ function noun(platform: string): string {
 export function chatActionSupport(
   platform: string,
   action: ChatModerationAction,
+  t: Translator = english,
 ): ChatActionSupport {
   // Local hide touches no platform API. Hub.HideLocally deliberately works
   // whether or not an adapter is attached, because a disconnected platform's
@@ -129,7 +136,7 @@ export function chatActionSupport(
     // printed for this case, so the existing wording survives.
     return {
       ok: false,
-      reason: `${noun(platform)} publishes no moderation API that polyemesis can call`,
+      reason: t("chatMod.noApi", { platform: noun(platform) }),
     };
   }
 
@@ -139,7 +146,7 @@ export function chatActionSupport(
         ? YES
         : {
             ok: false,
-            reason: `${noun(platform)} publishes no API for deleting a message. Hide it here instead — viewers will still see it.`,
+            reason: t("chatMod.noDelete", { platform: noun(platform) }),
           };
 
     case "hideUpstream":
@@ -148,7 +155,7 @@ export function chatActionSupport(
         : {
             ok: false,
             // Mirrors internal/automod/capabilities.go's ActionHide reason.
-            reason: `Only Facebook can hide a message upstream, because its live chat is a comment thread. On ${noun(platform)} the honest options are deleting it or hiding it here.`,
+            reason: t("chatMod.noHideUpstream", { platform: noun(platform) }),
           };
 
     case "timeout":
@@ -163,7 +170,7 @@ export function chatActionSupport(
             // Mirrors internal/automod/capabilities.go's ActionBan reason, so
             // an operator meeting this in the chat pane and in the automod
             // matrix reads the same sentence twice rather than two half-answers.
-            reason: `${noun(platform)} has no chat ban API. Delete or hide the comment instead, or ban the person from the ${noun(platform)} page itself.`,
+            reason: t("chatMod.noBan", { platform: noun(platform) }),
           };
   }
 }
@@ -176,10 +183,10 @@ export function chatActionSupport(
  *  next steps. Actions against a PERSON need it; deleting a message does not,
  *  which is why Facebook can still delete a comment whose author id never
  *  arrived. */
-export function authorReason(m: ChatMessage): string {
+export function authorReason(m: ChatMessage, t: Translator = english): string {
   const id = m.author.id?.trim() ?? "";
   if (id !== "") return "";
-  return `${noun(m.platform)} sent no user id with this message, so there is nobody to address`;
+  return t("chatMod.noAuthorId", { platform: noun(m.platform) });
 }
 
 /** The support answer for an action against the person who sent a message.
@@ -189,10 +196,11 @@ export function authorReason(m: ChatMessage): string {
 export function personActionSupport(
   m: ChatMessage,
   action: ChatModerationAction,
+  t: Translator = english,
 ): ChatActionSupport {
-  const missing = authorReason(m);
+  const missing = authorReason(m, t);
   if (missing !== "") return { ok: false, reason: missing };
-  return chatActionSupport(m.platform, action);
+  return chatActionSupport(m.platform, action, t);
 }
 
 /** True when the platform's capability COLUMN claims moderation works.

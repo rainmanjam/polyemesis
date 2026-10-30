@@ -135,7 +135,7 @@ function MessageRow({
   // Whether this platform can delete at all, asked the same way the context
   // menu asks it. Not `onDelete !== undefined`: the handler being wired says
   // the OPERATOR may delete, never that the PLATFORM can.
-  const deletable = chatActionSupport(m.platform, "delete");
+  const deletable = chatActionSupport(m.platform, "delete", t);
 
   const del = async () => {
     if (!onDelete) return;

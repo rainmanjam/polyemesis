@@ -1,3 +1,4 @@
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { toneMark, type SignalTone } from "@/lib/signal";
 
@@ -31,6 +32,7 @@ export function StatusDot({
         : size === "xl"
           ? "h-8 w-8"
           : "h-2 w-2";
+  const t = useT();
   const mark = toneMark[tone];
   // A ring scaled with the dot. At 6px a 2px border leaves a 2px hole that
   // closes up into a solid dot at any distance, which loses exactly the
@@ -62,9 +64,9 @@ export function StatusDot({
   return (
     <span
       className={cn("relative inline-flex shrink-0", dim, className)}
-      title={title ?? mark.title}
+      title={title ?? t(mark.title)}
       role="img"
-      aria-label={title ?? mark.title}
+      aria-label={title ?? t(mark.title)}
     >
       {pulse && (
         <span className={cn("absolute inline-flex h-full w-full opacity-60", pulse, mark.shape)} />

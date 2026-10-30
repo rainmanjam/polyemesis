@@ -1,3 +1,4 @@
+import type { TranslationKey } from "./i18n";
 import type { ProcessState } from "./types";
 
 /** The single mapping from process state to the theme's signal language.
@@ -90,20 +91,20 @@ export const toneBadge: Record<SignalTone, "live" | "warn" | "down" | "armed" | 
  * it cannot be added without a shape. */
 export const toneMark: Record<
   SignalTone,
-  { shape: string; hollow: boolean; title: string }
+  { shape: string; hollow: boolean; title: TranslationKey }
 > = {
   // Solid disc. The only tone that fills its box completely, which is what
   // makes "on air" the heaviest mark on the screen at a glance.
-  live: { shape: "rounded-full bg-live", hollow: false , title: "On air and carrying data" },
+  live: { shape: "rounded-full bg-live", hollow: false , title: "signal.live" },
   // Diamond. scale-90 trims it back toward the optical weight of the disc
   // beside it: a square turned 45° has a 1.41x diagonal, so at full size a
   // reconnecting dot reads as a bigger mark than a live one — which is a
   // hierarchy nobody meant to state. Transform only, so nothing here can move
   // the label beside it whatever the scale.
-  warn: { shape: "rotate-45 scale-90 rounded-[1px] bg-warn", hollow: false , title: "Reconnecting after a drop" },
-  down: { shape: "rounded-[1px] bg-down", hollow: false , title: "Failed" },
+  warn: { shape: "rotate-45 scale-90 rounded-[1px] bg-warn", hollow: false , title: "signal.warn" },
+  down: { shape: "rounded-[1px] bg-down", hollow: false , title: "state.failed" },
   // Hollow: nothing is flowing through it yet. Reads as "loaded, not firing"
   // without needing its hue.
-  armed: { shape: "rounded-full border-armed", hollow: true , title: "Configured and ready, but not running" },
-  idle: { shape: "rounded-[1px] border-subtle-foreground", hollow: true , title: "Not running" },
+  armed: { shape: "rounded-full border-armed", hollow: true , title: "signal.armed" },
+  idle: { shape: "rounded-[1px] border-subtle-foreground", hollow: true , title: "signal.idle" },
 };

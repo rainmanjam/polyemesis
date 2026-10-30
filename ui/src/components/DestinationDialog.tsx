@@ -1315,8 +1315,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               }
             >
               <div className="flex items-center gap-1.5">
-                <Badge variant={unsupported ? "warn" : "outline"}>{tierInfo(caps.tier).label}</Badge>
-                <span className="text-sm text-muted-foreground">{tierInfo(caps.tier).help}</span>
+                <Badge variant={unsupported ? "warn" : "outline"}>{t(tierInfo(caps.tier).label)}</Badge>
+                <span className="text-sm text-muted-foreground">{t(tierInfo(caps.tier).help)}</span>
               </div>
               <p className={unsupported ? "text-sm text-warn" : "text-sm text-muted-foreground"}>
                 {caps.summary}
@@ -1333,10 +1333,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                       key={col.key}
                       variant={info.variant}
                       className="normal-case"
-                      title={`${col.label} — ${info.label}. ${caps.reasons?.[col.key] ?? info.help}`}
+                      title={t("caps.cellTitle", {
+                        column: t(col.label),
+                        support: t(info.label),
+                        reason: caps.reasons?.[col.key] ?? t(info.help),
+                      })}
                     >
-                      {col.label}
-                      <span className="opacity-70">{info.label.toLowerCase()}</span>
+                      {t(col.label)}
+                      <span className="opacity-70">{t(info.label).toLowerCase()}</span>
                     </Badge>
                   );
                 })}

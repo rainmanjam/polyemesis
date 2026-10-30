@@ -357,7 +357,7 @@ export function MediaUploads() {
                       The wording lives in lib/upload-verdict so that this row
                       and the playlist editor's filter cannot disagree. */}
                   {(() => {
-                    const notice = uploadNotice(f);
+                    const notice = uploadNotice(f, t);
                     if (!notice) return null;
                     const Icon =
                       notice.tone === "refused" ? ShieldX : ShieldAlert;

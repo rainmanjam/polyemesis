@@ -5,6 +5,7 @@ import {
   TwitchGlyph,
   YouTubeGlyph,
 } from "@/components/platformGlyphs";
+import type { TranslationKey } from "@/lib/i18n";
 import type { SignalTone } from "@/lib/signal";
 import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 
@@ -109,11 +110,11 @@ const ACCENT: Record<
  *  Here rather than beside either consumer: the user card and the right-click
  *  menu both offer these durations, and two copies would drift into a menu
  *  whose "1 hour" is not the card's. */
-export const TIMEOUTS: { label: string; seconds: number }[] = [
-  { label: "1 min", seconds: 60 },
-  { label: "10 min", seconds: 600 },
-  { label: "1 hour", seconds: 3600 },
-  { label: "1 day", seconds: 86400 },
+export const TIMEOUTS: { label: TranslationKey; seconds: number }[] = [
+  { label: "chat.timeout1Min", seconds: 60 },
+  { label: "chat.timeout10Min", seconds: 600 },
+  { label: "chat.timeout1Hour", seconds: 3600 },
+  { label: "chat.timeout1Day", seconds: 86400 },
 ];
 
 export function accentFor(p: ChatPlatform) {

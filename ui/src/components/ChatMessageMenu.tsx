@@ -89,18 +89,18 @@ export function ChatMessageMenu({
   // The two reasons an action is unavailable are different and the operator
   // needs to tell them apart: the platform has no such API, versus this
   // particular message arrived without a user id to address.
-  const noAuthor = authorReason(message);
+  const noAuthor = authorReason(message, t);
 
   // Timeouts and a permanent ban are ONE question. Both route through Hub.Ban,
   // which type-asserts chat.Banner, so gating them separately would only invite
   // the two gates to drift apart.
-  const person = personActionSupport(message, "ban");
+  const person = personActionSupport(message, "ban", t);
 
   // Deleting a message is a DIFFERENT question, and deliberately not folded in
   // with the two above: it addresses a message rather than a person, so it does
   // not need an author id, and Facebook can do it while it cannot ban. Folding
   // them was the whole defect.
-  const del = chatActionSupport(message.platform, "delete");
+  const del = chatActionSupport(message.platform, "delete", t);
 
   // Which sentences to print, where, and each of them exactly once. Repeating
   // one reason five times is how a short menu turns back into a form, which is
@@ -215,10 +215,10 @@ export function ChatMessageMenu({
               close();
               openPlatformLink(link);
             }}
-            title={link.caveat}
+            title={t(link.caveat)}
           >
             <ExternalLink className="mr-2 h-3.5 w-3.5" />
-            {link.label}
+            {t(link.label)}
           </DropdownMenuItem>
         )}
 
@@ -242,8 +242,8 @@ export function ChatMessageMenu({
             onSelect={() => {
               close();
               void run(
-                t("chatMenu.timedOut", { duration: to.label, name: message.author.name }),
-                t("chatMenu.timeoutFailed", { duration: to.label, name: message.author.name }),
+                t("chatMenu.timedOut", { duration: t(to.label), name: message.author.name }),
+                t("chatMenu.timeoutFailed", { duration: t(to.label), name: message.author.name }),
                 () =>
                   api.banChatUser({
                     platform: message.platform,
@@ -255,7 +255,7 @@ export function ChatMessageMenu({
             }}
           >
             <Timer className="mr-2 h-3.5 w-3.5" />
-            {t("chatMenu.timeOutItem", { duration: to.label })}
+            {t("chatMenu.timeOutItem", { duration: t(to.label) })}
           </DropdownMenuItem>
         ))}
 

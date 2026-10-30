@@ -109,8 +109,8 @@ export function ChatUserCard({
   // ban rendered enabled here and failed at hub.go:803 on every press. A
   // control that lies to a moderator mid-raid is worse than one that is
   // missing. See lib/chatModeration.ts.
-  const ban = chatActionSupport(platform, "ban");
-  const hideUpstream = chatActionSupport(platform, "hideUpstream");
+  const ban = chatActionSupport(platform, "ban", t);
+  const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -267,19 +267,19 @@ export function ChatUserCard({
                 size="sm"
                 variant="secondary"
                 disabled={!ban.ok || busy !== ""}
-                title={ban.reason || t("chatCard.timeOutFor", { duration: to.label })}
+                title={ban.reason || t("chatCard.timeOutFor", { duration: t(to.label) })}
                 onClick={() =>
-                  run(t("chatCard.timedOutFor", { duration: to.label }), () =>
+                  run(t("chatCard.timedOutFor", { duration: t(to.label) }), () =>
                     api.banChatUser({ platform, account, userId: authorId, seconds: to.seconds }),
                   )
                 }
               >
-                {busy === t("chatCard.timedOutFor", { duration: to.label }) ? (
+                {busy === t("chatCard.timedOutFor", { duration: t(to.label) }) ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
                   <Timer className="mr-1 h-3 w-3" />
                 )}
-                {to.label}
+                {t(to.label)}
               </Button>
             ))}
           </div>

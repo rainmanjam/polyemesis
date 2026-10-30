@@ -882,7 +882,7 @@ function PolicyEditor({
                       <SelectContent>
                         {JOB_MODES.map((m) => (
                           <SelectItem key={m} value={m}>
-                            {JOB_MODE_LABEL[m]}
+                            {t(JOB_MODE_LABEL[m])}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -890,7 +890,7 @@ function PolicyEditor({
                   </div>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
-                  <p className="text-tiny text-muted-foreground">{JOB_MODE_HINT[mode]}</p>
+                  <p className="text-tiny text-muted-foreground">{t(JOB_MODE_HINT[mode])}</p>
 
                   {mode === "scheduled" && (
                     <WindowEditor
@@ -960,7 +960,7 @@ function PolicyEditor({
                   <SelectContent>
                     {JOB_MODES.map((m) => (
                       <SelectItem key={m} value={m}>
-                        {JOB_MODE_LABEL[m]}
+                        {t(JOB_MODE_LABEL[m])}
                       </SelectItem>
                     ))}
                   </SelectContent>

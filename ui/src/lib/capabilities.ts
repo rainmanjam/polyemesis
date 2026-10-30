@@ -11,6 +11,8 @@
    full-reload and discard a half-filled destination form.
    =========================================================================== */
 
+import type { TranslationKey } from "@/lib/i18n";
+
 /* ------------------------------------------------- platform capability matrix
  *
  *  What a user actually gets from each platform, said out loud before they
@@ -75,103 +77,103 @@ export interface PlatformCapability {
 
 export const CAPABILITY_COLUMNS: {
   key: Capability;
-  label: string;
-  help: string;
+  label: TranslationKey;
+  help: TranslationKey;
 }[] = [
   {
     key: "sso",
-    label: "Sign in",
-    help: "Connect the account with OAuth instead of pasting secrets.",
+    label: "auth.signIn",
+    help: "caps.colSsoHelp",
   },
   {
     key: "streamKey",
-    label: "Stream key",
-    help: "polyemesis fetches the ingest URL and key for you.",
+    label: "dest.streamKeyLabel",
+    help: "caps.colStreamKeyHelp",
   },
   {
     key: "metadata",
-    label: "Metadata",
-    help: "Set the title, description or category when you go live.",
+    label: "caps.colMetadata",
+    help: "caps.colMetadataHelp",
   },
   {
     key: "chatRead",
-    label: "Chat read",
-    help: "Messages appear in the unified chat pane.",
+    label: "caps.colChatRead",
+    help: "caps.colChatReadHelp",
   },
   {
     key: "chatSend",
-    label: "Chat send",
-    help: "You can reply from the chat pane.",
+    label: "caps.colChatSend",
+    help: "caps.colChatSendHelp",
   },
   {
     key: "moderation",
-    label: "Moderation",
-    help: "Delete a message or time a viewer out.",
+    label: "caps.colModeration",
+    help: "caps.colModerationHelp",
   },
   {
     key: "viewerStats",
-    label: "Viewers",
-    help: "Live viewer count read back from the platform.",
+    label: "caps.colViewerStats",
+    help: "caps.colViewerStatsHelp",
   },
   {
     key: "broadcastLifecycle",
-    label: "Start / end",
-    help: "Tell the platform to go live and to end, rather than only sending it video.",
+    label: "caps.colBroadcastLifecycle",
+    help: "caps.colBroadcastLifecycleHelp",
   },
 ];
 
 export const SUPPORT_LEGEND: {
   key: Support;
-  label: string;
-  help: string;
+  label: TranslationKey;
+  help: TranslationKey;
   variant: "live" | "default" | "outline" | "warn";
 }[] = [
   {
     key: "yes",
-    label: "Works",
-    help: "polyemesis does this for you today.",
+    label: "caps.supportYes",
+    help: "caps.supportYesHelp",
     variant: "live",
   },
   {
     key: "manual",
-    label: "By hand",
-    help: "Supported, with one step you do yourself — usually pasting a key.",
+    label: "caps.supportManual",
+    help: "caps.supportManualHelp",
     variant: "default",
   },
   {
     key: "unknown",
-    label: "Unverified",
-    help: "Not built yet, and the platform's API was not confirmed either way. Nothing stops you trying.",
+    label: "caps.supportUnknown",
+    help: "caps.supportUnknownHelp",
     variant: "outline",
   },
   {
     key: "no",
-    label: "Not possible",
-    help: "The platform publishes no API for this, so no amount of setup will produce it.",
+    label: "caps.supportNo",
+    help: "caps.supportNoHelp",
     variant: "warn",
   },
 ];
 
-export const TIER_LEGEND: { key: CapTier; label: string; help: string }[] = [
+export const TIER_LEGEND: { key: CapTier; label: TranslationKey; help: TranslationKey }[] = [
   {
     key: "integrated",
-    label: "Fully integrated",
-    help: "Sign in once and polyemesis fetches the ingest URL and stream key.",
+    label: "caps.tierIntegrated",
+    help: "caps.tierIntegratedHelp",
   },
   {
     key: "partial",
-    label: "Sign in + paste key",
-    help: "Sign-in works and brings chat and metadata with it, but the key is typed by hand.",
+    label: "caps.tierPartial",
+    help: "caps.tierPartialHelp",
   },
   {
     key: "manual",
-    label: "Manual key",
-    help: "Paste the ingest URL and stream key from the platform's dashboard. Streaming works exactly as well; there is just nothing to connect.",
+    label: "caps.tierManual",
+    help: "caps.tierManualHelp",
   },
   {
     key: "unsupported",
-    label: "Not supported",
-    help: "polyemesis cannot stream here. Shown so you do not spend an evening finding that out.",
+    label: "caps.tierUnsupported",
+    help: "caps.tierUnsupportedHelp",
   },
 ];
 

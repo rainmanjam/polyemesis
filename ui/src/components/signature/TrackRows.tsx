@@ -24,7 +24,7 @@ import { trackChipTitle } from "@/lib/trackLabels";
 import {
   MAX_LABEL_LEN,
   MAX_LANG_TAG_LEN,
-  ROLE_LABEL,
+  ROLE_LABEL_KEY,
   TRACK_ROLES,
   type Levels,
   type SourceTrack,
@@ -129,7 +129,8 @@ export function RoleBadge({
   role: Exclude<TrackRole, "">;
   excluded: boolean;
 }) {
-  const name = ROLE_LABEL[role];
+  const t = useT();
+  const name = t(ROLE_LABEL_KEY[role]);
   return (
     <Badge
       variant={excluded ? "warn" : "outline"}
@@ -475,7 +476,7 @@ export function TrackRows({
                   <div className="flex w-fit cursor-help items-center gap-1.5 text-sm text-warn">
                     <AlertTriangle className="h-3 w-3 shrink-0" />
                     <span>
-                      {translate("signature.track.excludedRole", { role: ROLE_LABEL[role] })}
+                      {translate("signature.track.excludedRole", { role: translate(ROLE_LABEL_KEY[role]) })}
                     </span>
                   </div>
                 </TooltipTrigger>
@@ -500,7 +501,7 @@ export function TrackRows({
                     <SelectItem value={NO_ROLE}>{translate("signature.track.noRole")}</SelectItem>
                     {TRACK_ROLES.map((r) => (
                       <SelectItem key={r} value={r}>
-                        {ROLE_LABEL[r]}
+                        {translate(ROLE_LABEL_KEY[r])}
                       </SelectItem>
                     ))}
                   </SelectContent>
