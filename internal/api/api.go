@@ -2250,7 +2250,12 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 // decodeJSONInto is decodeJSON's second half, over bytes already read. It
 // returns badRequestError rather than writing, so a settings closure can use it
 // without touching the ResponseWriter under the store's lock.
+//
+// A sent array or map REPLACES the one already in v rather than merging into it
+// by index or key; see resetSentCollections. On a freshly zeroed v that is a
+// no-op, so it matters only to the handlers that decode over a stored row.
 func decodeJSONInto(body []byte, v any) error {
+	resetSentCollections(body, v)
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

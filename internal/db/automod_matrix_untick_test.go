@@ -149,3 +149,25 @@ func TestDecodingAnAutomodBlockStillMergesEverythingElse(t *testing.T) {
 			"only changed enabled", a.History.MaxLinks)
 	}
 }
+
+// The rules list replaces too. An array decodes into the stored slice by INDEX,
+// and timeoutSeconds is omitempty: deleting the first of two rules sent the
+// second one back without a timeout, and it inherited the deleted rule's.
+//
+// Mutation: delete the `if len(sent.Rules) > 0 { a.Rules = nil }` branch from
+// AutomodSettings.UnmarshalJSON. Observed to fail with "inherited".
+func TestDecodingAutomodRulesReplacesTheStoredOnes(t *testing.T) {
+	a := AutomodSettings{Rules: []AutomodRule{
+		{ID: 1, Name: "slurs", Enabled: true, Pattern: "x", Action: "timeout", TimeoutSeconds: 600},
+		{ID: 2, Name: "links", Enabled: true, Pattern: "y", Action: "delete"},
+	}}
+	if err := json.Unmarshal([]byte(`{"rules":[{"id":2,"name":"links","enabled":true,"pattern":"y","action":"delete"}]}`), &a); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(a.Rules) != 1 || a.Rules[0].ID != 2 {
+		t.Fatalf("rules = %+v, want only rule 2", a.Rules)
+	}
+	if a.Rules[0].TimeoutSeconds != 0 {
+		t.Errorf("rule 2 inherited the deleted rule's timeout: %d s", a.Rules[0].TimeoutSeconds)
+	}
+}

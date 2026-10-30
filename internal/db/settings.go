@@ -1666,6 +1666,7 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 	var sent struct {
 		PlatformEnabled json.RawMessage `json:"platformEnabled"`
 		On              json.RawMessage `json:"on"`
+		Rules           json.RawMessage `json:"rules"`
 	}
 	if err := json.Unmarshal(b, &sent); err != nil {
 		return err
@@ -1675,6 +1676,13 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 	}
 	if len(sent.On) > 0 {
 		a.On = nil
+	}
+	// The rules list too. An array decodes into the stored slice by INDEX, so a
+	// rule the client sent without an omitempty field (timeoutSeconds) kept the
+	// value of whichever stored rule sat at that position, and deleting a rule
+	// from the middle shifted every later rule's leftovers onto its neighbour.
+	if len(sent.Rules) > 0 {
+		a.Rules = nil
 	}
 	return json.Unmarshal(b, (*plain)(a))
 }
