@@ -61,3 +61,12 @@ describe("musicRailReason", () => {
     expect(musicRailReason(false, false)).toBeNull();
   });
 });
+
+describe("the rail mark's reason reaches the accessible name, not only a hover title", () => {
+  it("renders the reason as screen-reader text inside the destination button", () => {
+    // A title attribute is not read by keyboard users and is not part of the
+    // button's accessible name. The reason must be text in the button itself.
+    const src = readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "utf8");
+    expect(src).toMatch(/<span className="sr-only">\{markReason \? t\(markReason\) : ""\}<\/span>/);
+  });
+});

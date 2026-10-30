@@ -364,19 +364,15 @@ export function DestinationCard({
 
         {/* --- problems --- */}
         {/* B1: every problem row names its reason, the failing step and the
-            as-of time. The step is the destination's output, because these
-            errors belong to the output process; the server does not yet send
-            when a reading was taken, so the as-of line says so. */}
+            as-of time. dest.error is shared by a routing compile failure, a
+            live child error and a missing programme engine, and the card cannot
+            tell which, so the step is left unreported rather than guessed. The
+            server does not yet send when a reading was taken, so the as-of line
+            says so. */}
         {dest.error && (
           <div className="flex items-start gap-1.5 rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <StatusReason
-              reason={dest.error}
-              step={t("foundation.status.step.destination", {
-                platform: PLATFORM_LABEL[dest.platform] ?? dest.platform,
-              })}
-              asOf={null}
-            />
+            <StatusReason reason={dest.error} step={null} asOf={null} />
           </div>
         )}
         {!dest.error && dest.process?.lastError && state !== "running" && (

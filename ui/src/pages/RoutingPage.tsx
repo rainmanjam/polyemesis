@@ -585,6 +585,9 @@ export function RoutingPage() {
                       >
                         <Music className="h-3 w-3 shrink-0" />
                         {t(mark.label)}
+                        {/* The reason, as text in the button: it is part of the
+                            accessible name, which a title attribute is not. */}
+                        <span className="sr-only">{markReason ? t(markReason) : ""}</span>
                       </span>
                     )}
                   </span>

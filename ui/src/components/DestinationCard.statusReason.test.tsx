@@ -51,10 +51,14 @@ function draw(over: Partial<DestStatus>) {
 }
 
 describe("destination problem rows name their reason, step and as-of", () => {
-  it("an error row names the reason and the failing output step", () => {
+  it("an error row names the reason, and says the step is not reported when the server does not say", () => {
+    // dest.error is shared by a routing compile failure, a live child error and
+    // a missing programme engine (internal/engine/status.go). The card cannot
+    // tell which, so it must not name an output step it cannot know.
     draw({ error: "stream key rejected by ingest" });
     expect(screen.getByText("stream key rejected by ingest")).toBeTruthy();
-    expect(screen.getByText(/Output to Twitch/)).toBeTruthy();
+    expect(screen.getByText(/not reported/i)).toBeTruthy();
+    expect(screen.queryByText(/Output to Twitch/)).toBeNull();
     expect(screen.getByText(/not recorded/i)).toBeTruthy();
   });
 
