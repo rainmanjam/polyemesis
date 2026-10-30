@@ -9,6 +9,11 @@ mapping in flight, so anything that ends up in an argv costs a respawn. Anything
 that does not must be pushed into the running process — because the alternative
 is being told a change applied while the process goes on running the old one.
 
+There is one exception. A destination's per-track gain and mute are in its
+argv, and a level-only change is still sent to the running process rather than
+replacing it, except on Windows. See
+[Live per-track gain and mute](#live-per-track-gain-and-mute-the-stdin-command-channel).
+
 **The authority is `settingsReload` in
 [internal/engine/reload.go](../internal/engine/reload.go).** It carries one rule
 per settings field: a class, the function that carries the change, and why. A
@@ -188,8 +193,9 @@ Stated here rather than discovered later.
   live.** All of them still respawn. The one exception is a destination's
   per-track gain and mute, above. The live set is deliberately small.
 - **Upgrading restarts every destination once.** The graph gained its named
-  volume stages, so every destination's signature moves on the first reconcile
-  after the upgrade.
+  volume stages, and a destination's argv dropped `-nostdin` everywhere except
+  Windows, so every destination's signature moves on the first reconcile after
+  the upgrade.
 - **The ingest is never hot-reloaded.** Any ingest edit drops the publisher.
 - **`listeners.srtPort` interrupts every programme**, not just the one being
   edited — it is a shared socket.

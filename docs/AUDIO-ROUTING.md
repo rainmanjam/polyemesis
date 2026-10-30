@@ -10,7 +10,10 @@ keeps the mic hot — from one upload and one video encode.
 
 Every destination has its own routing profile, and changing one restarts **only
 that destination**. The ingest, the recorder, and every other destination are
-untouched.
+untouched. A change to a track's gain or mute alone does not restart even that
+destination: it is applied to the running process, except on Windows and for a
+matrix cell's gain. See
+[HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel).
 
 ---
 
