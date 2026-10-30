@@ -55,9 +55,20 @@ STAGE="$DATA/.demo-seed"
 OUT="${SHOT_DIR:-$ROOT/docs/media}"
 
 IMAGE="${IMAGE:-polyemesis-demo-seed:local}"
-NET="polyemesis-demo-net"
-SRV="polyemesis-demo-server"
-PUB_PREFIX="polyemesis-demo-pub"
+# Overridable so a second checkout (a worktree, an agent) can run its own demo
+# install beside this one without the two tearing down each other's containers:
+# teardown removes everything matching these names.
+NET="${DEMO_NET:-polyemesis-demo-net}"
+SRV="${DEMO_SRV:-polyemesis-demo-server}"
+PUB_PREFIX="${DEMO_PUB_PREFIX:-polyemesis-demo-pub}"
+
+# THE VERSION THE UI PRINTS IN ITS HEADER, and the reason the marketing shots
+# read "dev". A plain `go build` leaves main.version at its default, so every
+# capture showed a development build -- an unfinished-looking label on the
+# images whose whole job is to look like the product people install. Default to
+# the latest release tag rather than `git describe`'s v0.11.0-12-gabc123: the
+# screenshots stand for a release, not for one commit of main.
+DEMO_VERSION="${DEMO_VERSION:-$(cd "$ROOT" && git describe --tags --abbrev=0 2>/dev/null || echo dev)}"
 
 CAPTURE=yes
 RESET=no
@@ -195,7 +206,8 @@ echo "==> building the UI and the demo image"
 ( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed" >&2; exit 1; }
 GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
 ( cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH_LOCAL" \
-    go build -o "$STAGE/polyemesis-linux" ./cmd/polyemesis ) \
+    go build -trimpath -ldflags "-s -w -X main.version=$DEMO_VERSION" \
+      -o "$STAGE/polyemesis-linux" ./cmd/polyemesis ) \
   || { echo "cross-compile for the container failed" >&2; exit 1; }
 docker build -q -t "$IMAGE" -f - "$STAGE" >/dev/null <<'DOCKERFILE' || { echo "docker build failed" >&2; exit 1; }
 FROM alpine:3.20
@@ -342,6 +354,54 @@ fi
 echo "==> capturing into $OUT"
 ( cd "$ROOT/ui" && BASE_URL="$BASE_URL" SHOT_DIR="$OUT" \
     npx --no-install playwright test --config=e2e/capture.config.ts )
+
+# THE SAME COMPRESSION capture-media.sh has always applied, which this script
+# never did -- so its shots came out at 300-450 KB against 90-200 KB for the
+# committed ones, and could not be committed as they were. A 256-colour palette
+# is lossless to the eye on a UI capture (flat fills, one accent, text); the
+# site still serves avif/webp variants built from these by Astro's <Picture>.
+echo "==> compressing"
+if python3 -c "import PIL" 2>/dev/null; then
+  python3 - "$OUT" <<'PY'
+import glob, os, sys
+from PIL import Image
+before = after = 0
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.png"))):
+    was = os.path.getsize(path)
+    im = Image.open(path).convert("RGB")
+    im.quantize(colors=256, method=Image.MEDIANCUT,
+                dither=Image.FLOYDSTEINBERG).save(path, optimize=True)
+    now = os.path.getsize(path)
+    before, after = before + was, after + now
+if before:
+    print(f"    {before // 1024}K -> {after // 1024}K "
+          f"({100 - 100 * after / before:.0f}% smaller, resolution unchanged)")
+PY
+else
+  echo "    skipped: python3 with Pillow not found, shots left unquantised" >&2
+fi
+
+# The site keeps its own copies (Astro must see them under web/src to build the
+# avif/webp variants), and web/src/lib/features-shots.test.ts fails when they
+# differ from docs/media by a byte. So refresh them here, the same way
+# capture-media.sh does: only files the site already ships, and only when this
+# run wrote the committed set. A verification run into a scratch --out must not
+# touch the site.
+SITE_SHOTS="$ROOT/web/src/assets/shots"
+if [ "$OUT" = "$ROOT/docs/media" ] && [ -d "$SITE_SHOTS" ]; then
+  echo "==> refreshing the site's copies"
+  copied=0
+  for dst in "$SITE_SHOTS"/*.png; do
+    [ -e "$dst" ] || continue
+    src="$OUT/$(basename "$dst")"
+    if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
+      cp -f "$src" "$dst"
+      echo "    $(basename "$dst")"
+      copied=$((copied + 1))
+    fi
+  done
+  [ "$copied" -eq 0 ] && echo "    already in step"
+fi
 
 echo
 echo "==> done"

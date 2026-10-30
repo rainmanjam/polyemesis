@@ -1,5 +1,6 @@
 ---
 import CodeBlock from "./CodeBlock.astro";
+import { TRACK_LAYOUT } from "../data/tracks.mjs";
 /* The patchbay, playable.
  *
  * This is the whole product in one control. Every other restreamer sends the
@@ -19,20 +20,16 @@ import CodeBlock from "./CodeBlock.astro";
  * difference between a toy and a tool.
  */
 
-const TRACKS = [
-  { id: 1, name: "Full mix", note: "music + game + mic", dbfs: -19.5, slug: "full-mix" },
-  { id: 2, name: "Clean mix", note: "no copyrighted music", dbfs: -20.8, slug: "clean-mix" },
-  { id: 3, name: "Mic", note: "your voice only", dbfs: -21.9, slug: "mic" },
-  { id: 4, name: "Guest", note: "remote caller", dbfs: -22.4, slug: "guest" },
-  { id: 5, name: "Game", note: "capture audio", dbfs: -20.1, slug: "game" },
-  { id: 6, name: "Ambience", note: "room / crowd", dbfs: -26.0, slug: "ambience" },
-];
+/* The layout is shared with the rest of the home page and with the seeded
+ * install the screenshots come from; see src/data/tracks.mjs for why it lives
+ * there rather than here. */
+const TRACKS = TRACK_LAYOUT;
 
 const DESTS = [
-  { id: "youtube", name: "YouTube", hint: "clean — no DMCA", preset: [2, 3] },
-  { id: "twitch", name: "Twitch", hint: "music is fine", preset: [1, 3] },
-  { id: "kick", name: "Kick", hint: "same as Twitch", preset: [1, 3] },
-  { id: "archive", name: "Archive", hint: "everything, stream-copied", preset: [1, 2, 3, 4, 5, 6] },
+  { id: "youtube", name: "YouTube", hint: "no music — no claim", preset: [1, 2, 4] },
+  { id: "twitch", name: "Twitch", hint: "music is fine live", preset: [1, 2, 3, 4] },
+  { id: "podcast", name: "Podcast", hint: "voices only", preset: [1, 2] },
+  { id: "archive", name: "Archive", hint: "everything, stream-copied", preset: [1, 2, 3, 4] },
 ];
 ---
 
@@ -43,7 +40,7 @@ const DESTS = [
       Patch each track to the platforms that should hear it.
     </h2>
     <p class="mt-4 text-pretty leading-relaxed text-muted">
-      This ingest carries six audio tracks. Light a crosspoint and that track is
+      This ingest carries four audio tracks. Light a crosspoint and that track is
       summed into that destination's stereo pair — and into no other. Hover a
       column to trace one destination's path. The video is copied, not
       re-encoded, so none of this buys a second encode.
@@ -91,6 +88,7 @@ const DESTS = [
                         data-dest={d.id}
                         data-db={t.dbfs}
                         data-track={t.id}
+                        data-slug={t.slug}
                         checked={d.preset.includes(t.id)}
                         aria-label={`Send track ${t.id}, ${t.name}, to ${d.name}`}
                       />
@@ -122,7 +120,7 @@ const DESTS = [
 
   <div class="mt-4 flex flex-wrap items-start justify-between gap-4">
     <p class="max-w-3xl text-xs leading-relaxed text-subtle">
-      <strong class="text-muted">How that figure is derived:</strong> summing
+      <strong class="text-muted">How that figure is derived:</strong> summing{" "}
       <em>k</em> uncorrelated sources raises level by 10·log₁₀(<em>k</em>), so two
       tracks land about 3&nbsp;dB above one. This is a power sum of nominal track
       levels — <em>not</em> a loudness measurement. Real EBU&nbsp;R128 loudness is
@@ -177,12 +175,14 @@ const DESTS = [
      adding weight for. */
 
   const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
-  const TRACK_SLUG: Record<string, string> = {
-    "1": "full-mix", "2": "clean-mix", "3": "mic",
-    "4": "guest", "5": "game", "6": "ambience",
-  };
+  // Read off the checkboxes, which carry the shared layout's slug, so this
+  // script cannot keep a second copy of the track names that drifts.
+  const TRACK_SLUG: Record<string, string> = {};
+  for (const b of document.querySelectorAll<HTMLInputElement>(".mm-box")) {
+    TRACK_SLUG[b.dataset.track!] = b.dataset.slug!;
+  }
   const DEST_LABEL: Record<string, string> = {
-    youtube: "YouTube", twitch: "Twitch", kick: "Kick", archive: "Archive",
+    youtube: "YouTube", twitch: "Twitch", podcast: "Podcast", archive: "Archive",
   };
 
   const boxes = Array.from(document.querySelectorAll<HTMLInputElement>(".mm-box"));

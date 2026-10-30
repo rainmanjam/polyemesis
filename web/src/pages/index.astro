@@ -4,7 +4,7 @@ import CodeBlock from "../components/CodeBlock.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
-import routing from "../assets/shots/02-routing.png";
+import routingHero from "../assets/shots/02-routing-hero.png";
 import { Picture } from "astro:assets";
 import meters from "../assets/shots/04-meters.png";
 /* Counted, never typed. A literal "23 documents" in the CTA below is a claim
@@ -12,11 +12,20 @@ import meters from "../assets/shots/04-meters.png";
  * would fail — the page would simply be wrong about the thing it is inviting
  * you to read. docs.mjs is the allowlist, so it is also the count. */
 import { PUBLISHED } from "../data/docs.mjs";
+import { TRACK_LAYOUT, MUSIC_TRACK } from "../data/tracks.mjs";
 /* Read from GitHub at build time, and null when that read fails. The trust
  * line below prints the star count and release only when this is present, so
  * a failed fetch yields a plain link, never a number. See lib/github-stats.ts. */
 import { fetchRepoStats } from "../lib/github-stats";
 const repo = await fetchRepoStats();
+
+/* "track 1 is the host mic, track 2 is the co-host mic, ... and track 4 is the
+ * room." Built from the shared layout so the sentence cannot name a track the
+ * patchbay and the capture do not have. */
+const LAYOUT_SENTENCE =
+  TRACK_LAYOUT.map(
+    (t, i) => `${i === TRACK_LAYOUT.length - 1 ? "and " : ""}track ${t.id} is the ${t.name.toLowerCase()}`,
+  ).join(", ") + ".";
 
 const features = [
   {
@@ -75,11 +84,15 @@ const features = [
       <div class="max-w-xl">
         <span class="chip rise rise-1">MIT licensed · self-hosted</span>
 
-        {/* One outcome line. The break is the one composed break in the
-            headline, between the two clauses; the highlight is the accent. */}
+        {/* One outcome line (S1, as the approved mockup has it): what the
+            creator gets, in the creator's words, rather than the mechanism. The
+            earlier "One stream in. A different mix out of each." was an outcome
+            too, but it wrapped to three lines at desktop width and left "each."
+            alone on the last one. The break is the one composed break, between
+            the two halves; the accent is the claim. */}
         <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
-          One stream in.<br />
-          A <span class="text-primary-bright">different mix</span> out of each.
+          Send each platform<br />
+          its own <span class="text-primary-bright">audio mix</span>.
         </h1>
 
         <p class="rise rise-3 mt-6 text-pretty text-lg leading-relaxed text-muted">
@@ -140,31 +153,45 @@ const features = [
         </div>
       </div>
 
-      {/* The routing UI itself, cropped to the destination list and the track
-          checkboxes. Cropped in CSS, not by a second image file, so the
-          screenshot the docs and features page use stays the single source. */}
+      {/* The routing UI itself, at a size it can be read (S1). This is its own
+          capture -- 02-routing-hero.png, a clip the capture harness takes of
+          the track rows and the music-rights switch for the selected YouTube
+          destination -- not a CSS crop of the full routing screenshot. The CSS
+          crop scaled a 1440px screen into this column, so the track names were
+          about 5px tall, and its offsets were tuned to one capture's pixels and
+          broke on the next.
+
+          The illustrative CSS track card this hero once had (HeroRouting.astro)
+          is NOT brought back as a secondary element, although the council's
+          recommendation allowed for it. Beside a legible photograph of the real
+          screen, a drawing of the same screen is a second picture making the
+          same point less truthfully, and the hero's job is one action and one
+          picture. */}
       <div class="relative flex items-center">
         <figure class="rise rise-5 w-full">
-          {/* Cropped to the destination list and the track rows. The top of the
-              screenshot is the "Development build dev" banner and app chrome,
-              so a plain object-top crop showed the banner. The image is
-              enlarged and offset so only the region from the destinations down
-              to the track checkboxes is inside the frame. */}
-          <div class="relative aspect-[39/20] overflow-hidden rounded-token border border-line bg-surface">
+          <div class="overflow-hidden rounded-token border border-line bg-surface shadow-2xl shadow-black/40">
+            <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
+              {/* Neutral, not the live green: in the install this was taken
+                  from, the YouTube destination is configured but not
+                  broadcasting, and a green dot beside its name would say it
+                  was. */}
+              <span class="size-1.5 rounded-full bg-line-strong" aria-hidden="true"></span>
+              <span class="font-mono text-[11px] text-subtle">Routing · YouTube — main channel</span>
+            </div>
             <Picture
-              src={routing}
+              src={routingHero}
               formats={["avif", "webp"]}
               fallbackFormat="webp"
-              widths={[480, 720, 960, 1440]}
+              widths={[480, 720, 1080]}
               sizes="(min-width: 1024px) 560px, calc(100vw - 2.5rem)"
-              alt="The polyemesis routing screen: a destination list on the left and, on the right, a checkbox per track for the selected destination."
+              alt="The polyemesis routing screen for a YouTube destination: tracks 1, 2 and 4 ticked, track 3, the licensed music bed, unticked and marked not sent, and the music-rights switch reading Music excluded."
               loading="eager"
               decoding="async"
-              class="absolute left-[-15%] top-[-22.6%] w-[116%] max-w-none"
+              class="block w-full"
             />
           </div>
           <figcaption class="mt-3 font-mono text-[11px] text-subtle">
-            The routing screen from a running install.
+            From a running install: YouTube gets every track except the music.
           </figcaption>
         </figure>
       </div>
@@ -247,14 +274,16 @@ const features = [
       <div>
         <p class="eyebrow">The problem</p>
         <h2 class="mt-3 text-balance text-3xl font-medium">
-          You have six tracks. Every platform will take one stereo pair.
+          You send four tracks. Every platform will take one stereo pair.
         </h2>
       </div>
+      {/* ONE TRACK LAYOUT FOR THE WHOLE PAGE (S7). These four tracks are the
+          ones the patchbay below lets you route and the ones the Proof capture
+          was photographed with -- all three read src/data/tracks.mjs, which is
+          the seeded install's own layout. */}
       <div class="space-y-4 text-pretty leading-relaxed text-muted">
         <p>
-          You run OBS with split audio tracks. Track 1 is the full mix
-          including copyrighted music, track 2 is the clean feed without it,
-          track 3 is your microphone.
+          You run OBS with split audio tracks: {LAYOUT_SENTENCE}
         </p>
         <p>
           Every live platform accepts exactly one stereo pair. So
@@ -266,13 +295,13 @@ const features = [
         <p class="text-fg">
           polyemesis ingests once and lets you pick, per destination, which
           tracks get summed into the stereo feed that destination receives.
-          YouTube gets the clean mix. Your local archive keeps everything. Your
-          Discord restream keeps the mic hot.
+          YouTube gets everything but track {MUSIC_TRACK}. Your local archive
+          keeps all four. Your podcast feed keeps only the two voices.
         </p>
         <p class="text-sm leading-relaxed text-subtle">
           Twitch can also carry the music bed while a separate archive track
           leaves it out, from the same upload. That route is Twitch-only and has
-          its own requirements, covered on the
+          its own requirements, covered on the{" "}
           <a href="/twitch-vod-track" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">Twitch track page</a>.
         </p>
       </div>
@@ -287,19 +316,25 @@ const features = [
       <div class="max-w-2xl">
         <p class="eyebrow">Proof, not a diagram</p>
         <h2 class="mt-3 text-balance text-3xl font-medium">
-          Three destinations, three different loudness readings, one ingest.
+          Loudness measured per destination, after routing, from one ingest.
         </h2>
+        {/* THE FIGURES ARE READ OFF 04-meters.png, and LoudnessBars carries the
+            same three. Two are equal on purpose: the archive and the compliance
+            log carry the same four tracks, so they must read the same, and the
+            podcast feed -- the two voices only, normalised -- reads where its
+            target is. A meter that showed three different numbers for two
+            identical mixes would be the thing to distrust. */}
         <p class="mt-4 text-pretty leading-relaxed text-muted">
-          One three-track source feeds all three destinations. The meters read
-          <span class="font-mono text-fg">−12.6</span>,
-          <span class="font-mono text-fg">−14.0</span> and
-          <span class="font-mono text-fg">−18.9&nbsp;LUFS</span> because each
-          was sent a different set of tracks — loudness is measured per
-          destination, after routing, on the programme that destination
-          actually receives.
+          The archive and the compliance log carry all four tracks and both read{" "}
+          <span class="font-mono text-fg">−25.8&nbsp;LUFS</span>. The podcast
+          feed carries only the two voices, is normalised to its −16 target,
+          and reads <span class="font-mono text-fg">−16.0</span>. Each figure
+          is measured on the programme that destination actually receives, not
+          on the ingest.
         </p>
         <p class="mt-3 text-sm text-subtle">
-          Track layout in this capture: 1 host mic, 2 music bed, 3 co-host.
+          Track layout in this capture: the same four tracks as above —{" "}
+          {TRACK_LAYOUT.map((t) => `${t.id} ${t.name.toLowerCase()}`).join(", ")}.
         </p>
       </div>
 
@@ -316,7 +351,7 @@ const features = [
             fallbackFormat="webp"
             widths={[420, 690, 960, 1440]}
             sizes="(min-width: 1024px) 690px, calc(100vw - 2.5rem)"
-            alt="polyemesis audio meters: three destinations showing −12.6, −14.0 and −18.9 LUFS from one ingest, each measured after its own routing"
+            alt="polyemesis audio meters: loudness compliance for three file destinations from one ingest, the archive and compliance log at −25.8 LUFS integrated and the podcast mix at −16.0, above live meters for each of the four ingest tracks"
             loading="lazy"
             decoding="async"
             class="w-full rounded-token border border-line"
