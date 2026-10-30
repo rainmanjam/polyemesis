@@ -100,6 +100,15 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		eng.ForgetDestinationLive(id)
 	}
 
+	// The same repair every destination write makes first, so this route
+	// cannot store a row keeping another platform's account
+	// (TestEveryDestinationWriteIsRepairedFirst).
+	warnings, err := s.dropUnsendableSettings(row)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+
 	// Persist first. Everything below reads the stored profile, so a restart
 	// triggered by the reconcile, or any later one, rebuilds with this level.
 	updated, err := s.store.UpdateDestination(row)
@@ -130,6 +139,9 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"applied": applied, "destination": updated}
 	if reason != "" {
 		resp["reason"] = reason
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
 	}
 	// The change is stored whether or not the reconcile succeeded; a failed one
 	// is reported the way every other mutation reports it (#709), not as a 500
