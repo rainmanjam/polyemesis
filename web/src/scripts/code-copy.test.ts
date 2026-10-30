@@ -96,3 +96,15 @@ describe("the docs copy button", () => {
     expect(btn.textContent).toBe("Copy");
   });
 });
+
+describe("a copy button that names its source", () => {
+  /* The hero's primary action sits outside the code box, so it cannot find its
+   * text by walking up to `.code`. It names the element instead. */
+  it("copies the text of the element its data-copy-target names", async () => {
+    document.body.innerHTML = `
+      <button data-copy-target="cmd">Copy install command</button>
+      <pre><code id="cmd">docker run -d polyemesis</code></pre>`;
+    document.body.querySelector("button")!.click();
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("docker run -d polyemesis"));
+  });
+});
