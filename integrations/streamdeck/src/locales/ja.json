@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "サーバーのアドレスを入力してください。",
   "streamdeck.err.urlInvalid": "サーバーのアドレスは有効な URL ではありません。",
   "streamdeck.err.urlScheme": "サーバーには https:// を使用してください。http:// はローカルホストでのみ使えます。",
-  "streamdeck.err.tokenRequired": "インストールの設定から API トークンを貼り付けてください。"
+  "streamdeck.err.tokenRequired": "インストールの設定から API トークンを貼り付けてください。",
+  "streamdeck.record.on": "録画中",
+  "streamdeck.record.off": "録画オフ",
+  "streamdeck.record.notRunning": "未起動",
+  "streamdeck.record.haltedDisk": "停止: ディスク",
+  "streamdeck.preset.hold": "長押しで適用",
+  "streamdeck.preset.applying": "適用中",
+  "streamdeck.preset.noIngest": "入力なし",
+  "streamdeck.pi.presetLabel": "ルーティングプリセット",
+  "streamdeck.pi.presetHint": "プリセットを適用すると、このプログラムの配信先が再起動することがあります。",
+  "streamdeck.pi.presetsFailed": "プリセット一覧を読み込めませんでした。",
+  "streamdeck.pi.installWide": "録画はインストール全体に適用されます。このキーはすべてのプログラムの録画を切り替えます。"
 }

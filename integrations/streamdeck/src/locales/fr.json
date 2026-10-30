@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "Saisissez l'adresse du serveur.",
   "streamdeck.err.urlInvalid": "L'adresse du serveur n'est pas une URL valide.",
   "streamdeck.err.urlScheme": "Utilisez https:// pour le serveur. http:// simple n'est autorisé que pour localhost.",
-  "streamdeck.err.tokenRequired": "Collez un jeton API depuis les Réglages de l'installation."
+  "streamdeck.err.tokenRequired": "Collez un jeton API depuis les Réglages de l'installation.",
+  "streamdeck.record.on": "Enregistrement",
+  "streamdeck.record.off": "Enregistrement arrêté",
+  "streamdeck.record.notRunning": "Non démarré",
+  "streamdeck.record.haltedDisk": "ARRÊTÉE : DISQUE",
+  "streamdeck.preset.hold": "Maintenir pour appliquer",
+  "streamdeck.preset.applying": "Application",
+  "streamdeck.preset.noIngest": "Pas de flux d'entrée",
+  "streamdeck.pi.presetLabel": "Préréglage de routage",
+  "streamdeck.pi.presetHint": "Appliquer un préréglage peut redémarrer les destinations de ce programme.",
+  "streamdeck.pi.presetsFailed": "La liste des préréglages n'a pas pu être chargée.",
+  "streamdeck.pi.installWide": "L'enregistrement concerne toute l'installation : cette touche le change pour tous les programmes."
 }

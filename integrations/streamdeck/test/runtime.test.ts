@@ -189,7 +189,7 @@ describe("stop-all hold-to-confirm", () => {
     rt.add(surface("s", "stopAll", { sourceId: 7 }));
 
     await rt.pressStopDown("s");
-    await rt.pressStopUp("s");
+    await rt.pressHoldUp("s");
     sched.fireAll();
     expect(net.writes()).toHaveLength(0);
   });
@@ -517,6 +517,315 @@ describe("armed stop face", () => {
     expect(stop.titles.at(-1)).toContain("2 YouTube will end");
     expect(stop.states.at(-1)).toBe(KEY_STATE.held);
     expect(sched.count()).toBe(1);
+  });
+});
+
+/** Lets a fired hold's async confirm run to the end before the test looks at the fake install. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const COUNT_1 = json(200, { destinations: 1, youtubeBroadcasts: 1 });
+
+describe("per-destination stop key", () => {
+  it("counts this destination alone on press, and on confirm stops only it", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/5/stop": json(200, { enabled: false }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    expect(key.titles.at(-1)).toContain("1 YouTube will end");
+    const impact = net.sent.find((r) => r.url.pathname === "/api/v1/destinations/stop-impact");
+    expect(impact?.url.searchParams.get("destination")).toBe("5");
+    expect(impact?.url.searchParams.has("source")).toBe(false);
+
+    sched.fireAll();
+    await flush();
+    expect(net.writes().map((r) => r.url.pathname)).toEqual(["/api/v1/destinations/5/stop"]);
+    expect(key.oks).toBe(1);
+  });
+
+  it("refuses when the destination's count cannot be loaded, and sends no stop", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": json(404, { error: "not found" }),
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    expect(key.alerts).toBe(1);
+    expect(key.titles.at(-1)).toContain("Count unavailable");
+    expect(sched.count()).toBe(0);
+    sched.fireAll();
+    await flush();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("refuses a key with no destination bound, without asking the server", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    expect(key.alerts).toBe(1);
+    expect(net.sent.some((r) => r.url.pathname.includes("stop-impact"))).toBe(false);
+  });
+
+  it("sends nothing from a read token and says so on the key", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    expect(key.titles.at(-1)).toContain("Needs admin token");
+    expect(net.sent.filter((r) => r.method === "GET" && r.url.pathname.includes("stop-impact"))).toHaveLength(0);
+  });
+
+  it("sends no stop when released before the hold completes", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("k", "stopOne", { sourceId: 7, destinationId: 5 }));
+
+    await rt.pressStopOneDown("k");
+    await rt.pressHoldUp("k");
+    sched.fireAll();
+    await flush();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("stops the destination it was pressed on, not one the settings name by the time the hold completes", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/destinations/stop-impact": COUNT_1,
+      "POST /api/v1/destinations/5/stop": json(200, {}),
+      "POST /api/v1/destinations/9/stop": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "stopOne", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+
+    await rt.pressStopOneDown("k");
+    key.settings.destinationId = 9;
+    sched.fireAll();
+    await flush();
+    expect(net.writes().map((r) => r.url.pathname)).toEqual(["/api/v1/destinations/5/stop"]);
+  });
+});
+
+describe("record key", () => {
+  const RECORD_HALTED = json(200, {
+    enabled: true, state: "halted_disk", halted: true, reason: "disk full", installWide: true,
+  });
+
+  it("shows HALTED: DISK with the reason when the free-space floor stopped recording", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/recording": RECORD_HALTED,
+    });
+    rt.configure(PAIRED);
+    const key = surface("r", "record");
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).toBe("HALTED: DISK\ndisk full");
+  });
+
+  it("shows off and not running as their own faces, never as recording", async () => {
+    const off = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/recording": json(200, { enabled: false, state: "off", halted: false, installWide: true }),
+    });
+    off.rt.configure(PAIRED);
+    const offKey = surface("r", "record");
+    off.rt.add(offKey);
+    await off.rt.tick();
+    expect(offKey.states.at(-1)).toBe(KEY_STATE.idle);
+    expect(offKey.titles.at(-1)).toBe("Record off");
+
+    const idle = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/recording": json(200, { enabled: true, state: "not_running", halted: false, installWide: true }),
+    });
+    idle.rt.configure(PAIRED);
+    const idleKey = surface("r", "record");
+    idle.rt.add(idleKey);
+    await idle.rt.tick();
+    expect(idleKey.states.at(-1)).toBe(KEY_STATE.warn);
+    expect(idleKey.titles.at(-1)).toBe("Not running");
+  });
+
+  it("toggles from a fresh read and writes only the switch", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/recording": json(200, { enabled: false, state: "off", halted: false, installWide: true }),
+      "POST /api/v1/recording": json(200, { enabled: true, state: "not_running", halted: false, installWide: true }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("r", "record");
+    rt.add(key);
+
+    await rt.pressRecord("r");
+    const post = net.writes();
+    expect(post).toHaveLength(1);
+    expect(JSON.parse(post[0]!.body!)).toEqual({ enabled: true });
+    expect(key.oks).toBe(1);
+  });
+
+  it("sends no request to the switch from a read token, not even the read", async () => {
+    // The GET is routed, so a missing admin gate would reach the POST and be caught here.
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/recording": json(200, { enabled: false, state: "off", halted: false, installWide: true }),
+      "POST /api/v1/recording": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("r", "record");
+    rt.add(key);
+
+    await rt.pressRecord("r");
+    expect(key.alerts).toBe(1);
+    expect(net.writes()).toHaveLength(0);
+    expect(net.sent.filter((r) => r.url.pathname === "/api/v1/recording")).toHaveLength(0);
+  });
+
+  it("shows an alert when the switch is refused", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/recording": json(200, { enabled: false, state: "off", halted: false, installWide: true }),
+      "POST /api/v1/recording": json(500, { error: "store locked" }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("r", "record");
+    rt.add(key);
+
+    await rt.pressRecord("r");
+    expect(key.alerts).toBe(1);
+    expect(key.oks).toBe(0);
+  });
+});
+
+describe("routing preset key", () => {
+  const PRESETS = json(200, { presets: [{ id: "music", name: "Music" }, { id: "all", name: "Everything" }], defaults: {} });
+
+  it("is unbound with no preset chosen", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": ADMIN, "GET /api/v1/routing/presets": PRESETS });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("p", "preset", { sourceId: 7 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.unbound);
+  });
+
+  it("names the chosen preset from the install's list, and holds it until confirmed", async () => {
+    const { rt } = runtimeFor({ "GET /api/v1/auth/connection": ADMIN, "GET /api/v1/routing/presets": PRESETS });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.idle);
+    expect(key.titles.at(-1)).toBe("Hold to apply\nMusic");
+  });
+
+  it("applies the preset to its own programme once the hold completes", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/routing/presets": PRESETS,
+      "POST /api/v1/routing/presets/music": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+    rt.add(key);
+
+    await rt.pressPresetDown("p");
+    expect(key.states.at(-1)).toBe(KEY_STATE.held);
+    sched.fireAll();
+    await flush();
+    const post = net.writes();
+    expect(post.map((r) => r.url.pathname)).toEqual(["/api/v1/routing/presets/music"]);
+    expect(post[0]!.url.searchParams.get("source")).toBe("7");
+    expect(key.oks).toBe(1);
+  });
+
+  it("sends no apply when released before the hold completes", async () => {
+    const { rt, net, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/routing/presets": PRESETS,
+      "POST /api/v1/routing/presets/music": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("p", "preset", { sourceId: 7, presetId: "music" }));
+
+    await rt.pressPresetDown("p");
+    await rt.pressHoldUp("p");
+    sched.fireAll();
+    await flush();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("shows the no-ingest face when the install has no programme to apply to", async () => {
+    const { rt, sched } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/routing/presets": PRESETS,
+      "POST /api/v1/routing/presets/music": json(503, { error: "no source yet", code: "no_source" }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+    rt.add(key);
+
+    await rt.pressPresetDown("p");
+    sched.fireAll();
+    await flush();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).toBe("No ingest");
+    expect(key.alerts).toBe(1);
+  });
+
+  it("sends no apply from a read token", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "POST /api/v1/routing/presets/music": json(200, {}),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("p", "preset", { sourceId: 7, presetId: "music" });
+    rt.add(key);
+
+    await rt.pressPresetDown("p");
+    expect(key.alerts).toBe(1);
+    expect(net.writes()).toHaveLength(0);
   });
 });
 

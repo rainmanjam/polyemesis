@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "Введите адрес сервера.",
   "streamdeck.err.urlInvalid": "Адрес сервера не является допустимым URL.",
   "streamdeck.err.urlScheme": "Используйте https:// для сервера. Обычный http:// разрешён только для localhost.",
-  "streamdeck.err.tokenRequired": "Вставьте API-токен из настроек установки."
+  "streamdeck.err.tokenRequired": "Вставьте API-токен из настроек установки.",
+  "streamdeck.record.on": "Запись",
+  "streamdeck.record.off": "Запись выключена",
+  "streamdeck.record.notRunning": "Не запущена",
+  "streamdeck.record.haltedDisk": "ОСТАНОВЛЕНО: ДИСК",
+  "streamdeck.preset.hold": "Удерживайте, чтобы применить",
+  "streamdeck.preset.applying": "Применяется",
+  "streamdeck.preset.noIngest": "Нет входного потока",
+  "streamdeck.pi.presetLabel": "Пресет маршрутизации",
+  "streamdeck.pi.presetHint": "Применение пресета может перезапустить назначения этой программы.",
+  "streamdeck.pi.presetsFailed": "Не удалось загрузить список пресетов.",
+  "streamdeck.pi.installWide": "Запись общая для установки: эта клавиша переключает её для всех программ."
 }

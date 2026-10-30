@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "Masukkan alamat server.",
   "streamdeck.err.urlInvalid": "Alamat server bukan URL yang valid.",
   "streamdeck.err.urlScheme": "Gunakan https:// untuk server. http:// biasa hanya diizinkan untuk localhost.",
-  "streamdeck.err.tokenRequired": "Tempel token API dari Pengaturan instalasi."
+  "streamdeck.err.tokenRequired": "Tempel token API dari Pengaturan instalasi.",
+  "streamdeck.record.on": "Merekam",
+  "streamdeck.record.off": "Rekaman mati",
+  "streamdeck.record.notRunning": "Tidak berjalan",
+  "streamdeck.record.haltedDisk": "DIHENTIKAN: DISK",
+  "streamdeck.preset.hold": "Tahan untuk menerapkan",
+  "streamdeck.preset.applying": "Menerapkan",
+  "streamdeck.preset.noIngest": "Tanpa ingest",
+  "streamdeck.pi.presetLabel": "Preset routing",
+  "streamdeck.pi.presetHint": "Menerapkan preset dapat memulai ulang destinasi program ini.",
+  "streamdeck.pi.presetsFailed": "Daftar preset tidak dapat dimuat.",
+  "streamdeck.pi.installWide": "Rekaman berlaku untuk seluruh instalasi: tombol ini mengubahnya untuk semua program."
 }

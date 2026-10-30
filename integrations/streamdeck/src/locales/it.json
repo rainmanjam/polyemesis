@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "Inserisci l'indirizzo del server.",
   "streamdeck.err.urlInvalid": "L'indirizzo del server non è un URL valido.",
   "streamdeck.err.urlScheme": "Usa https:// per il server. http:// semplice è consentito solo per localhost.",
-  "streamdeck.err.tokenRequired": "Incolla un token API dalle Impostazioni dell'installazione."
+  "streamdeck.err.tokenRequired": "Incolla un token API dalle Impostazioni dell'installazione.",
+  "streamdeck.record.on": "In registrazione",
+  "streamdeck.record.off": "Registrazione spenta",
+  "streamdeck.record.notRunning": "Non attiva",
+  "streamdeck.record.haltedDisk": "FERMA: DISCO",
+  "streamdeck.preset.hold": "Tieni premuto per applicare",
+  "streamdeck.preset.applying": "Applicazione",
+  "streamdeck.preset.noIngest": "Nessun ingest",
+  "streamdeck.pi.presetLabel": "Preset di instradamento",
+  "streamdeck.pi.presetHint": "Applicare un preset può riavviare le destinazioni di questo programma.",
+  "streamdeck.pi.presetsFailed": "Impossibile caricare l'elenco dei preset.",
+  "streamdeck.pi.installWide": "La registrazione è per l'intera installazione: questo tasto la cambia per tutti i programmi."
 }

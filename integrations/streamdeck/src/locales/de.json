@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "Serveradresse eingeben.",
   "streamdeck.err.urlInvalid": "Die Serveradresse ist keine gültige URL.",
   "streamdeck.err.urlScheme": "Verwenden Sie https:// für den Server. Reines http:// ist nur für localhost erlaubt.",
-  "streamdeck.err.tokenRequired": "Fügen Sie ein API-Token aus den Einstellungen der Installation ein."
+  "streamdeck.err.tokenRequired": "Fügen Sie ein API-Token aus den Einstellungen der Installation ein.",
+  "streamdeck.record.on": "Aufnahme läuft",
+  "streamdeck.record.off": "Aufnahme aus",
+  "streamdeck.record.notRunning": "Läuft nicht",
+  "streamdeck.record.haltedDisk": "GESTOPPT: SPEICHER",
+  "streamdeck.preset.hold": "Halten zum Anwenden",
+  "streamdeck.preset.applying": "Wird angewendet",
+  "streamdeck.preset.noIngest": "Kein Eingang",
+  "streamdeck.pi.presetLabel": "Routing-Voreinstellung",
+  "streamdeck.pi.presetHint": "Das Anwenden einer Voreinstellung kann die Ziele dieses Programms neu starten.",
+  "streamdeck.pi.presetsFailed": "Die Voreinstellungsliste konnte nicht geladen werden.",
+  "streamdeck.pi.installWide": "Die Aufnahme gilt für die gesamte Installation: Diese Taste schaltet sie für alle Programme."
 }

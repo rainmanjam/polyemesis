@@ -41,5 +41,16 @@
   "streamdeck.err.urlRequired": "请输入服务器地址。",
   "streamdeck.err.urlInvalid": "服务器地址不是有效的 URL。",
   "streamdeck.err.urlScheme": "服务器请使用 https://。仅 localhost 允许使用明文 http://。",
-  "streamdeck.err.tokenRequired": "请从安装的设置中粘贴 API 令牌。"
+  "streamdeck.err.tokenRequired": "请从安装的设置中粘贴 API 令牌。",
+  "streamdeck.record.on": "录制中",
+  "streamdeck.record.off": "录制已关闭",
+  "streamdeck.record.notRunning": "未运行",
+  "streamdeck.record.haltedDisk": "已停止：磁盘",
+  "streamdeck.preset.hold": "长按应用",
+  "streamdeck.preset.applying": "应用中",
+  "streamdeck.preset.noIngest": "无输入源",
+  "streamdeck.pi.presetLabel": "路由预设",
+  "streamdeck.pi.presetHint": "应用预设可能会重启此节目的输出目标。",
+  "streamdeck.pi.presetsFailed": "无法加载预设列表。",
+  "streamdeck.pi.installWide": "录制对整个安装生效：此键会为所有节目切换录制。"
 }
