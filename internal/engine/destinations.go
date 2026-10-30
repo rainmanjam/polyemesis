@@ -728,6 +728,19 @@ func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []stri
 		}
 		return nil
 	}
+	// FFmpeg 7.0's "-/" prefix reads an option's value from a file on this box,
+	// past every guard the expert editor applies. The API refuses it on the way
+	// in; a row stored before that check carries it still, so it is dropped here
+	// the same way unparseable text is.
+	for _, a := range argv {
+		if strings.HasPrefix(a, "-/") {
+			if log != nil {
+				log.Warn("ignoring expert arguments that read a value from a file",
+					"dest", row.Name, "field", field, "arg", a)
+			}
+			return nil
+		}
+	}
 	return argv
 }
 
