@@ -149,3 +149,49 @@ describe("GoLiveSheet: starting", () => {
     expect(within(row).getByText(T("golive.live"))).toBeTruthy();
   });
 });
+
+describe("GoLiveSheet: what a press shows while it runs", () => {
+  it("shows a refusal on its own row before the next destination is started", async () => {
+    // Real timers and a real pace: the point is the ORDER of the two things, a
+    // refusal visible while the walk is still waiting to reach the next row.
+    const onStart = vi.fn(async (id: DestinationId) => {
+      if ((id as unknown as number) === 1) throw new Error("ingest refused");
+    });
+    draw([dest({ id: did(1) }), dest({ id: did(2), name: "Second" })], { onStart, paceMs: 400 });
+
+    fireEvent.click(screen.getByRole("button", { name: T("golive.goCount", { count: 2 }) }));
+
+    await screen.findByText("ingest refused");
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets an earlier refusal when the sheet is opened again", async () => {
+    const onStart = vi.fn(async () => {
+      throw new Error("ingest refused");
+    });
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      live: [dest({ id: did(1) })],
+      youtubeAtRisk: 0,
+      onStart,
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} rows={goLiveRows([dest({ id: did(1) })], sources)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: T("golive.goCount", { count: 1 }) }));
+    await screen.findByText("ingest refused");
+
+    // The parent takes a fresh snapshot each time it opens.
+    rerender(<GoLiveSheet {...props} rows={goLiveRows([dest({ id: did(1) })], sources)} />);
+    expect(screen.queryByText("ingest refused")).toBeNull();
+  });
+
+  it("does not draw an enabled destination with no running process as live", () => {
+    draw([dest({ id: did(1), enabled: true })], { live: [dest({ id: did(1), enabled: true })] });
+
+    const row = screen.getByText("Twitch — no music").closest("[data-row]") as HTMLElement;
+    expect(within(row).queryByText(T("golive.live"))).toBeNull();
+  });
+});

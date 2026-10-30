@@ -73,13 +73,19 @@ export async function runPacedStarts(
   ids: readonly number[],
   start: (id: number) => Promise<void>,
   paceMs: number,
+  /** Told about each refusal the moment it happens, not at the end of the walk.
+   *  Two seconds a destination means a refusal at the front of a long list
+   *  would otherwise read as "Starting" for most of a minute. */
+  onError?: (id: number, message: string) => void,
 ): Promise<Map<number, string>> {
   const errors = new Map<number, string>();
   for (let i = 0; i < ids.length; i++) {
     try {
       await start(ids[i]);
     } catch (err) {
-      errors.set(ids[i], err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      errors.set(ids[i], message);
+      onError?.(ids[i], message);
     }
     if (paceMs > 0 && i < ids.length - 1) {
       await new Promise((r) => setTimeout(r, paceMs));

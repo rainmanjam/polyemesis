@@ -59,18 +59,31 @@ export function GoLiveSheet({
   const [attempted, setAttempted] = useState<Set<number>>(new Set());
   const [errors, setErrors] = useState<Map<number, string>>(new Map());
 
+  // A new snapshot is a new sheet. The parent takes a fresh rows array each
+  // time it opens, so a refusal from an earlier press must not still be on
+  // screen the next time the operator opens it. Reset during render (React's
+  // own recommended pattern for state that follows a prop), not in an effect.
+  const [session, setSession] = useState(rows);
+  if (rows !== session) {
+    setSession(rows);
+    setAttempted(new Set());
+    setErrors(new Map());
+    setRunning(false);
+  }
+
   const liveOf = (id: number) => live.find((d) => (d.id as unknown as number) === id);
 
   const progressOf = (row: GoLiveRow): Progress => {
     const id = row.id as unknown as number;
     if (!row.ready) return "blocked";
     if (errors.has(id)) return "failed";
-    const d = liveOf(id);
-    const state = d?.process?.state;
+    const state = liveOf(id)?.process?.state;
+    // Live means the process is running, and nothing else. An enabled
+    // destination with no process, or one that is retrying or stalled, is not
+    // live, and must not be drawn as if it were.
+    if (state === "running") return "live";
     if (state === "failed") return "failed";
-    if (d?.enabled && state === "running") return "live";
-    if (attempted.has(id) || (d?.enabled && state === "starting")) return "starting";
-    if (d?.enabled) return "live";
+    if (attempted.has(id) || state === "starting" || state === "reconnecting") return "starting";
     return "pending";
   };
 
@@ -83,15 +96,15 @@ export function GoLiveSheet({
     setErrors(new Map());
     setAttempted(new Set());
     const ids = readyNow.map((r) => r.id as unknown as number);
-    const failed = await runPacedStarts(
+    await runPacedStarts(
       ids,
       async (id) => {
         setAttempted((prev) => new Set(prev).add(id));
         await onStart(id as unknown as DestinationId);
       },
       paceMs,
+      (id, message) => setErrors((prev) => new Map(prev).set(id, message)),
     );
-    setErrors(failed);
     setRunning(false);
     onFinished();
   };
@@ -111,7 +124,7 @@ export function GoLiveSheet({
         )}
 
         <div className="flex flex-col divide-y divide-border rounded-md border border-border">
-          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr] gap-3 px-3 py-2 text-micro uppercase tracking-wide text-muted-foreground">
+          <div className="grid grid-cols-[1.4fr_1fr_1fr_1fr] gap-3 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
             <span>{t("golive.colDestination")}</span>
             <span>{t("golive.colSource")}</span>
             <span>{t("golive.colReadiness")}</span>
@@ -125,7 +138,7 @@ export function GoLiveSheet({
             >
               <span className="min-w-0">
                 <span className="block truncate font-medium">{row.name}</span>
-                <span className="block font-mono text-micro text-muted-foreground">{row.platform}</span>
+                <span className="block font-mono text-xs text-muted-foreground">{row.platform}</span>
               </span>
               <span className="truncate text-muted-foreground">{row.sourceName ?? "—"}</span>
               <span>
@@ -140,7 +153,7 @@ export function GoLiveSheet({
                   <Badge variant={CHIP[p].variant}>{t(CHIP[p].key)}</Badge>
                 </span>
                 {p === "failed" && errors.has(row.id as unknown as number) && (
-                  <span className="text-micro">{errors.get(row.id as unknown as number)}</span>
+                  <span className="text-xs">{errors.get(row.id as unknown as number)}</span>
                 )}
               </span>
             </div>
@@ -148,7 +161,7 @@ export function GoLiveSheet({
         </div>
 
         <DialogFooter className="flex-wrap items-center gap-3 sm:justify-between">
-          <span className="font-mono text-micro text-muted-foreground">
+          <span className="font-mono text-xs text-muted-foreground">
             {t("golive.summary", {
               live: count("live"),
               starting: count("starting"),

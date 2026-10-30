@@ -91,4 +91,18 @@ describe("runPacedStarts", () => {
     expect(errors.get(2)).toBe("ingest refused");
     expect(errors.has(1)).toBe(false);
   });
+
+  it("reports a refusal as it happens, before the next destination is started", async () => {
+    const seen: string[] = [];
+    await runPacedStarts(
+      [1, 2],
+      async (id) => {
+        seen.push(`start ${id}`);
+        if (id === 1) throw new Error("ingest refused");
+      },
+      0,
+      (id, msg) => seen.push(`failed ${id}: ${msg}`),
+    );
+    expect(seen).toEqual(["start 1", "failed 1: ingest refused", "start 2"]);
+  });
 });
