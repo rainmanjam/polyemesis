@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id} (już nie na liście)",
   "streamdeck.pi.trackHint": "Zmiana jest stosowana na żywo, gdy to możliwe. W przeciwnym razie miejsce docelowe się restartuje, a widzowie widzą ponowne połączenie. Serwer Windows zawsze się restartuje.",
   "streamdeck.pi.destinationLabel": "Miejsce docelowe",
-  "streamdeck.gain.matrix": "macierz: użyj UI"
+  "streamdeck.gain.matrix": "macierz: użyj UI",
+  "streamdeck.state.buffering": "Bufor opóźnienia",
+  "streamdeck.state.draining": "Nadaje końcówkę",
+  "streamdeck.delay.marker": "Opóźn. {seconds}s"
 }

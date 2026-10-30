@@ -618,6 +618,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // Reconnect policy. Empty is "retry forever, 1s to 30s", which is what every
   // destination did before this existed.
   const [resilience, setResilience] = useState<DestResilience>({});
+  // Broadcast delay in seconds (#11). 0 is off. The loaded value is kept so
+  // the dialog can say, before the save, that changing it restarts a live
+  // destination.
+  const [delaySeconds, setDelaySeconds] = useState(0);
+  const [loadedDelay, setLoadedDelay] = useState(0);
   // Output audio encoding. Empty is AAC stereo.
   const [audio, setAudio] = useState<AudioEncoding>({});
   // Copying audio is offered only where the receiver is not a platform ingest.
@@ -806,6 +811,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
       setBitrate(destination.audioBitrate);
       setTransport(destination.transport ?? {});
       setResilience(destination.resilience ?? {});
+      setDelaySeconds(destination.delaySeconds ?? 0);
+      setLoadedDelay(destination.delaySeconds ?? 0);
       setAudio(destination.audio ?? {});
       setCompliance(destination.compliance ?? {});
       setFacebook(destination.facebook ?? {});
@@ -824,6 +831,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
     } else {
       setTransport({});
       setResilience({});
+      setDelaySeconds(0);
+      setLoadedDelay(0);
       setAudio({});
       setCompliance({});
       setFacebook({});
@@ -1068,6 +1077,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
         sourceId: sourceIdForSave(sourceId, choices) ?? undefined,
         transport,
         resilience,
+        delaySeconds,
         // copyOn rather than audio.copy: switching the transport to RTMP has to
         // drop the flag here, or the operator gets a save error about a control
         // that is no longer on screen to turn off.
@@ -2466,6 +2476,30 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               <span className="text-sm text-muted-foreground">
                 {t("dest.muxQueuePair")}
               </span>
+
+              <div className="flex flex-col gap-1 border-t border-border pt-3">
+                <Label htmlFor="dest-delay">{t("delay.field")}</Label>
+                <Input
+                  id="dest-delay"
+                  type="number"
+                  min={0}
+                  max={900}
+                  step={1}
+                  value={delaySeconds}
+                  onChange={(e) =>
+                    setDelaySeconds(Math.max(0, Math.min(900, Math.round(Number(e.target.value) || 0))))
+                  }
+                  className="w-24"
+                />
+                <span className="text-sm text-muted-foreground">{t("delay.help")}</span>
+                {/* Said BEFORE the save: a delay cannot be stretched on a
+                    running buffer, so the destination restarts and refills. */}
+                {destination?.enabled && delaySeconds !== loadedDelay && (
+                  <span data-testid="delay-restart-warning" className="text-sm text-warn">
+                    {t("delay.liveRestart", { seconds: delaySeconds })}
+                  </span>
+                )}
+              </div>
 
               <div className="border-t border-border pt-3">
                 <p className="text-xs font-medium">{t("dest.reconnecting")}</p>

@@ -2950,5 +2950,16 @@
   "route.preset.cleanFeed": "Sinal limpo",
   "route.preset.cleanFeedDesc": "Áudio do programa sem comentário — o que um detentor de direitos, um arquivo ou uma transmissão em outro idioma quer.",
   "route.preset.exceptMusic": "Tudo menos a música",
-  "route.preset.exceptMusicDesc": "Todas as faixas, exceto as marcadas como música, com a instrução fixa de continuar excluindo a música se ela mudar de faixa."
+  "route.preset.exceptMusicDesc": "Todas as faixas, exceto as marcadas como música, com a instrução fixa de continuar excluindo a música se ela mudar de faixa.",
+  "delay.field": "Atraso de transmissão (segundos)",
+  "delay.help": "Atrasa a saída deste destino em até 15 minutos (900 s); 0 desliga. Os outros destinos não são afetados. Parar transmite o trecho atrasado antes de encerrar; Parar agora o descarta.",
+  "delay.liveRestart": "Este destino está ativo: salvar o reinicia e, com atraso de {seconds} s, nada chega à plataforma até o novo buffer encher.",
+  "delay.badge": "Atrasado {seconds} s",
+  "delay.buffering": "Preenchendo o atraso: {buffered} de {seconds} s",
+  "delay.fillLabel": "Preenchimento do buffer de atraso",
+  "delay.draining": "Transmitindo o buffer atrasado: faltam {seconds} s",
+  "delay.cutNow": "Cortar agora",
+  "delay.cutNowTitle": "Descarta o que {name} ainda tem no buffer, para que nada vá ao ar",
+  "delay.stopNow": "Parar agora",
+  "delay.stopNowTitle": "Parar {name} e descartar o buffer de atraso em vez de transmiti-lo"
 }

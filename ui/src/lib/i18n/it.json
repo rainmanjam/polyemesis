@@ -2950,5 +2950,16 @@
   "route.preset.cleanFeed": "Segnale pulito",
   "route.preset.cleanFeedDesc": "Audio del programma senza commento: ciò che vuole un titolare dei diritti, un archivio o una trasmissione in un'altra lingua.",
   "route.preset.exceptMusic": "Tutto tranne la musica",
-  "route.preset.exceptMusicDesc": "Tutte le tracce tranne quelle segnate come musica, con l'istruzione permanente di escluderla anche se passa a un'altra traccia."
+  "route.preset.exceptMusicDesc": "Tutte le tracce tranne quelle segnate come musica, con l'istruzione permanente di escluderla anche se passa a un'altra traccia.",
+  "delay.field": "Ritardo di trasmissione (secondi)",
+  "delay.help": "Trattiene l’uscita di questa destinazione fino a 15 minuti (900 s); 0 la disattiva. Le altre destinazioni non sono interessate. Ferma trasmette la coda ritardata prima di terminare; Ferma subito la scarta.",
+  "delay.liveRestart": "Questa destinazione è attiva: salvando si riavvia e, con un ritardo di {seconds} s, nulla raggiunge la piattaforma finché il nuovo buffer non è pieno.",
+  "delay.badge": "Ritardato {seconds} s",
+  "delay.buffering": "Riempimento del ritardo: {buffered} di {seconds} s",
+  "delay.fillLabel": "Riempimento del buffer di ritardo",
+  "delay.draining": "Trasmissione del buffer ritardato: mancano {seconds} s",
+  "delay.cutNow": "Taglia ora",
+  "delay.cutNowTitle": "Scarta ciò che {name} ha ancora nel buffer, così nulla va in onda",
+  "delay.stopNow": "Ferma subito",
+  "delay.stopNowTitle": "Ferma {name} e scarta il suo buffer di ritardo invece di trasmetterlo"
 }

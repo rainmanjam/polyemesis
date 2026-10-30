@@ -1487,6 +1487,11 @@ export function Dashboard() {
                 onMoveLater={() => move(d.id, 1)}
                 onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
                 onStop={() => act(d.id, () => api.stopDestination(d.id), "stop the destination")}
+                onStopNow={
+                  (d.delaySeconds ?? 0) > 0 || d.delay
+                    ? () => act(d.id, () => api.stopDestination(d.id, true), "cut the delayed destination")
+                    : undefined
+                }
                 onRestart={() =>
                   act(d.id, () => api.restartDestination(d.id), "restart the destination")
                 }

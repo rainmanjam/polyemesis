@@ -2950,5 +2950,16 @@
   "route.preset.cleanFeed": "Feed bersih",
   "route.preset.cleanFeedDesc": "Audio program tanpa komentar — yang diinginkan pemegang hak, arsip, atau siaran bahasa kedua.",
   "route.preset.exceptMusic": "Semua kecuali musik",
-  "route.preset.exceptMusicDesc": "Semua trek kecuali yang ditandai musik, dengan instruksi tetap untuk terus mengecualikan musik jika pindah ke trek lain."
+  "route.preset.exceptMusicDesc": "Semua trek kecuali yang ditandai musik, dengan instruksi tetap untuk terus mengecualikan musik jika pindah ke trek lain.",
+  "delay.field": "Jeda siaran (detik)",
+  "delay.help": "Menahan keluaran tujuan ini hingga 15 menit (900 dtk); 0 berarti mati. Tujuan lain tidak terpengaruh. Hentikan menayangkan sisa yang tertunda sebelum berakhir; Hentikan sekarang membuangnya.",
+  "delay.liveRestart": "Tujuan ini aktif: menyimpan akan memulai ulang, dan dengan jeda {seconds} dtk tidak ada yang sampai ke platform sampai buffer baru terisi.",
+  "delay.badge": "Tertunda {seconds} dtk",
+  "delay.buffering": "Mengisi jeda: {buffered} dari {seconds} dtk",
+  "delay.fillLabel": "Isi buffer jeda",
+  "delay.draining": "Menayangkan buffer tertunda: sisa {seconds} dtk",
+  "delay.cutNow": "Potong sekarang",
+  "delay.cutNowTitle": "Buang yang masih di-buffer {name} agar tidak ada yang tayang",
+  "delay.stopNow": "Hentikan sekarang",
+  "delay.stopNowTitle": "Hentikan {name} dan buang buffer jedanya alih-alih menayangkannya"
 }

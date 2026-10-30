@@ -38,6 +38,7 @@ export function titleFor(face: KeyFace, locale: string): string {
   if (face.reason) lines.push(clip(t(locale, face.reason)));
   if (face.detail) lines.push(clip(face.detail));
   if (face.warning) lines.push(clip(t(locale, face.warning)));
+  if (face.delaySeconds) lines.push(clip(t(locale, "streamdeck.delay.marker", { seconds: face.delaySeconds })));
   return lines.join("\n");
 }
 

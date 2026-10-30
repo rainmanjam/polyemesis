@@ -2950,5 +2950,16 @@
   "route.preset.cleanFeed": "클린 피드",
   "route.preset.cleanFeedDesc": "해설이 없는 프로그램 오디오 — 권리자, 아카이브, 다른 언어 방송이 원하는 것입니다.",
   "route.preset.exceptMusic": "음악 외 전체",
-  "route.preset.exceptMusicDesc": "음악으로 표시된 트랙을 뺀 모든 트랙이며, 음악이 다른 트랙으로 옮겨가도 계속 제외하도록 지정합니다."
+  "route.preset.exceptMusicDesc": "음악으로 표시된 트랙을 뺀 모든 트랙이며, 음악이 다른 트랙으로 옮겨가도 계속 제외하도록 지정합니다.",
+  "delay.field": "방송 지연(초)",
+  "delay.help": "이 대상의 출력을 최대 15분(900초)까지 늦춥니다. 0은 끔입니다. 다른 대상에는 영향이 없습니다. 중지는 지연된 나머지를 내보낸 뒤 끝나고, 지금 중지는 이를 버립니다.",
+  "delay.liveRestart": "이 대상은 켜져 있습니다. 저장하면 다시 시작되며, {seconds}초 지연에서는 새 버퍼가 찰 때까지 플랫폼에 아무것도 전달되지 않습니다.",
+  "delay.badge": "{seconds}초 지연",
+  "delay.buffering": "지연 채우는 중: {seconds}초 중 {buffered}초",
+  "delay.fillLabel": "지연 버퍼 채움 정도",
+  "delay.draining": "지연 버퍼 송출 중: {seconds}초 남음",
+  "delay.cutNow": "지금 끊기",
+  "delay.cutNowTitle": "{name}에 아직 버퍼링된 내용을 버려 아무것도 송출되지 않게 합니다",
+  "delay.stopNow": "지금 중지",
+  "delay.stopNowTitle": "{name}을(를) 중지하고 지연 버퍼를 송출하지 않고 버립니다"
 }

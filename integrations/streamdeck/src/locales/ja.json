@@ -80,5 +80,8 @@
   "streamdeck.pi.notListed": "{id}（一覧にありません）",
   "streamdeck.pi.trackHint": "変更は可能ならライブで適用されます。そうでなければ配信先が再起動し、視聴者には再接続が見えます。Windows サーバーは常に再起動します。",
   "streamdeck.pi.destinationLabel": "配信先",
-  "streamdeck.gain.matrix": "マトリクス: UIで操作"
+  "streamdeck.gain.matrix": "マトリクス: UIで操作",
+  "streamdeck.state.buffering": "ディレイ蓄積中",
+  "streamdeck.state.draining": "遅延分を送出中",
+  "streamdeck.delay.marker": "ディレイ{seconds}秒"
 }

@@ -53,6 +53,11 @@ export interface DestStatus {
   transitioning?: boolean;
   /** Why it is failing, or delivering too slowly. Absent while nothing is wrong. */
   reason?: FailureReason | null;
+  /** The configured broadcast delay in seconds (#11), absent when none. */
+  delaySeconds?: number;
+  /** The live delay buffer. phase "draining" is a STOPPED destination still on
+   *  the air with its buffered tail. */
+  delay?: { seconds: number; phase: "buffering" | "on-air" | "draining"; drainRemainingSeconds?: number } | null;
 }
 
 export interface HoldStatus {

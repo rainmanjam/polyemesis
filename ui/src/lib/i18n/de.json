@@ -2950,5 +2950,16 @@
   "route.preset.cleanFeed": "Sauberes Signal",
   "route.preset.cleanFeedDesc": "Programmton ohne Kommentar – was ein Rechteinhaber, ein Archiv oder eine Übertragung in einer zweiten Sprache braucht.",
   "route.preset.exceptMusic": "Alles außer Musik",
-  "route.preset.exceptMusicDesc": "Alle Spuren außer den als Musik markierten, mit der dauerhaften Anweisung, Musik auch dann auszuschließen, wenn sie auf eine andere Spur wechselt."
+  "route.preset.exceptMusicDesc": "Alle Spuren außer den als Musik markierten, mit der dauerhaften Anweisung, Musik auch dann auszuschließen, wenn sie auf eine andere Spur wechselt.",
+  "delay.field": "Sendeverzögerung (Sekunden)",
+  "delay.help": "Hält die Ausgabe dieses Ziels um bis zu 15 Minuten (900 s) zurück; 0 ist aus. Andere Ziele sind nicht betroffen. Stopp spielt den verzögerten Rest noch aus; Sofort stoppen verwirft ihn.",
+  "delay.liveRestart": "Dieses Ziel läuft: Speichern startet es neu, und mit {seconds} s Verzögerung erreicht nichts die Plattform, bis der neue Puffer gefüllt ist.",
+  "delay.badge": "Verzögert {seconds} s",
+  "delay.buffering": "Verzögerung füllt sich: {buffered} von {seconds} s",
+  "delay.fillLabel": "Füllstand des Verzögerungspuffers",
+  "delay.draining": "Verzögerter Puffer läuft noch: {seconds} s übrig",
+  "delay.cutNow": "Jetzt abschneiden",
+  "delay.cutNowTitle": "Verwirft, was {name} noch gepuffert hat, damit nichts davon gesendet wird",
+  "delay.stopNow": "Sofort stoppen",
+  "delay.stopNowTitle": "{name} stoppen und den Verzögerungspuffer verwerfen, statt ihn zu senden"
 }
