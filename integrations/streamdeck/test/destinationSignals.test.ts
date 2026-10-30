@@ -141,7 +141,7 @@ describe("each signal, alone, on the destination key", () => {
   });
 });
 
-describe("precedence: held > failed/cause > key/account > storm > drops > platform > source > upload slow", () => {
+describe("precedence: held > failed/key changed > account > reconnecting/stalled > expiring > storm > drops > platform > source > upload slow", () => {
   // Everything at once, on a running destination, then peeled from the top.
   const all = (over: Partial<DestStatus> = {}) =>
     base({
@@ -159,6 +159,8 @@ describe("precedence: held > failed/cause > key/account > storm > drops > platfo
       "held",
       "failed",
       "account",
+      "cycling",
+      "accountExpiring",
       "restartStorm",
       "droppingFrames",
       "platform",
@@ -227,10 +229,37 @@ describe("precedence: held > failed/cause > key/account > storm > drops > platfo
     expect(face).toMatchObject({ tone: "held", label: "streamdeck.state.held", more: 2 });
   });
 
-  it("a stalled destination is a fault and outranks the account", () => {
+  it("an expired account outranks a stall, and the label still says Stalled", () => {
     const face = destinationFace(all({ stalled: true }), undefined, null);
-    expect(face).toMatchObject({ tone: "warn", label: "streamdeck.state.stalled" });
-    expect(face.issues?.[1]?.key).toBe("streamdeck.issue.reconnectAccount");
+    expect(face).toMatchObject({ tone: "error", label: "streamdeck.state.stalled", reason: "streamdeck.issue.reconnectAccount" });
+    expect(face.issues?.[1]?.key).toBe("streamdeck.state.stalled");
+  });
+
+  it("an expired account outranks reconnecting with a cause", () => {
+    const face = destinationFace(
+      base({ accountHealth: "expired", process: { state: "reconnecting" }, reason: { cause: "timeout" } }),
+      undefined,
+      null,
+    );
+    expect(face).toMatchObject({ tone: "error", label: "streamdeck.state.reconnecting", reason: "streamdeck.issue.reconnectAccount", more: 1 });
+  });
+
+  it("key changed while reconnecting still outranks the account: it names the fix", () => {
+    const face = destinationFace(
+      base({ accountHealth: "expired", process: { state: "reconnecting" }, reason: { cause: "key_rejected", keyChanged: true } }),
+      undefined,
+      null,
+    );
+    expect(face).toMatchObject({ tone: "warn", reason: "streamdeck.reason.keyChanged", more: 1 });
+  });
+
+  it("an account that is only expiring stays below reconnecting", () => {
+    const face = destinationFace(
+      base({ accountHealth: "expiring", process: { state: "reconnecting" }, reason: { cause: "timeout" } }),
+      undefined,
+      null,
+    );
+    expect(face).toMatchObject({ tone: "warn", label: "streamdeck.state.reconnecting", reason: "streamdeck.reason.timeout", more: 1 });
   });
 
   it("a storm between runs is one issue, not two: the count is on the reconnecting face", () => {
@@ -326,5 +355,29 @@ describe("the property inspector's list of every current issue", () => {
   it("is translated", () => {
     const face = destinationFace(base({ accountHealth: "expired" }), undefined, null);
     expect(issueLines(face, "fr")[0]).not.toBe("Reconnect account");
+  });
+});
+
+describe("a restart storm on an expired account holds one face", () => {
+  // The frames a key sees during a storm: up for a few seconds, then between
+  // runs with a cause, then up again, the count climbing each time.
+  const cycle = (n: number): DestStatus[] => [
+    base({ accountHealth: "expired", restartStorm: n, process: { state: "running" }, reason: { cause: "unknown", line: "Broken pipe" } }),
+    base({ accountHealth: "expired", restartStorm: n + 1, process: { state: "reconnecting" }, reason: { cause: "unknown", line: "Broken pipe" } }),
+    base({ accountHealth: "expired", restartStorm: n + 1, process: { state: "starting" } }),
+    base({ accountHealth: "expired", restartStorm: n + 1, process: { state: "reconnecting" }, reason: { cause: "connection_refused" } }),
+  ];
+  const frames = [...cycle(6), ...cycle(8), ...cycle(10)];
+
+  // MUTATION: move "cycling" above "account" in ISSUE_RANK. Observed: FAIL on
+  // the reconnecting frames (amber "Reconnecting xN" with the cause).
+  it.each(frames.map((d, i) => [i, d] as const))("frame %i is red Reconnect account, with the storm in the count", (_i, d) => {
+    const face = destinationFace(d, undefined, null, on7({ active: "backup" }));
+    expect(face.tone).toBe("error");
+    expect(face.reason).toBe("streamdeck.issue.reconnectAccount");
+    expect(face.more).toBeGreaterThanOrEqual(1);
+    const kinds = face.issues?.map((i) => i.key) ?? [];
+    expect(kinds.some((k) => k === "streamdeck.issue.restartStorm" || face.issues?.some((i) => i.state === "streamdeck.issue.restartStorm"))).toBe(true);
+    expect(titleFor(face, "en").split("\n")[1]).toMatch(/^Reconnect account \+\d$/);
   });
 });

@@ -53,16 +53,30 @@ export interface KeyFace {
 }
 
 /**
- * The issues a destination key can carry, most severe first. Held is the server
- * refusing to retry; failed (with its cause, or a stall) is off air now; a key
- * or account problem names the fix; a restart storm, dropped frames, the
- * platform's verdict and the programme's source are an on-air stream going
- * wrong; a slow upload is the mildest, because it IS on air.
+ * The issues a destination key can carry, most severe first.
+ *
+ * - held: the server has stopped retrying; only a Retry changes it.
+ * - failed: a real failure, which no amount of waiting will fix. That is a
+ *   process that gave up ("failed"), or a key the platform says has changed, in
+ *   whatever state, because it names the one-click fix.
+ * - account: the connected account has expired or keeps failing to refresh.
+ * - cycling: a destination that is stalled, or reconnecting with a cause. It
+ *   is retrying, so this is transient, and it ranks BELOW the account. Otherwise
+ *   a restart storm on an expired account flips the key between red "Reconnect
+ *   account" (while up) and amber "Reconnecting" (between runs) on every cycle.
+ *   The account is the persistent problem, and probably the cause, so the face
+ *   holds on it until it clears.
+ * - accountExpiring: a warning about tomorrow, below anything happening now.
+ * - The rest: a restart storm, dropped frames, the platform's verdict and the
+ *   programme's source are an on-air stream going wrong. A slow upload is the
+ *   mildest, because it IS on air.
  */
 export const ISSUE_RANK = [
   "held",
   "failed",
   "account",
+  "cycling",
+  "accountExpiring",
   "restartStorm",
   "droppingFrames",
   "platform",
@@ -183,7 +197,7 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
     case "running": {
       if (dest.stalled) {
         const face: KeyFace = { tone: "warn", label: "streamdeck.state.stalled" };
-        return { face, issue: asIssue("failed", face) };
+        return { face, issue: asIssue("cycling", face) };
       }
       // A slow upload does not exit, so it is the one cause shown on a running
       // destination. Live, in the warn colour: it IS on air, badly.
@@ -206,7 +220,10 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
         ...(storm ? { labelVars: { count: storm } } : {}),
         ...(why.known ? withoutKnown(why) : withDetail(why.detail ?? proc.lastError)),
       };
-      return { face, issue: asIssue("failed", face), stormOnFace: storm > 0 };
+      // Retrying is transient ("cycling"), unless the platform says the key
+      // changed: that is a real failure with a named fix, and outranks the account.
+      const kind = why.reason === "streamdeck.reason.keyChanged" ? "failed" : "cycling";
+      return { face, issue: asIssue(kind, face), stormOnFace: storm > 0 };
     }
     case "failed": {
       // Held is its own tile: the server has stopped retrying, and only a
@@ -262,7 +279,7 @@ function signalIssues(dest: DestStatus, source: SourceContext | undefined, storm
   if (dest.accountHealth === "expired" || dest.accountHealth === "refreshFailing") {
     out.push({ kind: "account", tone: "error", key: "streamdeck.issue.reconnectAccount" });
   } else if (dest.accountHealth === "expiring") {
-    out.push({ kind: "account", tone: "warn", key: "streamdeck.issue.accountExpiring" });
+    out.push({ kind: "accountExpiring", tone: "warn", key: "streamdeck.issue.accountExpiring" });
   }
 
   const storm = stormCount(dest);
@@ -270,9 +287,17 @@ function signalIssues(dest: DestStatus, source: SourceContext | undefined, storm
     out.push({ kind: "restartStorm", tone: "warn", key: "streamdeck.issue.restartStorm", vars: { count: storm } });
   }
 
-  // The rest are about a stream that is on air: with nothing running there is
-  // nothing to drop, nothing for the platform to judge, and no source to carry.
-  if (!running) return out;
+  // The programme's source persists across this destination's restarts, so it
+  // stays in the list while the destination is between runs, not only while up.
+  const onAir = running || dest.process?.state === "reconnecting";
+  const src = onAir ? sourceIssue(dest, source) : undefined;
+
+  // The rest are about a stream that is up right now: with nothing running there
+  // is nothing to drop and nothing for the platform to judge.
+  if (!running) {
+    if (src) out.push(src);
+    return out;
+  }
 
   if (typeof dest.droppingFrames === "number" && dest.droppingFrames > 0) {
     out.push({ kind: "droppingFrames", tone: "warn", key: "streamdeck.issue.droppingFrames", note: String(dest.droppingFrames) });
@@ -290,7 +315,6 @@ function signalIssues(dest: DestStatus, source: SourceContext | undefined, storm
     });
   }
 
-  const src = sourceIssue(dest, source);
   if (src) out.push(src);
   return out;
 }

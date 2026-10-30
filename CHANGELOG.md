@@ -25,7 +25,8 @@ its first tagged release.
     key.
 
   When several are true at once, the key shows the most severe one with a
-  **+N** badge. The key's settings list every current issue. The plugin adds no
+  **+N** badge. During a restart storm on an expired account, the key holds red
+  **Reconnect account** through every reconnect instead of flipping colour. The key's settings list every current issue. The plugin adds no
   requests. `GET /api/v1/status` gains four optional destination fields:
   `restartStorm`, `droppingFrames`, `accountHealth` and `platformHealth`. Each
   is absent while there is nothing to report. `accountHealth` is the state word

@@ -1098,3 +1098,35 @@ describe("destination signals on the key and in the inspector", () => {
     expect(sent).toEqual([[]]);
   });
 });
+
+describe("a storm on an expired account, painted tick after tick", () => {
+  it("paints red Reconnect account on every tick of the restart cycle", async () => {
+    const states: StatusPayload["destinations"] = [];
+    const frame = (state: "running" | "reconnecting" | "starting", storm: number) => ({
+      source: { id: 7 },
+      destinations: [
+        {
+          id: 5, name: "YouTube", platform: "youtube", enabled: true, sourceId: 7,
+          process: { state }, restartStorm: storm, accountHealth: "expired" as const,
+          ...(state === "reconnecting" ? { reason: { cause: "connection_refused" as const } } : {}),
+        },
+      ],
+    });
+    const seq = [frame("running", 6), frame("reconnecting", 7), frame("starting", 7), frame("running", 7), frame("reconnecting", 8), frame("running", 8)];
+    let i = 0;
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": () => ({ status: 200, body: JSON.stringify(seq[Math.min(i++, seq.length - 1)]) }),
+    });
+    void states;
+    rt.configure(PAIRED);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    for (let n = 0; n < seq.length; n++) await rt.tick();
+    expect(key.titles.length).toBeGreaterThanOrEqual(seq.length);
+    for (const [n, title] of key.titles.entries()) {
+      expect(key.states[n], `tick ${n}: ${title}`).toBe(KEY_STATE.error);
+      expect(title.split("\n")[1], `tick ${n}`).toBe("Reconnect account +1");
+    }
+  });
+});

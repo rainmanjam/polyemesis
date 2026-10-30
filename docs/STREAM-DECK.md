@@ -219,19 +219,32 @@ order of severity: the higher row wins.
 | Rank | Face (top line, second line) | Colour | Shown when | The server's source |
 |---|---|---|---|---|
 | 1 | **Held** | Accent | The server stopped retrying after repeated quick rejections | `destinationHold`, `reason.held` |
-| 2 | **Failed**, then the cause or **Key changed** | Red | The process stopped on an error | `process.state`, `reason.cause`, `reason.keyChanged` |
-| 2 | **Stalled** | Amber | Running, but its output stopped moving | `stalled` |
-| 2 | **Reconnecting** (or **Reconnecting ×N** in a storm), then the cause | Amber | Retrying after a drop | `process.state`, `reason`, `restartStorm` |
-| 3 | **Reconnect account** | Red | The connected account has expired or keeps failing to refresh. Also shown on a key that is off, because going live would fail | `accountHealth`: `expired` or `refreshFailing` |
-| 3 | **Account expiring** | Amber | The connected account cannot refresh and expires within a day | `accountHealth`: `expiring` |
-| 4 | **Live**, **Reconnecting ×N** | Amber | More than 5 restarts in 15 minutes, the threshold of the `PolyemesisDestinationRestartStorm` alert | `restartStorm` |
-| 5 | **Live**, **Dropping frames** | Amber | At least 1% of the frames in the last 10 seconds were dropped | `droppingFrames` |
-| 6 | **Live**, **YouTube: poor** | Amber | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `platformHealth` |
-| 7 | **Live**, **On backup source**, **On playlist** or **On slate** | Amber | The destination's programme is not on its primary | `failover.active` |
-| 7 | **Live**, **Source degraded** | Amber | The programme's primary link is measured degraded. The line beneath is the server's measurement | `failover.degraded` |
-| 8 | **Live**, **Upload slow** | Amber | Running, but delivering slower than realtime | `reason.cause`: `upload_too_slow` |
+| 2 | **Failed**, then the cause | Red | The process gave up on an error | `process.state`, `reason.cause` |
+| 2 | **Key changed**, under the state | Red when failed, amber when reconnecting | The connected account reports a different stream key | `reason.keyChanged` |
+| 3 | **Reconnect account**, under the state | Red | The connected account has expired or keeps failing to refresh. Also shown on a key that is off, because going live would fail | `accountHealth`: `expired` or `refreshFailing` |
+| 4 | **Stalled** | Amber | Running, but its output stopped moving | `stalled` |
+| 4 | **Reconnecting** (or **Reconnecting ×N** in a storm), then the cause | Amber | Retrying after a drop | `process.state`, `reason`, `restartStorm` |
+| 5 | **Account expiring**, under the state | Amber | The connected account cannot refresh and expires within a day | `accountHealth`: `expiring` |
+| 6 | **Live**, **Reconnecting ×N** | Amber | More than 5 restarts in 15 minutes, the threshold of the `PolyemesisDestinationRestartStorm` alert | `restartStorm` |
+| 7 | **Live**, **Dropping frames** | Amber | At least 1% of the frames in the last 10 seconds were dropped | `droppingFrames` |
+| 8 | **Live**, **YouTube: poor** | Amber | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `platformHealth` |
+| 9 | **Live**, **On backup source**, **On playlist** or **On slate** | Amber | The destination's programme is not on its primary | `failover.active` |
+| 9 | **Live**, **Source degraded** | Amber | The programme's primary link is measured degraded. The line beneath is the server's measurement | `failover.degraded` |
+| 10 | **Live**, **Upload slow** | Amber | Running, but delivering slower than realtime | `reason.cause`: `upload_too_slow` |
 
-The signals at ranks 5 to 7 apply only while the destination is running.
+**Where the boundary falls, and why.** A failure that waiting will not fix
+outranks the account: **Held**, **Failed** (the server gave up), and **Key
+changed** (it names the fix). A destination that is still retrying (stalled, or
+reconnecting with a cause) ranks below **Reconnect account**. During a restart
+storm, the destination is up for a few seconds, then between runs, then up
+again. If the reconnect outranked the account, the key would flip between red
+and amber on every cycle. The account is the problem that persists, and often
+the cause, so the key holds red **Reconnect account** through the whole storm
+until the account is fixed. The top line still says what the destination is
+doing at that moment, and the storm stays in the **+N** count. **Account
+expiring** is a warning about tomorrow, so it stays below anything happening now.
+
+Dropped frames and the platform's verdict apply only while the destination is running. The source applies while it is running or reconnecting, because it persists across the destination's restarts.
 
 **The key's settings list every current issue.** A key cannot be hovered. Open
 the key's settings in the Stream Deck app to see **Current issues**: every issue,
