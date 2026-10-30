@@ -1,6 +1,6 @@
 # polyemesis vs Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer
 
-An honest comparison, including the parts where polyemesis loses.
+How polyemesis compares with Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer.
 
 Sourced from a survey of Restreamer's issue trackers (263 open, 548 closed) and
 restream.io's published plan comparison, done 2026-07-27 — with the polyemesis

@@ -233,7 +233,7 @@ const DOCS_BY_SECTION = {
        because it is about the relationship between two pages rather than about
        this row. */
     ["COMPARISON.md", "polyemesis vs Restreamer, restream.io, obs-multi-rtmp",
-      "An honest comparison, including where polyemesis loses. Sourced from the competitors' own trackers and plan pages, with every claim dated."],
+      "How polyemesis compares with Restreamer, restream.io, obs-multi-rtmp, Aitum and MistServer. Sourced from the competitors' own trackers and plan pages, with every claim dated."],
   ],
 };
 
