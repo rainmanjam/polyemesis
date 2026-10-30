@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Gelezen volgens de klok van deze browser en opgeslagen als tijdstip, dus de zone hieronder geldt niet voor een eenmalige.",
   "auto.tzHint": "IANA-naam. Leeg betekent UTC.",
   "auto.destinationsNoneHint": "Niets geselecteerd betekent elke bestemming, wat ‘de show starten’ meestal betekent.",
-  "auto.graceHint": "Hoe laat een moment na een herstart nog mag worden uitgevoerd. Daarna wordt het overgeslagen."
+  "auto.graceHint": "Hoe laat een moment na een herstart nog mag worden uitgevoerd. Daarna wordt het overgeslagen.",
+  "onAir.endAll": "Alles beëindigen"
 }

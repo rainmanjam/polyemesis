@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Lu selon l'horloge de ce navigateur et enregistré comme un instant : le fuseau ci-dessous ne s'applique donc pas à une exécution unique.",
   "auto.tzHint": "Nom IANA. Vide signifie UTC.",
   "auto.destinationsNoneHint": "Aucune sélection signifie toutes les destinations, ce que « lancer l'émission » veut généralement dire.",
-  "auto.graceHint": "Avec quel retard une occurrence peut encore être exécutée après un redémarrage. Au-delà, elle est ignorée."
+  "auto.graceHint": "Avec quel retard une occurrence peut encore être exécutée après un redémarrage. Au-delà, elle est ignorée.",
+  "onAir.endAll": "Tout arrêter"
 }

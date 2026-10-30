@@ -2,7 +2,7 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LazyBoundary } from "@/components/ErrorBoundary";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
@@ -668,10 +668,14 @@ function BulkDestinationControl({
   destinations,
   sources,
   onFinished,
+  openStopAllRef,
 }: Readonly<{
   destinations: readonly DestStatus[];
   sources: readonly SourceView[];
   onFinished: () => void;
+  /** Filled with this control's Stop all opener, so the on-air strip's End all
+   *  (A8) reaches the same dialog rather than a second stop path. */
+  openStopAllRef?: MutableRefObject<(() => void) | null>;
 }>) {
   const t = useT();
   const [report, setReport] = useState<BulkDestReport | null>(null);
@@ -715,6 +719,14 @@ function BulkDestinationControl({
       },
     );
   };
+
+  useEffect(() => {
+    if (!openStopAllRef) return;
+    openStopAllRef.current = openStopAll;
+    return () => {
+      openStopAllRef.current = null;
+    };
+  });
 
   const bulkLabel: Record<BulkDestOutcome, string> = {
     started: t("dash.bulkStarted"),
@@ -1133,6 +1145,8 @@ export function Dashboard() {
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<DestinationId | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The Stop all opener, lent to the on-air strip's End all (A8).
+  const endAllRef = useRef<(() => void) | null>(null);
 
   // The programmes, so a destination card can say which one it carries. Named
   // only when there is more than one: on a single-source install every card
@@ -1577,7 +1591,7 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} failover={failoverState} />
+      <OnAirBar status={status} failover={failoverState} onEndAll={() => endAllRef.current?.()} />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest
@@ -1881,6 +1895,7 @@ export function Dashboard() {
           destinations={destinations}
           sources={sources}
           onFinished={() => setRefreshKey((k) => k + 1)}
+          openStopAllRef={endAllRef}
         />
 
         {/* A card that jumps position is invisible to a screen reader unless

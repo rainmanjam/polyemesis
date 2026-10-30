@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Letto secondo l'orologio di questo browser e salvato come istante, quindi il fuso qui sotto non si applica a un'esecuzione singola.",
   "auto.tzHint": "Nome IANA. Vuoto significa UTC.",
   "auto.destinationsNoneHint": "Nessuna selezione significa tutte le destinazioni, che è ciò che di solito si intende con «avvia lo show».",
-  "auto.graceHint": "Con quanto ritardo un'occorrenza può ancora essere eseguita dopo un riavvio. Oltre, viene saltata."
+  "auto.graceHint": "Con quanto ritardo un'occorrenza può ancora essere eseguita dopo un riavvio. Oltre, viene saltata.",
+  "onAir.endAll": "Termina tutto"
 }

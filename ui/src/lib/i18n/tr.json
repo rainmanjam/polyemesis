@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Bu tarayıcının saatine göre okunur ve bir an olarak saklanır; bu yüzden aşağıdaki saat dilimi tek seferlik çalıştırmaya uygulanmaz.",
   "auto.tzHint": "IANA adı. Boş bırakılırsa UTC.",
   "auto.destinationsNoneHint": "Hiçbiri seçilmezse tüm hedefler kapsanır; \"yayını başlat\" genellikle bu anlama gelir.",
-  "auto.graceHint": "Yeniden başlatmadan sonra bir tetiklemenin ne kadar geç hâlâ çalıştırılabileceği. Bu süre geçince atlanır."
+  "auto.graceHint": "Yeniden başlatmadan sonra bir tetiklemenin ne kadar geç hâlâ çalıştırılabileceği. Bu süre geçince atlanır.",
+  "onAir.endAll": "Tümünü bitir"
 }

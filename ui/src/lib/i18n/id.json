@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Dibaca menurut jam peramban ini dan disimpan sebagai satu titik waktu, jadi zona di bawah tidak berlaku untuk jadwal sekali jalan.",
   "auto.tzHint": "Nama IANA. Kosong berarti UTC.",
   "auto.destinationsNoneHint": "Tidak memilih apa pun berarti semua tujuan, yang biasanya dimaksud dengan \"mulai acaranya\".",
-  "auto.graceHint": "Seberapa terlambat sebuah kejadian masih boleh dijalankan setelah restart. Lewat dari itu, kejadian dilewati."
+  "auto.graceHint": "Seberapa terlambat sebuah kejadian masih boleh dijalankan setelah restart. Lewat dari itu, kejadian dilewati.",
+  "onAir.endAll": "Akhiri semua"
 }

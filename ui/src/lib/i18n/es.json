@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Se lee con el reloj de este navegador y se guarda como un instante, así que la zona de abajo no se aplica a una ejecución única.",
   "auto.tzHint": "Nombre IANA. Vacío significa UTC.",
   "auto.destinationsNoneHint": "No seleccionar ninguno significa todos los destinos, que es lo que «empezar el programa» suele querer decir.",
-  "auto.graceHint": "Con cuánto retraso puede ejecutarse aún una ocurrencia tras un reinicio. Pasado ese margen, se omite."
+  "auto.graceHint": "Con cuánto retraso puede ejecutarse aún una ocurrencia tras un reinicio. Pasado ese margen, se omite.",
+  "onAir.endAll": "Terminar todo"
 }

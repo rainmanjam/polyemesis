@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "按此浏览器的时钟读取并存为一个时间点，因此下方的时区不适用于一次性计划。",
   "auto.tzHint": "IANA 名称。留空表示 UTC。",
   "auto.destinationsNoneHint": "不选择任何项即表示所有推流目标，这通常就是“开播”的意思。",
-  "auto.graceHint": "重启后某次触发最晚还能执行多久。超过此时间，该次触发将被跳过。"
+  "auto.graceHint": "重启后某次触发最晚还能执行多久。超过此时间，该次触发将被跳过。",
+  "onAir.endAll": "全部结束"
 }

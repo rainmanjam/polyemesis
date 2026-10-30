@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Lido pelo relógio deste navegador e salvo como um instante, então o fuso abaixo não se aplica a uma execução única.",
   "auto.tzHint": "Nome IANA. Vazio significa UTC.",
   "auto.destinationsNoneHint": "Nenhum selecionado significa todos os destinos, que é o que \"começar o programa\" costuma significar.",
-  "auto.graceHint": "Quanto atraso uma ocorrência ainda pode ter para ser executada após um reinício. Depois disso, ela é pulada."
+  "auto.graceHint": "Quanto atraso uma ocorrência ainda pode ter para ser executada após um reinício. Depois disso, ela é pulada.",
+  "onAir.endAll": "Encerrar tudo"
 }

@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Wird nach der Uhr dieses Browsers gelesen und als Zeitpunkt gespeichert, daher gilt die Zeitzone unten nicht für einen einmaligen Termin.",
   "auto.tzHint": "IANA-Name. Leer bedeutet UTC.",
   "auto.destinationsNoneHint": "Keine Auswahl bedeutet alle Ziele — das, was „die Sendung starten“ meistens heißt.",
-  "auto.graceHint": "Wie spät ein Termin nach einem Neustart noch ausgeführt werden darf. Danach wird er übersprungen."
+  "auto.graceHint": "Wie spät ein Termin nach einem Neustart noch ausgeführt werden darf. Danach wird er übersprungen.",
+  "onAir.endAll": "Alle beenden"
 }

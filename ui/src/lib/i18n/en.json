@@ -2129,5 +2129,6 @@
   "auto.runAtHint": "Read in this browser's clock and stored as an instant, so the zone below does not apply to a one-shot.",
   "auto.tzHint": "IANA name. Empty means UTC.",
   "auto.destinationsNoneHint": "None selected means every destination, which is what \"start the show\" usually means.",
-  "auto.graceHint": "How late an occurrence may still be acted on after a restart. Past it, the occurrence is skipped."
+  "auto.graceHint": "How late an occurrence may still be acted on after a restart. Past it, the occurrence is skipped.",
+  "onAir.endAll": "End all"
 }
