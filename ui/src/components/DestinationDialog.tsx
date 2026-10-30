@@ -35,6 +35,7 @@ import { FACEBOOK_PRIVACIES } from "@/lib/facebookPrivacy";
 import { useT } from "@/lib/i18n";
 import { isIpLiteralHost, platformSupportsDeviceCode } from "@/lib/platformConnect";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
+import { InfoHint } from "@/components/InfoHint";
 import {
   failedRead,
   mayClaim,
@@ -1558,7 +1559,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
               the whole point, and it is what Restreamer already does (its
               filter controls render only when the codec is not `copy`). */}
           <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-[12px] font-medium">{t("dest.videoTreatment")}</legend>
+            <legend className="mb-1 flex items-center gap-1.5 text-[12px] font-medium">
+              {t("dest.videoTreatment")}
+              {/* A6: the first place a rendition is offered, so the first place
+                  it is explained. */}
+              <InfoHint body="dest.help.rendition" title="dest.videoTreatment" />
+            </legend>
 
             {/* role="radio" is only meaningful inside a radiogroup. Without this
                 wrapper the two cards are announced as two unrelated radios with
@@ -1580,11 +1586,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                 <span className="flex items-center gap-2">
                   <StatusDot tone={renditionId === PASSTHROUGH ? "live" : "idle"} size="sm" />
                   <span className="text-[13px] font-medium">{t("dest.copySource")}</span>
-                  <Badge variant="outline" className="ml-auto">recommended</Badge>
+                  <Badge variant="outline" className="ml-auto">{t("dest.recommended")}</Badge>
                 </span>
                 <span className="mt-1 block text-sm text-muted-foreground">
-                  <span className="font-mono">-c:v copy</span> — the source video exactly as your
-                  encoder sent it. No encode, no process, no CPU.
+                  <span className="font-mono">-c:v copy</span> — {t("dest.copySourceBody")}
                 </span>
               </button>
 
