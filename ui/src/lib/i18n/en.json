@@ -477,7 +477,6 @@
   "dash.idle": "idle",
   "dash.ingestBackupOnAir": "Backup on air",
   "dash.ingestPrimaryOffline": "The primary ingest is offline. The backup ingest is carrying the broadcast, so bitrate and uptime are not reported for it here.",
-  "dash.ingestSharedFeed": "This install has more than one programme, and the live feed is not scoped to any of them: these figures describe whichever one reported last, named above.",
   "dash.ingestStreamsEnding": "Ingest streams that stop",
   "dash.ingestUrlCopied": "Ingest URL copied.",
   "dash.keyRefreshed": "Stream key refreshed from the platform.",

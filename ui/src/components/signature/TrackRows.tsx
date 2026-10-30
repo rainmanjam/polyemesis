@@ -20,7 +20,7 @@ import { useT } from "@/lib/i18n";
 import { formatPeakDb } from "@/lib/meterScale";
 import { gainPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { trackChipTitle } from "@/lib/trackLabels";
+import { trackChipCount, trackChipTitle } from "@/lib/trackLabels";
 import {
   MAX_LABEL_LEN,
   MAX_LANG_TAG_LEN,
@@ -564,17 +564,21 @@ export function TrackRows({
 export function TrackSummary({
   tracks,
   labels,
+  count,
   className,
 }: {
   tracks: number[] | null;
   labels?: (string | undefined)[] | null;
+  /** How many tracks the ingest carries, when known (lib/trackLabels.ts
+   *  trackCount). One chip per track; see trackChipCount. */
+  count?: number | null;
   className?: string;
 }) {
   const t = useT();
   const list = tracks ?? [];
   return (
     <div className={cn("flex items-center gap-1", className)}>
-      {Array.from({ length: 6 }, (_, i) => {
+      {Array.from({ length: trackChipCount(count, list) }, (_, i) => {
         const on = list.includes(i);
         return (
           <span

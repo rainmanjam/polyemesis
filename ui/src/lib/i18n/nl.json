@@ -477,7 +477,6 @@
   "dash.idle": "inactief",
   "dash.ingestBackupOnAir": "Back-up in de lucht",
   "dash.ingestPrimaryOffline": "De primaire ingest is offline. De back-upingest draagt de uitzending, dus bitrate en looptijd worden hier niet voor deze gerapporteerd.",
-  "dash.ingestSharedFeed": "Deze installatie heeft meer dan één programma en de live-feed is aan geen enkel programma gebonden: deze cijfers beschrijven degene die als laatste rapporteerde, hierboven genoemd.",
   "dash.ingestStreamsEnding": "Ingest-streams die stoppen",
   "dash.ingestUrlCopied": "Ingangs-URL gekopieerd.",
   "dash.keyRefreshed": "Streamsleutel vernieuwd vanaf het platform.",

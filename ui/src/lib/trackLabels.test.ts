@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { trackChipTitle, trackLabels } from "@/lib/trackLabels";
+import { trackChipCount, trackChipTitle, trackCount, trackLabels } from "@/lib/trackLabels";
 import type { SourceInfo, SourceTrack } from "@/lib/types";
 
 const track = (index: number, title?: string): SourceTrack => ({
@@ -82,5 +82,40 @@ describe("trackChipTitle", () => {
     expect(trackChipTitle(2, false, "Commentary")).toBe("Track 3 (Commentary) is excluded");
     expect(trackChipTitle(0, true)).toBe("Track 1 is included");
     expect(trackChipTitle(5, false)).toBe("Track 6 is excluded");
+  });
+});
+
+
+/* HOW MANY CHIPS. TrackSummary drew six whatever the ingest carried, so the
+ * demo's four-track Studio A showed chips 5 and 6 as "excluded" tracks that do
+ * not exist -- an operator reading them goes looking for two missing feeds. */
+describe("trackCount", () => {
+  it("is the probed layout's track count for this card's programme", () => {
+    const four = source({ probed: true, tracks: [track(0), track(1), track(2), track(3)] });
+    expect(trackCount(four, 1)).toBe(4);
+  });
+
+  it("is unknown for another programme, or before the probe answers", () => {
+    const four = source({ probed: true, tracks: [track(0), track(1), track(2), track(3)] });
+    expect(trackCount(four, 2)).toBeNull();
+    expect(trackCount(source({ probed: false, tracks: [track(0)] }), 1)).toBeNull();
+    expect(trackCount(null, 1)).toBeNull();
+  });
+});
+
+describe("trackChipCount", () => {
+  it("draws one chip per ingest track, not six", () => {
+    expect(trackChipCount(4, [0, 1])).toBe(4);
+  });
+
+  it("still draws a routed track the ingest no longer has", () => {
+    // A route to track 6 on a four-track ingest is a real problem; hiding the
+    // chip would hide it.
+    expect(trackChipCount(4, [0, 5])).toBe(6);
+  });
+
+  it("invents no tracks when the layout is unknown", () => {
+    expect(trackChipCount(null, [0, 2])).toBe(3);
+    expect(trackChipCount(null, [])).toBe(0);
   });
 });

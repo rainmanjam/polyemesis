@@ -477,7 +477,6 @@
   "dash.idle": "inactivo",
   "dash.ingestBackupOnAir": "Respaldo en el aire",
   "dash.ingestPrimaryOffline": "La ingesta principal está desconectada. La ingesta de respaldo mantiene la emisión, por lo que aquí no se informa de su bitrate ni de su tiempo activo.",
-  "dash.ingestSharedFeed": "Esta instalación tiene más de un programa y el flujo en vivo no está limitado a ninguno: estas cifras describen el que informó por último, nombrado arriba.",
   "dash.ingestStreamsEnding": "Flujos de entrada que se detienen",
   "dash.ingestUrlCopied": "URL de entrada copiada.",
   "dash.keyRefreshed": "Clave de transmisión renovada desde la plataforma.",

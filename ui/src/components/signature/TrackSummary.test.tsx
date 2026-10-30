@@ -33,11 +33,20 @@ describe("TrackSummary", () => {
   });
 
   it("falls back to the plain wording for tracks nobody has named", () => {
-    render(<TrackSummary tracks={[0]} labels={["Host mic"]} />);
+    render(<TrackSummary tracks={[0]} labels={["Host mic"]} count={4} />);
 
     expect(screen.getByTitle("Track 1 (Host mic) is included")).toBeTruthy();
-    // Beyond the end of `labels`, and the six chips are always drawn.
+    // Beyond the end of `labels`, within the ingest's four tracks.
     expect(screen.getByTitle("Track 4 is excluded")).toBeTruthy();
+  });
+
+  it("draws one chip per ingest track: four for a four-track source, not six", () => {
+    // The demo's Studio A carries four audio tracks; the dashboard drew six.
+    render(<TrackSummary tracks={[0, 2]} count={4} />);
+
+    expect(screen.getAllByTitle(/^Track \d+/)).toHaveLength(4);
+    expect(screen.queryByTitle("Track 5 is excluded")).toBeNull();
+    expect(screen.queryByTitle("Track 6 is excluded")).toBeNull();
   });
 
   it("keeps the wording it had when no labels are supplied at all", () => {

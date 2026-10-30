@@ -477,7 +477,6 @@
   "dash.idle": "diam",
   "dash.ingestBackupOnAir": "Cadangan sedang siaran",
   "dash.ingestPrimaryOffline": "Ingest utama sedang offline. Ingest cadangan membawa siaran, sehingga bitrate dan waktu aktifnya tidak dilaporkan di sini.",
-  "dash.ingestSharedFeed": "Instalasi ini memiliki lebih dari satu program, dan umpan langsungnya tidak terikat pada salah satu pun: angka-angka ini menggambarkan program yang melapor terakhir, disebutkan di atas.",
   "dash.ingestStreamsEnding": "Aliran masuk yang berhenti",
   "dash.ingestUrlCopied": "URL masukan disalin.",
   "dash.keyRefreshed": "Kunci siaran disegarkan dari platform.",

@@ -477,7 +477,6 @@
   "dash.idle": "bezczynne",
   "dash.ingestBackupOnAir": "Zapas na antenie",
   "dash.ingestPrimaryOffline": "Główny ingest jest offline. Rezerwowy ingest prowadzi transmisję, więc jego bitrate i czas działania nie są tu raportowane.",
-  "dash.ingestSharedFeed": "Ta instalacja ma więcej niż jeden program, a strumień na żywo nie jest przypisany do żadnego z nich: te wartości opisują ten, który zgłosił się ostatni – wskazany powyżej.",
   "dash.ingestStreamsEnding": "Strumienie wejściowe, które się zatrzymają",
   "dash.ingestUrlCopied": "Skopiowano adres URL wejścia.",
   "dash.keyRefreshed": "Klucz strumienia odświeżony z platformy.",

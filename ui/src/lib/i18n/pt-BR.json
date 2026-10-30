@@ -477,7 +477,6 @@
   "dash.idle": "ocioso",
   "dash.ingestBackupOnAir": "Backup no ar",
   "dash.ingestPrimaryOffline": "A ingestão principal está offline. A ingestão de backup está levando a transmissão, então bitrate e tempo ativo não são informados para ela aqui.",
-  "dash.ingestSharedFeed": "Esta instalação tem mais de um programa, e o feed ao vivo não é restrito a nenhum deles: estes números descrevem aquele que reportou por último, nomeado acima.",
   "dash.ingestStreamsEnding": "Fluxos de entrada que param",
   "dash.ingestUrlCopied": "URL de entrada copiada.",
   "dash.keyRefreshed": "Chave de transmissão atualizada a partir da plataforma.",

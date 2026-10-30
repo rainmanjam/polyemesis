@@ -79,6 +79,7 @@ export function DestinationCard({
   busy,
   domId,
   trackLabels,
+  trackCount,
 }: {
   dest: DestStatus;
   onStart: () => void;
@@ -116,6 +117,10 @@ export function DestinationCard({
    *  multi-programme install where the source snapshot describes a different
    *  one. See lib/trackLabels.ts. */
   trackLabels?: (string | undefined)[] | null;
+  /** How many audio tracks this destination's programme's ingest carries, or
+   *  null when not known here -- same scoping as trackLabels. Sizes the track
+   *  chips, which used to be six whatever the ingest carried. */
+  trackCount?: number | null;
 }) {
   const t = useT();
   const tn = useTN();
@@ -294,7 +299,7 @@ export function DestinationCard({
               <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
                 {t("route.audio")}
               </span>
-              <TrackSummary tracks={dest.tracks} labels={trackLabels} />
+              <TrackSummary tracks={dest.tracks} labels={trackLabels} count={trackCount} />
             </div>
             <span className="truncate font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
               {dest.summary || t("automod.notConfigured")}

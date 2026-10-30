@@ -477,7 +477,6 @@
   "dash.idle": "待機中",
   "dash.ingestBackupOnAir": "バックアップが放送中",
   "dash.ingestPrimaryOffline": "プライマリのインジェストはオフラインです。バックアップのインジェストが放送を担っているため、そのビットレートと稼働時間はここには表示されません。",
-  "dash.ingestSharedFeed": "このインストールには複数の番組があり、ライブフィードはどれにも限定されていません。ここの数値は最後に報告した番組（上に表示）のものです。",
   "dash.ingestStreamsEnding": "停止する取り込みストリーム",
   "dash.ingestUrlCopied": "入力 URL をコピーしました。",
   "dash.keyRefreshed": "プラットフォームからストリームキーを更新しました。",

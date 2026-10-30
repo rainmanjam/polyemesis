@@ -477,7 +477,6 @@
   "dash.idle": "대기 중",
   "dash.ingestBackupOnAir": "백업 방송 중",
   "dash.ingestPrimaryOffline": "기본 인제스트가 오프라인입니다. 백업 인제스트가 방송을 이어 가고 있어 비트레이트와 가동 시간은 여기에 표시되지 않습니다.",
-  "dash.ingestSharedFeed": "이 설치에는 프로그램이 여러 개 있고 라이브 피드는 어느 하나에 한정되지 않습니다. 이 수치는 마지막으로 보고한 프로그램(위에 표시됨)의 값입니다。",
   "dash.ingestStreamsEnding": "중지되는 인제스트 스트림",
   "dash.ingestUrlCopied": "입력 URL을 복사했습니다.",
   "dash.keyRefreshed": "플랫폼에서 스트림 키를 갱신했습니다.",

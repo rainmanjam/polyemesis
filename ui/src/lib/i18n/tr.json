@@ -477,7 +477,6 @@
   "dash.idle": "boşta",
   "dash.ingestBackupOnAir": "Yedek yayında",
   "dash.ingestPrimaryOffline": "Birincil ingest çevrimdışı. Yayını yedek ingest taşıyor; bu yüzden onun bitrate ve çalışma süresi burada bildirilmiyor.",
-  "dash.ingestSharedFeed": "Bu kurulumda birden fazla yayın var ve canlı akış bunlardan hiçbirine bağlı değil: bu değerler en son bildirim yapan yayını, yukarıda adı geçeni, anlatır.",
   "dash.ingestStreamsEnding": "Duracak giriş akışları",
   "dash.ingestUrlCopied": "Giriş URL'si kopyalandı.",
   "dash.keyRefreshed": "Yayın anahtarı platformdan yenilendi.",

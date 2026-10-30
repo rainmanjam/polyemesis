@@ -477,7 +477,6 @@
   "dash.idle": "inactif",
   "dash.ingestBackupOnAir": "Secours à l'antenne",
   "dash.ingestPrimaryOffline": "L'ingest principal est hors ligne. L'ingest de secours porte la diffusion ; son débit et sa durée de fonctionnement ne sont donc pas indiqués ici.",
-  "dash.ingestSharedFeed": "Cette installation comporte plusieurs programmes et le flux en direct n’est rattaché à aucun : ces chiffres décrivent celui qui a répondu en dernier, nommé ci-dessus.",
   "dash.ingestStreamsEnding": "Flux entrants qui s'arrêtent",
   "dash.ingestUrlCopied": "URL d'entrée copiée.",
   "dash.keyRefreshed": "Clé de flux actualisée depuis la plateforme.",

@@ -477,7 +477,6 @@
   "dash.idle": "im Leerlauf",
   "dash.ingestBackupOnAir": "Backup auf Sendung",
   "dash.ingestPrimaryOffline": "Der primäre Ingest ist offline. Der Backup-Ingest trägt die Sendung, daher werden Bitrate und Laufzeit hier nicht für ihn angezeigt.",
-  "dash.ingestSharedFeed": "Diese Installation hat mehr als ein Programm, und der Live-Feed ist keinem davon zugeordnet: Diese Werte beschreiben dasjenige, das zuletzt gemeldet hat – oben benannt.",
   "dash.ingestStreamsEnding": "Ingest-Streams, die stoppen",
   "dash.ingestUrlCopied": "Eingangs-URL kopiert.",
   "dash.keyRefreshed": "Streamschlüssel von der Plattform aktualisiert.",

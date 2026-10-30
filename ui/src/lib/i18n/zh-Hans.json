@@ -477,7 +477,6 @@
   "dash.idle": "空闲",
   "dash.ingestBackupOnAir": "备用输入正在播出",
   "dash.ingestPrimaryOffline": "主摄取已离线。备用摄取正在承载直播，因此此处不会显示其码率和运行时长。",
-  "dash.ingestSharedFeed": "本安装包含多个节目，而实时数据流并不限定于其中任何一个：这些数值描述的是最后上报的那个节目，名称见上方。",
   "dash.ingestStreamsEnding": "将停止的接入流",
   "dash.ingestUrlCopied": "输入 URL 已复制。",
   "dash.keyRefreshed": "已从平台刷新推流密钥。",
