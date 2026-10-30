@@ -596,6 +596,7 @@ CREATE TABLE IF NOT EXISTS timeline_events (
     type     TEXT    NOT NULL,
     severity TEXT    NOT NULL,
     title    TEXT    NOT NULL,
-    detail   TEXT    NOT NULL DEFAULT ''
+    detail   TEXT    NOT NULL DEFAULT '',
+    subject  TEXT    NOT NULL DEFAULT ''  -- the alert key; MigrateTimelineSubject
 );
 CREATE INDEX IF NOT EXISTS idx_timeline_events_at ON timeline_events(at, id);

@@ -2131,6 +2131,9 @@ export interface TimelineRow {
   severity: "critical" | "warning" | "info" | string;
   title: string;
   detail?: string;
+  /** The process whose log holds this row's detail ("dest:3", "ingest"), when
+   *  there is exactly one. Drives the row's "Show log" link (A13). */
+  process?: string;
 }
 
 export interface LogLine {

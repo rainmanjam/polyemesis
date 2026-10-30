@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"time"
 	"unicode/utf8"
 )
@@ -24,6 +25,11 @@ type TimelineEvent struct {
 	Severity string
 	Title    string
 	Detail   string
+	// Subject is the alert's key -- "destination:3", "ingest:1" -- naming
+	// WHAT the row is about, so the page can offer that subject's log (A13).
+	// The title names it in words, and words are not an address: names are
+	// shared and renamed. Empty on rows written before the column existed.
+	Subject string
 }
 
 // clip cuts s to the text limit without splitting a multi-byte character: it
@@ -45,8 +51,8 @@ func clip(s string) string {
 func (d *DB) RecordTimelineEvent(ev TimelineEvent) error {
 	cutoff := ev.At.Add(-timelineMaxAge).UnixMilli()
 	if _, err := d.sql.Exec(
-		`INSERT INTO timeline_events (at, type, severity, title, detail) VALUES (?, ?, ?, ?, ?)`,
-		ev.At.UnixMilli(), ev.Type, ev.Severity, clip(ev.Title), clip(ev.Detail),
+		`INSERT INTO timeline_events (at, type, severity, title, detail, subject) VALUES (?, ?, ?, ?, ?, ?)`,
+		ev.At.UnixMilli(), ev.Type, ev.Severity, clip(ev.Title), clip(ev.Detail), clip(ev.Subject),
 	); err != nil {
 		return err
 	}
@@ -66,7 +72,7 @@ func (d *DB) ListTimelineEvents(limit int) ([]TimelineEvent, error) {
 		limit = timelineMaxRows
 	}
 	rows, err := d.sql.Query(
-		`SELECT id, at, type, severity, title, detail FROM timeline_events ORDER BY id DESC LIMIT ?`,
+		`SELECT id, at, type, severity, title, detail, subject FROM timeline_events ORDER BY id DESC LIMIT ?`,
 		limit,
 	)
 	if err != nil {
@@ -77,11 +83,33 @@ func (d *DB) ListTimelineEvents(limit int) ([]TimelineEvent, error) {
 	for rows.Next() {
 		var e TimelineEvent
 		var at int64
-		if err := rows.Scan(&e.ID, &at, &e.Type, &e.Severity, &e.Title, &e.Detail); err != nil {
+		if err := rows.Scan(&e.ID, &at, &e.Type, &e.Severity, &e.Title, &e.Detail, &e.Subject); err != nil {
 			return nil, err
 		}
 		e.At = time.UnixMilli(at).UTC()
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// MigrateTimelineSubject adds timeline_events.subject to an install created
+// before it existed. Without it the recorder's INSERT fails on every event and
+// the timeline stops growing, silently -- the recorder only logs a warning.
+// DEFAULT ” is an old row with no subject, which offers no log link and is
+// otherwise unchanged.
+func (d *DB) MigrateTimelineSubject() error {
+	// Checked before anything is written, for the reason
+	// MigrateDestinationExpertArgs records: one connection, so a read issued
+	// inside a transaction would wait for ever.
+	has, err := columnExists(d.sql, "timeline_events", "subject")
+	if err != nil {
+		return fmt.Errorf("inspect timeline_events columns: %w", err)
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE timeline_events ADD COLUMN subject TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add timeline_events.subject: %w", err)
+	}
+	return nil
 }

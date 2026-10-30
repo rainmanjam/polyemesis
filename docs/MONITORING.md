@@ -712,6 +712,11 @@ know.
 A script reads the same rows from `GET /api/v1/timeline?limit=N`
 ([API.md](API.md)). A read token is enough.
 
+A row about a destination or an ingest has a **Show log** link. It opens the
+FFmpeg log on the same page, filtered to that process.
+`/monitoring?process=<name>` opens it the same way from anywhere. Rows written
+before this release have no link, because the subject was not stored then.
+
 A `destination.down` row says why the destination failed, as in
 `Reason: stream key rejected; held after 3 quick rejections, press Retry once
 it is fixed.` (see the next section).

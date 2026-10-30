@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -163,4 +164,14 @@ func destinationReason(p *supervisor.Status, ingestConfigured bool, sourceLive t
 	}
 	r := *p.Reason
 	return &r
+}
+
+// timelineEventOf is the one mapping from an alert to its timeline row. The
+// Subject is the alert's key, which is what lets the Monitoring timeline offer
+// the log of the destination or ingest a row is about (A13).
+func timelineEventOf(ev alerts.Event) db.TimelineEvent {
+	return db.TimelineEvent{
+		At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
+		Title: ev.Title, Detail: ev.Text, Subject: ev.Key,
+	}
 }

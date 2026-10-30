@@ -787,10 +787,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	var alertOpts []alerts.Option
 	if store != nil {
 		alertOpts = append(alertOpts, alerts.WithRecorder(func(ev alerts.Event) {
-			if err := store.RecordTimelineEvent(db.TimelineEvent{
-				At: ev.At, Type: string(ev.Type), Severity: string(ev.Severity),
-				Title: ev.Title, Detail: ev.Text,
-			}); err != nil {
+			if err := store.RecordTimelineEvent(timelineEventOf(ev)); err != nil {
 				log.Warn("timeline record failed", "type", ev.Type, "err", err)
 			}
 		}))

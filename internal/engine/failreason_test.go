@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -180,5 +181,18 @@ func TestAHeldDestinationIsNotRevivedByAMoreForgivingPolicy(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := proc.Status().Restarts; got != heldAt {
 		t.Fatalf("restarts went %d -> %d: a policy change lifted the hold", heldAt, got)
+	}
+}
+
+// TestTheTimelineRecorderKeepsTheAlertsSubject: A13's link is only as good as
+// the subject the recorder stores, and the recorder is the one line between
+// the alert and the table.
+func TestTheTimelineRecorderKeepsTheAlertsSubject(t *testing.T) {
+	ev := timelineEventOf(alerts.Event{
+		Type: alerts.TypeDestinationDown, Severity: alerts.SeverityCritical,
+		Key: "destination:3", Title: "Destination down: Twitch", Text: "why",
+	})
+	if ev.Subject != "destination:3" || ev.Title != "Destination down: Twitch" || ev.Detail != "why" {
+		t.Fatalf("got %+v", ev)
 	}
 }

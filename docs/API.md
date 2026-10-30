@@ -529,7 +529,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/upgrade/plan` | What an in-place upgrade would do on this install, and whether it can |
 | `POST` | `/upgrade/stage`, `/upgrade/rollback` | Session-only. Staging writes the new binary; rollback restores the saved one |
 | `GET` | `/processes`, `/processes/{name}/logs` | A child's own FFmpeg output |
-| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?}`. Install-wide, so it takes no `?source=` |
+| `GET` | `/timeline` | Stream history, newest first: failovers, destination and ingest transitions. `?limit=` defaults to 200, and anything but a positive integer is a `400`. The store keeps at most 1000 rows for 30 days. Each row is `{id, at, type, severity, title, detail?, process?}`. `process` names the supervised process whose log holds the detail (`dest:3`, `ingest`), when there is exactly one. Install-wide, so it takes no `?source=` |
 | `GET` | `/metrics` | Prometheus exposition |
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
 

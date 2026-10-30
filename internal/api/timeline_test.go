@@ -49,3 +49,45 @@ func TestTimelineRejectsANonPositiveLimit(t *testing.T) {
 	send(t, h, sign, http.MethodGet, "/api/v1/timeline?limit=0", nil, http.StatusBadRequest)
 	send(t, h, sign, http.MethodGet, "/api/v1/timeline?limit=abc", nil, http.StatusBadRequest)
 }
+
+// A13: a row about a destination or an ingest names the PROCESS whose log
+// holds the detail, so the page can offer "Show log" on it. Derived here from
+// the stored alert key rather than by the page, so the key's format stays the
+// server's business. A row about something with no single log (a failover)
+// names none.
+func TestTimelineRowsNameTheProcessWhoseLogHoldsTheDetail(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	at := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+	for i, ev := range []db.TimelineEvent{
+		{Type: "destination.down", Title: "Destination down: Twitch", Subject: "destination:3"},
+		{Type: "destination.falling_behind", Title: "Twitch is falling behind", Subject: "destination:3:speed"},
+		{Type: "ingest.lost", Title: "Ingest lost: Main", Subject: "ingest:1"},
+		{Type: "failover.switched", Title: "Failover", Subject: "failover:1"},
+		{Type: "destination.down", Title: "old row"},
+	} {
+		ev.At, ev.Severity = at.Add(time.Duration(i)*time.Second), "critical"
+		if err := store.RecordTimelineEvent(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rows []struct {
+		Title   string `json:"title"`
+		Process string `json:"process"`
+	}
+	body := send(t, h, sign, http.MethodGet, "/api/v1/timeline", nil, http.StatusOK)
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"Destination down: Twitch": "dest:3",
+		"Twitch is falling behind": "dest:3",
+		"Ingest lost: Main":        "ingest",
+		"Failover":                 "",
+		"old row":                  "",
+	}
+	for _, r := range rows {
+		if r.Process != want[r.Title] {
+			t.Errorf("%q: process = %q, want %q", r.Title, r.Process, want[r.Title])
+		}
+	}
+}

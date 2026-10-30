@@ -33,6 +33,19 @@ its first tagged release.
   captured in Docker against local ingest servers.
   [MONITORING.md](docs/MONITORING.md#why-a-destination-is-failing)
 
+- **A remedy beside every failure, and a way to its log.**
+  - A failed row in the Go live sheet has a **Retry** button. It starts a
+    refused start again, and it restarts a failed or held process.
+  - The destination card, Monitoring's process rows, the log summary and
+    any stat tile in its warning colour each say what to do. Each offers the
+    control that does it: edit the destination, the renditions page, the
+    sources page, or that process's log.
+  - Timeline rows about a destination or an ingest have a **Show log** link,
+    and `/monitoring?process=<name>` opens the FFmpeg log filtered to that
+    process.
+  - The timeline stores each row's subject in a new `subject` column, which
+    is added on upgrade. `GET /api/v1/timeline` rows gain `process`.
+
 - **A destination's per-track gain and mute apply to the running stream.** A
   level change used to be an argv change, so it replaced the destination's
   FFmpeg process and dropped that platform's connection. Each mixed track now

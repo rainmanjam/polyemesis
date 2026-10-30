@@ -7,6 +7,8 @@ import type { TimelineRow } from "@/lib/types";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Link } from "react-router";
+import { processLogHref } from "@/lib/failureRemedy";
 
 /** How often the timeline re-reads. Transitions are a few per incident, so a
  *  slow poll is enough and keeps this off the live socket. */
@@ -118,6 +120,19 @@ export function MonitorTimeline() {
                   <span className="flex min-w-0 flex-col">
                     <span className="break-words">{row.title}</span>
                     {row.detail && <span className="break-words text-muted-foreground">{row.detail}</span>}
+                    {/* A13: the slice of log behind this row, one click away.
+                        Lands on the FFmpeg log on this same page, filtered to
+                        the process. Not offered where the server names no
+                        single process: a dead link is worse than none. */}
+                    {row.process && (
+                      <Link
+                        to={processLogHref(row.process)}
+                        aria-label={`${t("reason.action.log")}: ${row.title}`}
+                        className="self-start text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                      >
+                        {t("reason.action.log")}
+                      </Link>
+                    )}
                   </span>
                 </li>
               );
