@@ -209,6 +209,12 @@ const GLYPH = {
     inRoundRect(0.42, 0.26, 0.6, 0.82, 0.03),
     inRoundRect(0.66, 0.4, 0.84, 0.82, 0.03),
   ),
+  // Chat poll: three horizontal result bars of different lengths, as the poll widget draws them.
+  poll: any(
+    inRoundRect(0.16, 0.2, 0.84, 0.34, 0.04),
+    inRoundRect(0.16, 0.43, 0.6, 0.57, 0.04),
+    inRoundRect(0.16, 0.66, 0.42, 0.8, 0.04),
+  ),
   // Record: a solid disc.
   record: inCircle(0.5, 0.5, 0.3),
   // Routing preset: three sliders with knobs set at different points.
@@ -337,7 +343,7 @@ function write(rel, size, paint) {
 // barred circle), so those states are faces of their own and never the generic error or warn
 // tile. Only the record key ever shows halted, and only the track mute key shows the last
 // three; every key has every face so the state indices line up across actions.
-const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute"];
+const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute", "poll"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
 function badged(base, shape) {

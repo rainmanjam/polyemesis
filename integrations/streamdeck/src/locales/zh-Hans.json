@@ -80,5 +80,15 @@
   "streamdeck.pi.notListed": "{id}（已不在列表中）",
   "streamdeck.pi.trackHint": "可以时，更改会实时生效。否则目标会重启，观众会看到重新连接。Windows 服务器总是重启。",
   "streamdeck.pi.destinationLabel": "目标",
-  "streamdeck.gain.matrix": "矩阵：请用界面"
+  "streamdeck.gain.matrix": "矩阵：请用界面",
+  "streamdeck.poll.start": "开始投票",
+  "streamdeck.poll.live": "投票中",
+  "streamdeck.poll.votes": "{count} 票 · {time}",
+  "streamdeck.poll.closing": "统计中",
+  "streamdeck.poll.holdEnd": "长按结束",
+  "streamdeck.poll.notSet": "设置投票",
+  "streamdeck.pi.pollQuestion": "投票问题",
+  "streamdeck.pi.pollOptions": "选项，每行一个 (2 到 6 个)",
+  "streamdeck.pi.pollDuration": "时长 (秒)",
+  "streamdeck.pi.pollHint": "按下即可在所有聊天中开始投票。进行中按键会显示票数和剩余时间；长按可提前结束。"
 }

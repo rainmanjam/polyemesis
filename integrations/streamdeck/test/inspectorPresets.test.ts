@@ -64,6 +64,7 @@ function loadInspector(action: string) {
     "url", "token", "caPem", "sourceId", "destinationId", "presetId", "err-preset", "result",
     "admin-warning", "test", "block-source", "block-destination", "block-preset", "block-install-wide",
     "block-track", "trackDestination", "track", "err-track",
+    "block-poll", "pollQuestion", "pollOptions", "pollDuration",
   ];
   const selects = ["presetId", "trackDestination", "track"];
   const els = Object.fromEntries(ids.map((id) => [id, element(id, selects.includes(id))]));
@@ -152,6 +153,29 @@ describe("inspector preset picker", () => {
     expect(record.els["block-install-wide"]!.hidden).toBe(false);
     const preset = loadInspector("com.polyemesis.streamdeck.preset");
     expect(preset.els["block-source"]!.hidden).toBe(false);
+  });
+});
+
+describe("inspector poll fields", () => {
+  const POLL = "com.polyemesis.streamdeck.poll";
+
+  it("shows the poll fields and no programme field on the poll key, and only there", () => {
+    const poll = loadInspector(POLL);
+    expect(poll.els["block-poll"]!.hidden).toBe(false);
+    expect(poll.els["block-source"]!.hidden).toBe(true);
+    const preset = loadInspector("com.polyemesis.streamdeck.preset");
+    expect(preset.els["block-poll"]!.hidden).toBe(true);
+  });
+
+  it("shows the saved poll, and saves the options one per line as a list", () => {
+    const { els, sent, receive, change } = loadInspector(POLL);
+    receive("didReceiveSettings", { settings: { pollQuestion: "Next map?", pollOptions: ["Dust", "Mirage"], pollDuration: 60 } });
+    expect(els.pollQuestion!.value).toBe("Next map?");
+    expect(els.pollOptions!.value).toBe("Dust\nMirage");
+    expect(els.pollDuration!.value).toBe("60");
+    els.pollOptions!.value = "Dust\n\n Mirage \nNuke";
+    change("pollOptions");
+    expect(settingsSent(sent).at(-1)).toEqual({ pollQuestion: "Next map?", pollOptions: ["Dust", "Mirage", "Nuke"], pollDuration: 60 });
   });
 });
 

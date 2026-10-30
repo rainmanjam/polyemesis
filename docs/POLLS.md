@@ -10,7 +10,7 @@ updates live in the console and, if you add it, on stream.
 
 Start a poll from any of these:
 
-- the **Polls** panel in the console;
+- the **Polls** panel on the console's **Chat** page;
 - a Stream Deck **Poll** key (see [STREAM-DECK.md](STREAM-DECK.md));
 - an AI assistant over MCP, with `start_poll` (see [MCP.md](MCP.md));
 - the API, with `POST /api/v1/polls` (see [API.md](API.md#chat-polls)).

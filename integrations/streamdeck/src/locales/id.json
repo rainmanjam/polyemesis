@@ -80,5 +80,15 @@
   "streamdeck.pi.notListed": "{id} (tidak lagi terdaftar)",
   "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
   "streamdeck.pi.destinationLabel": "Tujuan",
-  "streamdeck.gain.matrix": "matriks: pakai UI"
+  "streamdeck.gain.matrix": "matriks: pakai UI",
+  "streamdeck.poll.start": "Mulai polling",
+  "streamdeck.poll.live": "Polling aktif",
+  "streamdeck.poll.votes": "{count} suara · {time}",
+  "streamdeck.poll.closing": "Menghitung",
+  "streamdeck.poll.holdEnd": "Tahan untuk akhiri",
+  "streamdeck.poll.notSet": "Atur polling",
+  "streamdeck.pi.pollQuestion": "Pertanyaan polling",
+  "streamdeck.pi.pollOptions": "Pilihan, satu per baris (2 sampai 6)",
+  "streamdeck.pi.pollDuration": "Durasi (detik)",
+  "streamdeck.pi.pollHint": "Tekan untuk memulai polling di setiap obrolan. Selama berjalan, tombol menampilkan suara dan sisa waktu; tahan untuk mengakhirinya lebih awal."
 }

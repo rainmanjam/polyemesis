@@ -73,3 +73,73 @@ describe("the overlay page", () => {
     expect(container.textContent).toBe("");
   });
 });
+
+/** One SSE response carrying the given envelopes, then closing. */
+function sseOf(...envs: { id: string; type: string; data: unknown }[]): Response {
+  const body = envs.map((e) => `id: ${e.id}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(new ReadableStream({
+    start(c) { c.enqueue(new TextEncoder().encode(body)); c.close(); },
+  }), { status: 200 });
+}
+
+const pollEnv = (id: string, state = "open") => ({
+  id, type: "poll.display",
+  data: { id: "poll-3", question: "Which map next?", total: 4, state,
+    options: [{ label: "Dust", votes: 3 }, { label: "Mirage", votes: 1 }],
+    endsAt: new Date(Date.now() + 60_000).toISOString() },
+});
+
+const chatEnv = (id: string) => ({
+  id, type: "chat.display", data: { id, platform: "twitch", name: "viewer", text: "chat line here", at: "" },
+});
+
+describe("the poll widget page (#14)", () => {
+  const serve = (stream: () => Response) =>
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/overlay/config")) {
+        return new Response(JSON.stringify({ name: "x", platforms: ["twitch"], style: style("classic") }), { status: 200 });
+      }
+      return stream();
+    }));
+
+  // The poll page draws the poll and never a chat line, though both arrive
+  // on the same stream; and nothing on it names a platform.
+  it("draws only the poll, with no platform on it, and transparently", async () => {
+    window.history.replaceState(null, "", "/overlay/poll/k/pov_poll");
+    let first = true;
+    serve(() => {
+      if (!first) return new Response("{}", { status: 401 });
+      first = false;
+      return sseOf(chatEnv("c1"), pollEnv("p1"));
+    });
+    const { container } = render(<OverlayPage />);
+    await waitFor(() => expect(screen.getByText("Which map next?")).toBeTruthy());
+    expect(screen.getByText("Dust")).toBeTruthy();
+    expect(screen.getByText("75%")).toBeTruthy();
+    expect(screen.queryByText("chat line here")).toBeNull();
+    expect(container.textContent?.toLowerCase()).not.toMatch(/twitch|youtube|kick|ttv/);
+    expect((container.firstElementChild as HTMLElement).style.background).toBe("transparent");
+  });
+
+  it("draws nothing while no poll is running", async () => {
+    window.history.replaceState(null, "", "/overlay/poll#key=pov_poll");
+    serve(() => new Response("{}", { status: 401 }));
+    const { container } = render(<OverlayPage />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(container.textContent).toBe("");
+  });
+
+  // And the chat overlay, on the same stream, never draws the poll.
+  it("leaves the poll off the chat overlay", async () => {
+    window.history.replaceState(null, "", "/overlay#key=pov_chat");
+    let first = true;
+    serve(() => {
+      if (!first) return new Response("{}", { status: 401 });
+      first = false;
+      return sseOf(pollEnv("p1"), chatEnv("c1"));
+    });
+    render(<OverlayPage />);
+    await waitFor(() => expect(screen.getByText("chat line here")).toBeTruthy());
+    expect(screen.queryByText("Which map next?")).toBeNull();
+  });
+});

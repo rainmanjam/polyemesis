@@ -104,6 +104,7 @@ import type {
   TimelineRow,
 } from "./types";
 import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
+import type { Poll, PollSpec, PollsResponse } from "./polls";
 
 const BASE = "/api/v1";
 
@@ -571,6 +572,13 @@ export const api = {
   createToken: (name: string, scope: TokenScope) =>
     post<{ token: ApiToken; plaintext: string }>("/auth/tokens", { name, scope }),
   revokeToken: (id: number) => del<{ status: string }>(`/auth/tokens/${id}`),
+
+  // --- chat polls (#14) ---
+  /** The running poll (or null) and the history, newest first. */
+  listPolls: (limit?: number) => get<PollsResponse>("/polls" + (limit ? `?limit=${limit}` : "")),
+  startPoll: (spec: PollSpec) => post<Poll>("/polls", spec),
+  /** Ends it early. The result may still say "closing" for a few seconds. */
+  endPoll: (id: number) => post<Poll>(`/polls/${id}/end`),
 
   // --- chat overlays (session-only) ---
   listOverlays: () => get<OverlaysResponse>("/overlays"),

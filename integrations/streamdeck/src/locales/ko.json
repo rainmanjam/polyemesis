@@ -80,5 +80,15 @@
   "streamdeck.pi.notListed": "{id} (더 이상 목록에 없음)",
   "streamdeck.pi.trackHint": "변경은 가능하면 실시간으로 적용됩니다. 그렇지 않으면 대상이 재시작되고 시청자에게 재연결이 보입니다. Windows 서버는 항상 재시작합니다.",
   "streamdeck.pi.destinationLabel": "대상",
-  "streamdeck.gain.matrix": "매트릭스: UI 사용"
+  "streamdeck.gain.matrix": "매트릭스: UI 사용",
+  "streamdeck.poll.start": "투표 시작",
+  "streamdeck.poll.live": "투표 중",
+  "streamdeck.poll.votes": "{count}표 · {time}",
+  "streamdeck.poll.closing": "집계 중",
+  "streamdeck.poll.holdEnd": "길게 눌러 종료",
+  "streamdeck.poll.notSet": "투표 설정",
+  "streamdeck.pi.pollQuestion": "투표 질문",
+  "streamdeck.pi.pollOptions": "선택지, 한 줄에 하나 (2~6개)",
+  "streamdeck.pi.pollDuration": "시간 (초)",
+  "streamdeck.pi.pollHint": "누르면 모든 채팅에서 투표가 시작됩니다. 진행 중에는 키에 표 수와 남은 시간이 표시되며, 길게 누르면 일찍 끝낼 수 있습니다."
 }

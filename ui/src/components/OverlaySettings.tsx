@@ -10,6 +10,8 @@ import {
   OVERLAY_LIMITS,
   overlayPathUrl,
   overlayUrl,
+  pollWidgetPathUrl,
+  pollWidgetUrl,
   type ChatOverlay,
   type OverlayFont,
   type OverlayPreset,
@@ -387,6 +389,12 @@ export function OverlayEditor({
                   onClick={() => copyToClipboard(t, overlayUrl(origin, overlay.obsKey, true), t("overlay.dockUrl"))}>
                   <Copy /> {t("overlay.copyDockUrl")}
                 </Button>
+                {/* The poll widget (#14): the same key, its own browser
+                    source, so it can sit apart from the chat lines. */}
+                <Button size="sm" variant="outline"
+                  onClick={() => copyToClipboard(t, pollWidgetUrl(origin, overlay.obsKey), t("overlay.pollUrl"))}>
+                  <Copy /> {t("overlay.copyPollUrl")}
+                </Button>
               </div>
               <span className="font-mono text-micro text-muted-foreground">
                 {overlay.obsKey.slice(0, 12)}…
@@ -406,8 +414,13 @@ export function OverlayEditor({
                   onClick={() => copyToClipboard(t, overlayPathUrl(origin, overlay.obsKey, true), t("overlay.dockUrl"))}>
                   <Copy /> {t("overlay.copyDockPathUrl")}
                 </Button>
+                <Button size="sm" variant="ghost"
+                  onClick={() => copyToClipboard(t, pollWidgetPathUrl(origin, overlay.obsKey), t("overlay.pollUrl"))}>
+                  <Copy /> {t("overlay.copyPollPathUrl")}
+                </Button>
               </div>
               <span className="text-micro text-muted-foreground">{t("overlay.pathHint")}</span>
+              <span className="text-micro text-muted-foreground">{t("overlay.pollHint")}</span>
               <span className="text-micro text-muted-foreground">
                 {t("overlay.holdHint", { seconds: Math.round(meta.maxHoldMs / 1000) })}
               </span>

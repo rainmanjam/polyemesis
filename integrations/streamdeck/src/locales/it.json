@@ -80,5 +80,15 @@
   "streamdeck.pi.notListed": "{id} (non più elencato)",
   "streamdeck.pi.trackHint": "Una modifica si applica in diretta quando possibile. Altrimenti la destinazione si riavvia e gli spettatori vedono una riconnessione. Un server Windows si riavvia sempre.",
   "streamdeck.pi.destinationLabel": "Destinazione",
-  "streamdeck.gain.matrix": "matrice: usa la UI"
+  "streamdeck.gain.matrix": "matrice: usa la UI",
+  "streamdeck.poll.start": "Avvia sondaggio",
+  "streamdeck.poll.live": "Sondaggio attivo",
+  "streamdeck.poll.votes": "{count} voti · {time}",
+  "streamdeck.poll.closing": "Conteggio",
+  "streamdeck.poll.holdEnd": "Tieni premuto per terminare",
+  "streamdeck.poll.notSet": "Imposta il sondaggio",
+  "streamdeck.pi.pollQuestion": "Domanda del sondaggio",
+  "streamdeck.pi.pollOptions": "Opzioni, una per riga (da 2 a 6)",
+  "streamdeck.pi.pollDuration": "Durata (secondi)",
+  "streamdeck.pi.pollHint": "Premi per avviare il sondaggio in ogni chat. Mentre è in corso, il tasto mostra i voti e il tempo rimasto; tienilo premuto per terminarlo prima."
 }

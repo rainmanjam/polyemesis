@@ -360,6 +360,54 @@
       "SupportedInMultiActions": false
     },
     {
+      "UUID": "com.polyemesis.streamdeck.poll",
+      "Name": "Chat poll",
+      "Tooltip": "Starts the chat poll set on this key, announced in every chat. While it runs, shows the votes and time left; hold to end it early. Needs an admin token.",
+      "Icon": "imgs/actions/poll",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/poll/idle"
+        },
+        {
+          "Image": "imgs/keys/poll/live"
+        },
+        {
+          "Image": "imgs/keys/poll/warn"
+        },
+        {
+          "Image": "imgs/keys/poll/error"
+        },
+        {
+          "Image": "imgs/keys/poll/held"
+        },
+        {
+          "Image": "imgs/keys/poll/unbound"
+        },
+        {
+          "Image": "imgs/keys/poll/halted"
+        },
+        {
+          "Image": "imgs/keys/poll/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/poll/muted"
+        },
+        {
+          "Image": "imgs/keys/poll/restarted"
+        },
+        {
+          "Image": "imgs/keys/poll/unavailable"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
       "UUID": "com.polyemesis.streamdeck.track-mute",
       "Name": "Mute track",
       "Tooltip": "Mutes or unmutes one audio track on one destination. Applies live when the server can, otherwise by a restart the viewers see. Needs an admin token.",

@@ -9,6 +9,7 @@ import type {
   ConnectionInfo,
   DestinationLevels,
   LevelsReading,
+  PollSummary,
   RecordingState,
   StatusPayload,
   StopImpact,
@@ -39,16 +40,19 @@ export type SurfaceKind =
   | "preset"
   | "meter"
   | "trackMute"
-  | "trackGain";
+  | "trackGain"
+  | "poll";
 
 /** Kinds that confirm by a held press. A stop ends broadcasts for good; a preset can restart destinations. */
-const HELD_KINDS: readonly SurfaceKind[] = ["stopAll", "stopOne", "preset"];
+const HELD_KINDS: readonly SurfaceKind[] = ["stopAll", "stopOne", "preset", "poll"];
 
 /** What an armed hold will act on, captured at key down. A later settings edit cannot retarget it. */
 interface Armed {
   destinationId?: number;
   presetId?: string;
   sourceId?: number;
+  /** The poll a held poll key ends: the one running at key down. */
+  pollId?: number;
 }
 
 /** A preset has no broadcast count to load. The hold loader only has to answer so the hold arms. */
@@ -175,6 +179,9 @@ export class Runtime {
   private readonly lastMeterPaint = new Map<string, string>();
   /** The install-wide recording state, read each tick while a Record key is on the deck. */
   private recordingState: RecordingState | undefined;
+  /** The running chat poll: null when none runs, undefined until read. */
+  private pollState: PollSummary | null | undefined;
+  private pollError: ApiError | undefined;
   private recordingError: ApiError | undefined;
   /** Preset id to name, from the install's list. Undefined until a read succeeds. */
   private presetNames: Map<string, string> | undefined;
@@ -224,6 +231,8 @@ export class Runtime {
     this.levels.clear();
     this.recordingState = undefined;
     this.recordingError = undefined;
+    this.pollState = undefined;
+    this.pollError = undefined;
     this.presetNames = undefined;
     this.presetRefused.clear();
     this.destLevels = undefined;
@@ -323,6 +332,7 @@ export class Runtime {
       }
       await this.refreshStatuses();
       if (this.hasKind("record")) await this.refreshRecording();
+      if (this.hasKind("poll")) await this.refreshPoll();
       if (this.hasKind("preset")) await this.loadPresetNames();
       if (LEVEL_KINDS.some((k) => this.hasKind(k))) await this.refreshLevels();
       await this.paintAll();
@@ -340,6 +350,22 @@ export class Runtime {
       this.recordingState = undefined;
       const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
       this.recordingError = apiErr;
+      if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
+        this.connection = undefined;
+        this.connectionError = apiErr;
+      }
+    }
+  }
+
+  /** The poll key's answer: install-wide, one read. */
+  private async refreshPoll(): Promise<void> {
+    try {
+      this.pollState = await this.client!.currentPoll();
+      this.pollError = undefined;
+    } catch (err) {
+      this.pollState = undefined;
+      const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
+      this.pollError = apiErr;
       if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
         this.connection = undefined;
         this.connectionError = apiErr;
@@ -410,7 +436,7 @@ export class Runtime {
     const scopes = new Set<string>();
     // Install-wide and preset keys do not read a programme's status. Their own reads answer for them.
     for (const s of this.surfaces.values()) {
-      if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || LEVEL_KINDS.includes(s.kind)) continue;
+      if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || LEVEL_KINDS.includes(s.kind)) continue;
       scopes.add(scopeKey(s.settings.sourceId));
     }
     for (const key of scopes) {
@@ -490,6 +516,7 @@ export class Runtime {
     if (!this.client) return { tone: "idle", label: "streamdeck.auth.notPaired" };
     if (this.connectionError || !this.connection) return this.unavailableFace();
     if (s.kind === "record") return this.recordFace();
+    if (s.kind === "poll") return this.pollFace(s);
     if (s.kind === "preset") return this.presetFace(s);
     if (s.kind === "trackMute") return this.trackMuteFace(s);
     const key = scopeKey(s.settings.sourceId);
@@ -552,6 +579,24 @@ export class Runtime {
       default:
         return this.unavailableFace();
     }
+  }
+
+  /**
+   * The poll key. While a poll runs it shows the votes so far and the time left -- the same counts the
+   * dashboard has, no voter -- and a hold ends it. With none running it is ready to start the poll its
+   * settings describe, or says those settings are missing.
+   */
+  private pollFace(s: Surface): KeyFace {
+    if (this.pollError || this.pollState === undefined) return this.unavailableFace(this.pollError);
+    const p = this.pollState;
+    if (p && (p.state === "open" || p.state === "closing")) {
+      const votes = t(this.locale, "streamdeck.poll.votes", { count: p.total, time: pollClock(p.endsAt, Date.now()) });
+      if (p.state === "closing") return { tone: "warn", label: "streamdeck.poll.closing", detail: votes };
+      return { tone: "live", label: "streamdeck.poll.live", detail: votes };
+    }
+    if (!pollSpecOf(s)) return { tone: "unbound", label: "streamdeck.poll.notSet" };
+    const face = this.adminGated("streamdeck.poll.start");
+    return face.tone === "idle" ? { ...face, detail: s.settings.pollQuestion } : face;
   }
 
   /** The preset key: unbound, no ingest after a refused apply, needs admin, or ready to hold. */
@@ -799,6 +844,53 @@ export class Runtime {
     }
   }
 
+  /**
+   * Key down on the poll key. Reads the running poll FRESH: with one running, the press arms a hold that
+   * ends that poll (captured now, so a poll started meanwhile is not the one ended); with none, a tap
+   * starts the key's poll.
+   */
+  async pressPollDown(id: string): Promise<void> {
+    const s = this.surfaces.get(id);
+    const hold = this.holds.get(id);
+    if (!s || !hold || !this.client) return;
+    if (!(await this.requireAdmin(s))) return;
+    let current: PollSummary | null;
+    try {
+      current = await this.client.currentPoll();
+      this.pollState = current;
+      this.pollError = undefined;
+    } catch {
+      await s.showAlert();
+      return;
+    }
+    if (current && (current.state === "open" || current.state === "closing")) {
+      this.armed.set(id, { pollId: current.id });
+      const result = await hold.press(async () => NO_COUNT);
+      if (!result.superseded && result.phase === "arming") {
+        await s.setState(KEY_STATE.held);
+        await s.setTitle(titleFor({ tone: "held", label: "streamdeck.poll.holdEnd", detail: current.question }, this.locale));
+      }
+      return;
+    }
+    const spec = pollSpecOf(s);
+    if (!spec) {
+      await s.setTitle(t(this.locale, "streamdeck.poll.notSet"));
+      await s.showAlert();
+      return;
+    }
+    await this.oneTap(id, async () => {
+      try {
+        await this.client!.startPoll(spec);
+        this.pollState = await this.client!.currentPoll().catch(() => undefined);
+        await s.showOk();
+      } catch {
+        await s.showAlert();
+        return;
+      }
+      await this.paintFace(s, this.pollFace(s));
+    });
+  }
+
   /** Key down on the record key. Reads the switch fresh, then flips it. Tap, not hold: see README. */
   async pressRecord(id: string): Promise<void> {
     await this.oneTap(id, () => this.flipRecording(id));
@@ -842,6 +934,8 @@ export class Runtime {
       await this.run(s, () => this.client!.stopDestination(target.destinationId!, target.sourceId));
     } else if (s.kind === "preset" && target.presetId !== undefined) {
       await this.applyArmedPreset(s, target.presetId, target.sourceId);
+    } else if (s.kind === "poll" && target.pollId !== undefined) {
+      await this.run(s, () => this.client!.endPoll(target.pollId!));
     }
   }
 
@@ -1126,4 +1220,18 @@ export class Runtime {
       await s.showAlert();
     }
   }
+}
+
+/** The poll a key's settings describe, or undefined when they do not describe one yet. */
+export function pollSpecOf(s: Surface): { question: string; options: string[]; durationSeconds: number } | undefined {
+  const { pollQuestion, pollOptions, pollDuration } = s.settings;
+  if (!pollQuestion || !pollOptions || pollOptions.length < 2 || !pollDuration) return undefined;
+  return { question: pollQuestion, options: pollOptions, durationSeconds: pollDuration };
+}
+
+/** "1:05": the time left on a poll, from the server's end time. Never negative. */
+export function pollClock(endsAt: string, now: number): string {
+  const ends = Date.parse(endsAt);
+  const left = Number.isNaN(ends) ? 0 : Math.max(0, Math.ceil((ends - now) / 1000));
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
 }
