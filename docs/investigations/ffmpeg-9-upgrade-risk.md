@@ -86,12 +86,40 @@ rtmpserver, srtserver, multitrack and uploadprobe.
    (`requireShippedFFmpeg`). The 3 drawtext skips are a Homebrew build without
    libfreetype.
 3. `meters` TestAnalyserMeasuresThePerDestinationMixAndNotTheIngest ("never
-   bound udp … in 10s"). It fails identically on all three versions in the
-   container, so it is the harness artefact recorded below, not a version
-   regression.
+   bound udp … in 10s"). It is a harness artefact, and that was measured: the
+   plain `golang:*-bookworm` image has no `ss`/`lsof` to see the bind. In a
+   container that has them, `internal/meters` passes 59/59 on 9.0.2, 8.1.2 and
+   6.1.3. This is very likely the same cause as the 2026-08-27 failure below.
 4. The meters artefact, plus the documented below-7.1 limits: multitrack FLV
    (×1), two audio streams in flv (×3 with subtests), and SIGTERM ignored on a
-   quiet feed (×2).
+   quiet feed (×2). That last one: on 6.1 a recorder or file destination stopped
+   on a silent feed waits out the 8 s grace and is SIGKILLed, because 6.1 does
+   not act on the supervisor's wake. In the measured run the MKV still had a
+   duration. Recorded here rather than gated: 6.x stays the floor, and the cost
+   is a slow stop, not a lost stream.
+
+The acceptance suites ran in Linux containers on BtbN n9.0.2-17 and on n8.1.2-34
+(the staging build's commit), with identical results on both versions. Counts
+are each log's own `N passed, M failed` line:
+
+| suite | 9.0.2 | 8.1.2 |
+|---|---|---|
+| acceptance | 13/0 | 13/0 |
+| acceptance-audio | 36/**4** | 36/**4** |
+| acceptance-renditions | 45/0 | 45/0 |
+| acceptance-ladder | 45/0 | 45/0 |
+| acceptance-encoders | 29/0 | 29/0 |
+| acceptance-tls | 35/0 | 35/0 |
+| acceptance-pull | 11/0 | 11/0 |
+| acceptance-playlist-phase0 | 15/0 | 15/0 |
+| acceptance-synth | 10/0 | 10/0 |
+| acceptance-failover (rerun with `hexdump` in the image) | 27/0 | 27/0 |
+| acceptance-recording-stop | 13/0 | 13/0 |
+
+The four acceptance-audio failures do not depend on the FFmpeg version. They
+are section 9's backwards-compatibility goldens ("the compiled filter changed").
+I4's named `volume@trkN` stages now appear in the graph of an untouched profile.
+That is a ux-overhaul change, not an FFmpeg one.
 
 **I4 live gain on each version.** There are two checks. The first is the
 supervisor's real-FFmpeg test: mute, then gain 2.0, with the RMS measured and

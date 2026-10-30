@@ -84,12 +84,17 @@ jobs:
             asset: ffmpeg-n6.1.3-linux64-gpl-6.1.tar.xz
             sha256: 400f9ca9d8ea3f812660cf7a00b9bfed944175cd9d6bd0c9b6257cf99376a75c
             # What 6.1 CANNOT do, measured rather than assumed (2026-10-29,
-            # n6.1.3): multitrack FLV and two audio streams in one flv need 7.1
-            # ("at most one audio stream is supported in flv"), and 6.1 does
-            # not honour SIGTERM on a quiet feed, so a stop waits out the grace
-            # and kills. These are the documented below-7.1 limitations
-            # (docs/FAQ.md, docs/INSTALL.md), not regressions; skipped by name
-            # here so everything else on the floor still has to pass.
+            # n6.1.3), skipped by name so everything else on the floor still has
+            # to pass:
+            #   - multitrack FLV, and two audio streams in one flv (the second
+            #     VOD mix on an RTMP destination): the flv muxer refuses both
+            #     before 7.1, "at most one audio stream is supported in flv".
+            #     Documented in docs/FAQ.md and docs/AUDIO-ROUTING.md.
+            #   - a recorder or file destination stopped on a QUIET feed: 6.1
+            #     does not act on the wake the supervisor sends, so the stop
+            #     waits out the 8 s grace and is killed. The file still had a
+            #     duration in the measured run. Not yet documented; reported
+            #     with the 9.0 work rather than hidden here.
             skip: "TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder|TestTwoDistinctMixesReachAnRTMPFarEnd|TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled|TestAFileDestinationStoppedOnAQuietFeedFinalisesItsFile"
     env:
       # A missing ffmpeg/ffprobe is a failure here, never a skip.
