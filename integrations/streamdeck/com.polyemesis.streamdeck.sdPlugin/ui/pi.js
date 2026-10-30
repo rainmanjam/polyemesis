@@ -58,8 +58,35 @@
     if (Number.isSafeInteger(source) && source > 0) payload.sourceId = source;
     const dest = Number($("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
+    if ($("presetId").value) payload.presetId = $("presetId").value;
     send({ event: "setSettings", context: actionContext, payload });
     flashSaved();
+  }
+
+  // The preset list comes from the plugin, which reads the SAVED pairing. Never from this page,
+  // so a token typed but not yet saved cannot be what lists the presets.
+  function requestPresets() {
+    send({ action: actionType, event: "sendToPlugin", context: actionContext, payload: { type: "presets" } });
+  }
+
+  function showPresets(payload) {
+    const select = $("presetId");
+    const error = $("err-preset");
+    const current = select.value;
+    if (payload.key) {
+      error.textContent = strings[payload.key] || strings["streamdeck.pi.presetsFailed"] || "";
+      error.hidden = false;
+      return;
+    }
+    error.hidden = true;
+    select.replaceChildren();
+    (payload.presets || []).forEach((p) => {
+      const option = document.createElement("option");
+      option.value = p.id;
+      option.textContent = p.name;
+      select.appendChild(option);
+    });
+    select.value = current || select.value;
   }
 
   function showGlobal(settings) {
@@ -71,6 +98,7 @@
   function showAction(settings) {
     if (typeof settings.sourceId === "number") $("sourceId").value = String(settings.sourceId);
     if (typeof settings.destinationId === "number") $("destinationId").value = String(settings.destinationId);
+    if (typeof settings.presetId === "string") $("presetId").value = settings.presetId;
   }
 
   function runTest() {
@@ -113,6 +141,7 @@
     else if (msg.event === "sendToPropertyInspector") {
       const payload = msg.payload || {};
       if (payload.type === "test") onTestResult(payload);
+      else if (payload.type === "presets") showPresets(payload);
     }
   }
 
@@ -123,16 +152,20 @@
     pluginUUID = uuid;
     actionType = action.action;
     actionContext = action.context;
-    $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination";
+    $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination" && actionType !== "com.polyemesis.streamdeck.stop-destination";
+    $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
+    $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
     socket = new WebSocket("ws://127.0.0.1:" + port);
     socket.onopen = function () {
       send({ event: registerEvent, uuid: uuid });
       send({ event: "getGlobalSettings", context: uuid });
       send({ event: "getSettings", context: actionContext });
+      if (!$("block-preset").hidden) requestPresets();
     };
     socket.onmessage = onMessage;
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
     ["sourceId", "destinationId"].forEach((f) => $(f).addEventListener("change", saveAction));
+    $("presetId").addEventListener("change", saveAction);
     $("test").addEventListener("click", runTest);
   };
 })();

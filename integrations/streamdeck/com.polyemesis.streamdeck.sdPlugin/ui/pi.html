@@ -40,6 +40,17 @@
     <input id="destinationId" type="number" min="1" step="1">
   </section>
 
+  <section class="block" id="block-preset" hidden>
+    <label for="presetId" data-i18n="streamdeck.pi.presetLabel"></label>
+    <select id="presetId"></select>
+    <p class="hint" data-i18n="streamdeck.pi.presetHint"></p>
+    <p id="err-preset" class="error" hidden></p>
+  </section>
+
+  <section class="block" id="block-install-wide" hidden>
+    <p class="hint" data-i18n="streamdeck.pi.installWide"></p>
+  </section>
+
   <section class="block">
     <button id="test" type="button" data-i18n="streamdeck.pi.test"></button>
     <p id="result" class="result" role="status" aria-live="polite"></p>

@@ -19,8 +19,8 @@ describe("inspector strings", () => {
     const all = JSON.parse(json) as Record<string, Record<string, string>>;
     expect(Object.keys(all).sort()).toEqual(Object.keys(CATALOGS).sort());
     const enKeys = Object.keys(all.en!).sort();
-    // 10 inspector labels, 6 connection messages and 4 config errors.
-    expect(enKeys).toHaveLength(20);
+    // 14 inspector labels (including the preset picker and install-wide note), 6 connection messages and 4 config errors.
+    expect(enKeys).toHaveLength(24);
     for (const [locale, strings] of Object.entries(all)) {
       expect(Object.keys(strings).sort(), locale).toEqual(enKeys);
     }

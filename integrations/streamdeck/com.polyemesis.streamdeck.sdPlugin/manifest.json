@@ -157,6 +157,68 @@
       "UserTitleEnabled": false
     },
     {
+      "UUID": "com.polyemesis.streamdeck.stop-destination",
+      "Name": "Stop destination",
+      "Tooltip": "Hold to stop this one destination. Stopping a YouTube broadcast ends it for good. Needs an admin token.",
+      "Icon": "imgs/actions/stop-destination",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        { "Image": "imgs/keys/idle" },
+        { "Image": "imgs/keys/live" },
+        { "Image": "imgs/keys/warn" },
+        { "Image": "imgs/keys/error" },
+        { "Image": "imgs/keys/held" },
+        { "Image": "imgs/keys/unbound" }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.record",
+      "Name": "Record",
+      "Tooltip": "Switches recording on or off for the whole install, not one programme. Tap to switch. Needs an admin token.",
+      "Icon": "imgs/actions/record",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        { "Image": "imgs/keys/idle" },
+        { "Image": "imgs/keys/live" },
+        { "Image": "imgs/keys/warn" },
+        { "Image": "imgs/keys/error" },
+        { "Image": "imgs/keys/held" },
+        { "Image": "imgs/keys/unbound" }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.preset",
+      "Name": "Routing preset",
+      "Tooltip": "Hold to apply a routing preset to this programme. Applying can restart its destinations. Needs an admin token.",
+      "Icon": "imgs/actions/preset",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        { "Image": "imgs/keys/idle" },
+        { "Image": "imgs/keys/live" },
+        { "Image": "imgs/keys/warn" },
+        { "Image": "imgs/keys/error" },
+        { "Image": "imgs/keys/held" },
+        { "Image": "imgs/keys/unbound" }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
       "UUID": "com.polyemesis.streamdeck.meter",
       "Name": "Meter",
       "Tooltip": "The loudest channel on this install's meters. Shows NO FEED when the install is not sending levels.",
