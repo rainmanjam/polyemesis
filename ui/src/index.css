@@ -474,6 +474,12 @@
   .animate-signal-fast {
     animation: signal-pulse 0.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
+  /* Where a settings search result landed. An outline, so nothing moves. */
+  [data-search-hit] {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
 }
 
 /* An operator who has asked their system for less motion has asked this

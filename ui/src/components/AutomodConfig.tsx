@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, KeyRound, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,6 +21,7 @@ import {
   confidenceOutOfRange,
   MAX_CONFIDENCE,
   MIN_CONFIDENCE,
+  modelStatus,
   nextRuleId,
   ruleProblems,
   serverRejection,
@@ -410,7 +412,10 @@ export function AutomodConfig({
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("automod.modelTitle")}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {t("automod.modelTitle")}
+            <Badge variant={modelStatus(model).tone}>{t(modelStatus(model).key)}</Badge>
+          </CardTitle>
           <CardDescription>{t("automod.modelDesc")}</CardDescription>
         </CardHeader>
 
