@@ -219,7 +219,14 @@ describe("the app and the website hold one set of design tokens", () => {
  *  together would let a designer retuning a marketing page move the colour an
  *  operator reads a failing stream by. Both stylesheets carry the long form of
  *  this note beside the value. */
-const DUPLICATE_ON_PURPOSE = new Set(["--color-cross", "--color-cross-dim"]);
+const DUPLICATE_ON_PURPOSE = new Set([
+  "--color-cross",
+  "--color-cross-dim",
+  // A corner radius that happens to equal the app's --space-2 (0.5rem). A
+  // radius and a gap are different decisions: the site may retune its corners
+  // without touching the app's spacing grid, so the coincidence is not shared.
+  "--radius-token",
+]);
 
 describe("the website reads shared values rather than restating them", () => {
   it("holds no second copy of an app literal", () => {
