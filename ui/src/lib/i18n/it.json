@@ -1701,5 +1701,9 @@
   "nav.group.content": "Contenuti",
   "nav.group.community": "Community",
   "nav.group.operations": "Operazioni",
-  "nav.group.settings": "Impostazioni"
+  "nav.group.settings": "Impostazioni",
+  "addDest.titleAdd": "Aggiungi destinazione",
+  "addDest.titleEdit": "Modifica destinazione",
+  "addDest.description": "Scegli dove va questo programma. Audio e video usano impostazioni predefinite sensate, quindi di solito basta la piattaforma e la sua chiave. Apri le sezioni audio e video solo se vuoi modificarle.",
+  "addDest.howToGetKey": "Come ottenere questa chiave"
 }

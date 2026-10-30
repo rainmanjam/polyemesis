@@ -1701,5 +1701,9 @@
   "nav.group.content": "Treści",
   "nav.group.community": "Społeczność",
   "nav.group.operations": "Operacje",
-  "nav.group.settings": "Ustawienia"
+  "nav.group.settings": "Ustawienia",
+  "addDest.titleAdd": "Dodaj cel",
+  "addDest.titleEdit": "Edytuj cel",
+  "addDest.description": "Wybierz, dokąd trafia ten program. Dźwięk i obraz mają sensowne ustawienia domyślne, więc zwykle wystarczy platforma i jej klucz. Otwórz sekcje dźwięku i obrazu tylko wtedy, gdy chcesz je zmienić.",
+  "addDest.howToGetKey": "Jak uzyskać ten klucz"
 }

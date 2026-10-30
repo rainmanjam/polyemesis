@@ -1701,5 +1701,9 @@
   "nav.group.content": "内容",
   "nav.group.community": "社区",
   "nav.group.operations": "运维",
-  "nav.group.settings": "设置"
+  "nav.group.settings": "设置",
+  "addDest.titleAdd": "添加目的地",
+  "addDest.titleEdit": "编辑目的地",
+  "addDest.description": "选择此节目的去向。音频和视频已使用合理的默认设置，通常只需选择平台并填写其推流密钥。只有需要更改时，才展开音频和视频部分。",
+  "addDest.howToGetKey": "如何获取此密钥"
 }

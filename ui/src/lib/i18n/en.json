@@ -1701,5 +1701,9 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Operations",
-  "nav.group.settings": "Settings"
+  "nav.group.settings": "Settings",
+  "addDest.titleAdd": "Add destination",
+  "addDest.titleEdit": "Edit destination",
+  "addDest.description": "Choose where this programme goes. Audio and video default to sensible settings, so you usually only need the platform and its key. Open the audio and video sections only if you need to change them.",
+  "addDest.howToGetKey": "How to get this key"
 }

@@ -1090,16 +1090,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
+      {/* Wider than the old max-w-md: the sections below (platform grid,
+          audio, video) need the room, and a narrow column is what made the
+          form read as one long scroll. The lead sentence says what the form is
+          for before any term of art appears. Terms (routing profile,
+          rendition) are explained where they are used, not here. */}
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? "Edit destination" : "Add destination"}</DialogTitle>
-          <DialogDescription>
-            This destination copies its video, and by default mixes and re-encodes its audio
-            from its own routing profile. An SRT or file destination can copy the audio too,
-            forwarding your encoder's tracks untouched. Put it on a rendition if the platform
-            will not take the source video — a rendition re-encodes video once for everyone
-            that shares it, and still leaves the audio to each destination.
-          </DialogDescription>
+          <DialogTitle>{editing ? t("addDest.titleEdit") : t("addDest.titleAdd")}</DialogTitle>
+          <DialogDescription>{t("addDest.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
@@ -2459,21 +2458,29 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
             </div>
           </details>
 
+          {/* The platform's long setup prose sits behind a disclosure, so the
+              form shows the fields first. Facebook's notes alone run to about a
+              thousand characters; read on every open, they buried the key field. */}
           {selectedPreset && (
-            <div className="flex flex-col gap-1 rounded-md border border-dashed p-2">
-              <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
-              <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
-              {selectedPreset.helpUrl && (
-                <a
-                  href={selectedPreset.helpUrl}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
-                >
-                  <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
-                </a>
-              )}
-            </div>
+            <details className="rounded-md border border-dashed p-2">
+              <summary className="cursor-pointer text-sm font-medium">
+                {t("addDest.howToGetKey")}
+              </summary>
+              <div className="flex flex-col gap-1 pt-2">
+                <p className="text-sm text-muted-foreground">{selectedPreset.notes}</p>
+                <p className="text-sm text-muted-foreground">{PRESET_DISCLAIMER}</p>
+                {selectedPreset.helpUrl && (
+                  <a
+                    href={selectedPreset.helpUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
+                  >
+                    <ExternalLink className="size-3" /> {selectedPreset.name} setup docs
+                  </a>
+                )}
+              </div>
+            </details>
           )}
         </div>
 

@@ -1701,5 +1701,9 @@
   "nav.group.content": "Content",
   "nav.group.community": "Community",
   "nav.group.operations": "Beheer",
-  "nav.group.settings": "Instellingen"
+  "nav.group.settings": "Instellingen",
+  "addDest.titleAdd": "Bestemming toevoegen",
+  "addDest.titleEdit": "Bestemming bewerken",
+  "addDest.description": "Kies waar dit programma naartoe gaat. Audio en video gebruiken verstandige standaardinstellingen, dus meestal heb je alleen het platform en de sleutel nodig. Open de audio- en videosecties alleen als je ze wilt wijzigen.",
+  "addDest.howToGetKey": "Zo haal je deze sleutel op"
 }

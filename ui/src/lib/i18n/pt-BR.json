@@ -1701,5 +1701,9 @@
   "nav.group.content": "Conteúdo",
   "nav.group.community": "Comunidade",
   "nav.group.operations": "Operações",
-  "nav.group.settings": "Configurações"
+  "nav.group.settings": "Configurações",
+  "addDest.titleAdd": "Adicionar destino",
+  "addDest.titleEdit": "Editar destino",
+  "addDest.description": "Escolha para onde este programa vai. Áudio e vídeo usam configurações padrão adequadas, então normalmente basta a plataforma e a chave dela. Abra as seções de áudio e vídeo só se quiser alterá-las.",
+  "addDest.howToGetKey": "Como obter esta chave"
 }

@@ -1701,5 +1701,9 @@
   "nav.group.content": "İçerik",
   "nav.group.community": "Topluluk",
   "nav.group.operations": "İşletim",
-  "nav.group.settings": "Ayarlar"
+  "nav.group.settings": "Ayarlar",
+  "addDest.titleAdd": "Hedef ekle",
+  "addDest.titleEdit": "Hedefi düzenle",
+  "addDest.description": "Bu programın nereye gideceğini seçin. Ses ve video makul varsayılan ayarları kullanır, bu yüzden genellikle yalnızca platform ve yayın anahtarı yeterlidir. Ses ve video bölümlerini yalnızca değiştirmek istediğinizde açın.",
+  "addDest.howToGetKey": "Bu anahtar nasıl alınır"
 }

@@ -1701,5 +1701,9 @@
   "nav.group.content": "Inhalt",
   "nav.group.community": "Community",
   "nav.group.operations": "Betrieb",
-  "nav.group.settings": "Einstellungen"
+  "nav.group.settings": "Einstellungen",
+  "addDest.titleAdd": "Ziel hinzufügen",
+  "addDest.titleEdit": "Ziel bearbeiten",
+  "addDest.description": "Wählen Sie, wohin dieses Programm geht. Audio und Video nutzen sinnvolle Standardeinstellungen, meist brauchen Sie nur die Plattform und ihren Schlüssel. Öffnen Sie die Abschnitte für Audio und Video nur, wenn Sie sie ändern möchten.",
+  "addDest.howToGetKey": "So erhalten Sie diesen Schlüssel"
 }

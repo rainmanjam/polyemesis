@@ -1701,5 +1701,9 @@
   "nav.group.content": "콘텐츠",
   "nav.group.community": "커뮤니티",
   "nav.group.operations": "운영",
-  "nav.group.settings": "설정"
+  "nav.group.settings": "설정",
+  "addDest.titleAdd": "대상 추가",
+  "addDest.titleEdit": "대상 편집",
+  "addDest.description": "이 프로그램을 보낼 곳을 고르세요. 오디오와 비디오는 적절한 기본값을 쓰므로 보통은 플랫폼과 스트림 키만 있으면 됩니다. 오디오와 비디오 항목은 바꾸고 싶을 때만 여세요.",
+  "addDest.howToGetKey": "이 키를 얻는 방법"
 }

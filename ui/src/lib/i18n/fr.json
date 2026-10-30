@@ -1701,5 +1701,9 @@
   "nav.group.content": "Contenu",
   "nav.group.community": "Communauté",
   "nav.group.operations": "Exploitation",
-  "nav.group.settings": "Réglages"
+  "nav.group.settings": "Réglages",
+  "addDest.titleAdd": "Ajouter une destination",
+  "addDest.titleEdit": "Modifier la destination",
+  "addDest.description": "Choisissez où part ce programme. L'audio et la vidéo utilisent des réglages adaptés par défaut : il suffit en général de la plateforme et de sa clé. N'ouvrez les sections audio et vidéo que si vous voulez les modifier.",
+  "addDest.howToGetKey": "Comment obtenir cette clé"
 }
