@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "クリップを取得",
   "auto.evDebugExported": "デバッグバンドルを書き出しました",
   "auto.evAlertRuleChanged": "アラートルールが変更されました",
+  "auto.evMCPAction": "AI アシスタントの操作（MCP）",
   "auto.evDiskLow": "ディスク残量が少ない",
   "auto.evDiskRecovered": "ディスクが回復した",
   "auto.evIngestLost": "入力が失われた",

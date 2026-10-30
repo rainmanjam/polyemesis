@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Клип записан",
   "auto.evDebugExported": "Отладочный архив выгружен",
   "auto.evAlertRuleChanged": "Правило оповещения изменено",
+  "auto.evMCPAction": "Действие ИИ-ассистента (MCP)",
   "auto.evDiskLow": "Мало места на диске",
   "auto.evDiskRecovered": "Место на диске восстановлено",
   "auto.evIngestLost": "Вход потерян",

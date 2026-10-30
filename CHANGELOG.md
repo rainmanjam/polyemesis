@@ -10,6 +10,33 @@ its first tagged release.
 
 ### Added
 
+- **MCP server.** `POST /mcp` lets Claude Desktop, Claude Code or any Model
+  Context Protocol client read what is on air and, with an admin token, act on
+  it. Setup, with config examples, is in [docs/MCP.md](docs/MCP.md).
+  - Streamable HTTP, stateless, on the official Go SDK (v1.8.0; protocol
+    `2026-07-28` back to `2024-11-05`). `polyemesis mcp -url ...` relays stdio
+    to it for clients that only start local servers. The token comes from
+    `POLYEMESIS_TOKEN` or a file, never the command line.
+  - Authenticated with existing API tokens; a browser session is refused. A
+    `read` token is listed 9 read tools: status, destinations and their failure
+    causes, sources and link stats, routing presets, levels, recordings,
+    timeline and alerts, and stop impact. An `admin` token adds chat and
+    transcript search, the chat user card, and 11 write tools: start, stop,
+    retry, go live, stop all, mute and gain, apply a routing preset, recording
+    on/off, failover switch, create a clip, and schedule a start or stop.
+  - Every tool is a call to the HTTP API with the caller's own token, so scopes,
+    `?source=` and the API's own checks apply unchanged.
+  - Stop tools, go live, recording off and scheduled stops do nothing without
+    `confirm: true`, and answer with what they would end. Write tools carry
+    MCP destructive hints.
+  - No tool returns a credential, to any token. Requests made for MCP get the
+    read-safe views, and every answer is checked against every stored
+    credential.
+  - Chat and transcript text is fenced as untrusted viewer content. Arguments
+    are checked strictly, and none can choose the route a tool calls.
+  - Every write is a new `mcp.action` audit event, "Action via MCP (token
+    name)", naming the tool, target and outcome.
+  - Viewer analytics is not a tool yet; it comes with #4.
 - **Real-time events API.** `GET /api/v1/events` streams what is happening as
   Server-Sent Events, in the same envelope as webhooks: destinations going up,
   down, held, restarted or changing level (live or by restart), the ingest,

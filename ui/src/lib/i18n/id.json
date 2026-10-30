@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Klip ditangkap",
   "auto.evDebugExported": "Paket awakutu diekspor",
   "auto.evAlertRuleChanged": "Aturan peringatan diubah",
+  "auto.evMCPAction": "Tindakan asisten AI (MCP)",
   "auto.evDiskLow": "Disk menipis",
   "auto.evDiskRecovered": "Disk pulih",
   "auto.evIngestLost": "Masukan hilang",

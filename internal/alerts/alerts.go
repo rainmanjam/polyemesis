@@ -167,6 +167,14 @@ const (
 	// itself, on its way out (see the API's handleDeleteAlertRule), so the
 	// channel that goes quiet is told why.
 	TypeAlertRuleChanged Type = "alerts.rule_changed"
+	// TypeMCPAction fires when an AI assistant connected over MCP (#12) uses a
+	// write tool: start, stop, go live, a mute, a preset, a clip, a schedule.
+	// The REST routes those tools dispatch to mostly publish no audit event of
+	// their own -- a person pressing Stop in the console is not news -- but an
+	// agent acting on a live broadcast with a long-lived token is exactly what
+	// the operator needs a record of, and the token's name is how they find
+	// the one to revoke. Warning for the stop family, info otherwise.
+	TypeMCPAction Type = "mcp.action"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -221,6 +229,8 @@ func AllTypes() []Type {
 		// Appended for the fifth time. It is an audit event, like the block
 		// above, and it goes where every new row goes.
 		TypeAlertRuleChanged,
+		// The sixth append: an audit event, after the rest.
+		TypeMCPAction,
 	}
 }
 

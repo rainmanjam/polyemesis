@@ -1498,6 +1498,22 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// "is this stream public" is a setting an operator flips at runtime and a
 	// route table is built once at startup. Both handlers refuse unless playout
 	// is explicitly enabled; see the access rules at the top of playout.go.
+	// The MCP server (#12). Outside /api/v1 because the path is what an MCP
+	// client is configured with, and "/mcp" is what every guide tells people
+	// to type. A bearer token only (requireToken), scope applied per tool by
+	// the REST routes the tools dispatch to -- see mcp.go. POST only: the
+	// transport is stateless, so there is no GET stream or DELETE to serve, and
+	// chi answers those with 405 as the spec allows.
+	//
+	// root is THIS router: a tool's request is served on the same middleware
+	// and routes as one from curl.
+	root := http.Handler(r)
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requireToken)
+		r.Post(MCPPath, s.mcpEndpoint(root).ServeHTTP)
+	})
+
 	r.Handle(PlayoutPrefix+"*", s.playoutHandler())
 	// The player page. It resolves to the same SPA bundle as the admin UI but
 	// through its own route, so the frame-blocking headers can be relaxed for

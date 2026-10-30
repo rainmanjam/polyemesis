@@ -70,6 +70,13 @@ func everyAuditEvent() []alerts.Event {
 		// a caller name the version to install must sanitise at the source.
 		auditUpgradeStaged("v1.2.3", true, dirty),
 		auditUpgradeRolledBack(true, dirty),
+		// The token NAME is planted, as for auditAPITokenCreated: it is free text
+		// an operator typed, and here it travels in the title as well as a
+		// field. The tool and target are not planting sites: the tool is a name
+		// from the catalogue and the target is built from validated integers
+		// (mcp_tools.go), never from argument text.
+		auditMCPAction("stop_destination", "deploy bot streamkey="+plantedSecret, "destination 3",
+			"done (200)", dirty, true),
 	}
 }
 
@@ -286,6 +293,10 @@ func TestAuditSeveritiesMatchWhatTheFloorsPromise(t *testing.T) {
 		// that takes a channel out of the loop, so it reaches a critical-only
 		// rule. A create or an edit is warning; see auditAlertRuleChanged.
 		alerts.TypeAlertRuleChanged: alerts.SeverityCritical,
+		// The stop family, which is what everyAuditEvent builds: an AI agent
+		// ended something on air. A warning, not critical -- the operator may
+		// well have asked it to; info for the rest of the write tools.
+		alerts.TypeMCPAction: alerts.SeverityWarning,
 	}
 	seen := map[alerts.Type]bool{}
 	for _, ev := range everyAuditEvent() {

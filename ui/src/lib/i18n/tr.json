@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Klip yakalandı",
   "auto.evDebugExported": "Hata ayıklama paketi dışa aktarıldı",
   "auto.evAlertRuleChanged": "Uyarı kuralı değiştirildi",
+  "auto.evMCPAction": "Yapay zekâ asistanı eylemi (MCP)",
   "auto.evDiskLow": "Disk azalıyor",
   "auto.evDiskRecovered": "Disk toparlandı",
   "auto.evIngestLost": "Giriş kaybedildi",

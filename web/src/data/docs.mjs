@@ -218,6 +218,8 @@ const DOCS_BY_SECTION = {
       "A signed JSON POST when a stream starts or stops and when a destination goes live or drops. The envelope, verifying a signature, ordering and gaps."],
     ["EVENTS.md", "Real-time events API: Server-Sent Events",
       "GET /api/v1/events streams destination, ingest, failover, go-live, recording, chat and alert events as SSE, with replay. Event catalogue and examples."],
+    ["MCP.md", "MCP server: connect an AI assistant",
+      "POST /mcp lets Claude Desktop, Claude Code or any MCP client read status and failure causes, and with an admin token start, stop and go live. Tools, scopes, confirmations, setup."],
     ["MQTT.md", "MQTT telemetry and Home Assistant",
       "Retained state on an MQTT 5.0 broker, so a consumer that was offline still gets the current answer. The topic tree, the payloads, and Home Assistant."],
     ["API.md", "HTTP API reference — polyemesis /api/v1",

@@ -1,6 +1,6 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 51,
+  "excusedCeiling": 52,
   "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
@@ -12,9 +12,9 @@
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 236,
+    "methodPatternPairs": 237,
     "swept": 67,
-    "excused": 51,
+    "excused": 52,
     "denied": 118,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
@@ -1259,6 +1259,12 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "POST",
+      "pattern": "/mcp",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "CONNECT",
       "pattern": "/playout/*",
       "coverage": "excused",
@@ -2320,6 +2326,16 @@
         "anonMatchesRead": true
       },
       "counterpart": ""
+    },
+    {
+      "route": "POST /mcp",
+      "scope": "route",
+      "why": "the MCP endpoint (#12): a JSON-RPC envelope, not a REST body, so the sweep's {} is not a message and the transport refuses it with a 400 before any tool runs -- which is what the Want below observes. Every tool is a dispatch of routes this ledger already classifies; the counterpart drives every read tool through a real MCP client as a read token against the planted fixture. The admin token's MCP output is held to the same absence by TestNoMCPToolOrResourceReturnsACredentialToAnyToken.",
+      "want": {
+        "as": "read",
+        "status": 400
+      },
+      "counterpart": "mcpToolOutputs"
     }
   ],
   "shapes": [

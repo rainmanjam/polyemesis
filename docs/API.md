@@ -536,6 +536,10 @@ does not get to change what another operator's console shows them.
 | `GET` | `/ws` | WebSocket: status, levels, logs, chat |
 | `GET` | `/events` | The real-time events API, as Server-Sent Events: destination, ingest, failover, go-live and stop, recording, chat and alert events in the webhook envelope, numbered, with `Last-Event-ID` replay for 5 minutes. `?topics=` filters. A bearer token or the session cookie; no token in the query string. A `read` token is sent everything but `chat` and the audit alerts. Install-wide, so it takes no `?source=`. See [EVENTS.md](EVENTS.md) |
 
+`POST /mcp` (outside `/api/v1`) is the [MCP server](MCP.md): a bearer token
+only, and every tool is a call to one of the routes in this table, made with the
+caller's token, so the scopes above apply to it unchanged.
+
 `/status`, `/source`, `/source/annotations`, `/levels`, `/processes`,
 `/processes/{name}/logs` and `/ws` are programme-scoped: on an install with
 more than one source each of them needs `?source=<id>` and answers `400`

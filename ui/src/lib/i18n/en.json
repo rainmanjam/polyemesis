@@ -64,6 +64,7 @@
   "auto.evClipCaptured": "Clip captured",
   "auto.evDebugExported": "Debug bundle exported",
   "auto.evAlertRuleChanged": "Alert rule changed",
+  "auto.evMCPAction": "AI assistant action (MCP)",
   "auto.evDiskLow": "Disk running low",
   "auto.evDiskRecovered": "Disk recovered",
   "auto.evIngestLost": "Ingest lost",

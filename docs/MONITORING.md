@@ -593,6 +593,7 @@ server itself, and they answer one question: *was that me?*
 | `debug.exported` | `critical` | a debug bundle was downloaded, with how many log records and whether the capture was truncated |
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
 | `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
+| `mcp.action` | `warning` for a stop, `info` otherwise | an AI assistant connected over [MCP](MCP.md) used a write tool; names the tool, the API token, the target and the outcome. See [MCP.md](MCP.md#the-audit-trail) |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
 rather than five. (Deleting an alert rule is `critical` too; it is covered
