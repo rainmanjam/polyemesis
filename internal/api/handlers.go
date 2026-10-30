@@ -1215,6 +1215,13 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Platform: string(d.Platform),
 		Enabled:  d.Enabled,
 		SourceID: d.SourceID,
+		Delay:    metrics.DestDelay{Seconds: d.DelaySeconds},
+	}
+	if dl := d.Delay; dl != nil {
+		md.Delay.Fill = dl.Fill
+		md.Delay.MemBytes, md.Delay.DiskBytes = dl.MemBytes, dl.DiskBytes
+		md.Delay.DroppedBytes = dl.DroppedBytes
+		md.Delay.Draining = dl.Phase == engine.DelayDraining
 	}
 	// The cause CODE and the hold flag only. d.Reason.Line is FFmpeg's stderr,
 	// scrubbed for the status payload but not something to copy into a label:
@@ -2856,6 +2863,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		}
 		s.noteOrphanedIngestStream(dest)
 	}
+	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
+	// airing what is buffered. Marked before the reconcile so no drain starts,
+	// and cut after it for one already playing from an earlier stop.
+	s.mgr.CutOnStop(id)
 	if err := s.store.DeleteDestination(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -2865,6 +2876,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// FFmpeg child keeps publishing to a destination the console no longer
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
+	s.mgr.CutDelay(id)
 	writeMutation(w, http.StatusOK, rw, map[string]string{"status": "deleted"})
 }
 
@@ -2894,6 +2906,12 @@ type destEffect struct {
 	// row the engine is not carrying, which is not a failure -- it is what a
 	// destination on another source's programme looks like from here.
 	Found bool
+	// DrainingSeconds is set when the stop left a broadcast delay playing its
+	// tail out (#11): the destination is still on the air for this long, and
+	// ?now=true cuts it.
+	DrainingSeconds float64
+	// Cut reports that a delayed tail was discarded by this request.
+	Cut bool
 }
 
 // destControl is the result of applyDestinationEnabled, carrying the two
@@ -2914,12 +2932,25 @@ type destControl struct {
 // operator already has, driven from the same code, rather than a parallel
 // implementation that can drift from it. Nothing here is bulk-specific; the
 // pacing and the per-row reporting live entirely in destinations_bulk.go.
-func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
+//
+// cut is the broadcast-delay kill switch (#11): a stop that CUTS a delayed
+// destination's buffered tail instead of letting it play out. It is marked
+// before the reconcile, so the stop never starts a drain, and any drain already
+// playing is cut after it -- a destination stopped earlier, now told "Stop now".
+func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destControl {
+	cut = cut && !enabled
+	if cut {
+		s.mgr.CutOnStop(id)
+	}
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
 	if rw := s.reconcileNow("the destination"); rw != "" {
 		return destControl{ReconcileErr: errors.New(rw)}
+	}
+	var wasCut bool
+	if cut {
+		wasCut = s.mgr.CutDelay(id)
 	}
 	// The EFFECT, not just the intent.
 	//
@@ -2956,8 +2987,12 @@ func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 		if !enabled {
 			eff.Warning = d.StopWarning
 		}
+		if d.Delay != nil && d.Delay.Phase == engine.DelayDraining {
+			eff.DrainingSeconds = d.Delay.DrainRemainingSeconds
+		}
 		break
 	}
+	eff.Cut = wasCut
 	return destControl{Effect: eff}
 }
 
@@ -2967,7 +3002,20 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	ctl := s.applyDestinationEnabled(id, enabled)
+	// ?now=true is "Stop now": a delayed destination's buffered tail is cut,
+	// not aired. Same route, same auth and scope as stop -- it can only ever
+	// put less on the air. Parsed strictly: "now=yes" is refused rather than
+	// silently read as a stop that airs what the operator meant to cut.
+	cut := false
+	if v := r.URL.Query().Get("now"); v != "" {
+		b, perr := strconv.ParseBool(v)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "now must be true or false")
+			return
+		}
+		cut = b
+	}
+	ctl := s.applyDestinationEnabled(id, enabled, cut)
 	if ctl.StoreErr != nil {
 		writeStoreError(w, ctl.StoreErr)
 		return
@@ -2989,7 +3037,13 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 			if ctl.Effect.Warning != "" {
 				resp["warning"] = ctl.Effect.Warning
 			}
+			if ctl.Effect.DrainingSeconds > 0 {
+				resp["drainingSeconds"] = ctl.Effect.DrainingSeconds
+			}
 		}
+	}
+	if ctl.Effect.Cut {
+		resp["cut"] = true
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

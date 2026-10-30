@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/eventstream/streamtest"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
@@ -638,4 +641,56 @@ func TestStartingADestinationInAnotherEngineCutsItsDrainFirst(t *testing.T) {
 	}
 	a.Stop()
 	b.Stop()
+}
+
+// THE DELAY'S PHASES ARE ON THE #17 STREAM, in order: buffering when the
+// destination starts, on-air when the delayed data reaches it, draining when
+// it is stopped, drained when the tail is out. And none of them carries the
+// stream key, which the row in hand has.
+func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *testing.T) {
+	e, _ := storeEngine(t)
+	hub := eventstream.NewHub()
+	e.SetStream(hub)
+	sub := streamtest.Subscribe(t, hub)
+	row := delayedRow(t, e)
+
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	var seen []eventstream.Envelope
+	expect := func(reason string) {
+		t.Helper()
+		env := streamtest.Expect(t, sub, eventstream.TypeDestinationDelay)
+		if env.Reason != reason {
+			t.Fatalf("destination.delay reason = %q, want %q", env.Reason, reason)
+		}
+		if env.Destination == nil || env.Destination.ID != row.ID {
+			t.Fatalf("destination.delay names %+v", env.Destination)
+		}
+		seen = append(seen, env)
+	}
+	expect(DelayBuffering)
+	go feed(e.hub, 200)
+	expect(DelayOnAir)
+	time.Sleep(300 * time.Millisecond)
+	row.Enabled = false
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	e.stopDestinations(map[int64]destPlan{})
+	expect(DelayDraining)
+	expect(delayEventDrained)
+
+	for _, env := range seen {
+		raw, err := json.Marshal(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), row.StreamKey) || strings.Contains(string(raw), row.URL) {
+			t.Fatalf("a destination.delay event carries the publish target: %s", raw)
+		}
+		if !strings.Contains(string(raw), `"seconds":1`) {
+			t.Fatalf("destination.delay data = %v, want seconds 1", env.Data)
+		}
+	}
 }
