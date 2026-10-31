@@ -30,6 +30,10 @@ type Support struct {
 // the API read the same answer. Kick is skipped because no documented route
 // exists, and a path built without one would be a guess shown as a feature.
 var platforms = map[string]Support{
+	// PROVISIONAL: the SEI route is documented by Twitch, but whether Twitch
+	// displays the injected CEA-608 on the stream is a live check on a test
+	// channel with a minted key. Until that passes, the status is "go" for the
+	// build and the operator is shown that display is unverified.
 	"twitch": {
 		Mode:   ModeSEI,
 		Status: "go",

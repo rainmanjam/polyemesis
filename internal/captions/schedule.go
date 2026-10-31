@@ -116,11 +116,23 @@ func (s *Schedule) insert(e event) {
 	s.events[i] = e
 }
 
+// resetSlots is how far behind the newest slot a picture may be before it counts
+// as a discontinuity rather than reordering. Ten seconds is far beyond any B-frame
+// group, and well inside the 26-hour span of the 33-bit timestamp.
+const resetSlots = 10 * 30
+
 // Claim records that a picture exists at pts. The injector claims every picture
 // when it first sees it, before any of them are emitted, so that reordering
 // within the lookahead is visible to the slots that depend on it.
+//
+// A picture far behind the newest one is a discontinuity: the source reconnected
+// or the timestamps wrapped. The slot state belongs to the old timeline, so it is
+// dropped and the schedule starts again at the new position.
 func (s *Schedule) Claim(pts int64) {
 	k := slotOf(pts)
+	if s.anyClaimed && k < s.maxClaimed-resetSlots {
+		s.restart(k)
+	}
 	s.claimed[k] = true
 	if !s.anyClaimed || k > s.maxClaimed {
 		s.maxClaimed = k
@@ -180,4 +192,17 @@ func (s *Schedule) finalise(last int64) {
 		}
 		s.slots[s.cursor] = p
 	}
+}
+
+// restart begins the slot state again at slot k. Cues still waiting are kept: a
+// cue registered for the new timeline must not be lost to the restart. The pairs
+// already queued belong to the old timeline, so they are replaced by an erase,
+// which clears whatever caption was on screen before the stream went backwards.
+func (s *Schedule) restart(k int64) {
+	s.queue = ClearScript()
+	s.claimed = make(map[int64]bool)
+	s.slots = make(map[int64]Pair)
+	s.used = make(map[int64]bool)
+	s.cursor = k
+	s.maxClaimed = k
 }

@@ -168,3 +168,28 @@ func TestEmptyCueTextSchedulesNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestCaptionsResumeAfterTheStreamsTimestampsJumpBackwards covers a source that
+// reconnects, or a 33-bit timestamp wrap. The clock then runs backwards by far
+// more than any reorder window, and a schedule that kept its old slots would
+// answer every later picture with the null pair until the clock climbed back
+// past the old position. The captions must come back on the new timeline.
+func TestCaptionsResumeAfterTheStreamsTimestampsJumpBackwards(t *testing.T) {
+	s := NewSchedule(0)
+	s.PairAt(100 * 90000) // a long-running stream, far along its clock
+
+	// The stream reconnects and its timestamps restart near zero.
+	s.Add(Cue{StartPTS: 90000, EndPTS: 3 * 90000, Text: "BACK"})
+	got := drive(s, 0, 4*90000, tick30)
+	first := PopOnScript("BACK")[0]
+	found := false
+	for _, p := range got {
+		if p == first {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no caption went out after the timestamps jumped backwards; the schedule is stuck on its old slots")
+	}
+}
