@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import {
@@ -154,6 +156,9 @@ const DELAY_LABEL: Record<DelayDirection, TranslationKey> = {
 
 export function RoutingPage() {
   const t = useT();
+  // A28. Declared before any early return: a hook after one changes the hook
+  // count between renders, which React refuses.
+  const saveReasonId = useId();
   const { id } = useParams();
   const navigate = useNavigate();
   const { connected, levels, source, status, programme } = useLiveData();
@@ -983,6 +988,7 @@ export function RoutingPage() {
     );
   }
 
+  const saveReason = !dirty ? t("route.nothingToSave") : null;
   return (
     <div className="p-3">
       <PageHeader
@@ -990,10 +996,17 @@ export function RoutingPage() {
         subtitle={t("route.audioRoutingDesc")}
         actions={
           <>
-            <Button size="sm" onClick={save} disabled={!dirty || saving || !!blockingError}>
+            {/* A28: the reason Save is greyed is visible text, linked to it. */}
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={!dirty || saving || !!blockingError}
+              aria-describedby={disabledDescribedBy(saveReasonId, saveReason)}
+            >
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
               {t("common.save")}
             </Button>
+            <DisabledReason id={saveReasonId} reason={saveReason} className="max-w-xs text-right" />
           </>
         }
       />
@@ -1024,7 +1037,7 @@ export function RoutingPage() {
 
       <div
         className={cn(
-          "grid gap-3 lg:grid-cols-[13rem_minmax(0,1fr)]",
+          "grid gap-3 lg:grid-cols-[16rem_minmax(0,1fr)]",
           view === "overview" && "hidden",
         )}
       >
@@ -1051,8 +1064,8 @@ export function RoutingPage() {
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   }`}
                 >
-                  <span className="flex w-full items-center gap-1 truncate text-[12px] font-medium">
-                    <span className="truncate">{d.name}</span>
+                  <span className="flex w-full items-center gap-1 text-[12px] font-medium">
+                    <span className="min-w-0 break-words">{d.name}</span>
                     {mark && (
                       <span
                         title={markReason ? t(markReason) : undefined}
@@ -1071,7 +1084,7 @@ export function RoutingPage() {
                   </span>
                   <span
                     className={cn(
-                      "truncate font-mono text-sm",
+                      "break-words font-mono text-sm",
                       railTextClass("muted", d.id === selected?.id),
                     )}
                   >
