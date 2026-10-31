@@ -208,7 +208,16 @@ func TestTheClientEmitsConnectionStreamAndSceneEventsFromObsWebsocket(t *testing
 	}
 
 	obs.StreamState(obsbridge.OutputStarted)
-	env := streamtest.Expect(t, r.sub, eventstream.TypeOBSStream)
+	// On connecting, the client reads OBS's current state and announces it
+	// with sync:true. That can land after obs.connection, so skip it: the
+	// event under test is the one OBS pushed.
+	var env eventstream.Envelope
+	for {
+		env = streamtest.Expect(t, r.sub, eventstream.TypeOBSStream)
+		if env.Data.(map[string]any)["sync"] != true {
+			break
+		}
+	}
 	if d := env.Data.(map[string]any); d["state"] != "started" || d["via"] != "websocket" {
 		t.Fatalf("obs.stream data = %v", d)
 	}

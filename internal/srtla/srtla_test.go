@@ -508,16 +508,20 @@ func TestStatsReportsPerLinkCountersBitrateAndShare(t *testing.T) {
 	a, b := h.newLink(), h.newLink()
 	h.register(a, b)
 	payload := string(make([]byte, 984)) // 1000-byte datagrams
-	for range 40 {
+	// Sent in rounds, each counted before the next: 160 KB of loopback UDP
+	// in one burst overflows a small default receive buffer (Windows), and
+	// a dropped datagram is never coming, however long the wait.
+	for i := range 40 {
 		send(t, a, dataPkt(1, payload))
 		send(t, a, dataPkt(2, payload))
 		send(t, a, dataPkt(3, payload))
 		send(t, b, dataPkt(4, payload))
+		wantA, wantB := uint64(3*(i+1)), uint64(i+1)
+		waitFor(t, 3*time.Second, func() bool {
+			st := h.srv.Stats()
+			return st[0].Links[0].Packets >= wantA && st[0].Links[1].Packets >= wantB
+		})
 	}
-	waitFor(t, 3*time.Second, func() bool {
-		st := h.srv.Stats()
-		return st[0].Links[0].Packets >= 120 && st[0].Links[1].Packets >= 40
-	})
 	h.srv.sweep(time.Now().Add(h.srv.window))
 	st := h.srv.Stats()
 	la, lb := st[0].Links[0], st[0].Links[1]
