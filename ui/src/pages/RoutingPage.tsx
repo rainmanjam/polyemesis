@@ -1687,12 +1687,20 @@ function SecondMixCard({
     // in fact, which is better than a confirmation dialog: there is nothing to
     // confirm if nothing is lost.
     //
-    // Otherwise seed from the live mix rather than from a blank profile. A
-    // second mix is defined by how it DIFFERS from the first — drop the music,
-    // keep the commentary — so starting from a copy means the first edit is the
-    // actual decision, and an operator who switches this on and changes nothing
-    // gets two identical tracks rather than a silent one.
-    onChange(structuredClone(restorable ?? liveProfile));
+    // Otherwise seed from the live mix rather than from a blank profile, so the
+    // first edit is the actual decision. The seed excludes music, because that
+    // is the reason a second mix exists at all (the archive must not carry the
+    // licensed bed). DEFAULT: EVERYTHING EXCEPT MUSIC (#15). The archive mix is the live mix
+    // without the music bed, so a first-time switch-on carries the music rights
+    // guard already. The operator can still change it; a restored profile is
+    // returned untouched above.
+    if (restorable !== null) {
+      onChange(structuredClone(restorable));
+      return;
+    }
+    const seeded = structuredClone(liveProfile);
+    seeded.excludeRoles = [...new Set([...(seeded.excludeRoles ?? []), "music" as TrackRole])];
+    onChange(seeded);
   };
 
   return (

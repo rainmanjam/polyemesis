@@ -279,6 +279,26 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
   });
 });
 
+/* #15 default: switching on a second (VOD) mix seeds it with everything except
+ * the music. The plan's default is the archive without the music bed, so an
+ * operator who switches the VOD mix on and changes nothing gets the right
+ * default, not two identical tracks. A restored profile is still an undo. */
+describe("the second (VOD) mix's default: everything except music", () => {
+  // MUTATION: in SecondMixCard.enable, seed from the live mix unchanged (drop the
+  // excludeRoles union). Observed: FAIL, "the VOD mix does not exclude music".
+  it("switching the VOD mix on seeds it from the live mix with music excluded", async () => {
+    stored = dest({ vodProfile: null } as Partial<Destination>);
+    await renderPage();
+    await act(async () => fireEvent.click(document.getElementById("vod-enabled") as HTMLElement));
+    await save();
+    const body = updateDestination.mock.calls[0][1] as { vodProfile: RoutingProfile };
+    expect(body.vodProfile).not.toBeNull();
+    expect(body.vodProfile.excludeRoles ?? []).toContain("music");
+    // Everything else the live mix carries is still in the archive mix.
+    expect(body.vodProfile.tracks.map((s) => s.track).sort()).toEqual([0, 1]);
+  });
+});
+
 /* app-council A27: Presets, Mute and gain and Music rights stay in the main
  * column; loudness, A/V delay, ducking, the second mix and the compiled graph
  * move into an Advanced section that starts collapsed, and the graph itself is
