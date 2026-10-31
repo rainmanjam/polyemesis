@@ -408,6 +408,29 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Wave 3 reserved slots (wave3_reserved.go). Empty until their lane fills
+	// them in; they sit before MigrateSchemaVersion so a filled-in slot is
+	// stamped like any other migration.
+	if err := d.MigrateWave3RolloverState(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := d.MigrateWave3RecurringTemplates(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := d.MigrateWave3CaptionSettings(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := d.MigrateWave3VODTrack(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := d.MigrateWave3YouTubeVertical(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// LAST of all -- see MigrateSchemaVersion's comment for why the order
 	// matters and what this does and does not protect (issue #498).
 	if err := d.MigrateSchemaVersion(); err != nil {
