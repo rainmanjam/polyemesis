@@ -389,6 +389,21 @@ func TestThePolicyTableMatchesWhatEachRealProviderSendsOnTheWire(t *testing.T) {
 			prov := oauth.ProvidersWith(oauth.WithBaseURL(srv.URL))[p]
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
+			// Account and Stats are in the audit table as reads; they run first
+			// so a write from either is caught here too.
+			if _, err := prov.Account(ctx, "fake-client", "fake-access"); err != nil && policyFor(p) == ModeRead {
+				t.Fatalf("the stub did not satisfy %s's Account: %v", p, err)
+			}
+			if st, ok := prov.(oauth.LiveStatter); ok {
+				_, _ = st.Stats(ctx, "fake-client", "fake-access")
+			}
+			mu.Lock()
+			readWrites := append([]string(nil), writes...)
+			mu.Unlock()
+			if len(readWrites) != 0 {
+				t.Errorf("%s's Account or Stats sent %v; both are audited as reads", p, readWrites)
+			}
+
 			_, ingErr := prov.Ingest(ctx, "fake-client", "fake-access")
 
 			mu.Lock()
@@ -449,5 +464,43 @@ func TestTheDriverCannotCallAnIngestMethodExceptThroughThisPackage(t *testing.T)
 	})
 	if !sawRun {
 		t.Errorf("the driver never calls oauthlive.Run, so nothing here governs its live command")
+	}
+}
+
+// TestNoRunModeEmitsACredentialOrAStreamKey drives every path -- read, keys,
+// skipped, opted-in, half-failed create -- and checks that nothing secret the
+// fake handed out comes back in any emitted value. The driver's redact() only
+// knows the environment's secrets; it cannot scrub a stream key, so this
+// package must never hand it one.
+func TestNoRunModeEmitsACredentialOrAStreamKey(t *testing.T) {
+	secrets := []string{"fake-access", "fake-refresh", "fake-secret", "fake-stream-key", "fake-fb-key", "fake-yt-key", "/rtmp/", "/app"}
+	cases := []struct {
+		name string
+		f    *fakeProvider
+		opt  Options
+	}{
+		{"twitch", &fakeProvider{platform: db.PlatformTwitch}, Options{}},
+		{"kick", &fakeProvider{platform: db.PlatformKick}, Options{}},
+		{"youtube", &fakeProvider{platform: db.PlatformYouTube, keys: []string{"fake-yt-key"}}, Options{}},
+		{"facebook-default", &fakeProvider{platform: db.PlatformFacebook}, Options{}},
+		{"facebook-opted-in", &fakeProvider{platform: db.PlatformFacebook}, Options{AllowBroadcast: true}},
+		{"facebook-half-failed", &fakeProvider{platform: db.PlatformFacebook,
+			ingestForErr: errors.New("Facebook created live video 5 but returned no ingest URL")}, Options{AllowBroadcast: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			emit, out := collect()
+			Run(context.Background(), tc.f, creds(), tc.opt, emit)
+			if len(out) < 5 {
+				t.Fatalf("too little output to prove anything: %v", out)
+			}
+			for k, v := range out {
+				for _, s := range secrets {
+					if strings.Contains(v, s) {
+						t.Errorf("%s=%q carries %q", k, v, s)
+					}
+				}
+			}
+		})
 	}
 }
