@@ -46,11 +46,9 @@ function microUses(file: string): number {
 /** Allowed counts, by file. Lower these as usages convert. Raising one needs a
  *  reason in the PR, because the floor is the thing being defended. */
 const ALLOWED: Record<string, number> = {
-  "components/AccountLiveStats.tsx": 10,
   "components/AnchorGrid.tsx": 1,
-  "components/DestinationCard.tsx": 13,
-  "components/FacebookStreamHealth.tsx": 7,
-  "components/McpAccessCard.tsx": 3,
+  "components/DestinationCard.tsx": 5,
+  "components/FacebookStreamHealth.tsx": 3,
   "components/OnAirBar.tsx": 0,
   "components/OverlaySettings.tsx": 11,
   "components/PreviewPlayer.tsx": 3,
@@ -60,11 +58,11 @@ const ALLOWED: Record<string, number> = {
   // The unit beside a stat value ("ms", "%"). A unit, not content.
   "components/signature/Stat.tsx": 1,
   "pages/ClipEditor.tsx": 14,
-  "pages/ClipsPage.tsx": 4,
-  "pages/Dashboard.tsx": 31,
+  "pages/ClipsPage.tsx": 3,
+  "pages/Dashboard.tsx": 5,
   "pages/LibraryPage.tsx": 6,
-  "pages/MonitoringPage.tsx": 20,
-  "pages/RecordingsPage.tsx": 8,
+  "pages/MonitoringPage.tsx": 7,
+  "pages/RecordingsPage.tsx": 7,
 };
 
 const PRIMITIVE_DIRS = ["components/ui/", "components/signature/"];
@@ -100,5 +98,18 @@ describe("the 12px floor for content", () => {
       if (n > allowed) hits.push(`${rel} has ${n}, allowed ${allowed}`);
     }
     expect(hits, "use text-sm (12px) for new text; lower the count when converting").toEqual([]);
+  });
+
+  it("every recorded count is exact, so a conversion lowers it and the slack cannot be spent later", () => {
+    // app-council A94. A count left above the real number is room for a new
+    // 10px usage to land unnoticed: the ratchet above only says "no more
+    // than". Each listed file must hold exactly its count, so converting a
+    // usage fails here until the count comes down with it.
+    const stale: string[] = [];
+    for (const [rel, allowed] of Object.entries(ALLOWED)) {
+      const n = microUses(join(SRC, rel));
+      if (n !== allowed) stale.push(`${rel} has ${n}, recorded ${allowed}`);
+    }
+    expect(stale, "set the recorded count to the file's real count").toEqual([]);
   });
 });

@@ -115,9 +115,9 @@ export function McpAccessCard() {
                       />
                       <Label htmlFor={`mcp-level-${level}`}>{t(label)}</Label>
                     </div>
-                    <span className="text-micro text-muted-foreground">{t(desc)}</span>
+                    <span className="text-sm text-muted-foreground">{t(desc)}</span>
                     {warning && (
-                      <span className="flex items-start gap-1 text-micro text-warn">
+                      <span className="flex items-start gap-1 text-sm text-warn">
                         <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {t(warning)}
                       </span>
                     )}
@@ -133,7 +133,7 @@ export function McpAccessCard() {
               >
                 {t("mcp.createToken")}
               </Link>
-              <span className="text-micro text-muted-foreground">{t("mcp.tokenHint")}</span>
+              <span className="text-sm text-muted-foreground">{t("mcp.tokenHint")}</span>
             </div>
           </>
         )}

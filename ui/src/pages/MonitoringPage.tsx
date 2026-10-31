@@ -357,7 +357,7 @@ export function ExpertPanel() {
                 {t("mon.clear")}
               </Button>
               {!shown && (
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("mon.resolveHint")}
                 </span>
               )}
@@ -424,7 +424,7 @@ export function ExpertPanel() {
                   {resolved.command.command}
                 </pre>
                 {resolved.command.note && (
-                  <p className="mt-1 text-micro text-muted-foreground">{resolved.command.note}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{resolved.command.note}</p>
                 )}
               </div>
             )}
@@ -444,7 +444,7 @@ export function ExpertPanel() {
                 )}
                 {dryRun.output && (
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                       {t("i18nSweep.ffmpegOutput")}
                     </summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
@@ -492,7 +492,7 @@ function TileRemedy({
   onClick?: () => void;
 }) {
   return (
-    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-micro text-warn">
+    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-sm text-warn">
       <span>{text}</span>
       {to ? (
         <Link to={to} className="underline underline-offset-2 hover:text-foreground">
@@ -775,7 +775,7 @@ export function MonitoringPage() {
               value={system ? pct(system.cpuPercent) : "—"}
               tone={(system?.cpuPercent ?? 0) > cpuWarn ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
@@ -794,7 +794,7 @@ export function MonitoringPage() {
               value={system ? pct(system.memPercent) : "—"}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
               {bytes(system?.procMemBytes ?? 0)}
               <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
@@ -807,7 +807,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={status ? bytes(status.relay.rxBytes) : "—"} />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monSubscribers", {
                 count: status?.relay.subscribers?.length ?? 0,
                 port: status?.relay.port ?? "—",
@@ -823,7 +823,7 @@ export function MonitoringPage() {
               value={status ? status.relay.dropped : "—"}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("mon.relayDropsNote")}
               <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
@@ -843,7 +843,7 @@ export function MonitoringPage() {
               value={status ? `${status.relay.lossPercent.toFixed(2)}%` : "—"}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monTsMissing", {
                 lost: (status?.relay.tsLost ?? 0).toLocaleString(),
                 total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
@@ -980,7 +980,7 @@ export function MonitoringPage() {
                     />
                   </div>
                   {p.nextRetryIn ? (
-                    <div className="mt-1 text-micro text-warn">
+                    <div className="mt-1 text-sm text-warn">
                       {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
                     </div>
                   ) : null}
@@ -988,7 +988,7 @@ export function MonitoringPage() {
                       process's own log one click away. The raw lastError stays
                       for an unclassified failure. */}
                   {p.reason ? (
-                    <div className="mt-1 flex flex-col gap-1 text-micro text-down">
+                    <div className="mt-1 flex flex-col gap-1 text-sm text-down">
                       <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
                       <FailureRemedy
                         cause={p.reason.cause}
@@ -998,13 +998,13 @@ export function MonitoringPage() {
                     </div>
                   ) : (
                     p.lastError && (
-                      <div className="mt-1 line-clamp-2 break-words text-micro text-down">
+                      <div className="mt-1 line-clamp-2 break-words text-sm text-down">
                         {p.lastError}
                       </div>
                     )
                   )}
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                       {t("i18nSweep.commandLine")}
                     </summary>
                     <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">

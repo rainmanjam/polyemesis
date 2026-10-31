@@ -504,7 +504,7 @@ export function DestinationCard({
           </div>
         )}
         {warnings.map((w) => (
-          <div key={w} className="flex items-start gap-1.5 text-[10px] text-warn">
+          <div key={w} className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{w}</span>
           </div>
@@ -525,7 +525,7 @@ export function DestinationCard({
             "warning every time" this note's own comment exists to avoid. The
             claim itself is stated in full where the feature is switched on. */}
         {dest.multitrackNote && (
-          <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span className="break-words">
               <ExperimentalBadge className="mr-1 align-[1px]" />
@@ -539,7 +539,7 @@ export function DestinationCard({
         {(dest.multitrackDivergences ?? []).map((d) => (
           <div
             key={`${d.field}:${d.detail}`}
-            className="flex items-start gap-1.5 pl-4 text-[10px] text-muted-foreground"
+            className="flex items-start gap-1.5 pl-4 text-sm text-muted-foreground"
           >
             <span className="break-words">{d.detail}</span>
           </div>
@@ -549,7 +549,7 @@ export function DestinationCard({
             exists because the alternative was silence: two audio tracks pushed
             at a one-track ingest with nothing anywhere saying so. */}
         {dest.vodAudioDropped && (
-          <div className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span className="break-words">{dest.vodAudioDropped}</span>
           </div>
@@ -559,7 +559,7 @@ export function DestinationCard({
             they have redundancy. So its state is rendered beside the primary's
             whether it is healthy or not. */}
         {dest.backupProcess && (
-          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <span>{t("i18nSweep.backupFeed")}</span>
             {/* Through toneForState, like every other state in the app. The
                 two hand-written classes this replaced were `text-ok` and
@@ -574,7 +574,7 @@ export function DestinationCard({
           </div>
         )}
         {dest.backupError && (
-          <div className="flex items-start gap-1.5 text-[10px] text-warn">
+          <div className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{dest.backupError}</span>
           </div>
@@ -589,7 +589,7 @@ export function DestinationCard({
             href={`https://facebook.com/${dest.facebookBroadcastId}`}
             target="_blank"
             rel="noreferrer"
-            className="text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
             {t("i18nSweep.scheduledFacebook")}
           </a>
@@ -607,7 +607,7 @@ export function DestinationCard({
             One key for the whole sentence; the file name is a slot, so each
             language puts it where its own word order wants it. */}
         {dest.rolledOverTo && (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {tn("dash.rolledOverTo", {
               file: <span className="font-mono">{dest.rolledOverTo.split("/").pop()}</span>,
             })}

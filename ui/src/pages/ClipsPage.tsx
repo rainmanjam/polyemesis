@@ -500,7 +500,7 @@ export function ClipsPage() {
                     beside it rather than nowhere, and the sentence says where
                     the number goes instead. */}
                 {!buffer?.enabled && (
-                  <span className="text-micro text-warn">{t("clips.windowAppliesOnEnable")}</span>
+                  <span className="text-sm text-warn">{t("clips.windowAppliesOnEnable")}</span>
                 )}
                 <span className="text-micro text-muted-foreground">
                   {t("clips.windowNote", {

@@ -368,7 +368,7 @@ export function GoLiveComposer() {
             the live count read as a fault; the card's one sentence says what
             to do instead (A86). */}
         {targets.length > 0 && (
-          <span className="font-mono text-micro text-muted-foreground">
+          <span className="font-mono text-sm text-muted-foreground">
             {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
           </span>
         )}
@@ -404,7 +404,7 @@ export function GoLiveComposer() {
                 onChange={(e) => setTitle(e.target.value)}
               />
               {overLimit.length > 0 && (
-                <p className="text-micro text-down">
+                <p className="text-sm text-down">
                   {t("i18nSweep.titleTooLong", { platforms: overLimit.map((o) => o.platform).join(", ") })}
                 </p>
               )}
@@ -431,14 +431,14 @@ export function GoLiveComposer() {
                 onChange={(e) => setDescription(e.target.value)}
               />
               {descriptionOverLimit.length > 0 && (
-                <p className="text-[10px] text-down">
+                <p className="text-sm text-down">
                   {t("dash.descTooLong", {
                     platforms: descriptionOverLimit.map((t) => t.platform).join(", "),
                   })}
                 </p>
               )}
               {noDescription.length > 0 && (
-                <p className="text-micro text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {t("i18nSweep.noDescriptionField", {
                     platforms: noDescription.map((o) => o.platform).join(", "),
                   })}
@@ -455,7 +455,7 @@ export function GoLiveComposer() {
                 onChange={(e) => setCategory(e.target.value)}
               />
               {categoryHint && (
-                <p className="text-micro text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {categoryHint} {t("i18nSweep.categoryTypeName")}
                 </p>
               )}
@@ -470,7 +470,7 @@ export function GoLiveComposer() {
                   placeholder={t("dash.tagsPlaceholder")}
                   onChange={(e) => setTags(e.target.value)}
                 />
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("i18nSweep.tagsReplace", { platforms: tagTargets.map((o) => o.platform).join(", ") })}
                 </span>
               </div>
@@ -480,7 +480,7 @@ export function GoLiveComposer() {
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("dash.broadcastSettings")}</Label>
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("i18nSweep.platformsOnly", { platforms: broadcastAccounts.map((w) => w.platform).join(", ") })}
                   </span>
                 </div>
@@ -493,13 +493,13 @@ export function GoLiveComposer() {
                     value={scheduledStart}
                     onChange={(e) => setScheduledStart(e.target.value)}
                   />
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("i18nSweep.leaveEmptyKeep")}
                   </span>
                 </div>
 
                 {contentDetailsLocked && (
-                  <p className="text-micro text-warn">
+                  <p className="text-sm text-warn">
                     {lockedReason ||
                       t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
@@ -530,7 +530,7 @@ export function GoLiveComposer() {
                     </div>
                   ))}
                 </div>
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("dash.leaveUnchangedNote")}
                 </span>
               </div>
@@ -540,7 +540,7 @@ export function GoLiveComposer() {
               <Button size="sm" onClick={push} disabled={empty || busy}>
                 <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
-              <span className="text-micro text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("i18nSweep.appliesTo", {
                   who: accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount"),
                 })}
@@ -548,7 +548,7 @@ export function GoLiveComposer() {
             </div>
 
             {withCompliance.length > 0 && (
-              <p className="text-micro text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {t("i18nSweep.pushSendsCompliance", {
                   accounts: withCompliance.map((o) => o.accountName || o.platform).join(", "),
                 })}
@@ -569,7 +569,7 @@ export function GoLiveComposer() {
                   may not have reached the platform, and only the platform can
                   say which now. */}
               {jobLost && (
-                <p role="status" className="text-micro text-warn">
+                <p role="status" className="text-sm text-warn">
                   {t("dash.pushStatusLost")}
                 </p>
               )}
@@ -598,27 +598,27 @@ export function GoLiveComposer() {
                     </div>
 
                     {res.applied.length > 0 && (
-                      <p className="text-micro text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {t("i18nSweep.pushApplied", { fields: res.applied.join(", ") })}
                         {res.category && ` — ${t("i18nSweep.pushCategory", { category: res.category })}`}
                         {res.target && ` ${t("i18nSweep.pushOnTarget", { target: res.target })}`}
                       </p>
                     )}
                     {res.skipped && res.skipped.length > 0 && (
-                      <p className="text-micro text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {t("i18nSweep.pushNotSupported", { fields: res.skipped.join(", ") })}
                       </p>
                     )}
                     {res.message && (
                       <StatusReason
-                        className="text-micro text-down"
+                        className="text-sm text-down"
                         reason={res.message}
                         step={t("foundation.status.step.metaPush", { platform: res.platform })}
                         asOf={null}
                       />
                     )}
                     {res.warnings?.map((warn) => (
-                      <p key={warn} className="text-micro text-warn">
+                      <p key={warn} className="text-sm text-warn">
                         {warn}
                       </p>
                     ))}
@@ -840,7 +840,7 @@ function BulkDestinationControl({
                 {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
                   <StatusReason
-                    className={`text-micro ${
+                    className={`text-sm ${
                       res.outcome === "failed" ? "text-down" : "text-warn"
                     }`}
                     reason={res.message}
@@ -1763,7 +1763,7 @@ export function Dashboard() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {onBackup && failoverState?.primaryLive !== true && (
-                <p className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-micro leading-relaxed text-warn">
+                <p className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-sm leading-relaxed text-warn">
                   {t("dash.ingestPrimaryOffline")}
                 </p>
               )}
@@ -1806,7 +1806,7 @@ export function Dashboard() {
               </div>
 
               {source?.video && (
-                <div className="font-mono text-micro text-muted-foreground">
+                <div className="font-mono text-sm text-muted-foreground">
                   {source.video.codec} {source.video.width}×{source.video.height}
                   {source.video.frameRate > 0 && ` @ ${source.video.frameRate.toFixed(2)}fps`}
                 </div>
@@ -1817,7 +1817,7 @@ export function Dashboard() {
                 {urlCarriesCredential(system?.ingestUrl ?? "") ? (
                   <SecretCode value={system?.ingestUrl ?? ""} />
                 ) : (
-                  <code className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
+                  <code className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
                     {system?.ingestUrl ?? "…"}
                   </code>
                 )}
@@ -1830,7 +1830,7 @@ export function Dashboard() {
                   ingestProblem, the same rule the header chip uses, so a stale
                   lastError never sits beside a stream that has recovered. */}
               {ingestReason && (
-                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-micro text-down">
+                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
                   <StatusReason
                     reason={ingestReason}
                     step={t("foundation.status.step.ingest")}
@@ -1840,7 +1840,7 @@ export function Dashboard() {
               )}
 
               {system && !system.ffmpeg.hasLibsrt && (
-                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn">
+                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
                   {t("dash.noLibsrt", { flag: "--enable-libsrt" })}
                 </div>
               )}
@@ -1888,7 +1888,7 @@ export function Dashboard() {
                       <StatusDot tone={tone} size="sm" />
                       <span className="text-tiny">{label}</span>
                     </div>
-                    <span className="font-mono text-micro text-muted-foreground">
+                    <span className="font-mono text-sm text-muted-foreground">
                       {proc ? stateLabel(proc.state) : absent}
                     </span>
                   </div>
@@ -1912,7 +1912,7 @@ export function Dashboard() {
               <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
                 <span className="text-tiny text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
-                  <span className="font-mono text-micro text-muted-foreground">
+                  <span className="font-mono text-sm text-muted-foreground">
                     {t("i18nSweep.noRenditions")}
                   </span>
                 ) : (
@@ -1925,7 +1925,7 @@ export function Dashboard() {
                         />
                         <span className="truncate text-tiny">{r.name}</span>
                       </div>
-                      <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
+                      <span className="tnum shrink-0 font-mono text-sm text-muted-foreground">
                         {r.consumers === 1 ? t("i18nSweep.destsOne") : t("i18nSweep.destsMany", { count: r.consumers })}
                       </span>
                     </div>
