@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
 // Storage for planned rollover (#19): the per-destination settings and the session a rollover counts.
@@ -144,4 +146,23 @@ func scanRollover(s interface{ Scan(...any) error }) (RolloverSettings, error) {
 	out.LastRolloverAt = timeOrZero(rolloverAt)
 	out.UpdatedAt = timeOrZero(updated)
 	return out, nil
+}
+
+// rolloverTemplateQuery reads the template behind the occurrence whose platform event is the broadcast. It is a
+// constant for the reason the other reads are, and it needs both the destination and the id: the same event id
+// cannot belong to two destinations, but a rollover must never borrow another destination's template.
+const rolloverTemplateQuery = `SELECT ` + templateColumns + ` FROM broadcast_templates
+	WHERE schedule_id = (
+		SELECT schedule_id FROM recurring_occurrences
+		WHERE destination_id = ? AND platform_event_id = ? AND platform_event_id <> ''
+		ORDER BY id DESC LIMIT 1)`
+
+// RolloverTemplateFor returns the recurring template a live broadcast was created from, if any. ErrNotFound means
+// the broadcast did not come from a template, and the caller must copy the live broadcast instead.
+func (d *DB) RolloverTemplateFor(destinationID int64, broadcastID string) (*scheduler.BroadcastTemplate, error) {
+	t, err := scanTemplate(d.sql.QueryRow(rolloverTemplateQuery, destinationID, broadcastID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return t, err
 }

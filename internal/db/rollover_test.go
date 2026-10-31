@@ -1,8 +1,11 @@
 package db
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
 // Planned rollover's storage keeps three things apart: the operator's configuration, the session a rollover
@@ -96,5 +99,39 @@ func TestOnlyEnabledRolloversAreListedForTheSweep(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].DestinationID != 1 {
 		t.Fatalf("enabled list = %+v, want only destination 1", list)
+	}
+}
+
+// TestARolloverFindsTheTemplateTheLiveBroadcastCameFrom checks the link a rollover uses to keep the show's title,
+// description and privacy: the recurring occurrence whose platform event is the live broadcast, then its template.
+// A broadcast that did not come from a template must find none, so the caller copies it instead of inventing one.
+func TestARolloverFindsTheTemplateTheLiveBroadcastCameFrom(t *testing.T) {
+	d := testDB(t)
+	at := time.Date(2026, 11, 1, 19, 0, 0, 0, time.UTC)
+	if _, err := d.SaveBroadcastTemplate(scheduler.BroadcastTemplate{
+		ScheduleID: 5, TitlePattern: "Thursday show {date}", Description: "Weekly notes", Privacy: "unlisted",
+	}); err != nil {
+		t.Fatalf("save template: %v", err)
+	}
+	id, err := d.ClaimOccurrence(scheduler.Occurrence{ScheduleID: 5, DestinationID: 8, At: at})
+	if err != nil {
+		t.Fatalf("claim occurrence: %v", err)
+	}
+	if err := d.ResolveOccurrence(id, "live-bcast-1", "Thursday show 2026-11-01"); err != nil {
+		t.Fatalf("resolve occurrence: %v", err)
+	}
+
+	got, err := d.RolloverTemplateFor(8, "live-bcast-1")
+	if err != nil {
+		t.Fatalf("template for the live broadcast: %v", err)
+	}
+	if got.TitlePattern != "Thursday show {date}" || got.Description != "Weekly notes" || got.Privacy != "unlisted" {
+		t.Errorf("template = %+v, want the one the occurrence came from", got)
+	}
+	if _, err := d.RolloverTemplateFor(8, "not-from-a-template"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a broadcast with no occurrence found a template: err = %v, want ErrNotFound", err)
+	}
+	if _, err := d.RolloverTemplateFor(9, "live-bcast-1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the same broadcast on a different destination found a template: err = %v", err)
 	}
 }
