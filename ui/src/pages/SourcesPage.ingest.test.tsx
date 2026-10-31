@@ -45,7 +45,7 @@ const noop = () => {};
 function draw(over: Partial<SourceView>, previewOn = false) {
   return render(
     <MemoryRouter>
-      <SourceCard source={source(over)} busy={false} onPatch={noop} onRotate={noop} onDelete={noop} previewOn={previewOn} />
+      <SourceCard source={source(over)} busy={false} onPatch={noop} onRotate={noop} onDelete={noop} onAddDestination={noop} previewOn={previewOn} />
     </MemoryRouter>,
   );
 }
@@ -99,7 +99,8 @@ describe("SourceCard receiving thumbnail (A2)", () => {
   it("shows a live thumbnail of the feed when the preview is on", () => {
     draw({ publishing: true, running: true } as Partial<SourceView>, true);
     expect(screen.getByTestId("source-thumbnail")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Add destination" })).toBeTruthy();
+    // A30: a button that opens the dialog on this programme, not a link to Dashboard.
+    expect(screen.getByRole("button", { name: "Add destination" })).toBeTruthy();
   });
 
   it("says how to get one when the preview is off", () => {

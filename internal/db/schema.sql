@@ -245,7 +245,13 @@ CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick
     client_id         TEXT NOT NULL,
     client_secret_enc BLOB NOT NULL,         -- secretbox sealed
-    updated_at        INTEGER NOT NULL
+    updated_at        INTEGER NOT NULL,
+    -- The last credential check on this pair; '' / 0 = never checked.
+    -- MigratePlatformCredsCheck adds these to older installs.
+    check_state       TEXT    NOT NULL DEFAULT '',
+    check_method      TEXT    NOT NULL DEFAULT '',
+    check_detail      TEXT    NOT NULL DEFAULT '',
+    checked_at        INTEGER NOT NULL DEFAULT 0
 );
 
 -- One row per connected channel. Multiple accounts per platform is the point:
@@ -359,7 +365,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     enabled         INTEGER NOT NULL DEFAULT 1,
     action          TEXT    NOT NULL DEFAULT 'start',  -- start | stop | playlist.start | playlist.stop
     kind            TEXT    NOT NULL DEFAULT 'once',   -- once | daily | weekly
-    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every destination, and required empty for a playlist.* action
+    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; the named destinations when all_destinations = 0, and required empty for a playlist.* action
     tz              TEXT    NOT NULL DEFAULT '',       -- IANA zone; empty = UTC
     at_minutes      INTEGER NOT NULL DEFAULT 0,        -- minutes past local midnight
     days            TEXT    NOT NULL DEFAULT '[]',     -- JSON array of weekday numbers, Sunday = 0
@@ -367,7 +373,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     grace_seconds   INTEGER NOT NULL DEFAULT 300,
     last_run_at     INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
+    updated_at      INTEGER NOT NULL,
+    all_destinations INTEGER NOT NULL DEFAULT 0          -- app-council A54: 1 = every destination; a start/stop needs this or a list
 );
 
 -- The durable background job queue. Every heavy task — transcription, proxy
@@ -669,6 +676,28 @@ CREATE TABLE IF NOT EXISTS chat_overlays (
     key_rotated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_overlays_key ON chat_overlays(overlay_key) WHERE overlay_key != '';
+
+-- The rolling clip buffer's switch and window, ONE ROW PER PROGRAMME
+-- (app-council A14). It used to live only in the engine's memory, so every
+-- restart switched it off. Per programme because the buffer is: Studio B's
+-- operator turning capture on must not start Main's.
+--
+-- NO ROW MEANS OFF, which is what every source that predates this table and
+-- every new source reads. The buffer holds a window of video in memory, and an
+-- upgrade must not start paying for one nobody asked for.
+--
+-- Its own table rather than columns on sources, because PUT /sources/{id}
+-- decodes the request over the stored row and writes every column it carries
+-- back: a stale tab would switch the buffer back to whatever it showed. With no
+-- column there, that path cannot reach it (the same device the token columns
+-- use, #505). window_seconds 0 means the engine's default window.
+CREATE TABLE IF NOT EXISTS source_clip_buffers (
+    source_id      INTEGER PRIMARY KEY,
+    enabled        INTEGER NOT NULL DEFAULT 0,
+    window_seconds INTEGER NOT NULL DEFAULT 0,
+    updated_at     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
 
 -- MCP access: whether the /mcp endpoint exists at all, and which capability
 -- levels an MCP token may reach. One row, id 1, written only by the

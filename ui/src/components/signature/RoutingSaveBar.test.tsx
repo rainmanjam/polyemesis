@@ -22,16 +22,34 @@ const base = {
   onDiscard: vi.fn(),
 };
 
+/** The bar's own status line; SaveStatus is a second, separate one. */
+const bar = () => screen.getAllByRole("status")[0];
+
 describe("RoutingSaveBar", () => {
-  it("is absent when nothing is pending", () => {
-    render(<RoutingSaveBar {...base} dirty={false} />);
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+  // A26: the bar is the page's only save surface, so it no longer vanishes
+  // when clean. It says nothing is pending, greys both buttons, and links the
+  // greyed Save changes to the sentence that says why (A28).
+  it("stays, quiet and greyed, when nothing is pending", () => {
+    render(<RoutingSaveBar {...base} dirty={false} reason="Nothing to save until a route changes." />);
+    expect(bar().textContent).toContain("No unsaved changes.");
+    expect(bar().textContent).not.toContain("YouTube main");
+    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    const discard = screen.getByRole("button", { name: /discard/i }) as HTMLButtonElement;
+    expect(discard.disabled).toBe(true);
+    const id = save.getAttribute("aria-describedby");
+    expect(discard.getAttribute("aria-describedby")).toBe(id);
+    expect(document.getElementById(id as string)?.textContent).toContain("Nothing to save");
+  });
+
+  it("carries the kit's SaveStatus beside its buttons", () => {
+    render(<RoutingSaveBar {...base} saveState="failed" />);
+    expect(document.querySelector("[data-save-state]")?.getAttribute("data-save-state")).toBe("failed");
   });
 
   it("names the destination the pending change applies to", () => {
     render(<RoutingSaveBar {...base} />);
-    expect(screen.getByRole("status").textContent).toContain("YouTube main");
+    expect(bar().textContent).toContain("YouTube main");
   });
 
   it("warns that saving restarts an enabled destination", () => {
@@ -39,7 +57,7 @@ describe("RoutingSaveBar", () => {
     // one fact the operator must see before pressing Save, so the warning is
     // part of the bar, not a tooltip on the button.
     render(<RoutingSaveBar {...base} restarts />);
-    const text = screen.getByRole("status").textContent ?? "";
+    const text = bar().textContent ?? "";
     expect(text).toContain("YouTube main");
     expect(text.toLowerCase()).toContain("restart");
   });
@@ -49,7 +67,7 @@ describe("RoutingSaveBar", () => {
     // command channel. Warning of a restart there overstates the cost; a
     // Windows server still restarts, so the wording is "where supported".
     const { container } = render(<RoutingSaveBar {...base} restarts levelOnly />);
-    const text = screen.getByRole("status").textContent ?? "";
+    const text = bar().textContent ?? "";
     expect(text).toContain("YouTube main");
     expect(text).toMatch(/live, without a restart, where the server supports it/);
     expect(container.firstElementChild?.className).not.toMatch(/border-warn/);
@@ -57,12 +75,12 @@ describe("RoutingSaveBar", () => {
 
   it("still warns of a restart for a structural change", () => {
     render(<RoutingSaveBar {...base} restarts levelOnly={false} />);
-    expect(screen.getByRole("status").textContent).toMatch(/^Saving restarts/);
+    expect(bar().textContent).toMatch(/^Saving restarts/);
   });
 
   it("does not claim a restart for a destination that is disabled", () => {
     render(<RoutingSaveBar {...base} restarts={false} />);
-    expect(screen.getByRole("status").textContent?.toLowerCase()).not.toContain("restart");
+    expect(bar().textContent?.toLowerCase()).not.toContain("restart");
   });
 
   it("calls onSave only when Save is pressed, never on its own", () => {
@@ -70,7 +88,7 @@ describe("RoutingSaveBar", () => {
     const onDiscard = vi.fn();
     render(<RoutingSaveBar {...base} onSave={onSave} onDiscard={onDiscard} />);
     expect(onSave).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save changes$/i }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onDiscard).not.toHaveBeenCalled();
   });
@@ -87,7 +105,7 @@ describe("RoutingSaveBar", () => {
   it("keeps Save disabled while the form is blocked by a compile error", () => {
     render(<RoutingSaveBar {...base} blocked />);
     expect(
-      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: /^save changes$/i }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 

@@ -187,7 +187,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
   // from the RELAY. If it were repointed at status.ingest.progress the test
   // above would still pass on some other transport, and this one is what says
   // the answer tracks the bytes rather than being pinned on.
-  test("the same source with no bytes arriving reads Offline", async ({ page }) => {
+  test("the same source with no bytes arriving reads Stopped", async ({ page }) => {
     const console_ = watchConsole(page);
     await muteSocket(page);
     await patchStatus(page, (s) => {
@@ -205,7 +205,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
       "the chrome says the stream is up when no bytes are arriving. A false " +
         "'live' is worse than a missed one: it trains the operator to stop " +
         "reading the indicator",
-    ).toHaveText("Offline");
+    ).toHaveText("Stopped");
 
     expect(console_.errors, "the chrome logged errors").toEqual([]);
   });
@@ -213,7 +213,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
   // The other half of the derivation. The probe survives the publisher going
   // away, and the bitrate series briefly reads zero between reconnects, so both
   // signals are required and each needs its own case.
-  test("bytes arriving at a source that has never probed still reads Offline", async ({ page }) => {
+  test("bytes arriving at a source that has never probed still reads Stopped", async ({ page }) => {
     const console_ = watchConsole(page);
     await muteSocket(page);
     await patchStatus(page, (s) => {
@@ -230,7 +230,7 @@ test.describe("the chrome answers 'am I on air' from arriving bytes", () => {
       ingestStatus(page),
       "the chrome calls a source live before anything has been probed, so " +
         "arriving noise that no decoder accepted is reported as a broadcast",
-    ).toHaveText("Offline");
+    ).toHaveText("Stopped");
 
     expect(console_.errors, "the chrome logged errors").toEqual([]);
   });

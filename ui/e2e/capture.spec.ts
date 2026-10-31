@@ -41,7 +41,10 @@ test("dashboard — the hero shot", async ({ page }) => {
   // is the exact failure docs/media/README.md says this script refuses to
   // produce. "Offline" appears in the header and on the ingest badge and
   // nowhere else, so requiring zero of them cannot pass early.
-  await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
+  // The ingest's not-running word is Stopped since app-council A91, and
+  // Stopped can also be a pipeline row's honest answer, so the guard reads the
+  // header ingest chip itself rather than the whole page.
+  await expect(page.getByTestId("chrome-ingest-status")).not.toHaveText("Stopped", {
     timeout: 120_000,
   });
   // BEFORE the placeholder guard below, not after it. Waiting for the
@@ -56,8 +59,6 @@ test("dashboard — the hero shot", async ({ page }) => {
   await shoot(page, `${OUT}/01-dashboard.png`, [
     "Waiting for a stream…",
     "Ingest offline",
-    // Exact: the standalone ingest badge, not every string containing the word.
-    { text: "Offline", exact: true },
   ]);
 
   // The fan-out, framed on its own: thirteen destinations across five
@@ -137,6 +138,10 @@ test("routing — the thing nothing else does", async ({ page }) => {
 
   // The compiled filtergraph, which is the claim this product makes about
   // being inspectable. Worth its own frame rather than being cropped out.
+  // Since A27 it sits in the collapsed Advanced section, behind a button, so
+  // both are opened first; guarded like the rest of this optional frame.
+  await page.locator('[data-testid="routing-advanced"] summary').first().click().catch(() => {});
+  await page.getByRole("button", { name: "Show FFmpeg graph" }).first().click().catch(() => {});
   const graph = page.locator("text=/pan=stereo/").first();
   if (await graph.isVisible().catch(() => false)) {
     await graph.scrollIntoViewIfNeeded();
@@ -465,6 +470,18 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // is the product looking broken, which this harness refuses to photograph.
   const falseErrors = page.getByText(/^\d+ errors?$/);
   await expect(falseErrors).toHaveCount(0, { timeout: 30_000 });
+  // The process list is a table now (A72): its count is a bare number in the
+  // Errors column, which the "N errors" text match above cannot see.
+  const processTable = page
+    .getByRole("table")
+    .filter({ has: page.getByRole("columnheader", { name: "Errors", exact: true }) });
+  await expect
+    .poll(async () =>
+      (await processTable.locator("tbody tr > td:last-child").allInnerTexts())
+        .map((t) => t.trim())
+        .filter((t) => /^\d+$/.test(t) && t !== "0"),
+    )
+    .toEqual([]);
   await expect(page.getByText("Errors 0", { exact: true })).toBeVisible();
   await expect(page.getByText(/^No errors in the last \d+ s$/)).toBeVisible();
   // And the filtered log has lines in it: an empty log would be a picture of

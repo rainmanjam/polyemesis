@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Info, OctagonAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
-import { timestamp } from "@/lib/format";
+import { clockTime, timestamp } from "@/lib/format";
 import type { TimelineRow } from "@/lib/types";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,9 @@ export function MonitorTimeline() {
   const t = useT();
   const [rows, setRows] = useState<TimelineRow[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // When the rows on screen were last read. A failed refresh keeps them and
+  // says how old they are, rather than hiding the incident that was loaded (A69).
+  const [readAt, setReadAt] = useState("");
   const [family, setFamily] = useState<Family | null>(null);
 
   useEffect(() => {
@@ -56,6 +59,7 @@ export function MonitorTimeline() {
         .then((r) => {
           if (cancelled) return;
           setRows(r);
+          setReadAt(new Date().toISOString());
           setFailed(false);
         })
         .catch(() => {
@@ -75,11 +79,14 @@ export function MonitorTimeline() {
         <CardTitle>{t("timeline.title")}</CardTitle>
       </CardHeader>
       <CardContent>
-        {failed ? (
-          <p role="alert" className="text-tiny text-down">
-            {t("timeline.loadFailed")}
+        {failed && (
+          <p role="alert" className="mb-2 text-tiny text-down">
+            {rows === null
+              ? t("timeline.loadFailed")
+              : t("timeline.refreshFailed", { time: clockTime(readAt) })}
           </p>
-        ) : rows === null ? null : rows.length === 0 ? (
+        )}
+        {rows === null ? null : rows.length === 0 ? (
           <p className="text-tiny text-muted-foreground">{t("timeline.empty")}</p>
         ) : (
           <div className="flex flex-col gap-2">

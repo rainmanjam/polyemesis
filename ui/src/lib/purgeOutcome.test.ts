@@ -40,10 +40,13 @@ describe("JobsPage, the policy Save button", () => {
     // clobber the draft (load() guards on dirtyRef.current); the defect was
     // the vanishing button alone.
     expect(src).not.toContain("{!dirty && (");
-    // One Save left, in the dirty bar, and the bar is sticky because this tab
-    // is a long two-column grid.
+    // One Save left, in a sticky bar, because the per-kind cards make this tab
+    // long. Since A63 the bar is always rendered (pinned to the bottom) and
+    // Save is disabled rather than withdrawn while there is nothing to write;
+    // JobsPage.policyLayout.test.tsx checks that against the rendered page.
     expect(src.split('t("jobs.savePolicy")').length - 1).toBe(1);
-    expect(src).toContain('className="sticky top-0 z-10 flex items-center justify-end gap-2');
+    expect(src).toContain('className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2');
+    expect(src).not.toContain("{dirty && (");
   });
 });
 

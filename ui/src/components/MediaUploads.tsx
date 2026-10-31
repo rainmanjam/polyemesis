@@ -20,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { EmptyState } from "@/components/EmptyState";
 import { canReverify, uploadNotice } from "@/lib/upload-verdict";
 import {
   cancelledNames,
@@ -310,9 +311,7 @@ export function MediaUploads() {
         )}
 
         {files.length === 0 && inFlight.length === 0 ? (
-          <div className="text-xs text-muted-foreground">
-            {t("media.nothingUploaded")}
-          </div>
+          <EmptyState title={t("media.nothingUploaded")} className="py-4" />
         ) : (
           <div className="grid gap-1">
             {files.map((f) => (

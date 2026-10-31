@@ -69,10 +69,22 @@ describe("OnAirBar headline", () => {
 });
 
 describe("OnAirBar counts", () => {
-  it("names the live-over-enabled ratio in words, not as a bare fraction", () => {
+  it("names the live, stopped and off counts in words, not as a bare fraction", () => {
     // "2/3" alone gets read as a bitrate on a console full of them.
     render(<OnAirBar status={status([proc("running"), proc("running", { id: did(2) }), proc("failed", { id: did(3) })])} />);
-    expect(screen.getByText(/destinations live/)).toBeTruthy();
+    expect(screen.getByText(/2 live/)).toBeTruthy();
+    expect(screen.getByText(/1 failed/)).toBeTruthy();
+  });
+
+  it("counts against the whole install, and a switched-off card counts as Off, not Stopped", () => {
+    // A2: the denominator used to be enabled destinations only, so "5/5" sat
+    // beside thirteen cards. The numbers now add up to the install. A91: a
+    // switched-off destination is counted under the word its card shows, Off,
+    // and an enabled one that is not running under Stopped.
+    const off = dest({ id: did(4), enabled: false, process: null } as Partial<DestStatus>);
+    render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) }), off])} />);
+    expect(screen.getByText("1 live · 0 stopped · 1 off")).toBeTruthy();
+    expect(screen.getByText(/1 failed/)).toBeTruthy();
   });
 
   it("renders no count at all when it would be zero", () => {
@@ -108,7 +120,7 @@ describe("OnAirBar across-the-room", () => {
   it("keeps the large-type view closed until it is asked for", () => {
     render(<OnAirBar status={status([proc("running")])} />);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: /across the room/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /full-screen status/i })).toBeTruthy();
   });
 });
 
@@ -132,6 +144,24 @@ describe("OnAirBar verdict line", () => {
         translate("en", "health.verdictAttention", { count: 1, total: 2 }),
       ),
     ).toBeTruthy();
+  });
+
+  it("names its scope: the running destinations, not the whole install (app-council A2)", () => {
+    // Two running, one switched off. "All 2 destinations healthy" beside a
+    // page of three cards read as the whole install; the sentence now says
+    // which destinations it is about. Literal English on purpose, so the test
+    // pins the words and not only the key.
+    const st = {
+      ingest: { state: "running", uptimeSec: 760 },
+      destinations: [
+        proc("running"),
+        proc("running", { id: did(2) }),
+        proc("stopped", { id: did(3), enabled: false }),
+      ],
+    } as unknown as Status;
+    render(<OnAirBar status={st} />);
+
+    expect(screen.getByTestId("health-verdict").textContent).toBe("All 2 running destinations healthy");
   });
 
   it("offers a way to the first destination that needs attention", () => {
@@ -171,14 +201,27 @@ describe("OnAirBar on-air strip (A8)", () => {
     expect(screen.getByTestId("on-air-duration").textContent).toMatch(/12/);
   });
 
-  it("offers End all only while something is on air, and it asks the dashboard", () => {
+  it("offers Stop all only while something is on air, and it asks the dashboard", () => {
     let asked = 0;
     const { rerender } = render(
       <OnAirBar status={status([timed("stopped", 0)])} onEndAll={() => asked++} />,
     );
-    expect(screen.queryByRole("button", { name: "End all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop all" })).toBeNull();
     rerender(<OnAirBar status={status([timed("running", 30)])} onEndAll={() => asked++} />);
-    fireEvent.click(screen.getByRole("button", { name: "End all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop all" }));
     expect(asked).toBe(1);
+  });
+});
+
+describe("OnAirBar: the feed behind a running broadcast (A3)", () => {
+  it("says the ingest is not receiving, instead of 'all healthy', when every destination is up over a dead feed", () => {
+    render(<OnAirBar status={status([proc("running")])} ingestReceiving={false} />);
+    expect(screen.getByTestId("health-verdict").textContent).toBe(translate("en", "health.verdictNoIngest"));
+    expect(screen.queryByText(/healthy/i)).toBeNull();
+  });
+
+  it("keeps the healthy line when the feed is receiving", () => {
+    render(<OnAirBar status={status([proc("running")])} ingestReceiving={true} />);
+    expect(screen.getByTestId("health-verdict").textContent).toMatch(/healthy/i);
   });
 });

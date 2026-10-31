@@ -40,17 +40,17 @@ mkdirSync(OUT, { recursive: true });
 export const EMPTY = {
   /** empty.sourcesTitle */
   sources: "No sources yet",
-  /** rend.empty */
-  renditions: "No renditions.",
+  /** rend.emptyTitle ("No renditions yet") and rend.empty ("No renditions. ...") */
+  renditions: "No renditions",
   /** rec.empty */
   recordings: "No recordings yet.",
   /** lib.nothingRecorded */
   library: "Nothing recorded yet.",
-  /** meters.nothingToMeasure */
-  meters: "Nothing to measure yet.",
-  /** dash.noDestinations */
-  destinations: "No destinations yet.",
-  /** RoutingPage.tsx, not a translation key: the page renders this literal. */
+  /** meters.emptyTitle (the EmptyState title, app-council A83) */
+  meters: "Nothing to measure yet",
+  /** dash.noDestinationsTitle (the EmptyState title, app-council A83) */
+  destinations: "No destinations yet",
+  /** route.noDestinations, the EmptyState body on the Routing page. */
   routing: "Add a destination first",
 } as const;
 

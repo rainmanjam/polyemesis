@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { AlertTriangle } from "lucide-react";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,8 @@ import { loudnessMeasured } from "@/lib/meterFacts";
 import { autoZoomRange, FIXED_RANGE, type DbRange } from "@/lib/meterScale";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useT, useTN } from "@/lib/i18n";
 
 type Verdict = "unknown" | "pass" | "warn" | "fail";
@@ -124,6 +127,13 @@ export function MetersPage() {
      the fixed scale is the one every operator can compare across sessions. */
   const [autoZoom, setAutoZoom] = useState(false);
   const loudestPeak = Math.max(-100, ...(levels?.peak ?? []).flat());
+  // A36: the tracks at or past 0 dBFS, by the same test the clip badge uses.
+  // A28: the reason the monitor switch is blank, linked to it.
+  const monitorReasonId = useId();
+  const clippingTracks = tracks.filter((tr) => {
+    const peak = levels?.peak?.[tr.index] ?? [];
+    return peak.length > 0 && Math.max(...peak) >= -0.2;
+  });
   const span: DbRange = autoZoom ? autoZoomRange(loudestPeak) : FIXED_RANGE;
   /* True from the operator's click until the server has answered. A poll
      already in flight carries the state from BEFORE the click, and letting it
@@ -234,7 +244,7 @@ export function MetersPage() {
               variant={metersRunning ? "live" : "outline"}
               title={t("meters.metering.hint")}
             >
-              {metersRunning ? t("meters.metering") : t("dash.idle")}
+              {metersRunning ? t("meters.metering") : t("state.stopped")}
             </Badge>
           </div>
         }
@@ -251,64 +261,6 @@ export function MetersPage() {
         </Card>
       )}
 
-      {/* ---- compliance: what each destination is actually delivering ----
-          Placed above the per-track meters on purpose. The meters answer "is
-          the mix right"; this answers "will the platform turn me down", and
-          only one of those is a number somebody else acts on. */}
-      <Card className="mb-3">
-        <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            {t("meters.loudness")}
-            {freshness.stale && (
-              <Badge variant="warn" title={t("meters.notUpdatingTitle", { count: freshness.failures })}>
-                {t("meters.notUpdating")}
-              </Badge>
-            )}
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="loud-monitor" className="text-[10px] text-muted-foreground">
-              {t("meters.monitor")}
-            </Label>
-            {/* Disabled rather than guessed while the state is unknown: a
-                switch drawn in a position nobody chose is a lie one click
-                deep. */}
-            <Switch
-              id="loud-monitor"
-              checked={monitorOn ?? false}
-              // Also while the programme is unresolved: PUT /loudness is scoped, and
-              // firing it unnamed on a multi-programme install is a 400 the operator
-              // reads as a broken switch. See #606.
-              disabled={monitorOn === null || !programmeKnown}
-              onCheckedChange={toggleMonitor}
-            />
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {reports.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">
-              {monitorOn === null
-                ? t("meters.monitorUnknown")
-                : monitorOn
-                  ? t("meters.nothingToMeasure")
-                  : t("meters.monitorOff")}
-            </p>
-          ) : (
-            reports.map((rep) => (
-              <ComplianceRow
-                key={rep.destinationId}
-                report={rep}
-                truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
-                integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
-              />
-            ))
-          )}
-          <p className="text-[10px] text-muted-foreground">
-            {t("meters.integratedNote", {
-              seconds: loudness?.bounds.minIntegrationSeconds ?? 20,
-            })}
-          </p>
-        </CardContent>
-      </Card>
 
       {/* AN UNMETERED TRACK AND A SILENT TRACK DRAW THE SAME BAR.
           amerge refuses past 64 channels, so a very wide ingest is metered as a
@@ -348,6 +300,15 @@ export function MetersPage() {
         </Button>
       </div>
 
+      {/* A36: a clip is said in words for a screen reader. The region is always
+          mounted and stays empty until a track clips, so the first announcement
+          is heard, not dropped on the render that introduced the region. */}
+      <p aria-live="polite" className="sr-only">
+        {clippingTracks.length > 0
+          ? t("meters.clipAnnounce", { n: clippingTracks.map((tr) => tr.index + 1).join(", ") })
+          : ""}
+      </p>
+
       <div className="grid gap-3 xl:grid-cols-2">
         {tracks.map((track) => {
           const peak = levels?.peak?.[track.index] ?? [];
@@ -362,11 +323,11 @@ export function MetersPage() {
               <CardHeader className="flex-row items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                   {t("lib.trackLabel", { n: track.index + 1 })}
-                  <span className="font-mono text-[10px] font-normal text-muted-foreground">
+                  <span className="font-mono text-sm font-normal text-muted-foreground">
                     {track.layout} · {track.codec}
                   </span>
                   {track.title && (
-                    <span className="truncate text-[10px] font-normal text-muted-foreground">
+                    <span className="truncate text-sm font-normal text-muted-foreground">
                       {track.title}
                     </span>
                   )}
@@ -408,11 +369,14 @@ export function MetersPage() {
                     <div className="pl-[calc(1.25rem+0.5rem)]">
                       <MeterScale range={span} />
                     </div>
+                    <div className="pl-[calc(1.25rem+0.5rem)] text-sm uppercase tracking-wider text-muted-foreground">
+                      {t("meters.rmsPeakDbfs")}
+                    </div>
                     <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 pl-[calc(1.25rem+0.5rem)] sm:grid-cols-3">
                       {labels.map((l, i) => (
                         <div key={l} className="flex items-baseline justify-between">
-                          <span className="font-mono text-[10px] text-muted-foreground">{l}</span>
-                          <span className="tnum font-mono text-[10px]">
+                          <span className="font-mono text-sm text-muted-foreground">{l}</span>
+                          <span className="tnum font-mono text-sm">
                             {db(rms[i] ?? -100)}
                             <span className="text-muted-foreground"> / </span>
                             <span className={cn((peak[i] ?? -100) >= -0.2 && "text-down")}>
@@ -421,9 +385,6 @@ export function MetersPage() {
                           </span>
                         </div>
                       ))}
-                    </div>
-                    <div className="pl-[calc(1.25rem+0.5rem)] text-[9px] uppercase tracking-wider text-muted-foreground">
-                      {t("meters.rmsPeakDbfs")}
                     </div>
                   </>
                 ) : (
@@ -436,6 +397,72 @@ export function MetersPage() {
           );
         })}
       </div>
+
+      {/* ---- compliance: what each destination is actually delivering ----
+          Below the per-track meters (A35). The meters answer "is the mix
+          right", which is what this page is opened for; this answers "will the
+          platform turn me down", and it is read after the mix is checked. */}
+      <Card className="mb-3">
+        <CardHeader className="flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            {t("meters.loudness")}
+            {freshness.stale && (
+              <Badge variant="warn" title={t("meters.notUpdatingTitle", { count: freshness.failures })}>
+                {t("meters.notUpdating")}
+              </Badge>
+            )}
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="loud-monitor" className="text-sm text-muted-foreground">
+              {t("meters.monitor")}
+            </Label>
+            {/* Disabled rather than guessed while the state is unknown: a
+                switch drawn in a position nobody chose is a lie one click
+                deep. */}
+            <Switch
+              id="loud-monitor"
+              checked={monitorOn ?? false}
+              // Also while the programme is unresolved: PUT /loudness is scoped, and
+              // firing it unnamed on a multi-programme install is a 400 the operator
+              // reads as a broken switch. See #606.
+              disabled={monitorOn === null || !programmeKnown}
+              aria-describedby={disabledDescribedBy(
+                monitorReasonId,
+                monitorOn === null ? t("meters.monitorUnknown") : null,
+              )}
+              onCheckedChange={toggleMonitor}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {reports.length === 0 ? (
+            monitorOn === null ? (
+              <DisabledReason id={monitorReasonId} reason={t("meters.monitorUnknown")} />
+            ) : (
+              // app-council A83: the kit's empty state, which also lifts this
+              // off the 11px step.
+              <EmptyState
+                title={monitorOn ? t("meters.emptyTitle") : t("meters.monitorOffTitle")}
+                body={monitorOn ? t("meters.emptyBody") : t("meters.monitorOffBody")}
+              />
+            )
+          ) : (
+            reports.map((rep) => (
+              <ComplianceRow
+                key={rep.destinationId}
+                report={rep}
+                truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
+                integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
+              />
+            ))
+          )}
+          <p className="text-sm text-muted-foreground">
+            {t("meters.integratedNote", {
+              seconds: loudness?.bounds.minIntegrationSeconds ?? 20,
+            })}
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -487,7 +514,7 @@ export function ComplianceRow({
           </Button>
         )}
         {targeted && (
-          <span className="text-[10px] text-muted-foreground" title={report.target.reason}>
+          <span className="text-sm text-muted-foreground" title={report.target.reason}>
             {t("meters.targetLine", {
               lufs: report.target.lufs.toFixed(0),
               tolerance: report.target.toleranceLu.toFixed(0),
@@ -547,7 +574,7 @@ export function ComplianceRow({
               tone={peakOver ? "down" : "default"}
             />
           </div>
-          <span className="text-[10px] text-muted-foreground">{report.reason}</span>
+          <span className="text-sm text-muted-foreground">{report.reason}</span>
         </>
       )}
     </div>

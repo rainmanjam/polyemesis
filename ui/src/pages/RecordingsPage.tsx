@@ -9,6 +9,7 @@ import {
   Download,
   HardDrive,
   Loader2,
+  Video,
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,9 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
-import { useLiveData } from "@/hooks/useLiveData";
+import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { StatusPill } from "@/components/StatusPill";
+import { recorderStatus } from "@/lib/status";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import {
@@ -49,8 +52,11 @@ import {
 import { InfoHint } from "@/components/InfoHint";
 import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
+import { EmptyState } from "@/components/EmptyState";
+import { SaveStatus } from "@/components/SaveStatus";
+import { useSaveModel, useSaveOutcome } from "@/lib/saveModel";
 import {
-  retentionDirty,
+  retentionProblems,
   retentionDraft,
   savePolicyBody,
   switchPatchBody,
@@ -81,6 +87,28 @@ function masterKey(filename: string): string {
   return dot > 0 ? filename.slice(0, dot) : filename;
 }
 
+/** A number box that is blank is NaN, not 0: 0 means "no limit" on the server. */
+function numberOrBlank(raw: string): number {
+  return raw.trim() === "" ? Number.NaN : Number(raw);
+}
+
+/** What a retention box shows for a value: blank for NaN, never "NaN". */
+function shownValue(n: number): number | "" {
+  return Number.isNaN(n) ? "" : n;
+}
+
+/** The model's seed before settings arrive. Never shown: the card renders only
+ *  once `settings` is known, and the model reseeds from it then. */
+const EMPTY_RETENTION: RetentionDraft = { segmentSeconds: 0, maxGb: 0, maxAgeHours: 0, minFreeGb: 0 };
+
+/** Field by field with Object.is, so a blank box (NaN) equals itself and the
+ *  model does not read a blank as a permanent change. */
+const sameRetention = (a: RetentionDraft, b: RetentionDraft) =>
+  Object.is(a.segmentSeconds, b.segmentSeconds) &&
+  Object.is(a.maxGb, b.maxGb) &&
+  Object.is(a.maxAgeHours, b.maxAgeHours) &&
+  Object.is(a.minFreeGb, b.minFreeGb);
+
 export function RecordingsPage() {
   const t = useT();
   const { recordingsRevision, status } = useLiveData();
@@ -94,10 +122,6 @@ export function RecordingsPage() {
      completed save, which is what makes it safe for a switch to build a PUT
      from. */
   const [settings, setSettings] = useState<Settings | null>(null);
-  /* The four retention numbers, held apart. They used to be edited straight
-     into `settings`, and every switch on the card spread that same object -- so
-     flipping Stems PUT a half-typed segment length with it. */
-  const [draft, setDraft] = useState<RetentionDraft | null>(null);
   /* Same again, and this one was written down as deliberate: the stems GET
    * caught to `[]` so that losing it would not cost the recordings list. That
    * half is right and is kept. What it also did was make every row claim "no
@@ -126,7 +150,6 @@ export function RecordingsPage() {
         setRecRead(okRead(r));
         setUsage(u);
         setSettings(s);
-        setDraft(retentionDraft(s));
         setStemRead(st);
       })
       .catch((err) => {
@@ -168,21 +191,26 @@ export function RecordingsPage() {
     }
   };
 
-  const saveRetention = async (next: Settings) => {
-    setSaving(true);
-    try {
-      const saved = await api.putSettings(next);
-      setSettings(saved);
-      // Re-seeded from what came back, so the boxes show what is stored rather
-      // than what was asked for -- the server clamps some of these.
-      setDraft(retentionDraft(saved));
-      toast.success(t("rec.saved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  /* ONE SAVE MODEL ON THIS CARD (A95). The switches apply at once, and they
+     used to say so with a "Recording settings saved." toast while the
+     retention numbers beside them said it with SaveStatus: two confirmations
+     for one card. A switch's write now feeds the same status line (see the
+     SaveStatus by Save policy), and only a failure toasts, because it carries
+     the server's reason. */
+  const switchSave = useSaveOutcome();
+  const saveRetention = (next: Settings) =>
+    switchSave.run(async () => {
+      setSaving(true);
+      try {
+        const saved = await api.putSettings(next);
+        setSettings(saved);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    });
 
   // The stem fields are real on the wire but are not declared on the shared
   // Settings type yet, so they are read through a narrow view. Nothing is lost
@@ -201,21 +229,66 @@ export function RecordingsPage() {
     void saveRetention(switchPatchBody(settings, patch));
   };
 
-  const dirty = settings ? retentionDirty(settings, draft) : false;
+  /* The four retention numbers, held apart in ONE save model (useSaveModel),
+     like every other typed field on the console (A95). They used to be edited
+     straight into `settings`, and every switch on the card spread that same
+     object -- so flipping Stems PUT a half-typed segment length with it. The
+     model reseeds from `settings` while clean, so a value the server clamped
+     is what the boxes show after Save. */
+  const retention = useSaveModel<RetentionDraft>({
+    stored: settings ? retentionDraft(settings) : EMPTY_RETENTION,
+    equal: sameRetention,
+    onSave: async (d) => {
+      if (!settings) return;
+      try {
+        const saved = await api.putSettings(savePolicyBody(settings, d));
+        setSettings(saved);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
+        throw err;
+      }
+    },
+  });
+  const draft = settings ? retention.draft : null;
+  const setDraft = (fn: (d: RetentionDraft) => RetentionDraft) => {
+    switchSave.reset();
+    retention.setDraft(fn(retention.draft));
+  };
+  const dirty = retention.dirty;
 
   const recorderState = status?.recorder?.state;
+  // A broadcast is going out (A23): the one definition the app uses.
+  const ingestLiveNow = useIngestLive();
+  const confirmRecordingOff = useConfirm<boolean>();
+  const problems = draft ? retentionProblems(draft) : [];
 
   return (
     <div className="p-3">
-      <PageHeader
-        title={t("rec.title")}
-        subtitle={t("rec.subtitle")}
-        actions={
-          <Badge variant={recorderState === "running" ? "live" : "outline"}>
-            {recorderState === "running" ? t("rec.recording") : (recorderState ?? t("rec.disabled"))}
-          </Badge>
-        }
-      />
+      <PageHeader title={t("rec.title")} subtitle={t("rec.subtitle")} />
+
+      {/* A25: recording on/off and its status sit in one strip that shows at
+          every width, instead of under a seven-column table on phones. A24: a
+          live row is named in the table below. */}
+      {settings && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+          <div className="flex items-center gap-2">
+            <StatusPill reading={recorderStatus(status?.recorder ?? null)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="rec-enabled" className="flex items-center gap-1">
+              {t("rec.enabled")}
+              <InfoHint body="rec.help.enabled" title="rec.enabled" />
+            </Label>
+            <Switch
+              id="rec-enabled"
+              checked={settings.recording.enabled}
+              onCheckedChange={(v) =>
+                !v && ingestLiveNow ? confirmRecordingOff.ask(true) : saveRecording({ enabled: v })
+              }
+            />
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
         {/* ---------- file list ---------- */}
@@ -233,9 +306,12 @@ export function RecordingsPage() {
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               </div>
             ) : recordings.length === 0 ? (
-              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                {t("rec.empty")}
-              </div>
+              <EmptyState
+                icon={Video}
+                title={t("rec.emptyTitle")}
+                body={t("rec.empty")}
+                className="mx-3 mb-3 border-0"
+              />
             ) : (
               <Table>
                 <TableHeader>
@@ -287,7 +363,14 @@ export function RecordingsPage() {
                           {/* Both are measured only once the recorder has moved on
                               to the next segment, so the live one reads as dashes. */}
                           <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
-                            {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"}
+                            {r.durationMs > 0 ? (
+                              shortDuration(r.durationMs)
+                            ) : recorderState === "running" ? (
+                              // A24: the segment being written is named, not dashes.
+                              <Badge variant="live">{t("rec.recordingNow")}</Badge>
+                            ) : (
+                              "—"
+                            )}
                           </TableCell>
                           <TableCell className="text-center">
                             {r.tracks > 0 ? (
@@ -437,18 +520,6 @@ export function RecordingsPage() {
                 <CardTitle>{t("rec.settingsTitle")}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="rec-enabled" className="flex items-center gap-1">
-                    {t("rec.enabled")}
-                    <InfoHint body="rec.help.enabled" title="rec.enabled" />
-                  </Label>
-                  <Switch
-                    id="rec-enabled"
-                    checked={settings.recording.enabled}
-                    onCheckedChange={(v) => saveRecording({ enabled: v })}
-                  />
-                </div>
-
                 {/* Stems multiply what a session writes by roughly the track
                     count, so this is off by default and stays that way through
                     an upgrade. */}
@@ -482,7 +553,7 @@ export function RecordingsPage() {
                         <SelectItem value="wav">{t("rec.stemWav")}</SelectItem>
                       </SelectContent>
                     </Select>
-                    <span className="text-micro text-muted-foreground">
+                    <span className="text-sm text-muted-foreground">
                       {t("rec.stemNote")}
                     </span>
                   </div>
@@ -497,9 +568,9 @@ export function RecordingsPage() {
                     id="rec-seg"
                     type="number"
                     min={10}
-                    value={draft?.segmentSeconds ?? settings.recording.segmentSeconds}
+                    value={shownValue(draft?.segmentSeconds ?? settings.recording.segmentSeconds)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, segmentSeconds: Number(e.target.value) } : d))
+                      setDraft((d) => ({ ...d, segmentSeconds: numberOrBlank(e.target.value) }))
                     }
                   />
                 </div>
@@ -514,12 +585,12 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={draft?.maxGb ?? settings.recording.maxGb}
+                    value={shownValue(draft?.maxGb ?? settings.recording.maxGb)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, maxGb: Number(e.target.value) } : d))
+                      setDraft((d) => ({ ...d, maxGb: numberOrBlank(e.target.value) }))
                     }
                   />
-                  <span className="text-micro text-muted-foreground">{t("rec.noSizeLimit")}</span>
+                  <span className="text-sm text-muted-foreground">{t("rec.noSizeLimit")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -531,12 +602,12 @@ export function RecordingsPage() {
                     id="rec-age"
                     type="number"
                     min={0}
-                    value={draft?.maxAgeHours ?? settings.recording.maxAgeHours}
+                    value={shownValue(draft?.maxAgeHours ?? settings.recording.maxAgeHours)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, maxAgeHours: Number(e.target.value) } : d))
+                      setDraft((d) => ({ ...d, maxAgeHours: numberOrBlank(e.target.value) }))
                     }
                   />
-                  <span className="text-micro text-muted-foreground">{t("rec.keepForever")}</span>
+                  <span className="text-sm text-muted-foreground">{t("rec.keepForever")}</span>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -549,28 +620,39 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={draft?.minFreeGb ?? settings.recording.minFreeGb}
+                    value={shownValue(draft?.minFreeGb ?? settings.recording.minFreeGb)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, minFreeGb: Number(e.target.value) } : d))
+                      setDraft((d) => ({ ...d, minFreeGb: numberOrBlank(e.target.value) }))
                     }
                   />
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("rec.minFreeNote")}
                   </span>
                 </div>
 
-                {dirty && (
-                  <span className="text-micro text-warn">{t("rec.unsavedRetention")}</span>
+                {problems.length > 0 && (
+                  <span role="alert" className="text-sm text-down">{t("rec.retentionInvalid")}</span>
                 )}
-                <Button
-                  size="sm"
-                  onClick={() => draft && saveRetention(savePolicyBody(settings, draft))}
-                  disabled={saving || !draft}
-                >
-                  {saving && <Loader2 className="animate-spin" />}
-                  {t("rec.savePolicy")}
-                </Button>
-                <p className="text-micro text-muted-foreground">
+                {dirty && (
+                  <span className="text-sm text-warn">{t("rec.unsavedRetention")}</span>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => void retention.save()}
+                    disabled={saving || retention.state === "saving" || !dirty || problems.length > 0}
+                  >
+                    {retention.state === "saving" && <Loader2 className="animate-spin" />}
+                    {t("rec.savePolicy")}
+                  </Button>
+                  {/* The card's one status line: the retention draft while it
+                      has something to say, otherwise the last switch's write. */}
+                  <SaveStatus state={retention.state !== "clean" ? retention.state : switchSave.stateOf(false)} />
+                </div>
+                <p className="text-tiny text-muted-foreground">
+                  {t("rec.zeroNoLimit")}
+                </p>
+                <p className="text-sm text-muted-foreground">
                   {t("rec.retentionNote")}
                 </p>
               </CardContent>
@@ -578,6 +660,18 @@ export function RecordingsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDestructive
+        open={confirmRecordingOff.open}
+        onOpenChange={confirmRecordingOff.onOpenChange}
+        subject={t("rec.enabled")}
+        title={t("rec.stopWhileLiveTitle")}
+        description={t("rec.stopWhileLiveDescription")}
+        onConfirm={async () => {
+          confirmRecordingOff.close();
+          saveRecording({ enabled: false });
+        }}
+      />
 
       <ConfirmDestructive
         open={confirmDelete.open}

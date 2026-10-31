@@ -74,3 +74,17 @@ describe("ClipsPage and a read that failed", () => {
     expect(screen.queryByText(translate("en", "clips.listUnread"))).toBeNull();
   });
 });
+
+describe("ClipsPage buffer stats with nothing measured", () => {
+  // The Window cell printed "—s" with no buffer: a unit on a dash reads as a
+  // measurement of nothing seconds. Every cell now draws a bare dash.
+  it("draws the Window cell as a bare dash, with no unit", async () => {
+    clipsResponse = () => Promise.resolve(answered);
+    render(<ClipsPage />);
+    await waitFor(() => expect(screen.getByText(translate("en", "clips.window"))).toBeTruthy());
+    expect(screen.queryByText("—s")).toBeNull();
+    const cell = screen.getByText(translate("en", "clips.window")).parentElement as HTMLElement;
+    expect(cell.textContent).toContain("—");
+    expect(cell.textContent).not.toMatch(/—s/);
+  });
+});

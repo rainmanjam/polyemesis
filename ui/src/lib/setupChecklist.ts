@@ -65,3 +65,14 @@ export function setupChecklist(input: ChecklistInput): Checklist | null {
   const done = steps.slice(0, 4).filter((s) => s.state === "done").length;
   return { steps, done, reason };
 }
+
+/** Whether the Settings readiness strip may say "Ready to stream". Only when
+ *  every step before Go live is done (source, encoder, signal, destination),
+ *  the same steps the checklist counts in "{done} of 5". It used to read the
+ *  Go live reason instead, which is null as soon as a source and a destination
+ *  exist, so the strip said "Ready" in green directly above a checklist that
+ *  said "2 of 5 done" and was still waiting for a signal. One derivation, so
+ *  the two can no longer disagree. */
+export function readyToStream(checklist: Checklist): boolean {
+  return checklist.steps.slice(0, 4).every((s) => s.state === "done");
+}

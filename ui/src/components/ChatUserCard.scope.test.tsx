@@ -30,6 +30,11 @@ import type { ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
 const chatUser = vi.spyOn(api, "chatUser");
 const hide = vi.spyOn(api, "hideChatMessage");
 
+const toastError = vi.fn();
+vi.mock("sonner", () => ({
+  toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn(), message: vi.fn() },
+}));
+
 const card = (over: Partial<CardData> = {}): CardData =>
   ({
     name: "someone",
@@ -138,9 +143,46 @@ describe("#783: hiding from viewers, which no operator could ask for", () => {
     expect(hide.mock.calls[0][0]).toMatchObject({ scope: "platform", hidden: false });
   });
 
+  it("says how many lines were hidden when one fails partway through a hide-all", async () => {
+    // Seven lines, and the fourth one fails. The old loop stopped at the failure
+    // and reported one generic error, so the moderator could not tell which lines
+    // were already gone. The new run attempts every line and reports both counts.
+    chatUser.mockResolvedValue(
+      card({
+        messages: Array.from({ length: 7 }, (_, i) => ({
+          id: `m${i + 1}`,
+          text: `line ${i + 1}`,
+          at: "2026-08-20T12:00:00Z",
+          platform: "facebook" as const,
+          author: { id: "u1", name: "someone" },
+        })),
+      }),
+    );
+    hide.mockImplementation(async (args) => {
+      if (args.id === "m4") throw new Error("upstream refused");
+      return {} as Awaited<ReturnType<typeof api.hideChatMessage>>;
+    });
+    draw("facebook");
+    await waitFor(() => expect(button(/Hide here only/).disabled).toBe(false));
+    fireEvent.click(button(/Hide here only/));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(hide, "every line should be attempted, not just the lines before the failure").toHaveBeenCalledTimes(7);
+    expect(toastError.mock.calls[0][0]).toMatch(/6 of 7/);
+  });
+
   it("makes the difference between hiding and deleting legible", async () => {
     draw("facebook");
-    await waitFor(() => expect(screen.getByText(/Hiding can be undone/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Hiding from viewers can be undone/)).toBeTruthy());
+  });
+
+  it("does not describe 'Hide here only' as reversible, because nothing here reverses it", async () => {
+    // The undo sentence used to say "Hiding can be undone" with no scope, so a
+    // moderator who pressed "Hide here only" read it as covering that button.
+    // The server forgets a local hide (chat.go: "a local hide is forgotten, not
+    // flagged"), so the card has to say so beside the button it describes.
+    draw("facebook");
+    await waitFor(() => expect(screen.getByText(/cannot be undone from this card/)).toBeTruthy());
+    expect(screen.queryByText(/^Hiding can be undone/)).toBeNull();
   });
 
   it("renders the upstream hide inert with its reason where it cannot work", async () => {

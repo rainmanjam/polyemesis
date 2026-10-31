@@ -21,8 +21,9 @@ Bonding several cellular links into one stream is a separate feature; see
 ## Degraded-link failover
 
 Thresholds are set **per programme**, beside its ingest: on the **Sources**
-page, in the programme's card, under **Leave a degraded link**. The default
-programme's are also under **Settings → Ingest**. A bonded cellular rig and a
+page, in the programme's card, under **Leave a degraded link**. That is their
+one home: **Settings → Ingest** links there rather than editing a second copy.
+A bonded cellular rig and a
 studio line on the same install can have different floors.
 
 Failover itself has to be on, under **Settings → Pipeline → Failover**, with

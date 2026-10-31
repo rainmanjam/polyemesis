@@ -872,6 +872,16 @@ const NOT_A_CONTROL: Record<string, string> = {
     "not read: both checkers are asked with the primary's instruction",
   "automod.rules[].id":
     "server-assigned. A rule's identity is not something an operator types",
+  "ingest.degraded.enabled":
+    "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
+  "ingest.degraded.minBitrateKbps":
+    "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
+  "ingest.degraded.maxRttMs":
+    "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
+  "ingest.degraded.maxLossPercent":
+    "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
+  "ingest.degraded.sustainSeconds":
+    "edited on Sources, per programme, by DegradedLinkSettings (SourcesPage.tsx). Settings → Ingest wrote only the FIRST programme's copy and now links to Sources instead (settings-council R13); the ingest Save carries the stored value back unchanged",
 };
 
 /** Leaves a control DOES reach, by a route this guard cannot measure. Each one

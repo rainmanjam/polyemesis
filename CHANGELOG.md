@@ -10,6 +10,11 @@ its first tagged release.
 
 ### Added
 
+- **Shared console kit.** One empty state (`EmptyState`), one status pill and
+  vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
+  (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
+  `SaveStatus`). Pages pick these up as they are touched. See
+  [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md).
 - **OBS bridge: go live and stop when OBS does.** Polyemesis now hears
   about OBS in one of two ways. It can connect to obs-websocket 5 on your LAN
   or over Tailscale: the password is stored sealed, the link reconnects on its
@@ -409,6 +414,160 @@ its first tagged release.
 
 ### Changed
 
+- **Routing has one save model (app-council A26, A27).** Every edit, mute and
+  gain included, now waits for Save changes in a single bottom bar with
+  Discard; mute and gain no longer apply the moment they move, and the header
+  Save is gone. Loudness, A/V delay, ducking, the VOD mix and the compiled
+  result sit in a collapsed Advanced section, with the FFmpeg filter graph
+  behind "Show FFmpeg graph". The destination PUT is unchanged.
+- **The Jobs Policy tab leads with four decisions (app-council A63).** Default
+  mode, jobs at once and the CPU ceiling and resume levels come first, under a
+  sentence that reads them back. The twelve tuning settings sit behind an
+  Advanced section that opens by itself whenever one differs from its default
+  or is out of range. Revert and Save policy stay on screen with a save status.
+- **On phones the Dashboard shows destinations first (app-council A87).** Below
+  the desktop breakpoint the destinations and Go live come straight after the
+  on-air strip; Chat and Pipeline, the failover note and Stream info are
+  collapsed sections below them. The desktop layout is unchanged.
+- **Monitoring lists processes in a compact table (app-council A72).** Process,
+  State, Restarts, Uptime and Errors, with failed and reconnecting processes
+  first; a row expands to the cause, remedy, PID, log and full command.
+- **One status vocabulary across the console (app-council A91).** "Not
+  running" had four spellings side by side: the on-air counts said "stopped",
+  the cards those destinations were said OFF, the ingest chip said "Offline"
+  and the Pipeline card said "idle". There are now two words: **Off** for
+  something you switched off, and **Stopped** for something that is on and not
+  running. The on-air counts read "live · stopped · off", matching the cards.
+  Presentation only: no API, MQTT, webhook, SSE or Stream Deck value changed.
+- **Long explanations are one line, with the rest under "More about this"
+  (app-council A84).** The mux-queue, multitrack and give-up notes in the
+  destination dialog, the slate encoder, silence and GPU notes in Settings, and
+  the expert-arguments note on Monitoring now show one sentence; the full
+  paragraph is one click away.
+- **Settings saves say "Saved" beside the button (app-council A95).** Ingest,
+  listener ports, the Pipeline tab and platform credentials show the same save
+  status as Playout, Clips and Recordings instead of a success toast; a refused
+  save says "Not saved" there and still toasts the reason. Recordings' switches
+  are confirmed by the card's one status line.
+- **Settings Overview: "Ready to stream" agrees with the checklist.** It is shown
+  only once every step before Go live is done, so it no longer sits above
+  "2 of 5 done".
+- **Empty states carry their next step.** A programme lane with no
+  destinations offers Add destination on that programme; Chat with no account
+  connected offers Open platform credentials. An empty schedule name says why
+  Save is greyed.
+
+- **Settings is reorganised around tasks (settings council).** A new
+  **Overview** is the landing page on an install with no source: it shows
+  whether you are ready to stream, the same five-step setup checklist as the
+  Dashboard, and one tile per area (ingest, platforms, overlays, OBS, pipeline,
+  security), each saying "could not read" rather than "0" when a read fails.
+  The side menu is grouped into Stream in, Stream out, Processing, Access and
+  security, and Danger zone; every old `?tab=` link still opens the same panel.
+  One **Show advanced settings** switch hides expert cards (MQTT, preview,
+  audio meters, process logs, Enhanced Broadcasting hardware) until you want
+  them, but never hides a card whose value differs from the default, and a
+  search result opens the card it lands on. Pipeline is split into Routine and
+  Once per install. **Platforms** is one row per platform, connected first,
+  with one status and one button; the credentials, redirect URI, accounts and
+  setup guide open under the row, and the developer-app pair is an
+  "App credentials (advanced)" layer. The last credential check is stored and
+  shown after a reload. **Security** leads with the data directory and
+  secret.key backup. Ingest cards say whether they apply to the whole install
+  or to one programme, degraded-link thresholds are edited on Sources only, and
+  "Synthesise a silent track" now reads "Add silence when the source has no
+  audio".
+- **Schedules: "All destinations" is an explicit choice.** A start or stop
+  schedule now names its destinations or ticks **All destinations**
+  (`allDestinations` in the API). It can no longer mean every destination by
+  leaving the list empty, which for a stop meant "stop the whole broadcast" by
+  accident. The editor will not save a schedule with nothing chosen, and its hint
+  says what the action does. Existing schedules with an empty list were set to
+  All destinations on upgrade and behave as before. API clients that do not send
+  the field keep working, except a new stop with no destinations, which is
+  refused with a message naming `allDestinations`. See
+  [docs/SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
+- **Automation: plainer labels and explicit "All events".** The tab that holds
+  script hooks is now called **Hooks** (the `?tab=hooks` link is unchanged), and
+  the Alerts card is **Alert rules**. An alert rule has an **All events** switch,
+  on by default; turn it off to pick events, and the dialog will not save with
+  none picked. Schedule badges, alert summaries and the severity list show
+  translated labels instead of raw values such as `playlist.start` or `warning`.
+  Jargon is gone: *Combine repeat alerts for*, *Run if late by up to*, *Recent
+  runs*, and *Merged / Waiting / Discarded / Retried* with a one-line
+  explanation. Every select in the rule and schedule dialogs is named by its
+  label. Empty alert, schedule, hook and run lists use the shared empty state,
+  with the button that fills them.
+- **Chat: one empty state.** The timeline's empty pane uses the shared empty
+  state with a short title (for example "No messages yet" or "Messages are
+  filtered out"). The counters read *Duplicates skipped* and *Saved to history*.
+- **OBS chat dock says what went wrong.** A dock URL with no key, a key the
+  server refused, and a server that cannot be reached now each have their own
+  message, and the unreachable case retries by itself. While it loads, the dock
+  shows "Connecting to polyemesis…" instead of a blank panel. The on-stream
+  overlay still draws nothing in every one of these cases.
+- **Console polish: scoped counts, one empty state, readable warnings.** The
+  header's live badge counts the selected programme and names it ("Main: 3
+  live"), or says "All programmes: 5 live" when none is selected; the on-air
+  strip's healthy line says "All 5 running destinations healthy". Programme
+  lanes on the Dashboard read "9 destinations · 5 live" with an on-air glyph
+  that is not colour alone. The no-failover note is one line with a link to
+  Settings → Failover, its explanation behind "Why this matters". Every empty
+  list on the Dashboard, Jobs, Monitoring, Sources, Routing, Renditions and
+  Meters uses one empty state, with the next step as a button where there is
+  one. Warnings and hints on these pages are set at 12px instead of 10px.
+  Routing shows "Unsaved changes", "Saved" or a failure that keeps your edit
+  beside Save, and a read-only mix-matrix row says why in visible text.
+  Monitoring's memory line and ingest chart are translated.
+
+- **Dashboard: clearer on-air answer and one filled start action.** The on-air
+  strip counts live, stopped and failing destinations against the whole install
+  ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
+  a fault. It says "Ingest is not receiving" instead of "All healthy" when every
+  destination is up over a feed that is not arriving. Its End all is now Stop all
+  and opens the same confirmation as the toolbar. The stop-all dialog is shorter
+  and no longer points at a Start all button that does not exist; it says to start
+  again with Go live. Go live is the one filled start action: Add destination and
+  each stopped card's Start are outline buttons. The metadata card is titled
+  Stream info. The Go live sheet marks a running destination LIVE, not READY, and
+  wraps long source names instead of cutting them off. A "0 accounts" figure no
+  longer sits beside the Go live card when no platform account is connected.
+  The strip's full-screen view is named Full-screen status.
+- **Shell: keyboard and phone fixes.** A Skip to content link comes first on
+  every page. The closed mobile nav drawer is removed from the tab order. On a
+  phone the header now shows the on-air answer beside the menu (the live count, or
+  Off air). System moves into the Operations group beside Monitoring, and the
+  settings group is headed Setup.
+- **Chat composer.** When no platform can send, the field reads "Chat not
+  connected" and the reason sits beneath it instead of being clipped.
+
+
+- **Jobs, Monitoring and sign-in say what they mean.** Jobs says once, in place,
+  when the server cannot be reached, instead of a red toast every four seconds.
+  Cancelling a running transcode asks first; a queued job still cancels on the
+  click. The CPU gate says "CPU over ceiling" in words, and Pause all appears only
+  when there is something to pause. Monitoring opens with one status sentence
+  under the title, puts the FFmpeg log full width, keeps raw FFmpeg arguments
+  behind a button, and shows a dash rather than 0% before the first sample. On
+  the first-run and sign-in screen, a wrong setup code or a dropped connection
+  keeps what you typed, validation shows inline, and the setup-code help is
+  readable at 12px and up. Monitoring's CPU warning follows the Jobs CPU ceiling
+  you saved, and its status sentence counts processes that are not running. The
+  System page opens with the version, the ingest state and the host load, and
+  the debug recorder sits under Support tools.
+
+- **One status vocabulary, ready for the pages.** `lib/status.ts` maps every
+  process, destination, delay, rendition, recorder, clip-buffer, ingest and
+  output state to one translated word, a tone and a non-colour indicator. The
+  words are presentation only: the API, MQTT, webhook and Stream Deck values are
+  unchanged. Pages adopt it as they are touched.
+- **Badges, table headers and select labels are 12px.** Status badges, table
+  column headers and dropdown and select group labels moved from the 10px micro
+  step to 12px.
+- **Confirmation dialog: consequence line and caution tone.** `ConfirmDestructive`
+  accepts a one-sentence `consequence` and `tone="caution"` for reversible live
+  actions. The default look is unchanged, so existing callers do not change.
+
 - **Each platform card names its credentials the way that platform's console
   does.** Settings → Platforms used to label every card "Client ID" and "Client
   secret". The Facebook card now says **App ID** and **App Secret**, which is
@@ -462,7 +621,7 @@ its first tagged release.
   pending changes and lists what moves on air before Save (A7). The on-air
   strip shows the time on air and an End all button (A8). Presets open a
   review before they apply, the matrix has an undo history, and three starter
-  presets stay in view (A14). Debug recording moves to a System page, and
+  presets stay in view (UX Council A14). Debug recording moves to a System page, and
   Settings ends with a Danger zone (A17). Delete dialogs count what still uses
   the thing being deleted (A18). Routing, Renditions, playout, meters, chat,
   clips, library, Jobs, Automation, Monitoring, Settings and the destination
@@ -482,6 +641,79 @@ its first tagged release.
   text link, which reverses the earlier docs-first order. The CSS drawing is
   replaced by a crop of the real routing screen.
 
+- **Inputs pages say what they are doing.** Renditions reads "Not encoding,
+  starts when the first feed goes live" rather than "Starting" when no encode
+  has been asked for, and each feed chip names its state in words. Sources
+  shows the SRT host and port in clear with a Copy button; the passphrase and
+  stream ID stay masked behind Reveal. The degraded-link thresholds fold behind
+  a summary of the numbers, and the source switch says Accepting or Off, with
+  what that means for an encoder. Add destination on a source opens the
+  destination dialog already on that source. Meters put the per-track levels
+  above loudness compliance, state dBFS above the readouts, and announce a clip
+  in words. Routing shows why Save is greyed beside the button, and destination
+  names and routing summaries wrap rather than truncate.
+
+- **Clips, Recordings and Playout read more plainly.** A replay buffer that is
+  enabled but not running reads Waiting, not Ready. With the buffer off, Clips
+  shows one empty state with a Turn on rolling buffer button, and the capture
+  presets appear only while it runs. The buffer window is an editable draft with
+  an explicit Apply, so the three-second refresh no longer overwrites an edit.
+  Recordings shows recorder status as a status pill, marks a live segment
+  Recording now, leaves a blank retention box empty while Save stays off, and
+  says 0 means no limit. Switching recording off while the stream is live asks
+  first. In Playout, turning Public on or Protection open asks first; turning
+  them off saves at once.
+- **The Clips buffer stays on after a restart (app-council A14).** The rolling
+  buffer's switch and window are now saved per programme, so a programme whose
+  buffer was on comes back with it on, at the same window, after an upgrade,
+  reboot or crash. A programme that never turned it on, including every one on
+  an upgraded install, still starts with it off. The Clips page no longer says
+  the switch is off after a restart; it says the switch is saved. A failure to
+  save the switch is reported as a server error and leaves the buffer as it
+  was. `GET /clips` now carries the configured `windowSeconds` even while the
+  buffer is off.
+- **Playout reads as a control room (app-council A16-A20).** A status line under
+  the title says whether playout is on, who can watch and how many are
+  watching; when it is off, the line carries a Turn on playout button, and the
+  share links are greyed with the reason beside them. Share and Who can watch
+  sit side by side; the quality levels (formerly the ladder) and packaging are
+  in a closed Advanced section. Packaging fields no longer save, and restart
+  the stream, each time one loses focus: the changes are held until Apply and
+  restart stream, the bar counts them and shows each field's previous value,
+  and it asks first, naming the viewers, when anyone is watching. Quality level
+  names and audio tracks apply with their own Apply button. The player page
+  title and description have a Save button and say Unsaved changes, Saving,
+  Saved or Not saved. Labels are plainer: Quality levels, Original (no
+  re-encode), Rewind window, Audio track (number, from 0). The settings, API
+  and saved values are unchanged.
+- **Library, Recordings and the trim editor say what they are for (app-council
+  A37-A41).** Library's media upload card opens from an Upload media button
+  instead of sitting above the archive. When transcription is off, the header
+  shows "Transcripts: off" with an Install whisper.cpp link instead of a
+  paragraph ending in a config.yaml key; search stays on for the transcripts
+  you already have, and each greyed captions button names that status as its
+  reason. Regroup is now Rebuild sessions, with a one-line explanation under
+  the title. The play indicator and Generate proxy no longer share the film
+  icon, and a waiting job's reason is printed on its row. A track's speaker
+  name saves with Apply rather than on leaving the field. The clip editor is
+  titled Trim recording. Recordings' retention policy says Unsaved changes,
+  Saving and Saved beside its Save button, and Library, Recordings and Clips
+  use the same empty state.
+- **Chat overlays say whether OBS is connected (app-council A98).** An
+  overlay draws nothing when it fails, so a broken browser source looked the
+  same as an idle one. Settings now shows, for the selected overlay, how many
+  sources have it open, or when one last did, with a Check again button.
+  `GET /overlays` carries `connected` and `lastSeen` for each overlay.
+- **Chat: keyboard, attention and polls.** Enter that confirms an IME
+  composition no longer sends the message. Message rows are reachable from the
+  keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New
+  messages are announced once instead of on every line. The attention banner
+  names each platform that needs work, with its reason, and the poll form sits
+  behind a disclosure. The Twitch mirror option appears only when Twitch is
+  connected. Hide all on a user card works in batches of five and reports a
+  partial failure as "Hid X of Y lines; N failed". The ban action in the message
+  menu is now Open card to ban.
+
 ### Removed
 
 - **Trovo.** Trovo shut down on 30 June 2026, so it is gone from Add
@@ -495,6 +727,24 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **Phone Dashboard cards no longer run off the screen.** At 390px with a
+  source, the Ingest, Chat and Pipeline cards were 546px wide in a 356px
+  column; the top-row grid now has a shrinkable single column below the
+  desktop breakpoint. The header's on-air chip stays on one line.
+- **Settings Overview tiles no longer show a stale "Reading…" line** after two
+  reads in one tile settle.
+- **A slow credential check can no longer mark a newer pair as verified.** The
+  stored verdict is keyed to the client ID and secret that were checked; a
+  verdict for a pair replaced while it was checked is dropped.
+- **Clips: the Window stat shows "—", not "—s",** when the buffer has nothing
+  measured.
+
+- **A failed refresh no longer hides the timeline.** The incidents already on
+  screen stay, with a line saying how old the list is. A failed destination list
+  in Expert mode is said, with a retry. Numeric policy fields no longer snap to
+  the minimum while you type.
+
 
 - **A destination's restart count now includes restarts caused by live level
   changes.** Two restarts were never counted. One is the restart that keeps a

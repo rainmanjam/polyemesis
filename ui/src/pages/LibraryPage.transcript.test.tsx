@@ -91,14 +91,19 @@ describe("PlayerDialog: naming, deleting and re-running a track's transcript", (
     expect(input.value).toBe("Ana");
   });
 
-  it("saves a renamed speaker on blur, not on every keystroke", async () => {
+  it("saves a renamed speaker on Apply, never on a keystroke or on blur", async () => {
     draw("Ana");
     const input = await screen.findByLabelText("Speaker for track 0");
 
     fireEvent.change(input, { target: { value: "Ben" } });
     expect(api.setTranscriptSpeaker).not.toHaveBeenCalled();
-
+    // A blur save lost a name typed into a dialog that was then closed, and
+    // said nothing when it did write one (A95).
     fireEvent.blur(input);
+    expect(api.setTranscriptSpeaker).not.toHaveBeenCalled();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
       expect(api.setTranscriptSpeaker).toHaveBeenCalledWith(1, 0, "Ben"),
     );
@@ -128,8 +133,9 @@ describe("PlayerDialog: naming, deleting and re-running a track's transcript", (
   it("leaves the transcript alone when the dialog is cancelled", async () => {
     draw();
     fireEvent.click(await screen.findByLabelText("Delete the transcript for track 0"));
-    await screen.findByRole("dialog");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    // The confirmation's own Cancel, found by name: the player is a dialog too,
+    // so "the dialog" is ambiguous while both are mounted.
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(api.deleteTranscript).not.toHaveBeenCalled();
   });
 

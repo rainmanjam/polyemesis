@@ -60,7 +60,7 @@ func TestOneShotStoresUTCAndComesBackAsTheSameInstant(t *testing.T) {
 
 	created, err := d.CreateSchedule(&scheduler.Schedule{
 		Name: "the broadcast", Enabled: true, Action: scheduler.ActionStart,
-		Kind: scheduler.KindOnce, RunAt: local,
+		Kind: scheduler.KindOnce, RunAt: local, AllDestinations: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateSchedule: %v", err)
@@ -235,7 +235,7 @@ func TestStoredScheduleEvaluatesTheWayItWasWritten(t *testing.T) {
 
 	created, err := d.CreateSchedule(&scheduler.Schedule{
 		Name: "the broadcast", Enabled: true, Action: scheduler.ActionStart,
-		Kind: scheduler.KindOnce, RunAt: at, GraceSeconds: 300,
+		Kind: scheduler.KindOnce, RunAt: at, GraceSeconds: 300, AllDestinations: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateSchedule: %v", err)

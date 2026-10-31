@@ -242,10 +242,14 @@ export function stateLabelKey(state?: ProcessState | null): TranslationKey {
       return "state.starting";
     case "failed":
       return "state.failed";
+    // No process at all reads as Stopped, the same word as a process that
+    // stopped (app-council A91). "Offline" was a fourth spelling of "not
+    // running" beside Stopped, Off and idle; Off stays for what the operator
+    // switched off, so the two questions "is it running?" and "did I turn it
+    // off?" each have one word. Presentation only: no API value changes.
     case "stopped":
-      return "state.stopped";
     default:
-      return "state.offline";
+      return "state.stopped";
   }
 }
 

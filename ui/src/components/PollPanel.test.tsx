@@ -74,7 +74,7 @@ describe("starting a poll", () => {
 
   it("sends the question, the options, the duration and the Twitch mirror choice", async () => {
     start.mockResolvedValue(running);
-    render(<PollPanel />);
+    render(<PollPanel twitchAvailable />);
     fireEvent.change(await screen.findByLabelText("Question"), { target: { value: "Next map?" } });
     fireEvent.change(screen.getByLabelText("Option 1"), { target: { value: "Dust" } });
     fireEvent.change(screen.getByLabelText("Option 2"), { target: { value: "Mirage" } });
@@ -91,6 +91,27 @@ describe("starting a poll", () => {
       question: "Next map?", options: ["Dust", "Mirage"], durationSeconds: 45, mirrorTwitch: false,
       mirrorYouTube: true,
     });
+  });
+
+  it("offers no Twitch mirror, and sends none, when no Twitch account is attached", async () => {
+    // The mirror used to be checked by default with no Twitch account at all,
+    // and the only sign of it was a delivery line after the poll had started.
+    start.mockResolvedValue(running);
+    render(<PollPanel />);
+    fireEvent.change(await screen.findByLabelText("Question"), { target: { value: "Next map?" } });
+    fireEvent.change(screen.getByLabelText("Option 1"), { target: { value: "Dust" } });
+    fireEvent.change(screen.getByLabelText("Option 2"), { target: { value: "Mirage" } });
+    expect(screen.queryByLabelText("Also run as a native Twitch poll")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Start poll/ }));
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    expect(start.mock.calls[0][0]).toMatchObject({ mirrorTwitch: false });
+  });
+
+  it("keeps the start form behind a closed disclosure, so status can sit above it", async () => {
+    render(<PollPanel />);
+    const disclosure = (await screen.findByText("Start a poll")).closest("details");
+    expect(disclosure, "the start form is no longer behind a disclosure").not.toBeNull();
+    expect(disclosure?.open).toBe(false);
   });
 
   it("offers no more than six options and no fewer than two", async () => {

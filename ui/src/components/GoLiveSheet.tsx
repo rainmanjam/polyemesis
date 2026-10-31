@@ -208,9 +208,18 @@ export function GoLiveSheet({
                 <span className="block truncate font-medium">{row.name}</span>
                 <span className="block font-mono text-xs text-muted-foreground">{row.platform}</span>
               </span>
-              <span className="truncate text-muted-foreground">{row.sourceName ?? "—"}</span>
+              {/* Wraps rather than truncates: the source is what the operator
+                  confirms before a press, and "Main Programme — St…" cannot be
+                  confirmed (A90). The tooltip carries the full name on hover. */}
+              <span className="min-w-0 break-words text-muted-foreground" title={row.sourceName ?? undefined}>
+                {row.sourceName ?? "—"}
+              </span>
               <span>
-                {row.ready ? (
+                {/* A row that is already on air is not READY: it is not waiting
+                    for anything, and it is not counted in the start button. Its
+                    LIVE mark is the progress column's chip, so this cell is left
+                    empty rather than saying it twice (A8). */}
+                {p === "live" ? null : row.ready ? (
                   <Badge variant="armed">{t("golive.ready")}</Badge>
                 ) : (
                   <Badge variant="warn">{t("golive.blockedNoSource")}</Badge>

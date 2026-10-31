@@ -337,13 +337,21 @@ tokens are for.
   An absent body means unconfirmed. A body that is present and malformed — or
   that misspells the field — is a `400`, so a client that meant to confirm is
   never read as one that did not.
+- **A start or stop schedule says what it acts on.** It names destinations in
+  `destinationIds`, or sets `allDestinations: true` for every destination on
+  this install — never neither and never both, or the answer is `400` naming
+  `allDestinations`. An empty list used to mean every destination; upgraded
+  schedules were set to `allDestinations: true`, and a client that omits the
+  field keeps working: a new `start` with no list still means every
+  destination, and an edit with no list keeps what the schedule already says.
+  Only a new `stop` with nothing named, or an edit that empties a named stop, is
+  refused. See [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md).
 - **A schedule whose `destinationIds` cannot be resolved is refused, not
-  emptied.** An empty `destinationIds` means *every destination on this
-  install*, which is the correct reading of "no filter given" — but a list that
-  arrives with entries and resolves to nothing is a different thing, and it used
-  to normalise to empty before validation saw it. A `stop` schedule that named
-  three destinations then fired against every broadcast on the box, and stopping
-  a YouTube broadcast completes it permanently.
+  emptied.** A list that arrives with entries and resolves to nothing used to
+  normalise to empty before validation saw it, and an empty list then meant
+  every destination. A `stop` schedule that named three destinations fired
+  against every broadcast on the box, and stopping a YouTube broadcast completes
+  it permanently.
 
   So both the create and the update route compare the length before and after
   normalisation, and answer `400` when a non-empty list empties. `[null]` and
@@ -535,7 +543,10 @@ session, like `/auth/tokens`: each overlay carries a credential. `POST
 /overlays/{id}/key` rotates the key and `DELETE` revokes it; either ends open
 overlays within seconds. The overlay key itself reaches only the two
 `/overlay/*` routes above, and no other route accepts it. See
-[OVERLAY.md](OVERLAY.md).
+[OVERLAY.md](OVERLAY.md). Each overlay in `GET /overlays` carries `connected`,
+how many display streams (an OBS browser source, a dock) have it open now, and
+`lastSeen`, when one last did; `lastSeen` is absent for an overlay nothing has
+opened since the server started.
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not
@@ -1192,6 +1203,14 @@ On `PUT /clips/buffer`, a `windowSeconds` of `0` or less means **leave the
 window unchanged**, so a page that only toggles the switch does not need to know
 the current value.
 
+The buffer's switch and window are **stored per programme** and survive a
+restart: a programme whose buffer was on comes back with it on, at the same
+window. A programme that has never set it, including every one that predates
+this, boots with it off. A failure to store the switch answers `500` and leaves
+the buffer as it was; only a window outside the bounds answers `400`. The
+`buffer` object in `GET /clips` carries `windowSeconds` (the configured window)
+even while the buffer is off.
+
 `GET /clips`, `POST /clips` and `PUT /clips/buffer` are programme-scoped — the
 buffer belongs to one source — so on an install with more than one they need
 `?source=<id>`. See [Conventions](#conventions). `DELETE /clips/{name}` and
@@ -1305,6 +1324,11 @@ stored client credentials for it are still good, and answers with a verdict —
 never with the credential. It is a `POST` because it makes an outbound call, and
 it is refused to `read` tokens for the same reason: a route that exercises a
 stored secret is not a read, whatever its verb.
+
+The verdict the last save or check reached is stored with the pair, and
+`GET /platforms/credentials` returns it on each row as `lastCheck`
+(`state`, `method`, `detail`, `checkedAt`). The field is absent for a pair that
+has never been checked, and saving a new pair clears the old pair's verdict.
 
 #### Connecting an account with no callback URL
 

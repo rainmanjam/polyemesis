@@ -72,8 +72,10 @@ describe("the header ingest chip during a failover", () => {
     expect(text).toBe(translate("en", "chrome.ingestBackup"));
   });
 
-  it("still says Offline when nothing is on air from the backup", () => {
+  it("still says Stopped when nothing is on air from the backup", () => {
+    // Stopped, not Offline: an absent ingest uses the console's one word for
+    // "not running" (app-council A91).
     failoverActive = "primary";
-    expect(chip()).toBe("Offline");
+    expect(chip()).toBe("Stopped");
   });
 });

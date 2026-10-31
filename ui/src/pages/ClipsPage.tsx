@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Download, Loader2, Scissors, Trash2 } from "lucide-react";
+import { Download, Film, Loader2, Scissors, Trash2 } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { SaveStatus } from "@/components/SaveStatus";
+import { StatusPill } from "@/components/StatusPill";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +24,8 @@ import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { autoApi } from "@/lib/autoApi";
 import { keyframeVerdict, windowOnBufferToggle } from "@/lib/clipBufferFacts";
+import { clipBufferStatus } from "@/lib/status";
+import { useSaveModel } from "@/lib/saveModel";
 import { bytes, timestamp } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import {
@@ -69,6 +74,10 @@ interface BufferStatus {
   running: boolean;
   buffer?: BufferStats | null;
   dir: string;
+  /** The configured window, present whether or not the buffer runs. It is
+   *  stored per programme (app-council A14), so a switched-off buffer comes
+   *  back with it. Optional: a server older than this does not send it. */
+  windowSeconds?: number;
 }
 
 interface ClipsView {
@@ -104,8 +113,29 @@ export function ClipsPage() {
    * which exists to make exactly this unwriteable. */
   const [read, setRead] = useState<ReadState<ClipsView>>(pendingRead);
   const [capturing, setCapturing] = useState(false);
-  const [windowSec, setWindow] = useState(60);
   const [custom, setCustom] = useState(20);
+  // The window is the one field a 3-second poll must not overwrite (A13). It is
+  // a draft over the server's window: the poll reseeds it only while clean.
+  const storedWindow = mayClaim(read)
+    ? Math.round(read.value.buffer.buffer?.windowSeconds ?? read.value.buffer.windowSeconds ?? 60)
+    : 60;
+  const windowModel = useSaveModel<number>({
+    stored: storedWindow,
+    onSave: async (windowSeconds) => {
+      try {
+        const st = await autoApi.setClipBuffer<BufferStatus>(
+          { enabled: true, windowSeconds },
+          programme,
+        );
+        setRead((r) => (mayClaim(r) ? okRead({ ...r.value, buffer: st }) : r));
+        await load(true);
+      } catch (err) {
+        toast.error(errText(err, t("clips.couldNotChangeTheClip")));
+        throw err;
+      }
+    },
+  });
+  const windowSec = windowModel.draft;
 
   const load = useCallback(
     (quiet = false) =>
@@ -113,7 +143,6 @@ export function ClipsPage() {
         .listClips<ClipsView>(programme)
         .then((v) => {
           setRead(okRead(v));
-          if (v.buffer.buffer) setWindow(Math.round(v.buffer.buffer.windowSeconds));
         })
         .catch((err) => {
           // The toast is still suppressed on a background poll -- a red toast
@@ -198,9 +227,7 @@ export function ClipsPage() {
         title={t("clips.title")}
         subtitle={t("clips.subtitle")}
         actions={
-          <Badge variant={buffer?.running ? "live" : buffer?.enabled ? "warn" : "outline"}>
-            {buffer?.running ? t("clips.buffering") : buffer?.enabled ? t("clips.waitingForStream") : t("clips.off")}
-          </Badge>
+          <StatusPill reading={clipBufferStatus({ enabled: buffer?.enabled ?? false, running: buffer?.running ?? false })} />
         }
       />
 
@@ -214,68 +241,86 @@ export function ClipsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {QUICK_SECONDS.map((s) => (
-                  <Button
-                    key={s}
-                    size="sm"
-                    variant={s === 30 ? "default" : "secondary"}
-                    disabled={!programmeKnown || capturing || !buffer?.running}
-                    onClick={() => capture(s)}
-                  >
-                    {capturing && <Loader2 className="animate-spin" />}
-                    {t("clips.lastSeconds", { n: s })}
-                  </Button>
-                ))}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={!programmeKnown || capturing || !buffer?.running}
-                  onClick={() => capture(0)}
-                  title={t("clips.everythingHeld")}
-                >
-                  {t("clips.wholeBuffer")}
-                </Button>
-                <span className="mx-1 h-5 w-px bg-border" />
-                <Input
-                  type="number"
-                  min={1}
-                  max={view?.bounds.maxWindowSeconds ?? 300}
-                  value={custom}
-                  className="w-20"
-                  aria-label={t("clips.customLength")}
-                  onChange={(e) => setCustom(Number(e.target.value))}
-                />
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={!programmeKnown || capturing || !buffer?.running || custom < 1}
-                  onClick={() => capture(custom)}
-                >
-                  {t("clips.capture")}
-                </Button>
-              </div>
-
               {!buffer?.enabled ? (
-                <p className="text-tiny text-muted-foreground">
-                  {t("clips.bufferOff")}
-                </p>
-              ) : !buffer.running ? (
-                <p className="text-tiny text-muted-foreground">
-                  {t("clips.bufferIdle")}
-                </p>
+                // A12: one primary action in place of presets that cannot work
+                // while the buffer is off. The state is said once, here.
+                <EmptyState
+                  icon={Scissors}
+                  title={t("clips.bufferOffTitle")}
+                  body={t("clips.bufferOff")}
+                  action={{
+                    label: t("clips.turnOnBuffer"),
+                    onClick: () => void setBuffer(true, windowSec),
+                    disabled: !programmeKnown,
+                    disabledReason: !programmeKnown ? t("clips.programmeUnknown") : undefined,
+                  }}
+                />
               ) : (
-                <p className="text-tiny text-muted-foreground">
-                  {t("clips.holding", {
-                    held: held.toFixed(0),
-                    window: stats?.windowSeconds.toFixed(0) ?? "—",
-                  })}
-                  {/* Asking for more than has arrived is not an error — the
-                      capture is simply as long as the history allows. */}
-                  {" "}{t("clips.trimmedNote")}
-                  {stats?.truncated && ` ${t("clips.memoryLimits")}`}
-                  {stats && !stats.videoFound && ` ${t("clips.noKeyframeYet")}`}
-                </p>
+                <>
+                  {buffer.running && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {QUICK_SECONDS.map((s) => (
+                        <Button
+                          key={s}
+                          size="sm"
+                          variant={s === 30 ? "default" : "secondary"}
+                          disabled={!programmeKnown || capturing}
+                          onClick={() => capture(s)}
+                        >
+                          {capturing && <Loader2 className="animate-spin" />}
+                          {t("clips.lastSeconds", { n: s })}
+                        </Button>
+                      ))}
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!programmeKnown || capturing}
+                        onClick={() => capture(0)}
+                        title={t("clips.everythingHeld")}
+                      >
+                        {t("clips.wholeBuffer")}
+                      </Button>
+                      <span className="mx-1 h-5 w-px bg-border" />
+                      <Input
+                        type="number"
+                        min={1}
+                        max={view?.bounds.maxWindowSeconds ?? 300}
+                        value={custom}
+                        className="w-20"
+                        aria-label={t("clips.customLength")}
+                        onChange={(e) => setCustom(Number(e.target.value))}
+                      />
+                      {/* A96: the unit is visible, not only in the aria-label. */}
+                      <span className="text-sm text-muted-foreground" aria-hidden="true">s</span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!programmeKnown || capturing || custom < 1}
+                        onClick={() => capture(custom)}
+                      >
+                        {t("clips.capture")}
+                      </Button>
+                    </div>
+                  )}
+
+                  {!buffer.running ? (
+                    <p className="text-tiny text-muted-foreground">
+                      {t("clips.bufferIdle")}
+                    </p>
+                  ) : (
+                    <p className="text-tiny text-muted-foreground">
+                      {t("clips.holding", {
+                        held: held.toFixed(0),
+                        window: stats?.windowSeconds.toFixed(0) ?? "—",
+                      })}
+                      {/* Asking for more than has arrived is not an error — the
+                          capture is simply as long as the history allows. */}
+                      {" "}{t("clips.trimmedNote")}
+                      {stats?.truncated && ` ${t("clips.memoryLimits")}`}
+                      {stats && !stats.videoFound && ` ${t("clips.noKeyframeYet")}`}
+                    </p>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -294,9 +339,12 @@ export function ClipsPage() {
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : clips.length === 0 ? (
-                <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  {t("clips.noneYet")}
-                </div>
+                <EmptyState
+                  icon={Film}
+                  title={t("clips.noneYet")}
+                  body={t("clips.noneYetBody")}
+                  className="mx-3 mb-3 border-0"
+                />
               ) : (
                 <Table>
                   <TableHeader>
@@ -368,7 +416,8 @@ export function ClipsPage() {
             <CardHeader>
               <CardTitle>{t("clips.buffer")}</CardTitle>
             </CardHeader>
-            {/* Every cell follows the Window cell's `stats ? … : "—"`.
+            {/* Every cell follows `stats ? … : "—"`, and the dash carries no
+                unit: "—s" read as a measurement of nothing seconds.
                 Five of the six used to print a zero through `?? 0` with no
                 buffer to have measured it, and two of those zeros are not even
                 possible readings: the Ceiling is a configured constant that is
@@ -382,7 +431,7 @@ export function ClipsPage() {
                 value={stats ? `${held.toFixed(0)}s` : "—"}
                 tone={held > 0 ? "live" : "muted"}
               />
-              <Stat labelKey="clips.window" value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
+              <Stat labelKey="clips.window" value={stats ? `${stats.windowSeconds.toFixed(0)}s` : "—"} />
               <Stat
                 labelKey="clips.inMemory"
                 value={stats ? bytes(stats.bytes) : "—"}
@@ -441,25 +490,26 @@ export function ClipsPage() {
                     min={view?.bounds.minWindowSeconds ?? 5}
                     max={view?.bounds.maxWindowSeconds ?? 300}
                     value={windowSec}
-                    onChange={(e) => setWindow(Number(e.target.value))}
+                    onChange={(e) => windowModel.setDraft(Number(e.target.value))}
                   />
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={!programmeKnown || !buffer?.enabled}
-                    onClick={() => setBuffer(true, windowSec)}
+                    disabled={!programmeKnown || !buffer?.enabled || !windowModel.dirty}
+                    onClick={() => void windowModel.save()}
                   >
                     {t("common.apply")}
                   </Button>
                 </div>
+                <SaveStatus state={windowModel.state} />
                 {/* Apply stays greyed while the buffer is off -- there is
                     nothing to apply it to -- but the reason is now in words
                     beside it rather than nowhere, and the sentence says where
                     the number goes instead. */}
                 {!buffer?.enabled && (
-                  <span className="text-micro text-warn">{t("clips.windowAppliesOnEnable")}</span>
+                  <span className="text-sm text-warn">{t("clips.windowAppliesOnEnable")}</span>
                 )}
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("clips.windowNote", {
                     min: view?.bounds.minWindowSeconds ?? 5,
                     max: view?.bounds.maxWindowSeconds ?? 300,
@@ -471,14 +521,18 @@ export function ClipsPage() {
                 <Stat labelKey="clips.clipsKept" value={view?.usage.count ?? 0} />
                 <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
-              <p className="text-micro text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {t("clips.retention", {
                   count: view?.usage.maxClips ?? 0,
                   bytes: bytes(view?.usage.maxBytes ?? 0),
                 })}
               </p>
-              <p className="text-micro text-muted-foreground">
-            {t("clips.bufferLiveNote")}
+              {/* app-council A14: the switch and the window are stored for this
+                  programme and survive a restart (Engine.SetClipBuffer). The
+                  "off again after a restart" note this replaces was true until
+                  then; it is gone with the behaviour it described. */}
+              <p className="text-sm text-muted-foreground">
+                {t("clips.bufferSavedNote")}
               </p>
             </CardContent>
           </Card>

@@ -20,7 +20,29 @@ import {
 /** The dock keeps more scrollback than any overlay draws. */
 const DOCK_LINES = 200;
 
-type Phase = { kind: "loading" } | { kind: "denied" } | { kind: "ready"; config: OverlayConfig };
+/** How long the dock waits before asking again after the server did not
+ *  answer. An OBS dock is rarely reloaded by hand, so it has to recover on its
+ *  own once the server is back. */
+const RETRY_MS = 2000;
+
+/* app-council A99: each phase that is not "ready" is a different fix, and the
+ * dock says which. `missing` is a URL with no key in it (copy it again),
+ * `denied` a key the server refused (make a new one), `unreachable` a server
+ * that did not answer or answered with an error (check the server; the dock
+ * retries). They used to share one sentence about an invalid key. */
+type Phase =
+  | { kind: "loading" }
+  | { kind: "missing" }
+  | { kind: "denied" }
+  | { kind: "unreachable" }
+  | { kind: "ready"; config: OverlayConfig };
+
+const DOCK_COPY = {
+  loading: "overlay.dockLoading",
+  missing: "overlay.dockMissingKey",
+  denied: "overlay.dockDenied",
+  unreachable: "overlay.dockNetworkError",
+} as const;
 
 /** The chat overlay (/overlay) and dock (/overlay/dock), for OBS, and their
  *  path-key forms (/overlay/k/{key}, /overlay/dock/k/{key}).
@@ -115,7 +137,7 @@ function PollOverlay({ overlayKey: key }: { overlayKey: string }) {
 function ChatOverlay({ overlayKey: key, dock }: { overlayKey: string; dock: boolean }) {
   const t = useT();
   // No key in the URL is decided at once, not in an effect.
-  const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "denied" }));
+  const [phase, setPhase] = useState<Phase>(() => (key ? { kind: "loading" } : { kind: "missing" }));
   const [lines, setLines] = useState<ShownLine[]>([]);
   const [connected, setConnected] = useState(false);
 
@@ -169,10 +191,23 @@ function ChatOverlay({ overlayKey: key, dock }: { overlayKey: string; dock: bool
         ctl.signal,
       );
     };
-    run().catch(() => {
-      if (!ctl.signal.aborted) setPhase({ kind: "denied" });
-    });
-    return () => ctl.abort();
+    // A failure that is not a 401 -- the network, a 5xx, a stream that
+    // threw -- is "unreachable", not "denied", and is tried again. A 401
+    // resolves inside run() as denied and is not retried: a refused key stays
+    // refused until somebody makes a new one.
+    let retry: number | undefined;
+    const attempt = () => {
+      run().catch(() => {
+        if (ctl.signal.aborted) return;
+        setPhase({ kind: "unreachable" });
+        retry = window.setTimeout(attempt, RETRY_MS);
+      });
+    };
+    attempt();
+    return () => {
+      ctl.abort();
+      window.clearTimeout(retry);
+    };
   }, [key, dock]);
 
   // Fade. The dock keeps its scrollback; an overlay drops lines past fade.
@@ -184,10 +219,14 @@ function ChatOverlay({ overlayKey: key, dock }: { overlayKey: string; dock: bool
   }, [fade]);
 
   if (phase.kind !== "ready") {
-    if (!dock || phase.kind === "loading") return null;
+    // The overlay draws nothing in every phase: an error there is on stream.
+    if (!dock) return null;
     return (
-      <div style={{ padding: "0.75rem", color: "#e5e7eb", background: "#0b0d12", height: "100vh", font: "14px system-ui, sans-serif" }}>
-        {t("overlay.dockDenied")}
+      <div
+        role={phase.kind === "loading" ? "status" : "alert"}
+        style={{ padding: "0.75rem", color: "#e5e7eb", background: "#0b0d12", height: "100vh", font: "14px system-ui, sans-serif" }}
+      >
+        {t(DOCK_COPY[phase.kind])}
       </div>
     );
   }

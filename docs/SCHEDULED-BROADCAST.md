@@ -62,8 +62,33 @@ speed and buries the relay in an hour of stream in seconds.
 **3. Add your destinations and leave them disabled.**
 
 **4. Schedule the start.** *Automation → Schedules → New*, action **Start**, and
-pick the destinations. `once` fires at a single instant; `daily` and `weekly`
-take a wall-clock time and an IANA zone.
+pick the destinations, or tick **All destinations**. `once` fires at a single
+instant; `daily` and `weekly` take a wall-clock time and an IANA zone.
+
+**"Every destination" is a choice you make, not an empty list.** A start or stop
+schedule names its destinations, or sets `allDestinations: true` on the wire
+(**All destinations** in the editor). It cannot do neither: an empty list used
+to mean every destination, and for a stop that made "nothing ticked" and "stop
+the whole broadcast" the same request. The editor will not save a schedule with
+neither, and the API answers `400` naming `allDestinations`. It cannot do both
+either — a list *and* `allDestinations` is a `400` too.
+
+Existing schedules keep working. On upgrade, every start or stop schedule with
+an empty list is set to `allDestinations: true`, so it acts on every destination
+exactly as before. A client written before the field still works:
+
+- a new **start** with no list and no `allDestinations` means every destination,
+  as it always did;
+- an edit that sends no list and no `allDestinations` keeps what the schedule
+  already says, so an old client toggling a schedule on or off does not change
+  what it acts on;
+- a new **stop** with no list and no `allDestinations` — or an edit that clears
+  the list of a stop that named destinations — is refused. There is no safe
+  guess for a stop, so send `allDestinations: true` if every destination is what
+  you mean.
+
+The MCP `schedule_broadcast` tool always names 1 to 50 destinations, so it never
+takes this path.
 
 At the appointed time the schedule flips the same `enabled` bit you would have
 clicked and asks for a reconcile — so a scheduled start is indistinguishable
@@ -96,7 +121,7 @@ scheduled start is not self-healing. If a start matters, check that it happened
 rather than assuming it will arrive eventually.
 
 How late is too late is the **lateness allowance** on the schedule itself
-(`graceSeconds` on the wire, *Lateness allowance* in the editor). It defaults to
+(`graceSeconds` on the wire, *Run if late by up to* in the editor). It defaults to
 **300 seconds**, which is enough to survive a restart and a slow boot without
 being enough to start a stream in the middle of the night. It is clamped to a
 floor of **30 seconds** and a ceiling of **86400 seconds** (24 hours), and the
@@ -224,9 +249,9 @@ Editing the list *does* restart it, from item one.
 | How many files | one | every item in the list, in order, looping |
 | Failover while it plays | reads the programme as live | fully live; the primary is watched throughout |
 | It starts | when you save the setting | when nothing else can deliver, or when you pin it |
-| Where | *Settings → Ingest → Pull* | *Settings → Failover → Playlist*, or `failover.playlist` in the settings API |
+| Where | *Settings → Ingest → Pull* | *Settings → Pipeline → Failover → Playlist*, or `failover.playlist` in the settings API |
 
-Build the list in *Settings → Failover*, or set `failover.playlist.enabled` and
+Build the list in *Settings → Pipeline → Failover*, or set `failover.playlist.enabled` and
 `failover.playlist.items` through the settings API. `items` is a list, each
 entry an `{"upload": "<name>"}` naming a file already sent through the
 uploads page — a bare stored filename, never a path, confined to the uploads
@@ -251,7 +276,7 @@ transcoded once and appears in the sequence twice.
 
 ### Turning it on and off, including on a schedule
 
-*Settings → Failover → Playlist* has the enabled switch described above.
+*Settings → Pipeline → Failover → Playlist* has the enabled switch described above.
 *Automation → Schedules* can flip the same switch: a schedule with action
 **Start the playlist** or **Stop the playlist** sets
 `failover.playlist.enabled` and asks for a reconcile, through the same
@@ -275,13 +300,12 @@ Write two schedules at the same time instead: one with action `playlist.start`
 and no `destinationIds`, one with action `start` naming the destinations. This
 is easy to walk into by editing a working destination schedule's body and
 changing only its action, because the destination list is left behind in the
-request. Note that an empty `destinationIds` means the playlist here, not "every
-destination" as it does on a destination schedule — so a list that names ids and
-has none of them survive normalisation (`[0]`) is a `400` of its own rather than
-either reading, and says so. `[null]` never gets that far: a null is refused by
-the JSON parser before any schedule exists, with the un-branched message that an
-empty `destinationIds` "means EVERY destination on this install" — the reading
-that does *not* apply to a playlist schedule.
+request. Note that an empty `destinationIds` means the playlist here, and
+`allDestinations` is ignored on a playlist schedule — so a list that names ids
+and has none of them survive normalisation (`[0]`) is a `400` of its own, and
+says so. `[null]` never gets that far: a null is refused by the JSON parser
+before any schedule exists, with a message saying a null is not a destination
+and that `allDestinations: true` is how to mean every destination.
 
 Two more things about that switch are worth knowing before you schedule it, not
 during a broadcast:
@@ -398,7 +422,7 @@ of the departed ingest, which is precisely why it can never cause this.
 ## If you only want filler
 
 For "something on screen when the encoder drops" and nothing more, you want the
-**slate** — *Settings → Failover*. A slate is built at the probed geometry of the
+**slate** — *Settings → Pipeline → Failover*. A slate is built at the probed geometry of the
 departed ingest so a copying destination does not choke on the change, it needs
 no file and no matching, and it yields the moment the real feed returns. Reach
 for the failover playlist above when the filler should be *your* programming and

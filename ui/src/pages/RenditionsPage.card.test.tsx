@@ -47,6 +47,72 @@ const bounds: RenditionBounds = {
 afterEach(cleanup);
 
 describe("RenditionCard", () => {
+  it("names each feed's state in words, not only in a dot", () => {
+    // A34. The chips were a coloured dot with the state in a hover title, which
+    // touch users never see and which a colour-blind operator cannot read.
+    render(
+      <RenditionCard
+        view={view({ destinations: 1, enabledDestinations: 0 })}
+        live={undefined}
+        users={[{ id: 1, name: "Twitch", enabled: false } as never]}
+        hardwareExists
+        source={null}
+        busy={false}
+        onEdit={noop}
+        onRestart={noop}
+        onDelete={noop}
+      />,
+    );
+    const chip = screen.getByText("Twitch").parentElement as HTMLElement;
+    // Off, the word the destination card uses for a switched-off feed (A91).
+    expect(chip.textContent).toContain("Off");
+    // And the rendition nothing enabled uses reads Stopped, not "Idle".
+    expect(screen.queryByText("Idle")).toBeNull();
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
+  });
+
+  it("labels Delete with words, not an icon alone", () => {
+    // A33. Delete was an icon beside Restart with only an aria-label, so a
+    // sighted operator had to know the trash can meant the rendition.
+    render(
+      <RenditionCard
+        view={view()}
+        live={undefined}
+        users={[]}
+        hardwareExists
+        source={null}
+        busy={false}
+        onEdit={noop}
+        onRestart={noop}
+        onDelete={noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("says Not encoding, not Starting, when a feed wants this rendition and no encode exists", () => {
+    // A10. renditionSignal used to return "Starting" whenever a destination was
+    // enabled and no process existed, so an idle rendition read as a stuck
+    // encoder with no explanation. Nothing has been requested from the encoder
+    // until a feed goes live, so the honest reading is "Not encoding" and the
+    // sentence says what will start it.
+    render(
+      <RenditionCard
+        view={view({ enabledDestinations: 1 })}
+        live={undefined}
+        users={[{ id: 1, name: "YouTube", enabled: true } as never]}
+        hardwareExists
+        source={null}
+        busy={false}
+        onEdit={noop}
+        onRestart={noop}
+        onDelete={noop}
+      />,
+    );
+    expect(screen.queryByText("Starting")).toBeNull();
+    expect(screen.getByText("Not encoding · starts when the first feed goes live")).toBeTruthy();
+  });
+
   it("puts the reason for a greyed Restart button in the card", () => {
     // button.tsx sets `disabled:pointer-events-none`, so the title on a
     // disabled button never reaches a pointer and never reaches a screen
@@ -66,7 +132,12 @@ describe("RenditionCard", () => {
     );
     const restart = screen.getByRole("button", { name: /Restart/ }) as HTMLButtonElement;
     expect(restart.disabled).toBe(true);
-    expect(screen.getByTestId("restart-reason").textContent).toContain("Nothing to restart");
+    // A28: the reason is visible text the disabled button points at through
+    // aria-describedby, so a keyboard or screen-reader user hears it too. A
+    // title on a disabled button reaches nobody (button.tsx pointer-events-none).
+    const reasonId = restart.getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId as string)?.textContent).toContain("Nothing to restart");
   });
 
   it("says nothing of the kind while an encode is reported", () => {

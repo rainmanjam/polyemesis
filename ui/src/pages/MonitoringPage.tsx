@@ -28,15 +28,14 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
-import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { Link, useSearchParams } from "react-router";
-import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
 import { useConfirm } from "@/hooks/useConfirm";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
-import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
-import { toneBadge, toneForState } from "@/lib/signal";
+import { bytes, clockTime, kbps, pct } from "@/lib/format";
+import { EmptyState } from "@/components/EmptyState";
+import { ProcessTable } from "@/components/ProcessTable";
 import {
   VERDICT_WINDOW_SEC,
   collapseRepeats,
@@ -55,7 +54,8 @@ import {
   type LogLine,
   type ProcessInfo,
 } from "@/lib/types";
-import { useT, useTN, type TranslationKey, useStateLabel } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { MoreAbout } from "@/components/MoreAbout";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -150,12 +150,21 @@ export function ExpertPanel() {
   // now runs through this confirmation, which names the destination.
   const confirmClear = useConfirm<Destination>();
 
-  useEffect(() => {
+  // A failed list is said, with a retry, not left as an empty picker that reads
+  // as "there are no destinations" (A70).
+  const [destsFailed, setDestsFailed] = useState(false);
+  const loadDests = useCallback(() => {
     api
       .listDestinations()
-      .then((rows) => setDests(rows.map((r) => r.destination)))
-      .catch(() => {});
+      .then((rows) => {
+        setDests(rows.map((r) => r.destination));
+        setDestsFailed(false);
+      })
+      .catch(() => setDestsFailed(true));
   }, []);
+  useEffect(() => {
+    loadDests();
+  }, [loadDests]);
 
   // Switching destination throws away everything about the previous one. A
   // resolved command carried across would describe the wrong process.
@@ -280,14 +289,20 @@ export function ExpertPanel() {
       </CardHeader>
 
       <CardContent className="flex flex-col gap-2.5">
-        <p className="text-tiny text-muted-foreground">
+        {destsFailed && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 text-tiny text-down">
+            <span>{t("mon.destinationsLoadFailed")}</span>
+            <Button size="sm" variant="outline" onClick={loadDests}>
+              {t("common.retry")}
+            </Button>
+          </div>
+        )}
+        <MoreAbout lead={t("mon.expertLead")}>
           {tn("mon.expertIntro", { flag: <code className="font-mono">-i</code> })}
-        </p>
+        </MoreAbout>
 
         {selected === "" ? (
-          <div className="rounded border border-dashed border-border py-6 text-center text-tiny text-muted-foreground">
-            {t("mon.chooseDestinationToEdit")}
-          </div>
+          <EmptyState title={t("mon.chooseDestinationToEdit")} />
         ) : (
           <>
             <div className="grid gap-2.5 sm:grid-cols-2">
@@ -337,7 +352,7 @@ export function ExpertPanel() {
                 {t("mon.clear")}
               </Button>
               {!shown && (
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("mon.resolveHint")}
                 </span>
               )}
@@ -404,7 +419,7 @@ export function ExpertPanel() {
                   {resolved.command.command}
                 </pre>
                 {resolved.command.note && (
-                  <p className="mt-1 text-micro text-muted-foreground">{resolved.command.note}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{resolved.command.note}</p>
                 )}
               </div>
             )}
@@ -424,7 +439,7 @@ export function ExpertPanel() {
                 )}
                 {dryRun.output && (
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                       {t("i18nSweep.ffmpegOutput")}
                     </summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
@@ -472,7 +487,7 @@ function TileRemedy({
   onClick?: () => void;
 }) {
   return (
-    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-micro text-warn">
+    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-sm text-warn">
       <span>{text}</span>
       {to ? (
         <Link to={to} className="underline underline-offset-2 hover:text-foreground">
@@ -488,12 +503,25 @@ function TileRemedy({
 }
 
 export function MonitoringPage() {
-  const stateLabel = useStateLabel();
   const t = useT();
   const {
     system, bitrate, logs, status, clearLogs, programme, programmeKnown, programmes, selectProgramme,
   } = useLiveData();
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
+  // False until the first answer. Before it, an empty list is loading; after it,
+  // an empty list is the truth: nothing is running (A68).
+  const [processesLoaded, setProcessesLoaded] = useState(false);
+  // Expert mode (raw FFmpeg arguments) is closed until asked for (A67).
+  const [expertOpen, setExpertOpen] = useState(false);
+  // The CPU warning is the Jobs CPU ceiling the operator saved, so the two pages
+  // cannot disagree about when the machine is too busy (A71). 85 until read.
+  const [cpuWarn, setCpuWarn] = useState(85);
+  useEffect(() => {
+    api
+      .jobsOverview()
+      .then((v) => setCpuWarn(v.policy.cpuCeilingPercent))
+      .catch(() => setCpuWarn(85));
+  }, []);
   const [history, setHistory] = useState<LogLine[]>([]);
   // ?process=<name> opens the log on one process: the "Show log" links on a
   // destination card and on a timeline row land here (A9, A13). Followed on
@@ -577,6 +605,7 @@ export function MonitoringPage() {
         .listProcesses(programme)
         .then((p) => {
           setProcesses(p);
+          setProcessesLoaded(true);
           procOk();
         })
         .catch(procFailed);
@@ -693,6 +722,14 @@ export function MonitoringPage() {
     [processes],
   );
 
+  // THE ONE SENTENCE UNDER THE TITLE (A66). It says whether the stream is
+  // healthy before any tile is read: failures first, then ingest loss, then
+  // the calm case. It does not reuse the Dashboard verdict, which is still to
+  // be unified (A3, A73); it reads the same process states the table does.
+  const failedCount = processes.filter((p) => p.status.state === "failed").length;
+  const runningCount = processes.filter((p) => p.status.state === "running").length;
+  const losing = (status?.relay.dropped ?? 0) > 0 || (status?.relay.lossPercent ?? 0) > 0;
+
   return (
     <div className="p-3">
       <PageHeader
@@ -700,20 +737,47 @@ export function MonitoringPage() {
         subtitle={t("mon.subtitle")}
       />
 
+      {processesLoaded && processes.length > 0 && (
+        <p aria-live="polite" className={cn("mb-3 flex flex-wrap items-center gap-2 text-sm", failedCount > 0 ? "text-down" : "text-muted-foreground")}>
+          <span>
+            {failedCount > 0
+              ? t("mon.verdictProcessesFailed", { count: failedCount })
+              : losing
+                ? t("mon.verdictIngestLoss")
+                : runningCount === processes.length
+                  ? t("mon.verdictAllRunning", { count: processes.length })
+                  : t("mon.verdictSomeNotRunning", { running: runningCount, count: processes.length })}
+          </span>
+          {failedCount > 0 && (
+            <Button
+              variant="link"
+              size="sm"
+              className="h-auto p-0"
+              onClick={() => logCardRef.current?.scrollIntoView({ block: "start" })}
+            >
+              {t("mon.verdictSeeLog")}
+            </Button>
+          )}
+        </p>
+      )}
+
       {/* ---------- host + relay ---------- */}
       <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.hostCpu"
-              value={pct(system?.cpuPercent ?? 0)}
-              tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
+              value={system ? pct(system.cpuPercent) : "—"}
+              tone={(system?.cpuPercent ?? 0) > cpuWarn ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
-            {(system?.cpuPercent ?? 0) > 85 && (
+            <div className="mt-1 text-tiny text-muted-foreground">
+              {t("mon.cpuWarnsAbove", { pct: cpuWarn })}
+            </div>
+            {(system?.cpuPercent ?? 0) > cpuWarn && (
               <TileRemedy text={t("mon.remedy.cpu")} to="/renditions" label={t("reason.action.renditions")} />
             )}
           </CardContent>
@@ -722,12 +786,17 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.memory"
-              value={pct(system?.memPercent ?? 0)}
+              value={system ? pct(system.memPercent) : "—"}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
-              {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
-              {bytes(system?.procMemBytes ?? 0)}
+            <div className="mt-1 text-sm text-muted-foreground">
+              {/* app-council A93: the words around the figures are translated;
+                  the bare "rss" was English in every locale. */}
+              {t("mon.memProcess", {
+                used: bytes(system?.memUsedBytes ?? 0),
+                total: bytes(system?.memTotalBytes ?? 0),
+                rss: bytes(system?.procMemBytes ?? 0),
+              })}
               <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
             {(system?.memPercent ?? 0) > 90 && (
@@ -737,8 +806,8 @@ export function MonitoringPage() {
         </Card>
         <Card>
           <CardContent className="pt-3">
-            <Stat labelKey="mon.relayIn" value={bytes(status?.relay.rxBytes ?? 0)} />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <Stat labelKey="mon.relayIn" value={status ? bytes(status.relay.rxBytes) : "—"} />
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monSubscribers", {
                 count: status?.relay.subscribers?.length ?? 0,
                 port: status?.relay.port ?? "—",
@@ -751,10 +820,10 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.relayDrops"
-              value={status?.relay.dropped ?? 0}
+              value={status ? status.relay.dropped : "—"}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("mon.relayDropsNote")}
               <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
@@ -771,10 +840,10 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat
               labelKey="mon.ingestLoss"
-              value={`${(status?.relay.lossPercent ?? 0).toFixed(2)}%`}
+              value={status ? `${status.relay.lossPercent.toFixed(2)}%` : "—"}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monTsMissing", {
                 lost: (status?.relay.tsLost ?? 0).toLocaleString(),
                 total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
@@ -832,11 +901,12 @@ export function MonitoringPage() {
                     background: "var(--popover)",
                     border: "1px solid var(--border-strong)",
                     borderRadius: 6,
-                    fontSize: 11,
+                    // The text-sm step (12px), not an off-scale 11.
+                    fontSize: 12,
                     fontFamily: "var(--font-mono)",
                   }}
                   labelFormatter={(v) => new Date(v as number).toLocaleTimeString(undefined, { hour12: false })}
-                  formatter={(v) => [kbps(v as number), "ingest"]}
+                  formatter={(v) => [kbps(v as number), t("chrome.ingest")]}
                 />
                 <Area
                   type="monotone"
@@ -869,82 +939,31 @@ export function MonitoringPage() {
               )}
           </CardHeader>
           <CardContent className="flex flex-col gap-1.5">
-            {processes.length === 0 && (
-              <div className="py-3 text-center text-tiny text-muted-foreground">
-                <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
-              </div>
-            )}
-            {processes.map(({ status: p, command }) => {
-              const tone = toneForState(p.state);
-              return (
-                <div key={p.name} className="rounded-md border border-border bg-background p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <StatusDot tone={tone} size="sm" />
-                      <span className="truncate font-mono text-tiny">{p.name}</span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {(errorsByProcess.get(p.name) ?? 0) > 0 && (
-                        <Badge variant="warn">
-                          {t("monitor.processErrors", { count: errorsByProcess.get(p.name) ?? 0 })}
-                        </Badge>
-                      )}
-                      <Badge variant={toneBadge[tone]}>{stateLabel(p.state)}</Badge>
-                    </div>
-                  </div>
-                  <div className="mt-1 grid grid-cols-3 gap-1">
-                    <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
-                    <Stat
-                      labelKey="mon.uptime"
-                      value={p.state === "running" ? duration(p.uptimeSec) : "—"}
-                      tone="muted"
-                    />
-                    <Stat
-                      labelKey="mon.restarts"
-                      value={p.restarts}
-                      tone={p.restarts > 0 ? "warn" : "muted"}
-                    />
-                  </div>
-                  {p.nextRetryIn ? (
-                    <div className="mt-1 text-micro text-warn">
-                      {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
-                    </div>
-                  ) : null}
-                  {/* #20 + A9: the classified cause, what to do about it, and the
-                      process's own log one click away. The raw lastError stays
-                      for an unclassified failure. */}
-                  {p.reason ? (
-                    <div className="mt-1 flex flex-col gap-1 text-micro text-down">
-                      <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
-                      <FailureRemedy
-                        cause={p.reason.cause}
-                        process={p.name}
-                        onShowLog={() => showLog(p.name)}
-                      />
-                    </div>
-                  ) : (
-                    p.lastError && (
-                      <div className="mt-1 line-clamp-2 break-words text-micro text-down">
-                        {p.lastError}
-                      </div>
-                    )
-                  )}
-                  <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
-                      {t("i18nSweep.commandLine")}
-                    </summary>
-                    <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
-                      {command}
-                    </pre>
-                  </details>
+            {/* Loading is a spinner; an answered empty list is the kit's empty
+                state, which says what the absence means (A68). */}
+            {processes.length === 0 &&
+              (processesLoaded ? (
+                <EmptyState title={t("mon.noProcesses")} className="py-4" />
+              ) : (
+                <div className="py-3 text-center text-tiny text-muted-foreground">
+                  <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
                 </div>
-              );
-            })}
+              ))}
+            {/* A72: a compact table, problems first; each row opens to the
+                cause, remedy, PID, log and command the card used to show. */}
+            {processes.length > 0 && (
+              <ProcessTable processes={processes} errorsByProcess={errorsByProcess} onShowLog={showLog} />
+            )}
           </CardContent>
         </Card>
 
-        {/* ---------- log tail ---------- */}
-        <Card id="process-log" ref={logCardRef} className="flex min-h-0 flex-col scroll-mt-3">
+      </div>
+
+      {/* ---------- log tail ----------
+          Full width, beneath Timeline and Processes. It sat in the 22rem column
+          before, about 290px wide, which is where an operator least wants to
+          read a decode error (A65). */}
+      <Card id="process-log" ref={logCardRef} className="flex min-h-0 flex-col scroll-mt-3">
           <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <CardTitle>{t("mon.ffmpegLog")}</CardTitle>
@@ -1030,14 +1049,16 @@ export function MonitoringPage() {
               ref={logRef}
               className="h-[22rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
             >
+              {/* app-council A83: the kit's empty state, set in the sans face
+                  and without its own border inside the log box. */}
               {merged.length === 0 ? (
-                <div className="py-6 text-center text-muted-foreground">
-                  {t("mon.noLogLines")}
-                </div>
+                <EmptyState
+                  title={t("mon.noLogLinesTitle")}
+                  body={t("mon.noLogLinesBody")}
+                  className="border-0 font-sans"
+                />
               ) : groups.length === 0 ? (
-                <div className="py-6 text-center text-muted-foreground">
-                  {t("monitor.noMatchingLines")}
-                </div>
+                <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />
               ) : (
                 groups.map((g, i) => (
                   <div key={i} className="flex gap-2">
@@ -1086,10 +1107,25 @@ export function MonitoringPage() {
               )}
             </div>
           </CardContent>
-        </Card>
-      </div>
+      </Card>
 
-      <ExpertPanel />
+      {/* Raw FFmpeg arguments are a power tool, so they are closed by default and
+          do not mount until asked for. A live output's command is one deliberate
+          click away, not a card on every visit (A67). */}
+      <div className="mt-3">
+        <Button
+          variant="outline"
+          size="sm"
+          aria-expanded={expertOpen}
+          onClick={() => setExpertOpen((v) => !v)}
+        >
+          {expertOpen ? t("mon.expertHide") : t("mon.expertShow")}
+        </Button>
+        {!expertOpen && (
+          <p className="mt-1 text-tiny text-muted-foreground">{t("mon.expertClosedHint")}</p>
+        )}
+      </div>
+      {expertOpen && <ExpertPanel />}
     </div>
   );
 }

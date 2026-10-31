@@ -47,17 +47,17 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
       // from facebook") and a paraphrase would lose that.
       return (
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline" className="text-[9px]">
+          <Badge variant="outline" className="text-sm">
             {t("stats.noCount")}
           </Badge>
-          <span className="text-[10px] text-muted-foreground">{readout.reason}</span>
+          <span className="text-sm text-muted-foreground">{readout.reason}</span>
         </div>
       );
 
     case "offline":
       return (
         <div className="mt-0.5 flex items-center gap-1.5">
-          <Badge variant={toneBadge[toneForState("stopped")]} className="text-[9px]">
+          <Badge variant={toneBadge[toneForState("stopped")]} className="text-sm">
             {t("state.offline")}
           </Badge>
         </div>
@@ -69,10 +69,10 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
       // of the bug this component exists to avoid.
       return (
         <div className="mt-0.5 flex items-center gap-1.5">
-          <Badge variant={toneBadge[toneForState("running")]} className="text-[9px]">
+          <Badge variant={toneBadge[toneForState("running")]} className="text-sm">
             {t("state.live")}
           </Badge>
-          <span className={`text-[10px] ${toneText[toneForState("running")]}`}>
+          <span className={`text-sm ${toneText[toneForState("running")]}`}>
             {t("stats.watching", {
               count: new Intl.NumberFormat(lang).format(readout.count),
             })}
@@ -93,10 +93,10 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
       // broadcast.
       return (
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          <Badge variant={toneBadge[toneForState("running")]} className="text-[9px]">
+          <Badge variant={toneBadge[toneForState("running")]} className="text-sm">
             {t("state.live")}
           </Badge>
-          <span className="text-[10px] text-muted-foreground">{t("stats.notReported")}</span>
+          <span className="text-sm text-muted-foreground">{t("stats.notReported")}</span>
         </div>
       );
 
@@ -105,7 +105,7 @@ export function ViewerReadoutLine({ readout }: { readout: ViewerReadout }) {
       // tracker records the lesson: a single failed poll is not worth a toast,
       // but silence must not be indefinite or a stale panel reads as current.
       return (
-        <div className="mt-0.5 text-[10px] text-muted-foreground">{t("stats.unreadable")}</div>
+        <div className="mt-0.5 text-sm text-muted-foreground">{t("stats.unreadable")}</div>
       );
   }
 }
@@ -160,7 +160,7 @@ export function AccountLiveStats({ accountId }: { accountId: number }) {
 
   if (!readout) {
     // A word rather than a skeleton, per the header comment.
-    return <div className="mt-0.5 text-[10px] text-muted-foreground">{t("stats.checking")}</div>;
+    return <div className="mt-0.5 text-sm text-muted-foreground">{t("stats.checking")}</div>;
   }
 
   return (
@@ -168,7 +168,7 @@ export function AccountLiveStats({ accountId }: { accountId: number }) {
       <ViewerReadoutLine readout={readout} />
       {/* Platform data, so it is not a catalogue key. Only present when the
           platform sent one, which is only ever while live. */}
-      {title && <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{title}</div>}
+      {title && <div className="mt-0.5 truncate text-sm text-muted-foreground">{title}</div>}
     </>
   );
 }

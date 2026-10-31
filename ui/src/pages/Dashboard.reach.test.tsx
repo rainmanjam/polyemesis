@@ -199,22 +199,25 @@ describe("Dashboard: the description counter (#786)", () => {
 });
 
 describe("Dashboard: the Ingest card while the backup is on air", () => {
-  it("does not say plain Offline over a live backup, and names the backup", async () => {
+  it("does not say plain Stopped over a live backup, and names the backup", async () => {
     draw();
 
     await screen.findByRole("button", { name: translate("en", "dash.failoverReturn") });
     expect(
       screen.getByText(translate("en", "dash.ingestBackupOnAir")),
-      "the card reads OFFLINE beside an on-air backup panel",
+      "the card reads STOPPED beside an on-air backup panel",
     ).toBeTruthy();
+    // Stopped is the word an absent ingest now reads (A91); Offline is gone.
+    expect(screen.queryByText("Stopped")).toBeNull();
     expect(screen.queryByText("Offline")).toBeNull();
   });
 
-  it("keeps saying Offline when the primary is on air and nothing arrives", async () => {
+  it("keeps saying Stopped when the primary is on air and nothing arrives", async () => {
     draw(live({ status: status({ failover: { ...status().failover!, active: "primary" } }) }));
     await waitFor(() => expect(screen.getByText("Destinations")).toBeTruthy());
     expect(screen.queryByText(translate("en", "dash.ingestBackupOnAir"))).toBeNull();
-    expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
+    // Stopped is the console's one word for an absent process (A91).
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
   });
 
   it("still names the backup when the primary has recovered but the return is manual", async () => {
@@ -278,19 +281,31 @@ describe("Dashboard: bulk start goes through the Go live sheet, bulk stop stays 
     sourceId: 1,
   };
 
+  it("keeps Go live the only filled start action, so Add destination is an outline (A9)", async () => {
+    draw(live({ status: status({ destinations: [oneDest as never] }) }));
+    const add = await screen.findByRole("button", { name: translate("en", "firstRun.addDestination") });
+    expect(add.className).not.toContain("bg-primary");
+    expect(add.className).toContain("border");
+  });
+
   it("offers Go live instead of Start all, and no start fires from the bar itself", async () => {
     draw(live({ status: status({ destinations: [oneDest as never] }) }));
 
     expect(
       await screen.findByRole("button", { name: translate("en", "golive.trigger") }),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: translate("en", "dash.startAll") })).toBeNull();
+    // The bulk Start all button was removed (A5); its copy key is gone too, so
+    // the assertion names the words directly rather than a key that no longer exists.
+    expect(screen.queryByRole("button", { name: "Start all" })).toBeNull();
   });
 
   it("keeps Stop all behind its confirmation", async () => {
     draw(live({ status: status({ destinations: [{ ...oneDest, enabled: true } as never] }) }));
 
-    fireEvent.click(await screen.findByRole("button", { name: translate("en", "dash.stopAll") }));
+    // Two buttons carry this name: the toolbar's and the strip's (A4). Both open
+    // the same confirmation, so either one serves; the toolbar's is outside the strip.
+    const named = await screen.findAllByRole("button", { name: translate("en", "dash.stopAll") });
+    fireEvent.click(named.find((b) => !b.closest('[data-testid="on-air-bar"]')) as HTMLElement);
     expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });

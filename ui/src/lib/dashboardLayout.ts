@@ -28,6 +28,12 @@ export interface TopRowLayout {
  *   true on an install with two or more programmes. Lanes carry their own
  *   preview, so the top row has none -- see #614 for what that left behind.
  */
+/* BELOW lg THE GRID STILL NEEDS A TEMPLATE. With only the lg: template, a
+ * narrow screen got the implicit single track, which is `auto` and sizes to
+ * its content's min-content width: at 390x844 with a source the Ingest, Chat
+ * and Pipeline cards came out 546px wide in a 356px column, clipping the SRT
+ * address and the libsrt warning off the right edge. `minmax(0,1fr)` lets the
+ * one column shrink to the screen, as the first lg column already does. */
 export function topRowLayout(laned: boolean): TopRowLayout {
   // WITHOUT A PREVIEW THE LEFT COLUMN IS SHORT. Stacking chat above the
   // pipeline beside it made the row as tall as the stack and left ~400px of
@@ -35,7 +41,7 @@ export function topRowLayout(laned: boolean): TopRowLayout {
   // tall, the dead space is gone, and the destination area moves UP.
   if (laned) {
     return {
-      gridClass: "lg:grid-cols-[minmax(0,1fr)_20rem_20rem]",
+      gridClass: "grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_20rem_20rem]",
       sideStacked: false,
       columns: 3,
     };
@@ -43,7 +49,7 @@ export function topRowLayout(laned: boolean): TopRowLayout {
   // With a preview, the left column is the tallest thing on the page and the
   // stack beside it costs nothing.
   return {
-    gridClass: "lg:grid-cols-[minmax(0,1fr)_20rem]",
+    gridClass: "grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_20rem]",
     sideStacked: true,
     columns: 2,
   };

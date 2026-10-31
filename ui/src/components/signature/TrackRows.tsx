@@ -118,6 +118,11 @@ interface TrackRowsProps {
   duckTarget?: number[];
   /** Live mute and gain; see TrackRowsLive. */
   live?: TrackRowsLive;
+  /** A per-row Mute button that edits the DRAFT, like the gain slider beside
+   *  it: the change waits for the page's Save (A26). Ignored when `live` is
+   *  given. `disabledReason`, already translated, disables every row's button
+   *  (an audio-copy destination has no volume stage to mute). */
+  draftMute?: { disabledReason: string | null };
 }
 
 /** A15: the role chip is bounded by its column, cuts its text rather than
@@ -157,6 +162,7 @@ export function TrackRows({
   duckTrigger = [],
   duckTarget = [],
   live,
+  draftMute,
 }: TrackRowsProps) {
   const t = useT();
   const translate = useT();
@@ -290,6 +296,7 @@ export function TrackRows({
         const liveOk = !!live && !block;
         const rowBusy = busy[t.index] === true;
         const shownGain = drag[t.index] ?? sel.gain;
+        const muteColumn = !!live || !!draftMute;
 
         return (
           <div
@@ -306,7 +313,7 @@ export function TrackRows({
             <div
               className={cn(
                 "grid items-center gap-3",
-                live
+                muteColumn
                   ? "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem_auto]"
                   : "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem]",
               )}
@@ -461,6 +468,25 @@ export function TrackRows({
                   {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
                 </Button>
               )}
+              {!live && draftMute && (
+                <Button
+                  type="button"
+                  variant={sel.muted ? "secondary" : "ghost"}
+                  size="sm"
+                  aria-pressed={sel.muted === true}
+                  aria-label={translate(
+                    sel.muted ? "route.live.unmuteTrack" : "route.live.muteTrack",
+                    { n: t.index + 1 },
+                  )}
+                  title={draftMute.disabledReason ?? undefined}
+                  disabled={!!draftMute.disabledReason}
+                  className={cn(sel.muted && "text-warn")}
+                  onClick={() => update(t.index, { muted: !sel.muted })}
+                >
+                  {sel.muted ? <VolumeX /> : <Volume2 />}
+                  {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
+                </Button>
+              )}
             </div>
 
             {block?.inline && sel.enabled && (
@@ -584,11 +610,14 @@ export function TrackSummary({
           <span
             key={i}
             title={trackChipTitle(i, on, labels?.[i])}
+            data-routed={on}
+            // app-council A89: filled when routed, a dashed outline when
+            // excluded, so the two differ in shape and not in colour alone.
             className={cn(
               "tnum flex h-4 w-4 items-center justify-center rounded-[3px] font-mono text-sm font-bold",
               on
                 ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground",
+                : "border border-dashed border-muted-foreground/60 bg-transparent text-muted-foreground",
             )}
           >
             {i + 1}

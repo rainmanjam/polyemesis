@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import {
   Cpu,
@@ -43,6 +44,8 @@ import { PageHeader } from "@/components/AppLayout";
 import { Experimental } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
@@ -74,6 +77,7 @@ import {
   useStateLabel,
   type StateLabeller,
 } from "@/lib/i18n";
+import { destinationStatus } from "@/lib/status";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -385,8 +389,13 @@ function renditionSignal(
     return { tone: toneForState(live.process.state), label: stateLabel(live.process.state) };
   }
   if (live?.error) return { tone: "down", label: t("rend.signalError") };
-  if (enabledUsers === 0) return { tone: "idle", label: t("rend.signalIdle") };
-  return { tone: "warn", label: t("state.starting") };
+  // Stopped, the console's one word for "on the books and not running"
+  // (app-council A91); this badge said "Idle", a fifth spelling.
+  if (enabledUsers === 0) return { tone: "idle", label: t("state.stopped") };
+  // A10: a feed wants this rendition but no encode exists yet. Nothing is
+  // requested from the encoder until a feed goes live, so this is not a start
+  // in progress. "Starting" is reserved for a process that is reported.
+  return { tone: "idle", label: t("rend.signalNotEncoding") };
 }
 
 export function RenditionsPage() {
@@ -578,16 +587,13 @@ export function RenditionsPage() {
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       ) : views.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-            <p className="max-w-lg text-[12px] text-muted-foreground">
-            {t("rend.empty")}
-            </p>
-            <Button size="sm" onClick={openCreate}>
-              <Plus /> {t("rend.newRendition")}
-            </Button>
-          </CardContent>
-        </Card>
+        // app-council A83: the kit's empty state, with the one step.
+        <EmptyState
+          icon={Plus}
+          title={t("rend.emptyTitle")}
+          body={t("rend.empty")}
+          action={{ label: t("rend.newRendition"), onClick: openCreate }}
+        />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {views.map((v) => (
@@ -646,15 +652,16 @@ export function RenditionsPage() {
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
   const t = useT();
-  const stateLabel = useStateLabel();
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
-      title={dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
-    >
+    <span className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm">
       <StatusDot tone={tone} size="sm" />
       <span className="max-w-40 truncate">{dest.name}</span>
+      {/* A34: the state in words. A dot alone needed a legend nobody had, and
+          a hover title never reaches a touch screen. */}
+      <span className="text-muted-foreground">
+        {t(destinationStatus(dest.enabled, dest.process?.state).labelKey)}
+      </span>
     </span>
   );
 }
@@ -693,6 +700,8 @@ export function RenditionCard({
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
   const signal = renditionSignal(t, stateLabel, live, enabled);
+  const restartReasonId = useId();
+  const restartReason = live?.process ? null : t("rend.noProcessToRestart");
   const cost = encodeCost(t, r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
   // A saved rendition goes stale: the card was swapped, the driver upgraded,
@@ -804,6 +813,7 @@ export function RenditionCard({
             size="sm"
             onClick={onRestart}
             disabled={busy || !proc}
+            aria-describedby={disabledDescribedBy(restartReasonId, restartReason)}
             title={proc ? t("rend.restartEncode") : t("rend.notRunning")}
           >
             {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} {t("common.restart")}
@@ -815,19 +825,15 @@ export function RenditionCard({
               says "not reported" rather than "not running" deliberately: `proc`
               comes from the install-wide status socket, which on a
               multi-programme install describes whichever engine spoke last. */}
-          {!proc && (
-            <span className="text-sm text-muted-foreground" data-testid="restart-reason">
-              {t("rend.noProcessToRestart")}
-            </span>
-          )}
+          <DisabledReason id={restartReasonId} reason={restartReason} />
+          {/* A33: Delete is a labelled row action, not an icon beside Restart. */}
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             className="ml-auto text-muted-foreground hover:text-down"
             onClick={onDelete}
-            aria-label={t("sources.deleteAria", { name: r.name })}
           >
-            <Trash2 />
+            <Trash2 /> {t("common.delete")}
           </Button>
         </div>
       </CardContent>

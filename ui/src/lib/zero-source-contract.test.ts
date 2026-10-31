@@ -216,7 +216,12 @@ describe("the screens that meet an install with no source", () => {
      * operator has not created a source yet by definition. */
     expect(src, "the FFmpeg capability badges are no longer rendered on the zero-source " +
       "ingest tab, so the check docs/INSTALL.md sends a first-time operator to make is " +
-      "on a screen they cannot reach yet").toMatch(/<FfmpegBadges system=\{system\} \/>[\s\S]*<FfmpegBadges/);
+      "on a screen they cannot reach yet").toMatch(/<FfmpegCard system=\{system\} \/>[\s\S]*<FfmpegCard system=\{system\} \/>/);
+    /* ONE card, both paths (settings-council R13): the card component is what
+     * renders the badges, so it has to be the one both branches draw. */
+    expect(src, "the FFmpeg card no longer renders the badges").toMatch(
+      /function FfmpegCard[\s\S]*?<FfmpegBadges system=\{system\} \/>/,
+    );
   });
 
   it("the settings page keeps the install-wide controls it can still save", () => {

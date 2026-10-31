@@ -78,8 +78,10 @@ describe("text-subtle-foreground is reserved for disabled and placeholder text",
  *
  * Labels and values on the pages where an operator types a destination, a
  * rendition or a routing rule were 9-11px. The floor there is --text-sm (12px),
- * the console's own default. Badges keep the 10px badge step: they are read
- * as tags, not as values, and the Badge component owns that size. */
+ * the console's own default. Badges are on the same floor now: the Badge
+ * primitive moved from the 10px micro step to --text-sm, because a status
+ * word such as LIVE or FAILED is content, not a tag. The repo-wide version of
+ * this rule is lib/text-size-floor.test.ts. */
 const CONFIG_SURFACES = [
   "components/DestinationDialog.tsx",
   "pages/RenditionsPage.tsx",
@@ -99,6 +101,7 @@ const CONFIG_SURFACES = [
   "components/DangerZone.tsx",
   "components/PresetReviewDialog.tsx",
   "components/SetupChecklist.tsx",
+  "components/SettingsOverview.tsx",
   "components/signature/RoutingSaveBar.tsx",
   "pages/SettingsPage.tsx",
   "pages/SourcesPage.tsx",

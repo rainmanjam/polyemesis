@@ -117,6 +117,27 @@ describe("the destination dialog's programme picker", () => {
     expect(trigger.textContent).not.toContain("Main");
   });
 
+  it("opens a new destination on the programme the operator came from, when one is passed in", async () => {
+    // A30. The Sources card's "Add destination" used to link to Dashboard with
+    // no source carried over, so the operator picked the same programme again.
+    // Passing the card's source in opens the dialog already on it. Nothing is
+    // chosen for the operator; the source they were looking at is the answer.
+    listSources.mockResolvedValue(two);
+    render(
+      <DestinationDialog
+        open
+        onOpenChange={() => {}}
+        destination={null}
+        initialSourceId="2"
+        onSaved={() => {}}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    const trigger = await waitFor(() => screen.getByTestId("source-picker"));
+    await waitFor(() => expect(trigger.textContent).toContain("Studio B"));
+    expect(screen.queryByText(/which programme/i)).toBeNull();
+  });
+
   it("does not nag about a choice already made", async () => {
     // The "which programme" line is guidance for an unanswered question. On a
     // destination that already names one it is noise, and DESIGN-SYSTEM.md puts

@@ -40,6 +40,10 @@ import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/
    ask again.
    =========================================================================== */
 
+/** Concurrent hides per batch. Enough to stop a 200-line card taking 200 round
+ *  trips, few enough not to flood the platform's moderation API. */
+const HIDE_CONCURRENCY = 5;
+
 export function ChatUserCard({
   platform,
   account,
@@ -124,6 +128,9 @@ export function ChatUserCard({
       load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("chatCard.actionFailed", { action: what }));
+      // A partial action has still changed some lines, so the card reloads on
+      // failure too, not only on success.
+      load();
     } finally {
       setBusy("");
     }
@@ -153,10 +160,25 @@ export function ChatUserCard({
    *  Facebook can do that no other platform here can — was unreachable from
    *  the UI entirely. */
   const hideAll = (scope: "local" | "platform", hidden: boolean) => async () => {
+    // Bounded concurrency, not one await per message: a card can hold 200 lines,
+    // and a sequential loop took that many round trips to finish. Each batch
+    // settles as a whole, so one failure cannot hide the others' outcomes.
     let count = 0;
-    for (const m of messages) {
-      await api.hideChatMessage({ platform, account, id: m.id, scope, hidden });
-      count += 1;
+    let failed = 0;
+    for (let i = 0; i < messages.length; i += HIDE_CONCURRENCY) {
+      const batch = messages.slice(i, i + HIDE_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        batch.map((m) => api.hideChatMessage({ platform, account, id: m.id, scope, hidden })),
+      );
+      count += settled.filter((r) => r.status === "fulfilled").length;
+      failed += settled.filter((r) => r.status === "rejected").length;
+    }
+    // A partial run is reported with both numbers, because the lines that did
+    // get hidden are real and the moderator needs to know which ones.
+    if (failed > 0) {
+      throw new Error(
+        t("chatCard.hidePartial", { done: count, total: messages.length, failed }),
+      );
     }
     // The COUNT, not just the fact. "Hidden" over a loop that ran zero times
     // was the original defect; a number the moderator can check against what
@@ -236,7 +258,7 @@ export function ChatUserCard({
           ) : (
             messages.map((m: ChatMessage) => (
               <div key={m.id} className="py-0.5 text-[12px] leading-snug">
-                <span className="tnum mr-1.5 font-mono text-[10px] text-muted-foreground">
+                <span className="tnum mr-1.5 font-mono text-sm text-muted-foreground">
                   {clockTime(m.at)}
                 </span>
                 <span className="break-words">{m.text}</span>
@@ -249,7 +271,7 @@ export function ChatUserCard({
             "3 messages" as "this person has said three things ever" has been
             misled by a window that only ever showed them a slice. */}
         {card?.retentionNote && (
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
+          <p className="text-sm leading-relaxed text-muted-foreground">
             {card.truncated && <strong>{t("chatpage.showingRecentOnly")}</strong>}
             {card.retentionNote}
           </p>
@@ -258,7 +280,7 @@ export function ChatUserCard({
         {/* ---- what can be done ---- */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
               {t("automod.actionTimeout")}
             </span>
             {TIMEOUTS.map((to) => (
@@ -289,10 +311,10 @@ export function ChatUserCard({
               every action; now that Facebook can hide and delete but cannot
               ban, a card-wide "polyemesis cannot moderate Facebook" would be
               false about two of the controls on screen. */}
-          {!ban.ok && <p className="text-[10px] text-warn">{ban.reason}</p>}
+          {!ban.ok && <p className="text-sm text-warn">{ban.reason}</p>}
 
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
               {t("secret.hide")}
             </span>
 
@@ -377,7 +399,7 @@ export function ChatUserCard({
             </Button>
 
             {nothingToHide !== "" && !loading && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {failed
                   ? t("chatCard.nothingHereFailed")
                   : t("chatCard.nothingHereEmpty")}
@@ -389,15 +411,15 @@ export function ChatUserCard({
               make it. Hiding and deleting are one endpoint apart in the API
               and a world apart to the person pressing them, and the pane
               offers no way to find that out at the moment of the decision. */}
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
-            {t("chatCard.undoNote")}{" "}
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {t("chatCard.undoNote")} {t("chatCard.localHideNote")}{" "}
             {hideUpstream.ok
               ? t("chatCard.upstreamNote", { platform: accent.label })
               : hideUpstream.reason}
           </p>
 
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="mr-1 text-sm uppercase tracking-wider text-muted-foreground">
               {t("automod.actionBan")}
             </span>
 

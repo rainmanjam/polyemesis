@@ -1,10 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   BatteryLow,
+  ChevronDown,
   Cpu,
-  Gauge,
   Loader2,
   Pause,
   Play,
@@ -38,12 +39,25 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { SaveStatus } from "@/components/SaveStatus";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api, ApiError } from "@/lib/api";
 import { duration, timestamp } from "@/lib/format";
 import { purgeTone } from "@/lib/purgeOutcome";
+import { useSaveOutcome, type SaveState } from "@/lib/saveModel";
+import {
+  ADVANCED_SETTING_COUNT,
+  JOB_POLICY_DEFAULTS,
+  advancedNeedingAttention,
+  numberChanged,
+  numberInvalid,
+  rangeOf,
+  switchChanged,
+  type AdvancedNumberField,
+  type AdvancedSwitchKey,
+} from "@/lib/jobPolicyDefaults";
 import { cn } from "@/lib/utils";
 import {
   JOB_MODES,
@@ -171,6 +185,9 @@ export function JobsPage() {
   // rather than as its id: the dialog has to name what is destroyed, and only
   // the job itself knows whether a file is part of that (see CLIP_EXPORT_KIND).
   const [pendingDelete, setPendingDelete] = useState<JobView | null>(null);
+  // A RUNNING job asks first: cancelling it throws away the work already done.
+  // A queued job has no progress to lose, so it cancels on the click (A60).
+  const [pendingCancel, setPendingCancel] = useState<JobView | null>(null);
   // The policy is edited locally and saved explicitly. Live-saving every
   // keystroke of a CPU ceiling would write a policy nobody meant through the
   // half-typed values on the way there.
@@ -180,15 +197,25 @@ export function JobsPage() {
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
+  // A streak of failed polls. The first failure is news and toasts; the ones
+  // after it are the same news every four seconds, so they are said once, in
+  // place, until a poll gets through (A59).
+  const failingRef = useRef(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+
   const load = useCallback(async (): Promise<void> => {
     try {
       const next = await api.jobsOverview();
+      failingRef.current = false;
+      setConnectionLost(false);
       setView(next);
       // An unsaved edit is never clobbered by a poll. The queue's own numbers
       // keep updating; only the form the user is holding is left alone.
       if (!dirtyRef.current) setDraft(next.policy);
     } catch (err) {
-      toast.error(errText(err, t("jobs.couldNotReadTheJob")));
+      if (!failingRef.current) toast.error(errText(err, t("jobs.couldNotReadTheJob")));
+      failingRef.current = true;
+      setConnectionLost(true);
     } finally {
       setLoading(false);
     }
@@ -238,37 +265,68 @@ export function JobsPage() {
     }
   }, [load, t]);
 
+  // The saving / failed / saved half of the shared save model (A95). The page
+  // keeps its own draft and dirty flag, because the four-second poll's guard
+  // reads them through dirtyRef; useSaveOutcome is the half of saveModel.ts
+  // written for exactly that, so the policy's SaveStatus says "Saved" and
+  // "Couldn't save" the same way every other explicit Save on the console does.
+  const policySave = useSaveOutcome();
+  const { run: runPolicySave, reset: resetPolicySave } = policySave;
+
   const savePolicy = useCallback(async () => {
     if (!draft) return;
     setBusy(true);
     try {
-      const res = await api.putJobPolicy(draft);
-      setDirty(false);
-      setDraft(res.policy);
-      if (res.restartRequired) {
-        toast.warning(
-          t("jobs.savedTheConcurrencyChangeTakes"),
-        );
-      } else {
-        toast.success(t("jobs.policySaved"));
-      }
+      await runPolicySave(async () => {
+        try {
+          const res = await api.putJobPolicy(draft);
+          setDirty(false);
+          setDraft(res.policy);
+          // A concurrency change is saved but not live until a restart, and
+          // that is still said out loud: "Saved" alone would let an operator
+          // watch the old number of jobs run and wonder why.
+          if (res.restartRequired) {
+            toast.warning(t("jobs.savedTheConcurrencyChangeTakes"));
+          } else {
+            toast.success(t("jobs.policySaved"));
+          }
+        } catch (err) {
+          toast.error(errText(err, t("jobs.couldNotSaveThePolicy")));
+          throw err;
+        }
+      });
       await load();
-    } catch (err) {
-      toast.error(errText(err, t("jobs.couldNotSaveThePolicy")));
     } finally {
       setBusy(false);
     }
-  }, [draft, load, t]);
+  }, [draft, load, t, runPolicySave]);
 
-  const patch = useCallback((p: Partial<PostProdSettings>) => {
-    setDirty(true);
-    setDraft((d) => (d ? { ...d, ...p } : d));
-  }, []);
+  const patch = useCallback(
+    (p: Partial<PostProdSettings>) => {
+      setDirty(true);
+      resetPolicySave();
+      setDraft((d) => (d ? { ...d, ...p } : d));
+    },
+    [resetPolicySave],
+  );
 
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // No answer yet from an unreachable server is not the same as "no queue on
+  // this server", and must not be said as if it were (A59).
+  if (!view && connectionLost) {
+    return (
+      <div className="p-3">
+        <PageHeader title={t("jobs.title")} subtitle={t("jobs.subtitle")} />
+        <p role="status" className="text-sm text-warn">
+          {t("jobs.connectionLostRetrying")}
+        </p>
       </div>
     );
   }
@@ -306,23 +364,34 @@ export function JobsPage() {
                 {t("jobs.runningCount", { count: view.stats.running })}
               </Badge>
             )}
-            <Button
-              variant={view.paused ? "default" : "outline"}
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                act(
-                  () => (view.paused ? api.resumeJobs() : api.pauseJobs()),
-                  view.paused ? t("jobs.queueResumed") : t("jobs.queuePaused"),
-                )
-              }
-            >
-              {view.paused ? <Play /> : <Pause />}
-              {view.paused ? t("jobs.resumeAll") : t("jobs.pauseAll")}
-            </Button>
+            {/* Pause all needs something to pause. Over an empty queue it has no
+                target, so it is not offered; a paused queue always keeps its
+                Resume all, whatever is in it (A64). */}
+            {(view.paused || view.active.length > 0) && (
+              <Button
+                variant={view.paused ? "default" : "outline"}
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  act(
+                    () => (view.paused ? api.resumeJobs() : api.pauseJobs()),
+                    view.paused ? t("jobs.queueResumed") : t("jobs.queuePaused"),
+                  )
+                }
+              >
+                {view.paused ? <Play /> : <Pause />}
+                {view.paused ? t("jobs.resumeAll") : t("jobs.pauseAll")}
+              </Button>
+            )}
           </>
         }
       />
+
+      {connectionLost && (
+        <p role="status" className="mt-2 text-sm text-warn">
+          {t("jobs.connectionLostRetrying")}
+        </p>
+      )}
 
       {/* ---- the gates: what the machine is asserting right now ---- */}
       <GatePanel view={view} />
@@ -346,9 +415,14 @@ export function JobsPage() {
             <CardContent className="px-0 pb-0">
               <JobTable
                 jobs={view.active}
-                empty={t("jobs.nothingQueued")}
+                empty={t("jobs.nothingQueuedTitle")}
+                emptyBody={t("jobs.nothingQueuedBody")}
                 busy={busy}
-                onCancel={(id) => act(() => api.cancelJob(id), t("jobs.jobCancelled"))}
+                onCancel={(id) => {
+                  const job = view.active.find((j) => j.id === id);
+                  if (job?.state === "running") setPendingCancel(job);
+                  else void act(() => api.cancelJob(id), t("jobs.jobCancelled"));
+                }}
                 onRelease={
                   governed
                     ? (id) =>
@@ -370,12 +444,14 @@ export function JobsPage() {
               kinds={view.kinds}
               dirty={dirty}
               busy={busy}
+              saveState={policySave.stateOf(dirty)}
               onPatch={patch}
               whisper={view.whisper}
               onSave={savePolicy}
               onRevert={() => {
                 setDraft(view.policy);
                 setDirty(false);
+                resetPolicySave();
               }}
             />
           )}
@@ -437,6 +513,23 @@ export function JobsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Cancelling a running job loses the work done on it (A60). */}
+      <ConfirmDestructive
+        open={pendingCancel !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingCancel(null);
+        }}
+        subject={pendingCancel ? (pendingCancel.label ?? pendingCancel.kind) : ""}
+        title={t("jobs.cancelRunningTitle")}
+        description={t("jobs.cancelRunningDescription")}
+        confirmLabel={t("jobs.cancelRunningConfirm")}
+        onConfirm={() =>
+          pendingCancel
+            ? act(() => api.cancelJob(pendingCancel.id), t("jobs.jobCancelled"))
+            : undefined
+        }
+      />
 
       {/* THE ROW DELETE TAKES THE FILE TOO, and said nothing about it.
           handleDeleteJob (internal/api/jobs.go) calls removeClipExport once the
@@ -534,6 +627,9 @@ function GatePanel({ view }: { view: JobsOverview }) {
             <Badge variant={g.cpuOverCeiling ? "warn" : "outline"} title={t("jobs.hostCpuLoad")}>
               <Cpu className="h-2.5 w-2.5" />
               {g.cpuPercent.toFixed(0)}%
+              {/* The reason a job is held is said in words, not left to the
+                  tooltip that touch and keyboard users never see (A61). */}
+              {g.cpuOverCeiling && <span className="ml-1">{t("jobs.gateCpuOverCeiling")}</span>}
             </Badge>
           )}
           {g?.gpuBusy && (
@@ -587,6 +683,7 @@ function GatePanel({ view }: { view: JobsOverview }) {
 function JobTable({
   jobs,
   empty,
+  emptyBody,
   busy,
   onCancel,
   onRetry,
@@ -595,6 +692,8 @@ function JobTable({
 }: {
   jobs: JobView[];
   empty: string;
+  /** One sentence under the empty title, when there is more to say. */
+  emptyBody?: string;
   busy: boolean;
   onCancel?: (id: number) => void;
   onRetry?: (id: number) => void;
@@ -604,10 +703,10 @@ function JobTable({
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
 
+  // app-council A83: the kit's empty state. Post-production is submitted
+  // from the library, which the sentence says, so there is no button here.
   if (jobs.length === 0) {
-    return (
-      <div className="px-3 py-8 text-center text-sm text-muted-foreground">{empty}</div>
-    );
+    return <EmptyState title={empty} body={emptyBody} className="m-3" />;
   }
 
   return (
@@ -783,12 +882,33 @@ function ProgressCell({ job }: { job: JobView }) {
 
 // ------------------------------------------------------------------ policy
 
+/* THE POLICY TAB, LED BY FOUR DECISIONS (A63).
+ *
+ * It used to be sixteen controls in one long right-hand column, with the four
+ * an operator comes here to change -- the default mode, how many jobs run at
+ * once, the CPU ceiling and where it releases -- given the same weight as the
+ * ionice class. Those four now come first, under one sentence saying what they
+ * add up to, and the twelve that tune the gates sit behind Advanced.
+ *
+ * ADVANCED NEVER HIDES A CHANGED OR BROKEN VALUE. It is closed only while every
+ * setting inside it holds the server's default and is in range; see
+ * lib/jobPolicyDefaults.ts for where the defaults come from and why "0 means
+ * default" is true of only three of them. Anything else opens it without a
+ * click and keeps it open, and the field that did it says so. Once open it
+ * stays open for the rest of the visit, so editing a value back to its
+ * default does not fold the section shut under the cursor.
+ *
+ * The enabled and yield-to-stream switches are not in it: one turns the whole
+ * policy off and the other is the gate the policy exists for, and neither is
+ * tuning. The per-kind modes and the transcription model keep their own cards
+ * below, because they are separate decisions rather than finer settings. */
 function PolicyEditor({
   draft,
   kinds,
   whisper,
   dirty,
   busy,
+  saveState,
   onPatch,
   onSave,
   onRevert,
@@ -801,6 +921,7 @@ function PolicyEditor({
   whisper: WhisperInfo;
   dirty: boolean;
   busy: boolean;
+  saveState: SaveState;
   onPatch: (p: Partial<PostProdSettings>) => void;
   onSave: () => void;
   onRevert: () => void;
@@ -821,361 +942,338 @@ function PolicyEditor({
   const clearKind = (kind: string) =>
     onPatch({ kinds: (draft.kinds ?? []).filter((k) => k.kind !== kind) });
 
+  const defaultMode = (draft.defaultMode || "deferred") as JobMode;
+
+  // Open = forced by a value that must be seen, or opened by the operator. The
+  // latch below is adjusted during render rather than in an effect, the same
+  // way NumberField follows its saved value.
+  const attention = advancedNeedingAttention(draft);
+  const forced = attention > 0;
+  const [userOpen, setUserOpen] = useState(forced);
+  if (forced && !userOpen) setUserOpen(true);
+  const advancedOpen = forced || userOpen;
+
+  // The sentence over the four fields, from the DRAFT, so it reads back what
+  // Save is about to write rather than what was written last.
+  let summary: ReactNode;
+  if (!draft.enabled) summary = t("jobsPolicyUx.summaryOff");
+  else if (draft.cpuCeilingPercent <= 0) summary = t("jobsPolicyUx.summaryNoCeiling");
+  else
+    summary = tn("jobsPolicyUx.summaryCpu", {
+      above: (
+        <span className="text-warn">
+          {t("jobsPolicyUx.summaryCpuAbove", { ceiling: draft.cpuCeilingPercent })}
+        </span>
+      ),
+      resume: draft.cpuResumePercent,
+    });
+
+  /** The line under an Advanced field that is why the section is open. */
+  const numberNote = (key: AdvancedNumberField["key"]): ReactNode => {
+    const v = draft[key];
+    if (numberInvalid(key, v)) {
+      const { min, max } = rangeOf(key);
+      return <span className="text-down">{t("jobsPolicyUx.outOfRange", { min, max })}</span>;
+    }
+    if (numberChanged(key, v)) {
+      return (
+        <span className="text-warn">
+          {t("jobsPolicyUx.changedFromDefault", { value: JOB_POLICY_DEFAULTS[key] })}
+        </span>
+      );
+    }
+    return null;
+  };
+
+  const advancedNumber = (key: AdvancedNumberField["key"], id: string, label: string, hint: string) => {
+    const { min, max } = rangeOf(key);
+    return (
+      <NumberField
+        id={id}
+        label={label}
+        hint={hint}
+        value={draft[key]}
+        min={min}
+        max={max}
+        invalid={numberInvalid(key, draft[key])}
+        note={numberNote(key)}
+        onChange={(n) => onPatch({ [key]: n })}
+      />
+    );
+  };
+
+  const advancedSwitch = (key: AdvancedSwitchKey, label: string, hint?: string) => (
+    <div className="flex flex-col gap-1">
+      <label className="flex items-center justify-between gap-2 text-sm">
+        {label}
+        <Switch checked={draft[key]} onCheckedChange={(v) => onPatch({ [key]: v })} />
+      </label>
+      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+      {switchChanged(key, draft[key]) && (
+        <p className="text-sm text-warn">{t("jobsPolicyUx.changedFromDefaultSwitch")}</p>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-3">
-      {/* STICKY, and the only Save on the tab.
+      <Card>
+        <CardContent className="flex flex-col gap-4 pt-3">
+          <p data-testid="jobs-policy-summary" className="text-sm">
+            {summary}
+          </p>
 
-          There used to be a second one at the bottom of the right-hand column
-          rendered under `!dirty` -- a Save button that existed only while
-          there was nothing to save, and was withdrawn the instant there was.
-          An operator who had learnt where it lived edited a field and watched
-          it disappear. (The poll does not clobber the draft: load() guards on
-          `dirtyRef.current`. The defect was the vanishing button alone.)
+          {/* ---------- the four decisions ---------- */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="jobs-default-mode">{t("jobs.defaultMode")}</Label>
+              <Select value={defaultMode} onValueChange={(v) => onPatch({ defaultMode: v as JobMode })}>
+                <SelectTrigger id="jobs-default-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {JOB_MODES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {t(JOB_MODE_LABEL[m])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground">{t(JOB_MODE_HINT[defaultMode])}</p>
+            </div>
+            <NumberField
+              id="jobs-concurrency"
+              label={t("jobsPolicyUx.jobsAtOnce")}
+              hint={t("jobs.howManyJobsMayRun")}
+              value={draft.concurrency}
+              min={1}
+              max={16}
+              onChange={(n) => onPatch({ concurrency: n })}
+            />
+            <NumberField
+              id="jobs-cpu-ceiling"
+              label={t("jobs.cpuCeiling")}
+              hint={t("jobs.nothingNewStartsAboveThis")}
+              value={draft.cpuCeilingPercent}
+              min={0}
+              max={100}
+              onChange={(n) => onPatch({ cpuCeilingPercent: n })}
+            />
+            <NumberField
+              id="jobs-cpu-resume"
+              label={t("jobs.cpuResume")}
+              hint={t("jobs.whereTheCeilingReleasesThe")}
+              value={draft.cpuResumePercent}
+              min={0}
+              max={100}
+              onChange={(n) => onPatch({ cpuResumePercent: n })}
+            />
+          </div>
 
-          Deleting it leaves one Save, and `sticky top-0` is what makes that
-          safe: this tab is a long two-column grid, so a bar that only exists
-          at the top is a bar an operator editing the last card cannot see. */}
-      {dirty && (
-        <div className="sticky top-0 z-10 flex items-center justify-end gap-2 rounded-md border border-warn/40 bg-background/95 px-2 py-1.5 backdrop-blur">
-          <span className="mr-auto text-sm text-warn">{t("jobs.unsavedChanges")}</span>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onRevert}>
-            {t("jobs.revert")}
-          </Button>
-          <Button size="sm" disabled={busy} onClick={onSave}>
-            {t("jobs.savePolicy")}
-          </Button>
-        </div>
-      )}
-
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        {/* ---------- per-kind modes ---------- */}
-        <div className="flex flex-col gap-3">
-          {kinds.map((k) => {
-            const row = draft.kinds?.find((r) => r.kind === k.kind);
-            const mode = (row?.mode || draft.defaultMode || "deferred") as JobMode;
-            const windows = row?.windows ?? k.windows ?? [];
-            return (
-              <Card key={k.kind}>
-                <CardHeader className="flex-row items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle>{k.label}</CardTitle>
-                    <p className="mt-0.5 text-sm text-muted-foreground">{k.description}</p>
-                    {!k.available && (
-                      <p className="mt-1 text-sm text-warn">{k.unavailable}</p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {row && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => clearKind(k.kind)}
-                        title={t("jobs.backToDefault")}
-                      >
-                        {t("jobs.useDefault")}
-                      </Button>
-                    )}
-                    <Select value={mode} onValueChange={(v) => setKind(k.kind, { mode: v as JobMode })}>
-                      <SelectTrigger className="w-40">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {JOB_MODES.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            {t(JOB_MODE_LABEL[m])}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <p className="text-sm text-muted-foreground">{t(JOB_MODE_HINT[mode])}</p>
-
-                  {mode === "scheduled" && (
-                    <WindowEditor
-                      idBase={k.kind}
-                      windows={windows}
-                      onChange={(next) => setKind(k.kind, { windows: next })}
-                    />
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch
-                        checked={row?.usesGpu ?? k.usesGpu}
-                        onCheckedChange={(v) => setKind(k.kind, { usesGpu: v })}
-                      />
-                      {t("jobs.competesWithGpu")}
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch
-                        checked={row?.ignoreIngest ?? k.ignoreIngest}
-                        onCheckedChange={(v) => setKind(k.kind, { ignoreIngest: v })}
-                      />
-                      {t("jobs.cheapDuringBroadcast")}
-                    </label>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        {/* ---------- global controls ---------- */}
-        <div className="flex flex-col gap-3">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("jobs.global")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
               <label className="flex items-center justify-between gap-2 text-sm">
                 {t("jobs.resourcePolicy")}
-                <Switch
-                  checked={draft.enabled}
-                  onCheckedChange={(v) => onPatch({ enabled: v })}
-                />
+                <Switch checked={draft.enabled} onCheckedChange={(v) => onPatch({ enabled: v })} />
               </label>
-              <p className="-mt-2 text-sm text-muted-foreground">
-                {t("jobs.resourcePolicyOffHint")}
-              </p>
-
-              <label className="flex items-center justify-between gap-2 text-sm">
-                {t("jobs.yieldToStream")}
-                <Switch
-                  checked={draft.yieldToStream}
-                  onCheckedChange={(v) => onPatch({ yieldToStream: v })}
-                />
-              </label>
-
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="jobs-default-mode">{t("jobs.defaultMode")}</Label>
-                <Select
-                  value={(draft.defaultMode || "deferred") as JobMode}
-                  onValueChange={(v) => onPatch({ defaultMode: v as JobMode })}
-                >
-                  <SelectTrigger id="jobs-default-mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {JOB_MODES.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {t(JOB_MODE_LABEL[m])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <NumberField
-                id="jobs-concurrency"
-                label={t("jobs.concurrency")}
-                hint={t("jobs.howManyJobsMayRun")}
-                value={draft.concurrency}
-                min={1}
-                max={16}
-                onChange={(n) => onPatch({ concurrency: n })}
+              <p className="text-sm text-muted-foreground">{t("jobs.resourcePolicyOffHint")}</p>
+            </div>
+            <label className="flex items-start justify-between gap-2 text-sm">
+              {t("jobs.yieldToStream")}
+              <Switch
+                checked={draft.yieldToStream}
+                onCheckedChange={(v) => onPatch({ yieldToStream: v })}
               />
-              <NumberField
-                id="jobs-cpu-ceiling"
-                label={t("jobs.cpuCeiling")}
-                hint={t("jobs.nothingNewStartsAboveThis")}
-                value={draft.cpuCeilingPercent}
-                min={0}
-                max={100}
-                onChange={(n) => onPatch({ cpuCeilingPercent: n })}
-              />
-              <NumberField
-                id="jobs-cpu-resume"
-                label={t("jobs.cpuResume")}
-                hint={t("jobs.whereTheCeilingReleasesThe")}
-                value={draft.cpuResumePercent}
-                min={0}
-                max={100}
-                onChange={(n) => onPatch({ cpuResumePercent: n })}
-              />
-              {/* THE FOUR TIMINGS THE TWO PERCENTAGES ABOVE ARE MEASURED WITH.
+            </label>
+          </div>
+
+          {/* ---------- Advanced: the twelve that tune the gates ---------- */}
+          <details open={advancedOpen} className="rounded-md border border-dashed border-border">
+            <summary
+              className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm [&::-webkit-details-marker]:hidden"
+              onClick={(e) => {
+                // Fully controlled, so a forced-open section cannot be closed
+                // by a click or by Enter/Space on the summary.
+                e.preventDefault();
+                if (!forced) setUserOpen((o) => !o);
+              }}
+            >
+              <span>{t("jobsPolicyUx.advanced", { count: ADVANCED_SETTING_COUNT })}</span>
+              {forced ? (
+                <span className="text-right text-warn">
+                  {t("jobsPolicyUx.keptOpen", { count: attention })}
+                </span>
+              ) : (
+                <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                  {advancedOpen ? t("jobsPolicyUx.hide") : t("jobsPolicyUx.show")}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")}
+                  />
+                </span>
+              )}
+            </summary>
+            <div className="grid gap-3 border-t border-dashed border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
+              {/* THE FOUR TIMINGS THE TWO PERCENTAGES ARE MEASURED WITH.
                   The ceiling and the resume level say WHERE the gate moves;
                   sustain and settle say how long the load has to stay there
                   before it does, and linger and defer say how long the other
-                  two gates hold on afterwards. All four have been in
-                  PostProdSettings and in the policy endpoint since the governor
-                  landed, and none of them had a control -- so an operator whose
-                  transcodes were suspended by a five-second CPU spike could see
-                  the ceiling that did it, could edit the ceiling, and could not
-                  reach the window that decided the spike counted. The only
-                  route was hand-editing settings on disk.
+                  two gates hold on afterwards. They had no control until #780,
+                  so an operator whose transcodes were suspended by a
+                  five-second spike could see the ceiling that did it and could
+                  not reach the window that decided the spike counted.
 
                   0 is NOT "off" for three of the four. normalise() in
                   internal/jobs/governor.go substitutes DefaultCPUSustained,
                   DefaultCPUSettle and DefaultDeferFor for a zero, so those
                   three fields read 0 and behave as 30, 20 and 30 seconds; only
                   ingest linger honours a zero as "release the gate at once".
-                  Each hint says so, because a field showing 0 while the machine
-                  waits half a minute is a lie an operator can only discover by
-                  timing it with a stopwatch. */}
-              <NumberField
-                id="jobs-cpu-sustained"
-                label={t("jobs.cpuSustained")}
-                hint={t("jobs.cpuSustainedHint")}
-                value={draft.cpuSustainedSeconds}
-                min={0}
-                max={3600}
-                onChange={(n) => onPatch({ cpuSustainedSeconds: n })}
-              />
-              <NumberField
-                id="jobs-cpu-settle"
-                label={t("jobs.cpuSettle")}
-                hint={t("jobs.cpuSettleHint")}
-                value={draft.cpuSettleSeconds}
-                min={0}
-                max={3600}
-                onChange={(n) => onPatch({ cpuSettleSeconds: n })}
-              />
-              <NumberField
-                id="jobs-ingest-linger"
-                label={t("jobs.ingestLinger")}
-                hint={t("jobs.ingestLingerHint")}
-                value={draft.ingestLingerSeconds}
-                min={0}
-                max={3600}
-                onChange={(n) => onPatch({ ingestLingerSeconds: n })}
-              />
-              <NumberField
-                id="jobs-defer-seconds"
-                label={t("jobs.deferFor")}
-                hint={t("jobs.deferHint")}
-                value={draft.deferSeconds}
-                min={0}
-                max={3600}
-                onChange={(n) => onPatch({ deferSeconds: n })}
-              />
-              <NumberField
-                id="jobs-nice"
-                label={t("jobs.niceLevel")}
-                hint={t("jobs.niceHint")}
-                value={draft.niceLevel}
-                min={0}
-                max={19}
-                onChange={(n) => onPatch({ niceLevel: n })}
-              />
-              <label className="flex items-center justify-between gap-2 text-sm">
-                {t("jobs.idleIo")}
-                <Switch checked={draft.idleIo} onCheckedChange={(v) => onPatch({ idleIo: v })} />
-              </label>
-            </CardContent>
-          </Card>
+                  Each hint says so. */}
+              {advancedNumber("cpuSustainedSeconds", "jobs-cpu-sustained", t("jobs.cpuSustained"), t("jobs.cpuSustainedHint"))}
+              {advancedNumber("cpuSettleSeconds", "jobs-cpu-settle", t("jobs.cpuSettle"), t("jobs.cpuSettleHint"))}
+              {advancedNumber("ingestLingerSeconds", "jobs-ingest-linger", t("jobs.ingestLinger"), t("jobs.ingestLingerHint"))}
+              {advancedNumber("deferSeconds", "jobs-defer-seconds", t("jobs.deferFor"), t("jobs.deferHint"))}
+              {advancedNumber("niceLevel", "jobs-nice", t("jobs.niceLevel"), t("jobs.niceHint"))}
+              {advancedSwitch("idleIo", t("jobs.idleIo"))}
+              {advancedNumber("thermalCeilingC", "jobs-thermal", t("jobs.thermalCeiling"), t("jobs.stopsEverythingRealtimeIncludedA"))}
+              {advancedNumber("batteryFloorPercent", "jobs-battery", t("jobs.batteryFloor"), t("jobs.holdDeferredWorkBackOn"))}
+              {advancedSwitch("avoidGpuWhenStreaming", t("jobs.avoidGpu"))}
+              {advancedSwitch("gpuBusy", t("jobs.gpuInUse"), t("jobs.gpuInUseHint"))}
+              {advancedNumber("retainDays", "jobs-retain-days", t("jobs.keepForDays"), t("jobs.retainDaysHint"))}
+              {advancedNumber("retainJobs", "jobs-retain-jobs", t("jobs.alwaysKeepNewest"), t("jobs.thisManyFinishedJobsSurvive"))}
+            </div>
+          </details>
+        </CardContent>
+      </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                <Gauge className="mr-1 inline h-3 w-3" />
-                {t("jobs.machineGates")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <label className="flex items-center justify-between gap-2 text-sm">
-                {t("jobs.avoidGpu")}
-                <Switch
-                  checked={draft.avoidGpuWhenStreaming}
-                  onCheckedChange={(v) => onPatch({ avoidGpuWhenStreaming: v })}
-                />
-              </label>
-              <label className="flex items-center justify-between gap-2 text-sm">
-                {t("jobs.gpuInUse")}
-                <Switch checked={draft.gpuBusy} onCheckedChange={(v) => onPatch({ gpuBusy: v })} />
-              </label>
-              <p className="-mt-2 text-sm text-muted-foreground">
-                {t("jobs.gpuInUseHint")}
-              </p>
-              <NumberField
-                id="jobs-battery"
-                label={t("jobs.batteryFloor")}
-                hint={t("jobs.holdDeferredWorkBackOn")}
-                value={draft.batteryFloorPercent}
-                min={0}
-                max={100}
-                onChange={(n) => onPatch({ batteryFloorPercent: n })}
-              />
-              <NumberField
-                id="jobs-thermal"
-                label={t("jobs.thermalCeiling")}
-                hint={t("jobs.stopsEverythingRealtimeIncludedA")}
-                value={draft.thermalCeilingC}
-                min={0}
-                max={120}
-                onChange={(n) => onPatch({ thermalCeilingC: n })}
-              />
-            </CardContent>
-          </Card>
+      {/* ---------- per-kind modes ---------- */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {kinds.map((k) => {
+          const row = draft.kinds?.find((r) => r.kind === k.kind);
+          const mode = (row?.mode || draft.defaultMode || "deferred") as JobMode;
+          const windows = row?.windows ?? k.windows ?? [];
+          return (
+            <Card key={k.kind}>
+              <CardHeader className="flex-row items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <CardTitle>{k.label}</CardTitle>
+                  <p className="mt-0.5 text-sm text-muted-foreground">{k.description}</p>
+                  {!k.available && (
+                    <p className="mt-1 text-sm text-warn">{k.unavailable}</p>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {row && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => clearKind(k.kind)}
+                      title={t("jobs.backToDefault")}
+                    >
+                      {t("jobs.useDefault")}
+                    </Button>
+                  )}
+                  <Select value={mode} onValueChange={(v) => setKind(k.kind, { mode: v as JobMode })}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {JOB_MODES.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {t(JOB_MODE_LABEL[m])}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                <p className="text-sm text-muted-foreground">{t(JOB_MODE_HINT[mode])}</p>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("jobs.transcription")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
-              <Label htmlFor="jobs-whisper-model">{t("jobs.defaultModel")}</Label>
-              <select
-                id="jobs-whisper-model"
-                value={draft.whisperModel ?? ""}
-                onChange={(e) => onPatch({ whisperModel: e.target.value })}
-                className="h-8 w-56 rounded border border-border bg-card-raised px-2 text-sm"
-              >
-                {/* Empty is first and is the default, because the
-                    hardware-derived choice is the right answer until an operator
-                    has a reason to override it. */}
-                <option value="">{t("jobs.automaticModel")}</option>
-                {(whisper.models ?? []).map((m: string) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <span className="text-sm text-muted-foreground">
-                {tn("jobs.defaultModelHint", {
-                  model: <strong>{whisper.defaultModel || t("jobs.defaultModelNone")}</strong>,
-                })}
-              </span>
-              {!whisper.available && (
-                <span className="text-sm text-warn">
-            {t("jobs.whisperMissing")}
-                </span>
-              )}
-              {(whisper.models ?? []).length === 0 && whisper.available && (
-                <span className="text-sm text-warn">
-            {t("jobs.noModels")}
-                </span>
-              )}
-            </CardContent>
-          </Card>
+                {mode === "scheduled" && (
+                  <WindowEditor
+                    idBase={k.kind}
+                    windows={windows}
+                    onChange={(next) => setKind(k.kind, { windows: next })}
+                  />
+                )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("jobs.historyRetention")}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <NumberField
-                id="jobs-retain-days"
-                label={t("jobs.keepForDays")}
-                hint={t("jobs.retainDaysHint")}
-                value={draft.retainDays}
-                min={0}
-                max={3650}
-                onChange={(n) => onPatch({ retainDays: n })}
-              />
-              <NumberField
-                id="jobs-retain-jobs"
-                label={t("jobs.alwaysKeepNewest")}
-                hint={t("jobs.thisManyFinishedJobsSurvive")}
-                value={draft.retainJobs}
-                min={0}
-                max={100000}
-                onChange={(n) => onPatch({ retainJobs: n })}
-              />
-            </CardContent>
-          </Card>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={row?.usesGpu ?? k.usesGpu}
+                      onCheckedChange={(v) => setKind(k.kind, { usesGpu: v })}
+                    />
+                    {t("jobs.competesWithGpu")}
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={row?.ignoreIngest ?? k.ignoreIngest}
+                      onCheckedChange={(v) => setKind(k.kind, { ignoreIngest: v })}
+                    />
+                    {t("jobs.cheapDuringBroadcast")}
+                  </label>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
 
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("jobs.transcription")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Label htmlFor="jobs-whisper-model">{t("jobs.defaultModel")}</Label>
+            <select
+              id="jobs-whisper-model"
+              value={draft.whisperModel ?? ""}
+              onChange={(e) => onPatch({ whisperModel: e.target.value })}
+              className="h-8 w-56 rounded border border-border bg-card-raised px-2 text-sm"
+            >
+              {/* Empty is first and is the default, because the
+                  hardware-derived choice is the right answer until an operator
+                  has a reason to override it. */}
+              <option value="">{t("jobs.automaticModel")}</option>
+              {(whisper.models ?? []).map((m: string) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <span className="text-sm text-muted-foreground">
+              {tn("jobs.defaultModelHint", {
+                model: <strong>{whisper.defaultModel || t("jobs.defaultModelNone")}</strong>,
+              })}
+            </span>
+            {!whisper.available && <span className="text-sm text-warn">{t("jobs.whisperMissing")}</span>}
+            {(whisper.models ?? []).length === 0 && whisper.available && (
+              <span className="text-sm text-warn">{t("jobs.noModels")}</span>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* THE ONLY SAVE ON THE TAB, ALWAYS THERE AND STICKY.
+
+          There used to be a second Save rendered under `!dirty` -- a button
+          that existed only while there was nothing to save and was withdrawn
+          the instant there was -- and after that one Save that appeared only
+          once something was dirty. Both moved under the operator. Revert and
+          Save now never leave: they are disabled while there is nothing to
+          write, and SaveStatus beside them says Unsaved / Saving / Saved /
+          Couldn't save the way every other explicit Save does (A95). Sticky to
+          the bottom, because the per-kind cards make the tab long and an
+          operator editing the last one must still see the bar. (The poll does
+          not clobber the draft: load() guards on `dirtyRef.current`.) */}
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-md border border-border bg-background/95 px-2 py-1.5 backdrop-blur">
+        <SaveStatus state={saveState} className="mr-auto" />
+        <Button variant="outline" size="sm" disabled={busy || !dirty} onClick={onRevert}>
+          {t("jobs.revert")}
+        </Button>
+        <Button size="sm" disabled={busy || !dirty} onClick={onSave}>
+          {t("jobs.savePolicy")}
+        </Button>
       </div>
     </div>
   );
@@ -1188,6 +1286,8 @@ function NumberField({
   value,
   min,
   max,
+  invalid,
+  note,
   onChange,
 }: {
   id: string;
@@ -1196,8 +1296,35 @@ function NumberField({
   value: number;
   min: number;
   max: number;
+  /** Marks the input invalid for assistive tech; the note says why. */
+  invalid?: boolean;
+  /** A line under the hint, e.g. why the Advanced section is open. */
+  note?: ReactNode;
   onChange: (n: number) => void;
 }) {
+  // What is typed is kept as text, so an emptied field stays empty. The old
+  // code wrote NaN through as the minimum, so clearing the box to type 70 over
+  // 85 left "1" in it mid-edit (A62). On blur or Enter the value is clamped.
+  const [text, setText] = useState(String(value));
+  // Follows the saved value when it changes from outside, by adjusting state
+  // during render rather than in an effect.
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) {
+    setSeen(value);
+    setText(String(value));
+  }
+
+  const commit = () => {
+    const n = Number.parseInt(text, 10);
+    if (Number.isNaN(n)) {
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, n));
+    setText(String(clamped));
+    if (clamped !== value) onChange(clamped);
+  };
+
   return (
     <div className="flex flex-col gap-1">
       <Label htmlFor={id}>{label}</Label>
@@ -1207,13 +1334,26 @@ function NumberField({
         className="tnum font-mono"
         min={min}
         max={max}
-        value={value}
+        aria-invalid={invalid || undefined}
+        value={text}
         onChange={(e) => {
+          setText(e.target.value);
+          // A number is passed up as it is typed, as before. Nothing is
+          // written for an empty field, so NaN no longer becomes the minimum.
           const n = Number.parseInt(e.target.value, 10);
-          onChange(Number.isNaN(n) ? min : n);
+          if (!Number.isNaN(n)) onChange(n);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
         }}
       />
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+      {hint && (
+        <p className="text-sm text-muted-foreground">
+          {hint} <span className="tnum font-mono">({min}–{max})</span>
+        </p>
+      )}
+      {note && <p className="text-sm">{note}</p>}
     </div>
   );
 }

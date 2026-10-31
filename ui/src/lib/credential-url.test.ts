@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { urlCarriesCredential } from "./credential-url";
+import { srtAddressParts, urlCarriesCredential } from "./credential-url";
 
 /* THIS FUNCTION DECIDES WHETHER A STRING GOES ON SCREEN.
  *
@@ -80,3 +80,26 @@ describe("urlCarriesCredential", () => {
     expect(urlCarriesCredential("srt://host.example:6000?Passphrase=x")).toBe(true);
   });
 });
+
+describe("srtAddressParts: the SRT address split for display (A31)", () => {
+  it("splits an SRT URL at its first query string, so host:port can show in clear", () => {
+    const parts = srtAddressParts("srt://example.invalid:6000?latency=200&passphrase=x&streamid=y");
+    expect(parts).toEqual({ address: "srt://example.invalid:6000", query: "?latency=200&passphrase=x&streamid=y" });
+  });
+
+  it("keeps a streamid written first in the query on the masked side", () => {
+    const parts = srtAddressParts("srt://example.invalid:6000?streamid=y&latency=200");
+    expect(parts?.address).toBe("srt://example.invalid:6000");
+    expect(parts?.query.startsWith("?streamid=")).toBe(true);
+  });
+
+  it("returns null for anything that is not SRT, so other shapes stay fully masked", () => {
+    expect(srtAddressParts("rtmp://example.invalid/live?streamKey=z")).toBeNull();
+    expect(srtAddressParts("rtmp://user:pw@example.invalid/live/x")).toBeNull();
+  });
+
+  it("returns null for SRT with userinfo before the host, which is a secret too", () => {
+    expect(srtAddressParts("srt://user:pw@example.invalid:6000?passphrase=x")).toBeNull();
+  });
+});
+

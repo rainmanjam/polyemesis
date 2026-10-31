@@ -40,7 +40,7 @@ function platformLabel(p: string): string {
   return accentFor(p as ChatPlatform).label || p;
 }
 
-export function PollPanel() {
+export function PollPanel({ twitchAvailable = false }: { twitchAvailable?: boolean }) {
   const t = useT();
   const [data, setData] = useState<PollsResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -81,7 +81,17 @@ export function PollPanel() {
       {unavailable && <p className="text-sm text-muted-foreground">{t("polls.unavailable")}</p>}
 
       {!unavailable && data?.current && live && <LivePoll poll={data.current} now={now} onChanged={load} />}
-      {!unavailable && !live && <StartForm onStarted={load} />}
+      {!unavailable && !live && (
+        // The start form is the least-used part of the sidebar once a show is
+        // running, and it is about seventeen controls. Behind a disclosure it
+        // no longer sits above the connection status the moderator needs.
+        <details className="rounded border border-border px-2 py-1">
+          <summary className="cursor-pointer text-sm font-semibold">{t("polls.startDisclosure")}</summary>
+          <div className="pt-2">
+            <StartForm onStarted={load} twitchAvailable={twitchAvailable} />
+          </div>
+        </details>
+      )}
 
       {finished.length > 0 && (
         <div className="flex flex-col gap-1">
@@ -102,12 +112,21 @@ export function PollPanel() {
   );
 }
 
-function StartForm({ onStarted }: { onStarted: () => Promise<void> }) {
+function StartForm({
+  onStarted,
+  twitchAvailable,
+}: {
+  onStarted: () => Promise<void>;
+  /** Whether a Twitch account is attached. Without one there is nothing to mirror to. */
+  twitchAvailable: boolean;
+}) {
   const t = useT();
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState<string[]>(["", ""]);
   const [duration, setDuration] = useState(120);
-  const [mirror, setMirror] = useState(true);
+  // On only when there is a Twitch account to mirror to. The old default was
+  // "on" with no account, and the only sign of it was a line after start.
+  const [mirror, setMirror] = useState(twitchAvailable);
   // Off by default: a YouTube live poll costs 40 units of the day's API quota.
   const [mirrorYouTube, setMirrorYouTube] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -116,7 +135,13 @@ function StartForm({ onStarted }: { onStarted: () => Promise<void> }) {
   const setOption = (i: number, v: string) => setOptions((os) => os.map((o, k) => (k === i ? v : o)));
 
   const start = async () => {
-    const spec = { question, options, durationSeconds: duration, mirrorTwitch: mirror, mirrorYouTube };
+    const spec = {
+      question,
+      options,
+      durationSeconds: duration,
+      mirrorTwitch: twitchAvailable && mirror,
+      mirrorYouTube,
+    };
     const p = pollProblem(spec);
     if (p) {
       setProblem(t(p, { max: POLL_LIMITS.maxOption, maxQuestion: POLL_LIMITS.maxQuestion,
@@ -202,19 +227,21 @@ function StartForm({ onStarted }: { onStarted: () => Promise<void> }) {
         />
         <span className="text-sm text-muted-foreground">{t("polls.seconds")}</span>
       </div>
-      <div className="flex items-center gap-1.5">
-        <input
-          id="poll-mirror"
-          type="checkbox"
-          checked={mirror}
-          disabled={busy}
-          onChange={(e) => setMirror(e.target.checked)}
-          className="h-3.5 w-3.5 accent-primary"
-        />
-        <Label htmlFor="poll-mirror" className="text-sm">
-          {t("polls.mirrorTwitch")}
-        </Label>
-      </div>
+      {twitchAvailable && (
+        <div className="flex items-center gap-1.5">
+          <input
+            id="poll-mirror"
+            type="checkbox"
+            checked={mirror}
+            disabled={busy}
+            onChange={(e) => setMirror(e.target.checked)}
+            className="h-3.5 w-3.5 accent-primary"
+          />
+          <Label htmlFor="poll-mirror" className="text-sm">
+            {t("polls.mirrorTwitch")}
+          </Label>
+        </div>
+      )}
       <div className="flex items-center gap-1.5">
         <input
           id="poll-mirror-youtube"

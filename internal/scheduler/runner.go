@@ -198,8 +198,12 @@ func (r *Runner) Tick(now time.Time) []Result {
 			continue
 		}
 
+		// AllDestinations, not an empty list, is what expands (app-council
+		// A54). Evaluate has already refused a destination schedule that has
+		// neither, so a row reaching here with an empty list and no flag acts
+		// on nothing -- which is the safe reading of a stop nobody aimed.
 		targets := s.DestinationIDs
-		if len(targets) == 0 {
+		if s.AllDestinations {
 			if !allDone {
 				all, allErr = r.act.ListDestinationIDs()
 				allDone = true

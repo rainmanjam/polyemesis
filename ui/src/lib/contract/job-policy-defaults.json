@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "concurrency": 1,
+  "defaultMode": "deferred",
+  "yieldToStream": true,
+  "cpuCeilingPercent": 85,
+  "cpuResumePercent": 65,
+  "cpuSustainedSeconds": 30,
+  "cpuSettleSeconds": 20,
+  "avoidGpuWhenStreaming": true,
+  "gpuBusy": false,
+  "batteryFloorPercent": 40,
+  "thermalCeilingC": 90,
+  "niceLevel": 10,
+  "idleIo": true,
+  "ingestLingerSeconds": 30,
+  "deferSeconds": 30,
+  "retainDays": 30,
+  "retainJobs": 200
+}

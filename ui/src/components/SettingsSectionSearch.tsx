@@ -32,7 +32,10 @@ export function SettingsSectionSearch({
   onPick,
 }: {
   labels: Record<SettingsTab, string>;
-  onPick: (tab: SettingsTab) => void;
+  /** The section to open, and the field hit when the pick was a field, so the
+   *  page can open a hidden advanced card before the hit is revealed
+   *  (settings-council R7). */
+  onPick: (tab: SettingsTab, hit?: SettingsHit) => void;
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -91,7 +94,7 @@ export function SettingsSectionSearch({
       onPick(r.tab);
       return;
     }
-    onPick(r.hit.tab);
+    onPick(r.hit.tab, r.hit);
     setPending(r.hit);
   };
 

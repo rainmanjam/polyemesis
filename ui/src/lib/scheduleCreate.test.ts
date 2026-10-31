@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runAtUnset, scheduleBlock, type ScheduleFormFacts } from "./scheduleCreate";
+import { formForAction, runAtUnset, scheduleBlock, type ScheduleFormFacts } from "./scheduleCreate";
 
 const NOW = Date.parse("2026-08-20T12:00:00Z");
 
@@ -12,6 +12,8 @@ const form = (over: Partial<ScheduleFormFacts> = {}): ScheduleFormFacts => ({
   action: "start",
   kind: "daily",
   runAt: "",
+  destinationIds: [],
+  allDestinations: true,
   ...over,
 });
 
@@ -81,7 +83,7 @@ describe("scheduleBlock: destinations that have not arrived", () => {
     // Before the first snapshot the checkbox list is empty for a reason that
     // has nothing to do with the operator's intent, so "stop nothing selected"
     // silently becomes "stop the whole broadcast at 23:00".
-    const b = scheduleBlock(form({ action: "stop" }), {
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false }), {
       destinationsKnown: false,
       editing: false,
       now: NOW,
@@ -114,6 +116,67 @@ describe("scheduleBlock: destinations that have not arrived", () => {
       now: NOW,
     });
     expect(b.kind).toBe("name");
+    // And says so in words, like every other block (the kit's DisabledReason).
+    expect(b.kind === "name" && b.reason).toBe("auto.blockName");
+  });
+});
+
+/* app-council A54: "every destination" is ticked, never inferred from nothing. */
+describe("scheduleBlock: a destination schedule that names nothing", () => {
+  it("refuses a stop with nothing picked and All destinations off", () => {
+    // The old dialog saved this and the server stopped EVERY destination.
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+    if (b.kind === "destinationsNone") expect(b.reason).toBe("auto.blockDestinationsNone");
+  });
+
+  it("refuses it on an edit too, where emptying the list is the likelier slip", () => {
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: true,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+  });
+
+  it("refuses a start the same way: the choice is explicit for both", () => {
+    const b = scheduleBlock(form({ action: "start", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+  });
+
+  it("accepts All destinations, and a named list", () => {
+    const opts = { destinationsKnown: true, editing: false, now: NOW };
+    expect(scheduleBlock(form({ action: "stop", allDestinations: true }), opts).kind).toBe("ok");
+    expect(
+      scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [3] }), opts).kind,
+    ).toBe("ok");
+  });
+
+  it("lets All destinations through before the destination list has arrived", () => {
+    // Nothing needs picking from a list that is not there yet.
+    const b = scheduleBlock(form({ action: "stop", allDestinations: true }), {
+      destinationsKnown: false,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("ok");
+  });
+
+  it("never asks a playlist schedule for destinations", () => {
+    const b = scheduleBlock(form({ action: "playlist.stop", allDestinations: false }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("ok");
   });
 });
 
@@ -144,5 +207,37 @@ describe("AutomationPage, the schedule dialog", () => {
     const src = page();
     expect(src).not.toContain("{(status?.destinations ?? []).map((d) => (");
     expect(src).toContain("const destinationsKnown = status !== null;");
+  });
+});
+
+/* app-council A54: what changing the action does to the destination choice. */
+describe("formForAction", () => {
+  const f = (over: Partial<ScheduleFormFacts>): ScheduleFormFacts => form(over);
+
+  it("does not carry an All destinations ticked for a start into a stop", () => {
+    // Every destination on a stop takes the whole broadcast down: it is
+    // ticked for the stop itself or not at all.
+    const next = formForAction(f({ action: "start", allDestinations: true }), "stop");
+    expect(next).toEqual({ action: "stop", destinationIds: [], allDestinations: false });
+  });
+
+  it("keeps All destinations when the action stays a stop", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true }), "stop");
+    expect(next.allDestinations).toBe(true);
+  });
+
+  it("keeps a stop's choice when it becomes a start", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true }), "start");
+    expect(next.allDestinations).toBe(true);
+  });
+
+  it("keeps named destinations across start and stop", () => {
+    const next = formForAction(f({ action: "start", allDestinations: false, destinationIds: [4, 5] }), "stop");
+    expect(next.destinationIds).toEqual([4, 5]);
+  });
+
+  it("clears both for a playlist action, which names no destination", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true, destinationIds: [4] }), "playlist.start");
+    expect(next).toEqual({ action: "playlist.start", destinationIds: [], allDestinations: false });
   });
 });

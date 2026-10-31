@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
+import { Link, useNavigate } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/AppLayout";
+import { EmptyState } from "@/components/EmptyState";
 import {
   ChatComposer,
   ChatEmpty,
@@ -37,6 +39,7 @@ import type { ChatMessage, ChatPlatform } from "@/lib/types";
  *  shared with the compact dashboard pane. This file is layout. */
 export function ChatPage() {
   const t = useT();
+  const navigate = useNavigate();
   const {
     messages,
     statuses,
@@ -137,20 +140,27 @@ export function ChatPage() {
               </Badge>
             )}
             {configured && !connected && (
-              <Badge variant="warn">
-                <WifiOff className="h-3 w-3" />
-                {t("chatpage.socketOffline")}
-              </Badge>
+              <>
+                <Badge variant="warn" title={t("chrome.socketOfflineHint")}>
+                  <WifiOff className="h-3 w-3" />
+                  {t("chatpage.socketOffline")}
+                </Badge>
+                {/* The reason sits beside the badge, not only in its tooltip:
+                    a tooltip cannot be read by a keyboard or touch user. */}
+                <span className="text-sm text-muted-foreground">{t("chrome.socketOfflineHint")}</span>
+              </>
             )}
             {/* #13/#21: `connected` cannot say this -- the socket stays open
                 while a frame it delivered fails to parse and is dropped. */}
             {frameError && (
-              <Badge
-                variant="warn"
-                title={t("i18nSweep.chatPageFrameErrorHint")}
-              >
-                {t("i18nSweep.frameError")}
-              </Badge>
+              <>
+                <Badge variant="warn" title={t("i18nSweep.chatPageFrameErrorHint")}>
+                  {t("i18nSweep.frameError")}
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  {t("i18nSweep.chatPageFrameErrorHint")}
+                </span>
+              </>
             )}
             <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>
               <RefreshCw className={loading ? "animate-spin" : undefined} />
@@ -238,10 +248,12 @@ export function ChatPage() {
               onMenu={(m, at) => setMenu({ m, at })}
               empty={
                 hidden.size > 0 && messages.length > 0 ? (
-                  <div className="flex h-full items-center justify-center px-6 text-center">
-                    <p className="text-sm text-muted-foreground">
-                    {t("chatpage.allFiltered")}
-                    </p>
+                  <div className="flex h-full items-center justify-center p-3">
+                    <EmptyState
+                      icon={MessagesSquare}
+                      title={t("chatpage.emptyFilteredTitle")}
+                      body={t("chatpage.allFiltered")}
+                    />
                   </div>
                 ) : (
                   <ChatEmpty
@@ -249,6 +261,7 @@ export function ChatPage() {
                     configured={configured}
                     error={error}
                     statuses={statuses}
+                    onOpenCredentials={() => void navigate("/settings?tab=platforms")}
                   />
                 )
               }
@@ -267,16 +280,35 @@ export function ChatPage() {
                   count: troubled.length,
                 })}
               </p>
+              {/* Which platform, and why, in the banner itself. A count alone sends
+                  the moderator to scan every card to find the one that is failing. */}
+              <ul className="mt-0.5 flex flex-col gap-0.5">
+                {troubled.map((s) => {
+                  const label = accentFor(s.platform).label;
+                  const reason = s.detail || s.lastError;
+                  return (
+                    <li key={`${s.platform}-${s.account ?? ""}`} className="text-sm text-warn">
+                      {reason ? t("chatpage.attentionItem", { platform: label, reason }) : label}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 
-          <PollPanel />
-          <ChatRules statuses={statuses} />
+          {/* The connection status is the first thing in the sidebar: it answers
+              "is it working", which is what a moderator needs before the poll
+              form, and before the rules. */}
           <ChatStatusList statuses={statuses} />
+          <ChatRules statuses={statuses} />
+          <PollPanel twitchAvailable={statuses.some((s) => s.platform === "twitch")} />
 
           {configured && statuses.length === 0 && (
             <p className="rounded-md border border-border bg-card px-2 py-1.5 text-sm leading-relaxed text-muted-foreground">
-                    {t("chatpage.noAccount")}
+              {t("chatpage.noAccount")}{" "}
+              <Link to="/settings?tab=platforms" className="text-primary underline-offset-2 hover:underline">
+                {t("chatpage.openCredentials")}
+              </Link>
             </p>
           )}
 

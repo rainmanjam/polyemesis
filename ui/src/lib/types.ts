@@ -2093,6 +2093,18 @@ export interface PlatformCreds {
   clientId: string;
   hasSecret: boolean;
   updatedAt: string;
+  /** The verdict the last Save or Re-check reached on this pair
+   *  (settings-council R10). Absent when it has never been checked, and on a
+   *  server too old to store it -- both drawn as "no verdict", never as one. */
+  lastCheck?: StoredCredentialCheck;
+}
+
+/** A CredentialCheck as stored with the pair, with when it was reached. */
+export interface StoredCredentialCheck {
+  state: CredentialCheck["state"];
+  method: CredentialCheck["method"];
+  detail: string;
+  checkedAt: string;
 }
 
 export interface PlatformAccount {

@@ -104,7 +104,10 @@ async function openStopAll() {
       </LiveDataContext.Provider>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: new RegExp(translate("en", "dash.stopAll")) }));
+  // The strip's Stop all (A4) opens the same confirmation, so the name is on two
+  // buttons. The toolbar's is the one this helper means: the one outside the strip.
+  const named = await screen.findAllByRole("button", { name: new RegExp(translate("en", "dash.stopAll")) });
+  fireEvent.click(named.find((b) => !b.closest('[data-testid="on-air-bar"]')) as HTMLElement);
   return screen.findByRole("dialog");
 }
 
@@ -118,7 +121,11 @@ describe("Dashboard: the Stop all dialog's count comes from the server", () => {
     stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 0 } });
     const dialog = await openStopAll();
 
-    await within(dialog).findByText(translate("en", "dash.stopAllConsequence", { count: "2" }));
+    // The count the server gave is in the dialog title (the consequence copy no
+    // longer repeats it), and the copy never sends the operator to a Start all
+    // button that does not exist (A5).
+    await within(dialog).findByText(translate("en", "dash.stopAllTitle", { count: "2" }));
+    expect(dialog.textContent ?? "").not.toMatch(/start all/i);
     expect(stopImpactCalls).toBe(1);
     expect(
       within(dialog).queryByText(new RegExp(translate("en", "golive.stopYoutube", { count: 1 }))),

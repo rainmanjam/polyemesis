@@ -57,8 +57,10 @@ number that was never true at the time it appeared.
 
 ## Setting it up
 
-`Settings → MQTT telemetry`. Off by default; an upgrade never starts publishing to a
-broker nobody configured.
+`Settings → Pipeline → MQTT telemetry`. Off by default; an upgrade never starts publishing to a
+broker nobody configured. The card is in the Pipeline tab's **Advanced** group, so
+turn on **Show advanced settings** in the settings side menu to see it while MQTT
+is still off; once a broker is configured the card always shows.
 
 | Field | Notes |
 |---|---|

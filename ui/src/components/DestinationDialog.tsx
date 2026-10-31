@@ -80,6 +80,7 @@ import type {
   SourceView,
   RenditionConcern,
 } from "@/lib/types";
+import { MoreAbout } from "@/components/MoreAbout";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -570,9 +571,13 @@ interface Props {
   /** Existing destination to edit, or null to create. */
   destination: Destination | null;
   onSaved: () => void;
+  /** A30: the programme the operator is looking at when they ask to add a
+   *  destination (a Sources card). Starts a NEW destination on that programme.
+   *  Ignored when editing: an existing destination keeps its own. */
+  initialSourceId?: string;
 }
 
-export function DestinationDialog({ open, onOpenChange, destination, onSaved }: Props) {
+export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Props) {
   const editing = destination !== null;
   // Every operator-visible sentence here comes from the catalogue. The preset
   // table stores keys rather than English, so its notes and group labels are
@@ -691,8 +696,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // destination's programme when the fetch resolves late.
   useEffect(() => {
     if (!open || choices.length === 0) return;
-    setSourceId((current) => (current === "" ? initialSourceValue(destination, choices) : current));
-  }, [open, choices, destination]);
+    // A30: a new destination opened from a programme starts on that programme,
+    // provided it is still in the list. A stale id falls back to the usual rule.
+    const fromCard = destination === null && initialSourceId && sourceIsChosen(initialSourceId, choices) ? initialSourceId : null;
+    setSourceId((current) => (current === "" ? (fromCard ?? initialSourceValue(destination, choices)) : current));
+  }, [open, choices, destination, initialSourceId]);
   const [guidanceRead, setGuidanceRead] = useState<ReadState<PlatformPresetInfo[]>>(pendingRead);
   const guidance = rowsOf(guidanceRead);
   const [servicesRead, setServicesRead] = useState<ReadState<ServiceInfo[]>>(pendingRead);
@@ -2247,7 +2255,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   negotiation that does not succeed is the EXPECTED outcome on
                   the machine most operators run this on, so saying it in amber
                   would train them to read a normal broadcast as broken. */}
-              <span className="text-sm text-muted-foreground">{t("addDest.multitrackHelp")}</span>
+              <MoreAbout lead={t("addDest.multitrackLead")}>{t("addDest.multitrackHelp")}</MoreAbout>
               {/* The two things the sentence above leaves out, and both are
                   things an operator would otherwise have to guess: nothing is
                   asked at all until the machine's GPU is declared, and the
@@ -2462,9 +2470,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   />
                 </div>
               </div>
-              <span className="text-sm text-muted-foreground">
-                {t("dest.muxQueuePair")}
-              </span>
+              <MoreAbout lead={t("dest.muxQueuePairLead")}>{t("dest.muxQueuePair")}</MoreAbout>
 
               <div className="flex flex-col gap-1 border-t border-border pt-3">
                 <Label htmlFor="dest-delay">{t("delay.field")}</Label>
@@ -2537,7 +2543,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
                   }
                   className="w-24"
                 />
-                <span className="text-sm text-muted-foreground">{t("addDest.giveUpHelp")}</span>
+                <MoreAbout lead={t("addDest.giveUpLead")}>{t("addDest.giveUpHelp")}</MoreAbout>
               </div>
             </div>
           </details>

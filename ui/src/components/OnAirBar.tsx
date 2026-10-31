@@ -50,6 +50,7 @@ export function OnAirBar({
   status,
   failover,
   onEndAll,
+  ingestReceiving,
 }: {
   status: Status | null | undefined;
   /** The programme-scoped failover tier, from the Dashboard. Not read from
@@ -58,11 +59,17 @@ export function OnAirBar({
   /** Opens the dashboard's one Stop all confirmation. The strip only asks; the
    *  count, the YouTube warning and the stop itself stay where they were. */
   onEndAll?: () => void;
+  /** The selected programme's ingest, receiving or not: the same signal the
+   *  header chip reads. Left undefined where it has not been read yet. */
+  ingestReceiving?: boolean;
 }) {
   const stateLabel = useStateLabel();
   const t = useT();
   const [roomOpen, setRoomOpen] = useState(false);
   const air = onAir(status?.destinations);
+  // Every destination row, switched off or not: the stopped count is measured
+  // against the install, which is what the operator counts on the cards below.
+  const total = status?.destinations?.length ?? 0;
   const items = attention(status);
   const head = headline(air);
   // The ingest's uptime only means something while it is running. SRT has no
@@ -70,7 +77,7 @@ export function OnAirBar({
   // the verdict simply omits the stability clause rather than inventing one.
   const ingestUptime = status?.ingest?.state === "running" ? status.ingest.uptimeSec : null;
   const offPrimary = !!failover && failover.active !== "primary" && failover.active !== "";
-  const verdict = healthVerdict(air, items, ingestUptime, offPrimary);
+  const verdict = healthVerdict(air, items, ingestUptime, offPrimary, ingestReceiving);
   // How long the broadcast has been on air: the longest-running destination,
   // since the first one up is when the audience could first see it.
   const onAirSec = (status?.destinations ?? []).reduce(
@@ -109,12 +116,19 @@ export function OnAirBar({
           )}
         </h2>
 
-        {/* The denominator is enabled destinations, not every row — see onAir().
-            Spelled out in words beside the ratio because "2/3" alone is the
-            kind of figure that gets read as a bitrate on a console full of
-            them. */}
-        <span className="tnum font-mono text-[12px] text-muted-foreground">
-          <span className="text-foreground">{air.live}</span>/{air.enabled} {t("i18nSweep.destinationsLive")}
+        {/* Numbers in words, not a bare ratio ("2/3" reads as a bitrate on a
+            console full of them). Each word is the one the destination cards
+            use (app-council A91): Stopped for an enabled destination that is
+            not running, Off for one the operator switched off. With the
+            connecting and failed marks beside them, which appear only when
+            non-zero, they add up to the install, and a switched-off card is
+            never read as a fault (A2). */}
+        <span className="tnum font-mono text-[12px] text-muted-foreground" data-testid="on-air-counts">
+          {t("onAir.counts", {
+            live: String(air.live),
+            stopped: String(Math.max(0, air.enabled - air.live - air.degraded - air.failed)),
+            off: String(Math.max(0, total - air.enabled)),
+          })}
         </span>
 
         {/* Counts, each with its own mark. Rendered only when non-zero: a
@@ -148,6 +162,12 @@ export function OnAirBar({
                 {t("health.verdictIngest", { uptime: duration(verdict.uptimeSec) })}
               </span>
             )}
+          </span>
+        )}
+        {verdict?.kind === "no-ingest" && (
+          <span className="flex items-center gap-1.5 text-[12px] text-warn">
+            <StatusDot tone="warn" size="sm" />
+            <span data-testid="health-verdict">{t("health.verdictNoIngest")}</span>
           </span>
         )}
         {verdict?.kind === "attention" && (
@@ -199,20 +219,20 @@ export function OnAirBar({
                 <span className="min-w-0 flex-1">
                   <span className="font-medium">{item.subject}</span>
                   {item.state && (
-                    <span className="ml-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span className="ml-1.5 font-mono text-tiny uppercase tracking-wider text-muted-foreground">
                       {stateLabel(item.state)}
                     </span>
                   )}
                   {/* #20: the server's classified cause, translated. The row
                       leads to the card, where its remedy is (A9). */}
                   {item.cause && (
-                    <span className="block text-[11px] text-foreground">
+                    <span className="block text-tiny text-foreground">
                       {t(`reason.cause.${item.cause}`)}
                     </span>
                   )}
                   {/* The server's own sentence, never a summary of it. */}
                   {item.detail && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
+                    <span className="block truncate text-tiny text-muted-foreground">
                       {item.detail}
                     </span>
                   )}

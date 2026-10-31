@@ -31,10 +31,12 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     labelKey: "nav.group.operations",
-    routes: ["/jobs", "/monitoring"],
+    // System sits with Monitoring: both are where an operator goes to find
+    // out why something is wrong, and the settings group is only for config (A82).
+    routes: ["/jobs", "/monitoring", "/system"],
   },
   {
     labelKey: "nav.group.settings",
-    routes: ["/system", "/settings"],
+    routes: ["/settings"],
   },
 ];

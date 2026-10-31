@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmptyState } from "@/components/EmptyState";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
@@ -161,12 +162,32 @@ function MessageRow({
       }
     : undefined;
 
+  // The keyboard route to the same menu. A row takes focus (Tab), and the menu
+  // opens from the keys a keyboard user already has for "menu here": Enter, the
+  // ContextMenu key, and Shift+F10. Keys pressed on the name or delete buttons
+  // inside the row belong to those buttons, so they are ignored here.
+  const openMenuFromKeyboard = onMenu
+    ? (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (e.target !== e.currentTarget) return;
+        const menuKey =
+          e.key === "Enter" || e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+        if (!menuKey) return;
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        onMenu(m, { x: r.left + 16, y: r.top + r.height / 2 });
+      }
+    : undefined;
+
   return (
     <div
+      role="group"
+      aria-roledescription={t("chatpage.messageRole")}
+      tabIndex={onMenu ? 0 : undefined}
+      onKeyDown={openMenuFromKeyboard}
       onContextMenu={openMenu}
       onDoubleClick={openMenu}
       className={cn(
-        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised",
+        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         accent.rule,
         m.echo && "bg-primary-dim/40",
       )}
@@ -174,14 +195,14 @@ function MessageRow({
       <span className="mr-1.5 inline-flex items-center gap-1 align-baseline">
         <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
         {!compact && (
-          <span className="tnum font-mono text-[10px] text-muted-foreground" title={timestamp(m.at)}>
+          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
             {clockTime(m.at)}
           </span>
         )}
       </span>
 
       {m.replyTo && (
-        <span className="mr-1 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+        <span className="mr-1 inline-flex items-center gap-0.5 text-sm text-muted-foreground">
           <CornerUpLeft className="h-2.5 w-2.5" />
           {m.replyTo}
         </span>
@@ -250,7 +271,7 @@ function MessageRow({
           disabled={busy || !deletable.ok}
           aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
           title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex"
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex group-focus-within:flex pointer-coarse:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
@@ -308,7 +329,10 @@ export function ChatTimeline({
         onScroll={onScroll}
         className="h-full overflow-y-auto py-1"
         role="log"
-        aria-live="polite"
+        // The log stays silent. Announcing every line on a busy stream is
+        // noise a screen reader user cannot stop; the status region below
+        // announces the one thing that matters while scrolled up.
+        aria-live="off"
         aria-relevant="additions"
       >
         {messages.length === 0
@@ -323,6 +347,10 @@ export function ChatTimeline({
                 compact={compact}
               />
             ))}
+      </div>
+
+      <div role="status" aria-live="polite" className="sr-only">
+        {behind > 0 ? t("chatpage.newCount", { count: behind }) : ""}
       </div>
 
       {behind > 0 && (
@@ -373,7 +401,7 @@ export function PlatformFilter({
             onClick={() => onToggle(p)}
             aria-pressed={on}
             className={cn(
-              "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+              "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-sm font-semibold uppercase tracking-wider transition-colors",
               on ? accent.chipOn : "border-border text-muted-foreground hover:text-muted-foreground",
             )}
           >
@@ -502,6 +530,10 @@ export function ChatComposer({
           onKeyDown={(e) => {
             // Enter sends, Shift+Enter breaks the line. The other way round
             // makes a chat box feel like a form.
+            // An IME confirms a candidate with an Enter that belongs to the
+            // composition, not to the message. isComposing is the standard
+            // signal; Safari reports the same keystroke as keyCode 229.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();
@@ -509,8 +541,10 @@ export function ChatComposer({
           }}
           rows={compact ? 1 : 2}
           placeholder={
+            // The field says the state in two words. The reason is text under
+            // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
             senders.length === 0
-              ? t("chatpage.noSender")
+              ? t("chatpage.notConnected")
               : t("chatpage.sendTo", {
                   platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
                 })
@@ -518,6 +552,9 @@ export function ChatComposer({
           className="min-h-0 resize-none text-[12px]"
           aria-label={t("chatpage.composerAria")}
         />
+        {senders.length === 0 && (
+          <p className="text-sm text-muted-foreground">{t("chatpage.noSender")}</p>
+        )}
         <Button size="sm" onClick={() => void send()} disabled={sending || !text.trim()}>
           {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           {!compact && t("chatpage.send")}
@@ -526,7 +563,7 @@ export function ChatComposer({
       {strictest > 0 && (
         <p
           className={cn(
-            "mt-1 text-[10px]",
+            "mt-1 text-sm",
             over ? "text-warn" : "text-muted-foreground",
           )}
         >
@@ -585,7 +622,7 @@ export function ChatStatusList({
                 {s.channel && (
                   <span className="truncate text-[11px] text-muted-foreground">{s.channel}</span>
                 )}
-                <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span className="ml-auto text-sm uppercase tracking-wider text-muted-foreground">
                   {CHAT_STATE_KEY[s.state] ? t(CHAT_STATE_KEY[s.state]) : s.state}
                 </span>
               </div>
@@ -593,7 +630,7 @@ export function ChatStatusList({
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{detail}</p>
               )}
               {quota && (
-                <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
                   {tn("chatpage.quotaUsed", {
                     n: (
                       <span className="tnum font-mono">
@@ -611,7 +648,7 @@ export function ChatStatusList({
                 </p>
               )}
               {!compact && (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                <p className="mt-0.5 text-sm text-muted-foreground">
                   {tn("chatpage.receivedCount", {
                     n: <span className="tnum font-mono">{s.received.toLocaleString()}</span>,
                   })}
@@ -709,7 +746,7 @@ export function ChatSearchResults({
   const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-sm text-muted-foreground">
         <span>
           {search.loading
             ? t("chatpage.searching")
@@ -749,7 +786,7 @@ export function ChatSearchResults({
       </div>
 
       {search.results.length > 0 && search.note && (
-        <p className="shrink-0 border-t border-border px-2 py-1 text-[10px] leading-snug text-muted-foreground">
+        <p className="shrink-0 border-t border-border px-2 py-1 text-sm leading-snug text-muted-foreground">
           {search.note}
         </p>
       )}
@@ -926,6 +963,7 @@ export function ChatEmpty({
   error,
   statuses,
   hiddenMessages = 0,
+  onOpenCredentials,
 }: {
   loading: boolean;
   configured: boolean;
@@ -943,28 +981,59 @@ export function ChatEmpty({
    *  Optional and zero by default: a caller that has no filter cannot be made
    *  to think about one. */
   hiddenMessages?: number;
+  /** Where "no account connected" sends the operator: the kit's primary
+   *  action on that empty state. Optional, because the Dashboard's chat card
+   *  already sits beside its own connect prompt. */
+  onOpenCredentials?: () => void;
 }) {
   const t = useT();
+  // Loading is not empty: it is a wait, so it keeps the spinner and no title.
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center">
+        <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+          {t("chatpage.emptyLoading")}
+        </p>
+      </div>
+    );
+  }
+  // Every other situation is the kit's EmptyState: a title naming what is
+  // missing, the existing sentence as its body (it was an 11px line, below
+  // the 12px floor). Same ranking as before.
+  let title: TranslationKey;
   let body: string;
-  if (loading) body = t("chatpage.emptyLoading");
-  else if (error) body = error;
-  else if (!configured) body = t("chatpage.emptyNotRunning");
-  else if (statuses.length === 0) body = t("chatpage.emptyNoAccount");
-  // Ranked ABOVE "nothing has been said": when the filter is the reason the
-  // pane is empty, it is the only reason worth printing.
-  else if (hiddenMessages > 0)
+  if (error) {
+    title = "chatpage.emptyErrorTitle";
+    body = error;
+  } else if (!configured) {
+    title = "chatpage.emptyOffTitle";
+    body = t("chatpage.emptyNotRunning");
+  } else if (statuses.length === 0) {
+    title = "chatpage.emptyNoAccountTitle";
+    body = t("chatpage.emptyNoAccount");
+  } else if (hiddenMessages > 0) {
+    // Ranked ABOVE "nothing has been said": when the filter is the reason the
+    // pane is empty, it is the only reason worth printing.
+    title = "chatpage.emptyFilteredTitle";
     body =
       hiddenMessages === 1
         ? t("chatpage.emptyFilteredOne")
         : t("chatpage.emptyFilteredMany", { count: hiddenMessages });
-  else body = t("chatpage.emptyWaiting");
+  } else {
+    title = "chatpage.emptyWaitingTitle";
+    body = t("chatpage.emptyWaiting");
+  }
 
+  // The one empty state with a next step on another page gets it as the
+  // kit's primary action, not only as a link in the side note.
+  const action =
+    title === "chatpage.emptyNoAccountTitle" && onOpenCredentials
+      ? { label: t("chatpage.openCredentials"), onClick: onOpenCredentials }
+      : undefined;
   return (
-    <div className="flex h-full items-center justify-center px-6 text-center">
-      <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground">
-        {loading ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : null}
-        {body}
-      </p>
+    <div className="flex h-full items-center justify-center p-3">
+      <EmptyState icon={MessagesSquare} title={t(title)} body={body} action={action} />
     </div>
   );
 }

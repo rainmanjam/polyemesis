@@ -69,7 +69,7 @@ describe("SettingsPage, Pipeline tab", () => {
     expect(tab).toContain("const saveTab = () =>");
     expect(tab).toContain("pipelineSaveCarriesPassword(mqttPassword)");
     expect(tab).toContain("? onSaveMqtt(draft, mqttPassword)");
-    expect(tab).toContain("<Button size=\"sm\" onClick={saveTab} disabled={saving || !dirty}>");
+    expect(tab).toContain("<Button size=\"sm\" onClick={() => void saveTab()} disabled={saving || !dirty}>");
     // And the MQTT card's own button is gone with the rest.
     expect(tab).not.toContain("onClick={() => onSaveMqtt(draft, mqttPassword)}");
   });

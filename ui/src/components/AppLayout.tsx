@@ -57,6 +57,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
+import { headerLive } from "@/lib/headerLive";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
@@ -115,7 +116,7 @@ export function AppLayout({
   username: string;
   onSignOut: () => void;
 }) {
-  const { status, connected, frameError, sourceCount } = useLiveData();
+  const { status, connected, frameError, sourceCount, programme, programmes } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
 
@@ -218,12 +219,27 @@ export function AppLayout({
   const uptime = ingestUptimeSec(ingest, snapshot?.relay, ingestLive);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
   const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
-  const liveCount =
-    status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
+  // app-council A81: the badge counts the selected programme and says whose
+  // count it is ("Main: 3 live"), or "All programmes" where nothing is
+  // selected. It sat beside the programme-scoped ingest chip printing the
+  // whole install's count with nothing to say so. See lib/headerLive.ts.
+  const live = headerLive({ destinations: status?.destinations, programme, programmes, sourceCount });
+  const liveCount = live.count;
+  const liveLabel = t(live.key, live.params);
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
       {/* ---- top bar: the always-visible answer to "am I on air?" ---- */}
+      {/* A80: the first focusable thing in the shell. Hidden until it takes
+          focus, then it lands on <main>, so a keyboard user does not walk the
+          header and fifteen nav links on every page load. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:shadow"
+      >
+        {t("shell.skipToContent")}
+      </a>
+
       <UpdateBanner onInfo={onVersionInfo} />
       {/* An OFFER, not a launch. It renders nothing once the tour has been
           taken or dismissed, and nothing at all until the server has said
@@ -251,6 +267,25 @@ export function AppLayout({
         >
           {mobileOpen ? <X /> : <Menu />}
         </Button>
+
+        {/* A78: below sm the header carried no on-air answer at all. This is the
+            phone's one answer to "am I on air?", beside the hamburger: the live
+            count when something is running, and the words Off air otherwise.
+            It reuses the strip's own wording, so the two cannot disagree. */}
+        {/* One line, always. With the programme in it ("Main: Off air") the
+            chip wrapped onto three lines beside the logo at 390px; it now
+            keeps to one line and truncates the text, with the whole of it in
+            the title. */}
+        <span
+          data-testid="mobile-on-air"
+          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden"
+          title={liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
+        >
+          <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
+          <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
+            {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
+          </span>
+        </span>
 
         {/* No tinted tile behind it: the site sets the mark straight on the
             background, and the tile was there to give a monochrome glyph
@@ -317,7 +352,7 @@ export function AppLayout({
           {liveCount > 0 && (
             <Badge variant="live" className="hidden sm:inline-flex">
               <StatusDot tone="live" size="sm" />
-              {t("chrome.liveCount", { count: liveCount })}
+              {liveLabel}
             </Badge>
           )}
           {uptime !== null && (
@@ -503,8 +538,11 @@ export function AppLayout({
               // hamburger would be an icon strip nobody asked for, and the
               // drawer already solves the problem collapsing solves.
               "w-44",
-              "max-md:absolute max-md:inset-y-11 max-md:left-0 max-md:transition-transform",
-              mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+              "max-md:absolute max-md:inset-y-11 max-md:left-0 max-md:transition-[transform,visibility]",
+              // A79: closed, the drawer is also invisible, which takes its links
+              // out of the tab order. Translating it off screen alone left them
+              // focusable. The visibility change waits for the slide to finish.
+              mobileOpen ? "max-md:visible max-md:translate-x-0" : "max-md:invisible max-md:-translate-x-full",
             )}
           >
             {/* A11: the links, in labelled sections. Each section is a named
@@ -677,7 +715,7 @@ export function AppLayout({
             against a 900px viewport. Making this pane a containing block keeps
             that — and anything else a page renders — inside the scroller where
             it belongs. */}
-        <main className="relative min-w-0 flex-1 overflow-y-auto">
+        <main id="main-content" tabIndex={-1} className="relative min-w-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>

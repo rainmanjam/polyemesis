@@ -3,6 +3,9 @@ import type { TranslationKey } from "./i18n";
 /** The sub-rail's sections, in rail order. The values are the `?tab=` values
  *  the settings page already reads, so a link to a section keeps working. */
 export const SETTINGS_TABS = [
+  // The landing page (settings-council R3/R5): the setup checklist and one
+  // tile per area. New, so no old link names it.
+  "overview",
   "ingest",
   "pipeline",
   "platforms",
@@ -14,6 +17,30 @@ export const SETTINGS_TABS = [
 ] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+/** The rail's groups, in rail order (settings-council R6). Overview sits above
+ *  them and Danger zone below them, each on its own. The tab VALUES are the
+ *  ones the page has always read, so grouping moved no link: every old
+ *  `?tab=` still opens the panel it always opened (settingsTabFor). */
+export const SETTINGS_GROUPS: readonly { label: TranslationKey; tabs: readonly SettingsTab[] }[] = [
+  { label: "settingsUx.groupStreamIn", tabs: ["ingest"] },
+  { label: "settingsUx.groupStreamOut", tabs: ["platforms", "overlays", "obs"] },
+  { label: "settingsUx.groupProcessing", tabs: ["pipeline"] },
+  { label: "settingsUx.groupAccess", tabs: ["security"] },
+];
+
+/** The panel a `?tab=` value opens.
+ *
+ *  Every value a link has ever carried keeps its panel, so an old bookmark, the
+ *  OAuth callback's `?tab=platforms` and the tour's `?tab=security` all land
+ *  where they did. `debug` is not a panel here any more -- the page sends it to
+ *  /system before this is asked. Anything else, a typo or a value from a newer
+ *  build, opens the Overview rather than a rail with nothing selected and an
+ *  empty panel beside it. */
+export function settingsTabFor(raw: string): Exclude<SettingsTab, "debug"> {
+  const known = SETTINGS_TABS.find((tab) => tab === raw);
+  return known && known !== "debug" ? known : "overview";
+}
 
 /** One searchable thing on the settings page: a card title or a field label.
  *
@@ -112,20 +139,27 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "pipeline", key: "set.fileSizeMb", card: "set.processLogs", anchor: "log-mb" },
   { tab: "pipeline", key: "set.filesKept", card: "set.processLogs", anchor: "log-files" },
   // platforms
+  // The platforms are rows now (settings-council R1), and each platform's
+  // fields are inside its row, which is closed until opened. A field hit
+  // therefore lands on the "Add a platform" list, which is always drawn, and
+  // the result names that list as its context.
+  { tab: "platforms", key: "settingsUx.connectedChannels" },
+  { tab: "platforms", key: "settingsUx.addPlatform" },
   { tab: "platforms", key: "set.whatPlatformsDo" },
-  { tab: "platforms", key: "set.whyDevApp" },
-  { tab: "platforms", key: "set.redirectUri" },
-  { tab: "platforms", key: "set.clientId" },
-  { tab: "platforms", key: "set.clientSecret" },
+  { tab: "platforms", key: "set.redirectUri", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "set.clientId", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "set.clientSecret", card: "settingsUx.addPlatform" },
   // Each card names its pair in the platform's own words (lib/
   // platformCredentialLabels.ts), so "App ID" has to find the Facebook card.
-  { tab: "platforms", key: "credLabels.appId" },
-  { tab: "platforms", key: "credLabels.appSecret" },
-  { tab: "platforms", key: "credLabels.clientIdentifier" },
-  { tab: "platforms", key: "set.connectedAccounts" },
+  { tab: "platforms", key: "credLabels.appId", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "credLabels.appSecret", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "credLabels.clientIdentifier", card: "settingsUx.addPlatform" },
+  { tab: "platforms", key: "set.connectedAccounts", card: "settingsUx.addPlatform" },
   // obs bridge (#16): its fields live in ObsBridgeSettings.tsx
   { tab: "obs", key: "obs.title" },
   // security
+  { tab: "security", key: "settingsUx.secretKeyTitle" },
+  { tab: "security", key: "settingsUx.backedUp", card: "settingsUx.secretKeyTitle", anchor: "secret-key-ack" },
   { tab: "security", key: "set.adminPassword" },
   { tab: "security", key: "set.currentPassword", card: "set.adminPassword", anchor: "cur-pw" },
   { tab: "security", key: "set.newPassword", card: "set.adminPassword", anchor: "new-pw" },
@@ -163,6 +197,10 @@ export interface SettingsHit {
   context: string;
   /** The label's own text, for finding it on the page when there is no id. */
   key: TranslationKey;
+  /** The card the hit sits in, by key: the card itself for a card title. The
+   *  page reads it to open a hidden advanced card before the hit is revealed
+   *  (settings-council R7). */
+  cardKey: TranslationKey;
   anchor?: string;
 }
 
@@ -187,6 +225,7 @@ export function searchSettingsFields(
         label,
         context: entry.card ? translate(entry.card) : "",
         key: entry.key,
+        cardKey: entry.card ?? entry.key,
         anchor: entry.anchor,
       });
     }
@@ -242,6 +281,12 @@ export function revealSettingsHit(
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
   }
   if (!target) return false;
+  // A hit inside a closed disclosure -- the transport card's details, a
+  // platform's app credentials -- opens it, so the result is never a focused
+  // field nobody can see (settings-council R7).
+  for (let d = target.closest("details"); d; d = d.parentElement?.closest("details") ?? null) {
+    d.open = true;
+  }
   // A short highlight so the eye lands on the right row after the scroll.
   target.setAttribute("data-search-hit", "");
   window.setTimeout(() => target?.removeAttribute("data-search-hit"), 1600);
