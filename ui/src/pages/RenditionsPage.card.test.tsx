@@ -66,6 +66,9 @@ describe("RenditionCard", () => {
     const chip = screen.getByText("Twitch").parentElement as HTMLElement;
     // Off, the word the destination card uses for a switched-off feed (A91).
     expect(chip.textContent).toContain("Off");
+    // And the rendition nothing enabled uses reads Stopped, not "Idle".
+    expect(screen.queryByText("Idle")).toBeNull();
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
   });
 
   it("labels Delete with words, not an icon alone", () => {

@@ -389,7 +389,9 @@ function renditionSignal(
     return { tone: toneForState(live.process.state), label: stateLabel(live.process.state) };
   }
   if (live?.error) return { tone: "down", label: t("rend.signalError") };
-  if (enabledUsers === 0) return { tone: "idle", label: t("rend.signalIdle") };
+  // Stopped, the console's one word for "on the books and not running"
+  // (app-council A91); this badge said "Idle", a fifth spelling.
+  if (enabledUsers === 0) return { tone: "idle", label: t("state.stopped") };
   // A10: a feed wants this rendition but no encode exists yet. Nothing is
   // requested from the encoder until a feed goes live, so this is not a start
   // in progress. "Starting" is reserved for a process that is reported.

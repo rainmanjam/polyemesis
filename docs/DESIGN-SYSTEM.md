@@ -128,6 +128,14 @@ them to the server and never rename a state value; the API, MQTT, webhook and
 Stream Deck vocabularies are contracts. A new state goes in `lib/status.ts`
 with a test, not into a page.
 
+**Two words for "not running"** (app-council A91). **Off** is something the
+operator switched off: a disabled destination, a disabled feature. **Stopped**
+is something that is on and not running: no process, or a process that
+stopped. Do not add a third spelling ("Offline", "idle", "Disabled") to a
+status pill, badge or count; the on-air counts use the same two words as the
+cards. "Offline" stays only where it names something else: the live-updates
+socket and a platform channel's own state.
+
 **Confirmation.** `components/ConfirmDestructive.tsx`. Use it for every
 destructive or live-affecting action; never `window.confirm`. Two conventions:
 
