@@ -367,7 +367,10 @@ a settings page that hangs.
 5. **Credentials → Create Credentials → OAuth client ID → Web application.**
 6. Add the redirect URI shown on the credentials page, exactly:
    `https://YOUR_HOST/api/v1/oauth/youtube/callback`
-7. Paste the client ID and secret into polyemesis, then **Connect account**.
+7. Paste the **Client ID** and **Client secret** into the fields of the same
+   names in polyemesis, then **Connect account**. Both are on the OAuth client's
+   page (Google Auth Platform → Clients). Google shows the secret in full only
+   when it is created.
 
 Scope requested: `https://www.googleapis.com/auth/youtube`. Write access is
 needed because polyemesis creates a reusable ingest stream if your channel has
@@ -531,7 +534,8 @@ current broadcast and carries every untouched field through on every write.
 1. <https://dev.twitch.tv/console/apps> → **Register Your Application**.
 2. OAuth Redirect URL: `https://YOUR_HOST/api/v1/oauth/twitch/callback`
 3. Category: *Broadcasting Suite*. Client Type: **Confidential**.
-4. **Manage → New Secret**, then paste both values into polyemesis.
+4. **Manage**, then **New Secret**. Paste the **Client ID** and the
+   **Client Secret** into the fields of the same names in polyemesis.
 
 Connect account sends a PKCE challenge (RFC 7636, S256) along with the client
 secret, which the app keeps; the client stays **Confidential**. Twitch's discovery
@@ -576,8 +580,8 @@ minutes, and start it before you need it.
 2. Add the **Facebook Login** product; under its settings enable Client and Web
    OAuth login and add the redirect URI:
    `https://YOUR_HOST/api/v1/oauth/facebook/callback`
-3. **App settings → Basic** — the App ID is the client ID and the App Secret is
-   the client secret. Paste both into polyemesis.
+3. **App settings → Basic**: paste the **App ID** and the **App Secret** (click
+   **Show** beside it) into the polyemesis fields of the same names.
 4. **Connect account**, then pick your profile or a Page.
 
 The key this fetches belongs to one live video, so *Refresh key* on a Facebook
@@ -638,8 +642,8 @@ Kick note further up this page for why the key looked unfetchable for so long.
 
 1. <https://kick.com/settings/developer> → create an OAuth application.
 2. Redirect URI: `https://YOUR_HOST/api/v1/oauth/kick/callback`
-3. Paste the client ID and secret into polyemesis, then **Connect account**.
-   Kick speaks OAuth 2.1, so polyemesis sends a PKCE challenge automatically —
+3. Paste the **Client ID** and **Client Secret** into the fields of the same
+   names in polyemesis, then **Connect account**. Kick speaks OAuth 2.1, so polyemesis sends a PKCE challenge automatically —
    it is the first provider here that does.
 4. Nothing to paste. The ingest URL and stream key are fetched for you over
    the `streamkey:read` scope.

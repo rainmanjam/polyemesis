@@ -409,6 +409,13 @@ its first tagged release.
 
 ### Changed
 
+- **Each platform card names its credentials the way that platform's console
+  does.** Settings → Platforms used to label every card "Client ID" and "Client
+  secret". The Facebook card now says **App ID** and **App Secret**, which is
+  what Meta's App settings → Basic page shows. Vimeo says **Client identifier**,
+  and Twitch and Kick say **Client Secret**. Under each field, a short hint says
+  where to find it in that platform's console. The values you paste and the API
+  fields they are stored in have not changed.
 - **The site banner and comparison blurbs lead with what polyemesis does.** The
   bar on every page now reads "Free and open source (MIT). One stream in, every
   platform out, each with its own mix." and links to /features. The comparison
