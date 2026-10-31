@@ -170,8 +170,8 @@ who objects has the bring-your-own path, which is exactly why that path stays.
   who uses the default path. Read them first; at least one will have something
   to say about it.
 * A rate limit per operator, or one abusive install exhausts a shared quota for
-  everyone. Trovo, for reference, publishes 1200 requests/minute **per client
-  id** — shared across every user of that id.
+  everyone. Trovo, for reference, published 1200 requests/minute **per client
+  id** — shared across every user of that id — before it shut down in 2026.
 * An answer to "the broker is down and I cannot connect an account", which is
   bring-your-own, and that answer only exists because the hybrid keeps it.
 * A decision on what happens to tokens already issued through the broker if the

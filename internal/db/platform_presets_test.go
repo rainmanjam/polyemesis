@@ -153,7 +153,9 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 		PlatformTwitch:   true,
 		PlatformKick:     true,
 		PlatformFacebook: true,
-		PlatformTrovo:    true,
+		// PlatformTrovo is deliberately absent: Trovo shut down on 30 June
+		// 2026, and a preset naming it would offer a destination that the
+		// store refuses to create.
 		// Vimeo names a platform and still pastes its key, which is the first
 		// time those two have come apart in this catalogue. The platform is
 		// what carries sign-in and the live-API entitlement probe; the preset

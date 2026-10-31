@@ -360,58 +360,6 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "trovo", Name: "Trovo", Platform: db.PlatformTrovo,
-		// INTEGRATED even though one field of the ingest is still typed. The
-		// partial tier means the KEY is pasted, and it is not: it is fetched
-		// over channel_details_self like YouTube's and Twitch's. What Trovo
-		// does not publish is the ingest HOSTNAME, which is a different field
-		// and a one-time copy rather than a per-broadcast chore.
-		Tier:    TierIntegrated,
-		Summary: "Sign in with Trovo and polyemesis fetches the stream key, sets the title and category at go-live, and reads the live viewer count. The server URL is the one field you copy across yourself, once.",
-		// This row was eight cells of Unverified with a note saying the API was
-		// answering and nothing had been built against it. It has been built
-		// against now, from Trovo's own reference read 2026-08-26 and recorded
-		// in docs/evidence/vimeo-trovo-oauth-2026-08-26.md.
-		ReadFirst: "Trovo does not hand out the client secret from its developer portal. Its documentation says, verbatim, “If you don't have the Client Secret, please contact: developer@trovo.live” — and the authorization-code flow cannot complete without one, because Trovo documents no PKCE. Ask for it before the day you need it. Nothing else here is gated: registration is open and every capability below is in the published reference.",
-		HelpURL:   "https://developer.trovo.live/docs/APIs.html",
-		Caps: map[Capability]Support{
-			CapSSO:       SupportYes,
-			CapStreamKey: SupportYes,
-			CapMetadata:  SupportYes,
-			// DOCUMENTED AND UNBUILT, which is the same expressive gap the X row
-			// records: none of the four Support values says "the platform
-			// publishes this and polyemesis has not written it yet". Unverified
-			// is the least wrong — it renders as an invitation to try rather
-			// than as a refusal — and the Reasons below name the endpoint and
-			// the scope so the next person starts from evidence rather than
-			// from a search. Do NOT read these three as absent APIs.
-			CapChatRead:    SupportUnknown,
-			CapChatSend:    SupportUnknown,
-			CapModeration:  SupportUnknown,
-			CapViewerStats: SupportYes,
-			// Checked, not assumed: the whole APIs reference was read end to end
-			// and there is no broadcast object and no transition call anywhere
-			// in it. Same answer as Twitch and Kick, reached the same way.
-			CapBroadcastLifecycle: SupportNo,
-		},
-		Reasons: map[Capability]string{
-			CapSSO: "OAuth 2.0 authorization code with a client_secret. Trovo documents no PKCE, so polyemesis does not send one — and the secret arrives by email from developer@trovo.live rather than from the portal.",
-			CapStreamKey: "Fetched from GET /openplatform/channel over the channel_details_self scope. " +
-				"THE SERVER URL IS NOT: Trovo issues the ingest hostname per region and publishes it " +
-				"nowhere in its API, so that one field is copied from the creator dashboard once and " +
-				"refreshing the key afterwards leaves it alone. An account connected before this " +
-				"integration existed has to be reconnected once.",
-			CapMetadata: "Title and category, over POST /openplatform/channels/update with channel_update_self. " +
-				"Trovo's channel update takes no description and has no tags, so those are reported as " +
-				"skipped rather than silently dropped.",
-			CapChatRead:           "Trovo delivers chat over a websocket (developer.trovo.live's Chat Service doc) rather than by poll or webhook. Real, documented, and not wired up here yet.",
-			CapChatSend:           "POST /openplatform/chat/send, over chat_send_self plus send_to_my_channel. Not wired up here yet, and the scopes are deliberately not requested until it is — asking for them early would put permissions on the consent screen that nothing uses.",
-			CapModeration:         "POST /openplatform/channels/command with manage_messages, which performs Trovo's own chat commands — “ban xxx”, “mod @xxx”, with no leading slash. Not wired up here yet; the scope is not requested until it is.",
-			CapViewerStats:        "Live state and viewer count from the same channel read the stream key comes from, so it costs no extra call and no extra scope. It reads current_viewers rather than Trovo's dedicated viewers endpoint on purpose: that endpoint's total is documented as the channel's “total login users”, which counts signed-in viewers only and would under-report an audience without saying so. Offline, polyemesis reports no count rather than zero.",
-			CapBroadcastLifecycle: "Trovo has no broadcast resource: nothing creates, starts or ends one, so the stream itself is the trigger and liveness can only be observed. Established by reading the whole APIs reference, not by failing to find a page.",
-		},
-	},
-	{
 		PresetID: "vimeo", Name: "Vimeo Livestream", Platform: db.PlatformVimeo,
 		// THE FIRST ROW IN THIS TIER SINCE KICK LEFT IT, and the tier's own
 		// comment predicted exactly this shape: "a provider can ship SSO long

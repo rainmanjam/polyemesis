@@ -314,41 +314,6 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     },
   },
   {
-    presetId: "trovo",
-    name: "Trovo",
-    connect: "trovo",
-    /* Integrated, not partial: the KEY is fetched over channel_details_self.
-       What Trovo publishes nowhere is the ingest HOSTNAME, which is regional
-       and lives only in the creator dashboard — a different field, and a
-       one-time copy rather than a per-broadcast chore. */
-    tier: "integrated",
-    summary: "caps.trovo.summary",
-    readFirst: "caps.trovo.readFirst",
-    caps: {
-      sso: "yes",
-      streamKey: "yes",
-      metadata: "yes",
-      /* Documented and unbuilt. "unknown" renders as Unverified, which invites
-         the operator to try rather than refusing — the same reading the X row
-         records. These are NOT absent APIs; the reasons name each endpoint. */
-      chatRead: "unknown",
-      chatSend: "unknown",
-      moderation: "unknown",
-      viewerStats: "yes",
-      broadcastLifecycle: "no",
-    },
-    reasons: {
-      sso: "caps.trovo.sso",
-      streamKey: "caps.trovo.streamKey",
-      metadata: "caps.trovo.metadata",
-      chatRead: "caps.trovo.chatRead",
-      chatSend: "caps.trovo.chatSend",
-      moderation: "caps.trovo.moderation",
-      viewerStats: "caps.trovo.viewerStats",
-      broadcastLifecycle: "caps.trovo.broadcastLifecycle",
-    },
-  },
-  {
     presetId: "vimeo",
     name: "Vimeo Livestream",
     connect: "vimeo",

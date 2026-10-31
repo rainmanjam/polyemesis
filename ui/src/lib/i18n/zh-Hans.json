@@ -2775,7 +2775,6 @@
   "addDest.presetNote.tiktok": "TikTok 按每次直播分配服务器 URL 和密钥，且只发放给获得 LIVE 权限的账号。请在 TikTok LIVE Studio 或 LIVE Center 中创建直播，并从那里复制这两项。",
   "addDest.presetNote.x": "仅支持手动填写密钥。X 的 API 涵盖帖子、用户、媒体和帖子全量流 — 其文档中的“流式传输”指的是帖子流，而不是视频接入 — 因此没有可供 polyemesis 获取接入地址的公开端点，也没有相关计划。请在 X 自己的直播制作工具中创建来源，并从那里复制服务器 URL 和密钥。",
   "addDest.presetNote.linkedin": "LinkedIn 按每个活动分配接入 URL 和密钥，来源可以是 LinkedIn 自己的活动创建流程，也可以是与主页关联的已批准推流工具。请从活动中复制这两项。",
-  "addDest.presetNote.trovo": "在第 2 步连接 Trovo 账号（需先在设置中填写该平台的应用凭据），polyemesis 会通过 channel_details_self 权限范围自行获取推流密钥。无论哪种方式，服务器 URL 都需要你自己填写：Trovo 的接入主机名因地区而异，且不出现在其 API 中，因此请从 Trovo 创作者控制面板 → Stream 复制一次。之后刷新密钥不会改动该 URL。",
   "addDest.presetNote.dlive": "从 DLive → Dashboard → Stream settings 复制服务器 URL 和推流密钥。仅支持手动，并且很可能一直如此：DLive 位于 dev.dlive.tv 的开发者门户已无法解析，没有任何公开资料可供对接。",
   "addDest.presetNote.rumble": "仅支持手动填写密钥。Rumble Studio 按每场直播分配接入 URL 和密钥 — 在那里设置好直播，并从其 RTMP 详情中复制这两项。Rumble 的 API 页面 (rumble.com/account/api) 需要登录且没有公开内容，因此无从对接。",
   "addDest.presetNote.odysee": "Odysee 在你频道的直播设置中分配接入 URL 和密钥。请从那里复制这两项。",
@@ -2906,16 +2905,6 @@
   "caps.kick.chatRead": "Kick 通过 Webhook 而非套接字推送聊天，因此 polyemesis 需要一个可从外部访问的公开 HTTPS 地址。没有它，面板就不会有任何内容，但会发出警告，而不是让无声看起来像是聊天冷清。",
   "caps.kick.moderation": "删除消息，使用 moderation:chat_message:manage。封禁和禁言使用 moderation:ban。注意：YouTube 和 Twitch 的禁言以秒计，而 Kick 以“分钟”计，且上限为 7 天；polyemesis 会自动换算，所以你在所有平台上都用同一个单位。",
   "caps.kick.viewerStats": "直播状态和观众数，来自 Kick 的 livestreams 端点。",
-  "caps.trovo.summary": "使用 Trovo 登录后，polyemesis 会获取推流密钥，在开播时设置标题和分类，并读取实时观众数。服务器地址是唯一需要你自己复制一次的字段。",
-  "caps.trovo.readFirst": "Trovo 不在开发者门户中发放客户端密钥。其文档原文写道：“如果你没有客户端密钥，请联系：developer@trovo.live”——而由于 Trovo 未提供 PKCE 文档，没有密钥就无法完成授权码流程。请在需要的那天之前提前申请。除此之外没有任何限制：注册是开放的，下面的每项能力都在公开的参考文档中。",
-  "caps.trovo.sso": "使用 client_secret 的 OAuth 2.0 授权码流程。Trovo 未提供 PKCE 文档，所以 polyemesis 也不发送——而且密钥是由 developer@trovo.live 通过邮件发送的，而不是从门户获取。",
-  "caps.trovo.streamKey": "通过 channel_details_self 权限范围从 GET /openplatform/channel 获取。服务器地址“无法”获取：Trovo 按地区分配 Ingest 主机名，且在其 API 中任何地方都不公开，因此这一个字段需要从创作者后台复制一次，之后刷新密钥也不会改动它。在此集成出现之前连接的账号需要重新连接一次。",
-  "caps.trovo.metadata": "标题和分类，通过 POST /openplatform/channels/update 配合 channel_update_self 设置。Trovo 的频道更新不接受说明，也没有标签，所以这些会被报告为已跳过，而不是被悄悄丢弃。",
-  "caps.trovo.chatRead": "Trovo 通过 WebSocket 推送聊天，而不是轮询或 Webhook。真实存在且有文档，但这里尚未接入。",
-  "caps.trovo.chatSend": "POST /openplatform/chat/send，使用 chat_send_self 加 send_to_my_channel。这里尚未接入，在接入之前会刻意不请求这些权限范围——过早请求会让授权页面上出现无任何用途的权限。",
-  "caps.trovo.moderation": "POST /openplatform/channels/command 配合 manage_messages，用于执行 Trovo 自己的聊天命令——“ban xxx”、“mod @xxx”，不带开头的斜杠。这里尚未接入；在接入之前不会请求该权限范围。",
-  "caps.trovo.viewerStats": "直播状态和观众数来自获取推流密钥的同一次频道读取，因此不需要额外调用，也不需要额外的权限范围。这里刻意读取 current_viewers，而不是 Trovo 专门的观众端点：该端点的总数在文档中被描述为频道的“登录用户总数”，只统计已登录的观众，会在毫无提示的情况下少报观众。离线时，polyemesis 显示无数值，而不是零。",
-  "caps.trovo.broadcastLifecycle": "Trovo 没有直播资源：没有任何操作能创建、开始或结束直播，所以推流本身就是触发条件，是否在线只能观测得到。这一结论是通读整个 API 参考文档后得出的，而不是因为没找到某个页面。",
   "caps.vimeo.summary": "使用 Vimeo 登录后，polyemesis 会读取令牌属于哪个会员，并在你连接的那一刻检查你的账号能否访问 Vimeo 的直播 API。输入 URL 和推流密钥需从直播活动中粘贴：Vimeo 按活动分别发放，而创建活动仅限 Enterprise。",
   "caps.vimeo.readFirst": "请先阅读：“我们的直播 API 仅向 Vimeo Enterprise 客户提供”——这是 Vimeo 自己在直播 API 参考文档中的说法，于 2026-08-26 查阅。这是商业层面的限制，而非权限问题：任何权限范围、重新连接或应用设置都无法解除，并且适用于 Vimeo 公开的所有直播方法（创建活动、激活、结束，读取其 Ingest、M3U8 播放地址和缩略图）。登录本身对任何 Vimeo 套餐开放，polyemesis 会在你连接的那一刻询问直播 API“你的”账号能否访问，这样你在连接时就能知道，而不是在直播中途才发现。无论如何，向 Vimeo 推流都能正常工作——像以前一样，从活动的设置面板粘贴 RTMPS 地址和密钥即可。此外，Vimeo 正在弃用一次性直播活动并建议避免使用，所以请创建循环活动。",
   "caps.vimeo.sso": "针对 api.vimeo.com 的 OAuth 2.0 授权码流程，使用 public 和 private 权限范围。Vimeo 还可以在你连接任何东西之前验证客户端 ID 和密钥，因此输入错误会在凭据页面上被发现。Vimeo 没有 PKCE 的文档，因此不会发送——严格校验查询字符串的授权服务器会直接拒绝未知参数。",
@@ -3171,5 +3160,7 @@
   "automod.lastDecidedPrimary": "最近一次判定：主检查器",
   "automod.lastDecidedSecondary": "最近一次判定：备用检查器",
   "automod.keyPending": "已使用您输入的密钥通过测试。保存此地址后，它将成为此检查器的密钥。",
-  "automod.keyBoundNote": "已保存的密钥只会发送到为其指定的地址。更改地址后保存时会清除该密钥，除非您先用新地址的密钥进行测试。"
+  "automod.keyBoundNote": "已保存的密钥只会发送到为其指定的地址。更改地址后保存时会清除该密钥，除非您先用新地址的密钥进行测试。",
+  "dash.platformRetired.trovo": "Trovo 已于 2026 年 6 月 30 日停止服务",
+  "dash.platformRetiredCannotStart": "此目标已无法再启动。其设置会保留以供查看，你可以随时删除它。"
 }

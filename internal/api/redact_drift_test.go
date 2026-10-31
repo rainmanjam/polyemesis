@@ -111,6 +111,7 @@ var leafSensitivity = map[string]sensitivity{
 	// only explanation a flagged destination has, in the read-safe views that
 	// are exactly where somebody debugging one would look.
 	"destination.keyUnreadable":                      sPublic,
+	"destination.retired":                            sPublic,
 	"destination.kind":                               sPublic,
 	"destination.multitrack":                         sPublic,
 	"destination.name":                               sPublic,

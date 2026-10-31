@@ -2775,7 +2775,6 @@
   "addDest.presetNote.tiktok": "TikTok은 서버 URL과 키를 방송마다, LIVE 권한을 받은 계정에만 발급합니다. TikTok LIVE Studio나 LIVE Center에서 스트림을 만들고 두 항목을 모두 거기서 복사하세요.",
   "addDest.presetNote.x": "수동 키만 지원합니다. X의 API는 게시물, 사용자, 미디어, 게시물 파이어호스를 다루며, 문서의 “스트리밍”은 영상 인제스트가 아니라 게시물 스트리밍을 뜻합니다. 그래서 polyemesis가 인제스트를 가져올 수 있는 문서화된 엔드포인트가 없고, 계획도 없습니다. X 자체 프로듀서 도구에서 소스를 만들고 서버 URL과 키를 거기서 복사하세요.",
   "addDest.presetNote.linkedin": "LinkedIn은 인제스트 URL과 키를 이벤트마다 발급합니다. LinkedIn 자체 이벤트 생성 과정이나 페이지에 연결된 승인된 스트리밍 도구에서 발급됩니다. 두 항목 모두 이벤트에서 복사하세요.",
-  "addDest.presetNote.trovo": "2단계에서 Trovo 계정을 연결하면(먼저 설정에 플랫폼 앱 자격 증명이 있어야 합니다) polyemesis가 channel_details_self 범위로 스트림 키를 직접 가져옵니다. 어느 쪽이든 서버 URL은 직접 입력해야 합니다. Trovo의 인제스트 호스트 이름은 지역마다 다르고 API 어디에도 나오지 않으므로, Trovo 크리에이터 대시보드 → Stream에서 한 번 복사하세요. 이후 키를 새로 고쳐도 그 URL은 그대로 유지됩니다.",
   "addDest.presetNote.dlive": "DLive → Dashboard → Stream settings에서 서버 URL과 스트림 키를 복사하세요. 수동으로만 가능하며 앞으로도 그럴 가능성이 큽니다. dev.dlive.tv의 DLive 개발자 포털이 더 이상 연결되지 않아, 연동할 공개 자료가 없습니다.",
   "addDest.presetNote.rumble": "수동 키만 지원합니다. Rumble Studio는 스트림마다 인제스트 URL과 키를 발급합니다. 거기서 스트림을 설정하고 RTMP 세부 정보에서 두 항목을 모두 복사하세요. Rumble의 API 페이지(rumble.com/account/api)는 로그인해야 볼 수 있고 공개된 내용이 없어 연동을 만들 근거가 없습니다.",
   "addDest.presetNote.odysee": "Odysee는 채널의 라이브 스트림 설정에서 인제스트 URL과 키를 발급합니다. 둘 다 거기서 복사하세요.",
@@ -2906,16 +2905,6 @@
   "caps.kick.chatRead": "Kick은 채팅을 소켓이 아니라 웹훅으로 전달하므로, polyemesis에 외부에서 접근할 수 있는 공개 HTTPS URL이 필요합니다. 그것이 없으면 채팅 창은 조용하지만, 조용한 채팅처럼 보이도록 두지 않고 경고를 표시합니다.",
   "caps.kick.moderation": "메시지 삭제. moderation:chat_message:manage를 사용합니다. 차단과 타임아웃은 moderation:ban으로 동작합니다. YouTube와 Twitch는 타임아웃을 초 단위로 세지만 Kick은 \"분\" 단위로 세고 최대 7일로 제한합니다. polyemesis가 변환하므로 어디서나 같은 단위로 입력하면 됩니다.",
   "caps.kick.viewerStats": "라이브 상태와 시청자 수를 Kick의 livestreams 엔드포인트에서 가져옵니다.",
-  "caps.trovo.summary": "Trovo로 로그인하면 polyemesis가 스트림 키를 가져오고, 방송 시작 시 제목과 카테고리를 설정하며, 실시간 시청자 수를 읽습니다. 서버 URL만은 처음 한 번 직접 복사해 넣어야 합니다.",
-  "caps.trovo.readFirst": "Trovo는 개발자 포털에서 클라이언트 시크릿을 발급하지 않습니다. 문서에는 \"클라이언트 시크릿이 없다면 developer@trovo.live로 문의하세요\"라고 적혀 있습니다. Trovo는 PKCE를 문서화하지 않았기 때문에, 시크릿 없이는 인증 코드 흐름을 완료할 수 없습니다. 필요한 날보다 미리 요청하세요. 그 밖에는 아무 제한도 없습니다. 등록은 누구나 할 수 있고, 아래의 모든 기능은 공개된 레퍼런스에 나와 있습니다.",
-  "caps.trovo.sso": "client_secret을 사용하는 OAuth 2.0 인증 코드 흐름. Trovo는 PKCE를 문서화하지 않았으므로 polyemesis도 보내지 않습니다. 또한 시크릿은 포털이 아니라 developer@trovo.live에서 이메일로 받습니다.",
-  "caps.trovo.streamKey": "GET /openplatform/channel에서 channel_details_self 범위로 가져옵니다. 서버 URL은 \"가져올 수 없습니다\". Trovo는 Ingest 호스트 이름을 지역별로 발급하며 API 어디에도 공개하지 않습니다. 그래서 이 필드 하나는 크리에이터 대시보드에서 한 번 복사하며, 이후 키를 새로 고쳐도 그대로 유지됩니다. 이 연동이 생기기 전에 연결한 계정은 한 번 다시 연결해야 합니다.",
-  "caps.trovo.metadata": "제목과 카테고리. channel_update_self로 POST /openplatform/channels/update를 사용합니다. Trovo의 채널 업데이트는 설명을 받지 않고 태그도 없으므로, 조용히 버리는 대신 건너뜀으로 보고합니다.",
-  "caps.trovo.chatRead": "Trovo는 채팅을 폴링이나 웹훅이 아니라 웹소켓으로 전달합니다. 실제로 존재하고 문서화되어 있지만, 아직 여기에 연결되지 않았습니다.",
-  "caps.trovo.chatSend": "POST /openplatform/chat/send. chat_send_self와 send_to_my_channel을 사용합니다. 아직 여기에 연결되지 않았으며, 연결될 때까지 이 범위들은 일부러 요청하지 않습니다. 미리 요청하면 아무것도 쓰지 않는 권한이 동의 화면에 표시되기 때문입니다.",
-  "caps.trovo.moderation": "manage_messages로 POST /openplatform/channels/command를 사용해, 앞에 슬래시 없이 Trovo 고유의 채팅 명령(“ban xxx”, “mod @xxx”)을 실행합니다. 아직 여기에 연결되지 않았으며, 연결될 때까지 범위를 요청하지 않습니다.",
-  "caps.trovo.viewerStats": "라이브 상태와 시청자 수를 스트림 키를 가져오는 것과 같은 채널 조회에서 읽으므로, 추가 호출도 추가 범위도 필요 없습니다. Trovo의 전용 시청자 엔드포인트 대신 일부러 current_viewers를 읽습니다. 그 엔드포인트의 합계는 채널의 \"전체 로그인 사용자\"로 문서화되어 있어 로그인한 시청자만 세므로, 아무 표시 없이 시청자를 적게 보고하게 되기 때문입니다. 오프라인일 때 polyemesis는 0이 아니라 수치 없음으로 표시합니다.",
-  "caps.trovo.broadcastLifecycle": "Trovo에는 방송 리소스가 없습니다. 방송을 생성·시작·종료하는 것이 아무것도 없으므로 스트림 자체가 트리거이며, 라이브 여부는 관찰만 할 수 있습니다. 이는 페이지를 찾지 못해서가 아니라 API 레퍼런스 전체를 읽고 확인한 결과입니다.",
   "caps.vimeo.summary": "Vimeo로 로그인하면 polyemesis가 토큰이 어느 회원의 것인지 읽고, 연결하는 순간 계정이 Vimeo의 라이브 API에 접근할 수 있는지 확인합니다. 입력 URL과 스트림 키는 라이브 이벤트에서 붙여넣습니다. Vimeo는 이를 이벤트마다 발급하며, 이벤트 생성은 Enterprise 전용입니다.",
   "caps.vimeo.readFirst": "먼저 읽어 주세요. \"당사의 라이브 API는 Vimeo Enterprise 고객만 이용할 수 있습니다\" — 2026-08-26에 확인한 Vimeo 라이브 API 레퍼런스의 문구입니다. 이는 권한이 아니라 상업적 제한입니다. 어떤 범위나 재연결, 앱 설정으로도 풀리지 않으며, Vimeo가 공개한 모든 라이브 메서드(이벤트 생성, 활성화, 종료, Ingest·M3U8 재생·썸네일 조회)에 적용됩니다. 로그인 자체는 어떤 Vimeo 요금제로도 가능하며, polyemesis는 연결하는 순간 \"사용자의\" 계정이 라이브 API에 접근할 수 있는지 묻습니다. 그래서 방송 도중이 아니라 연결 시점에 알 수 있습니다. Vimeo로의 송출은 이와 관계없이 작동합니다. 이전처럼 이벤트 설정 패널에서 RTMPS URL과 키를 붙여넣으세요. 또한 Vimeo는 일회성 라이브 이벤트를 폐지할 예정이며 사용하지 말 것을 권장하므로, 반복 이벤트를 만드세요.",
   "caps.vimeo.sso": "api.vimeo.com에 대한 OAuth 2.0 인증 코드 흐름으로, public 및 private 범위를 사용합니다. Vimeo는 아무것도 연결하기 전에 클라이언트 ID와 시크릿을 검증할 수도 있으므로, 오타는 자격 증명 페이지에서 잡힙니다. Vimeo에는 PKCE가 문서화되어 있지 않아 보내지 않습니다. 쿼리 문자열을 엄격하게 검증하는 인증 서버는 알 수 없는 매개변수를 즉시 거부하기 때문입니다.",
@@ -3171,5 +3160,7 @@
   "automod.lastDecidedPrimary": "마지막 판정: 1차 검사기",
   "automod.lastDecidedSecondary": "마지막 판정: 예비 검사기",
   "automod.keyPending": "입력한 키로 통과했습니다. 이 주소를 저장하면 이 검사기의 키가 됩니다.",
-  "automod.keyBoundNote": "저장된 키는 해당 키를 입력한 주소로만 전송됩니다. 주소를 바꾸면 새 주소를 먼저 그 키로 테스트하지 않는 한 저장할 때 키가 지워집니다."
+  "automod.keyBoundNote": "저장된 키는 해당 키를 입력한 주소로만 전송됩니다. 주소를 바꾸면 새 주소를 먼저 그 키로 테스트하지 않는 한 저장할 때 키가 지워집니다.",
+  "dash.platformRetired.trovo": "Trovo는 2026년 6월 30일에 서비스를 종료했습니다",
+  "dash.platformRetiredCannotStart": "이 대상은 더 이상 시작할 수 없습니다. 설정은 확인할 수 있도록 보존되며, 언제든지 삭제할 수 있습니다."
 }

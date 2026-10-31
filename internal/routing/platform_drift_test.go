@@ -22,8 +22,8 @@ import (
 // THE OPT-OUT LIST IS THE POINT, not a weakening of the test. Rumble, Trovo and
 // Vimeo take the custom row deliberately, and internal/db says why at each
 // constant: Rumble "exists for CHAT and for nothing else", Vimeo "for SIGN-IN",
-// and Trovo can fetch a stream key but not the ingest URL beside it, so all
-// three are pasted by hand and behave as custom destinations do. Recording that
+// and Trovo is RETIRED -- it shut down on 30 June 2026, and its rows are kept
+// only so the operator can read and delete them, never run. Recording that
 // here turns three silent omissions into three stated decisions -- and makes a
 // FOURTH omission fail, which is the part that was missing.
 //
@@ -31,7 +31,7 @@ import (
 // the dependency runs the other way (policy.go:24).
 var platformsDeliberatelyCustom = map[string]string{
 	"rumble": "chat only; its ingest URL and key are pasted by hand and the destination preset does not carry it",
-	"trovo":  "the key is fetchable, the ingest hostname is not; the preset carries an empty URL",
+	"trovo":  "retired: Trovo shut down on 30 June 2026, so its destinations are kept switched off and never run",
 	"vimeo":  "sign-in only; the live API is Enterprise-gated, so ingest is pasted by hand",
 }
 

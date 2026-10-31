@@ -252,7 +252,9 @@ export type DestKind = "rtmp" | "srt" | "file";
  *  its destination preset deliberately does not carry it, so no destination row
  *  ever arrives with it. "vimeo" IS here because its preset does carry it —
  *  Vimeo signs in, and a saved Vimeo destination is stamped with the platform
- *  even though its key is still pasted by hand. */
+ *  even though its key is still pasted by hand. "trovo" is RETIRED (Trovo shut
+ *  down on 30 June 2026): nothing offers it any more, and it stays here only
+ *  because rows saved before the shutdown still carry it. */
 export type Platform =
   | "custom"
   | "youtube"
@@ -320,6 +322,12 @@ export interface Destination {
    *  the key in again and switch it back on — and it is also carried on the
    *  status card's `warnings`, which is where the dashboard shows it. */
   keyUnreadable?: string;
+  /** Why this destination can no longer run because its platform shut down
+   *  ("Trovo shut down on 30 June 2026"). Absent for every live platform.
+   *  When present `enabled` always reads false and the server refuses a start.
+   *  The card shows its own translated sentence, keyed on `platform`, so this
+   *  English text is for API clients. */
+  retired?: string;
   /** The operator's intent: publish a redundant feed for this destination.
    *  Sits beside the endpoint it gates rather than under `facebook`, because
    *  neither the engine nor the endpoint is platform-specific. Intent without
@@ -2414,8 +2422,8 @@ export interface WsEvent {
  *  destination picker.
  *
  *  IT IS NOW WIDER THAN THE SET OF PLATFORMS WITH A CHAT ADAPTER, and the
- *  alias is what makes that possible: "trovo" is a destination platform whose
- *  chat is documented (a websocket) and unbuilt, so it is nameable here and no
+ *  alias is what makes that possible: "trovo" is a retired destination
+ *  platform (Trovo shut down on 30 June 2026), so it is nameable here and no
  *  message will ever arrive carrying it. Read this as the union a message
  *  COULD be tagged with, not as a list of what works — the capability matrix
  *  in lib/capabilities.ts is the answer to that, per platform and per column. */
@@ -2423,8 +2431,9 @@ export interface WsEvent {
  *  and destinations gain platforms at different times, and the two newest
  *  platforms came apart in OPPOSITE directions.
  *
- *  "trovo" IS here: its chat is documented (a websocket) and unbuilt, so it is
- *  nameable and no message will ever arrive carrying it yet. "vimeo" is NOT:
+ *  "trovo" IS here: it is a retired platform (Trovo shut down on 30 June
+ *  2026) that old destination rows still name, and no message will ever
+ *  arrive carrying it. "vimeo" is NOT:
  *  it has no chat adapter in internal/chat at all, so no message can ever carry
  *  it and the accent map has nothing to say about it. Vimeo's own live-event
  *  chat, if it exists, sits behind the same Enterprise gate as the rest of its

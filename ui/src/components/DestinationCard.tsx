@@ -54,10 +54,24 @@ const PLATFORM_LABEL: Record<string, string> = {
   // fallback firing where a label belongs, exactly the failure the i18n drift
   // guard exists to catch one layer up.
   facebook: "Facebook",
+  // Kept although Trovo is retired: a row saved before the shutdown still
+  // carries the platform, and its card should still name it properly.
   trovo: "Trovo",
   vimeo: "Vimeo",
   custom: "Custom",
 };
+
+/** Platforms that have shut down, with the sentence the card shows for them.
+ *
+ *  Keyed on `platform` and translated here rather than rendering the server's
+ *  `retired` text, because that text is English for API clients. A row on one
+ *  of these reads `enabled: false` on every fetch and the server refuses a
+ *  start, so Start is greyed out with the reason rather than offered and
+ *  answered with an error. The row is kept, not hidden: its settings are the
+ *  operator's to read, and Delete is still in the menu. */
+const RETIRED_PLATFORM = {
+  trovo: "dash.platformRetired.trovo",
+} as const;
 
 /** One destination, as shown on the dashboard.
  *
@@ -145,6 +159,10 @@ export function DestinationCard({
   const warnings = dest.warnings ?? [];
   const reason = dest.enabled ? dest.reason : undefined;
   const platformLabel = PLATFORM_LABEL[dest.platform] ?? dest.platform;
+  const retiredKey =
+    dest.platform in RETIRED_PLATFORM
+      ? RETIRED_PLATFORM[dest.platform as keyof typeof RETIRED_PLATFORM]
+      : null;
 
   /* --- Facebook broadcast lifecycle -------------------------------------
    *
@@ -261,7 +279,7 @@ export function DestinationCard({
                     <RefreshCw /> {t("common.restart")}
                   </DropdownMenuItem>
                 )}
-                {dest.platform !== "custom" && dest.platform !== "kick" && (
+                {dest.platform !== "custom" && dest.platform !== "kick" && !retiredKey && (
                   <DropdownMenuItem onSelect={onRefreshKey}>
                     <RefreshCw /> {t("i18nSweep.refreshStreamKey")}
                   </DropdownMenuItem>
@@ -472,6 +490,19 @@ export function DestinationCard({
             <StatusReason reason={dest.stopWarning} step={t("foundation.status.step.stop")} asOf={null} />
           </div>
         )}
+        {retiredKey && (
+          <div
+            className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
+            role="status"
+            data-testid="dest-retired"
+          >
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <div>
+              <div className="font-medium">{t(retiredKey)}</div>
+              <div className="text-xs">{t("dash.platformRetiredCannotStart")}</div>
+            </div>
+          </div>
+        )}
         {warnings.map((w) => (
           <div key={w} className="flex items-start gap-1.5 text-[10px] text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -640,11 +671,13 @@ export function DestinationCard({
               size="sm"
               className="flex-1"
               onClick={onStart}
-              disabled={busy || unsettled}
+              disabled={busy || unsettled || !!retiredKey}
               title={
-                unsettled
-                  ? t("i18nSweep.justChangedToStart")
-                  : t("i18nSweep.startNamed", { name: dest.name })
+                retiredKey
+                  ? t(retiredKey)
+                  : unsettled
+                    ? t("i18nSweep.justChangedToStart")
+                    : t("i18nSweep.startNamed", { name: dest.name })
               }
             >
               <Play /> {t("common.start")}

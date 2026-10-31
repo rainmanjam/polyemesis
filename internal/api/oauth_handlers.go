@@ -765,10 +765,10 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	// destroy the half the operator supplied.
 	//
 	// This was an unconditional assignment, which was right while every
-	// provider returned both fields. Trovo returns only the key: it publishes
-	// the stream key on its channel resource and publishes the ingest hostname
-	// nowhere at all -- the host is regional and lives only in the creator
-	// dashboard, so the operator copies it across once. Blanking it on every
+	// provider returned both fields. Trovo (retired: it shut down on 30 June
+	// 2026) returned only the key -- its ingest host was regional and lived
+	// only in the creator dashboard, so the operator copied it across once --
+	// and a provider of that shape may come again. Blanking it on every
 	// key refresh would take a working destination and make it unsavable,
 	// reported as "an RTMP URL is required" from a button labelled Refresh
 	// stream key.
