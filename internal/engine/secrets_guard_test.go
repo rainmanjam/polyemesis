@@ -27,8 +27,9 @@ var secretsExempt = map[string]string{
 	// operator input reaches it.
 	`"silence" silenceSubName`: "relay URLs only; the slate is generated, not fetched",
 
-	// relayFeedArgs / SlateArgs / playlistFeedArgs: a loopback relay URL, a
-	// timestamp offset and, for the playlist tier, a concat list PATH that the
+	// relayFeedArgs / conformedFeedArgs / SlateArgs / playlistFeedArgs: a
+	// loopback relay URL, a timestamp offset, the probed audio format the
+	// standby is conformed to and, for the playlist tier, a concat list PATH that the
 	// server wrote itself. The pull URL is consumed by the ingest child, which
 	// is a different process and does declare its secrets.
 	`"source" "source:" + string(kind)`: "a loopback relay URL and a PTS offset; the " +

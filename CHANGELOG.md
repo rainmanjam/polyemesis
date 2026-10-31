@@ -515,6 +515,18 @@ its first tagged release.
   now stay in sync and keep their connection. A destination that mixes several
   tracks still gets the silence at such a switch. See
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Multi-track destinations stay in sync through a format-changing failover
+  too.** A destination that mixes several tracks no longer falls behind its
+  video when the slate or a backup encoder sends audio at another sample rate
+  or channel count. The slate is now built at the primary's measured sample
+  rate and channel count, not always 48 kHz stereo. A backup or playlist feed
+  now has its audio re-encoded to the primary's format, track by track, as it
+  goes on air; its video is still copied. The destination then decodes one
+  audio format across the switch and never rebuilds its mix. Measured on a
+  two-track mix: 39.9 s of audio hidden behind its timestamps before, none
+  after. A feed starts this conversion only once the primary has been
+  measured. The primary itself is still copied untouched. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - **Show log works on timeline rows about another programme.** Every
   programme's ingest is named `ingest`, so these rows had no link. The link now

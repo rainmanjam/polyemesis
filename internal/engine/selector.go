@@ -90,7 +90,15 @@ import (
 // copying destination will pass through as a visible resolution change. Both of
 // those are the deliberate choice: degrade visibly rather than corrupt quietly.
 //
-// The slate publishes ONE stereo track. A destination whose routing profile
+// The AUDIO has to match more exactly than the video, and can. A destination
+// decodes audio, and when the decoded rate or channel count changes FFmpeg
+// rebuilds its filter graph mid-run -- which puts the stream's whole runtime in
+// front of a multi-track mix (routing's trackAlign). So the slate's one track is
+// built at the primary's measured track 0, and a backup or playlist has its
+// audio re-encoded to the primary's format on its copy hop: see
+// conformedFeedArgs. The primary is never touched.
+//
+// The slate publishes ONE track. A destination whose routing profile
 // selects track 1 or above finds nothing on those inputs while the slate is up
 // and stops producing output — no worse than the departed ingest, which
 // delivered nothing on every track, but no better either. Closing that gap
@@ -1730,7 +1738,17 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 			return fail(serr)
 		}
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
-		args = relayFeedArgs(url, out, offset)
+		if kind == sourcePrimary {
+			args = relayFeedArgs(url, out, offset)
+		} else {
+			// The standby sources are conformed to the primary's audio
+			// format; the primary IS that format and stays a pure copy. See
+			// conformedFeedArgs.
+			e.mu.RLock()
+			primary := e.audioToConformTo()
+			e.mu.RUnlock()
+			args = conformedFeedArgs(url, out, offset, primary)
+		}
 	default:
 		// A fifth kind lands here, and lands here VISIBLY: nothing is started
 		// and nothing is recorded as active, because a feed that cannot be built
@@ -2013,6 +2031,72 @@ func relayFeedArgs(inURL, outURL string, offsetSeconds float64) []string {
 	}
 }
 
+// conformAudioKbps is the bitrate a conformed track is re-encoded at when the
+// primary's probe did not report one it can be held to.
+const conformAudioKbps = 128
+
+// conformedFeedArgs is the copy hop for a STANDBY source -- the backup or the
+// playlist -- with its audio re-encoded to the primary's measured format.
+//
+// WHY A STANDBY MAY NOT KEEP ITS OWN AUDIO FORMAT. A destination reads one relay
+// for its whole life, and when the audio on it starts decoding at another
+// sample rate or channel count, FFmpeg rebuilds the destination's filter graph
+// mid-run. A one-track graph survives that since #931. A multi-track one cannot:
+// each leg ends in routing's trackAlign (`aresample=async=1:first_pts=0`, the
+// only common origin amix has), a rebuilt leg meets its first frame at the
+// stream's runtime T and pads T seconds of silence in front of it, and the
+// audio goes T seconds behind the video until the destination restarts. No
+// filter inside the graph can stop the rebuild, because the rebuild is decided
+// at the graph's INPUT. So the format is fixed here, before the relay: track N
+// of the standby is encoded at track N of the primary's rate and channel count,
+// and across the switch the destination decodes one format throughout.
+//
+// The video is still copied, so the selector is still not a place video is
+// degraded. The audio costs one AAC generation, and only while a standby is
+// on air; a destination re-encodes it again anyway unless it copies audio.
+// The primary never comes through here -- it IS the format, and stays a pure
+// `-c copy` -- and with no measured primary (nil) this is relayFeedArgs
+// exactly: there is nothing to match, and guessing would be worse than the
+// copy.
+//
+// A standby track beyond the primary's count stays copied; no compiled graph
+// maps it. A primary track the probe gave no rate or channel count for is left
+// alone rather than encoded at a guess.
+//
+// LIMIT, stated rather than hidden: AAC is what this produces. The rebuild is
+// triggered by the decoded sample format, rate and layout, not the codec name,
+// and AAC decodes to planar float, as most lossy codecs do -- but a primary
+// whose decoder emits something else (PCM, say) still sees a format change.
+// tests: failover_format_conform_test.go.
+func conformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []ffmpeg.AudioStream) []string {
+	args := relayFeedArgs(inURL, outURL, offsetSeconds)
+	var conform []string
+	for _, a := range primary {
+		if a.Index < 0 || a.SampleRate <= 0 || a.Channels <= 0 {
+			continue
+		}
+		kbps := a.Bitrate / 1000
+		if kbps < 32 || kbps > 512 {
+			kbps = conformAudioKbps
+		}
+		n := strconv.Itoa(a.Index)
+		conform = append(conform,
+			"-c:a:"+n, "aac",
+			"-ar:a:"+n, strconv.Itoa(a.SampleRate),
+			"-ac:a:"+n, strconv.Itoa(a.Channels),
+			"-b:a:"+n, strconv.Itoa(kbps)+"k",
+		)
+	}
+	if len(conform) == 0 {
+		return args
+	}
+	// Straight after the blanket `-c copy`: a per-stream codec has to come
+	// after it to override it, and every flag here has to come before the
+	// output target to attach to it.
+	at := slices.Index(args, "copy") + 1
+	return slices.Insert(args, at, conform...)
+}
+
 // slateSpec builds the standby source, and reports why a configured encoder was
 // not used when it was not.
 func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.SlateSpec, string) {
@@ -2020,6 +2104,7 @@ func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.Sl
 
 	e.mu.RLock()
 	v := e.videoInfo
+	audio := e.audioToConformTo()
 	e.mu.RUnlock()
 
 	spec := ffmpeg.SlateSpec{
@@ -2028,6 +2113,15 @@ func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.Sl
 		VideoKbps:              sl.VideoKbps,
 		Preset:                 sl.Preset,
 		TimestampOffsetSeconds: offset,
+	}
+	// Audio from the probe too, and for a sharper reason than the geometry: a
+	// slate at its default 48 kHz stereo under a 44.1 kHz or mono primary makes
+	// every destination rebuild its filter graph at the switch, and a
+	// multi-track one then falls the stream's runtime behind its video. See
+	// conformedFeedArgs. Track 0, because the slate publishes one track and
+	// that is the track it stands in for. Unmeasured, SlateArgs' default stands.
+	if len(audio) > 0 && audio[0].Index == 0 {
+		spec.SampleRate, spec.AudioChannels = audio[0].SampleRate, audio[0].Channels
 	}
 	// Geometry from the probe, never from a form: matching the departed ingest
 	// is what gives a `-c:v copy` destination a chance of riding the change, and

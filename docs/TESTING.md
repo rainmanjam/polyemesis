@@ -455,8 +455,10 @@ a 44.1 kHz mono backup (`DRIFT_MODE=backup`), or the 48 kHz stereo slate under a
 measures what the sink received from one destination that rode both switches
 and one that the engine restarted. Each destination must have no audio hidden
 behind its timestamps, must end within 100 ms of its video, and must have no
-runtime-length silence. `POLYEMESIS_IMAGE` tests an existing image instead of
-building this checkout.
+runtime-length silence. `DRIFT_TRACKS=2` makes it the multi-track case: the
+primary publishes two tracks over E-RTMP, the backup still one, and both
+destinations mix tracks 0 and 1. `POLYEMESIS_IMAGE` tests an existing image
+instead of building this checkout.
 
 The *other* half of that question — can a destination SEND two audio tracks at
 all — is measured in-process instead, by
