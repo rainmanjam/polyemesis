@@ -116,6 +116,8 @@ describe("scheduleBlock: destinations that have not arrived", () => {
       now: NOW,
     });
     expect(b.kind).toBe("name");
+    // And says so in words, like every other block (the kit's DisabledReason).
+    expect(b.kind === "name" && b.reason).toBe("auto.blockName");
   });
 });
 

@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Waiting for the destination list. Tick All destinations, or wait for the list to pick from it.",
   "auto.blockRunAtPast": "That time has already passed, so this would never fire. Choose one in the future.",
   "auto.blockRunAtUnset": "Choose when this fires. A one-shot with no time saves happily and can then never run.",
+  "auto.blockName": "Give the schedule a name.",
   "auto.broadcastFault": "Broadcast could not be started or ended",
   "auto.chosenWeekdays": "Chosen weekdays",
   "auto.coalesced": "Merged",

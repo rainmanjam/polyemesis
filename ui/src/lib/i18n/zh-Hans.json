@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "正在等待推流目标列表。请勾选“所有推流目标”，或等列表加载后再选择。",
   "auto.blockRunAtPast": "该时间已经过去，因此永远不会触发。请选择将来的时间。",
   "auto.blockRunAtUnset": "请选择触发时间。没有时间的一次性计划可以保存，但之后永远不会运行。",
+  "auto.blockName": "请为此计划命名。",
   "auto.broadcastFault": "无法启动或结束直播",
   "auto.chosenWeekdays": "选定的星期",
   "auto.coalesced": "已合并",

@@ -115,6 +115,17 @@ describe("A54: every destination is a choice, and naming nothing is refused", ()
     expect((await rowOf("Broken row")).textContent).toContain(en("auto.targetNoDestinations"));
   });
 
+  it("says why Save is greyed when the name is empty, linked to the button", async () => {
+    draw("schedules");
+    fireEvent.click(within(await rowOf("Night stop")).getByRole("button", { name: en("auto.edit") }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(en("auto.name")), { target: { value: "" } });
+    const save = within(dialog).getByRole("button", { name: en("auto.saveSchedule") }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    const reason = document.getElementById(save.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toBe(en("auto.blockName"));
+  });
+
   it("refuses to save a stop with nothing picked, says why, and saves it once All destinations is ticked", async () => {
     draw("schedules");
     fireEvent.click(within(await rowOf("Night stop")).getByRole("button", { name: en("auto.edit") }));

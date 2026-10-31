@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Hedef listesi bekleniyor. Tüm hedefler'i işaretleyin ya da listeden seçmek için bekleyin.",
   "auto.blockRunAtPast": "O saat çoktan geçti, bu yüzden bu asla çalışmaz. Gelecekte bir saat seçin.",
   "auto.blockRunAtUnset": "Bunun ne zaman çalışacağını seçin. Saati olmayan tek seferlik bir zamanlama sorunsuz kaydedilir ve sonra asla çalışamaz.",
+  "auto.blockName": "Zamanlamaya bir ad verin.",
   "auto.broadcastFault": "Yayın başlatılamadı veya sonlandırılamadı",
   "auto.chosenWeekdays": "Seçilen hafta günleri",
   "auto.coalesced": "Birleştirilmiş",

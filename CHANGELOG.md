@@ -414,6 +414,31 @@ its first tagged release.
 
 ### Changed
 
+- **One status vocabulary across the console (app-council A91).** "Not
+  running" had four spellings side by side: the on-air counts said "stopped",
+  the cards those destinations were said OFF, the ingest chip said "Offline"
+  and the Pipeline card said "idle". There are now two words: **Off** for
+  something you switched off, and **Stopped** for something that is on and not
+  running. The on-air counts read "live · stopped · off", matching the cards.
+  Presentation only: no API, MQTT, webhook, SSE or Stream Deck value changed.
+- **Long explanations are one line, with the rest under "More about this"
+  (app-council A84).** The mux-queue, multitrack and give-up notes in the
+  destination dialog, the slate encoder, silence and GPU notes in Settings, and
+  the expert-arguments note on Monitoring now show one sentence; the full
+  paragraph is one click away.
+- **Settings saves say "Saved" beside the button (app-council A95).** Ingest,
+  listener ports, the Pipeline tab and platform credentials show the same save
+  status as Playout, Clips and Recordings instead of a success toast; a refused
+  save says "Not saved" there and still toasts the reason. Recordings' switches
+  are confirmed by the card's one status line.
+- **Settings Overview: "Ready to stream" agrees with the checklist.** It is shown
+  only once every step before Go live is done, so it no longer sits above
+  "2 of 5 done".
+- **Empty states carry their next step.** A programme lane with no
+  destinations offers Add destination on that programme; Chat with no account
+  connected offers Open platform credentials. An empty schedule name says why
+  Save is greyed.
+
 - **Settings is reorganised around tasks (settings council).** A new
   **Overview** is the landing page on an install with no source: it shows
   whether you are ready to stream, the same five-step setup checklist as the
@@ -684,6 +709,18 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **Phone Dashboard cards no longer run off the screen.** At 390px with a
+  source, the Ingest, Chat and Pipeline cards were 546px wide in a 356px
+  column; the top-row grid now has a shrinkable single column below the
+  desktop breakpoint. The header's on-air chip stays on one line.
+- **Settings Overview tiles no longer show a stale "Reading…" line** after two
+  reads in one tile settle.
+- **A slow credential check can no longer mark a newer pair as verified.** The
+  stored verdict is keyed to the client ID and secret that were checked; a
+  verdict for a pair replaced while it was checked is dropped.
+- **Clips: the Window stat shows "—", not "—s",** when the buffer has nothing
+  measured.
 
 - **A failed refresh no longer hides the timeline.** The incidents already on
   screen stay, with a line saying how old the list is. A failed destination list

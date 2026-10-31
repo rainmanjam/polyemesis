@@ -48,7 +48,7 @@ export interface ScheduleFormFacts {
 
 export type ScheduleBlock =
   | { kind: "ok" }
-  | { kind: "name" }
+  | { kind: "name"; reason: TranslationKey }
   | { kind: "destinationsUnknown"; reason: TranslationKey }
   | { kind: "destinationsNone"; reason: TranslationKey }
   | { kind: "runAtUnset"; reason: TranslationKey }
@@ -76,7 +76,9 @@ export function scheduleBlock(
   form: ScheduleFormFacts,
   opts: { destinationsKnown: boolean; editing: boolean; now: number },
 ): ScheduleBlock {
-  if (!form.name.trim()) return { kind: "name" };
+  // Said in words like every other block: Create used to grey out over an
+  // empty name with nothing beside it to say why.
+  if (!form.name.trim()) return { kind: "name", reason: "auto.blockName" };
 
   if (form.kind === "once") {
     if (runAtUnset(form.runAt)) {

@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Esperando la lista de destinos. Marca Todos los destinos o espera a la lista para elegir de ella.",
   "auto.blockRunAtPast": "Esa hora ya pasó, así que esto nunca se dispararía. Elija una futura.",
   "auto.blockRunAtUnset": "Elija cuándo se dispara. Una programación única sin hora se guarda sin problema y luego nunca puede ejecutarse.",
+  "auto.blockName": "Ponle un nombre a la programación.",
   "auto.broadcastFault": "No se pudo iniciar o finalizar la retransmisión",
   "auto.chosenWeekdays": "Días de la semana elegidos",
   "auto.coalesced": "Agrupadas",

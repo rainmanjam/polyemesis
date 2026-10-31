@@ -963,6 +963,7 @@ export function ChatEmpty({
   error,
   statuses,
   hiddenMessages = 0,
+  onOpenCredentials,
 }: {
   loading: boolean;
   configured: boolean;
@@ -980,6 +981,10 @@ export function ChatEmpty({
    *  Optional and zero by default: a caller that has no filter cannot be made
    *  to think about one. */
   hiddenMessages?: number;
+  /** Where "no account connected" sends the operator: the kit's primary
+   *  action on that empty state. Optional, because the Dashboard's chat card
+   *  already sits beside its own connect prompt. */
+  onOpenCredentials?: () => void;
 }) {
   const t = useT();
   // Loading is not empty: it is a wait, so it keeps the spinner and no title.
@@ -1020,9 +1025,15 @@ export function ChatEmpty({
     body = t("chatpage.emptyWaiting");
   }
 
+  // The one empty state with a next step on another page gets it as the
+  // kit's primary action, not only as a link in the side note.
+  const action =
+    title === "chatpage.emptyNoAccountTitle" && onOpenCredentials
+      ? { label: t("chatpage.openCredentials"), onClick: onOpenCredentials }
+      : undefined;
   return (
     <div className="flex h-full items-center justify-center p-3">
-      <EmptyState icon={MessagesSquare} title={t(title)} body={body} />
+      <EmptyState icon={MessagesSquare} title={t(title)} body={body} action={action} />
     </div>
   );
 }

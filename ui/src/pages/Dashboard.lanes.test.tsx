@@ -12,8 +12,16 @@
 // carrying destinations on both programmes.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+
+// The dialog stands in as the props it was opened with: which programme a new
+// destination starts on is the claim, and the real dialog's own fetches are
+// not this file's business.
+vi.mock("@/components/DestinationDialog", () => ({
+  DestinationDialog: (p: { open: boolean; initialSourceId?: string }) =>
+    p.open ? <div role="dialog" data-initial-source={p.initialSourceId ?? ""} /> : null,
+}));
 
 import { Dashboard } from "./Dashboard";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
@@ -134,6 +142,20 @@ describe("Dashboard: empty lists use the kit's EmptyState (app-council A83)", ()
     const title = await screen.findByText(translate("en", "dash.destNoneHere"));
     expect(title.className).toContain("font-semibold");
     expect(title.closest(".border-dashed")).not.toBeNull();
+  });
+
+  // The empty lane carries the kit's primary action, and it adds on THAT
+  // lane's programme: the round-2 review found "No destinations on this
+  // programme yet." on Studio B with no way to add one from there.
+  it("gives an empty lane an Add destination action for that lane's programme", async () => {
+    draw({ destinations: [dest(1, 1, true)] } as Partial<Status>);
+    const add = await screen.findByRole("button", {
+      name: `${translate("en", "firstRun.addDestination")}: Studio B`,
+    });
+    fireEvent.click(add);
+    const dialog = await screen.findByRole("dialog");
+    // Studio B is source 2 in this harness.
+    expect(dialog.getAttribute("data-initial-source")).toBe("2");
   });
 
   it("draws an install with no destinations as an EmptyState whose action opens Add destination", async () => {

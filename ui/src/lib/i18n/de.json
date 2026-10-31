@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Warte auf die Zielliste. Haken Sie Alle Ziele an oder warten Sie, bis Sie aus der Liste wählen können.",
   "auto.blockRunAtPast": "Dieser Zeitpunkt liegt bereits in der Vergangenheit, dies würde also nie ausgelöst. Wählen Sie einen künftigen.",
   "auto.blockRunAtUnset": "Wählen Sie, wann dies ausgelöst wird. Ein einmaliger Zeitplan ohne Zeit lässt sich speichern, kann danach aber nie laufen.",
+  "auto.blockName": "Geben Sie dem Zeitplan einen Namen.",
   "auto.broadcastFault": "Übertragung konnte nicht gestartet oder beendet werden",
   "auto.chosenWeekdays": "Ausgewählte Wochentage",
   "auto.coalesced": "Zusammengefasst",

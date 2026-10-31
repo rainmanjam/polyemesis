@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Czekam na listę celów. Zaznacz Wszystkie cele albo poczekaj na listę, aby z niej wybrać.",
   "auto.blockRunAtPast": "Ta godzina już minęła, więc to nigdy nie zadziała. Wybierz przyszłą.",
   "auto.blockRunAtUnset": "Wybierz moment uruchomienia. Jednorazowy harmonogram bez godziny zapisze się bez problemu i już nigdy nie zadziała.",
+  "auto.blockName": "Nadaj harmonogramowi nazwę.",
   "auto.broadcastFault": "Nie udało się rozpocząć ani zakończyć transmisji",
   "auto.chosenWeekdays": "Wybrane dni tygodnia",
   "auto.coalesced": "Połączone",

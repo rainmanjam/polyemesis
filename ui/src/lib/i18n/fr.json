@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "En attente de la liste des destinations. Cochez Toutes les destinations, ou attendez la liste pour y choisir.",
   "auto.blockRunAtPast": "Cette heure est déjà passée : cela ne se déclencherait jamais. Choisissez-en une dans le futur.",
   "auto.blockRunAtUnset": "Choisissez le moment du déclenchement. Une exécution unique sans heure s’enregistre sans broncher et ne pourra jamais se déclencher.",
+  "auto.blockName": "Donnez un nom à la programmation.",
   "auto.broadcastFault": "La diffusion n'a pas pu être démarrée ou arrêtée",
   "auto.chosenWeekdays": "Jours de la semaine choisis",
   "auto.coalesced": "Regroupées",

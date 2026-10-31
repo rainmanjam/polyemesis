@@ -416,7 +416,8 @@ export function ClipsPage() {
             <CardHeader>
               <CardTitle>{t("clips.buffer")}</CardTitle>
             </CardHeader>
-            {/* Every cell follows the Window cell's `stats ? … : "—"`.
+            {/* Every cell follows `stats ? … : "—"`, and the dash carries no
+                unit: "—s" read as a measurement of nothing seconds.
                 Five of the six used to print a zero through `?? 0` with no
                 buffer to have measured it, and two of those zeros are not even
                 possible readings: the Ceiling is a configured constant that is
@@ -430,7 +431,7 @@ export function ClipsPage() {
                 value={stats ? `${held.toFixed(0)}s` : "—"}
                 tone={held > 0 ? "live" : "muted"}
               />
-              <Stat labelKey="clips.window" value={`${stats?.windowSeconds.toFixed(0) ?? "—"}s`} />
+              <Stat labelKey="clips.window" value={stats ? `${stats.windowSeconds.toFixed(0)}s` : "—"} />
               <Stat
                 labelKey="clips.inMemory"
                 value={stats ? bytes(stats.bytes) : "—"}

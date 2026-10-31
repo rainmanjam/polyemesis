@@ -1209,6 +1209,9 @@ export function Dashboard() {
 
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  // The programme a NEW destination starts on, when the add came from a lane
+  // that has none yet; undefined for every other way in. Cleared on close.
+  const [addFor, setAddFor] = useState<string | undefined>(undefined);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [busyId, setBusyId] = useState<DestinationId | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -2121,7 +2124,22 @@ export function Dashboard() {
                     </LazyBoundary>
                     <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
                       {lane.destinations.length === 0 ? (
-                        <EmptyState title={t("dash.destNoneHere")} className="xl:col-span-2" />
+                        // The kit's empty state with its primary action: add a
+                        // destination on THIS lane's programme (DestinationDialog
+                        // initialSourceId, A30), not on whichever is selected.
+                        <EmptyState
+                          title={t("dash.destNoneHere")}
+                          className="xl:col-span-2"
+                          action={{
+                            label: t("firstRun.addDestination"),
+                            ariaLabel: `${t("firstRun.addDestination")}: ${lane.name}`,
+                            onClick: () => {
+                              setEditing(null);
+                              setAddFor(String(lane.sourceId));
+                              setDialogOpen(true);
+                            },
+                          }}
+                        />
                       ) : (
                         lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
                       )}
@@ -2152,9 +2170,13 @@ export function Dashboard() {
 
       <DestinationDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setAddFor(undefined);
+        }}
         destination={editing}
         onSaved={() => setRefreshKey((k) => k + 1)}
+        initialSourceId={addFor}
       />
       <ConfirmDestructive
         open={confirmDelete.open}

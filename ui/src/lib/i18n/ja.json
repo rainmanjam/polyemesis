@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "配信先の一覧を待っています。「すべての配信先」にチェックを入れるか、一覧が届いてから選んでください。",
   "auto.blockRunAtPast": "その時刻はすでに過ぎているため、けっして実行されません。未来の時刻を選んでください。",
   "auto.blockRunAtUnset": "実行時刻を選んでください。時刻のない単発スケジュールは保存はできますが、その後けっして実行されません。",
+  "auto.blockName": "スケジュールに名前を付けてください。",
   "auto.broadcastFault": "配信を開始または終了できませんでした",
   "auto.chosenWeekdays": "選択した曜日",
   "auto.coalesced": "まとめ済み",

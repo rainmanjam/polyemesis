@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Wachten op de lijst met bestemmingen. Vink Alle bestemmingen aan, of wacht tot je uit de lijst kunt kiezen.",
   "auto.blockRunAtPast": "Dat tijdstip is al voorbij, dus dit zou nooit afgaan. Kies er een in de toekomst.",
   "auto.blockRunAtUnset": "Kies wanneer dit afgaat. Een eenmalige planning zonder tijd wordt gewoon opgeslagen en kan daarna nooit lopen.",
+  "auto.blockName": "Geef de planning een naam.",
   "auto.broadcastFault": "Uitzending kon niet worden gestart of beëindigd",
   "auto.chosenWeekdays": "Gekozen weekdagen",
   "auto.coalesced": "Samengevoegd",

@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "대상 목록을 기다리는 중입니다. 모든 대상을 선택하거나, 목록이 도착한 뒤 고르세요.",
   "auto.blockRunAtPast": "그 시각은 이미 지났으므로 절대 실행되지 않습니다. 미래의 시각을 고르세요.",
   "auto.blockRunAtUnset": "실행 시각을 고르세요. 시각이 없는 일회성 일정은 저장은 되지만 이후 절대 실행되지 않습니다.",
+  "auto.blockName": "일정 이름을 입력하세요.",
   "auto.broadcastFault": "방송을 시작하거나 종료할 수 없습니다",
   "auto.chosenWeekdays": "선택한 요일",
   "auto.coalesced": "병합됨",

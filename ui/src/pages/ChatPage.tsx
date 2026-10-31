@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/AppLayout";
@@ -39,6 +39,7 @@ import type { ChatMessage, ChatPlatform } from "@/lib/types";
  *  shared with the compact dashboard pane. This file is layout. */
 export function ChatPage() {
   const t = useT();
+  const navigate = useNavigate();
   const {
     messages,
     statuses,
@@ -260,6 +261,7 @@ export function ChatPage() {
                     configured={configured}
                     error={error}
                     statuses={statuses}
+                    onOpenCredentials={() => void navigate("/settings?tab=platforms")}
                   />
                 )
               }

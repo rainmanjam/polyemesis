@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { DisabledReason } from "@/components/DisabledReason";
@@ -1204,6 +1204,7 @@ function ScheduleDialog({
   // that none selected means every destination.
   const destinationsKnown = status !== null;
   const blocked = scheduleBlock(form, { destinationsKnown, editing, now: Date.now() });
+  const nameReasonId = useId();
 
   const toggleDay = (d: number) =>
     setForm((f) => {
@@ -1443,13 +1444,24 @@ function ScheduleDialog({
           {/* The reason BESIDE the button, not in a title attribute on it:
               button.tsx sets `disabled:pointer-events-none`, so a title on a
               disabled button is unreachable by mouse and by keyboard. */}
+          {/* An empty name is not a problem to warn about, only the next
+              thing to do, so it is the kit's quiet DisabledReason (linked to
+              the button) rather than the amber line the other blocks use. */}
+          {blocked.kind === "name" && (
+            <DisabledReason id={nameReasonId} className="mr-auto" reason={t(blocked.reason)} />
+          )}
           {blocked.kind !== "ok" && blocked.kind !== "name" && (
             <span className="mr-auto text-left text-sm text-warn">{t(blocked.reason)}</span>
           )}
           <Button variant="ghost" size="sm" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button size="sm" onClick={save} disabled={saving || blocked.kind !== "ok"}>
+          <Button
+            size="sm"
+            onClick={save}
+            disabled={saving || blocked.kind !== "ok"}
+            aria-describedby={blocked.kind === "name" ? nameReasonId : undefined}
+          >
             {saving && <Loader2 className="animate-spin" />}
             {editing ? t("auto.saveSchedule") : t("auto.createSchedule")}
           </Button>

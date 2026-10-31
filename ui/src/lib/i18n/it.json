@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "In attesa dell'elenco delle destinazioni. Spunta Tutte le destinazioni, oppure attendi l'elenco per scegliere.",
   "auto.blockRunAtPast": "Quell’orario è già passato, quindi non si attiverebbe mai. Scegline uno futuro.",
   "auto.blockRunAtUnset": "Scegli quando si attiva. Una pianificazione una tantum senza orario si salva senza problemi e poi non può mai partire.",
+  "auto.blockName": "Dai un nome alla pianificazione.",
   "auto.broadcastFault": "Impossibile avviare o terminare la diretta",
   "auto.chosenWeekdays": "Giorni scelti",
   "auto.coalesced": "Raggruppati",

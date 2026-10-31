@@ -24,6 +24,7 @@
   "auto.blockDestinationsUnknown": "Menunggu daftar tujuan. Centang Semua tujuan, atau tunggu daftarnya untuk memilih.",
   "auto.blockRunAtPast": "Waktu itu sudah lewat, jadi ini tidak akan pernah dijalankan. Pilih waktu di masa depan.",
   "auto.blockRunAtUnset": "Pilih kapan ini dijalankan. Jadwal sekali jalan tanpa waktu tetap tersimpan, lalu tidak pernah bisa berjalan.",
+  "auto.blockName": "Beri nama jadwal ini.",
   "auto.broadcastFault": "Siaran tidak dapat dimulai atau diakhiri",
   "auto.chosenWeekdays": "Hari terpilih",
   "auto.coalesced": "Digabungkan",
