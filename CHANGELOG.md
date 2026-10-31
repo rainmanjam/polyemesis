@@ -484,6 +484,15 @@ its first tagged release.
 
 ### Fixed
 
+- **A destination's restart count now includes restarts caused by live level
+  changes.** Two restarts were never counted. One is the restart that keeps a
+  live mute or gain in place when a failover or a new ingest session changes
+  the audio format. The other is the restart that replaces a level change the
+  running FFmpeg refused, which is every level change on Windows. The card,
+  `polyemesis_destination_restarts_total`, the `destination.restarted` event
+  and the Stream Deck restart-storm key now count each of these once. The
+  backup output's own count, shown on the card, counts them too. A level
+  applied in place is still not a restart.
 - **The OAuth acceptance suite no longer creates a Facebook live video.**
   `scripts/acceptance-oauth.sh` said its credentialed step "starts no
   broadcast", but the step called Facebook's ingest lookup, and that lookup

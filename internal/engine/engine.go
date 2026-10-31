@@ -277,6 +277,14 @@ type Engine struct {
 	// from an ingest's state callback, which must never take mu for writing.
 	levelRespawnMu  sync.Mutex
 	levelRespawning map[*supervisor.Process]bool
+	// restartCarry is, per destination, the process a refused live level change
+	// tore down, so the start that replaces it can count that teardown as the
+	// restart it is (supervisor.Process.InheritRestarts) instead of beginning
+	// again at zero. Written by stopDestinations, consumed by startDest, and
+	// cleared at the end of startDestinations for any destination that did not
+	// start -- a count must not wait for a later, unrelated fresh start.
+	// Guarded by mu.
+	restartCarry map[int64]*supervisor.Process
 
 	// heldMu guards heldPorts. Separate from e.mu because releasePort is called
 	// from teardown paths that already hold it.

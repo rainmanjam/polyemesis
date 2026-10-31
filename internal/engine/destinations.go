@@ -376,6 +376,14 @@ func (e *Engine) stopDestinations(plans map[int64]destPlan) {
 					e.retiring = map[int64]*destination{}
 				}
 				e.retiring[c.id] = c.d
+				// The replacement startDest builds is this output restarting,
+				// not a new one, so it carries the count on. Only here: a
+				// structural edit is a new configuration and starts at zero, as
+				// every other edit does.
+				if e.restartCarry == nil {
+					e.restartCarry = map[int64]*supervisor.Process{}
+				}
+				e.restartCarry[c.id] = c.d.proc
 			}
 			toStop = append(toStop, c.d)
 		}
@@ -495,6 +503,13 @@ func (e *Engine) startDestinations(plans map[int64]destPlan) {
 		e.mu.Unlock()
 		e.reconcileBackup(id, d, backupCompiled(p), p.upstream)
 	}
+
+	// A carry startDest did not consume belongs to a destination that did not
+	// start in this pass -- disabled, removed or broken since its fallback. Its
+	// next start is a fresh run, so the count is not left waiting for it.
+	e.mu.Lock()
+	clear(e.restartCarry)
+	e.mu.Unlock()
 }
 
 // upstreamHub is the relay a destination reads: the ingest's when it is on
@@ -1193,6 +1208,18 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		WakeOnStop: relayWaker(readHub, subName),
 	})
 
+	// A refused live level change tore the previous process down so that this
+	// one could start with the level: the same output restarting, so it
+	// continues that process's restart count and storm window. Before the
+	// publication, so no reader ever sees the new child with the count still
+	// at zero -- and the two process locks InheritRestarts takes are taken
+	// OUTSIDE e.mu, never under it (see staleLevelProcs).
+	e.mu.Lock()
+	carried := e.restartCarry[row.ID]
+	delete(e.restartCarry, row.ID)
+	e.mu.Unlock()
+	proc.InheritRestarts(carried)
+
 	e.mu.Lock()
 	// Shutdown may have run since this reconcile started; publishing under the
 	// same lock Stop collects destinations with is what keeps a late start from
@@ -1457,6 +1484,10 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	// paid for a hash of a command line that was then discarded by the early
 	// return below. That is the common case, not an edge one.
 	var want string
+	// refused is the backup a refused live level change is about to replace:
+	// the same redundant output restarting, so its successor carries its
+	// restart count on, as the primary's does (see restartCarry).
+	var refused *supervisor.Process
 	if wantsBackup(prev.row) {
 		want = backupSpecOf(prev.row, compiled, upstream)
 		if prev.backup != nil && prev.backupSpec == want {
@@ -1465,6 +1496,7 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 			}
 			// Refused live: fall through and restart the backup with the level
 			// it was given, so the new one takes effect.
+			refused = prev.backup
 		}
 	} else if prev.backup == nil && prev.backupSub == "" && prev.backupPort == 0 &&
 		prev.backupSpec == "" && prev.backupErr == reason {
@@ -1480,6 +1512,9 @@ func (e *Engine) reconcileBackup(id int64, prev *destination, compiled routing.R
 	next.backupSpec, next.backupErr = "", reason
 	if wantsBackup(prev.row) {
 		e.buildBackup(&next, compiled, want)
+		if next.backup != nil {
+			next.backup.InheritRestarts(refused)
+		}
 	}
 	e.publishDest(id, prev, &next)
 }
