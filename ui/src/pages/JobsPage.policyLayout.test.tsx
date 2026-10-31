@@ -135,6 +135,15 @@ describe("JobsPage policy: the Advanced disclosure", () => {
     expect(advanced().open, "an out-of-range value was folded out of sight").toBe(true);
   });
 
+  it("accepts the thermal ceilings the server accepts, up to 150°C", async () => {
+    // internal/db/settings.go validates 0-150. A stored 130 is a change from
+    // the default, so the section opens, but it must not be called out of range.
+    policy = { ...factory(), thermalCeilingC: 130 };
+    await openPolicy();
+    expect(advanced().open).toBe(true);
+    expect(screen.queryByText(/^Out of range\. Allowed/), "a value the server accepts was called out of range").toBeNull();
+  });
+
   it("opens by itself when a switch inside it is off its default", async () => {
     policy = { ...factory(), gpuBusy: true };
     await openPolicy();

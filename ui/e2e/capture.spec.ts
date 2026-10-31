@@ -470,6 +470,18 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // is the product looking broken, which this harness refuses to photograph.
   const falseErrors = page.getByText(/^\d+ errors?$/);
   await expect(falseErrors).toHaveCount(0, { timeout: 30_000 });
+  // The process list is a table now (A72): its count is a bare number in the
+  // Errors column, which the "N errors" text match above cannot see.
+  const processTable = page
+    .getByRole("table")
+    .filter({ has: page.getByRole("columnheader", { name: "Errors", exact: true }) });
+  await expect
+    .poll(async () =>
+      (await processTable.locator("tbody tr > td:last-child").allInnerTexts())
+        .map((t) => t.trim())
+        .filter((t) => /^\d+$/.test(t) && t !== "0"),
+    )
+    .toEqual([]);
   await expect(page.getByText("Errors 0", { exact: true })).toBeVisible();
   await expect(page.getByText(/^No errors in the last \d+ s$/)).toBeVisible();
   // And the filtered log has lines in it: an empty log would be a picture of

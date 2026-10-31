@@ -54,7 +54,7 @@ export const ADVANCED_NUMBER_FIELDS: readonly AdvancedNumberField[] = [
   { key: "deferSeconds", min: 0, max: 3600 },
   { key: "niceLevel", min: 0, max: 19 },
   { key: "batteryFloorPercent", min: 0, max: 100 },
-  { key: "thermalCeilingC", min: 0, max: 120 },
+  { key: "thermalCeilingC", min: 0, max: 150 },
   { key: "retainDays", min: 0, max: 3650 },
   { key: "retainJobs", min: 0, max: 100000 },
 ];
