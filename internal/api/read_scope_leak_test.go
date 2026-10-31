@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -282,16 +284,32 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 	// -- and returns errClipNotMeasured when that leaves it with nothing, so a
 	// single unmeasured row would have kept /clipper/recordings/{id} on a 404
 	// while looking like a fixture that had one.
-	base := time.Date(2026, 3, 1, 20, 0, 0, 0, time.UTC)
+	//
+	// A WEEK AGO, not a fixed date, and each segment has a file on disk: the
+	// engine's recording manager is RUNNING underneath this fixture, and its
+	// ScanAndSweep -- once the moment the engine starts, then every 30s -- has
+	// two ways to take these rows away. Scan de-indexes a row whose file is
+	// missing, and Sweep's age rule (720h by default) deletes everything older
+	// than that except the newest segment. The planted date used to be
+	// 2026-03-01, which crossed 720h at the start of April; from then on, a
+	// startup sweep that listed the index after this loop deleted part1 and
+	// spared part2 as "live", and CI on a loaded macOS runner read "planted 1
+	// recordings, want 2". Both deleters were reproduced by forcing a
+	// ScanAndSweep (and a Sweep alone) at each point in this sequence.
+	//
+	// So the fixture is a FIXED POINT of ScanAndSweep rather than a race it
+	// hopes to win: whenever a scan lands, it finds every row's file, inside
+	// retention, at the size the row claims. See plantRecordingOnDisk.
+	base := time.Now().UTC().Add(-7 * 24 * time.Hour).Truncate(time.Hour)
+	stamp := base.Format("2006-01-02-1504")
+	dir := s.eng().Recordings().Dir()
 	for i, rec := range []db.Recording{
-		{Filename: "2026-03-01-2000-part1.mkv", StartedAt: base,
+		{Filename: stamp + "-part1.mkv", StartedAt: base,
 			FinishedAt: base.Add(10 * time.Minute), Bytes: 4 << 20, DurationMS: 600_000, Tracks: 2},
-		{Filename: "2026-03-01-2010-part2.mkv", StartedAt: base.Add(10 * time.Minute),
+		{Filename: stamp + "-part2.mkv", StartedAt: base.Add(10 * time.Minute),
 			FinishedAt: base.Add(20 * time.Minute), Bytes: 3 << 20, DurationMS: 600_000, Tracks: 2},
 	} {
-		if err := store.UpsertRecording(&rec); err != nil {
-			t.Fatalf("plant recording %d: %v", i+1, err)
-		}
+		plantRecordingOnDisk(t, store, dir, rec, i+1)
 	}
 	recs, err := store.ListRecordings()
 	if err != nil {
@@ -378,6 +396,49 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 			`{"label":"Mirage","votes":1,"byPlatform":{"youtube":1}}],"total":3,"byPlatform":{"twitch":2,"youtube":1}}`),
 	}); err != nil {
 		t.Fatalf("plant poll: %v", err)
+	}
+}
+
+// plantRecordingOnDisk indexes rec the way a fixture under a RUNNING engine has
+// to: with its file already in the recordings directory, so the recording
+// manager's Scan cannot de-index it as "disappeared from disk".
+//
+// The file is written BEFORE the row, and shaped so that a scan landing at any
+// point -- before the upsert, after it, or between two calls of this -- leaves
+// the row exactly as planted:
+//
+//   - Truncated to rec.Bytes, which is sparse and so costs nothing. Scan
+//     re-upserts every file with its on-disk size, and a six-byte placeholder
+//     would rewrite the planted byte count underneath the sweep.
+//   - Its mtime set to rec.StartedAt. These names do not parse in
+//     startTimeFromName, so a scan that indexes the file before the upsert
+//     takes started_at from the mtime, and the upsert never overwrites
+//     started_at.
+//
+// Retention is the caller's half: rec.StartedAt has to sit inside the default
+// 720h age rule, or Sweep deletes the row and this file with it.
+func plantRecordingOnDisk(t *testing.T, store *db.DB, dir string, rec db.Recording, n int) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create the recordings dir for recording %d: %v", n, err)
+	}
+	path := filepath.Join(dir, rec.Filename)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("plant recording %d's file: %v", n, err)
+	}
+	if err := f.Truncate(rec.Bytes); err != nil {
+		_ = f.Close()
+		t.Fatalf("size recording %d's file to %d bytes: %v", n, rec.Bytes, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close recording %d's file: %v", n, err)
+	}
+	if err := os.Chtimes(path, rec.StartedAt, rec.StartedAt); err != nil {
+		t.Fatalf("date recording %d's file: %v", n, err)
+	}
+	if err := store.UpsertRecording(&rec); err != nil {
+		t.Fatalf("plant recording %d: %v", n, err)
 	}
 }
 
