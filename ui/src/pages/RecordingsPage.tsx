@@ -54,7 +54,7 @@ import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { SaveStatus } from "@/components/SaveStatus";
-import { useSaveModel } from "@/lib/saveModel";
+import { useSaveModel, useSaveOutcome } from "@/lib/saveModel";
 import {
   retentionProblems,
   retentionDraft,
@@ -191,18 +191,26 @@ export function RecordingsPage() {
     }
   };
 
-  const saveRetention = async (next: Settings) => {
-    setSaving(true);
-    try {
-      const saved = await api.putSettings(next);
-      setSettings(saved);
-      toast.success(t("rec.saved"));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  /* ONE SAVE MODEL ON THIS CARD (A95). The switches apply at once, and they
+     used to say so with a "Recording settings saved." toast while the
+     retention numbers beside them said it with SaveStatus: two confirmations
+     for one card. A switch's write now feeds the same status line (see the
+     SaveStatus by Save policy), and only a failure toasts, because it carries
+     the server's reason. */
+  const switchSave = useSaveOutcome();
+  const saveRetention = (next: Settings) =>
+    switchSave.run(async () => {
+      setSaving(true);
+      try {
+        const saved = await api.putSettings(next);
+        setSettings(saved);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("rec.saveFailed"));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    });
 
   // The stem fields are real on the wire but are not declared on the shared
   // Settings type yet, so they are read through a narrow view. Nothing is lost
@@ -242,7 +250,10 @@ export function RecordingsPage() {
     },
   });
   const draft = settings ? retention.draft : null;
-  const setDraft = (fn: (d: RetentionDraft) => RetentionDraft) => retention.setDraft(fn(retention.draft));
+  const setDraft = (fn: (d: RetentionDraft) => RetentionDraft) => {
+    switchSave.reset();
+    retention.setDraft(fn(retention.draft));
+  };
   const dirty = retention.dirty;
 
   const recorderState = status?.recorder?.state;
@@ -634,7 +645,9 @@ export function RecordingsPage() {
                     {retention.state === "saving" && <Loader2 className="animate-spin" />}
                     {t("rec.savePolicy")}
                   </Button>
-                  <SaveStatus state={retention.state} />
+                  {/* The card's one status line: the retention draft while it
+                      has something to say, otherwise the last switch's write. */}
+                  <SaveStatus state={retention.state !== "clean" ? retention.state : switchSave.stateOf(false)} />
                 </div>
                 <p className="text-tiny text-muted-foreground">
                   {t("rec.zeroNoLimit")}

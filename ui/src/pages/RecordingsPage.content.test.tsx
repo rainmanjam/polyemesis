@@ -54,8 +54,9 @@ vi.mock("@/hooks/useLiveData", () => ({
   useIngestLive: () => ingestLive,
 }));
 
+const toastSuccess = vi.fn();
 vi.mock("sonner", () => ({
-  toast: { error: () => {}, success: () => {}, info: () => {} },
+  toast: { error: () => {}, success: (m: string) => toastSuccess(m), info: () => {} },
 }));
 
 const { RecordingsPage } = await import("./RecordingsPage");
@@ -137,6 +138,24 @@ describe("RecordingsPage retention save model (A95)", () => {
     await waitFor(() => expect(putSettings).toHaveBeenCalledTimes(1));
     expect((putSettings.mock.calls[0][0] as typeof SETTINGS).recording.maxGb).toBe(80);
     await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  });
+
+  // One model on the card: a switch applies at once and is confirmed by the
+  // same status line as the retention Save, not by a "Recording settings
+  // saved." toast beside it (round-2 review of A95).
+  it("confirms a switch with the card's SaveStatus, not a success toast", async () => {
+    putSettings.mockClear();
+    toastSuccess.mockClear();
+    render(<RecordingsPage />);
+    const enabled = (await waitFor(() => {
+      const el = document.getElementById("rec-enabled");
+      if (!el) throw new Error("switch not rendered yet");
+      return el;
+    })) as HTMLButtonElement;
+    fireEvent.click(enabled);
+    await waitFor(() => expect(putSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it("shows the kit empty state when there are no recordings", async () => {

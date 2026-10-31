@@ -118,3 +118,54 @@ export function useSaveModel<T>({
     discard,
   };
 }
+
+export interface SaveOutcome {
+  /** The SaveState to draw for a surface whose draft is (or is not) dirty. */
+  stateOf: (dirty: boolean) => SaveState;
+  /** Runs one write. The write signals failure by throwing or rejecting; the
+   *  error is swallowed here because the caller has already said what went
+   *  wrong (a toast carrying the server's sentence) and this only records that
+   *  it failed. Resolves once the write has settled either way. */
+  run: (write: () => Promise<unknown>) => Promise<void>;
+  /** Clears "Saved" and "Couldn't save" once the operator edits again. */
+  reset: () => void;
+}
+
+/** The saving / failed / saved half of the model for a surface that keeps its
+ *  own draft, or has none: a switch that applies at once (the first rule
+ *  above), or a form whose dirty test is its own (Settings' Pipeline tab folds
+ *  a write-only broker password into it). The state still goes through
+ *  saveStateOf, so it is the same SaveState every <SaveStatus> draws, and the
+ *  page confirms a save the same way everywhere instead of with a toast on
+ *  one page and a status line on the next. */
+export function useSaveOutcome(): SaveOutcome {
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+
+  const run = useCallback(async (write: () => Promise<unknown>) => {
+    setSaving(true);
+    setFailed(false);
+    setJustSaved(false);
+    try {
+      await write();
+      setJustSaved(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    setFailed(false);
+    setJustSaved(false);
+  }, []);
+
+  const stateOf = useCallback(
+    (dirty: boolean) => saveStateOf({ dirty, saving, failed, justSaved }),
+    [saving, failed, justSaved],
+  );
+
+  return { stateOf, run, reset };
+}

@@ -142,6 +142,13 @@ import type {
   TlsStatus,
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
+import { SaveStatus } from "@/components/SaveStatus";
+import { useSaveModel, useSaveOutcome } from "@/lib/saveModel";
+
+/** Whether two settings values are the same document. The settings are plain
+ *  JSON from one source, so their key order is stable and a serialised compare
+ *  is exact; the save model needs it because every reply is a new object. */
+const sameSettings = <T,>(a: T, b: T): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 export function SettingsPage() {
   const t = useT();
@@ -303,22 +310,28 @@ export function SettingsPage() {
       action: { label: t("chatpage.reload"), onClick: () => window.location.reload() },
     });
 
+  // CONFIRMED BY THE FORM'S OWN SaveStatus, NOT A TOAST (app-council A95).
+  // Every other typed form on the console says "Saved" beside its Save button;
+  // Settings, the largest form surface, said it with a toast that vanished.
+  // So success is silent here, and a failure still toasts -- it carries the
+  // server's sentence, which the status line does not -- and then REJECTS, so
+  // the form's save model records the failure instead of showing "Saved".
   const save = async (next: Settings) => {
     setSaving(true);
     setSaveError(null);
     try {
       setSettings(await api.putSettings(next));
-      toast.success(t("set.settingsSavedAffectedProcessesHave"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("rec.saveFailed");
       // A conflict is not given to setSaveError: it belongs to no field, and
       // AutomodConfig would otherwise hunt for a rule to pin it on.
       if (isSettingsConflict(err)) {
         conflictToast(msg);
-        return;
+      } else {
+        setSaveError(msg);
+        toast.error(msg);
       }
-      setSaveError(msg);
-      toast.error(msg);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -338,13 +351,15 @@ export function SettingsPage() {
         saved.mqtt = { ...saved.mqtt, enabled: saved.mqtt?.enabled ?? false, hasPassword: true };
       }
       setSettings(saved);
-      toast.success(t("i18nSweep.mqttSaved"));
     } catch (err) {
+      // As `save` above: the toast carries the reason, the rejection tells the
+      // tab's SaveStatus that nothing was saved.
       if (isSettingsConflict(err) && err instanceof Error) {
         conflictToast(err.message);
-        return;
+      } else {
+        toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheMqtt"));
       }
-      toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheMqtt"));
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -691,15 +706,19 @@ function IngestSettings({
 }: {
   settings: Settings;
   system: SystemInfo | null;
-  onSave: (s: Settings) => void;
+  onSave: (s: Settings) => Promise<void>;
   saving: boolean;
   /** The programme this form writes to, or null when it could not be named. */
   programme: string | null;
 }) {
   const t = useT();
   const tn = useTN();
-  const [draft, setDraft] = useState(settings);
-  useEffect(() => setDraft(settings), [settings]);
+  // The kit's save model (A95): the draft is held over the stored settings,
+  // reseeded while clean, kept while dirty, and the Save button says Unsaved,
+  // Saving, Saved or Couldn't save beside it.
+  const model = useSaveModel<Settings>({ stored: settings, onSave, equal: sameSettings });
+  const draft = model.draft;
+  const setDraft = model.setDraft;
   // This page had no idea whether a broadcast was running: it never read live
   // state at all, so changing an SRT port mid-stream dropped every viewer with
   // nothing on screen having said so.
@@ -857,15 +876,18 @@ function IngestSettings({
               {t("set.ingestLiveWarn")}
             </p>
           )}
-          <Button
-            size="sm"
-            variant={live ? "destructive" : "default"}
-            onClick={() => onSave(draft)}
-            disabled={saving}
-          >
-            {saving ? <Loader2 className="animate-spin" /> : <Save />}
-            {live ? t("set.saveAndDrop") : t("set.saveIngest")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant={live ? "destructive" : "default"}
+              onClick={() => void model.save()}
+              disabled={saving || model.state === "saving"}
+            >
+              {model.state === "saving" ? <Loader2 className="animate-spin" /> : <Save />}
+              {live ? t("set.saveAndDrop") : t("set.saveIngest")}
+            </Button>
+            <SaveStatus state={model.state} />
+          </div>
         </CardContent>
       </Card>
 
@@ -987,29 +1009,32 @@ function ListenerPortsOnly({
   saving,
 }: {
   settings: Settings;
-  onSave: (s: Settings) => void;
+  onSave: (s: Settings) => Promise<void>;
   saving: boolean;
 }) {
   const t = useT();
-  const [listeners, setListeners] = useState(settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 });
-  useEffect(
-    () => setListeners(settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 }),
-    [settings],
-  );
+  const model = useSaveModel<ListenerSettings>({
+    stored: settings.listeners ?? { srtPort: 6000, rtmpPort: 1935 },
+    onSave: (listeners) => onSave({ ...settings, listeners }),
+    equal: sameSettings,
+  });
+  const listeners = model.draft;
   return (
     <ListenerPortsCard
       listeners={listeners}
-      setListeners={(patch) => setListeners({ ...listeners, ...patch })}
+      setListeners={(patch) => model.setDraft({ ...listeners, ...patch })}
       footer={
-        <Button
-          size="sm"
-          className="self-start"
-          onClick={() => onSave({ ...settings, listeners })}
-          disabled={saving}
-        >
-          {saving ? <Loader2 className="animate-spin" /> : <Save />}
-          {t("set.saveListeners")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() => void model.save()}
+            disabled={saving || model.state === "saving"}
+          >
+            {model.state === "saving" ? <Loader2 className="animate-spin" /> : <Save />}
+            {t("set.saveListeners")}
+          </Button>
+          <SaveStatus state={model.state} />
+        </div>
       }
     />
   );
@@ -1169,8 +1194,8 @@ function PipelineSettings({
   saveError,
 }: {
   settings: Settings;
-  onSave: (s: Settings) => void;
-  onSaveMqtt: (s: Settings, password: string) => void;
+  onSave: (s: Settings) => Promise<void>;
+  onSaveMqtt: (s: Settings, password: string) => Promise<void>;
   onClearMqttPassword: () => Promise<void>;
   saving: boolean;
   saveError: string | null;
@@ -1201,10 +1226,14 @@ function PipelineSettings({
   // them also ends the second half of the same defect: a Save under the
   // failover slate that silently committed an abandoned chat-retention edit.
   const dirty = pipelineDirty(settings, draft, mqttPassword);
+  // The tab keeps its own draft and dirty test (the broker password is part of
+  // it and is never in the stored settings), so it takes the saving / failed /
+  // saved half of the kit model and draws the same SaveStatus (A95).
+  const outcome = useSaveOutcome();
   const saveTab = () =>
-    pipelineSaveCarriesPassword(mqttPassword)
-      ? onSaveMqtt(draft, mqttPassword)
-      : onSave(draft);
+    outcome.run(() =>
+      pipelineSaveCarriesPassword(mqttPassword) ? onSaveMqtt(draft, mqttPassword) : onSave(draft),
+    );
 
   return (
     <div className="flex flex-col gap-3">
@@ -1216,7 +1245,10 @@ function PipelineSettings({
         <span className={cn("mr-auto text-sm", dirty ? "text-warn" : "text-muted-foreground")}>
           {dirty ? t("set.pipelineUnsaved") : t("set.pipelineOneSave")}
         </span>
-        <Button size="sm" onClick={saveTab} disabled={saving || !dirty}>
+        {/* "Unsaved" is already the sentence beside it, so the status line
+            adds only what that sentence cannot: saving, saved, couldn't save. */}
+        <SaveStatus state={outcome.stateOf(dirty) === "dirty" ? "clean" : outcome.stateOf(dirty)} />
+        <Button size="sm" onClick={() => void saveTab()} disabled={saving || !dirty}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />} {t("set.savePipeline")}
         </Button>
       </div>
@@ -2791,22 +2823,28 @@ export function PlatformCredCard({
     ...(guide.note && guide.note !== warning ? [guide.note] : []),
   ];
 
-  const save = async () => {
-    setBusy(true);
-    try {
-      const saved = await api.putCreds(guide.platform, clientId.trim(), clientSecret.trim());
-      setCheck(saved.check ? { ...saved.check, checkedAt: new Date().toISOString() } : null);
-      // Saved is saved, whatever the checker thought. The verdict renders
-      // below; it does not turn a successful save into a failure toast.
-      toast.success(t("i18nSweep.credentialsSaved", { name: guide.name }));
-      setClientSecret("");
-      onChanged();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheCredentials"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  // Confirmed by the SaveStatus beside the button, like every other form on
+  // the console (A95), not by a success toast. A failure still toasts the
+  // server's reason, then rejects so the status line says Couldn't save.
+  const outcome = useSaveOutcome();
+  const credsDirty = clientSecret.trim() !== "" || clientId.trim() !== (creds?.clientId ?? "");
+  const save = () =>
+    outcome.run(async () => {
+      setBusy(true);
+      try {
+        const saved = await api.putCreds(guide.platform, clientId.trim(), clientSecret.trim());
+        setCheck(saved.check ? { ...saved.check, checkedAt: new Date().toISOString() } : null);
+        // Saved is saved, whatever the checker thought. The verdict renders
+        // below; it does not turn a successful save into a failure.
+        setClientSecret("");
+        onChanged();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("set.couldNotSaveTheCredentials"));
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    });
 
   const recheck = async () => {
     setRechecking(true);
@@ -3098,10 +3136,10 @@ export function PlatformCredCard({
                   </div>
                 )}
 
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Button
                     size="sm"
-                    onClick={save}
+                    onClick={() => void save()}
                     disabled={busy || !clientId.trim() || !clientSecret.trim()}
                     aria-describedby={disabledDescribedBy(saveReasonId, saveReason)}
                   >
@@ -3117,6 +3155,7 @@ export function PlatformCredCard({
                       <Trash2 /> {t("i18nSweep.remove")}
                     </Button>
                   )}
+                  <SaveStatus state={outcome.stateOf(credsDirty)} />
                 </div>
 
                 {/* Why Save is greyed, in words (the kit's DisabledReason): the
