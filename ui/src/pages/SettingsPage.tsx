@@ -238,7 +238,8 @@ export function SettingsPage() {
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
   const onSearchPick = (v: string, hit?: SettingsHit) => {
     if (v === "debug") {
-      navigate("/system");
+      // navigate may return a promise (data routers); nothing waits on it.
+      void navigate("/system");
       return;
     }
     if (hit && isAdvancedCard(hit.cardKey)) setRevealed((prev) => new Set(prev).add(hit.cardKey));
