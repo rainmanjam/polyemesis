@@ -33,6 +33,9 @@ script needed.
 | `destination.down` | a destination stops — failed, disabled, deleted, or stalled with its process still running | 10s |
 | `broadcast.fault` | a platform refused to start or end a broadcast | none |
 | `destination.rolledover` | a file destination's recording continued into a different file | none |
+| `rollover.started` | a planned rollover (#19) began: a replacement broadcast is being created for a live one. `reason` names the trigger (`margin`, `quiet`, `obsScene` or `manual`) | none |
+| `rollover.completed` | the replacement broadcast is live and the destination points at it. A Twitch rollover is a reconnect, and its `reason` says so | none |
+| `rollover.failed` | a planned rollover stopped. The old broadcast is still on air unless `reason` says it could not be ended; no ingest was touched | none |
 | `destination.held` | polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry | none; after the `down` if the destination was live |
 | `failover.switched` | a programme's source selector put a different source on air (primary, backup, playlist or slate). `reason` says why; a switch caused by a degraded link starts `degraded: ` and names what was measured | none |
 

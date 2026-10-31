@@ -1,6 +1,10 @@
 package oauth
 
-import "github.com/rainmanjam/polyemesis/internal/db"
+import (
+	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
 
 // Platform limits are the caps a broadcast runs into on the platform's side,
 // rather than anything polyemesis chooses. Wave 3 rollover (#19) reads them to
@@ -65,8 +69,8 @@ func PlatformLimits() []PlatformLimit {
 		{
 			PresetID: "youtube", Platform: db.PlatformYouTube,
 			Kind: LimitKindArchiveDuration, Hours: 12, Status: LimitDocumented,
-			Source: "https://support.google.com/youtube/answer/9296823?hl=en",
-			Note:   "The DVR page says DVR capabilities may be limited or unavailable for streams longer than 12 hours. The same page's archive sentence (a stream under 12 hours can be archived automatically) was read from a search excerpt, not the full page. A longer stream may not be captured as a replay.",
+			Source: "https://support.google.com/youtube/answer/6247592?hl=en",
+			Note:   "YouTube's archive help page says a stream over 12 hours may not be captured at all, so a longer broadcast can lose its replay. The DVR page gives the same 12-hour figure but states the consequence only as DVR being limited, so it is not the citation used here. Rollover ends and restarts the broadcast before this point.",
 		},
 		{
 			PresetID: "facebook", Platform: db.PlatformFacebook,
@@ -80,4 +84,40 @@ func PlatformLimits() []PlatformLimit {
 			Note: "No platform source was confirmed. Third-party guides disagree: some say Kick has no stream length limit, and one says only the first 48 hours of a stream are saved as a replay. Replay retention is also reported as 30 days for verified and 7 days for unverified channels, which conflicts with the 48-hour figure. Verify against Kick's help centre before adding a countdown.",
 		},
 	}
+}
+
+// RolloverLimitFor returns the limit a countdown and a planned rollover count
+// to for one platform. When a platform has both a broadcast-duration cap and an
+// archive cap, the one that ends or truncates the live feed is used: YouTube's
+// rollover is driven by its archive cap, because that is the point at which a
+// long stream stops being kept, while its live feed carries on. ok is false for a
+// platform the table does not describe, which gets no countdown.
+func RolloverLimitFor(p db.Platform) (PlatformLimit, bool) {
+	var found PlatformLimit
+	ok := false
+	for _, l := range PlatformLimits() {
+		if l.Platform != p {
+			continue
+		}
+		if l.Kind == LimitKindArchiveDuration {
+			return l, true
+		}
+		found, ok = l, true
+	}
+	return found, ok
+}
+
+// CutoffFor returns the instant a broadcast that went live at liveSince reaches
+// this limit. ok is false, and no time is returned, when there is nothing honest
+// to count to: the limit is unverified or has no positive number, or the live
+// start is unknown. The zero time is treated as unknown, because a countdown
+// counted from it would read as long overdue rather than as no answer.
+func (l PlatformLimit) CutoffFor(liveSince time.Time) (time.Time, bool) {
+	if l.Status == LimitUnverified || l.Hours <= 0 {
+		return time.Time{}, false
+	}
+	if liveSince.IsZero() {
+		return time.Time{}, false
+	}
+	return liveSince.Add(time.Duration(l.Hours * float64(time.Hour))), true
 }

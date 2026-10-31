@@ -164,6 +164,9 @@ real producer, to actually be emitted.
 | `destination.restarted` | destination | yes | A destination's process was respawned: after it exited, or because a live level change restarted it; reason says which. |
 | `destination.level` | destination | yes | A level (gain or mute) change reached a destination, applied live or by a restart. |
 | `destination.rolledover` | destination | yes | A file destination continued into a new file because the configured one already held footage. |
+| `rollover.started` | destination | yes | A planned rollover began: a replacement broadcast is being created for a live one. reason says which trigger fired. |
+| `rollover.completed` | destination | yes | A planned rollover finished: the replacement is live and the destination points at it. Connecting Twitch is a reconnect; reason says which. |
+| `rollover.failed` | destination | yes | A planned rollover stopped. The old broadcast is still on air unless reason says it could not be ended; no ingest was touched. |
 | `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer. |
 | `ingest.published` | ingest | yes | Data started arriving on a programme's ingest. |
 | `ingest.disconnected` | ingest | yes | Nothing has arrived on a programme's ingest for the disconnect window. |

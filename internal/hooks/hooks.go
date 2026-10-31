@@ -97,6 +97,15 @@ const (
 	// Reason carries the path actually written. It is a filename, not a
 	// credential, but it goes through the same redaction as every other Reason.
 	TriggerDestinationRolledOver Trigger = "destination.rolledover"
+	// TriggerRolloverStarted fires when a planned rollover (#19) begins: the replacement is being created for a live
+	// broadcast. It is spelled rollover.* and not destination.* because it names a platform broadcast being replaced,
+	// not a file continuing into a new one, which is what destination.rolledover means.
+	TriggerRolloverStarted Trigger = "rollover.started"
+	// TriggerRolloverCompleted fires when the replacement is live and the destination points at it.
+	TriggerRolloverCompleted Trigger = "rollover.completed"
+	// TriggerRolloverFailed fires when a rollover stopped. The old broadcast is still on air unless the reason says
+	// otherwise, and no ingest was touched.
+	TriggerRolloverFailed Trigger = "rollover.failed"
 	// TriggerDestinationHeld fires once when polyemesis stops retrying a
 	// destination after repeated quick rejections (failreason.Reason.Held):
 	// nothing more happens to it until somebody presses Retry.
@@ -148,6 +157,9 @@ func AllTriggers() []Trigger {
 		// hold now arrives as a destination.held after the destination.down it
 		// used to arrive folded into.
 		TriggerDestinationHeld,
+		// APPENDED, for the same two reasons as the rows above. A planned rollover is new behaviour, and an install
+		// with an empty Triggers list will start receiving these on upgrade, as it does for every row above.
+		TriggerRolloverStarted, TriggerRolloverCompleted, TriggerRolloverFailed,
 		// APPENDED, a fourth time, for the same two reasons. An install with
 		// failover off never sends it; one with failover on and an empty
 		// Triggers list starts receiving every switch on upgrade.

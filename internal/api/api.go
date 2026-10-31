@@ -544,6 +544,9 @@ type Server struct {
 	// method writes one column, a provider set, a token refresher and an
 	// escalation callback. See the header of lifecycle.go.
 	lifecycle *lifecycleCoordinator
+	// rollover is the planned-rollover sweep (#19). Built beside the lifecycle coordinator, with the same narrow
+	// host: a token source, a predicate and one restart. See rollover.go.
+	rollover *rolloverCoordinator
 
 	// kickKeys caches Kick's webhook signing key. One per server rather than
 	// one per adapter: the key belongs to Kick, not to an account, so two
@@ -829,6 +832,14 @@ func New(o Options) *Server {
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
+	}
+	if o.DB != nil {
+		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
+			tokenFor:   s.tokenFor,
+			restart:    s.restartDestinationForRollover,
+			delivering: s.destinationDelivering,
+			announce:   s.publishRollover,
+		})
 	}
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
@@ -1170,6 +1181,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical", s.handleCreateYouTubeVertical)
 			r.Get("/destinations/{id}/youtube-vertical", s.handleYouTubeVerticalStatus)
 			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical/confirm", s.handleConfirmYouTubeVertical)
+			// Planned rollover (#19): the platform caps, one destination's countdown and settings, and a manual rollover.
+			r.Get("/rollover/limits", s.handleListRolloverLimits)
+			r.With(s.requireSource).Get("/destinations/{id}/rollover", s.handleGetRollover)
+			r.With(s.requireSource).Put("/destinations/{id}/rollover", s.handleSaveRollover)
+			r.With(s.requireSource).Post("/destinations/{id}/rollover/run", s.handleRunRollover)
 
 			// Expert mode: hand-edited FFmpeg arguments for one destination.
 			// Preview and dry-run are POSTs because they carry a candidate
