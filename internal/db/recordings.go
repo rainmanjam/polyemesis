@@ -77,13 +77,18 @@ func (d *DB) UpsertRecording(r *Recording) error {
 	// Nil was every row, so it fell back to the default programme every time
 	// and the mislabelling it prevents was happening on every clip.
 	//
+	// finished_at is guarded the same way. The scanner re-indexes every segment on
+	// every pass with no finish time of its own (it cannot know one from a
+	// directory listing), so an unguarded write cleared the finish time an earlier
+	// writer had recorded, every 30 s. A zero here means "no opinion", as it does
+	// for the source and the measurements beside it.
 	// Guarded like duration_ms and tracks beside it, and for the same reason:
 	// a later sweep that re-indexes a file it cannot attribute must not wipe an
 	// attribution an earlier one made.
 	_, err := d.sql.Exec(`INSERT INTO recordings (filename, started_at, finished_at, bytes, duration_ms, tracks, source_id)
 		VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT(filename) DO UPDATE SET
-			finished_at=excluded.finished_at,
+			finished_at=CASE WHEN excluded.finished_at > 0 THEN excluded.finished_at ELSE recordings.finished_at END,
 			bytes=excluded.bytes,
 			duration_ms=CASE WHEN excluded.duration_ms > 0 THEN excluded.duration_ms ELSE recordings.duration_ms END,
 			tracks=CASE WHEN excluded.tracks > 0 THEN excluded.tracks ELSE recordings.tracks END,
