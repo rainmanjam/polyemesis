@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Geavanceerd",
   "settingsUx.showAdvanced": "Geavanceerde instellingen tonen",
   "settingsUx.showAdvancedHint": "Uit houdt instellingen voor experts uit beeld. Een instelling die je hebt gewijzigd, of een met een probleem, wordt altijd getoond.",
-  "settingsUx.advancedHidden": "{n} geavanceerde instellingen verborgen: {names}.",
+  "settingsUx.advancedHidden": "Verborgen geavanceerde instellingen: {names}.",
   "settingsUx.showThem": "Geavanceerde tonen",
   "settingsUx.groupRoutine": "Dagelijks",
   "settingsUx.groupRoutineDesc": "De instellingen die je het vaakst zult wijzigen.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover uit",
   "settingsUx.tileStagger": "Spreiding van verbindingen: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Certificaat verloopt over {n} dagen",
+  "settingsUx.tileCertExpiring": "Certificaat: {left}",
   "settingsUx.tileTokens": "API-tokens: {n}",
   "settingsUx.tileBackedUp": "Back-up van secret.key bevestigd",
-  "settingsUx.tileNotBackedUp": "Back-up van secret.key niet bevestigd"
+  "settingsUx.tileNotBackedUp": "Back-up van secret.key niet bevestigd",
+  "settingsUx.saveCredsNeedsBoth": "Vul beide velden in om op te slaan. Een opgeslagen secret wordt nooit meer getoond, dus plak het bij elke wijziging opnieuw."
 }

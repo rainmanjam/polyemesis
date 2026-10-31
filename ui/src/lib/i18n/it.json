@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Avanzate",
   "settingsUx.showAdvanced": "Mostra impostazioni avanzate",
   "settingsUx.showAdvancedHint": "Spento, tiene da parte le impostazioni per esperti. Un'impostazione che hai cambiato, o una con un problema, è sempre visibile.",
-  "settingsUx.advancedHidden": "{n} impostazioni avanzate nascoste: {names}.",
+  "settingsUx.advancedHidden": "Impostazioni avanzate nascoste: {names}.",
   "settingsUx.showThem": "Mostra avanzate",
   "settingsUx.groupRoutine": "Di routine",
   "settingsUx.groupRoutineDesc": "Le impostazioni che cambierai più spesso.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover spento",
   "settingsUx.tileStagger": "Scaglionamento connessioni: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Il certificato scade tra {n} giorni",
+  "settingsUx.tileCertExpiring": "Certificato: {left}",
   "settingsUx.tileTokens": "Token API: {n}",
   "settingsUx.tileBackedUp": "Backup di secret.key confermato",
-  "settingsUx.tileNotBackedUp": "Backup di secret.key non confermato"
+  "settingsUx.tileNotBackedUp": "Backup di secret.key non confermato",
+  "settingsUx.saveCredsNeedsBoth": "Compila entrambi i campi per salvare. Un secret salvato non viene più mostrato, quindi incollalo di nuovo a ogni modifica."
 }

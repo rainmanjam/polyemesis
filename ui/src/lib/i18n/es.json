@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Avanzado",
   "settingsUx.showAdvanced": "Mostrar ajustes avanzados",
   "settingsUx.showAdvancedHint": "Desactivado, aparta los ajustes para expertos. Un ajuste que hayas cambiado, o uno con un problema, se muestra siempre.",
-  "settingsUx.advancedHidden": "{n} ajustes avanzados ocultos: {names}.",
+  "settingsUx.advancedHidden": "Ajustes avanzados ocultos: {names}.",
   "settingsUx.showThem": "Mostrar avanzados",
   "settingsUx.groupRoutine": "Habituales",
   "settingsUx.groupRoutineDesc": "Los ajustes que más probablemente cambiarás.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover desactivado",
   "settingsUx.tileStagger": "Escalonado de conexiones: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "El certificado caduca en {n} días",
+  "settingsUx.tileCertExpiring": "Certificado: {left}",
   "settingsUx.tileTokens": "Tokens de API: {n}",
   "settingsUx.tileBackedUp": "Copia de secret.key confirmada",
-  "settingsUx.tileNotBackedUp": "Copia de secret.key sin confirmar"
+  "settingsUx.tileNotBackedUp": "Copia de secret.key sin confirmar",
+  "settingsUx.saveCredsNeedsBoth": "Rellena los dos campos para guardar. Un secreto guardado no se vuelve a mostrar, así que pégalo de nuevo con cualquier cambio."
 }

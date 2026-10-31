@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Расширенные",
   "settingsUx.showAdvanced": "Показывать расширенные настройки",
   "settingsUx.showAdvancedHint": "Если выключено, экспертные настройки скрыты. Изменённая настройка или настройка с проблемой показывается всегда.",
-  "settingsUx.advancedHidden": "Скрыто расширенных настроек: {n} ({names}).",
+  "settingsUx.advancedHidden": "Скрытые расширенные настройки: {names}.",
   "settingsUx.showThem": "Показать расширенные",
   "settingsUx.groupRoutine": "Повседневные",
   "settingsUx.groupRoutineDesc": "Настройки, которые вы будете менять чаще всего.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover выключен",
   "settingsUx.tileStagger": "Разнесение подключений: {ms} мс",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Сертификат истекает через {n} дн.",
+  "settingsUx.tileCertExpiring": "Сертификат: {left}",
   "settingsUx.tileTokens": "API-токенов: {n}",
   "settingsUx.tileBackedUp": "Резервная копия secret.key подтверждена",
-  "settingsUx.tileNotBackedUp": "Резервная копия secret.key не подтверждена"
+  "settingsUx.tileNotBackedUp": "Резервная копия secret.key не подтверждена",
+  "settingsUx.saveCredsNeedsBoth": "Заполните оба поля, чтобы сохранить. Сохранённый секрет больше не показывается, поэтому вставляйте его заново при любом изменении."
 }

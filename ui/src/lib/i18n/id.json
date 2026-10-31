@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Lanjutan",
   "settingsUx.showAdvanced": "Tampilkan pengaturan lanjutan",
   "settingsUx.showAdvancedHint": "Jika mati, pengaturan untuk pakar disembunyikan. Pengaturan yang sudah Anda ubah, atau yang bermasalah, selalu ditampilkan.",
-  "settingsUx.advancedHidden": "{n} pengaturan lanjutan disembunyikan: {names}.",
+  "settingsUx.advancedHidden": "Pengaturan lanjutan yang disembunyikan: {names}.",
   "settingsUx.showThem": "Tampilkan lanjutan",
   "settingsUx.groupRoutine": "Rutin",
   "settingsUx.groupRoutineDesc": "Pengaturan yang paling mungkin Anda ubah.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover mati",
   "settingsUx.tileStagger": "Jeda koneksi bertahap: {ms} md",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Sertifikat kedaluwarsa dalam {n} hari",
+  "settingsUx.tileCertExpiring": "Sertifikat: {left}",
   "settingsUx.tileTokens": "Token API: {n}",
   "settingsUx.tileBackedUp": "Cadangan secret.key dikonfirmasi",
-  "settingsUx.tileNotBackedUp": "Cadangan secret.key belum dikonfirmasi"
+  "settingsUx.tileNotBackedUp": "Cadangan secret.key belum dikonfirmasi",
+  "settingsUx.saveCredsNeedsBoth": "Isi kedua kolom untuk menyimpan. Secret yang tersimpan tidak pernah ditampilkan lagi, jadi tempel ulang setiap kali ada perubahan."
 }

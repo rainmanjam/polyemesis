@@ -72,10 +72,10 @@ describe("overviewTiles", () => {
 
   it("flags a certificate inside its last 30 days", () => {
     const security = tile(
-      reads({ tls: okRead({ mode: "acme", certificate: { daysRemaining: 5 } } as never) }),
+      reads({ tls: okRead({ mode: "acme", certificate: { daysRemaining: 1, expired: false } } as never) }),
       "security",
     );
-    expect(security.lines).toContain(t("settingsUx.tileCertExpiring", { n: 5 }));
+    expect(security.lines).toContain(t("settingsUx.tileCertExpiring", { left: t("set.certDaysLeftOne", { n: 1 }) }));
     expect(security.attention).toBe(true);
   });
 

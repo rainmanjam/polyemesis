@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Gelişmiş",
   "settingsUx.showAdvanced": "Gelişmiş ayarları göster",
   "settingsUx.showAdvancedHint": "Kapalıyken uzman ayarları gizlenir. Değiştirdiğiniz ya da sorunlu bir ayar her zaman gösterilir.",
-  "settingsUx.advancedHidden": "{n} gelişmiş ayar gizli: {names}.",
+  "settingsUx.advancedHidden": "Gizli gelişmiş ayarlar: {names}.",
   "settingsUx.showThem": "Gelişmişleri göster",
   "settingsUx.groupRoutine": "Rutin",
   "settingsUx.groupRoutineDesc": "En çok değiştireceğiniz ayarlar.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover kapalı",
   "settingsUx.tileStagger": "Bağlantı aralığı: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Sertifikanın süresi {n} gün içinde doluyor",
+  "settingsUx.tileCertExpiring": "Sertifika: {left}",
   "settingsUx.tileTokens": "API belirteçleri: {n}",
   "settingsUx.tileBackedUp": "secret.key yedeği onaylandı",
-  "settingsUx.tileNotBackedUp": "secret.key yedeği onaylanmadı"
+  "settingsUx.tileNotBackedUp": "secret.key yedeği onaylanmadı",
+  "settingsUx.saveCredsNeedsBoth": "Kaydetmek için iki alanı da doldurun. Kayıtlı bir gizli anahtar bir daha gösterilmez, bu yüzden her değişiklikte yeniden yapıştırın."
 }

@@ -365,4 +365,67 @@ describe("Platforms as rows (settings-council R1, R2, R10, R16)", () => {
     expect(await screen.findByText(T("settingsUx.platformsBanner"))).toBeTruthy();
     expect(screen.queryByText(T("set.whyDevApp"), { selector: "[data-slot=card-title]" })).toBeNull();
   });
+
+  it("says why Save credentials is greyed, in words beside it", async () => {
+    guides = [guide("twitch", "Twitch")];
+    creds = [{ platform: "twitch", clientId: "id", hasSecret: true, updatedAt: "" } as PlatformCreds];
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.manage")}: Twitch` }));
+    const save = await screen.findByRole("button", { name: new RegExp(T("i18nSweep.saveCredentials")) });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    const reason = document.getElementById(save.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toBe(T("settingsUx.saveCredsNeedsBoth"));
+  });
+
+  it("keeps a working pair's credential layer closed, and Show advanced opens it", async () => {
+    guides = [guide("twitch", "Twitch")];
+    creds = [{ platform: "twitch", clientId: "id", hasSecret: true, updatedAt: "" } as PlatformCreds];
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.manage")}: Twitch` }));
+    expect(screen.getByText(T("settingsUx.appCredentials")).closest("details")?.open).toBe(false);
+    cleanup();
+    window.localStorage.setItem("polyemesis.settings.showAdvanced", "1");
+    open("/settings?tab=platforms");
+    fireEvent.click(await screen.findByRole("button", { name: `${T("settingsUx.manage")}: Twitch` }));
+    expect(screen.getByText(T("settingsUx.appCredentials")).closest("details")?.open).toBe(true);
+  });
+
+  it("keeps the capability table closed until asked for", async () => {
+    open("/settings?tab=platforms");
+    const show = await screen.findByRole("button", { name: T("settingsUx.showTable") });
+    expect(document.getElementById("platform-capability-table")).toBeNull();
+    fireEvent.click(show);
+    expect(document.getElementById("platform-capability-table")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: T("settingsUx.hideTable") }));
+    expect(document.getElementById("platform-capability-table")).toBeNull();
+  });
 });
+
+describe("the hidden-advanced line (settings-council R7)", () => {
+  it("turns the switch on from the line that names what is hidden", async () => {
+    open("/settings?tab=pipeline");
+    const line = await screen.findByTestId("advanced-hidden");
+    fireEvent.click(within(line).getByRole("button", { name: T("settingsUx.showThem") }));
+    expect(screen.queryByTestId("advanced-hidden")).toBeNull();
+    expect(advancedCard("set.processLogs")?.hidden).toBe(false);
+  });
+
+  it("opens the transport details with the switch on", async () => {
+    window.localStorage.setItem("polyemesis.settings.showAdvanced", "1");
+    open("/settings?tab=security");
+    const summary = await screen.findByText(T("settingsUx.tlsDetails"));
+    expect(summary.closest("details")?.open).toBe(true);
+  });
+
+  it("copies the full data path, not the shortened one", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.assign(navigator, { clipboard: { writeText } });
+    open("/settings?tab=security");
+    const p = await panel();
+    await waitFor(() => expect(p.querySelector("code[title]")).not.toBeNull());
+    const card = p.querySelector('[data-tour="data-directory"]') as HTMLElement;
+    fireEvent.click(within(card).getByRole("button", { name: T("set.copy") }));
+    expect(writeText).toHaveBeenCalledWith("/var/lib/polyemesis/a/very/long/path/for/the/data/dir");
+  });
+});
+

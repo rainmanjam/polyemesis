@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Erweitert",
   "settingsUx.showAdvanced": "Erweiterte Einstellungen anzeigen",
   "settingsUx.showAdvancedHint": "Aus hält Experteneinstellungen aus dem Weg. Eine geänderte Einstellung oder eine mit einem Problem wird immer angezeigt.",
-  "settingsUx.advancedHidden": "{n} erweiterte Einstellungen ausgeblendet: {names}.",
+  "settingsUx.advancedHidden": "Ausgeblendete erweiterte Einstellungen: {names}.",
   "settingsUx.showThem": "Erweiterte anzeigen",
   "settingsUx.groupRoutine": "Alltag",
   "settingsUx.groupRoutineDesc": "Die Einstellungen, die Sie am ehesten ändern.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover aus",
   "settingsUx.tileStagger": "Verbindungsstaffelung: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Zertifikat läuft in {n} Tagen ab",
+  "settingsUx.tileCertExpiring": "Zertifikat: {left}",
   "settingsUx.tileTokens": "API-Tokens: {n}",
   "settingsUx.tileBackedUp": "Sicherung von secret.key bestätigt",
-  "settingsUx.tileNotBackedUp": "Sicherung von secret.key nicht bestätigt"
+  "settingsUx.tileNotBackedUp": "Sicherung von secret.key nicht bestätigt",
+  "settingsUx.saveCredsNeedsBoth": "Füllen Sie beide Felder aus, um zu speichern. Ein gespeichertes Secret wird nie wieder angezeigt, fügen Sie es bei jeder Änderung erneut ein."
 }

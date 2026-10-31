@@ -139,8 +139,17 @@ export function overviewTiles(
   if (mayClaim(reads.tls)) {
     const tls = reads.tls.value;
     securityLines.push(t("settingsUx.tileTls", { mode: t(TLS_MODE[tls.mode]) }));
-    if (tls.certificate && tls.certificate.daysRemaining < 30) {
-      securityLines.push(t("settingsUx.tileCertExpiring", { n: Math.max(tls.certificate.daysRemaining, 0) }));
+    const cert = tls.certificate;
+    if (cert && cert.daysRemaining < 30) {
+      // The transport card's own words for the time left, so the two never
+      // disagree and "1 days" never appears.
+      const n = Math.abs(cert.daysRemaining);
+      const left = cert.expired
+        ? n === 0
+          ? t("set.certExpiredToday")
+          : t(n === 1 ? "set.certExpiredAgoOne" : "set.certExpiredAgoMany", { n })
+        : t(n === 1 ? "set.certDaysLeftOne" : "set.certDaysLeftMany", { n });
+      securityLines.push(t("settingsUx.tileCertExpiring", { left }));
       securityAttention = true;
     }
   } else {

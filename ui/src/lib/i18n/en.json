@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Advanced",
   "settingsUx.showAdvanced": "Show advanced settings",
   "settingsUx.showAdvancedHint": "Off keeps expert settings out of the way. A setting you changed, or one with a problem, is always shown.",
-  "settingsUx.advancedHidden": "{n} advanced settings hidden: {names}.",
+  "settingsUx.advancedHidden": "Hidden advanced settings: {names}.",
   "settingsUx.showThem": "Show advanced",
   "settingsUx.groupRoutine": "Routine",
   "settingsUx.groupRoutineDesc": "The settings you are most likely to change.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover off",
   "settingsUx.tileStagger": "Connection stagger: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Certificate expires in {n} days",
+  "settingsUx.tileCertExpiring": "Certificate: {left}",
   "settingsUx.tileTokens": "API tokens: {n}",
   "settingsUx.tileBackedUp": "secret.key backup confirmed",
-  "settingsUx.tileNotBackedUp": "secret.key backup not confirmed"
+  "settingsUx.tileNotBackedUp": "secret.key backup not confirmed",
+  "settingsUx.saveCredsNeedsBoth": "Fill in both fields to save. A stored secret is never shown again, so paste it again with any change."
 }

@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "高级",
   "settingsUx.showAdvanced": "显示高级设置",
   "settingsUx.showAdvancedHint": "关闭时隐藏专家设置。你改过的设置或有问题的设置始终显示。",
-  "settingsUx.advancedHidden": "已隐藏 {n} 项高级设置：{names}。",
+  "settingsUx.advancedHidden": "已隐藏的高级设置：{names}。",
   "settingsUx.showThem": "显示高级设置",
   "settingsUx.groupRoutine": "常用",
   "settingsUx.groupRoutineDesc": "你最可能修改的设置。",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "故障切换已关闭",
   "settingsUx.tileStagger": "连接错开间隔：{ms} 毫秒",
   "settingsUx.tileTls": "TLS：{mode}",
-  "settingsUx.tileCertExpiring": "证书将在 {n} 天后过期",
+  "settingsUx.tileCertExpiring": "证书：{left}",
   "settingsUx.tileTokens": "API 令牌：{n}",
   "settingsUx.tileBackedUp": "已确认备份 secret.key",
-  "settingsUx.tileNotBackedUp": "尚未确认备份 secret.key"
+  "settingsUx.tileNotBackedUp": "尚未确认备份 secret.key",
+  "settingsUx.saveCredsNeedsBoth": "请填写两个字段后保存。已保存的密钥不会再显示，因此每次修改都需要重新粘贴。"
 }

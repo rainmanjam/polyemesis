@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useId, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
@@ -44,6 +44,8 @@ import { SettingsOverview } from "@/components/SettingsOverview";
 import { readSecretKeyAck, SECRET_KEY_ACK } from "@/lib/settingsOverview";
 import { StatusPill } from "@/components/StatusPill";
 import { EmptyState } from "@/components/EmptyState";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
 import { platformSetupStatus } from "@/lib/status";
 import { SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
 import {
@@ -634,10 +636,7 @@ function AdvancedHiddenLine({
       className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border-strong px-3 py-2 lg:col-span-2"
     >
       <span className="mr-auto text-sm text-muted-foreground">
-        {t("settingsUx.advancedHidden", {
-          n: hidden.length,
-          names: hidden.map((card) => t(card)).join(", "),
-        })}
+        {t("settingsUx.advancedHidden", { names: hidden.map((card) => t(card)).join(", ") })}
       </span>
       <Button size="sm" variant="outline" onClick={() => ctx.setShow(true)}>
         {t("settingsUx.showThem")}
@@ -1440,11 +1439,6 @@ function PipelineSettings({
         </CardContent>
       </Card>
 
-      <ChatCommandSettings
-        value={draft.chatCommands}
-        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
-      />
-
       {/* Automod sits directly after chat retention, because the two are the
           same subject: retention is the DEPTH the history checker can see, and
           a rate detector with a two-hour scrollback behind it is a different
@@ -1461,6 +1455,11 @@ function PipelineSettings({
       <AutomodConfig settings={draft} onChange={setDraft} saveError={saveError} />
 
       <AutomodMatrix settings={draft} onChange={setDraft} />
+
+      <ChatCommandSettings
+        value={draft.chatCommands}
+        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
 
       {/* Alert DELIVERY, not alert matching. Which conditions fire is per-rule
           and lives on the Automation page; this is the one install-wide answer
@@ -2788,13 +2787,21 @@ export function PlatformCredCard({
   // when there is nothing stored yet (connecting is impossible without it) or
   // when the platform refused what is stored; closed once the pair works, so a
   // connected platform shows its accounts first.
-  const [credsOpen, setCredsOpen] = useState(!creds?.hasSecret || creds?.lastCheck?.state === "rejected");
+  // Show advanced settings opens it too (settings-council R7: one switch for
+  // every advanced layer on the page, not only the Pipeline cards).
+  const { show: showAdvanced } = useContext(AdvancedContext);
+  const [credsOpen, setCredsOpen] = useState(
+    showAdvanced || !creds?.hasSecret || creds?.lastCheck?.state === "rejected",
+  );
 
   // ONE WARNING PER CARD, the one that applies now (settings-council R16). A
   // redirect problem the server found for THIS origin blocks connecting today,
   // so it outranks the platform's standing caveat; whichever is not shown here
   // is in the setup guide below, not lost.
   const warning = guide.redirectWarnings?.[0] ?? guide.note ?? "";
+  const saveReasonId = useId();
+  const saveReason =
+    !busy && (!clientId.trim() || !clientSecret.trim()) ? t("settingsUx.saveCredsNeedsBoth") : null;
   const otherWarnings = [
     ...(guide.redirectWarnings ?? []).filter((w) => w !== warning),
     ...(guide.note && guide.note !== warning ? [guide.note] : []),
@@ -2939,7 +2946,8 @@ export function PlatformCredCard({
         <div className="flex flex-col gap-1">
           <CardTitle className="flex items-center gap-2">
             {guide.name}
-            {!guide.supported && <Badge variant="outline">{t("i18nSweep.manualKey")}</Badge>}
+            {/* The row's word for it (settings-council R11: one term). */}
+            {!guide.supported && <Badge variant="outline">{t("settingsUx.pillManualKey")}</Badge>}
             {creds?.hasSecret && <Badge variant="live">{t("i18nSweep.configured")}</Badge>}
           </CardTitle>
         </div>
@@ -3107,7 +3115,12 @@ export function PlatformCredCard({
                 )}
 
                 <div className="flex flex-wrap gap-1.5">
-                  <Button size="sm" onClick={save} disabled={busy || !clientId.trim() || !clientSecret.trim()}>
+                  <Button
+                    size="sm"
+                    onClick={save}
+                    disabled={busy || !clientId.trim() || !clientSecret.trim()}
+                    aria-describedby={disabledDescribedBy(saveReasonId, saveReason)}
+                  >
                     {busy ? <Loader2 className="animate-spin" /> : <Save />} {t("i18nSweep.saveCredentials")}
                   </Button>
                   {creds?.hasSecret && (
@@ -3121,6 +3134,11 @@ export function PlatformCredCard({
                     </Button>
                   )}
                 </div>
+
+                {/* Why Save is greyed, in words (the kit's DisabledReason): the
+                    usual case is an operator editing only the ID of a pair whose
+                    secret is stored and can never be shown back. */}
+                <DisabledReason id={saveReasonId} reason={saveReason} />
 
                 {guide.redirectPath && (
                   <div className="flex flex-col gap-1">
@@ -3603,6 +3621,9 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
 
 function TransportSecurity() {
   const t = useT();
+  // The details below open with the page's Show advanced switch (settings-
+  // council R7); closed otherwise.
+  const { show: showAdvanced } = useContext(AdvancedContext);
   const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -3710,7 +3731,7 @@ function TransportSecurity() {
                 Let's Encrypt walkthrough and the config.yaml are what they read
                 once. A native disclosure keeps the fields mounted, so the
                 search can still open it and land on the hostname field. */}
-            <details className="group border-t border-border pt-2">
+            <details className="group border-t border-border pt-2" open={showAdvanced || undefined}>
               <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
                 <ChevronDown aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
                 {t("settingsUx.tlsDetails")}

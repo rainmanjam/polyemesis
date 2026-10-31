@@ -3239,7 +3239,7 @@
   "settingsUx.groupAdvanced": "Zaawansowane",
   "settingsUx.showAdvanced": "Pokaż ustawienia zaawansowane",
   "settingsUx.showAdvancedHint": "Wyłączone ukrywa ustawienia dla ekspertów. Ustawienie, które zmieniono, albo takie z problemem, jest zawsze widoczne.",
-  "settingsUx.advancedHidden": "Ukryte ustawienia zaawansowane ({n}): {names}.",
+  "settingsUx.advancedHidden": "Ukryte ustawienia zaawansowane: {names}.",
   "settingsUx.showThem": "Pokaż zaawansowane",
   "settingsUx.groupRoutine": "Codzienne",
   "settingsUx.groupRoutineDesc": "Ustawienia, które najczęściej będziesz zmieniać.",
@@ -3306,8 +3306,9 @@
   "settingsUx.tileFailoverOff": "Failover wyłączony",
   "settingsUx.tileStagger": "Rozłożenie połączeń: {ms} ms",
   "settingsUx.tileTls": "TLS: {mode}",
-  "settingsUx.tileCertExpiring": "Certyfikat wygasa za {n} dni",
+  "settingsUx.tileCertExpiring": "Certyfikat: {left}",
   "settingsUx.tileTokens": "Tokeny API: {n}",
   "settingsUx.tileBackedUp": "Kopia secret.key potwierdzona",
-  "settingsUx.tileNotBackedUp": "Kopia secret.key niepotwierdzona"
+  "settingsUx.tileNotBackedUp": "Kopia secret.key niepotwierdzona",
+  "settingsUx.saveCredsNeedsBoth": "Wypełnij oba pola, aby zapisać. Zapisany sekret nie jest już nigdy pokazywany, więc wklej go ponownie przy każdej zmianie."
 }
