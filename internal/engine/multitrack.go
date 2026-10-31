@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
 )
 
@@ -127,6 +128,17 @@ func twitchOneAudioTrack(row *db.Destination) bool {
 // because that answer does not depend on anything a network call could say.
 func vodNeedsNegotiation(row *db.Destination) bool {
 	return row != nil && row.VODProfile != nil && twitchOneAudioTrack(row) && wantsMultitrack(row)
+}
+
+// flvRefused is the reason this binary cannot carry a second audio track in an
+// FLV, or "" when it can or has never been asked. Only a probe that ran and
+// failed refuses; see ffmpeg.Tools.TwoAudioFLV for why unknown is not a refusal.
+func flvRefused(tools *ffmpeg.Tools) string {
+	ok, probed, reason := tools.TwoAudioFLV()
+	if probed && !ok {
+		return reason
+	}
+	return ""
 }
 
 // noteVODWithoutMultitrack is what an operator is told when they configured a
