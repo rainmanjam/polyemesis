@@ -94,6 +94,7 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	// three clicks from making valid is obstructive rather than protective.
 	//
 	check := s.providers.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
+	s.recordCredCheck(platform, check, req.ClientSecret)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"platform":  platform,
 		"hasSecret": true,
@@ -116,8 +117,27 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK,
-		s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret))
+	check := s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret)
+	s.recordCredCheck(platform, check, creds.ClientSecret)
+	writeJSON(w, http.StatusOK, check)
+}
+
+// recordCredCheck stores a verdict so the settings page can show it after a
+// reload (settings-council R10). A failure to store it is logged and NOT
+// returned: the save and the check both succeeded, and refusing them over the
+// bookkeeping would turn a working credential into an error on screen. The
+// cost of the failure is one reload that shows no verdict.
+//
+// The detail is STORED and then served on every list read, so it is scrubbed
+// of the secret that was checked first. The checkers write their own sentences
+// today, but a platform error body quoted back into one is exactly the kind of
+// change that would put a client secret on disk in the clear and into every
+// settings page load, and nothing at this layer would notice.
+func (s *Server) recordCredCheck(platform db.Platform, check oauth.CheckResult, secret string) {
+	if err := s.store.RecordPlatformCredsCheck(platform, string(check.State), string(check.Method),
+		scrubSecret(check.Detail, secret), time.Now()); err != nil {
+		s.log.Warn("could not store the credential check verdict", "platform", platform, "err", err)
+	}
 }
 
 func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +147,16 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// scrubSecret replaces every occurrence of secret in text. A blank or
+// whitespace-only secret scrubs nothing: replacing "" would interleave the
+// marker between every character of an innocent sentence.
+func scrubSecret(text, secret string) string {
+	if strings.TrimSpace(secret) == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, secret, "[redacted]")
 }
 
 // accountView is a stored account plus whether it still holds the permissions

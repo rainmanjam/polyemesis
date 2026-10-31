@@ -101,6 +101,7 @@ const CONFIG_SURFACES = [
   "components/DangerZone.tsx",
   "components/PresetReviewDialog.tsx",
   "components/SetupChecklist.tsx",
+  "components/SettingsOverview.tsx",
   "components/signature/RoutingSaveBar.tsx",
   "pages/SettingsPage.tsx",
   "pages/SourcesPage.tsx",

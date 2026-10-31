@@ -533,7 +533,7 @@ was never there. Check the source's probed layout on the **Sources** page agains
 the destination's selection.
 
 For a **video-only source**, this is expected until you turn on the silence tier
-(**Settings → Synthetic audio**), which synthesises a silent stereo track so
+(**Settings → Pipeline → Synthetic audio → Add silence when the source has no audio**), which synthesises a silent stereo track so
 destinations have something to select.
 
 ### It writes a file once and then never again

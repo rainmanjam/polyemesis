@@ -224,9 +224,9 @@ Editing the list *does* restart it, from item one.
 | How many files | one | every item in the list, in order, looping |
 | Failover while it plays | reads the programme as live | fully live; the primary is watched throughout |
 | It starts | when you save the setting | when nothing else can deliver, or when you pin it |
-| Where | *Settings → Ingest → Pull* | *Settings → Failover → Playlist*, or `failover.playlist` in the settings API |
+| Where | *Settings → Ingest → Pull* | *Settings → Pipeline → Failover → Playlist*, or `failover.playlist` in the settings API |
 
-Build the list in *Settings → Failover*, or set `failover.playlist.enabled` and
+Build the list in *Settings → Pipeline → Failover*, or set `failover.playlist.enabled` and
 `failover.playlist.items` through the settings API. `items` is a list, each
 entry an `{"upload": "<name>"}` naming a file already sent through the
 uploads page — a bare stored filename, never a path, confined to the uploads
@@ -251,7 +251,7 @@ transcoded once and appears in the sequence twice.
 
 ### Turning it on and off, including on a schedule
 
-*Settings → Failover → Playlist* has the enabled switch described above.
+*Settings → Pipeline → Failover → Playlist* has the enabled switch described above.
 *Automation → Schedules* can flip the same switch: a schedule with action
 **Start the playlist** or **Stop the playlist** sets
 `failover.playlist.enabled` and asks for a reconcile, through the same
@@ -398,7 +398,7 @@ of the departed ingest, which is precisely why it can never cause this.
 ## If you only want filler
 
 For "something on screen when the encoder drops" and nothing more, you want the
-**slate** — *Settings → Failover*. A slate is built at the probed geometry of the
+**slate** — *Settings → Pipeline → Failover*. A slate is built at the probed geometry of the
 departed ingest so a copying destination does not choke on the change, it needs
 no file and no matching, and it yields the moment the real feed returns. Reach
 for the failover playlist above when the filler should be *your* programming and

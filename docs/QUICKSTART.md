@@ -162,7 +162,7 @@ do.
 | Two programmes at once (e.g. horizontal + vertical) | **Sources** — add a second one |
 | Different resolutions per destination | **Renditions** |
 | Keep a recording | **Recordings** — the *Recording* card on that page, not Settings |
-| Stay on air when the encoder drops | **Settings → Failover** — off by default |
+| Stay on air when the encoder drops | **Settings → Pipeline → Failover** — off by default |
 | Serve a player from polyemesis itself | **Playout** |
 | Something is wrong | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 
@@ -181,5 +181,5 @@ selecting a track the source is not sending gives you silence. The Meters page
 measures what is actually going out.
 
 **A video-only source.** Every major platform refuses video with no audio.
-Turn on the silence tier (**Settings → Synthetic audio**) and polyemesis will
+Turn on the silence tier (**Settings → Pipeline → Synthetic audio → Add silence when the source has no audio**) and polyemesis will
 synthesise a silent stereo track so your destinations work.

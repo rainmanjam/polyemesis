@@ -18,6 +18,22 @@ type PlatformCreds struct {
 	ClientSecret string    `json:"-"` // never serialised outward
 	HasSecret    bool      `json:"hasSecret"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+	// LastCheck is the verdict the last Save or Re-check reached on THIS pair
+	// (settings-council R10), or nil when the pair has never been checked.
+	// Stored so the settings page can say "verified 3 days ago" on a reload
+	// instead of a bare "configured": the check itself makes an outbound call
+	// to the platform, so re-running it on every page load is not an option.
+	LastCheck *CredentialVerdict `json:"lastCheck,omitempty"`
+}
+
+// CredentialVerdict is a stored credential check. Plain strings rather than
+// the oauth package's types, because oauth imports this package. The detail is
+// the checker's operator-facing sentence, which never carries the secret.
+type CredentialVerdict struct {
+	State     string    `json:"state"`
+	Method    string    `json:"method"`
+	Detail    string    `json:"detail"`
+	CheckedAt time.Time `json:"checkedAt"`
 }
 
 // PutPlatformCreds stores a client ID/secret pair, encrypting the secret.
@@ -29,7 +45,8 @@ func (d *DB) PutPlatformCreds(box *secrets.Box, p Platform, clientID, clientSecr
 	_, err = d.sql.Exec(`INSERT INTO platform_creds (platform, client_id, client_secret_enc, updated_at)
 		VALUES (?,?,?,?)
 		ON CONFLICT(platform) DO UPDATE SET client_id=excluded.client_id,
-			client_secret_enc=excluded.client_secret_enc, updated_at=excluded.updated_at`,
+			client_secret_enc=excluded.client_secret_enc, updated_at=excluded.updated_at,
+			check_state='', check_method='', check_detail='', checked_at=0`,
 		p, clientID, enc, time.Now().Unix())
 	return err
 }
@@ -59,7 +76,8 @@ func (d *DB) GetPlatformCreds(box *secrets.Box, p Platform) (*PlatformCreds, err
 
 // ListPlatformCreds returns credentials without secrets, for the settings UI.
 func (d *DB) ListPlatformCreds() ([]PlatformCreds, error) {
-	rows, err := d.sql.Query(`SELECT platform, client_id, LENGTH(client_secret_enc), updated_at FROM platform_creds`)
+	rows, err := d.sql.Query(`SELECT platform, client_id, LENGTH(client_secret_enc), updated_at,
+		check_state, check_method, check_detail, checked_at FROM platform_creds`)
 	if err != nil {
 		return nil, err
 	}
@@ -71,15 +89,68 @@ func (d *DB) ListPlatformCreds() ([]PlatformCreds, error) {
 			c       PlatformCreds
 			n       int
 			updated int64
+			v       CredentialVerdict
+			checked int64
 		)
-		if err := rows.Scan(&c.Platform, &c.ClientID, &n, &updated); err != nil {
+		if err := rows.Scan(&c.Platform, &c.ClientID, &n, &updated,
+			&v.State, &v.Method, &v.Detail, &checked); err != nil {
 			return nil, err
 		}
 		c.HasSecret = n > 0
 		c.UpdatedAt = time.Unix(updated, 0)
+		// An empty state is "never checked", not a fourth verdict.
+		if v.State != "" {
+			v.CheckedAt = time.Unix(checked, 0)
+			c.LastCheck = &v
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// RecordPlatformCredsCheck stores the verdict a check reached on the pair that
+// is stored now (settings-council R10). ErrNotFound when no pair is stored, so
+// a verdict can never outlive the credentials it was about.
+func (d *DB) RecordPlatformCredsCheck(p Platform, state, method, detail string, at time.Time) error {
+	res, err := d.sql.Exec(`UPDATE platform_creds SET check_state=?, check_method=?, check_detail=?, checked_at=?
+		WHERE platform = ?`, state, method, detail, at.Unix(), p)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// MigratePlatformCredsCheck adds the four columns that hold the last
+// credential verdict (settings-council R10). Additive and defaulted: an older
+// binary never reads them, and a pair saved before them lists as never checked.
+func (d *DB) MigratePlatformCredsCheck() error {
+	// One column at a time, each checked before it is written (for the reason
+	// MigrateTimelineSubject records: one connection, so a read inside a
+	// transaction would wait), so a start that was interrupted between two
+	// ALTERs finishes the job on the next start instead of skipping it.
+	for _, col := range []struct{ name, ddl string }{
+		{"check_state", "TEXT NOT NULL DEFAULT ''"},
+		{"check_method", "TEXT NOT NULL DEFAULT ''"},
+		{"check_detail", "TEXT NOT NULL DEFAULT ''"},
+		{"checked_at", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		has, err := columnExists(d.sql, "platform_creds", col.name)
+		if err != nil {
+			return fmt.Errorf("inspect platform_creds columns: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(`ALTER TABLE platform_creds ADD COLUMN ` + col.name + ` ` + col.ddl); err != nil {
+			return fmt.Errorf("add platform_creds.%s: %w", col.name, err)
+		}
+	}
+	return nil
 }
 
 // DeletePlatformCreds removes a developer app registration.

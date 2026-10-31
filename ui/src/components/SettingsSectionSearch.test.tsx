@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SettingsSectionSearch } from "./SettingsSectionSearch";
 
 const labels = {
+  overview: "Overview",
   ingest: "Ingest",
   pipeline: "Pipeline",
   platforms: "Platforms",
@@ -37,7 +38,9 @@ describe("SettingsSectionSearch", () => {
     const option = screen.getByRole("option", { name: /Broker URL/ });
     expect(option.textContent).toContain("Pipeline › MQTT");
     fireEvent.mouseDown(option);
-    expect(onPick).toHaveBeenCalledWith("pipeline");
+    // The hit travels with the section, so the page can open the card it sits
+    // in when that card is a hidden advanced one (settings-council R7).
+    expect(onPick).toHaveBeenCalledWith("pipeline", expect.objectContaining({ key: "set.brokerUrl", cardKey: "set.mqtt" }));
   });
 
   it("tells the four Enabled switches apart by their card", () => {

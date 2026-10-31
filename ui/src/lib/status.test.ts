@@ -6,6 +6,7 @@ import {
   destinationStatus,
   ingestPhaseStatus,
   outputStatus,
+  platformSetupStatus,
   processStatus,
   recorderStatus,
   renditionStatus,
@@ -112,5 +113,39 @@ describe("every label the vocabulary can return exists in the English catalogue"
   ];
   it.each([...new Set(keys.map((k) => k.labelKey))])("%s is catalogued", (key) => {
     expect(Object.prototype.hasOwnProperty.call(en, key)).toBe(true);
+  });
+});
+
+describe("platformSetupStatus (settings-council R1, R10)", () => {
+  const base = { supported: true, hasSecret: false, accounts: 0, reconnectNeeded: false };
+
+  it("reads an untouched platform as not set up, not as a fault", () => {
+    expect(platformSetupStatus(base)).toMatchObject({ labelKey: "settingsUx.pillNotSetUp", tone: "idle" });
+  });
+
+  it("reads saved credentials with no account as unfinished, not as connected", () => {
+    expect(platformSetupStatus({ ...base, hasSecret: true })).toMatchObject({
+      labelKey: "settingsUx.pillCredsSaved",
+      tone: "warn",
+    });
+  });
+
+  it("reads a pair the platform refused as bad, even after a reload", () => {
+    expect(platformSetupStatus({ ...base, hasSecret: true, lastCheckState: "rejected" })).toMatchObject({
+      labelKey: "settingsUx.pillCredsRejected",
+      tone: "bad",
+    });
+  });
+
+  it("reads a connected account as ok, and one that must reconnect as a warning over it", () => {
+    expect(platformSetupStatus({ ...base, hasSecret: true, accounts: 1 }).tone).toBe("ok");
+    expect(platformSetupStatus({ ...base, hasSecret: true, accounts: 1, reconnectNeeded: true })).toMatchObject({
+      labelKey: "settingsUx.pillReconnect",
+      tone: "warn",
+    });
+  });
+
+  it("reads a manual-key platform as such rather than as not set up", () => {
+    expect(platformSetupStatus({ ...base, supported: false }).labelKey).toBe("settingsUx.pillManualKey");
   });
 });

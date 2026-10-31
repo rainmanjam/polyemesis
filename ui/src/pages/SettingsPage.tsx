@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useId, useState } from "react";
 import { urlCarriesCredential } from "@/lib/credential-url";
 import { SecretCode } from "@/components/SecretCode";
-import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { SettingsSectionSearch } from "@/components/SettingsSectionSearch";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
+  ChevronDown,
   RefreshCw,
   Check,
   Copy,
@@ -26,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { SecretInput } from "@/components/SecretInput";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useIngestLive } from "@/hooks/useLiveData";
 import { AccountLiveStats } from "@/components/AccountLiveStats";
 import { DeviceCodeDialog } from "@/components/DeviceCodeDialog";
@@ -38,6 +40,21 @@ import { ObsBridgeSettings } from "@/components/ObsBridgeSettings";
 import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SettingsOverview } from "@/components/SettingsOverview";
+import { readSecretKeyAck, SECRET_KEY_ACK } from "@/lib/settingsOverview";
+import { StatusPill } from "@/components/StatusPill";
+import { EmptyState } from "@/components/EmptyState";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
+import { platformSetupStatus } from "@/lib/status";
+import { SETTINGS_GROUPS, settingsTabFor, type SettingsHit } from "@/lib/settingsSearch";
+import {
+  ADVANCED_CARDS,
+  advancedCardShown,
+  isAdvancedCard,
+  useShowAdvanced,
+  type AdvancedCard as AdvancedCardKey,
+} from "@/lib/settingsAdvanced";
 import {
   Select,
   SelectContent,
@@ -101,9 +118,9 @@ import {
   type ReadState,
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
-import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
 import { ChatCommandSettings } from "@/components/ChatCommandSettings";
 import type {
+  StoredCredentialCheck,
   AcmeCheckId,
   AcmeCheckStatus,
   AcmePreflight,
@@ -138,6 +155,12 @@ export function SettingsPage() {
   // could not be read must leave this page exactly as it was before the count
   // existed, never draw an empty state over an install with four sources.
   const [sourceCount, setSourceCount] = useState<number | null>(null);
+  // The programme the Ingest tab writes through to (settings-council R8). The
+  // server writes PUT /settings' ingest to DefaultSourceID -- the first source
+  // by position -- which the list marks isDefault, so the scope label names the
+  // same row the save will change. Null when unknown: the label then says only
+  // that it is one programme's setting, never a guessed name.
+  const [defaultSourceName, setDefaultSourceName] = useState<string | null>(null);
   // Whether the question has been ANSWERED, however it was answered. The render
   // gate waits on this rather than on the count, so a failed read stops the
   // spinner instead of leaving it turning for ever.
@@ -163,7 +186,10 @@ export function SettingsPage() {
     api.getSettings().then(setSettings).catch(() => setLoadFailed(true));
     api
       .listSources()
-      .then((rows) => setSourceCount(rows.length))
+      .then((rows) => {
+        setSourceCount(rows.length);
+        setDefaultSourceName((rows.find((r) => r.isDefault) ?? rows[0])?.name ?? null);
+      })
       // NOT 0. Claiming zero sources because the request failed would replace
       // the ingest form with "create a source" on an install that has several,
       // which is a worse lie than the one this change is fixing. Unknown leaves
@@ -192,8 +218,32 @@ export function SettingsPage() {
   // An explicit ?tab=ingest is still honoured. Somebody who navigated there
   // deliberately gets the tab and the explanation on it, which is a different
   // thing from being put there.
-  const tab = params.get("tab") ?? (sourceCount === 0 ? "pipeline" : "ingest");
+  //
+  // On an install with no source that is now the Overview (settings-council
+  // R3): its "Set up this stream" checklist is the shortest true answer to
+  // "what do I do first", where the eleven-card Pipeline tab was the longest.
+  // An install that already has sources keeps landing where it always did.
+  const requested = params.get("tab") ?? (sourceCount === 0 ? "overview" : "ingest");
+  // Every value a link has ever carried keeps its panel (settingsTabFor); an
+  // unknown one opens the Overview instead of an empty panel.
+  const tab = settingsTabFor(requested);
   const navigate = useNavigate();
+  const openTab = (v: string) => setParams({ tab: v });
+
+  // ONE "SHOW ADVANCED" SWITCH for the page (settings-council R7), remembered
+  // in this browser. `revealed` holds advanced cards a search result opened
+  // while the switch was off: the operator asked for that card by name, so it
+  // is shown without turning every other expert card on.
+  const [showAdvanced, setShowAdvanced] = useShowAdvanced();
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
+  const onSearchPick = (v: string, hit?: SettingsHit) => {
+    if (v === "debug") {
+      navigate("/system");
+      return;
+    }
+    if (hit && isAdvancedCard(hit.cardKey)) setRevealed((prev) => new Set(prev).add(hit.cardKey));
+    openTab(v);
+  };
 
   // The OAuth round trip is a full navigation, so its outcome comes back in
   // the query string rather than as an XHR response.
@@ -311,7 +361,7 @@ export function SettingsPage() {
   };
 
   // The old Debug tab's address, kept working (A17).
-  if (tab === "debug") return <Navigate to="/system" replace />;
+  if (requested === "debug") return <Navigate to="/system" replace />;
 
   if (loadFailed) {
     return (
@@ -348,6 +398,7 @@ export function SettingsPage() {
 
       <SettingsSectionSearch
         labels={{
+          overview: t("settingsUx.tabOverview"),
           ingest: t("set.ingest"),
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
@@ -358,40 +409,94 @@ export function SettingsPage() {
           debug: t("set.tabDebug"),
         }}
         // Debug lives on the System page now (A17); the search still finds it.
-        onPick={(v) => (v === "debug" ? navigate("/system") : setParams({ tab: v }))}
+        // A hit on an advanced card opens that card (settings-council R7).
+        onPick={onSearchPick}
       />
 
       {/* The sections run down a left rail on wide screens and stack on narrow
-          ones. The rail is the same tab list, so a rail link and a search result
-          both set the same ?tab= value. */}
+          ones. The rail is the same tab lists, so a rail link and a search
+          result both set the same ?tab= value.
+
+          GROUPED BY TASK (settings-council R6): Stream in, Stream out,
+          Processing, Access and security, then the Advanced switch and Danger
+          zone last. Each group is its own tablist, labelled by its visible
+          heading, so the headings and the switch are never children of a
+          tablist -- a screen reader hears "Stream out, tab list, 3 items"
+          rather than a heading announced as a tab. */}
+      <AdvancedContext.Provider value={{ show: showAdvanced, revealed, setShow: setShowAdvanced }}>
       <Tabs
         value={tab}
         orientation="vertical"
-        onValueChange={(v) => setParams({ tab: v })}
-        className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-4 [&>[role=tablist]]:lg:row-span-full [&>[role=tabpanel]]:lg:col-start-2"
+        onValueChange={openTab}
+        className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-4 [&>[role=tabpanel]]:lg:col-start-2"
       >
-        <TabsList className="lg:flex-col lg:items-stretch">
-          <TabsTrigger value="ingest">{t("set.ingest")}</TabsTrigger>
-          <TabsTrigger value="pipeline">{t("set.tabPipeline")}</TabsTrigger>
-          <TabsTrigger value="platforms">{t("set.tabPlatforms")}</TabsTrigger>
-          {/* Chat overlays for OBS. Its own section rather than a card under
-              Platforms: it mints credentials, and it is where an operator goes
-              to rotate one. */}
-          <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
-          {/* The OBS bridge (#16): OBS starting, stopping and switching scene
-              drives destinations. Its own section because it holds a
-              credential (the obs-websocket password) and a stop switch that
-              ends broadcasts. */}
-          <TabsTrigger value="obs">{t("obs.tab")}</TabsTrigger>
-          <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
+        <nav
+          aria-label={t("set.title")}
+          className="flex flex-wrap items-start gap-2 lg:row-span-full lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-1 lg:rounded-md lg:border lg:border-border lg:bg-card lg:p-1"
+        >
+          <TabsList aria-label={t("settingsUx.tabOverview")} className="lg:flex-col lg:items-stretch lg:border-0 lg:bg-transparent lg:p-0">
+            <TabsTrigger value="overview">{t("settingsUx.tabOverview")}</TabsTrigger>
+          </TabsList>
+          {SETTINGS_GROUPS.map((group) => (
+            <div key={group.label} className="flex flex-col gap-0.5">
+              <span id={`settings-group-${group.label}`} className="px-2.5 pt-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t(group.label)}
+              </span>
+              <TabsList
+                aria-labelledby={`settings-group-${group.label}`}
+                className="lg:flex-col lg:items-stretch lg:border-0 lg:bg-transparent lg:p-0"
+              >
+                {group.tabs.map((v) => (
+                  <TabsTrigger key={v} value={v}>
+                    {t(RAIL_LABEL[v])}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+          ))}
+          {/* The Advanced switch sits in the rail because it changes every
+              tab, not one card (settings-council R7). */}
+          <div className="flex flex-col gap-1 px-2.5 pt-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("settingsUx.groupAdvanced")}
+            </span>
+            <div className="flex items-center justify-between gap-2">
+              {/* A plain label, not the kit's Label: this is the rail's switch,
+                  not a field of any tab, so it stays out of the search index. */}
+              <label htmlFor="settings-show-advanced" className="text-sm">
+                {t("settingsUx.showAdvanced")}
+              </label>
+              <Switch
+                id="settings-show-advanced"
+                checked={showAdvanced}
+                onCheckedChange={setShowAdvanced}
+                aria-describedby="settings-show-advanced-hint"
+              />
+            </div>
+            <span id="settings-show-advanced-hint" className="text-sm text-muted-foreground">
+              {t("settingsUx.showAdvancedHint")}
+            </span>
+          </div>
           {/* Last, set apart and in the down tone (A17): the section that only
               holds what cannot be undone. Debug, which used to sit here, is on
               the System page. */}
-          <TabsTrigger value="danger" className="text-down lg:mt-3">
-            {t("danger.title")}
-          </TabsTrigger>
-        </TabsList>
+          <TabsList aria-label={t("danger.title")} className="lg:mt-2 lg:flex-col lg:items-stretch lg:border-0 lg:bg-transparent lg:p-0">
+            <TabsTrigger value="danger" className="text-down">
+              {t("danger.title")}
+            </TabsTrigger>
+          </TabsList>
+        </nav>
 
+        <TabsContent value="overview">
+          <SettingsOverview
+            settings={settings}
+            system={system}
+            sourceCount={sourceCount}
+            defaultSourceName={defaultSourceName}
+            showAdvanced={showAdvanced}
+            onOpen={openTab}
+          />
+        </TabsContent>
         <TabsContent value="ingest">
           {/* The form is REPLACED rather than disabled, and the difference is
               what the operator is told. A greyed-out form says "not now"; this
@@ -418,17 +523,16 @@ export function SettingsPage() {
                   operator has not created a source yet by definition -- so
                   hiding them with the form would have taken the check away
                   from exactly the person it exists for. */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("set.ffmpegTitle")}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <FfmpegBadges system={system} />
-                </CardContent>
-              </Card>
+              <FfmpegCard system={system} />
             </div>
           ) : (
-            <IngestSettings settings={settings} system={system} onSave={save} saving={saving} />
+            <IngestSettings
+              settings={settings}
+              system={system}
+              onSave={save}
+              saving={saving}
+              programme={defaultSourceName}
+            />
           )}
         </TabsContent>
         <TabsContent value="pipeline">
@@ -457,7 +561,136 @@ export function SettingsPage() {
           <DangerZone />
         </TabsContent>
       </Tabs>
+      </AdvancedContext.Provider>
     </div>
+  );
+}
+
+/** The rail's word for each grouped tab. */
+const RAIL_LABEL: Record<(typeof SETTINGS_GROUPS)[number]["tabs"][number], TranslationKey> = {
+  overview: "settingsUx.tabOverview",
+  ingest: "set.ingest",
+  pipeline: "set.tabPipeline",
+  platforms: "set.tabPlatforms",
+  overlays: "set.tabOverlays",
+  obs: "obs.tab",
+  security: "set.tabSecurity",
+  danger: "danger.title",
+  debug: "set.tabDebug",
+};
+
+/** The page's Advanced switch, read by every AdvancedCard below. */
+const AdvancedContext = createContext<{
+  show: boolean;
+  revealed: ReadonlySet<string>;
+  setShow: (next: boolean) => void;
+}>({ show: true, revealed: new Set(), setShow: () => {} });
+
+/** One advanced card (settings-council R4, R7), HIDDEN rather than unmounted
+ *  when it is not shown -- see lib/settingsAdvanced.ts for why. `settings` is
+ *  the STORED document, not the draft: a card shown because its saved value is
+ *  not the default must not vanish under the operator's cursor the moment they
+ *  type the default back in. */
+function AdvancedCard({
+  card,
+  settings,
+  inError,
+  children,
+}: {
+  card: AdvancedCardKey;
+  settings: Settings;
+  inError: boolean;
+  children: React.ReactNode;
+}) {
+  const ctx = useContext(AdvancedContext);
+  const shown = advancedCardShown(card, { show: ctx.show, settings, inError, revealed: ctx.revealed });
+  return (
+    <div hidden={!shown} data-advanced-card={card} className="contents">
+      {children}
+    </div>
+  );
+}
+
+/** The line that says what the Advanced switch is hiding on this tab, so an
+ *  operator never has to guess whether a setting exists. Names the hidden
+ *  cards and turns the switch on in one click. Renders nothing when nothing is
+ *  hidden. */
+function AdvancedHiddenLine({
+  settings,
+  inError,
+  cards,
+}: {
+  settings: Settings;
+  inError: boolean;
+  cards: readonly AdvancedCardKey[];
+}) {
+  const t = useT();
+  const ctx = useContext(AdvancedContext);
+  const hidden = cards.filter(
+    (card) => !advancedCardShown(card, { show: ctx.show, settings, inError, revealed: ctx.revealed }),
+  );
+  if (hidden.length === 0) return null;
+  return (
+    <div
+      data-testid="advanced-hidden"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border-strong px-3 py-2 lg:col-span-2"
+    >
+      <span className="mr-auto text-sm text-muted-foreground">
+        {t("settingsUx.advancedHidden", { names: hidden.map((card) => t(card)).join(", ") })}
+      </span>
+      <Button size="sm" variant="outline" onClick={() => ctx.setShow(true)}>
+        {t("settingsUx.showThem")}
+      </Button>
+    </div>
+  );
+}
+
+/** A group heading inside a tab (settings-council R4). */
+function SettingsGroupHeading({ title, desc }: { title: TranslationKey; desc: TranslationKey }) {
+  const t = useT();
+  return (
+    <div className="flex flex-col gap-0.5 pt-1 lg:col-span-2">
+      <h2 className="text-sm font-semibold">{t(title)}</h2>
+      <p className="text-sm text-muted-foreground">{t(desc)}</p>
+    </div>
+  );
+}
+
+/** Says which programmes a card's settings apply to (settings-council R8). */
+function ScopeNote({ programme }: { programme?: string | null }) {
+  const t = useT();
+  if (programme === undefined) {
+    return (
+      <Badge variant="outline" className="w-fit normal-case">
+        {t("settingsUx.scopeInstall")}
+      </Badge>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <Badge variant="outline" className="w-fit normal-case">
+        {programme ? t("settingsUx.scopeProgramme", { name: programme }) : t("settingsUx.scopeOneProgramme")}
+      </Badge>
+      <Link to="/sources" className="text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground">
+        {t("settingsUx.scopeOthersOnSources")}
+      </Link>
+    </span>
+  );
+}
+
+/** A card description cut to one plain line, with the full explanation one
+ *  click away (settings-council R11). The long text is unchanged; it is only
+ *  no longer the first thing the operator has to read. */
+function MoreAbout({ children }: { children: React.ReactNode }) {
+  const t = useT();
+  return (
+    <details className="group text-sm text-muted-foreground">
+      <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm underline-offset-2 hover:text-foreground hover:underline">
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+        {t("settingsUx.more")}
+      </summary>
+      <div className="mt-1">{children}</div>
+    </details>
   );
 }
 
@@ -468,11 +701,14 @@ function IngestSettings({
   system,
   onSave,
   saving,
+  programme,
 }: {
   settings: Settings;
   system: SystemInfo | null;
   onSave: (s: Settings) => void;
   saving: boolean;
+  /** The programme this form writes to, or null when it could not be named. */
+  programme: string | null;
 }) {
   const t = useT();
   const tn = useTN();
@@ -500,7 +736,9 @@ function IngestSettings({
       <Card>
         <CardHeader>
           <CardTitle>{t("set.ingest")}</CardTitle>
-          <CardDescription>{t("set.ingestDesc")}          </CardDescription>
+          <ScopeNote programme={programme} />
+          <CardDescription>{t("settingsUx.ingestShort")}</CardDescription>
+          <MoreAbout>{t("set.ingestDesc")}</MoreAbout>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
@@ -607,14 +845,19 @@ function IngestSettings({
             </>
           )}
 
-          {/* Degraded-link failover's thresholds (#6) are this programme's, so
-              they sit with its ingest. They take effect without a restart; see
-              docs/LINK-HEALTH.md. */}
-          <DegradedLinkSettings
-            idPrefix="ingest-degraded"
-            value={draft.ingest.degraded}
-            onChange={(degraded) => setDraft({ ...draft, ingest: { ...draft.ingest, degraded } })}
-          />
+          {/* Degraded-link failover's thresholds (#6) are per programme, and
+              their ONE HOME is that programme's row on Sources (settings-
+              council R13): this tab edits only the first programme, so a
+              second copy here could only ever reach one of them. Linked, not
+              deleted -- the control is one click away, for every programme.
+              The draft still carries the stored thresholds unchanged, so
+              saving this form never resets them. */}
+          <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+            {t("settingsUx.degradedOnSources")}
+            <Link to="/sources" className="underline underline-offset-2 hover:text-foreground">
+              {t("empty.goToSources")}
+            </Link>
+          </p>
 
           {/* Saving ingest settings reconciles the ingest, which restarts the
               FFmpeg child and drops every viewer. That is sometimes exactly
@@ -643,6 +886,7 @@ function IngestSettings({
       <Card className="h-fit">
         <CardHeader>
           <CardTitle>{t("set.encoderUrl")}</CardTitle>
+          <ScopeNote programme={programme} />
           <CardDescription>{t("set.pointObs")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -663,9 +907,13 @@ function IngestSettings({
               container: <code className="font-mono">mpegts</code>,
             })}
           </p>
-          <FfmpegBadges system={system} />
         </CardContent>
       </Card>
+
+      {/* The same FFmpeg card the zero-source branch draws (settings-council
+          R13): one component, both render paths, so the check docs/INSTALL.md
+          sends operators to reads the same whichever path they are on. */}
+      <FfmpegCard system={system} />
     </div>
   );
 }
@@ -691,7 +939,9 @@ function ListenerPortsCard({
     <Card>
       <CardHeader>
         <CardTitle>{t("set.listeners")}</CardTitle>
-        <CardDescription>{t("set.listenersDesc")}          </CardDescription>
+        <ScopeNote />
+        <CardDescription>{t("settingsUx.listenersShort")}</CardDescription>
+        <MoreAbout>{t("set.listenersDesc")}</MoreAbout>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         <div className="grid grid-cols-2 gap-2">
@@ -776,6 +1026,25 @@ function ListenerPortsOnly({
         </Button>
       }
     />
+  );
+}
+
+/** The FFmpeg capability card, drawn by BOTH ingest render paths (settings-
+ *  council R13). It used to be a card of its own on the zero-source branch and
+ *  a row inside the Encoder URL card on the other, so the same check looked
+ *  like two different things depending on whether a source existed. */
+function FfmpegCard({ system }: { system: SystemInfo | null }) {
+  const t = useT();
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle>{t("set.ffmpegTitle")}</CardTitle>
+        <ScopeNote />
+      </CardHeader>
+      <CardContent>
+        <FfmpegBadges system={system} />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -967,60 +1236,13 @@ function PipelineSettings({
       </div>
 
     <div className="grid gap-3 lg:grid-cols-2">
-      {/* FIRST in the tab, which is where db.Settings puts Display and for the
-          reason its comment gives: it is the one install-wide block that
-          changes what every other screen LOOKS like without changing what any
-          of them DO. Nothing on this page could reach it -- lib/format.ts has
-          held the zone for every clock in the console since it was written, and
-          api.ts pushes it in on every settings read and every settings save, so
-          the whole mechanism was live with no producer at the front of it. An
-          install could only ever read UTC.
+      <div className="lg:col-span-2">
+        {/* Every card on this tab writes the one install-wide settings
+            document (settings-council R8). */}
+        <ScopeNote />
+      </div>
 
-          It is on this tab rather than a Display tab of its own because it is a
-          field of the same Settings document as everything else here, and the
-          tab has the one Save that commits it. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.displayTitle")}</CardTitle>
-          <CardDescription>{t("set.displayDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="disp-tz">{t("set.displayTimeZone")}</Label>
-            <Input
-              id="disp-tz"
-              value={draft.display?.timeZone ?? ""}
-              placeholder={t("set.displayTimeZonePlaceholder")}
-              onChange={(e) => setDraft({ ...draft, display: { timeZone: e.target.value } })}
-            />
-            <span className="text-sm text-muted-foreground">{t("set.displayTimeZoneNote")}</span>
-            {/* Warned rather than refused -- see zoneResolves. The line is the
-                only thing between a typo and a console that reads UTC for ever
-                with nothing saying why. */}
-            {!zoneResolves(draft.display?.timeZone ?? "") && (
-              <span className="text-sm text-warn">{t("set.displayTimeZoneUnknown")}</span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.syntheticAudio")}</CardTitle>
-          <CardDescription>{t("set.syntheticDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="synth-silence">{t("set.synthesiseSilent")}</Label>
-            <Switch
-              id="synth-silence"
-              checked={draft.synth?.silenceOnVideoOnly ?? true}
-              onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
-            />
-          </div>
-          <span className="text-sm text-muted-foreground">{t("set.synthesiseNote")}</span>
-        </CardContent>
-      </Card>
+      <SettingsGroupHeading title="settingsUx.groupRoutine" desc="settingsUx.groupRoutineDesc" />
 
       <Card>
         <CardHeader>
@@ -1047,13 +1269,6 @@ function PipelineSettings({
           </div>
         </CardContent>
       </Card>
-
-      <MultitrackHardware draft={draft} setDraft={setDraft} />
-
-      <ChatCommandSettings
-        value={draft.chatCommands}
-        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
-      />
 
       <Card>
         <CardHeader>
@@ -1241,6 +1456,11 @@ function PipelineSettings({
 
       <AutomodMatrix settings={draft} onChange={setDraft} />
 
+      <ChatCommandSettings
+        value={draft.chatCommands}
+        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
+
       {/* Alert DELIVERY, not alert matching. Which conditions fire is per-rule
           and lives on the Automation page; this is the one install-wide answer
           behind all of them, and it is stored in the same settings tree as
@@ -1271,7 +1491,67 @@ function PipelineSettings({
         </CardContent>
       </Card>
 
+      <SettingsGroupHeading title="settingsUx.groupOnce" desc="settingsUx.groupOnceDesc" />
 
+      {/* FIRST in the tab, which is where db.Settings puts Display and for the
+          reason its comment gives: it is the one install-wide block that
+          changes what every other screen LOOKS like without changing what any
+          of them DO. Nothing on this page could reach it -- lib/format.ts has
+          held the zone for every clock in the console since it was written, and
+          api.ts pushes it in on every settings read and every settings save, so
+          the whole mechanism was live with no producer at the front of it. An
+          install could only ever read UTC.
+
+          It is on this tab rather than a Display tab of its own because it is a
+          field of the same Settings document as everything else here, and the
+          tab has the one Save that commits it. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("set.displayTitle")}</CardTitle>
+          <CardDescription>{t("set.displayDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="disp-tz">{t("set.displayTimeZone")}</Label>
+            <Input
+              id="disp-tz"
+              value={draft.display?.timeZone ?? ""}
+              placeholder={t("set.displayTimeZonePlaceholder")}
+              onChange={(e) => setDraft({ ...draft, display: { timeZone: e.target.value } })}
+            />
+            <span className="text-sm text-muted-foreground">{t("set.displayTimeZoneNote")}</span>
+            {/* Warned rather than refused -- see zoneResolves. The line is the
+                only thing between a typo and a console that reads UTC for ever
+                with nothing saying why. */}
+            {!zoneResolves(draft.display?.timeZone ?? "") && (
+              <span className="text-sm text-warn">{t("set.displayTimeZoneUnknown")}</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("set.syntheticAudio")}</CardTitle>
+          <CardDescription>{t("set.syntheticDesc")}          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="synth-silence">{t("set.synthesiseSilent")}</Label>
+            <Switch
+              id="synth-silence"
+              checked={draft.synth?.silenceOnVideoOnly ?? true}
+              onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
+            />
+          </div>
+          <span className="text-sm text-muted-foreground">{t("set.synthesiseNote")}</span>
+        </CardContent>
+      </Card>
+
+      {/* Failover stays OUT of the Advanced group on purpose: the dashboard
+          links to #failover (Dashboard.tsx), and an operator who followed
+          that link must land on the switch, whatever the Advanced switch says.
+          Off, it is already one row -- its fields render only once it is on. */}
       <Card>
         <CardHeader>
           {/* The anchor the dashboard's exposure line points at. The tab is
@@ -1279,7 +1559,8 @@ function PipelineSettings({
               a link from the dashboard lands on the switch rather than at the
               top of a long page. */}
           <CardTitle id="failover">{t("set.failover")}</CardTitle>
-          <CardDescription>{t("set.failoverDesc")}          </CardDescription>
+          <CardDescription>{t("settingsUx.failoverShort")}</CardDescription>
+          <MoreAbout>{t("set.failoverDesc")}</MoreAbout>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
@@ -1559,358 +1840,374 @@ function PipelineSettings({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.mqtt")}</CardTitle>
-          <CardDescription>{t("set.mqttDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="mq-enabled">{t("set.enabled")}</Label>
-            <Switch
-              id="mq-enabled"
-              checked={draft.mqtt?.enabled ?? false}
-              onCheckedChange={(v) => setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: v } })}
-            />
-          </div>
-          <span className="text-sm text-muted-foreground">
-            {tn("set.mqtt5Why", { only: <strong>{t("set.mqtt5Only")}</strong> })}
-          </span>
+      <SettingsGroupHeading title="settingsUx.groupAdvanced" desc="settingsUx.groupAdvancedDesc" />
+      <AdvancedHiddenLine settings={settings} inError={saveError !== null} cards={ADVANCED_CARDS} />
 
-          {draft.mqtt?.enabled && (
-            <>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="mq-url">{t("set.brokerUrl")}</Label>
-                {/* The placeholder suggests mqtts, not mqtt. A placeholder is a
-                    suggestion, and the encrypted scheme is the better thing to
-                    suggest — the help below already says all four schemes work,
-                    and the warning under it explains when plaintext is a
-                    reasonable choice on a trusted LAN. It also stops
-                    SonarCloud's S5332 reading illustrative text in an empty
-                    field as an insecure connection. */}
-                <Input
-                  id="mq-url"
-                  value={draft.mqtt?.brokerUrl ?? ""}
-                  placeholder={t("set.brokerUrlPlaceholder")}
-                  onChange={(e) =>
-                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
-                  }
-                />
-                <span className="text-sm text-muted-foreground">
-                  {t("set.brokerUrlNote")}
-                </span>
-                {/* Said at the point of configuration rather than left to the
-                    docs, because the credential is encrypted at rest and then
-                    sent in the clear -- which is the sort of gap an operator
-                    reasonably assumes has been closed. Not a refusal: mqtt:// on
-                    a trusted LAN is the normal Home Assistant setup and what our
-                    own documentation recommends. */}
-                {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
-                  <span className="text-sm text-warn">
-                    {t("set.brokerPlainNote")}
+      <AdvancedCard card="set.mqtt" settings={settings} inError={saveError !== null}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("set.mqtt")}</CardTitle>
+            <CardDescription>{t("set.mqttDesc")}          </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="mq-enabled">{t("set.enabled")}</Label>
+              <Switch
+                id="mq-enabled"
+                checked={draft.mqtt?.enabled ?? false}
+                onCheckedChange={(v) => setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: v } })}
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {tn("set.mqtt5Why", { only: <strong>{t("set.mqtt5Only")}</strong> })}
+            </span>
+
+            {draft.mqtt?.enabled && (
+              <>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="mq-url">{t("set.brokerUrl")}</Label>
+                  {/* The placeholder suggests mqtts, not mqtt. A placeholder is a
+                      suggestion, and the encrypted scheme is the better thing to
+                      suggest — the help below already says all four schemes work,
+                      and the warning under it explains when plaintext is a
+                      reasonable choice on a trusted LAN. It also stops
+                      SonarCloud's S5332 reading illustrative text in an empty
+                      field as an insecure connection. */}
+                  <Input
+                    id="mq-url"
+                    value={draft.mqtt?.brokerUrl ?? ""}
+                    placeholder={t("set.brokerUrlPlaceholder")}
+                    onChange={(e) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, brokerUrl: e.target.value } })
+                    }
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {t("set.brokerUrlNote")}
                   </span>
+                  {/* Said at the point of configuration rather than left to the
+                      docs, because the credential is encrypted at rest and then
+                      sent in the clear -- which is the sort of gap an operator
+                      reasonably assumes has been closed. Not a refusal: mqtt:// on
+                      a trusted LAN is the normal Home Assistant setup and what our
+                      own documentation recommends. */}
+                  {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
+                    <span className="text-sm text-warn">
+                      {t("set.brokerPlainNote")}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-user">{t("set.username")}</Label>
+                    <Input
+                      id="mq-user"
+                      value={draft.mqtt?.username ?? ""}
+                      onChange={(e) =>
+                        setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, username: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-pw">{t("set.password")}</Label>
+                    <SecretInput
+                      id="mq-pw"
+                      value={mqttPassword}
+                      placeholder={draft.mqtt?.hasPassword ? t("set.unchangedPlaceholder") : ""}
+                      onChange={(e) => setMqttPassword(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <span className="text-sm text-muted-foreground">{t("set.passwordNote")}</span>
+                {draft.mqtt?.hasPassword && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setMqttPassword("");
+                      void onClearMqttPassword();
+                    }}
+                  >
+                    {t("i18nSweep.clearStoredPassword")}
+                  </Button>
                 )}
-              </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-user">{t("set.username")}</Label>
-                  <Input
-                    id="mq-user"
-                    value={draft.mqtt?.username ?? ""}
-                    onChange={(e) =>
-                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, username: e.target.value } })
-                    }
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-prefix">{t("set.topicPrefix")}</Label>
+                    <Input
+                      id="mq-prefix"
+                      value={draft.mqtt?.prefix ?? "polyemesis"}
+                      onChange={(e) =>
+                        setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, prefix: e.target.value } })
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-inst">{t("set.instance")}</Label>
+                    <Input
+                      id="mq-inst"
+                      value={draft.mqtt?.instance ?? "polyemesis"}
+                      onChange={(e) =>
+                        setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, instance: e.target.value } })
+                      }
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-pw">{t("set.password")}</Label>
-                  <SecretInput
-                    id="mq-pw"
-                    value={mqttPassword}
-                    placeholder={draft.mqtt?.hasPassword ? t("set.unchangedPlaceholder") : ""}
-                    onChange={(e) => setMqttPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-              <span className="text-sm text-muted-foreground">{t("set.passwordNote")}</span>
-              {draft.mqtt?.hasPassword && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setMqttPassword("");
-                    void onClearMqttPassword();
-                  }}
-                >
-                  {t("i18nSweep.clearStoredPassword")}
-                </Button>
-              )}
+                <span className="text-sm text-muted-foreground">
+                  {t("set.topicPrefixNote")}
+                </span>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-prefix">{t("set.topicPrefix")}</Label>
-                  <Input
-                    id="mq-prefix"
-                    value={draft.mqtt?.prefix ?? "polyemesis"}
-                    onChange={(e) =>
-                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, prefix: e.target.value } })
-                    }
-                  />
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-int">{t("set.publishInterval")}</Label>
+                    <Input
+                      id="mq-int"
+                      type="number"
+                      min={1}
+                      max={3600}
+                      value={draft.mqtt?.intervalSeconds ?? 10}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          mqtt: { ...draft.mqtt, enabled: true, intervalSeconds: Number(e.target.value) },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor="mq-ka">{t("set.keepAlive")}</Label>
+                    <Input
+                      id="mq-ka"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={draft.mqtt?.keepAliveSeconds ?? 30}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          mqtt: { ...draft.mqtt, enabled: true, keepAliveSeconds: Number(e.target.value) },
+                        })
+                      }
+                    />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-inst">{t("set.instance")}</Label>
-                  <Input
-                    id="mq-inst"
-                    value={draft.mqtt?.instance ?? "polyemesis"}
-                    onChange={(e) =>
-                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, instance: e.target.value } })
-                    }
-                  />
-                </div>
-              </div>
-              <span className="text-sm text-muted-foreground">
-                {t("set.topicPrefixNote")}
-              </span>
+                <span className="text-sm text-muted-foreground">{t("set.intervalNote")}</span>
 
-              <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-int">{t("set.publishInterval")}</Label>
+                  <Label htmlFor="mq-cid">{t("set.clientId")}</Label>
                   <Input
-                    id="mq-int"
-                    type="number"
-                    min={1}
-                    max={3600}
-                    value={draft.mqtt?.intervalSeconds ?? 10}
+                    id="mq-cid"
+                    value={draft.mqtt?.clientId ?? ""}
+                    placeholder={t("set.clientIdPlaceholder")}
                     onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        mqtt: { ...draft.mqtt, enabled: true, intervalSeconds: Number(e.target.value) },
-                      })
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
                     }
                   />
+                  <span className="text-sm text-muted-foreground">{t("set.clientIdNote")}</span>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="mq-ka">{t("set.keepAlive")}</Label>
-                  <Input
-                    id="mq-ka"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={draft.mqtt?.keepAliveSeconds ?? 30}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        mqtt: { ...draft.mqtt, enabled: true, keepAliveSeconds: Number(e.target.value) },
-                      })
-                    }
-                  />
-                </div>
-              </div>
-              <span className="text-sm text-muted-foreground">{t("set.intervalNote")}</span>
 
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="mq-disc">{t("set.haDiscovery")}</Label>
+                  <Switch
+                    id="mq-disc"
+                    checked={draft.mqtt?.discovery ?? true}
+                    onCheckedChange={(v) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, discovery: v } })
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="mq-tls">{t("set.acceptSelfSigned")}</Label>
+                  <Switch
+                    id="mq-tls"
+                    checked={draft.mqtt?.tlsSkipVerify ?? false}
+                    onCheckedChange={(v) =>
+                      setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, tlsSkipVerify: v } })
+                    }
+                  />
+                </div>
+              </>
+            )}
+
+          </CardContent>
+        </Card>
+      </AdvancedCard>
+
+      <AdvancedCard card="set.preview" settings={settings} inError={saveError !== null}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("set.preview")}</CardTitle>
+            <CardDescription>{t("set.previewDesc")}          </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="prev-enabled">{t("set.enabled")}</Label>
+              <Switch
+                id="prev-enabled"
+                checked={draft.preview.enabled}
+                onCheckedChange={(v) => setDraft({ ...draft, preview: { ...draft.preview, enabled: v } })}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor="mq-cid">{t("set.clientId")}</Label>
+                <Label htmlFor="prev-seg">{t("set.segmentSec")}</Label>
                 <Input
-                  id="mq-cid"
-                  value={draft.mqtt?.clientId ?? ""}
-                  placeholder={t("set.clientIdPlaceholder")}
+                  id="prev-seg"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={draft.preview.segmentSeconds}
                   onChange={(e) =>
-                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, clientId: e.target.value } })
-                  }
-                />
-                <span className="text-sm text-muted-foreground">{t("set.clientIdNote")}</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label htmlFor="mq-disc">{t("set.haDiscovery")}</Label>
-                <Switch
-                  id="mq-disc"
-                  checked={draft.mqtt?.discovery ?? true}
-                  onCheckedChange={(v) =>
-                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, discovery: v } })
+                    setDraft({
+                      ...draft,
+                      preview: { ...draft.preview, segmentSeconds: Number(e.target.value) },
+                    })
                   }
                 />
               </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="mq-tls">{t("set.acceptSelfSigned")}</Label>
-                <Switch
-                  id="mq-tls"
-                  checked={draft.mqtt?.tlsSkipVerify ?? false}
-                  onCheckedChange={(v) =>
-                    setDraft({ ...draft, mqtt: { ...draft.mqtt, enabled: true, tlsSkipVerify: v } })
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="prev-h">{t("set.height")}</Label>
+                <Input
+                  id="prev-h"
+                  type="number"
+                  value={draft.preview.videoHeight}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      preview: { ...draft.preview, videoHeight: Number(e.target.value) },
+                    })
                   }
                 />
               </div>
-            </>
-          )}
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="prev-kbps">kbps</Label>
+                <Input
+                  id="prev-kbps"
+                  type="number"
+                  value={draft.preview.videoKbps}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      preview: { ...draft.preview, videoKbps: Number(e.target.value) },
+                    })
+                  }
+                />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="prev-idle">{t("set.stopAfterIdle")}</Label>
+              <Input
+                id="prev-idle"
+                type="number"
+                min={5}
+                max={3600}
+                value={draft.preview.idleTimeoutSeconds}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    preview: { ...draft.preview, idleTimeoutSeconds: Number(e.target.value) },
+                  })
+                }
+              />
+              <span className="text-sm text-muted-foreground">{t("set.previewIdleNote")}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </AdvancedCard>
 
-        </CardContent>
-      </Card>
+      <AdvancedCard card="set.audioMeters" settings={settings} inError={saveError !== null}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("set.audioMeters")}</CardTitle>
+            <CardDescription>{t("set.metersDesc")}          </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="met-enabled">{t("set.enabled")}</Label>
+              <Switch
+                id="met-enabled"
+                checked={draft.meters.enabled}
+                onCheckedChange={(v) => setDraft({ ...draft, meters: { ...draft.meters, enabled: v } })}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="met-int">{t("set.updateInterval")}</Label>
+              <Input
+                id="met-int"
+                type="number"
+                min={40}
+                max={2000}
+                value={draft.meters.intervalMs}
+                onChange={(e) =>
+                  setDraft({ ...draft, meters: { ...draft.meters, intervalMs: Number(e.target.value) } })
+                }
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </AdvancedCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.preview")}</CardTitle>
-          <CardDescription>{t("set.previewDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="prev-enabled">{t("set.enabled")}</Label>
-            <Switch
-              id="prev-enabled"
-              checked={draft.preview.enabled}
-              onCheckedChange={(v) => setDraft({ ...draft, preview: { ...draft.preview, enabled: v } })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="prev-seg">{t("set.segmentSec")}</Label>
-              <Input
-                id="prev-seg"
-                type="number"
-                min={1}
-                max={10}
-                value={draft.preview.segmentSeconds}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    preview: { ...draft.preview, segmentSeconds: Number(e.target.value) },
-                  })
+      <AdvancedCard card="set.processLogs" settings={settings} inError={saveError !== null}>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("set.processLogs")}</CardTitle>
+            <CardDescription>{t("settingsUx.logsShort")}</CardDescription>
+          <MoreAbout>{t("set.logsDesc")}</MoreAbout>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="log-persist">{t("set.writeLogs")}</Label>
+              <Switch
+                id="log-persist"
+                checked={draft.logging.persistProcessLogs}
+                onCheckedChange={(v) =>
+                  setDraft({ ...draft, logging: { ...draft.logging, persistProcessLogs: v } })
                 }
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="prev-h">{t("set.height")}</Label>
-              <Input
-                id="prev-h"
-                type="number"
-                value={draft.preview.videoHeight}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    preview: { ...draft.preview, videoHeight: Number(e.target.value) },
-                  })
-                }
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="log-mb">{t("set.fileSizeMb")}</Label>
+                <Input
+                  id="log-mb"
+                  type="number"
+                  min={1}
+                  max={1024}
+                  value={draft.logging.maxFileMb}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      logging: { ...draft.logging, maxFileMb: Number(e.target.value) },
+                    })
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="log-files">{t("set.filesKept")}</Label>
+                <Input
+                  id="log-files"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={draft.logging.maxFiles}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      logging: { ...draft.logging, maxFiles: Number(e.target.value) },
+                    })
+                  }
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="prev-kbps">kbps</Label>
-              <Input
-                id="prev-kbps"
-                type="number"
-                value={draft.preview.videoKbps}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    preview: { ...draft.preview, videoKbps: Number(e.target.value) },
-                  })
-                }
-              />
-            </div>
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="prev-idle">{t("set.stopAfterIdle")}</Label>
-            <Input
-              id="prev-idle"
-              type="number"
-              min={5}
-              max={3600}
-              value={draft.preview.idleTimeoutSeconds}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  preview: { ...draft.preview, idleTimeoutSeconds: Number(e.target.value) },
-                })
-              }
-            />
-            <span className="text-sm text-muted-foreground">{t("set.previewIdleNote")}</span>
-          </div>
-        </CardContent>
-      </Card>
+            <span className="text-sm text-muted-foreground">{t("set.logsBoundNote")}</span>
+          </CardContent>
+        </Card>
+      </AdvancedCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.audioMeters")}</CardTitle>
-          <CardDescription>{t("set.metersDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="met-enabled">{t("set.enabled")}</Label>
-            <Switch
-              id="met-enabled"
-              checked={draft.meters.enabled}
-              onCheckedChange={(v) => setDraft({ ...draft, meters: { ...draft.meters, enabled: v } })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="met-int">{t("set.updateInterval")}</Label>
-            <Input
-              id="met-int"
-              type="number"
-              min={40}
-              max={2000}
-              value={draft.meters.intervalMs}
-              onChange={(e) =>
-                setDraft({ ...draft, meters: { ...draft.meters, intervalMs: Number(e.target.value) } })
-              }
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.processLogs")}</CardTitle>
-          <CardDescription>{t("set.logsDesc")}          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="log-persist">{t("set.writeLogs")}</Label>
-            <Switch
-              id="log-persist"
-              checked={draft.logging.persistProcessLogs}
-              onCheckedChange={(v) =>
-                setDraft({ ...draft, logging: { ...draft.logging, persistProcessLogs: v } })
-              }
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="log-mb">{t("set.fileSizeMb")}</Label>
-              <Input
-                id="log-mb"
-                type="number"
-                min={1}
-                max={1024}
-                value={draft.logging.maxFileMb}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    logging: { ...draft.logging, maxFileMb: Number(e.target.value) },
-                  })
-                }
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="log-files">{t("set.filesKept")}</Label>
-              <Input
-                id="log-files"
-                type="number"
-                min={1}
-                max={100}
-                value={draft.logging.maxFiles}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    logging: { ...draft.logging, maxFiles: Number(e.target.value) },
-                  })
-                }
-              />
-            </div>
-          </div>
-          <span className="text-sm text-muted-foreground">{t("set.logsBoundNote")}</span>
-        </CardContent>
-      </Card>
+      <AdvancedCard card="set.ebTitle" settings={settings} inError={saveError !== null}>
+        <MultitrackHardware draft={draft} setDraft={setDraft} />
+      </AdvancedCard>
 
       </div>
     </div>
@@ -2135,14 +2432,19 @@ function PlatformSettings() {
 
   return (
     <div className="flex flex-col gap-3">
-      <PlatformCapabilityMatrix />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("set.whyDevApp")}</CardTitle>
-          <CardDescription>{t("set.whyDevAppDesc")}          </CardDescription>
-        </CardHeader>
-      </Card>
+      {/* SCOPED, NOT "OPTIONAL" FULL STOP (settings-council R2, as revised):
+          a pasted stream key on a destination needs none of this, but
+          connecting an account does need the operator's own app. The old
+          "Why you need your own developer app" card read as a mandatory first
+          step; its explanation is kept, one click down. */}
+      <div className="flex flex-col gap-1 rounded-md border border-primary/40 bg-primary-dim px-3 py-2 text-sm">
+        <p>
+          <strong>{t("settingsUx.optional")}</strong> {t("settingsUx.platformsBanner")}
+        </p>
+        <MoreAbout>
+          <span className="font-medium text-foreground">{t("set.whyDevApp")}.</span> {t("set.whyDevAppDesc")}
+        </MoreAbout>
+      </div>
 
       {(readFailed(guides) || readFailed(creds) || readFailed(accounts)) && (
         <Card>
@@ -2153,17 +2455,157 @@ function PlatformSettings() {
         </Card>
       )}
 
-      {credsUsable &&
-        rowsOf(guides).map((g) => (
-          <PlatformCredCard
-            key={g.platform}
-            guide={g}
-            creds={creds.value.find((c) => c.platform === g.platform) ?? null}
-            accounts={rowsOf(accounts).filter((a) => a.platform === g.platform)}
-            onChanged={load}
-          />
-        ))}
+      {credsUsable && (
+        <PlatformList
+          guides={rowsOf(guides)}
+          creds={creds.value}
+          accounts={rowsOf(accounts)}
+          onChanged={load}
+        />
+      )}
+
+      {/* Below the rows, closed: the table pushed every platform below the
+          fold, and it answers "which platform can do what", a question asked
+          once, not on every visit (settings-council R1). */}
+      <PlatformCapabilityMatrix />
     </div>
+  );
+}
+
+/** One row per platform, connected ones first (settings-council R1).
+ *
+ *  Each row is a name, ONE status pill and ONE button. The credentials, the
+ *  redirect URI, the accounts and the setup guide are the platform's card,
+ *  opened inline under its row -- inline rather than in a modal drawer because
+ *  the card itself opens confirm dialogs and the device-code dialog, and a
+ *  dialog inside a dialog is a focus trap inside a focus trap. One row open at
+ *  a time, so the page never grows back into the wall of forms it replaced. */
+function PlatformList({
+  guides,
+  creds,
+  accounts,
+  onChanged,
+}: {
+  guides: SetupGuide[];
+  creds: PlatformCreds[];
+  accounts: PlatformAccount[];
+  onChanged: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState<string | null>(null);
+  const rows = guides.map((g) => {
+    const c = creds.find((x) => x.platform === g.platform) ?? null;
+    const a = accounts.filter((x) => x.platform === g.platform);
+    return { guide: g, creds: c, accounts: a };
+  });
+  const connected = rows.filter((r) => r.accounts.length > 0);
+  const rest = rows.filter((r) => r.accounts.length === 0);
+
+  const renderRow = (r: (typeof rows)[number]) => (
+    <PlatformRow
+      key={r.guide.platform}
+      guide={r.guide}
+      creds={r.creds}
+      accounts={r.accounts}
+      open={open === r.guide.platform}
+      onToggle={() => setOpen((cur) => (cur === r.guide.platform ? null : r.guide.platform))}
+      onChanged={onChanged}
+    />
+  );
+
+  return (
+    <>
+      <Card data-testid="platforms-connected">
+        <CardHeader>
+          <CardTitle>{t("settingsUx.connectedChannels")}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-0 p-0">
+          {connected.length > 0 ? (
+            <ul className="flex flex-col">{connected.map(renderRow)}</ul>
+          ) : (
+            <EmptyState
+              className="m-3"
+              title={t("settingsUx.noChannelsTitle")}
+              body={t("settingsUx.noChannelsBody")}
+            />
+          )}
+        </CardContent>
+      </Card>
+      {rest.length > 0 && (
+        <Card data-testid="platforms-add">
+          <CardHeader>
+            <CardTitle>{t("settingsUx.addPlatform")}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-0 p-0">
+            <ul className="flex flex-col">{rest.map(renderRow)}</ul>
+          </CardContent>
+        </Card>
+      )}
+    </>
+  );
+}
+
+/** One platform's row and, when open, its card. Exported for its test. */
+export function PlatformRow({
+  guide,
+  creds,
+  accounts,
+  open,
+  onToggle,
+  onChanged,
+}: {
+  guide: SetupGuide;
+  creds: PlatformCreds | null;
+  accounts: PlatformAccount[];
+  open: boolean;
+  onToggle: () => void;
+  onChanged: () => void;
+}) {
+  const t = useT();
+  const panelId = `platform-panel-${guide.platform}`;
+  const reading = platformSetupStatus({
+    supported: guide.supported,
+    hasSecret: creds?.hasSecret ?? false,
+    lastCheckState: creds?.lastCheck?.state,
+    accounts: accounts.length,
+    reconnectNeeded: accounts.some((a) => a.reconnect?.needed),
+  });
+  // ONE button, and its word says what opening the row is for.
+  const action: TranslationKey = !guide.supported
+    ? "settingsUx.details"
+    : creds?.hasSecret || accounts.length > 0
+      ? "settingsUx.manage"
+      : "settingsUx.setUp";
+  return (
+    <li className="border-t border-border first:border-t-0" data-platform-row={guide.platform}>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-medium">{guide.name}</span>
+          {accounts.length > 0 && (
+            <span className="truncate text-sm text-muted-foreground">
+              {accounts.map((a) => a.accountName).join(", ")}
+            </span>
+          )}
+        </div>
+        <StatusPill reading={reading} />
+        <Button
+          size="sm"
+          variant={action === "settingsUx.setUp" ? "default" : "outline"}
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={onToggle}
+          aria-label={`${t(action)}: ${guide.name}`}
+        >
+          {t(action)}
+          <ChevronDown aria-hidden className={cn("transition-transform", open && "rotate-180")} />
+        </Button>
+      </div>
+      {open && (
+        <div id={panelId} className="border-t border-border bg-background/40 p-3">
+          <PlatformCredCard guide={guide} creds={creds} accounts={accounts} onChanged={onChanged} />
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -2177,14 +2619,28 @@ function PlatformSettings() {
  *  the first thing on this tab. */
 function PlatformCapabilityMatrix() {
   const t = useT();
+  // Closed by default (settings-council R1): see PlatformSettings.
+  const [open, setOpen] = useState(false);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("set.whatPlatformsDo")}</CardTitle>
-        <CardDescription>{t("set.platformsDesc")}        </CardDescription>
+      <CardHeader className="flex-row items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <CardTitle>{t("set.whatPlatformsDo")}</CardTitle>
+          <CardDescription>{t("set.platformsDesc")}</CardDescription>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={open}
+          aria-controls="platform-capability-table"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? t("settingsUx.hideTable") : t("settingsUx.showTable")}
+        </Button>
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-3">
+      {open && (
+      <CardContent id="platform-capability-table" className="flex flex-col gap-3">
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -2285,6 +2741,7 @@ function PlatformCapabilityMatrix() {
           </div>
         ))}
       </CardContent>
+      )}
     </Card>
   );
 }
@@ -2311,17 +2768,50 @@ export function PlatformCredCard({
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [check, setCheck] = useState<CredentialCheck | null>(null);
+  // SEEDED FROM THE STORED VERDICT (settings-council R10). It used to start
+  // null on every load, so a reload turned "the platform refused this pair"
+  // back into a plain "configured". `checkedAt` is absent only for a verdict
+  // this card has just been handed by a Save or Re-check, which is "now".
+  const [check, setCheck] = useState<(CredentialCheck & { checkedAt?: string }) | StoredCredentialCheck | null>(
+    creds?.lastCheck ?? null,
+  );
   const [rechecking, setRechecking] = useState(false);
   const labels = credentialLabelsFor(guide.platform);
 
   useEffect(() => setClientId(creds?.clientId ?? ""), [creds]);
+  useEffect(() => {
+    if (creds?.lastCheck) setCheck(creds.lastCheck);
+  }, [creds]);
+
+  // THE DEVELOPER-APP PAIR IS THE ADVANCED LAYER (settings-council R2): open
+  // when there is nothing stored yet (connecting is impossible without it) or
+  // when the platform refused what is stored; closed once the pair works, so a
+  // connected platform shows its accounts first.
+  // Show advanced settings opens it too (settings-council R7: one switch for
+  // every advanced layer on the page, not only the Pipeline cards).
+  const { show: showAdvanced } = useContext(AdvancedContext);
+  const [credsOpen, setCredsOpen] = useState(
+    showAdvanced || !creds?.hasSecret || creds?.lastCheck?.state === "rejected",
+  );
+
+  // ONE WARNING PER CARD, the one that applies now (settings-council R16). A
+  // redirect problem the server found for THIS origin blocks connecting today,
+  // so it outranks the platform's standing caveat; whichever is not shown here
+  // is in the setup guide below, not lost.
+  const warning = guide.redirectWarnings?.[0] ?? guide.note ?? "";
+  const saveReasonId = useId();
+  const saveReason =
+    !busy && (!clientId.trim() || !clientSecret.trim()) ? t("settingsUx.saveCredsNeedsBoth") : null;
+  const otherWarnings = [
+    ...(guide.redirectWarnings ?? []).filter((w) => w !== warning),
+    ...(guide.note && guide.note !== warning ? [guide.note] : []),
+  ];
 
   const save = async () => {
     setBusy(true);
     try {
       const saved = await api.putCreds(guide.platform, clientId.trim(), clientSecret.trim());
-      setCheck(saved.check ?? null);
+      setCheck(saved.check ? { ...saved.check, checkedAt: new Date().toISOString() } : null);
       // Saved is saved, whatever the checker thought. The verdict renders
       // below; it does not turn a successful save into a failure toast.
       toast.success(t("i18nSweep.credentialsSaved", { name: guide.name }));
@@ -2337,7 +2827,7 @@ export function PlatformCredCard({
   const recheck = async () => {
     setRechecking(true);
     try {
-      setCheck(await api.checkCreds(guide.platform));
+      setCheck({ ...(await api.checkCreds(guide.platform)), checkedAt: new Date().toISOString() });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("set.couldNotReCheckThe"));
     } finally {
@@ -2431,16 +2921,35 @@ export function PlatformCredCard({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const verdictBadge = check && (
+    <Badge
+      variant={
+        check.state === "verified"
+          ? "live"
+          : check.state === "rejected"
+            ? "down"
+            : check.state === "unreachable"
+              ? "warn"
+              : "outline"
+      }
+    >
+      {check.state === "verified" && t("i18nSweep.credVerified")}
+      {check.state === "rejected" && t("i18nSweep.credRejected")}
+      {check.state === "unverified" && t("i18nSweep.credUnverifiable")}
+      {check.state === "unreachable" && t("i18nSweep.credUnreachable")}
+    </Badge>
+  );
+
   return (
     <Card>
       <CardHeader className="flex-row items-start justify-between">
-        <div>
+        <div className="flex flex-col gap-1">
           <CardTitle className="flex items-center gap-2">
             {guide.name}
-            {!guide.supported && <Badge variant="outline">{t("i18nSweep.manualKey")}</Badge>}
+            {/* The row's word for it (settings-council R11: one term). */}
+            {!guide.supported && <Badge variant="outline">{t("settingsUx.pillManualKey")}</Badge>}
             {creds?.hasSecret && <Badge variant="live">{t("i18nSweep.configured")}</Badge>}
           </CardTitle>
-          {guide.note && <CardDescription className="mt-1">{guide.note}</CardDescription>}
         </div>
         {guide.consoleUrl && (
           <Button variant="outline" size="sm" asChild>
@@ -2452,209 +2961,235 @@ export function PlatformCredCard({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
-        <Accordion type="single" collapsible>
-          <AccordionItem value="steps" className="border-b-0">
-            <AccordionTrigger>{t("set.stepByStep")}</AccordionTrigger>
-            <AccordionContent>
-              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
-                {guide.steps.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ol>
-              {guide.redirectPath && (
-                <div className="mt-2 flex flex-col gap-1">
-                  <Label>{t("set.redirectUri")}</Label>
-                  <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
-                    <code className="min-w-0 flex-1 break-all font-mono text-sm">
-                      {guide.redirectPath}
-                    </code>
-                    <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
-                      {copied ? <Check className="text-live" /> : <Copy />}
-                    </Button>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{t("set.redirectNote")}</span>
-                  {/* Above the credential fields on purpose: registering the
-                      right URI has to happen before the credentials matter. */}
-                  {guide.redirectWarnings?.map((warning) => (
-                    <div
-                      key={warning}
-                      className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
-                    >
-                      <AlertTriangle className="mt-px size-3 shrink-0" />
-                      <span>{warning}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {guide.scopes && guide.scopes.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {guide.scopes.map((s) => (
-                    <Badge key={s} variant="outline" className="font-mono normal-case">
-                      {s}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
+        {warning && (
+          <div
+            data-testid="platform-warning"
+            className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1.5 text-sm text-warn"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>{warning}</span>
+          </div>
+        )}
 
         {guide.supported && (
           <>
-            {/* Labelled in the platform's own words (Meta's "App ID", X's
-                "OAuth 2.0 Client ID"), with where to find each one, because
-                the operator is copying from that platform's console. The
-                values are still clientId / clientSecret on the wire -- see
-                lib/platformCredentialLabels.ts. */}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor={`cid-${guide.platform}`}>{t(labels.id)}</Label>
-                <Input
-                  id={`cid-${guide.platform}`}
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  aria-describedby={labels.idWhere ? `cid-${guide.platform}-where` : undefined}
-                  className="font-mono"
-                />
-                {labels.idWhere && (
-                  <span id={`cid-${guide.platform}-where`} className="text-sm text-muted-foreground">
-                    {t(labels.idWhere)}
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor={`cs-${guide.platform}`}>{t(labels.secret)}</Label>
-                <SecretInput
-                  id={`cs-${guide.platform}`}
-                  value={clientSecret}
-                  placeholder={creds?.hasSecret ? t("i18nSweep.storedEncrypted") : ""}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  aria-describedby={labels.secretWhere ? `cs-${guide.platform}-where` : undefined}
-                  className="font-mono"
-                />
-                {labels.secretWhere && (
-                  <span id={`cs-${guide.platform}-where`} className="text-sm text-muted-foreground">
-                    {t(labels.secretWhere)}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* The verdict.
-                Four distinct words, and four distinct colours. "not verifiable"
-                must never read as "verified", and "could not check" must never
-                read as "rejected": a check that CANNOT run must not look like
-                one that ran and failed, and a platform outage must not be
-                reported as the operator's mistake. */}
-            {check && (
-              <div className="flex items-start gap-2 text-sm">
-                <Badge
-                  variant={
-                    check.state === "verified"
-                      ? "live"
-                      : check.state === "rejected"
-                        ? "down"
-                        : check.state === "unreachable"
-                          ? "warn"
-                          : "outline"
-                  }
+            {/* THE CONNECTED LAYER FIRST (settings-council R2): what most
+                operators come here for is the account, not the app. */}
+            <div className="flex flex-col gap-1.5">
+              <Label>{t("set.connectedAccounts")}</Label>
+              {accounts.length === 0 && (
+                <span className="text-sm text-muted-foreground">{t("settingsUx.noAccountsYet")}</span>
+              )}
+              {accounts.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5"
                 >
-                  {check.state === "verified" && t("i18nSweep.credVerified")}
-                  {check.state === "rejected" && t("i18nSweep.credRejected")}
-                  {check.state === "unverified" && t("i18nSweep.credUnverifiable")}
-                  {check.state === "unreachable" && t("i18nSweep.credUnreachable")}
-                </Badge>
-                <span className="text-muted-foreground">{check.detail}</span>
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" onClick={save} disabled={busy || !clientId.trim() || !clientSecret.trim()}>
-                {busy ? <Loader2 className="animate-spin" /> : <Save />} {t("i18nSweep.saveCredentials")}
-              </Button>
-              {creds?.hasSecret && (
-                <Button size="sm" variant="outline" onClick={recheck} disabled={rechecking}>
-                  {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} {t("i18nSweep.recheck")}
-                </Button>
-              )}
-              {/* Which of these the card offers is decided in
-                  lib/platformConnect.ts, with the reasons -- in particular why
-                  the code route is offered BESIDE the redirect one rather than
-                  instead of it. Written here it was a rule nothing could
-                  reach. */}
-              {connectControls.includes("connectRedirect") && (
-                <Button size="sm" variant="outline" asChild>
-                  <a href={api.connectUrl(guide.platform)}>
-                    <ExternalLink /> {t("i18nSweep.connectAccount")}
-                  </a>
-                </Button>
-              )}
-              {connectControls.includes("connectWithCode") && (
-                <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
-                  <KeyRound /> {t("device.connectWithACode")}
-                </Button>
-              )}
-              {connectControls.includes("removeCredentials") && (
-                <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
-                  <Trash2 /> {t("i18nSweep.remove")}
-                </Button>
-              )}
-            </div>
-
-            {accounts.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <Label>{t("set.connectedAccounts")}</Label>
-                {accounts.map((a) => (
-                  <div
-                    key={a.id}
-                    className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-sm">{a.accountName}</span>
-                        {a.reconnect?.needed && (
-                          <Badge variant="outline" className="border-warn text-sm text-warn">
-                            {t("i18nSweep.reconnectNeeded")}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="font-mono text-sm text-muted-foreground">{a.accountRef}</div>
-                      {/* What the capability matrix two cards up promises, on
-                          the account it is a promise about. "Viewers: Works"
-                          read as a claim nobody could check until this was
-                          here, because the route existed and nothing called
-                          it. Polled while this tab is visible; see
-                          lib/viewerCount.ts for why the interval is what it
-                          is. */}
-                      <AccountLiveStats accountId={a.id} />
-                      {/* Said in full rather than as a bare badge. "Reconnect"
-                          with no reason reads as a fault the operator caused;
-                          the point is that a token cannot gain a permission it
-                          was not issued with, which is nobody's mistake. */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm">{a.accountName}</span>
                       {a.reconnect?.needed && (
-                        <div className="mt-0.5 text-sm text-warn">
-                          {a.reconnect.reason}
-                          {a.reconnect.missing && a.reconnect.missing.length > 0 && (
-                            <> {t("i18nSweep.missingScopes")} <code>{a.reconnect.missing.join(", ")}</code></>
-                          )}
-                        </div>
+                        <Badge variant="outline" className="border-warn text-sm text-warn">
+                          {t("i18nSweep.reconnectNeeded")}
+                        </Badge>
                       )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => confirmDisconnect.ask(a)}
-                      aria-label={t("set.disconnect")}
-                    >
-                      <Unplug />
-                    </Button>
+                    <div className="font-mono text-sm text-muted-foreground">{a.accountRef}</div>
+                    {/* What the capability matrix promises, on the account it
+                        is a promise about. Polled while this row is open; see
+                        lib/viewerCount.ts for why the interval is what it is. */}
+                    <AccountLiveStats accountId={a.id} />
+                    {/* Said in full rather than as a bare badge: a token cannot
+                        gain a permission it was not issued with, which is
+                        nobody's mistake. */}
+                    {a.reconnect?.needed && (
+                      <div className="mt-0.5 text-sm text-warn">
+                        {a.reconnect.reason}
+                        {a.reconnect.missing && a.reconnect.missing.length > 0 && (
+                          <> {t("i18nSweep.missingScopes")} <code>{a.reconnect.missing.join(", ")}</code></>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => confirmDisconnect.ask(a)}
+                    aria-label={t("set.disconnect")}
+                  >
+                    <Unplug />
+                  </Button>
+                </div>
+              ))}
+              {accounts.length > 0 && (
                 <span className="text-sm text-muted-foreground">{t("set.multiAccountNote")}</span>
+              )}
+              {/* Which of these the card offers is decided in
+                  lib/platformConnect.ts, with the reasons. Nothing is offered
+                  before the app credentials are stored, and the line below says
+                  so rather than leaving an empty row. */}
+              <div className="flex flex-wrap gap-1.5">
+                {connectControls.includes("connectRedirect") && (
+                  <Button size="sm" asChild>
+                    <a href={api.connectUrl(guide.platform)}>
+                      <ExternalLink /> {t("i18nSweep.connectAccount")}
+                    </a>
+                  </Button>
+                )}
+                {connectControls.includes("connectWithCode") && (
+                  <Button size="sm" variant="outline" onClick={() => setDeviceOpen(true)}>
+                    <KeyRound /> {t("device.connectWithACode")}
+                  </Button>
+                )}
               </div>
-            )}
+              {!creds && <span className="text-sm text-muted-foreground">{t("settingsUx.connectNeedsApp")}</span>}
+            </div>
+
+            {/* THE ADVANCED LAYER: the developer app's pair (settings-council
+                R2). A native disclosure, so the fields stay in the page for the
+                search and for a screen reader's form list. */}
+            <details
+              open={credsOpen}
+              onToggle={(e) => setCredsOpen((e.currentTarget as HTMLDetailsElement).open)}
+              className="rounded-md border border-border"
+            >
+              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2 py-1.5 text-sm font-medium">
+                <ChevronDown aria-hidden className={cn("h-3.5 w-3.5 transition-transform", credsOpen && "rotate-180")} />
+                {t("settingsUx.appCredentials")}
+                {verdictBadge}
+                {check?.checkedAt && (
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {t("settingsUx.lastChecked", { time: timestamp(check.checkedAt) })}
+                  </span>
+                )}
+              </summary>
+              <div className="flex flex-col gap-3 border-t border-border p-2">
+                <span className="text-sm text-muted-foreground">{t("settingsUx.appCredentialsHint")}</span>
+                {/* Labelled in the platform's own words (Meta's "App ID", X's
+                    "OAuth 2.0 Client ID"), with where to find each one, because
+                    the operator is copying from that platform's console. The
+                    values are still clientId / clientSecret on the wire -- see
+                    lib/platformCredentialLabels.ts. */}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={`cid-${guide.platform}`}>{t(labels.id)}</Label>
+                    <Input
+                      id={`cid-${guide.platform}`}
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                      aria-describedby={labels.idWhere ? `cid-${guide.platform}-where` : undefined}
+                      className="font-mono"
+                    />
+                    {labels.idWhere && (
+                      <span id={`cid-${guide.platform}-where`} className="text-sm text-muted-foreground">
+                        {t(labels.idWhere)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={`cs-${guide.platform}`}>{t(labels.secret)}</Label>
+                    <SecretInput
+                      id={`cs-${guide.platform}`}
+                      value={clientSecret}
+                      placeholder={creds?.hasSecret ? t("i18nSweep.storedEncrypted") : ""}
+                      onChange={(e) => setClientSecret(e.target.value)}
+                      aria-describedby={labels.secretWhere ? `cs-${guide.platform}-where` : undefined}
+                      className="font-mono"
+                    />
+                    {labels.secretWhere && (
+                      <span id={`cs-${guide.platform}-where`} className="text-sm text-muted-foreground">
+                        {t(labels.secretWhere)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* The verdict, in full. Four distinct words, and four distinct
+                    colours. "not verifiable" must never read as "verified", and
+                    "could not check" must never read as "rejected". */}
+                {check && (
+                  <div className="flex items-start gap-2 text-sm">
+                    {verdictBadge}
+                    <span className="text-muted-foreground">{check.detail}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    onClick={save}
+                    disabled={busy || !clientId.trim() || !clientSecret.trim()}
+                    aria-describedby={disabledDescribedBy(saveReasonId, saveReason)}
+                  >
+                    {busy ? <Loader2 className="animate-spin" /> : <Save />} {t("i18nSweep.saveCredentials")}
+                  </Button>
+                  {creds?.hasSecret && (
+                    <Button size="sm" variant="outline" onClick={recheck} disabled={rechecking}>
+                      {rechecking ? <Loader2 className="animate-spin" /> : <RefreshCw />} {t("i18nSweep.recheck")}
+                    </Button>
+                  )}
+                  {connectControls.includes("removeCredentials") && (
+                    <Button size="sm" variant="ghost" onClick={() => confirmCreds.ask({ name: guide.name })}>
+                      <Trash2 /> {t("i18nSweep.remove")}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Why Save is greyed, in words (the kit's DisabledReason): the
+                    usual case is an operator editing only the ID of a pair whose
+                    secret is stored and can never be shown back. */}
+                <DisabledReason id={saveReasonId} reason={saveReason} />
+
+                {guide.redirectPath && (
+                  <div className="flex flex-col gap-1">
+                    <Label>{t("set.redirectUri")}</Label>
+                    <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
+                      <code className="min-w-0 flex-1 break-all font-mono text-sm">{guide.redirectPath}</code>
+                      <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
+                        {copied ? <Check className="text-live" /> : <Copy />}
+                      </Button>
+                    </div>
+                    <span className="text-sm text-muted-foreground">{t("set.redirectNote")}</span>
+                  </div>
+                )}
+                {guide.scopes && guide.scopes.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {guide.scopes.map((sc) => (
+                      <Badge key={sc} variant="outline" className="font-mono normal-case">
+                        {sc}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
           </>
         )}
+
+        {/* The setup guide, closed: plain words for what it is and how long
+            (settings-council R16, R11). The warnings not shown above live
+            here rather than stacking at the top of the card. */}
+        <Accordion type="single" collapsible>
+          <AccordionItem value="steps" className="border-b-0">
+            <AccordionTrigger>{t("settingsUx.setupGuide", { n: guide.steps.length })}</AccordionTrigger>
+            <AccordionContent>
+              <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
+                {guide.steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+              {otherWarnings.map((w) => (
+                <div
+                  key={w}
+                  className="mt-2 flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn"
+                >
+                  <AlertTriangle className="mt-px size-3 shrink-0" />
+                  <span>{w}</span>
+                </div>
+              ))}
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </CardContent>
       <ConfirmDestructive
         open={confirmCreds.open}
@@ -2768,6 +3303,11 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
+      {/* FIRST, and full width (settings-council R9): the one thing on this
+          tab a first-time operator has to DO on day one. It sat at the bottom
+          of the transport card, under the Let's Encrypt walkthrough. */}
+      <SecretKeyCard system={system} />
+
       <Card>
         <CardHeader>
           <CardTitle>{t("set.adminPassword")}</CardTitle>
@@ -2814,7 +3354,7 @@ function SecuritySettings({ system }: { system: SystemInfo | null }) {
         </CardContent>
       </Card>
 
-      <TransportSecurity system={system} />
+      <TransportSecurity />
 
       <ApiTokens />
     </div>
@@ -3079,8 +3619,11 @@ function LetsEncryptWalkthrough({ tls }: { tls: TlsStatus }) {
   );
 }
 
-function TransportSecurity({ system }: { system: SystemInfo | null }) {
+function TransportSecurity() {
   const t = useT();
+  // The details below open with the page's Show advanced switch (settings-
+  // council R7); closed otherwise.
+  const { show: showAdvanced } = useContext(AdvancedContext);
   const tn = useTN();
   const [tls, setTls] = useState<TlsStatus | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -3183,6 +3726,17 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
               </p>
             )}
 
+            {/* THE DETAIL, CLOSED (settings-council R9): the mode and the
+                expiry above are what an operator checks; the CA download, the
+                Let's Encrypt walkthrough and the config.yaml are what they read
+                once. A native disclosure keeps the fields mounted, so the
+                search can still open it and land on the hostname field. */}
+            <details className="group border-t border-border pt-2" open={showAdvanced || undefined}>
+              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                <ChevronDown aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                {t("settingsUx.tlsDetails")}
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
             {tls.caAvailable && (
               <div className="flex flex-col gap-1.5 border-t border-border pt-2">
                 <span className="text-sm text-muted-foreground">
@@ -3234,9 +3788,56 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             <pre className="overflow-x-auto rounded border border-border bg-background p-2 font-mono text-sm text-muted-foreground">
               {tlsYaml(tls)}
             </pre>
+              </div>
+            </details>
           </>
         )}
 
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The key under the data directory that decrypts every stored credential,
+ *  and whether this operator has said they backed it up (settings-council R9).
+ *
+ *  THE ACKNOWLEDGEMENT IS THIS BROWSER'S, and the card does not pretend
+ *  otherwise. polyemesis cannot see a backup, so a server-side "backed up" flag
+ *  would be a claim nothing checks; a tick in this browser is the operator's
+ *  own note to themselves, and the Overview reads it to stop asking. */
+/** A long absolute path, shortened from the middle so both the root and the
+ *  directory name stay readable. The full path is the title and the copy. */
+function shortenPath(path: string, max = 48): string {
+  if (path.length <= max) return path;
+  const keep = Math.floor((max - 1) / 2);
+  return `${path.slice(0, keep)}…${path.slice(path.length - keep)}`;
+}
+
+function SecretKeyCard({ system }: { system: SystemInfo | null }) {
+  const t = useT();
+  const tn = useTN();
+  const [ack, setAck] = useState(readSecretKeyAck);
+  const dir = system?.dataDir ?? "";
+  const toggle = (next: boolean) => {
+    setAck(next);
+    try {
+      window.localStorage.setItem(SECRET_KEY_ACK, next ? "1" : "0");
+    } catch {
+      // Not remembered; the box still shows what was ticked for this visit.
+    }
+  };
+  const copyDir = async () => {
+    if (!dir) return;
+    await navigator.clipboard.writeText(dir);
+    toast.success(t("settingsUx.pathCopied"));
+  };
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle>{t("settingsUx.secretKeyTitle")}</CardTitle>
+        <CardDescription>{t("settingsUx.secretKeyDesc")}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
         {/* The onboarding tour's last step anchors here, and the wrapper exists
             so the highlight covers the path AND the sentence about secret.key
             underneath it — the path alone would highlight a directory name with
@@ -3245,15 +3846,28 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
             what lets the tour navigate straight to it rather than asking the
             operator to find it. See ui/src/lib/tourSteps.ts. */}
         <div data-tour="data-directory" className="flex flex-col gap-2">
-          <div className="flex items-start justify-between gap-2 border-t border-border pt-2">
+          <div className="flex items-center justify-between gap-2">
             <span className="shrink-0 text-sm text-muted-foreground">{t("set.dataDirectory")}</span>
-            <code className="min-w-0 break-all text-right font-mono text-sm">
-              {system?.dataDir ?? "—"}
-            </code>
+            <span className="flex min-w-0 items-center gap-1">
+              <code className="min-w-0 truncate font-mono text-sm" title={dir || undefined}>
+                {dir ? shortenPath(dir) : "—"}
+              </code>
+              {dir && (
+                <Button variant="ghost" size="icon-sm" onClick={copyDir} aria-label={t("set.copy")}>
+                  <Copy />
+                </Button>
+              )}
+            </span>
           </div>
           <p className="text-sm text-muted-foreground">
             {tn("set.secretKeyNote", { file: <code className="mx-1 font-mono">secret.key</code> })}
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox id="secret-key-ack" checked={ack} onCheckedChange={(v) => toggle(v === true)} />
+          <Label htmlFor="secret-key-ack" className="text-sm font-normal">
+            {t("settingsUx.backedUp")}
+          </Label>
         </div>
       </CardContent>
     </Card>

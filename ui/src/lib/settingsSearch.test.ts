@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SETTINGS_TABS, searchSettings } from "@/lib/settingsSearch";
 
 const labels = {
+  overview: "Overview",
   ingest: "Ingest",
   pipeline: "Pipeline",
   platforms: "Platforms",
@@ -23,7 +24,7 @@ describe("searchSettings", () => {
   });
 
   it("returns every section whose name contains the query, in rail order", () => {
-    expect(searchSettings("i", labels)).toEqual(["ingest", "pipeline", "obs", "security"]);
+    expect(searchSettings("i", labels)).toEqual(["overview", "ingest", "pipeline", "obs", "security"]);
   });
 
   it("matches the translated label, so a non-English install searches in its own words", () => {
@@ -32,7 +33,17 @@ describe("searchSettings", () => {
     expect(searchSettings("security", de)).toEqual([]);
   });
 
-  it("keeps the rail order fixed: five sections, the Danger zone last, and Debug (on the System page) after it", () => {
-    expect(SETTINGS_TABS).toEqual(["ingest", "pipeline", "platforms", "overlays", "obs", "security", "danger", "debug"]);
+  it("keeps the rail order fixed: the Overview first, the Danger zone last, and Debug (on the System page) after it", () => {
+    expect(SETTINGS_TABS).toEqual([
+      "overview",
+      "ingest",
+      "pipeline",
+      "platforms",
+      "overlays",
+      "obs",
+      "security",
+      "danger",
+      "debug",
+    ]);
   });
 });
