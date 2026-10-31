@@ -333,6 +333,13 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// platform_creds' last-verdict columns, so the settings page can show
+	// whether a stored pair was accepted without re-running the outbound check
+	// on every load (settings-council R10). See MigratePlatformCredsCheck.
+	if err := d.MigratePlatformCredsCheck(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// The partial unique index that makes two active jobs for one unique target
 	// impossible. A migration rather than a line in schema.sql because the rule
 	// is partial and because an install that already holds a duplicate pair

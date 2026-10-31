@@ -245,7 +245,13 @@ CREATE TABLE IF NOT EXISTS platform_creds (
     platform          TEXT PRIMARY KEY,      -- youtube | twitch | kick
     client_id         TEXT NOT NULL,
     client_secret_enc BLOB NOT NULL,         -- secretbox sealed
-    updated_at        INTEGER NOT NULL
+    updated_at        INTEGER NOT NULL,
+    -- The last credential check on this pair; '' / 0 = never checked.
+    -- MigratePlatformCredsCheck adds these to older installs.
+    check_state       TEXT    NOT NULL DEFAULT '',
+    check_method      TEXT    NOT NULL DEFAULT '',
+    check_detail      TEXT    NOT NULL DEFAULT '',
+    checked_at        INTEGER NOT NULL DEFAULT 0
 );
 
 -- One row per connected channel. Multiple accounts per platform is the point:

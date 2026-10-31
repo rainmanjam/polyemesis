@@ -94,6 +94,7 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	// three clicks from making valid is obstructive rather than protective.
 	//
 	check := s.providers.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
+	s.recordCredCheck(platform, check)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"platform":  platform,
 		"hasSecret": true,
@@ -116,8 +117,21 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK,
-		s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret))
+	check := s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret)
+	s.recordCredCheck(platform, check)
+	writeJSON(w, http.StatusOK, check)
+}
+
+// recordCredCheck stores a verdict so the settings page can show it after a
+// reload (settings-council R10). A failure to store it is logged and NOT
+// returned: the save and the check both succeeded, and refusing them over the
+// bookkeeping would turn a working credential into an error on screen. The
+// cost of the failure is one reload that shows no verdict.
+func (s *Server) recordCredCheck(platform db.Platform, check oauth.CheckResult) {
+	if err := s.store.RecordPlatformCredsCheck(platform, string(check.State), string(check.Method),
+		check.Detail, time.Now()); err != nil {
+		s.log.Warn("could not store the credential check verdict", "platform", platform, "err", err)
+	}
 }
 
 func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {

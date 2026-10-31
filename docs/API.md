@@ -1306,6 +1306,11 @@ never with the credential. It is a `POST` because it makes an outbound call, and
 it is refused to `read` tokens for the same reason: a route that exercises a
 stored secret is not a read, whatever its verb.
 
+The verdict the last save or check reached is stored with the pair, and
+`GET /platforms/credentials` returns it on each row as `lastCheck`
+(`state`, `method`, `detail`, `checkedAt`). The field is absent for a pair that
+has never been checked, and saving a new pair clears the old pair's verdict.
+
 #### Connecting an account with no callback URL
 
 `/platforms/credentials/{platform}/device` is the **device code flow**: the way
