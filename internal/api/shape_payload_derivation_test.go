@@ -313,6 +313,12 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 				"download (no Content-Disposition, and it is served inline to a player), " +
 				"and not the manifest-and-segments shape streaming-media names -- so the " +
 				"honest classification was a row that did not exist."},
+		"image/png": {Shape: "",
+			Why: "NOT AN EMISSION. This is the thumbnail UPLOAD for a recurring broadcast template (#18): " +
+				"the operator's picture arrives as an INBOUND request body, checked against the PNG signature in " +
+				"recurring_handlers.go, and then sent to the platform. The bytes travel into this process, so no " +
+				"response shape describes them. Its JPEG sibling is claimed by the playout-poster row, which is an " +
+				"emission; this one is an input."},
 		"application/vnd.github+json": {Shape: "",
 			Why: "NOT AN EMISSION. This is an Accept header on an OUTBOUND request from " +
 				"this process to the GitHub release API in handlers.go, so the bytes " +

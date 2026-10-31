@@ -481,6 +481,9 @@ func run(h *hooks) error {
 	// ahead of the stream and nothing downstream waits on it, so a failure
 	// here never delays or blocks a go-live.
 	go srv.PreannounceLoop(ctx)
+	// The recurring-template look-ahead (#18). Same contract: best-effort, runs ahead of the
+	// stream, and a platform refusal is logged and retried, never allowed to delay a go-live.
+	go srv.RecurringLoop(ctx)
 	// Drives a platform's broadcast lifecycle: puts a YouTube broadcast on air
 	// once bytes are arriving, and ends it when the operator turns the
 	// destination off or deletes it.

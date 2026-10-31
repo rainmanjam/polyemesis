@@ -383,6 +383,15 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 		t.Fatalf("plant schedule: %v", err)
 	}
 
+	// A recurring template on that schedule (#18), so /schedules/1/template answers 200 for the
+	// read token and the sweep sees a body rather than a not-found. The title is the operator's own
+	// text; the template holds no credential, and the body carries no clock, so it is stable.
+	if _, err := store.SaveBroadcastTemplate(scheduler.BroadcastTemplate{
+		ScheduleID: 1, TitlePattern: "Ledger {date}", Description: "Ledger template",
+	}); err != nil {
+		t.Fatalf("plant broadcast template: %v", err)
+	}
+
 	// A finished chat poll, at a fixed time so the bodies are stable, and a
 	// poll engine so the three poll GETs answer rather than 503. Its result is
 	// counts with no voter in it; the sweep checks that is all a read token
@@ -600,6 +609,11 @@ func leakRoutes() []string {
 		"/api/v1/library/sessions/1",
 		"/api/v1/renditions/1",
 		"/api/v1/schedules/1",
+		// Recurring templates (#18): the template a schedule carries and the calendar window of its
+		// occurrences. A read a read-scoped token may make. Titles and descriptions are the operator's
+		// own text; no credential is stored in either.
+		"/api/v1/schedules/1/template",
+		"/api/v1/recurring/occurrences",
 		// Chat polls (#14): counts per option and platform, never a voter.
 		"/api/v1/polls",
 		"/api/v1/polls/1",

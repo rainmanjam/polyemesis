@@ -148,6 +148,18 @@ func (s Set) All() map[db.Platform]Provider {
 	return s.byPlatform
 }
 
+// With returns a copy of the set with one platform's provider replaced. It is the seam a test uses to
+// put a fake beside the production provider for every other platform, the same way WithBaseURL aims the
+// whole set at a stub. The receiver is not changed, so the set a test started from stays intact.
+func (s Set) With(p db.Platform, pr Provider) Set {
+	next := make(map[db.Platform]Provider, len(s.All())+1)
+	for k, v := range s.All() {
+		next[k] = v
+	}
+	next[p] = pr
+	return Set{byPlatform: next}
+}
+
 // Get returns a provider, or an error naming the platform.
 func (s Set) Get(p db.Platform) (Provider, error) {
 	if pr, ok := s.All()[p]; ok {

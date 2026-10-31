@@ -320,7 +320,11 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 // documents nothing of the kind: liveBroadcasts/insert requires
 // snippet.scheduledStartTime and says nothing about how far ahead it may point,
 // and the live errors page carries invalidScheduledStartTime with no limit
-// attached (both read 2026-08-16). A number invented to fill that silence would
+// attached (both read 2026-08-16). The official-docs truth sheet (2026-10-31)
+// adds that a scheduled start refused as too far off implies a limit, so a
+// refusal is a real signal and not a bug; still, no number is published, so the
+// horizon stays unbounded and the refusal is logged by the caller, not guessed
+// at here. A number invented to fill that silence would
 // be indistinguishable in this code from Facebook's documented one, and it would
 // fail by SKIPPING -- the caller's gate drops an out-of-range occurrence without
 // an error -- so a guess of 30 days would quietly stop pre-announcing a show

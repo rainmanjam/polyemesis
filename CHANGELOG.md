@@ -70,6 +70,14 @@ its first tagged release.
   the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
   and a failed read stays on that half. The UI option, the sub-row and the Stream Deck
   face are not built in this change.
+- **Recurring broadcast events (preview).** A start schedule can carry a broadcast
+  template: a title pattern with `{date}` and `{time}`, a description, privacy,
+  category and thumbnail. The next occurrences (default 2, up to 10) are created as
+  upcoming YouTube events, and the go-live uses the first one that is not skipped.
+  One occurrence can be skipped or retitled, and deleting the template cancels its
+  upcoming events. Facebook, Twitch, Kick and X are not given template events yet,
+  and the calendar screen is not in this build. See
+  [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
