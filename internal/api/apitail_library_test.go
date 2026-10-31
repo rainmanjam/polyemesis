@@ -50,16 +50,20 @@ func apitailLibraryFixture(t *testing.T) (http.Handler, func(*http.Request), int
 	t.Helper()
 	h, store, sign := sourceServer(t)
 
-	if err := store.UpsertRecording(&db.Recording{
+	// With its file on disk, because sourceServer's engine is running its
+	// recording manager underneath this fixture, and a Scan that found the row
+	// with no file would de-index it -- "holds 0 recordings, want exactly 1",
+	// whenever the startup scan happened to land after this line. An hour old
+	// is well inside the default retention, so Sweep leaves it too. See
+	// plantRecordingOnDisk.
+	plantRecordingOnDisk(t, store, serverUnderTest(t, h).eng().Recordings().Dir(), db.Recording{
 		Filename:   "apitail-library.mkv",
 		StartedAt:  time.Now().Add(-time.Hour),
 		FinishedAt: time.Now(),
 		Bytes:      4096,
 		DurationMS: 60000,
 		Tracks:     2,
-	}); err != nil {
-		t.Fatalf("UpsertRecording: %v", err)
-	}
+	}, 1)
 	recs, err := store.ListRecordings()
 	if err != nil {
 		t.Fatalf("ListRecordings: %v", err)
