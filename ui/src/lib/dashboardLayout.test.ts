@@ -9,7 +9,8 @@ import { topRowLayout } from "@/lib/dashboardLayout";
  *  number sitting next to it. A template edited to add a column without
  *  touching `columns` is exactly the drift this file exists to catch. */
 function declaredColumns(gridClass: string): number {
-  const inner = gridClass.match(/grid-cols-\[(.+)\]/)?.[1];
+  // The lg: template; the base one below lg is a single column by design.
+  const inner = gridClass.match(/lg:grid-cols-\[([^\]]+)\]/)?.[1];
   if (!inner) throw new Error(`no bracketed grid template in ${gridClass}`);
   // Split on underscores that are not inside parentheses: minmax(0,1fr) is one
   // column, and it contains no underscore, but a future clamp() might.
@@ -58,6 +59,15 @@ describe("topRowLayout", () => {
     // other column here is a fixed 20rem.
     for (const laned of [true, false]) {
       expect(topRowLayout(laned).gridClass).toContain("minmax(0,1fr)");
+    }
+  });
+
+  it("declares a shrinkable single column below lg, so nothing overflows a phone", () => {
+    // Without a base template the implicit track sizes to min-content, and at
+    // 390px the cards came out 546px wide in a 356px column.
+    for (const laned of [true, false]) {
+      const base = topRowLayout(laned).gridClass.split(" ").find((c) => c.startsWith("grid-cols-"));
+      expect(base).toBe("grid-cols-[minmax(0,1fr)]");
     }
   });
 });

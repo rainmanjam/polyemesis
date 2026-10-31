@@ -156,4 +156,21 @@ describe("the header live badge counts and names the selected programme", () => 
       translate("en", "chrome.liveCount", { count: 5 }),
     );
   });
+
+  // At 390px "Main: Off air" wrapped onto three lines beside the logo. jsdom
+  // cannot measure a wrap, so this holds the two classes that prevent it and
+  // the title that keeps the truncated text readable; the e2e layout spec
+  // measures the real height at 390px.
+  it("keeps the phone chip on one line, truncating the programme name rather than wrapping", () => {
+    current = {
+      ...frame(1, "A programme with a long name", true, 1_000_000, 10),
+      destinations: [dest(1, 1, false)],
+    } as unknown as Status;
+    render(layout());
+    const chip = screen.getByTestId("mobile-on-air");
+    expect(chip.className).toContain("whitespace-nowrap");
+    expect(chip.className).toContain("min-w-0");
+    expect(chip.lastElementChild?.className).toContain("truncate");
+    expect(chip.getAttribute("title")).toBe(chip.textContent);
+  });
 });

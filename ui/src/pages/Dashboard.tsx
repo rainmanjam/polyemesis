@@ -1151,7 +1151,7 @@ function FailoverElapsed({ switchedAt }: { switchedAt: string }) {
  *  is not something the person editing it is likely to be toggling.
  */
 function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNode }) {
-  if (stacked) return <div className="flex flex-col gap-3">{children}</div>;
+  if (stacked) return <div className="flex min-w-0 flex-col gap-3">{children}</div>;
   return <>{children}</>;
 }
 
@@ -1749,7 +1749,9 @@ export function Dashboard() {
        */}
       <div className={cn("grid gap-3", topRow.gridClass)}>
         {/* ---------- preview + ingest ---------- */}
-        <div className="flex flex-col gap-3">
+        {/* min-w-0: a grid item's min width is its content's by default, so a
+            long SRT address would widen the column instead of wrapping. */}
+        <div className="flex min-w-0 flex-col gap-3">
           <LazyBoundary
             fallback={
               // Same max-h as PreviewPlayer, and it has to be: this stands in for

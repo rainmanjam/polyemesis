@@ -136,3 +136,44 @@ test.describe("app shell scrolling", () => {
     expect(m.spillBelowFold).toBe(0);
   });
 });
+
+/* ===========================================================================
+   A phone with a source configured (auth.setup.ts guarantees one).
+
+   At 390x844 the Dashboard's top-row grid had no template below lg, so its one
+   implicit track sized to min-content and the Ingest, Chat and Pipeline cards
+   came out 546px wide in a 356px column: the SRT address and the libsrt
+   warning were cut off on the right. And the header's on-air chip ("Main: Off
+   air") wrapped onto three lines beside the logo. Both are measured here.
+   =========================================================================== */
+const PHONE = { width: 390, height: 844 };
+
+test.describe("the Dashboard on a phone", () => {
+  test("no card is wider than the screen, and the header chip stays on one line", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.goto("/");
+    await expect(page.locator("main")).toBeVisible();
+    // The Ingest card is the one whose content (the SRT address) widened it.
+    await expect(page.getByText("Ingest", { exact: true }).first()).toBeVisible();
+
+    const m = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const cards = [...document.querySelectorAll("main .rounded-lg.border")]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0);
+      const chip = document.querySelector('[data-testid="mobile-on-air"]');
+      const line = chip ? parseFloat(getComputedStyle(chip).lineHeight) || 16 : 0;
+      return {
+        vw,
+        cards: cards.length,
+        widest: Math.max(0, ...cards.map((r) => r.width)),
+        overRight: cards.filter((r) => r.right > vw + 1).length,
+        chipHeight: chip?.getBoundingClientRect().height ?? 0,
+        line,
+      };
+    });
+    expect(m.cards, "no cards were found to measure").toBeGreaterThan(0);
+    expect(m.overRight, `a card runs past the right edge (widest ${m.widest}px in ${m.vw}px)`).toBe(0);
+    expect(m.chipHeight, "the header on-air chip wrapped").toBeLessThanOrEqual(m.line * 1.5);
+  });
+});

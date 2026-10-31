@@ -9,7 +9,7 @@ import { api } from "@/lib/api";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { copyToClipboard } from "@/lib/clipboard";
 import { failedRead, mayClaim, okRead, pendingRead, type ReadState } from "@/lib/readState";
-import { setupChecklist, type ChecklistStepId } from "@/lib/setupChecklist";
+import { readyToStream, setupChecklist, type ChecklistStepId } from "@/lib/setupChecklist";
 import {
   overviewTiles,
   readSecretKeyAck,
@@ -101,7 +101,9 @@ export function SettingsOverview({
   const checklist =
     destinations === null ? null : setupChecklist({ sourceCount, signal, destinations });
   const nextStep = checklist?.steps.find((step) => step.state === "next");
-  const ready = checklist !== null && checklist.reason === null;
+  // The strip and the checklist below it read the same steps (readyToStream),
+  // so "Ready to stream" never sits above "2 of 5 done".
+  const ready = checklist !== null && readyToStream(checklist);
 
   const tiles = overviewTiles({
     settings,
@@ -185,8 +187,13 @@ function OverviewTileCard({ tile, onOpen }: { tile: OverviewTile; onOpen: (tab: 
               </span>
             )}
           </div>
-          {tile.lines.map((line) => (
-            <span key={line} className="text-sm first-of-type:font-medium">
+          {/* Keyed by position, not by text: two reads still pending give two
+              identical "Reading…" lines, and a text key made them collide, so
+              React kept a stale node and the settled tile showed four lines
+              from a three-line array. The lines are a fixed-order list, rebuilt
+              whole on every render, so the index is the stable identity. */}
+          {tile.lines.map((line, i) => (
+            <span key={i} className="text-sm first-of-type:font-medium">
               {line}
             </span>
           ))}

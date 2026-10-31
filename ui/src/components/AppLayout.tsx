@@ -272,12 +272,17 @@ export function AppLayout({
             phone's one answer to "am I on air?", beside the hamburger: the live
             count when something is running, and the words Off air otherwise.
             It reuses the strip's own wording, so the two cannot disagree. */}
+        {/* One line, always. With the programme in it ("Main: Off air") the
+            chip wrapped onto three lines beside the logo at 390px; it now
+            keeps to one line and truncates the text, with the whole of it in
+            the title. */}
         <span
           data-testid="mobile-on-air"
-          className="flex items-center gap-1.5 text-tiny sm:hidden"
+          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden"
+          title={liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
         >
           <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
-          <span className={liveCount > 0 ? "text-foreground" : "text-muted-foreground"}>
+          <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
             {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
           </span>
         </span>
