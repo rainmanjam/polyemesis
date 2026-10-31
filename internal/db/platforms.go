@@ -652,33 +652,6 @@ var destinationPresets = []DestinationPreset{
 			"from the approved streaming tool linked to the page. Copy both from the event.",
 	},
 	{
-		ID: "trovo", Name: "Trovo", Group: GroupVideo,
-		Video: &VideoGuidance{
-			Width: 1920, Height: 1080, FPS: 30, KbpsMin: 4000, KbpsMax: 6000, GOPSeconds: 2,
-			Note:   "Above 6000 kbps is subscribers only. Trovo's own page is undated and omits the keyframe interval, audio codec and audio bitrate; the 2s keyframe here is from OBS's services.json, in which Trovo maintains its own entry. OBS carries a 9000 kbps ceiling against Trovo's published 6000-for-non-subscribers.",
-			Source: "https://support.trovo.live/category/1/article/778", Checked: "2026-08-06",
-		},
-		Transport: PresetRTMP, Kind: DestRTMP, Platform: PlatformTrovo,
-		SeparateKey: true,
-		// No HelpURL: Trovo's stream settings live behind a login and this file
-		// has no verified public address for them. An invented one is worse
-		// than none — the note below says where to look.
-		//
-		// KEEP THIS IN STEP WITH oauth.PlatformCapabilities()'s trovo row, for
-		// the reason the kick preset above gives: that note went on telling
-		// operators to copy a key polyemesis had started fetching for them.
-		//
-		// The split here is the unusual part and the note has to carry it. The
-		// KEY is fetched from a connected account; the ingest URL is not, and
-		// cannot be — Trovo issues the hostname per region and publishes it
-		// only in the creator dashboard, so there is nothing to prefill and
-		// nothing to look up. That is one field copied once, not per broadcast.
-		Notes: "Connect a Trovo account in Settings → Platform credentials and polyemesis fetches the stream " +
-			"key itself, over the channel_details_self scope. The server URL is yours to supply either way: " +
-			"Trovo's ingest hostname varies by region and appears nowhere in its API, so copy it once from " +
-			"the Trovo creator dashboard → Stream. Refreshing the key afterwards leaves that URL alone.",
-	},
-	{
 		ID: "dlive", Name: "DLive", Group: GroupVideo,
 		Transport: PresetRTMP, Kind: DestRTMP,
 		SeparateKey: true,

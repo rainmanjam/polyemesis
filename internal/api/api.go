@@ -2402,6 +2402,12 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, db.ErrNoUser):
 		writeError(w, http.StatusConflict, "setup has not been completed")
+	// A START REFUSED BECAUSE THE PLATFORM SHUT DOWN (Trovo, 30 June 2026).
+	// The row is fine and the request well formed; what it asks for conflicts
+	// with the world, and the sentence naming the shutdown is the whole answer.
+	// Without this case it fell through to 500, which reads as a server fault.
+	case errors.Is(err, db.ErrPlatformRetired):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrStateConflict):
 		// The sentence is passed through rather than replaced, because unlike
 		// the two cases above this one is per-request: WHICH state blocked the

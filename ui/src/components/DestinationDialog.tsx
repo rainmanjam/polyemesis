@@ -258,17 +258,6 @@ const PRESETS: DestPreset[] = [
     notes: "addDest.presetNote.linkedin",
   },
   {
-    id: "trovo",
-    name: "Trovo",
-    group: "video",
-    transport: "rtmp",
-    kind: "rtmp",
-    platform: "trovo",
-    url: "",
-    separateKey: true,
-    notes: "addDest.presetNote.trovo",
-  },
-  {
     id: "dlive",
     name: "DLive",
     group: "video",

@@ -475,6 +475,18 @@ its first tagged release.
   text link, which reverses the earlier docs-first order. The CSS drawing is
   replaced by a crop of the real routing screen.
 
+### Removed
+
+- **Trovo.** Trovo shut down on 30 June 2026, so it is gone from Add
+  destination, the platform presets, the capability matrix and the sign-in
+  options, and the Trovo OAuth provider has been removed. Creating a Trovo
+  destination through the API answers 400, and starting one answers 409, each
+  saying "Trovo shut down on 30 June 2026". A Trovo destination saved before
+  the shutdown is kept: on the first start after upgrading it is switched off,
+  its card says why, and its settings stay readable until you delete it. Stored
+  Trovo account tokens, the Trovo app credentials and any pending Trovo sign-in
+  are deleted from the database at the same time.
+
 ### Fixed
 
 - **The source card's "retrans" count was always 0.** It counted
