@@ -477,6 +477,19 @@ its first tagged release.
 
 ### Fixed
 
+- **The OAuth acceptance suite no longer creates a Facebook live video.**
+  `scripts/acceptance-oauth.sh` said its credentialed step "starts no
+  broadcast", but the step called Facebook's ingest lookup, and that lookup
+  creates a `LIVE_NOW` live video. Run with real credentials, it would have left
+  one on the account. A YouTube channel with no stream would also have got a
+  new stream inserted. The default run now creates nothing on any platform.
+  Twitch and Kick read their ingest. YouTube lists its stream keys. Facebook is
+  skipped. `POLY_OAUTH_ALLOW_BROADCAST=1` (the driver's `-allow-broadcast`) opts
+  in to creating one public Facebook live video. The run ends that video, and
+  reports its id, before it exits. The suite also says now that a Kick run
+  rotates the refresh token. The live step moved to `scripts/internal/oauthlive`,
+  where a test fails if the default path calls a method that creates anything.
+
 - **The source card's "retrans" count was always 0.** It counted
   retransmissions the listener had sent, which a receive-only listener never
   does. It now counts the retransmitted packets received.
