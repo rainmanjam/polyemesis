@@ -768,6 +768,18 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/facebook/end-broadcast` |
 | `GET` | `/destinations/{id}/facebook/stream-health` |
 | `POST` | `/destinations/{id}/tracks/{track}/gain` |
+| `GET` `PUT` | `/destinations/{id}/rollover` |
+| `POST` | `/destinations/{id}/rollover/run` |
+| `GET` | `/rollover/limits` |
+
+The planned-rollover routes (#19) read and set one destination's rollover
+settings and its countdown, and run a rollover now. `GET /rollover/limits` is
+the table of platform caps, each with its source and how well it is established.
+`PUT` takes `enabled`, `marginMinutes` (5 to 120), `quietStart`, `quietEnd`,
+`quietZone` and `obsScene`, and a bad value is refused with the reason. `POST
+.../rollover/run` is refused with a 409 when the destination is not delivering,
+the platform is countdown only, or a rollover ran in the last ten minutes. See
+[ROLLOVER.md](ROLLOVER.md).
 
 `POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
 destination. The body takes `muted` (boolean), `gain` (a finite number above
