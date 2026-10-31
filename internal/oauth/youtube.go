@@ -270,7 +270,9 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 		// scheduled broadcasts are already bound to.
 		for i := range streams {
 			if strings.EqualFold(streams[i].CDN.IngestionType, "rtmp") &&
-				streams[i].CDN.IngestionInfo.StreamName != "" {
+				streams[i].CDN.IngestionInfo.StreamName != "" &&
+				!isVerticalStreamTitle(streams[i].Snippet.Title) &&
+				!containsString(opts.ExcludeStreamIDs, streams[i].ID) {
 				return &streams[i], nil
 			}
 		}
