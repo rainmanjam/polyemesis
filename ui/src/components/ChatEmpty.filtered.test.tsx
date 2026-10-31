@@ -59,3 +59,28 @@ describe("ChatEmpty", () => {
     expect(screen.getByText("chat socket refused")).toBeTruthy();
   });
 });
+
+/* ONE EMPTY STATE (app-council, EmptyState adoption on Chat).
+ *
+ * The timeline's empty pane was an 11px grey sentence, below the 12px floor and
+ * unlike every other empty list. It is the kit's EmptyState now: a short title
+ * saying what is missing, and the existing sentence as the body. */
+describe("ChatEmpty uses the kit's empty state", () => {
+  afterEach(cleanup);
+
+  it("titles the waiting pane and keeps the sentence as its body", () => {
+    draw(0);
+    expect(screen.getByText("No messages yet")).toBeTruthy();
+    expect(screen.getByText(/Connected and waiting\./)).toBeTruthy();
+  });
+
+  it("titles a filtered pane as filtered, not as silent", () => {
+    draw(3);
+    expect(screen.getByText("Messages are filtered out")).toBeTruthy();
+  });
+
+  it("titles an error as an error", () => {
+    render(<ChatEmpty loading={false} configured error="chat socket refused" statuses={statuses} />);
+    expect(screen.getByText("Chat could not load")).toBeTruthy();
+  });
+});

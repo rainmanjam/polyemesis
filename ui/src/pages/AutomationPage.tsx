@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { DisabledReason } from "@/components/DisabledReason";
+import { EmptyState } from "@/components/EmptyState";
 import { HooksCard } from "@/components/HooksCard";
 import { McpAccessCard } from "@/components/McpAccessCard";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -131,6 +133,10 @@ export interface Schedule {
   action: ScheduleAction;
   kind: ScheduleKind;
   destinationIds: number[] | null;
+  /** The explicit "every destination" (app-council A54). The server refuses a
+   *  start or stop that has neither this nor a destination list. Optional
+   *  because a row from a server older than the field omits it. */
+  allDestinations?: boolean;
   tz: string;
   atMinutes: number;
   days: number[] | null;
@@ -187,6 +193,26 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "alerts.rule_changed": "auto.evAlertRuleChanged",
   "mcp.action": "auto.evMCPAction",
   "destination.held": "auto.destinationHeld",
+};
+
+/** app-council A57: severity and payload format are stored machine values,
+ *  shown through these maps so the table and the selects say the same
+ *  translated word. An unknown value renders as itself rather than vanishing. */
+const SEVERITY_LABELS: Record<AlertSeverity, TranslationKey> = {
+  info: "timeline.severityInfo",
+  warning: "timeline.severityWarning",
+  critical: "timeline.severityCritical",
+};
+
+const severityLabel = (t: Translator, sv: string) =>
+  sv in SEVERITY_LABELS ? t(SEVERITY_LABELS[sv as AlertSeverity]) : sv;
+
+/** Discord and Slack are product names and stay as written in every locale. */
+const formatLabel = (t: Translator, f: string) => {
+  if (f === "json") return t("auto.formatPlainJson");
+  if (f === "discord") return "Discord";
+  if (f === "slack") return "Slack";
+  return f;
 };
 
 /** The stored event name is the fallback: an unknown type renders as itself
@@ -409,6 +435,9 @@ export function AutomationPage() {
                   action: "start",
                   kind: "daily",
                   destinationIds: [],
+                  // Off, so "every destination" is something the operator
+                  // ticks rather than what an untouched form means (A54).
+                  allDestinations: false,
                   tz: browserZone(),
                   atMinutes: 19 * 60,
                   days: [1, 2, 3, 4, 5],
@@ -540,9 +569,13 @@ function AlertRules({
               <span className="text-left">{t("auto.rulesUnread")}</span>
             </div>
           ) : rules.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {t("auto.noRules")}
-            </div>
+            <EmptyState
+              className="m-3"
+              icon={Bell}
+              title={t("auto.noRulesTitle")}
+              body={t("auto.noRulesBody")}
+              action={{ label: t("auto.newRuleButton"), onClick: onNew }}
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -561,8 +594,8 @@ function AlertRules({
                       <div className="text-sm">{r.name}</div>
                       <div className="text-sm text-muted-foreground">
                         {t("auto.ruleSummary", {
-                          format: r.format,
-                          severity: r.minSeverity,
+                          format: formatLabel(t, r.format),
+                          severity: severityLabel(t, r.minSeverity),
                           debounce: r.debounceSeconds,
                           interval: r.minIntervalSeconds,
                         })}
@@ -654,6 +687,8 @@ function AlertRules({
             tone={stats?.dropped ? "warn" : "muted"}
           />
           <Stat labelKey="auto.retries" value={stats?.retries ?? 0} tone="muted" />
+          {/* app-council A58: the four quieter counters, said once in words. */}
+          <p className="col-span-2 text-sm text-muted-foreground">{t("auto.deliveryStatsHint")}</p>
           {stats?.lastSent && (
             <Stat
               className="col-span-2"
@@ -701,6 +736,12 @@ function RuleDialog({
   const [saving, setSaving] = useState(false);
   const editing = draft.id > 0;
   const events = form.events ?? [];
+  // app-council A55: "every event" is a switch, on by default, rather than
+  // what an empty checkbox list happens to mean. The server's wire shape is
+  // unchanged -- an empty list is still every event -- so this is the one
+  // place the two readings are told apart.
+  const [allEvents, setAllEvents] = useState(() => events.length === 0);
+  const eventsBlocked = !allEvents && events.length === 0;
 
   const toggleEvent = (t: string) =>
     setForm((f) => {
@@ -717,7 +758,7 @@ function RuleDialog({
         // reads that as "keep the endpoint you already have".
         url: form.url,
         format: form.format,
-        events,
+        events: allEvents ? [] : events,
         minSeverity: form.minSeverity,
         debounceSeconds: form.debounceSeconds,
         minIntervalSeconds: form.minIntervalSeconds,
@@ -805,37 +846,40 @@ function RuleDialog({
           </label>
 
           <div className="grid grid-cols-2 gap-3">
+            {/* app-council A58: every SelectTrigger is named by its Label
+                through id/htmlFor, so a screen reader announces more than
+                the current value. */}
             <div className="flex flex-col gap-1">
-              <Label>{t("auto.payloadFormat")}</Label>
+              <Label htmlFor="rule-format">{t("auto.payloadFormat")}</Label>
               <Select
                 value={form.format}
                 onValueChange={(v) => setForm({ ...form, format: v as AlertFormat })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="rule-format">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {meta.formats.map((f) => (
                     <SelectItem key={f} value={f}>
-                      {f === "json" ? t("auto.formatPlainJson") : f === "discord" ? "Discord" : "Slack"}
+                      {formatLabel(t, f)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label>{t("auto.minSeverity")}</Label>
+              <Label htmlFor="rule-severity">{t("auto.minSeverity")}</Label>
               <Select
                 value={form.minSeverity}
                 onValueChange={(v) => setForm({ ...form, minSeverity: v as AlertSeverity })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="rule-severity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {meta.severities.map((sv) => (
                     <SelectItem key={sv} value={sv}>
-                      {sv}
+                      {severityLabel(t, sv)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -843,20 +887,31 @@ function RuleDialog({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>{t("auto.events")}</Label>
-            <p className="text-sm text-muted-foreground">
-              {t("auto.eventsNoneHint")}
-            </p>
-            <div className="grid gap-1.5 sm:grid-cols-2">
-              {meta.events.map((ev) => (
-                <label key={ev} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={events.includes(ev)} onCheckedChange={() => toggleEvent(ev)} />
-                  {eventLabel(t, ev)}
-                </label>
-              ))}
-            </div>
-          </div>
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="mb-1 text-sm font-medium">{t("auto.events")}</legend>
+            <label className="flex items-start gap-2">
+              <Switch
+                className="mt-0.5"
+                checked={allEvents}
+                onCheckedChange={setAllEvents}
+                aria-label={t("auto.allEvents")}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm">{t("auto.allEvents")}</span>
+                <span className="text-sm text-muted-foreground">{t("auto.allEventsHint")}</span>
+              </span>
+            </label>
+            {!allEvents && (
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {meta.events.map((ev) => (
+                  <label key={ev} className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={events.includes(ev)} onCheckedChange={() => toggleEvent(ev)} />
+                    {eventLabel(t, ev)}
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
@@ -867,8 +922,12 @@ function RuleDialog({
                 min={meta.bounds.minDebounceSeconds || 1}
                 max={meta.bounds.maxDebounceSeconds || 3600}
                 value={form.debounceSeconds}
+                aria-describedby="rule-debounce-hint"
                 onChange={(e) => setForm({ ...form, debounceSeconds: Number(e.target.value) })}
               />
+              <span id="rule-debounce-hint" className="text-sm text-muted-foreground">
+                {t("auto.coalescingHint")}
+              </span>
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="rule-interval">{t("auto.minGap")}</Label>
@@ -884,11 +943,21 @@ function RuleDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+          <DisabledReason
+            id="rule-save-reason"
+            className="mr-auto"
+            reason={eventsBlocked ? t("auto.blockEventsNone") : null}
+          />
           <Button variant="ghost" size="sm" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button size="sm" onClick={save} disabled={saving || !form.name.trim()}>
+          <Button
+            size="sm"
+            onClick={save}
+            disabled={saving || !form.name.trim() || eventsBlocked}
+            aria-describedby={eventsBlocked ? "rule-save-reason" : undefined}
+          >
             {saving && <Loader2 className="animate-spin" />}
             {editing ? t("auto.saveRule") : t("auto.createRule")}
           </Button>
@@ -931,6 +1000,9 @@ function Schedules({
         action: s.action,
         kind: s.kind,
         destinationIds: s.destinationIds ?? [],
+        // Sent as it is stored, so the on/off switch cannot change what the
+        // schedule acts on (A54).
+        allDestinations: Boolean(s.allDestinations),
         tz: s.tz,
         atMinutes: s.atMinutes,
         days: s.days ?? [],
@@ -962,8 +1034,11 @@ function Schedules({
     // under every playlist row -- telling the operator this schedule does the
     // one thing its validation exists to forbid.
     if (isPlaylistAction(s.action)) return t("auto.targetPlaylist");
+    // The flag, not an empty list, is "every destination" (A54). A row with
+    // neither does not run, and says so instead of claiming everything.
+    if (s.allDestinations) return t("auto.targetEveryDestination");
     const ids = s.destinationIds ?? [];
-    if (ids.length === 0) return t("auto.targetEveryDestination");
+    if (ids.length === 0) return t("auto.targetNoDestinations");
     return ids.map((id) => destNames.get(id) ?? `#${id}`).join(", ");
   };
 
@@ -983,9 +1058,13 @@ function Schedules({
               <span className="text-left">{t("auto.schedulesUnread")}</span>
             </div>
           ) : schedules.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {t("auto.noSchedules")}
-            </div>
+            <EmptyState
+              className="m-3"
+              icon={CalendarClock}
+              title={t("auto.noSchedulesTitle")}
+              body={t("auto.noSchedulesBody")}
+              action={{ label: t("auto.newSchedule"), onClick: onNew }}
+            />
           ) : (
             <Table>
               <TableHeader>
@@ -1002,8 +1081,9 @@ function Schedules({
                   <TableRow key={s.id}>
                     <TableCell>
                       <div className="flex items-center gap-1.5 text-sm">
+                        {/* app-council A57: the translated action, not its id. */}
                         <Badge variant={isStartAction(s.action) ? "live" : "outline"}>
-                          {s.action}
+                          {scheduleActionLabel(s.action, t)}
                         </Badge>
                         {s.name}
                       </div>
@@ -1063,9 +1143,7 @@ function Schedules({
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {runs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-            {t("auto.nothingFired")}
-            </p>
+            <EmptyState title={t("auto.noRunsTitle")} body={t("auto.noRunsBody")} />
           ) : (
             runs.map((r) => (
               <div key={`${r.id}-${r.at}`} className="flex flex-col gap-0.5 border-b border-border pb-2 last:border-0">
@@ -1118,6 +1196,7 @@ function ScheduleDialog({
   const editing = draft.id > 0;
   const days = form.days ?? [];
   const dests = form.destinationIds ?? [];
+  const allDests = Boolean(form.allDestinations);
 
   // Whether the live snapshot has arrived at all. `status === null` is NOT the
   // same fact as "this install has no destinations", and the two used to
@@ -1149,7 +1228,9 @@ function ScheduleDialog({
         enabled: form.enabled,
         action: form.action,
         kind: form.kind,
-        destinationIds: dests,
+        // Never both: the server refuses a list beside allDestinations.
+        destinationIds: allDests ? [] : dests,
+        allDestinations: allDests,
         tz: form.tz,
         atMinutes: form.atMinutes,
         days,
@@ -1194,24 +1275,31 @@ function ScheduleDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label>{t("auto.action")}</Label>
+              <Label htmlFor="sch-action">{t("auto.action")}</Label>
               <Select
                 value={form.action}
                 onValueChange={(v) => {
                   const action = v as ScheduleAction;
+                  const playlist = action.startsWith("playlist.");
                   setForm({
                     ...form,
                     action,
                     // A playlist schedule that also names destinations is
                     // refused by the server, so a stale pick from before the
                     // switch must not ride along invisibly.
-                    destinationIds: action.startsWith("playlist.")
-                      ? []
-                      : form.destinationIds,
+                    destinationIds: playlist ? [] : form.destinationIds,
+                    // A54: an All destinations ticked for a START does not
+                    // carry into a STOP. "Every destination" on a stop takes
+                    // the whole broadcast down, so it is ticked for the stop
+                    // itself or not at all.
+                    allDestinations:
+                      playlist || (action === "stop" && form.action !== "stop")
+                        ? false
+                        : form.allDestinations,
                   });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="sch-action">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1224,12 +1312,12 @@ function ScheduleDialog({
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label>{t("auto.repeats")}</Label>
+              <Label htmlFor="sch-kind">{t("auto.repeats")}</Label>
               <Select
                 value={form.kind}
                 onValueChange={(v) => setForm({ ...form, kind: v as ScheduleKind })}
               >
-                <SelectTrigger>
+                <SelectTrigger id="sch-kind">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1304,13 +1392,31 @@ function ScheduleDialog({
             </>
           )}
 
-          {!form.action.startsWith("playlist.") && (
-            <div className="flex flex-col gap-1.5">
-              <Label>{t("auto.destinations")}</Label>
+          {!isPlaylistAction(form.action) && (
+            <fieldset className="flex flex-col gap-1.5">
+              <legend className="mb-1 text-sm font-medium">{t("auto.destinations")}</legend>
+              {/* app-council A54: the hint says what THIS action does to the
+                  destinations it acts on. It used to say "none selected means
+                  every destination, which is what start the show usually
+                  means" under a stop as well. */}
               <p className="text-sm text-muted-foreground">
-                {t("auto.destinationsNoneHint")}
+                {form.action === "stop" ? t("auto.destinationsStopHint") : t("auto.destinationsStartHint")}
               </p>
-              {destinationsKnown ? (
+              {/* The explicit choice. Every destination is something ticked,
+                  never what an untouched list means. */}
+              <label className="flex items-start gap-2">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={allDests}
+                  onCheckedChange={(v) => setForm({ ...form, allDestinations: Boolean(v) })}
+                  aria-label={t("auto.allDestinations")}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-sm">{t("auto.allDestinations")}</span>
+                  <span className="text-sm text-muted-foreground">{t("auto.allDestinationsHint")}</span>
+                </span>
+              </label>
+              {allDests ? null : destinationsKnown ? (
                 <div className="grid gap-1.5 sm:grid-cols-2">
                   {status.destinations.map((d) => (
                     <label key={d.id} className="flex items-center gap-2 text-sm">
@@ -1324,13 +1430,12 @@ function ScheduleDialog({
                 </div>
               ) : (
                 // An empty list is a positive claim -- "this install has no
-                // destinations" -- and beside the sentence above it becomes
-                // "so this stops all of them". Said plainly instead.
+                // destinations" -- so it is not drawn before the list arrives.
                 <span className="text-sm text-warn">
                   {t("auto.blockDestinationsUnknown")}
                 </span>
               )}
-            </div>
+            </fieldset>
           )}
 
           <div className="flex flex-col gap-1">
@@ -1341,9 +1446,10 @@ function ScheduleDialog({
               min={30}
               max={86400}
               value={form.graceSeconds}
+              aria-describedby="sch-grace-hint"
               onChange={(e) => setForm({ ...form, graceSeconds: Number(e.target.value) })}
             />
-            <span className="text-sm text-muted-foreground">
+            <span id="sch-grace-hint" className="text-sm text-muted-foreground">
               {t("auto.graceHint")}
             </span>
           </div>

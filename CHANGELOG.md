@@ -424,6 +424,25 @@ its first tagged release.
   the field keep working, except a new stop with no destinations, which is
   refused with a message naming `allDestinations`. See
   [docs/SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
+- **Automation: plainer labels and explicit "All events".** The tab that holds
+  script hooks is now called **Hooks** (the `?tab=hooks` link is unchanged), and
+  the Alerts card is **Alert rules**. An alert rule has an **All events** switch,
+  on by default; turn it off to pick events, and the dialog will not save with
+  none picked. Schedule badges, alert summaries and the severity list show
+  translated labels instead of raw values such as `playlist.start` or `warning`.
+  Jargon is gone: *Combine repeat alerts for*, *Run if late by up to*, *Recent
+  runs*, and *Merged / Waiting / Discarded / Retried* with a one-line
+  explanation. Every select in the rule and schedule dialogs is named by its
+  label. Empty alert, schedule, hook and run lists use the shared empty state,
+  with the button that fills them.
+- **Chat: one empty state.** The timeline's empty pane uses the shared empty
+  state with a short title (for example "No messages yet" or "Messages are
+  filtered out"). The counters read *Duplicates skipped* and *Saved to history*.
+- **OBS chat dock says what went wrong.** A dock URL with no key, a key the
+  server refused, and a server that cannot be reached now each have their own
+  message, and the unreachable case retries by itself. While it loads, the dock
+  shows "Connecting to polyemesis…" instead of a blank panel. The on-stream
+  overlay still draws nothing in every one of these cases.
 - **Dashboard: clearer on-air answer and one filled start action.** The on-air
   strip counts live, stopped and failing destinations against the whole install
   ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as

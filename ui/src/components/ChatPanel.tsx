@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmptyState } from "@/components/EmptyState";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api } from "@/lib/api";
 import { clockTime, timestamp } from "@/lib/format";
@@ -981,26 +982,47 @@ export function ChatEmpty({
   hiddenMessages?: number;
 }) {
   const t = useT();
+  // Loading is not empty: it is a wait, so it keeps the spinner and no title.
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center">
+        <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+          {t("chatpage.emptyLoading")}
+        </p>
+      </div>
+    );
+  }
+  // Every other situation is the kit's EmptyState: a title naming what is
+  // missing, the existing sentence as its body (it was an 11px line, below
+  // the 12px floor). Same ranking as before.
+  let title: TranslationKey;
   let body: string;
-  if (loading) body = t("chatpage.emptyLoading");
-  else if (error) body = error;
-  else if (!configured) body = t("chatpage.emptyNotRunning");
-  else if (statuses.length === 0) body = t("chatpage.emptyNoAccount");
-  // Ranked ABOVE "nothing has been said": when the filter is the reason the
-  // pane is empty, it is the only reason worth printing.
-  else if (hiddenMessages > 0)
+  if (error) {
+    title = "chatpage.emptyErrorTitle";
+    body = error;
+  } else if (!configured) {
+    title = "chatpage.emptyOffTitle";
+    body = t("chatpage.emptyNotRunning");
+  } else if (statuses.length === 0) {
+    title = "chatpage.emptyNoAccountTitle";
+    body = t("chatpage.emptyNoAccount");
+  } else if (hiddenMessages > 0) {
+    // Ranked ABOVE "nothing has been said": when the filter is the reason the
+    // pane is empty, it is the only reason worth printing.
+    title = "chatpage.emptyFilteredTitle";
     body =
       hiddenMessages === 1
         ? t("chatpage.emptyFilteredOne")
         : t("chatpage.emptyFilteredMany", { count: hiddenMessages });
-  else body = t("chatpage.emptyWaiting");
+  } else {
+    title = "chatpage.emptyWaitingTitle";
+    body = t("chatpage.emptyWaiting");
+  }
 
   return (
-    <div className="flex h-full items-center justify-center px-6 text-center">
-      <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground">
-        {loading ? <Loader2 className="mr-1 inline h-3 w-3 animate-spin" /> : null}
-        {body}
-      </p>
+    <div className="flex h-full items-center justify-center p-3">
+      <EmptyState icon={MessagesSquare} title={t(title)} body={body} />
     </div>
   );
 }

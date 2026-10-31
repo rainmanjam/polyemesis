@@ -12,6 +12,8 @@ const form = (over: Partial<ScheduleFormFacts> = {}): ScheduleFormFacts => ({
   action: "start",
   kind: "daily",
   runAt: "",
+  destinationIds: [],
+  allDestinations: true,
   ...over,
 });
 
@@ -81,7 +83,7 @@ describe("scheduleBlock: destinations that have not arrived", () => {
     // Before the first snapshot the checkbox list is empty for a reason that
     // has nothing to do with the operator's intent, so "stop nothing selected"
     // silently becomes "stop the whole broadcast at 23:00".
-    const b = scheduleBlock(form({ action: "stop" }), {
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false }), {
       destinationsKnown: false,
       editing: false,
       now: NOW,
@@ -114,6 +116,65 @@ describe("scheduleBlock: destinations that have not arrived", () => {
       now: NOW,
     });
     expect(b.kind).toBe("name");
+  });
+});
+
+/* app-council A54: "every destination" is ticked, never inferred from nothing. */
+describe("scheduleBlock: a destination schedule that names nothing", () => {
+  it("refuses a stop with nothing picked and All destinations off", () => {
+    // The old dialog saved this and the server stopped EVERY destination.
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+    if (b.kind === "destinationsNone") expect(b.reason).toBe("auto.blockDestinationsNone");
+  });
+
+  it("refuses it on an edit too, where emptying the list is the likelier slip", () => {
+    const b = scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: true,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+  });
+
+  it("refuses a start the same way: the choice is explicit for both", () => {
+    const b = scheduleBlock(form({ action: "start", allDestinations: false, destinationIds: [] }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("destinationsNone");
+  });
+
+  it("accepts All destinations, and a named list", () => {
+    const opts = { destinationsKnown: true, editing: false, now: NOW };
+    expect(scheduleBlock(form({ action: "stop", allDestinations: true }), opts).kind).toBe("ok");
+    expect(
+      scheduleBlock(form({ action: "stop", allDestinations: false, destinationIds: [3] }), opts).kind,
+    ).toBe("ok");
+  });
+
+  it("lets All destinations through before the destination list has arrived", () => {
+    // Nothing needs picking from a list that is not there yet.
+    const b = scheduleBlock(form({ action: "stop", allDestinations: true }), {
+      destinationsKnown: false,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("ok");
+  });
+
+  it("never asks a playlist schedule for destinations", () => {
+    const b = scheduleBlock(form({ action: "playlist.stop", allDestinations: false }), {
+      destinationsKnown: true,
+      editing: false,
+      now: NOW,
+    });
+    expect(b.kind).toBe("ok");
   });
 });
 

@@ -15,9 +15,14 @@ import type { TranslationKey } from "./i18n";
  *     `status?.destinations ?? []`, so before the first live snapshot it is
  *     empty and nothing distinguishes that from "an install with no
  *     destinations". The paragraph above it promises "none selected means
- *     every destination", and scheduler.go implements exactly that -- so a
- *     `stop` schedule created in that window turns an unanswered question into
- *     "stop the whole broadcast at 23:00".
+ *     every destination", and scheduler.go implemented exactly that -- so a
+ *     `stop` schedule created in that window turned an unanswered question
+ *     into "stop the whole broadcast at 23:00".
+ *   - A DESTINATION SCHEDULE THAT NAMES NOTHING (app-council A54). An empty
+ *     list used to MEAN every destination. Now "every destination" is the
+ *     explicit All destinations tick (`allDestinations` on the wire), and a
+ *     start or stop with neither a tick nor a pick is refused here and by the
+ *     server alike.
  *
  * A CONTROL, not a warning: the Create button is disabled and the reason sits
  * beside it. Warning about the epoch would leave the operator free to save the
@@ -35,12 +40,17 @@ export interface ScheduleFormFacts {
   kind: "once" | "daily" | "weekly";
   /** RFC3339, or "" for a one-shot whose instant has not been chosen. */
   runAt: string;
+  destinationIds: readonly number[] | null;
+  /** The explicit "every destination" (app-council A54). Optional because a
+   *  schedule read from a server older than the field has none. */
+  allDestinations?: boolean;
 }
 
 export type ScheduleBlock =
   | { kind: "ok" }
   | { kind: "name" }
   | { kind: "destinationsUnknown"; reason: TranslationKey }
+  | { kind: "destinationsNone"; reason: TranslationKey }
   | { kind: "runAtUnset"; reason: TranslationKey }
   | { kind: "runAtPast"; reason: TranslationKey };
 
@@ -59,8 +69,9 @@ export function runAtUnset(runAt: string): boolean {
 /** The first reason this schedule may not be saved, or `ok`.
  *
  *  `destinationsKnown` is false while the live snapshot has not arrived. It
- *  only blocks CREATION: an existing schedule already carries its stored
- *  destination ids, and the save round-trips them untouched. */
+ *  only blocks CREATION, and only when All destinations is off: an existing
+ *  schedule already carries its stored destination ids, and the save
+ *  round-trips them untouched. */
 export function scheduleBlock(
   form: ScheduleFormFacts,
   opts: { destinationsKnown: boolean; editing: boolean; now: number },
@@ -76,8 +87,15 @@ export function scheduleBlock(
     }
   }
 
-  if (!isPlaylistAction(form.action) && !opts.editing && !opts.destinationsKnown) {
-    return { kind: "destinationsUnknown", reason: "auto.blockDestinationsUnknown" };
+  if (!isPlaylistAction(form.action) && !form.allDestinations) {
+    if (!opts.editing && !opts.destinationsKnown) {
+      return { kind: "destinationsUnknown", reason: "auto.blockDestinationsUnknown" };
+    }
+    // On an edit too: clearing the last tick of an existing stop is the
+    // likelier way to arrive here, and the server refuses it either way.
+    if ((form.destinationIds ?? []).length === 0) {
+      return { kind: "destinationsNone", reason: "auto.blockDestinationsNone" };
+    }
   }
 
   return { kind: "ok" };

@@ -6,6 +6,7 @@ import { Stat } from "@/components/signature/Stat";
 import { toast } from "sonner";
 import { AlertTriangle, Copy, Loader2, Pencil, Plus, Send, Trash2, Webhook } from "lucide-react";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { EmptyState } from "@/components/EmptyState";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -253,9 +254,13 @@ export function HooksCard() {
                 {t("hooks.listUnread")}
               </div>
             ) : hooks.length === 0 ? (
-              <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                {t("hooks.empty")}
-              </div>
+              <EmptyState
+                className="m-3"
+                icon={Webhook}
+                title={t("hooks.emptyTitle")}
+                body={t("hooks.emptyBody")}
+                action={{ label: t("hooks.new"), onClick: () => setDraft({ enabled: true, triggers: [] }) }}
+              />
             ) : (
               <Table>
                 <TableHeader>
