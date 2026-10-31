@@ -106,7 +106,7 @@ func TestAStandbyFeedReencodesEachTrackToThePrimarysFormatAndStillCopiesTheVideo
 		ffmpeg.AudioStream{Index: 2, Codec: "aac", Channels: 6, Layout: "5.1", SampleRate: 48000}))
 
 	for _, pair := range [][2]string{
-		{"-c", "copy"},
+		{"-c:v", "copy"},
 		{"-c:a:0", "aac"}, {"-ar:a:0", "44100"}, {"-ac:a:0", "1"}, {"-b:a:0", "96k"},
 		{"-c:a:1", "aac"}, {"-ar:a:1", "44100"}, {"-ac:a:1", "1"},
 		// No probed bitrate: a sensible default rather than FFmpeg's.
@@ -118,15 +118,15 @@ func TestAStandbyFeedReencodesEachTrackToThePrimarysFormatAndStillCopiesTheVideo
 			t.Errorf("missing %s %s in %q", pair[0], pair[1], args)
 		}
 	}
-	// Per-stream overrides only take effect AFTER the blanket copy.
-	if slices.Index(args, "-c:a:0") < slices.Index(args, "-c") {
-		t.Errorf("-c:a:0 precedes -c copy and is overridden by it: %q", args)
+	// Per-stream overrides only take effect AFTER the video copy.
+	if slices.Index(args, "-c:a:0") < slices.Index(args, "-c:v") {
+		t.Errorf("-c:a:0 precedes -c:v copy and is overridden by it: %q", args)
 	}
 	if got := args[len(args)-1]; got != ffmpeg.RelayOutputURL(out) {
 		t.Errorf("output target = %q, want the selector hub", got)
 	}
-	if slices.Contains(args, "-c:v") {
-		t.Errorf("the standby feed encodes video: %q", args)
+	if i := slices.Index(args, "-c:v"); i < 0 || args[i+1] != "copy" {
+		t.Errorf("the standby feed does not copy video: %q", args)
 	}
 
 	if got, want := conformedFeedArgs(in, out, 12.5, nil), relayFeedArgs(in, out, 12.5); !slices.Equal(got, want) {
