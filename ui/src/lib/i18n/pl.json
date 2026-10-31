@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Klucz strumienia odświeżony z platformy.",
   "dash.laneNoPreview": "Brak podglądu — uruchom koder dla tego programu.",
   "dash.laneCounts": "Miejsca docelowe: {count} · na żywo: {live}",
+  "dash.laneCountsOne": "Miejsca docelowe: 1 · na żywo: {live}",
   "dash.leaveUnchanged": "Pozostaw bez zmian",
   "dash.leaveUnchangedNote": "„Pozostaw bez zmian” nie wysyła niczego, więc platforma zachowuje to, co ma. Wybranie Włączone lub Wyłączone zapisuje tę wartość.",
   "dash.loadingDestinations": "Sprawdzanie, co jest skonfigurowane w tej instalacji…",

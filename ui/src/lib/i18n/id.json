@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Kunci siaran disegarkan dari platform.",
   "dash.laneNoPreview": "Belum ada pratinjau — mulai encoder untuk program ini.",
   "dash.laneCounts": "{count} tujuan · {live} aktif",
+  "dash.laneCountsOne": "1 tujuan · {live} aktif",
   "dash.leaveUnchanged": "Biarkan tidak berubah",
   "dash.leaveUnchangedNote": "“Biarkan tidak berubah” sama sekali tidak mengirim apa pun, jadi platform mempertahankan nilai yang sudah ada. Memilih Aktif atau Mati akan menuliskan nilai itu.",
   "dash.loadingDestinations": "Memeriksa apa yang telah dikonfigurasi pada instalasi ini…",

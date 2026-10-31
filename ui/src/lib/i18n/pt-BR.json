@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Chave de transmissão atualizada a partir da plataforma.",
   "dash.laneNoPreview": "Ainda sem pré-visualização — inicie seu codificador para este programa.",
   "dash.laneCounts": "{count} destinos · {live} ao vivo",
+  "dash.laneCountsOne": "1 destino · {live} ao vivo",
   "dash.leaveUnchanged": "Deixar sem alteração",
   "dash.leaveUnchangedNote": "“Deixar sem alteração” não envia absolutamente nada, então a plataforma mantém o que tem. Escolher Ligado ou Desligado grava aquele valor.",
   "dash.loadingDestinations": "Verificando o que esta instalação tem configurado…",

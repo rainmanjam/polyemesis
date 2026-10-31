@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Stream key refreshed from the platform.",
   "dash.laneNoPreview": "No preview yet — start your encoder for this programme.",
   "dash.laneCounts": "{count} destinations · {live} live",
+  "dash.laneCountsOne": "1 destination · {live} live",
   "dash.leaveUnchanged": "Leave unchanged",
   "dash.leaveUnchangedNote": "“Leave unchanged” sends nothing at all, so the platform keeps what it has. Choosing On or Off writes that value.",
   "dash.loadingDestinations": "Checking what this install has configured…",

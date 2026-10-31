@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Clé de flux actualisée depuis la plateforme.",
   "dash.laneNoPreview": "Pas encore d'aperçu — démarrez votre encodeur pour ce programme.",
   "dash.laneCounts": "{count} destinations · {live} en direct",
+  "dash.laneCountsOne": "1 destination · {live} en direct",
   "dash.leaveUnchanged": "Laisser inchangé",
   "dash.leaveUnchangedNote": "« Laisser inchangé » n'envoie strictement rien, la plateforme conserve donc ce qu'elle a. Choisir Activé ou Désactivé écrit cette valeur.",
   "dash.loadingDestinations": "Vérification de ce qui est configuré sur cette installation…",

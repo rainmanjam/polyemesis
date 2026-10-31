@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Streamsleutel vernieuwd vanaf het platform.",
   "dash.laneNoPreview": "Nog geen voorbeeld — start je encoder voor dit programma.",
   "dash.laneCounts": "{count} bestemmingen · {live} in de lucht",
+  "dash.laneCountsOne": "1 bestemming · {live} in de lucht",
   "dash.leaveUnchanged": "Ongewijzigd laten",
   "dash.leaveUnchangedNote": "“Ongewijzigd laten” stuurt helemaal niets, dus het platform houdt wat het heeft. Aan of Uit kiezen schrijft die waarde.",
   "dash.loadingDestinations": "Controleren wat deze installatie heeft ingesteld…",

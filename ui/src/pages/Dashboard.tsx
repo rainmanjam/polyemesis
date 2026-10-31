@@ -32,7 +32,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { StatusReason } from "@/components/signature/StatusReason";
 import { trackCount, trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
+import { Circle, Copy, Megaphone, Play, Plus, Radio, RotateCcw, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -884,27 +884,70 @@ function BulkDestinationControl({
   );
 }
 
+/** A lane's heading (app-council A89): the programme's name, then what the
+ *  number counts in words ("9 destinations · 5 live"), and a cue that is not
+ *  colour. On air is a filled radio glyph, off air a hollow circle, and the
+ *  heading carries data-lane-state for anything reading it without eyes. The
+ *  bare "STUDIO A 9" it replaces said neither what was counted nor whether
+ *  the lane was live. */
+export function LaneHeading({ name, destinations }: { name: string; destinations: readonly DestStatus[] }) {
+  const t = useT();
+  const live = destinations.filter((d) => d.process?.state === "running").length;
+  const onAir = live > 0;
+  const Cue = onAir ? Radio : Circle;
+  return (
+    <h3
+      data-lane-state={onAir ? "live" : "idle"}
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-muted-foreground"
+    >
+      <Cue
+        aria-hidden="true"
+        data-lane-cue={onAir ? "on-air" : "off-air"}
+        className={cn("h-3.5 w-3.5 shrink-0", onAir ? "text-live" : "text-muted-foreground")}
+      />
+      <span data-lane-name className="truncate font-semibold uppercase tracking-wide text-foreground">
+        {name}
+      </span>
+      <span className="tnum">
+        {destinations.length === 1
+          ? t("dash.laneCountsOne", { live })
+          : t("dash.laneCounts", { count: destinations.length, live })}
+      </span>
+    </h3>
+  );
+}
+
 /** The failover exposure line. Renders nothing when there is nothing to say,
  *  which is the common case on a correctly configured install. */
-function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+export function FailoverExposure({ notice }: { notice: FailoverNotice }) {
   const t = useT();
   if (notice.kind === "none") return null;
 
+  // app-council A85: one line, the lead and the link to the setting. The
+  // argument for failover (restart, a completed YouTube broadcast cannot return
+  // to live, the remux hop) sits behind a closed disclosure. As a two-line
+  // paragraph on every visit it pushed the destinations down and read as a
+  // fault on a page where nothing was wrong.
   return (
     <div
-      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-tiny"
+      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-sm"
       // Not role="alert". Nothing has gone wrong yet, and announcing a standing
       // configuration fact as an alert on every page load is how a screen-reader
       // user learns to tune the region out.
     >
-      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
-      <p className="text-muted-foreground">
-        <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
-        {t("i18nSweep.noFailoverBody")}{" "}
-        <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-          {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
-        </Link>
-      </p>
+      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" aria-hidden="true" />
+      <div className="min-w-0 text-muted-foreground">
+        <p>
+          <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
+          <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+            {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
+          </Link>
+        </p>
+        <details className="mt-1">
+          <summary className="cursor-pointer hover:text-foreground">{t("dash.failoverWhy")}</summary>
+          <p className="mt-1">{t("i18nSweep.noFailoverBody")}</p>
+        </details>
+      </div>
     </div>
   );
 }
@@ -2053,13 +2096,7 @@ export function Dashboard() {
                  renders nothing while lanes are on. */
               lanes.lanes.map((lane) => (
                 <section key={lane.sourceId} className="flex flex-col gap-2">
-                  <h3 className="flex items-center gap-2 text-tiny font-medium uppercase tracking-wide text-muted-foreground">
-                    <RadioTower className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{lane.name}</span>
-                    <span className="font-mono normal-case tracking-normal">
-                      {lane.destinations.length}
-                    </span>
-                  </h3>
+                  <LaneHeading name={lane.name} destinations={lane.destinations} />
                   <div className="grid gap-3 lg:grid-cols-3">
                     <LazyBoundary
                       fallback={

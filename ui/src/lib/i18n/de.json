@@ -490,6 +490,7 @@
   "dash.keyRefreshed": "Streamschlüssel von der Plattform aktualisiert.",
   "dash.laneNoPreview": "Noch keine Vorschau — starten Sie Ihren Encoder für dieses Programm.",
   "dash.laneCounts": "{count} Ziele · {live} auf Sendung",
+  "dash.laneCountsOne": "1 Ziel · {live} auf Sendung",
   "dash.leaveUnchanged": "Unverändert lassen",
   "dash.leaveUnchangedNote": "„Unverändert lassen“ sendet überhaupt nichts, die Plattform behält also, was sie hat. Die Wahl von An oder Aus schreibt diesen Wert.",
   "dash.loadingDestinations": "Prüfe, was in dieser Installation konfiguriert ist …",
