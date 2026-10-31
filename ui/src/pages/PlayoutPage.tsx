@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   Check,
+  ChevronDown,
   Copy,
   Eye,
   Globe,
@@ -53,7 +54,11 @@ import type {
   Settings,
   SourceView,
 } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
+import { DisabledReason } from "@/components/DisabledReason";
+import { SaveStatus } from "@/components/SaveStatus";
+import { disabledDescribedBy } from "@/lib/disabledReason";
+import { useSaveModel } from "@/lib/saveModel";
 
 const MAX_VARIANTS = 8;
 
@@ -78,11 +83,6 @@ export function PlayoutPage() {
   const [sources, setSources] = useState<SourceView[]>([]);
   const [busy, setBusy] = useState(false);
 
-  // Draft copies. Publishing fields are free text, so they are edited locally
-  // and saved on blur or on a button rather than on every keystroke.
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-
   const refresh = useCallback(async () => {
     try {
       const [v, s, r, src] = await Promise.all([
@@ -95,8 +95,6 @@ export function PlayoutPage() {
       setSettings(s);
       setRenditions(r);
       setSources(src);
-      setTitle(v.title);
-      setDescription(v.description);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("play.couldNotLoadPlayout"));
     }
@@ -125,7 +123,11 @@ export function PlayoutPage() {
   /** Save the ladder. The server merges over stored settings, so sending the
    *  whole object is safe and keeps this page from having to know what else
    *  lives in there. */
-  const savePlayoutSettings = useCallback(
+  /** The write itself, which THROWS on failure so a draft held by
+   *  useSaveModel can stay dirty and say "Not saved" rather than look applied.
+   *  savePlayoutSettings below is the same write for a switch or a choice,
+   *  which applies at once and only needs the toast. */
+  const putPlayout = useCallback(
     async (next: PlayoutSettings) => {
       if (!settings) return;
       setBusy(true);
@@ -138,6 +140,7 @@ export function PlayoutPage() {
         // Re-read rather than leave the form showing a value the server
         // rejected, which would look saved.
         void refresh();
+        throw err;
       } finally {
         setBusy(false);
       }
@@ -145,7 +148,15 @@ export function PlayoutPage() {
     [settings, refresh, t],
   );
 
-  const savePublish = useCallback(
+  const savePlayoutSettings = useCallback(
+    (next: PlayoutSettings) => putPlayout(next).catch(() => undefined),
+    [putPlayout],
+  );
+
+  /** Same split as putPlayout: this one throws, for the title and
+   *  description draft (app-council A20); savePublish swallows, for the
+   *  protection choice, which applies at once. */
+  const putPublish = useCallback(
     async (body: {
       protection?: PlayoutProtection;
       title?: string;
@@ -157,11 +168,17 @@ export function PlayoutPage() {
         setView(await api.playout());
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("play.saveFailed"));
+        throw err;
       } finally {
         setBusy(false);
       }
     },
     [t],
+  );
+
+  const savePublish = useCallback(
+    (body: { protection?: PlayoutProtection }) => putPublish(body).catch(() => undefined),
+    [putPublish],
   );
 
   const rotate = useCallback(async () => {
@@ -211,7 +228,15 @@ export function PlayoutPage() {
         }
       />
 
-      <ExposureBanner view={view} />
+      {/* app-council A17: one status line under the title says whether playout
+          is on, who can watch and how many are watching, so the page reads as
+          a control room before it reads as a form. A18: when it is off, the
+          line carries the one action that turns it on. */}
+      <ExposureBanner
+        view={view}
+        busy={busy}
+        onTurnOn={() => void savePlayoutSettings({ ...play, enabled: true })}
+      />
 
       <ProgrammeCard play={play} sources={sources} busy={busy} onSave={savePlayoutSettings} />
 
@@ -224,110 +249,81 @@ export function PlayoutPage() {
         </Card>
       )}
 
+      {/* Share and Who can watch side by side: the two decisions an operator
+          makes on air. Everything that restarts the stream is under Advanced. */}
       <div className="grid gap-3 lg:grid-cols-2">
         <ShareCard view={view} play={play} busy={busy} onRotate={rotate} />
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Eye className="h-3.5 w-3.5" />
-              {t("play.audienceTitle")}
-            </CardTitle>
-            <CardDescription>{t("play.audienceDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat labelKey="play.watchingNow" value={String(analytics.viewers)} />
-              <Stat labelKey="play.peak" value={String(analytics.peak)} />
-              <Stat labelKey="play.sessions" value={String(analytics.sessions)} />
-              <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
-            </div>
-            {analytics.uncounted > 0 && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                {t("play.uncountedViewers", { count: analytics.uncounted })}
-              </p>
-            )}
-            {usage.overLimit && (
-              <p className="mt-3 flex items-start gap-1.5 text-sm text-down">
-                <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
-                {t("play.diskCapBelowWindow")}
-              </p>
-            )}
-            <div className="mt-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy || !view.running}
-                onClick={() => {
-                  void api
-                    .resetPlayoutAnalytics()
-                    .then(() => api.playout())
-                    .then(setView)
-                    .catch(() => toast.error(t("play.resetFailed")));
-                }}
-              >
-                <RotateCw />
-                {t("play.resetCounters")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <ProtectionCard
+          view={view}
+          play={play}
+          busy={busy}
+          onSave={savePublish}
+          onSaveSettings={savePlayoutSettings}
+          className="mt-0"
+        />
       </div>
-
-      <ProtectionCard
-        view={view}
-        play={play}
-        busy={busy}
-        onSave={savePublish}
-        onSaveSettings={savePlayoutSettings}
-      />
 
       <Card className="mt-3">
         <CardHeader>
-          <CardTitle>{t("play.playerPage")}</CardTitle>
-          <CardDescription>
-            {t("play.posterNote")}
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Eye className="h-3.5 w-3.5" />
+            {t("play.audienceTitle")}
+          </CardTitle>
+          <CardDescription>{t("play.audienceDesc")}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="playout-title">{t("play.metaTitle")}</Label>
-            <Input
-              id="playout-title"
-              value={title}
-              maxLength={200}
-              placeholder={t("play.untitled")}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => {
-                if (title !== view.title) void savePublish({ title });
-              }}
-            />
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat labelKey="play.watchingNow" value={String(analytics.viewers)} />
+            <Stat labelKey="play.peak" value={String(analytics.peak)} />
+            <Stat labelKey="play.sessions" value={String(analytics.sessions)} />
+            <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="playout-description">{t("play.metaDescription")}</Label>
-            <Textarea
-              id="playout-description"
-              value={description}
-              maxLength={2000}
-              rows={3}
-              onChange={(e) => setDescription(e.target.value)}
-              onBlur={() => {
-                if (description !== view.description) void savePublish({ description });
+          {analytics.uncounted > 0 && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {t("play.uncountedViewers", { count: analytics.uncounted })}
+            </p>
+          )}
+          {usage.overLimit && (
+            <p className="mt-3 flex items-start gap-1.5 text-sm text-down">
+              <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0" />
+              {t("play.diskCapBelowWindow")}
+            </p>
+          )}
+          <div className="mt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy || !view.running}
+              onClick={() => {
+                void api
+                  .resetPlayoutAnalytics()
+                  .then(() => api.playout())
+                  .then(setView)
+                  .catch(() => toast.error(t("play.resetFailed")));
               }}
-            />
+            >
+              <RotateCw />
+              {t("play.resetCounters")}
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <VariantsCard
+      <PlayerPageCard
+        title={view.title}
+        description={view.description}
+        onSave={(body) => putPublish(body)}
+      />
+
+      <AdvancedSection
         play={play}
         variants={variants}
         renditions={renditions}
         busy={busy}
+        viewers={analytics.viewers}
         onSave={savePlayoutSettings}
+        onApply={putPlayout}
       />
-
-      <PackagingCard play={play} busy={busy} onSave={savePlayoutSettings} />
     </div>
   );
 }
@@ -338,54 +334,116 @@ export function PlayoutPage() {
  *
  *  Silently exposing somebody's stream would be a serious bug, so the state is
  *  stated in words at the top of the page rather than inferred from a toggle
- *  three cards down. */
-function ExposureBanner({ view }: { view: PlayoutAdminView }) {
+ *  three cards down.
+ *
+ *  app-council A17: it is also the page's status line. It leads with whether
+ *  playout is on and ends with how many are watching, so an operator reads
+ *  state, audience and exposure in one place. A18: when playout is off, it
+ *  carries the one primary action that turns it on, instead of leaving the
+ *  header switch as the only way. Exported for its test. */
+export function ExposureBanner({
+  view,
+  busy,
+  onTurnOn,
+}: {
+  view: PlayoutAdminView;
+  busy: boolean;
+  onTurnOn: () => void;
+}) {
   const t = useT();
+  const counts = (
+    <span className="ml-auto flex shrink-0 items-center gap-3 text-sm text-muted-foreground">
+      <span>
+        {t("play.watchingNow")}{" "}
+        <span className="tnum font-mono text-foreground">{view.status.analytics.viewers}</span>
+      </span>
+      <span>
+        {t("play.sessions")}{" "}
+        <span className="tnum font-mono text-foreground">{view.status.analytics.sessions}</span>
+      </span>
+    </span>
+  );
+  const state = (on: boolean) => (
+    <span className="flex shrink-0 items-center gap-1.5 font-medium">
+      <StatusDot tone={on ? "live" : "idle"} />
+      {on ? t("play.statusOn") : t("play.statusOff")}
+    </span>
+  );
   if (!view.status.enabled) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-        <Lock className="h-3.5 w-3.5 shrink-0" />
-        {t("play.offBanner")}
+      <div
+        data-playout-status="off"
+        className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+      >
+        {state(false)}
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Lock className="h-3.5 w-3.5 shrink-0" />
+          {t("play.offBody")}
+        </span>
+        <Button size="sm" className="ml-auto" disabled={busy} onClick={onTurnOn}>
+          {t("play.turnOn")}
+        </Button>
       </div>
     );
   }
   if (!view.status.public) {
     return (
-      <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-        <Lock className="h-3.5 w-3.5 shrink-0 text-live" />
-        <span>
-          <span className="font-medium">{t("play.private")}</span>{" "}
-          <span className="text-muted-foreground">
-            {t("play.privateBanner", { public: t("play.public") })}
+      <div
+        data-playout-status="private"
+        className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+      >
+        {state(true)}
+        <span className="flex items-center gap-1.5">
+          <Lock className="h-3.5 w-3.5 shrink-0 text-live" />
+          <span>
+            <span className="font-medium">{t("play.private")}</span>{" "}
+            <span className="text-muted-foreground">
+              {t("play.privateBanner", { public: t("play.public") })}
+            </span>
           </span>
         </span>
+        {counts}
       </div>
     );
   }
   if (view.exposed) {
     return (
-      <div className="mb-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-        <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-        <span>
-          <span className="font-medium text-destructive">
-            {t("play.exposedTitle")}
-          </span>{" "}
-          <span className="text-muted-foreground">
-            {t("play.exposedBody", { mode: t("play.playbackLink") })}
+      <div
+        data-playout-status="exposed"
+        className="mb-3 flex flex-wrap items-start gap-x-3 gap-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+      >
+        {state(true)}
+        <span className="flex items-start gap-1.5">
+          <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          <span>
+            <span className="font-medium text-destructive">
+              {t("play.exposedTitle")}
+            </span>{" "}
+            <span className="text-muted-foreground">
+              {t("play.exposedBody", { mode: t("play.playbackLink") })}
+            </span>
           </span>
         </span>
+        {counts}
       </div>
     );
   }
   return (
-    <div className="mb-3 flex items-start gap-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm">
-      <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
-      <span>
-        <span className="font-medium">{t("play.unlisted")}</span>{" "}
-        <span className="text-muted-foreground">
-          {t("play.unlistedBanner")}
+    <div
+      data-playout-status="unlisted"
+      className="mb-3 flex flex-wrap items-start gap-x-3 gap-y-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm"
+    >
+      {state(true)}
+      <span className="flex items-start gap-1.5">
+        <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+        <span>
+          <span className="font-medium">{t("play.unlisted")}</span>{" "}
+          <span className="text-muted-foreground">
+            {t("play.unlistedBanner")}
+          </span>
         </span>
       </span>
+      {counts}
     </div>
   );
 }
@@ -466,11 +524,17 @@ function CopyField({
   value,
   hint,
   mono = true,
+  disabled = false,
+  describedBy,
 }: {
   label: string;
   value: string;
   hint?: string;
   mono?: boolean;
+  /** Greyed while playout is off (app-council A18): a link that serves
+   *  nothing must not look ready to hand out. The reason is the card's. */
+  disabled?: boolean;
+  describedBy?: string;
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -481,12 +545,17 @@ function CopyField({
         <Input
           readOnly
           value={value}
+          disabled={disabled}
+          aria-label={label}
+          aria-describedby={describedBy}
           onFocus={(e) => e.currentTarget.select()}
           className={cn("text-sm", mono && "font-mono")}
         />
         <Button
           variant="secondary"
           size="icon-sm"
+          disabled={disabled}
+          aria-describedby={describedBy}
           aria-label={t("play.copyAria", { label })}
           onClick={() => {
             navigator.clipboard
@@ -534,6 +603,11 @@ export function ShareCard({
    * the dialog names the number that makes it a decision. */
   const [rotateOpen, setRotateOpen] = useState(false);
   const viewers = view.status.analytics.viewers;
+  // app-council A18: while playout is off the links serve nothing, so they are
+  // greyed with the reason in words above them rather than looking ready.
+  const offReasonId = useId();
+  const offReason = play.enabled ? null : t("play.shareOffReason");
+  const describedBy = disabledDescribedBy(offReasonId, offReason);
   return (
     <Card>
       <CardHeader>
@@ -544,9 +618,12 @@ export function ShareCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
+        <DisabledReason id={offReasonId} reason={offReason} />
         <CopyField
           label={t("play.playerPage")}
           value={view.urls.watch}
+          disabled={!play.enabled}
+          describedBy={describedBy}
           hint={
             protectedLink
               ? t("play.carriesThePlaybackTokenAnyone")
@@ -557,6 +634,8 @@ export function ShareCard({
           label={t("play.hlsPlaylist")}
           value={view.urls.master}
           hint={t("play.forObsACdnOr")}
+          disabled={!play.enabled}
+          describedBy={describedBy}
         />
         <div className="grid gap-1.5">
           <Label htmlFor="playout-embed">{t("play.embedCode")}</Label>
@@ -565,6 +644,8 @@ export function ShareCard({
             readOnly
             rows={3}
             value={view.urls.embed}
+            disabled={!play.enabled}
+            aria-describedby={describedBy}
             onFocus={(e) => e.currentTarget.select()}
             className="font-mono text-sm"
           />
@@ -622,19 +703,21 @@ export function ProtectionCard({
   busy,
   onSave,
   onSaveSettings,
+  className = "mt-3",
 }: {
   view: PlayoutAdminView;
   play: PlayoutSettings;
   busy: boolean;
   onSave: (body: { protection?: PlayoutProtection }) => Promise<void>;
   onSaveSettings: (next: PlayoutSettings) => Promise<void>;
+  className?: string;
 }) {
   const t = useT();
   // A15: making the stream reachable by people who are not signed in changes who
   // can watch, so it asks first. Turning it back to token or off does not.
   const exposure = useConfirm<"public" | "open">();
   return (
-    <Card className="mt-3">
+    <Card className={className}>
       <CardHeader>
         <CardTitle>{t("play.whoCanWatch")}</CardTitle>
         <CardDescription>
@@ -729,12 +812,20 @@ export function VariantsCard({
   renditions,
   busy,
   onSave,
+  onApply = onSave,
+  onDirtyChange,
 }: {
   play: PlayoutSettings;
   variants: PlayoutAdminView["status"]["variants"];
   renditions: RenditionView[];
   busy: boolean;
   onSave: (next: PlayoutSettings) => Promise<void>;
+  /** The typed fields' write, which throws on failure so the row's draft can
+   *  say "Not saved". Defaults to onSave for a caller with only one. */
+  onApply?: (next: PlayoutSettings) => Promise<void>;
+  /** Per row, keyed by the rung's name, so a section can stay open while any
+   *  row holds an unapplied edit. */
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }) {
   const t = useT();
   /* Removing a rung stopped its muxer and dropped everyone watching it the
@@ -794,118 +885,22 @@ export function VariantsCard({
           </p>
         )}
 
-        {play.variants.map((v, i) => {
-          const st = statusByName.get(v.name);
-          return (
-            <div
-              key={v.name}
-              className="grid items-end gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[auto_1fr_1fr_auto_auto]"
-            >
-              <div className="flex items-center gap-2 pb-2">
-                <StatusDot tone={st?.running ? "live" : v.enabled ? "warn" : "idle"} />
-                <Switch
-                  checked={v.enabled}
-                  disabled={busy}
-                  aria-label={t("hooks.enableAria", { name: v.name })}
-                  onCheckedChange={(enabled) => update(i, { enabled })}
-                />
-              </div>
-
-              <div className="grid gap-1">
-                <Label className="text-sm">{t("play.name")}</Label>
-                {/* Uncontrolled, and committed on blur rather than on every
-                    keystroke: a rename is a directory move and a muxer
-                    restart, so saving mid-word would cycle the stream once per
-                    character. Keyed by the name so a save re-seeds the field. */}
-                <Input
-                  key={v.name}
-                  defaultValue={v.name}
-                  maxLength={32}
-                  className="text-sm"
-                  onBlur={(e) => {
-                    const name = e.currentTarget.value.trim();
-                    if (name && name !== v.name) update(i, { name });
-                    else e.currentTarget.value = v.name;
-                  }}
-                />
-              </div>
-
-              <div className="grid gap-1">
-                <Label className="text-sm">{t("play.videoSource")}</Label>
-                <Select
-                  value={v.renditionId == null ? "source" : String(v.renditionId)}
-                  disabled={busy}
-                  onValueChange={(val) =>
-                    update(i, { renditionId: val === "source" ? null : Number(val) })
-                  }
-                >
-                  <SelectTrigger className="text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="source">{t("play.passthrough")}</SelectItem>
-                    {renditions.map((r) => (
-                      <SelectItem key={r.rendition.id} value={String(r.rendition.id)}>
-                        {r.rendition.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid gap-1">
-                <Label className="text-sm">{t("play.audioTrack")}</Label>
-                {/* Committed on blur for the same reason the name is: each
-                    save restarts this rung's muxer. */}
-                <Input
-                  key={`${v.name}-track-${v.audioTrack}`}
-                  type="number"
-                  min={0}
-                  max={63}
-                  defaultValue={v.audioTrack}
-                  className="w-20 text-sm"
-                  onBlur={(e) => {
-                    const n = Number(e.currentTarget.value);
-                    if (Number.isFinite(n) && n >= 0 && n !== v.audioTrack) {
-                      update(i, { audioTrack: n });
-                    } else {
-                      e.currentTarget.value = String(v.audioTrack);
-                    }
-                  }}
-                />
-              </div>
-
-              <div className="flex items-center gap-1 pb-1">
-                {st?.running && st.bandwidth > 0 && (
-                  <Badge variant="outline" className="font-mono text-sm">
-                    {Math.round(st.bandwidth / 1000)}k
-                    {st.height ? ` · ${st.height}p` : ""}
-                  </Badge>
-                )}
-                {st?.viewers ? (
-                  <Badge variant="outline" className="text-sm">
-                    {t("stats.watching", { count: st.viewers })}
-                  </Badge>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={busy}
-                  aria-label={t("playlist.remove", { name: v.name })}
-                  onClick={() =>
-                    confirmRemove.ask({ index: i, name: v.name, viewers: st?.viewers ?? 0 })
-                  }
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-
-              {st?.error && (
-                <p className="text-sm text-down sm:col-span-5">{st.error}</p>
-              )}
-            </div>
-          );
-        })}
+        {play.variants.map((v, i) => (
+          <RungRow
+            key={v.name}
+            variant={v}
+            status={statusByName.get(v.name)}
+            renditions={renditions}
+            busy={busy}
+            onUpdate={(patch) => update(i, patch)}
+            onApply={(patch) => onApply({
+              ...play,
+              variants: play.variants.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+            })}
+            onRemove={(viewers) => confirmRemove.ask({ index: i, name: v.name, viewers })}
+            onDirtyChange={onDirtyChange}
+          />
+        ))}
 
         <div>
           <Button
@@ -944,67 +939,278 @@ export function VariantsCard({
   );
 }
 
-// --------------------------------------------------------------- packaging
-
-function NumberField({
-  id,
-  label,
-  hint,
-  value,
-  min,
-  max,
-  disabled,
-  onCommit,
+/** One quality level. The switch and the video source apply at once -- a
+ *  toggle or a choice has nothing to keep back. The name and the audio track
+ *  are typed, and each change restarts this level's muxer, so they are a
+ *  draft with an explicit Apply and a save status (useSaveModel), never a blur
+ *  save: a blur save lost an edit that was never blurred and said nothing when
+ *  it wrote one (app-council A16, A20's rule). */
+function RungRow({
+  variant: v,
+  status: st,
+  renditions,
+  busy,
+  onUpdate,
+  onApply,
+  onRemove,
+  onDirtyChange,
 }: {
-  id: string;
-  label: string;
-  hint?: string;
-  value: number;
-  min: number;
-  max: number;
-  disabled: boolean;
-  onCommit: (n: number) => void;
+  variant: PlayoutVariant;
+  status: NonNullable<PlayoutAdminView["status"]["variants"]>[number] | undefined;
+  renditions: RenditionView[];
+  busy: boolean;
+  onUpdate: (patch: Partial<PlayoutVariant>) => void;
+  /** Throws on failure, so the draft stays and says "Not saved". */
+  onApply: (patch: Pick<PlayoutVariant, "name" | "audioTrack">) => Promise<void>;
+  onRemove: (viewers: number) => void;
+  /** Stable (a useCallback in the section), with the row's own key, so the
+   *  effects below run when the row's dirtiness changes and not every render. */
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
+  const t = useT();
+  const reasonId = useId();
+  const model = useSaveModel<{ name: string; audioTrack: string }>({
+    stored: { name: v.name, audioTrack: String(v.audioTrack) },
+    equal: (a, b) => a.name === b.name && a.audioTrack === b.audioTrack,
+    onSave: async (d) => {
+      await onApply({ name: d.name.trim(), audioTrack: Number(d.audioTrack) });
+    },
+  });
+  const dirtyKey = `rung:${v.name}`;
+  useEffect(() => onDirtyChange?.(dirtyKey, model.dirty), [dirtyKey, model.dirty, onDirtyChange]);
+  // A row that goes away (removed, or renamed and re-keyed) is not dirty.
+  useEffect(() => () => onDirtyChange?.(dirtyKey, false), [dirtyKey, onDirtyChange]);
+  const track = Number(model.draft.audioTrack);
+  const invalid =
+    model.draft.name.trim() === "" ||
+    model.draft.audioTrack.trim() === "" ||
+    !Number.isInteger(track) ||
+    track < 0 ||
+    track > 63;
+  const reason = model.dirty && invalid ? t("play.fixValuesFirst") : null;
   return (
-    <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type="number"
-        min={min}
-        max={max}
-        value={draft}
-        disabled={disabled}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          const n = Number(draft);
-          if (Number.isFinite(n) && n !== value) onCommit(n);
-          else setDraft(String(value));
-        }}
-      />
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+    <div className="grid items-end gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[auto_1fr_1fr_auto_auto]">
+      <div className="flex items-center gap-2 pb-2">
+        <StatusDot tone={st?.running ? "live" : v.enabled ? "warn" : "idle"} />
+        <Switch
+          checked={v.enabled}
+          disabled={busy}
+          aria-label={t("hooks.enableAria", { name: v.name })}
+          onCheckedChange={(enabled) => onUpdate({ enabled })}
+        />
+      </div>
+
+      <div className="grid gap-1">
+        <Label className="text-sm" htmlFor={`${reasonId}-name`}>{t("play.name")}</Label>
+        <Input
+          id={`${reasonId}-name`}
+          value={model.draft.name}
+          maxLength={32}
+          className="text-sm"
+          onChange={(e) => model.setDraft({ ...model.draft, name: e.target.value })}
+        />
+      </div>
+
+      <div className="grid gap-1">
+        <Label className="text-sm">{t("play.videoSource")}</Label>
+        <Select
+          value={v.renditionId == null ? "source" : String(v.renditionId)}
+          disabled={busy}
+          onValueChange={(val) =>
+            onUpdate({ renditionId: val === "source" ? null : Number(val) })
+          }
+        >
+          <SelectTrigger className="text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="source">{t("play.passthrough")}</SelectItem>
+            {renditions.map((r) => (
+              <SelectItem key={r.rendition.id} value={String(r.rendition.id)}>
+                {r.rendition.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-1">
+        <Label className="text-sm" htmlFor={`${reasonId}-track`}>{t("play.audioTrack")}</Label>
+        <Input
+          id={`${reasonId}-track`}
+          type="number"
+          min={0}
+          max={63}
+          value={model.draft.audioTrack}
+          className="w-24 text-sm"
+          onChange={(e) => model.setDraft({ ...model.draft, audioTrack: e.target.value })}
+        />
+      </div>
+
+      <div className="flex items-center gap-1 pb-1">
+        {st?.running && st.bandwidth > 0 && (
+          <Badge variant="outline" className="font-mono text-sm">
+            {Math.round(st.bandwidth / 1000)}k
+            {st.height ? ` · ${st.height}p` : ""}
+          </Badge>
+        )}
+        {st?.viewers ? (
+          <Badge variant="outline" className="text-sm">
+            {t("stats.watching", { count: st.viewers })}
+          </Badge>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={busy}
+          aria-label={t("playlist.remove", { name: v.name })}
+          onClick={() => onRemove(st?.viewers ?? 0)}
+        >
+          <Trash2 />
+        </Button>
+      </div>
+
+      {(model.dirty || model.state !== "clean") && (
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-5">
+          {model.dirty && (
+            <>
+              <Button
+                size="sm"
+                disabled={busy || invalid}
+                aria-describedby={disabledDescribedBy(`${reasonId}-reason`, reason)}
+                onClick={() => void model.save()}
+              >
+                {t("common.apply")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={model.discard}>
+                {t("common.discard")}
+              </Button>
+            </>
+          )}
+          <SaveStatus state={model.state} />
+          <DisabledReason id={`${reasonId}-reason`} reason={reason} />
+        </div>
+      )}
+
+      {st?.error && (
+        <p className="text-sm text-down sm:col-span-5">{st.error}</p>
+      )}
     </div>
   );
 }
 
-function PackagingCard({
+// --------------------------------------------------------------- packaging
+
+/** The packaging numbers, held as typed text so a half-typed value is never
+ *  coerced, and so "was 4" can be shown beside a field that now says 2. */
+type PackagingNumberKey =
+  | "segmentSeconds"
+  | "playlistSegments"
+  | "dvrWindowSeconds"
+  | "maxDiskMb"
+  | "audioKbps"
+  | "sessionIdleSeconds"
+  | "maxSessions";
+
+type PackagingDraft = { format: PlayoutSettings["format"] } & Record<PackagingNumberKey, string>;
+
+const PACKAGING_FIELDS: {
+  key: PackagingNumberKey;
+  id: string;
+  label: TranslationKey;
+  hint: TranslationKey;
+  min: number;
+  max: number;
+}[] = [
+  { key: "segmentSeconds", id: "playout-segment", label: "play.segmentLength", hint: "play.shorterIsLowerLatencyAnd", min: 1, max: 30 },
+  { key: "playlistSegments", id: "playout-window", label: "play.liveWindow", hint: "play.threeIsTheMinimumA", min: 3, max: 100 },
+  { key: "dvrWindowSeconds", id: "playout-dvr", label: "play.dvrWindow", hint: "play.dvrHint", min: 0, max: 43200 },
+  { key: "maxDiskMb", id: "playout-disk", label: "play.diskCap", hint: "play.acrossEveryRungTheBackstop", min: 64, max: 1048576 },
+  { key: "audioKbps", id: "playout-audio", label: "play.audioBitrate", hint: "play.oneStereoAacTrackPer", min: 32, max: 512 },
+  { key: "sessionIdleSeconds", id: "playout-idle", label: "play.idleTimeout", hint: "play.mustExceedOneSegmentOr", min: 5, max: 3600 },
+  { key: "maxSessions", id: "playout-sessions", label: "play.sessionCap", hint: "play.boundsTheViewerTableViewers", min: 1, max: 1000000 },
+];
+
+function packagingOf(play: PlayoutSettings): PackagingDraft {
+  const d = { format: play.format } as PackagingDraft;
+  for (const f of PACKAGING_FIELDS) d[f.key] = String(play[f.key]);
+  return d;
+}
+
+const samePackaging = (a: PackagingDraft, b: PackagingDraft) =>
+  a.format === b.format && PACKAGING_FIELDS.every((f) => a[f.key] === b[f.key]);
+
+/** A typed value that is a whole number inside the field's bounds, or null. */
+function packagingValue(raw: string, min: number, max: number): number | null {
+  if (raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= min && n <= max ? n : null;
+}
+
+/** Packaging: every field here restarts the muxers.
+ *
+ *  app-council A16. Each of eight fields used to commit its own PUT on blur,
+ *  and each PUT restarted the stream: tabbing through two fields on air was
+ *  two interruptions, with nothing on screen saying so. The fields are now one
+ *  draft (useSaveModel). Nothing is written until "Apply and restart stream",
+ *  the bar that offers it appears only while something has changed, it counts
+ *  the changes and shows what each field was, and with anyone watching it asks
+ *  first and names how many. Exported for its test. */
+export function PackagingCard({
   play,
   busy,
-  onSave,
+  viewers,
+  onApply,
+  onDirtyChange,
 }: {
   play: PlayoutSettings;
   busy: boolean;
-  onSave: (next: PlayoutSettings) => Promise<void>;
+  viewers: number;
+  /** Throws on failure, so the draft stays and says "Not saved". */
+  onApply: (next: PlayoutSettings) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useT();
-  const set = (patch: Partial<PlayoutSettings>) => void onSave({ ...play, ...patch });
+  const reasonId = useId();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const stored = packagingOf(play);
+  const model = useSaveModel<PackagingDraft>({
+    stored,
+    equal: samePackaging,
+    onSave: async (d) => {
+      // Merged over the CURRENT settings at write time, so an Enabled or
+      // Public switch flipped while this draft was open is not reverted.
+      const next: PlayoutSettings = { ...play, format: d.format };
+      for (const f of PACKAGING_FIELDS) next[f.key] = Number(d[f.key]);
+      await onApply(next);
+    },
+  });
+  const { draft, dirty } = model;
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+
+  const changed = [
+    draft.format !== stored.format,
+    ...PACKAGING_FIELDS.map((f) => draft[f.key] !== stored[f.key]),
+  ].filter(Boolean).length;
+  const invalid = PACKAGING_FIELDS.some((f) => packagingValue(draft[f.key], f.min, f.max) === null);
+  const reason = invalid ? t("play.fixValuesFirst") : null;
+
+  const apply = () => {
+    if (viewers > 0) setConfirmOpen(true);
+    else void model.save();
+  };
 
   return (
     <Card className="mt-3">
       <CardHeader>
-        <CardTitle>{t("play.packaging")}</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          {t("play.packaging")}
+          {dirty && (
+            <Badge variant="warn" className="ml-auto">
+              {t("play.changesPending", { count: changed })}
+            </Badge>
+          )}
+        </CardTitle>
         <CardDescription>
             {t("play.restartNote")}
         </CardDescription>
@@ -1013,9 +1219,11 @@ function PackagingCard({
         <div className="grid gap-1.5">
           <Label htmlFor="playout-format">{t("play.format")}</Label>
           <Select
-            value={play.format}
+            value={draft.format}
             disabled={busy}
-            onValueChange={(v) => set({ format: v === "hls+dash" ? "hls+dash" : "hls" })}
+            onValueChange={(v) =>
+              model.setDraft({ ...draft, format: v === "hls+dash" ? "hls+dash" : "hls" })
+            }
           >
             <SelectTrigger id="playout-format">
               <SelectValue />
@@ -1025,81 +1233,253 @@ function PackagingCard({
               <SelectItem value="hls+dash">{t("play.hlsDash")}</SelectItem>
             </SelectContent>
           </Select>
+          {draft.format !== stored.format && (
+            <p className="font-mono text-sm text-muted-foreground">
+              {t("play.was", { value: stored.format === "hls" ? t("play.hls") : t("play.hlsDash") })}
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             {t("play.dashNote")}
           </p>
         </div>
 
-        <NumberField
-          id="playout-segment"
-          label={t("play.segmentLength")}
-          hint={t("play.shorterIsLowerLatencyAnd")}
-          value={play.segmentSeconds}
-          min={1}
-          max={30}
-          disabled={busy}
-          onCommit={(segmentSeconds) => set({ segmentSeconds })}
+        {PACKAGING_FIELDS.map((f) => {
+          const raw = draft[f.key];
+          const bad = packagingValue(raw, f.min, f.max) === null;
+          const was = raw !== stored[f.key];
+          return (
+            <div key={f.key} className="grid content-start gap-1.5">
+              <Label htmlFor={f.id}>{t(f.label)}</Label>
+              <Input
+                id={f.id}
+                type="number"
+                min={f.min}
+                max={f.max}
+                value={raw}
+                disabled={busy}
+                aria-invalid={bad || undefined}
+                className={cn(was && "border-primary")}
+                onChange={(e) => model.setDraft({ ...draft, [f.key]: e.target.value })}
+              />
+              {was && (
+                <p className="font-mono text-sm text-muted-foreground">
+                  {t("play.was", { value: stored[f.key] })}
+                </p>
+              )}
+              {bad && (
+                <p className="text-sm text-down">{t("play.outOfRange", { min: f.min, max: f.max })}</p>
+              )}
+              <p className="text-sm text-muted-foreground">{t(f.hint)}</p>
+            </div>
+          );
+        })}
+
+        {(dirty || model.state !== "clean") && (
+          <div
+            data-testid="packaging-apply-bar"
+            className="flex flex-wrap items-center gap-3 rounded-md border border-primary/50 bg-background p-3 sm:col-span-2 lg:col-span-3"
+          >
+            {dirty ? (
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">
+                  <span className="font-semibold">{t("play.applyTitle")}</span>{" "}
+                  {t("play.applyBody")}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {t("play.watchingNow")}{" "}
+                  <span className="tnum font-mono text-foreground">{viewers}</span>
+                </p>
+                <DisabledReason id={reasonId} reason={reason} />
+              </div>
+            ) : (
+              <div className="flex-1" />
+            )}
+            <SaveStatus state={model.state} />
+            {dirty && (
+              <>
+                <Button variant="outline" size="sm" disabled={model.state === "saving"} onClick={model.discard}>
+                  {t("common.discard")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || invalid || model.state === "saving"}
+                  aria-describedby={disabledDescribedBy(reasonId, reason)}
+                  onClick={apply}
+                >
+                  {t("play.applyRestart")}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+
+      <ConfirmDestructive
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        subject={{ unnamed: true }}
+        title={t("play.applyConfirmTitle")}
+        description={t("play.applyConfirmDescription")}
+        consequencesLabel={t("play.removeRungDrops")}
+        consequences={[{ label: t("play.watching"), count: viewers }]}
+        confirmLabel={t("play.applyRestart")}
+        tone="caution"
+        onConfirm={async () => {
+          setConfirmOpen(false);
+          await model.save();
+        }}
+      />
+    </Card>
+  );
+}
+
+/** Ladder and Packaging, behind one closed "Advanced" section (app-council
+ *  A17). Both restart the stream, and neither is what an operator reaches for
+ *  on air, so they no longer push Share and Who can watch down the page.
+ *
+ *  It cannot be closed over unapplied packaging changes: collapsing it would
+ *  hide the only bar that says the stream has not been restarted with them. */
+export function AdvancedSection({
+  play,
+  variants,
+  renditions,
+  busy,
+  viewers,
+  onSave,
+  onApply,
+}: {
+  play: PlayoutSettings;
+  variants: PlayoutAdminView["status"]["variants"];
+  renditions: RenditionView[];
+  busy: boolean;
+  viewers: number;
+  onSave: (next: PlayoutSettings) => Promise<void>;
+  onApply: (next: PlayoutSettings) => Promise<void>;
+}) {
+  const t = useT();
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [dirtyParts, setDirtyParts] = useState<Record<string, boolean>>({});
+  const markDirty = useCallback((key: string, d: boolean) => {
+    setDirtyParts((cur) => (cur[key] === d ? cur : { ...cur, [key]: d }));
+  }, []);
+  const markPackaging = useCallback((d: boolean) => markDirty("packaging", d), [markDirty]);
+  const dirty = Object.values(dirtyParts).some(Boolean);
+  const shown = open || dirty;
+  const reason = dirty ? t("play.applyOrDiscardFirst") : null;
+  return (
+    <section className="mt-3 rounded-md border border-border">
+      <button
+        type="button"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left"
+        aria-expanded={shown}
+        aria-controls={`${id}-body`}
+        aria-disabled={dirty || undefined}
+        aria-describedby={disabledDescribedBy(`${id}-reason`, reason)}
+        onClick={() => {
+          if (!dirty) setOpen(!open);
+        }}
+      >
+        <span className="text-base font-semibold">{t("play.advanced")}</span>
+        <span className="text-sm text-muted-foreground">{t("play.advancedSummary")}</span>
+        <ChevronDown
+          aria-hidden="true"
+          className={cn("ml-auto h-4 w-4 text-muted-foreground transition-transform", shown && "rotate-180")}
         />
-        <NumberField
-          id="playout-window"
-          label={t("play.liveWindow")}
-          hint={t("play.threeIsTheMinimumA")}
-          value={play.playlistSegments}
-          min={3}
-          max={100}
-          disabled={busy}
-          onCommit={(playlistSegments) => set({ playlistSegments })}
+      </button>
+      {reason && <DisabledReason id={`${id}-reason`} reason={reason} className="px-3" />}
+      {/* Mounted while closed, so a draft survives the section closing. */}
+      <div id={`${id}-body`} hidden={!shown} className="px-3 pb-3">
+        <VariantsCard
+          play={play}
+          variants={variants}
+          renditions={renditions}
+          busy={busy}
+          onSave={onSave}
+          onApply={onApply}
+          onDirtyChange={markDirty}
         />
-        <NumberField
-          id="playout-dvr"
-          label={t("play.dvrWindow")}
-          hint={t("play.dvrHint")}
-          value={play.dvrWindowSeconds}
-          min={0}
-          max={43200}
-          disabled={busy}
-          onCommit={(dvrWindowSeconds) => set({ dvrWindowSeconds })}
+        <PackagingCard
+          play={play}
+          busy={busy}
+          viewers={viewers}
+          onApply={onApply}
+          onDirtyChange={markPackaging}
         />
-        <NumberField
-          id="playout-disk"
-          label={t("play.diskCap")}
-          hint={t("play.acrossEveryRungTheBackstop")}
-          value={play.maxDiskMb}
-          min={64}
-          max={1048576}
-          disabled={busy}
-          onCommit={(maxDiskMb) => set({ maxDiskMb })}
-        />
-        <NumberField
-          id="playout-audio"
-          label={t("play.audioBitrate")}
-          hint={t("play.oneStereoAacTrackPer")}
-          value={play.audioKbps}
-          min={32}
-          max={512}
-          disabled={busy}
-          onCommit={(audioKbps) => set({ audioKbps })}
-        />
-        <NumberField
-          id="playout-idle"
-          label={t("play.idleTimeout")}
-          hint={t("play.mustExceedOneSegmentOr")}
-          value={play.sessionIdleSeconds}
-          min={5}
-          max={3600}
-          disabled={busy}
-          onCommit={(sessionIdleSeconds) => set({ sessionIdleSeconds })}
-        />
-        <NumberField
-          id="playout-sessions"
-          label={t("play.sessionCap")}
-          hint={t("play.boundsTheViewerTableViewers")}
-          value={play.maxSessions}
-          min={1}
-          max={1000000}
-          disabled={busy}
-          onCommit={(maxSessions) => set({ maxSessions })}
-        />
+      </div>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------- player page
+
+/** Title and description on the public player page.
+ *
+ *  app-council A20. These saved on blur with no sign that anything was
+ *  written, and an edit that was never blurred -- a tab closed, a route
+ *  changed -- was simply lost. They are a draft now (useSaveModel): Save is
+ *  offered once something differs, and the status line says Unsaved changes,
+ *  Saving, Saved or Not saved. Exported for its test. */
+export function PlayerPageCard({
+  title,
+  description,
+  onSave,
+}: {
+  title: string;
+  description: string;
+  /** Throws on failure, so the draft stays and says "Not saved". */
+  onSave: (body: { title: string; description: string }) => Promise<void>;
+}) {
+  const t = useT();
+  const model = useSaveModel<{ title: string; description: string }>({
+    stored: { title, description },
+    equal: (a, b) => a.title === b.title && a.description === b.description,
+    onSave,
+  });
+  return (
+    <Card className="mt-3">
+      <CardHeader>
+        <CardTitle>{t("play.playerPage")}</CardTitle>
+        <CardDescription>
+          {t("play.posterNote")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="playout-title">{t("play.metaTitle")}</Label>
+          <Input
+            id="playout-title"
+            value={model.draft.title}
+            maxLength={200}
+            placeholder={t("play.untitled")}
+            onChange={(e) => model.setDraft({ ...model.draft, title: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="playout-description">{t("play.metaDescription")}</Label>
+          <Textarea
+            id="playout-description"
+            value={model.draft.description}
+            maxLength={2000}
+            rows={3}
+            onChange={(e) => model.setDraft({ ...model.draft, description: e.target.value })}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <Button
+            size="sm"
+            disabled={!model.dirty || model.state === "saving"}
+            onClick={() => void model.save()}
+          >
+            {t("common.save")}
+          </Button>
+          {model.dirty && (
+            <Button size="sm" variant="ghost" onClick={model.discard}>
+              {t("common.discard")}
+            </Button>
+          )}
+          <SaveStatus state={model.state} />
+        </div>
       </CardContent>
     </Card>
   );

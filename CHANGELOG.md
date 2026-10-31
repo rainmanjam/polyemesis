@@ -566,6 +566,20 @@ its first tagged release.
   save the switch is reported as a server error and leaves the buffer as it
   was. `GET /clips` now carries the configured `windowSeconds` even while the
   buffer is off.
+- **Playout reads as a control room (app-council A16-A20).** A status line under
+  the title says whether playout is on, who can watch and how many are
+  watching; when it is off, the line carries a Turn on playout button, and the
+  share links are greyed with the reason beside them. Share and Who can watch
+  sit side by side; the quality levels (formerly the ladder) and packaging are
+  in a closed Advanced section. Packaging fields no longer save, and restart
+  the stream, each time one loses focus: the changes are held until Apply and
+  restart stream, the bar counts them and shows each field's previous value,
+  and it asks first, naming the viewers, when anyone is watching. Quality level
+  names and audio tracks apply with their own Apply button. The player page
+  title and description have a Save button and say Unsaved changes, Saving,
+  Saved or Not saved. Labels are plainer: Quality levels, Original (no
+  re-encode), Rewind window, Audio track (number, from 0). The settings, API
+  and saved values are unchanged.
 - **Chat: keyboard, attention and polls.** Enter that confirms an IME
   composition no longer sends the message. Message rows are reachable from the
   keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New
