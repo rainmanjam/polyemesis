@@ -17,13 +17,16 @@ its first tagged release.
   so each picture carries the caption pair due at its presentation time. Pairs
   are keyed on picture timestamps, not arrival order, so B-frames read back in
   order; a short reorder window is the only added latency. Verified by FFmpeg's
-  own CEA-608 decoder reading the injected captions back. **PROVISIONAL:** the
-  Twitch path needs a live check on a test channel before it is offered.
+  own CEA-608 decoder (host FFmpeg 9.0.2) reading the injected captions back.
+  **PROVISIONAL:** the Twitch path needs a live check on a test channel before
+  it is offered. Nothing calls it yet: no API route, no UI control, and no
+  destination path runs the injector.
 - Caption text policy: vocabulary spellings and profanity masking, applied once
   at the emit boundary so every output shows the same words. Timing, track and
   speaker are unchanged.
 - Per-destination caption mode (`destinations.caption_mode`, default `off`).
-  Twitch SEI is the one built path marked go. YouTube's caption POST is
+  There is no control yet, so no operator can set it. Twitch SEI is the one
+  built path marked go. YouTube's caption POST is
   provisional and needs a 30 s or 60 s broadcast delay. Facebook SEI stays off
   behind a flag. Kick is skipped: Kick documents no caption route for live
   streams.
