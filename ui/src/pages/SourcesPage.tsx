@@ -1,5 +1,4 @@
 import { lazy, useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   Activity,
@@ -45,6 +44,7 @@ import { LazyBoundary } from "@/components/ErrorBoundary";
 import { NoProgrammeYet } from "@/components/NoProgrammeYet";
 import { SecretInput } from "@/components/SecretInput";
 import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
+import { DestinationDialog } from "@/components/DestinationDialog";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
@@ -54,7 +54,7 @@ import { SecretCode } from "@/components/SecretCode";
 import { useLiveData } from "@/hooks/useLiveData";
 import { copyToClipboard as copy } from "@/lib/clipboard";
 import { WaitingForEncoder } from "@/components/WaitingForEncoder";
-import { urlCarriesCredential } from "@/lib/credential-url";
+import { srtAddressParts, urlCarriesCredential } from "@/lib/credential-url";
 import { tokenNotEnforcedKey } from "@/lib/tokenNotice";
 import { LIMITS } from "@/lib/limits";
 import { cn } from "@/lib/utils";
@@ -95,6 +95,8 @@ export function SourcesPage() {
   const [deleting, setDeleting] = useState<SourceView | null>(null);
   const [rotating, setRotating] = useState<SourceView | null>(null);
   const [busyId, setBusyId] = useState<SourceId | null>(null);
+  // A30: the programme whose "Add destination" was pressed; the dialog opens on it.
+  const [addingTo, setAddingTo] = useState<SourceId | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -285,6 +287,7 @@ export function SourcesPage() {
               onPatch={(c) => patch(s, c)}
               onRotate={() => setRotating(s)}
               onDelete={() => setDeleting(s)}
+              onAddDestination={() => setAddingTo(s.id)}
               previewOn={previewOn}
             />
           ))}
@@ -356,6 +359,13 @@ export function SourcesPage() {
         confirmLabel={t("sources.deleteConfirm")}
         onConfirm={remove}
       />
+      <DestinationDialog
+        open={addingTo !== null}
+        onOpenChange={(o) => !o && setAddingTo(null)}
+        destination={null}
+        initialSourceId={addingTo === null ? undefined : String(addingTo)}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }
@@ -364,12 +374,29 @@ export function SourcesPage() {
  * whether it is running, whether its token gates anything, and now whether it
  * accepts publishes at all -- and those are claims worth pinning without
  * standing up the page around it. */
+/** A credential-carrying publish address (A31). For SRT the host:port the
+ *  encoder points at is printed in clear, and the query string that holds the
+ *  passphrase and stream ID is masked behind Reveal. Everything else that
+ *  carries a credential, including pull URLs with userinfo, is masked whole.
+ *  The Copy button beside this copies the full URL either way. */
+function PublishAddress({ url }: Readonly<{ url: string }>) {
+  const parts = srtAddressParts(url);
+  if (!parts) return <SecretCode value={url} />;
+  return (
+    <>
+      <code className="min-w-0 truncate rounded bg-muted px-1.5 py-1 font-mono text-sm">{parts.address}</code>
+      <SecretCode value={parts.query} />
+    </>
+  );
+}
+
 export function SourceCard({
   source,
   busy,
   onPatch,
   onRotate,
   onDelete,
+  onAddDestination,
   previewOn = false,
 }: {
   source: SourceView;
@@ -377,6 +404,9 @@ export function SourceCard({
   onPatch: (changes: Partial<Source>) => void;
   onRotate: () => void;
   onDelete: () => void;
+  /** A30. Opens the destination dialog on this programme. Absent in tests that
+   *  do not exercise the receiving card, so the button is then not drawn. */
+  onAddDestination?: () => void;
   /** The preview encoder is on, so a receiving card can show a thumbnail. */
   previewOn?: boolean;
 }) {
@@ -449,11 +479,23 @@ export function SourceCard({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-          <Switch
-            checked={source.enabled}
-            onCheckedChange={(v) => onPatch({ enabled: v })}
-            aria-label={t("sources.enableAria", { name: source.name })}
-          />
+          {/* A33: the state in words and the consequence beside the switch. The
+              aria-label names the switch; the visible text says what it does. */}
+          <div className="flex max-w-64 flex-col items-end gap-0.5 text-right">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                {source.enabled ? t("sources.acceptingLabel") : t("state.off")}
+              </span>
+              <Switch
+                checked={source.enabled}
+                onCheckedChange={(v) => onPatch({ enabled: v })}
+                aria-label={t("sources.enableAria", { name: source.name })}
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {source.enabled ? t("sources.enabledConsequence") : t("sources.disabledConsequence")}
+            </span>
+          </div>
           {/* Enabled on the only source too. The store used to refuse that
               delete, so a disabled button was the honest thing to show; it now
               accepts it, and an install with no source is a state the whole
@@ -619,6 +661,7 @@ export function SourceCard({
         {/* This programme's degraded-link thresholds (#6), with its ingest:
             link quality is a property of one encoder's uplink. */}
         <DegradedLinkSettings
+          collapsible
           idPrefix={`source-${source.id}-degraded`}
           value={ing.degraded}
           onChange={(degraded) => setIngest({ degraded })}
@@ -655,9 +698,13 @@ export function SourceCard({
               {!previewOn && (
                 <p className="text-[12px] text-muted-foreground">{t("sources.thumbnailOff")}</p>
               )}
-              <Button size="sm" variant="outline" className="w-fit" asChild>
-                <Link to="/">{t("firstRun.addDestination")}</Link>
-              </Button>
+              {/* A30: opens the destination dialog here, on this programme. The
+                  old link went to Dashboard with nothing carried over. */}
+              {onAddDestination && (
+                <Button size="sm" variant="outline" className="w-fit" onClick={onAddDestination}>
+                  {t("firstRun.addDestination")}
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -723,7 +770,7 @@ export function SourceCard({
                   this that keyed on the label alone printed both in plain text
                   on every SRT install. */}
               {proto === "streamKey" || urlCarriesCredential(url) ? (
-                <SecretCode value={url} />
+                <PublishAddress url={url} />
               ) : (
                 <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-1 font-mono text-sm">
                   {url}

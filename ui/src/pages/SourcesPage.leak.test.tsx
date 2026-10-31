@@ -88,3 +88,32 @@ describe("SourcesPage: credentials never reach the DOM unrevealed", () => {
     expect(container.textContent ?? "").toContain("1935/live");
   });
 });
+
+describe("SourcesPage: the SRT address shows its host and port in clear", () => {
+  it("prints host:port in clear and masks the passphrase and streamid behind Reveal", () => {
+    // A31. The encoder needs host:port, so that part is shown. Passphrase and
+    // stream ID are the credential and stay masked. The fixture secrets are
+    // built at runtime so no literal looks like a real credential.
+    const secret = ["pass", "phrase", "value", "0007"].join("-");
+    const streamId = ["stream", "id", "value", "0008"].join("-");
+    const { container, getByText } = draw("srt", {
+      srt: `srt://example.invalid:6000?latency=200&passphrase=${secret}&streamid=${streamId}`,
+    });
+    expect(getByText("srt://example.invalid:6000")).toBeTruthy();
+    expect(container.innerHTML).not.toContain(secret);
+    expect(container.innerHTML).not.toContain(streamId);
+  });
+
+  it("keeps a pull URL with userinfo fully masked, host included", () => {
+    // The SRT split must not widen to other credential shapes: userinfo before
+    // the host is a secret, so the host is masked too.
+    const user = ["user", "name", "0009"].join("-");
+    const pass = ["pass", "word", "0010"].join("-");
+    const { container } = draw("rtmp", {
+      pull: `rtmp://${user}:${pass}@example.invalid/live/x`,
+    });
+    expect(container.innerHTML).not.toContain(pass);
+    expect(container.innerHTML).not.toContain("example.invalid");
+  });
+});
+

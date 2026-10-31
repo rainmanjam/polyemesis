@@ -581,9 +581,13 @@ interface Props {
   /** Existing destination to edit, or null to create. */
   destination: Destination | null;
   onSaved: () => void;
+  /** A30: the programme the operator is looking at when they ask to add a
+   *  destination (a Sources card). Starts a NEW destination on that programme.
+   *  Ignored when editing: an existing destination keeps its own. */
+  initialSourceId?: string;
 }
 
-export function DestinationDialog({ open, onOpenChange, destination, onSaved }: Props) {
+export function DestinationDialog({ open, onOpenChange, destination, onSaved, initialSourceId }: Props) {
   const editing = destination !== null;
   // Every operator-visible sentence here comes from the catalogue. The preset
   // table stores keys rather than English, so its notes and group labels are
@@ -702,8 +706,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved }: 
   // destination's programme when the fetch resolves late.
   useEffect(() => {
     if (!open || choices.length === 0) return;
-    setSourceId((current) => (current === "" ? initialSourceValue(destination, choices) : current));
-  }, [open, choices, destination]);
+    // A30: a new destination opened from a programme starts on that programme,
+    // provided it is still in the list. A stale id falls back to the usual rule.
+    const fromCard = destination === null && initialSourceId && sourceIsChosen(initialSourceId, choices) ? initialSourceId : null;
+    setSourceId((current) => (current === "" ? (fromCard ?? initialSourceValue(destination, choices)) : current));
+  }, [open, choices, destination, initialSourceId]);
   const [guidanceRead, setGuidanceRead] = useState<ReadState<PlatformPresetInfo[]>>(pendingRead);
   const guidance = rowsOf(guidanceRead);
   const [servicesRead, setServicesRead] = useState<ReadState<ServiceInfo[]>>(pendingRead);
