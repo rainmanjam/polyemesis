@@ -535,7 +535,10 @@ session, like `/auth/tokens`: each overlay carries a credential. `POST
 /overlays/{id}/key` rotates the key and `DELETE` revokes it; either ends open
 overlays within seconds. The overlay key itself reaches only the two
 `/overlay/*` routes above, and no other route accepts it. See
-[OVERLAY.md](OVERLAY.md).
+[OVERLAY.md](OVERLAY.md). Each overlay in `GET /overlays` carries `connected`,
+how many display streams (an OBS browser source, a dock) have it open now, and
+`lastSeen`, when one last did; `lastSeen` is absent for an overlay nothing has
+opened since the server started.
 
 `/tour` is the onboarding tour's "has this operator been offered it already",
 kept on the server rather than in the browser so a second machine does not

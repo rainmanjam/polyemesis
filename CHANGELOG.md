@@ -593,6 +593,11 @@ its first tagged release.
   titled Trim recording. Recordings' retention policy says Unsaved changes,
   Saving and Saved beside its Save button, and Library, Recordings and Clips
   use the same empty state.
+- **Chat overlays say whether OBS is connected (app-council A98).** An
+  overlay draws nothing when it fails, so a broken browser source looked the
+  same as an idle one. Settings now shows, for the selected overlay, how many
+  sources have it open, or when one last did, with a Check again button.
+  `GET /overlays` carries `connected` and `lastSeen` for each overlay.
 - **Chat: keyboard, attention and polls.** Enter that confirms an IME
   composition no longer sends the message. Message rows are reachable from the
   keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New

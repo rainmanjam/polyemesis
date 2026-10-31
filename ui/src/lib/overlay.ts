@@ -75,6 +75,11 @@ export interface ChatOverlay {
   style: OverlayStyle;
   createdAt: string;
   keyRotatedAt: string;
+  /** Display streams open right now (an OBS browser source, a dock), and when
+   *  one last was (app-council A98). In the list only; absent on a server
+   *  older than this, and lastSeen absent when nothing has connected. */
+  connected?: number;
+  lastSeen?: string;
 }
 
 /** What Settings sends to create or update one. */

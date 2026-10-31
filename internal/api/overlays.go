@@ -68,9 +68,37 @@ const OverlayKeyPath = "/k/"
 const overlayRecheck = 2 * time.Second
 
 // overlayKicker ends open display streams when their key changes.
+//
+// It is also the one place that knows which display streams are open, so it
+// answers "is OBS connected?" (app-council A98). seen is the last instant each
+// overlay had a stream open: stamped when one opens and again when one closes,
+// so a source that dropped five minutes ago reads as "last connected five
+// minutes ago" rather than as one that never connected. In memory only: a
+// restart forgets it, and every source reconnects within seconds anyway.
 type overlayKicker struct {
 	mu   sync.Mutex
 	subs map[int64]map[chan struct{}]struct{}
+	seen map[int64]time.Time
+}
+
+// status reports how many display streams one overlay has open, and when it
+// last had one. Zero and the zero time for an overlay nothing ever opened.
+func (k *overlayKicker) status(id int64) (int, time.Time) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	n := len(k.subs[id])
+	if n > 0 {
+		return n, time.Now()
+	}
+	return 0, k.seen[id]
+}
+
+// stampLocked records that id had a stream open just now. Caller holds k.mu.
+func (k *overlayKicker) stampLocked(id int64) {
+	if k.seen == nil {
+		k.seen = map[int64]time.Time{}
+	}
+	k.seen[id] = time.Now()
 }
 
 func (k *overlayKicker) register(id int64) (<-chan struct{}, func()) {
@@ -84,11 +112,13 @@ func (k *overlayKicker) register(id int64) (<-chan struct{}, func()) {
 	}
 	ch := make(chan struct{})
 	k.subs[id][ch] = struct{}{}
+	k.stampLocked(id)
 	return ch, func() {
 		k.mu.Lock()
 		defer k.mu.Unlock()
 		if _, ok := k.subs[id][ch]; ok {
 			delete(k.subs[id], ch)
+			k.stampLocked(id)
 		}
 	}
 }
@@ -97,6 +127,9 @@ func (k *overlayKicker) register(id int64) (<-chan struct{}, func()) {
 func (k *overlayKicker) kick(id int64) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if len(k.subs[id]) > 0 {
+		k.stampLocked(id)
+	}
 	for ch := range k.subs[id] {
 		close(ch)
 	}
@@ -122,6 +155,12 @@ func redactOverlayKeys(p string) string {
 type overlayView struct {
 	db.ChatOverlay
 	Style overlay.Style `json:"style"`
+	// Connected is how many display streams (an OBS browser source, a dock)
+	// have this overlay open right now, and LastSeen when one last did
+	// (app-council A98). Filled by the list only; create and update answer
+	// with the row, where 0 and no time are simply not reported yet.
+	Connected int       `json:"connected"`
+	LastSeen  time.Time `json:"lastSeen,omitzero"`
 }
 
 func viewOverlay(o db.ChatOverlay) overlayView {
@@ -159,7 +198,9 @@ func (s *Server) handleListOverlays(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]overlayView, 0, len(list))
 	for _, o := range list {
-		views = append(views, viewOverlay(o))
+		v := viewOverlay(o)
+		v.Connected, v.LastSeen = s.overlayKicks.status(o.ID)
+		views = append(views, v)
 	}
 	var stats overlay.Stats
 	if s.overlayGate != nil {
