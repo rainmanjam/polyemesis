@@ -3895,7 +3895,7 @@ func (e *Engine) probeOnce(ctx context.Context) bool {
 	// Committing, so the layout was measured: this is the real result the reset
 	// was always meant to be paired with.
 	e.probeFails.Store(0)
-	e.commitProbe(src, res.Video, e.settings.Ingest.Mode)
+	e.commitProbe(src, res.Video, res.Audio, e.settings.Ingest.Mode)
 	e.mu.Unlock()
 
 	if changed {

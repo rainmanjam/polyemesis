@@ -235,8 +235,18 @@ outage before the rebuild stays a timestamp gap, the same gap the copied video
 has.
 
 The per-track legs above keep `first_pts=0`, because nothing else gives `amix`
-a common origin. So a **multi-track** mix still pads at a format-changing switch.
-A switch that keeps the format is unaffected.
+a common origin. A rebuilt **multi-track** graph would therefore still pad, and
+nothing inside the graph can stop it: the rebuild is decided at the graph's
+input, when the decoded format changes. So the selector makes sure the format
+does not change. The slate is built at the primary's measured sample rate and
+channel count (track 0). A backup or playlist feed re-encodes its audio to the
+primary's format, track N to track N, on the copy hop it takes into the
+selector; its video is still copied. The primary stays a pure `-c copy`. With
+no measured primary there is nothing to match, and the standby is copied as it
+arrives. The conversion produces AAC, so a primary whose decoder emits a
+different sample format from AAC's planar float (PCM, for example) still
+changes format at the switch. Tests: `internal/engine/failover_format_conform_test.go`
+and `DRIFT_TRACKS=2 scripts/acceptance-audio-drift.sh`.
 
 The generated string is returned to the UI verbatim so the user can see exactly
 what their routing compiles to.
