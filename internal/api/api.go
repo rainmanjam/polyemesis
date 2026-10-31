@@ -39,7 +39,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -501,6 +503,15 @@ type Server struct {
 	// than by the connector because ApplyAutomod rebuilds the connector on
 	// every settings save. See internal/automod/budget.go.
 	automodBudget *automod.Budget
+	// automodSecondaryBudget is the secondary model checker's, kept apart so
+	// a primary outage that sends every message to the secondary cannot spend
+	// the primary's allowance -- each checker's ceiling is the one the operator
+	// set for it.
+	automodSecondaryBudget *automod.Budget
+	// automodTestPrimary / automodTestSecondary allow one Test run per
+	// checker at a time. A Test is three paid calls, and an impatient
+	// double-click should not be six.
+	automodTestPrimary, automodTestSecondary sync.Mutex
 
 	// hooks is the shared lifecycle-webhook dispatcher. Optional like
 	// everything else in this block: a build with none wired still serves the
@@ -517,6 +528,11 @@ type Server struct {
 	// rotated or revoked (overlays.go).
 	overlayGate  *overlay.Gate
 	overlayKicks overlayKicker
+	// obs is the OBS bridge (#16). Optional: nil answers its routes with what
+	// is stored and refuses the script's POST with a 503.
+	obs *obsbridge.Bridge
+	// polls is the chat poll counter (#14), or nil without chat. polls.go.
+	polls *polls.Engine
 
 	// lifecycle drives platform broadcast state -- when a broadcast goes live,
 	// and when it ends. Nil when the server was built without a store, which is
@@ -693,6 +709,10 @@ type Options struct {
 	// where the process starts and handed to every model built afterwards, so
 	// a settings save rebuilds the connector without refilling its allowance.
 	AutomodBudget *automod.Budget
+	// AutomodSecondaryBudget is the same, for the secondary model checker.
+	// Nil gets one created with the Server, which lives as long as the
+	// process -- the property that matters.
+	AutomodSecondaryBudget *automod.Budget
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
@@ -701,6 +721,12 @@ type Options struct {
 	Stream *eventstream.Hub
 	// OverlayGate is the chat overlay's display gate. Optional.
 	OverlayGate *overlay.Gate
+	// OBS is the OBS bridge. Optional. New installs the server as the
+	// bridge's Actions, so the bridge acts through this server's own code.
+	OBS *obsbridge.Bridge
+	// Polls is the chat poll counter. Optional; the poll routes answer 503
+	// without it.
+	Polls *polls.Engine
 
 	// SetupCode is what POST /setup must be sent on an install with no admin.
 	// Leaving it nil is safe in the only direction that matters: setup is then
@@ -734,17 +760,25 @@ func New(o Options) *Server {
 		whisper:       o.Whisper,
 		chat:          o.Chat,
 		automodBudget: o.AutomodBudget,
-		hooks:         o.Hooks,
-		stream:        o.Stream,
-		overlayGate:   o.OverlayGate,
-		version:       o.Version,
-		diag:          o.Diag,
-		diagLevel:     o.DiagLevel,
-		startedAt:     time.Now(),
-		logins:        auth.NewThrottle(),
-		setups:        auth.NewThrottle(),
-		setupCode:     o.SetupCode,
-		kickKeys:      &chat.KickKeyFetcher{},
+		automodSecondaryBudget: func() *automod.Budget {
+			if o.AutomodSecondaryBudget != nil {
+				return o.AutomodSecondaryBudget
+			}
+			return automod.NewBudget()
+		}(),
+		hooks:       o.Hooks,
+		stream:      o.Stream,
+		overlayGate: o.OverlayGate,
+		obs:         o.OBS,
+		polls:       o.Polls,
+		version:     o.Version,
+		diag:        o.Diag,
+		diagLevel:   o.DiagLevel,
+		startedAt:   time.Now(),
+		logins:      auth.NewThrottle(),
+		setups:      auth.NewThrottle(),
+		setupCode:   o.SetupCode,
+		kickKeys:    &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
@@ -791,6 +825,13 @@ func New(o Options) *Server {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
 		s.lifecycle.announce = s.announceBroadcastPhase
+		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
+		// the coordinator wait, never stop or start anything. See
+		// lifecycleCoordinator.airing.
+		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
+	}
+	if s.obs != nil {
+		s.obs.SetActions(s.OBSActions())
 	}
 	return s
 }
@@ -1062,6 +1103,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// the settings blob -- see handlePutMQTTPassword.
 			r.Put("/settings/mqtt-password", s.handlePutMQTTPassword)
 
+			// The OBS bridge (#16). See obs.go. The configuration and its
+			// password are settings writes like the MQTT pair above, reachable
+			// by an admin token. /obs/events is the one route an "obs"-scoped
+			// token reaches (obsScopePatterns): the OBS script's way in.
+			r.Get("/obs", s.handleGetOBS)
+			r.Put("/obs", s.handlePutOBS)
+			r.Put("/obs/password", s.handlePutOBSPassword)
+			r.Post("/obs/events", s.handleOBSEvent)
+
 			r.Get("/tls", s.handleTLSStatus)
 			// What Let's Encrypt would need from this host, checked against
 			// this host. Authenticated, unlike /tls/ca above: it reads the
@@ -1148,6 +1198,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/automod/matrix", s.handleAutomodMatrix)
 			r.Get("/automod/stats", s.handleAutomodStats)
 			r.Put("/settings/automod-key", s.handlePutAutomodKey)
+			// The Test button. SESSION-ONLY, like /debug/export: it is the
+			// one route that unseals a model key and sends it out of the
+			// process, so no API token -- admin or not -- may drive it
+			// without a human present. keyMayGoTo bounds where the key goes;
+			// this bounds who can make it go.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+				r.Post("/automod/test", s.handleAutomodTest)
+			})
 
 			// The read half of media. POST /media and DELETE /media/{name} are
 			// in the session-only group above, which is the fix for #140; this
@@ -1412,6 +1471,15 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
 			r.Post("/chat/send", s.handleChatSend)
+
+			// Chat polls (#14). Results are counts with no voter in them, so
+			// the GETs follow the method rule; starting and ending one posts
+			// into every chat, so both are admin. See polls.go.
+			r.Get("/polls", s.handleListPolls)
+			r.Post("/polls", s.handleStartPoll)
+			r.Get("/polls/export", s.handleExportPolls)
+			r.Get("/polls/{id}", s.handleGetPoll)
+			r.Post("/polls/{id}/end", s.handleEndPoll)
 		})
 
 		// A scraper has no CSRF token to double-submit, and this route is a
@@ -1573,6 +1641,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 	// on a request that matched.
 	r.Get(OverlayPath+OverlayKeyPath+"{key}", ovPage)
 	r.Get(OverlayPath+"/dock"+OverlayKeyPath+"{key}", ovPage)
+	// The poll widget (#14): the same overlay key, a separate OBS source so
+	// it can be placed apart from the chat lines.
+	r.Get(OverlayPath+"/poll", ovPage)
+	r.Get(OverlayPath+"/poll"+OverlayKeyPath+"{key}", ovPage)
 
 	if h, err := s.uiHandler(); err == nil {
 		r.NotFound(h.ServeHTTP)
@@ -1998,6 +2070,15 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/chat/users":    true,
 }
 
+// obsScopePatterns is everything an "obs" token may reach: one route, keyed by
+// METHOD and chi pattern together so a GET on the same path is not smuggled in
+// by the POST's entry. ALLOWLIST, the failure mode of forgetting a route being
+// a 403 an operator notices. TestAnOBSTokenReachesOnlyTheOBSEventsRoute walks
+// the whole router to hold that.
+var obsScopePatterns = map[string]bool{
+	http.MethodPost + " /api/v1/obs/events": true,
+}
+
 // requireScope enforces what a token is ALLOWED to do, once requireAuth has
 // settled who it is. It must run after requireAuth, which is what puts the
 // principal in the context.
@@ -2034,6 +2115,19 @@ func (s *Server) requireScope(next http.Handler) http.Handler {
 		}
 		if p.token == nil || p.token.Scope == db.ScopeAdmin {
 			next.ServeHTTP(w, r)
+			return
+		}
+		// THE OBS SCOPE IS DECIDED HERE AND NEVER FALLS THROUGH. Below this
+		// branch every non-admin scope is read, and read reaches every GET;
+		// an obs token must not, so it gets its own allowlist of one and a
+		// refusal for everything else, reads included.
+		if p.token.Scope == db.ScopeOBS {
+			if rc := chi.RouteContext(r.Context()); rc != nil && obsScopePatterns[r.Method+" "+rc.RoutePattern()] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusForbidden,
+				"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
 			return
 		}
 		// Anything that is not admin is treated as read-only, including a

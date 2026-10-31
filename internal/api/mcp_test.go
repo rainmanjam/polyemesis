@@ -139,13 +139,13 @@ func (r mcpRig) mcpEvents() []alerts.Event {
 // that asks the catalogue what is in the catalogue cannot fail.
 var (
 	mcpWantReadTools = []string{
-		"get_destination", "get_levels", "get_status", "get_stop_impact", "get_timeline",
+		"get_destination", "get_levels", "get_polls", "get_status", "get_stop_impact", "get_timeline",
 		"list_destinations", "list_recordings", "list_routing_presets", "list_sources",
 	}
 	mcpWantContentTools = []string{"get_chat_user", "search_chat", "search_transcripts"}
 	mcpWantWriteTools   = []string{
-		"apply_routing_preset", "create_clip", "go_live", "retry_destination", "schedule_broadcast",
-		"set_recording", "set_track_level", "start_destination", "stop_all_destinations",
+		"apply_routing_preset", "create_clip", "end_poll", "go_live", "retry_destination", "schedule_broadcast",
+		"set_recording", "set_track_level", "start_destination", "start_poll", "stop_all_destinations",
 		"stop_destination", "switch_failover_source",
 	}
 )
@@ -176,6 +176,9 @@ func mcpSampleArgs() map[string]map[string]any {
 		"set_recording":          {"enabled": true},
 		"switch_failover_source": {"input": "auto"},
 		"create_clip":            {"seconds": 5},
+		"get_polls":              {"limit": 5},
+		"start_poll":             {"question": "Next map?", "options": []string{"Dust", "Mirage"}, "durationSeconds": 60, "confirm": true},
+		"end_poll":               {"pollId": 1, "confirm": true},
 		"schedule_broadcast": {"name": "evening show", "action": "start", "kind": "once",
 			"destinationIds": []int{1}, "runAt": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)},
 	}
@@ -1024,5 +1027,30 @@ func proveMCPToolOutputs(t *testing.T) proofResult {
 		Pattern: patternDriven(t, h, http.MethodPost, MCPPath),
 		High:    bodyOf(t, h, sign, "/api/v1/destinations"),
 		Read:    b.String(),
+	}
+}
+
+// #11: stop_destination takes now:true, the broadcast delay's "Stop now", and
+// it changes nothing about the confirm rule: unconfirmed, it is still refused
+// with the impact; confirmed, it stops through the same REST route.
+func TestStopNowThroughMCPKeepsTheConfirmRuleAndStops(t *testing.T) {
+	rig := newMCPRig(t)
+	if err := rig.store.SetDestinationEnabled(1, true); err != nil {
+		t.Fatal(err)
+	}
+	c := mcpClient(t, rig.h, rig.admin)
+	text, isErr := callText(t, c, "stop_destination", map[string]any{"destinationId": 1, "now": true})
+	if !isErr || !strings.Contains(text, "Not done") {
+		t.Fatalf("an unconfirmed Stop now answered (isError=%v): %s", isErr, text)
+	}
+	if d, _ := rig.store.GetDestination(1); !d.Enabled {
+		t.Fatal("an unconfirmed Stop now stopped the destination")
+	}
+	text, isErr = callText(t, c, "stop_destination", map[string]any{"destinationId": 1, "now": true, "confirm": true})
+	if isErr {
+		t.Fatalf("a confirmed Stop now failed: %s", text)
+	}
+	if d, _ := rig.store.GetDestination(1); d.Enabled {
+		t.Fatal("a confirmed Stop now left the destination enabled")
 	}
 }

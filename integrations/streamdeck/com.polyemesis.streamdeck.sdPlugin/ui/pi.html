@@ -57,6 +57,25 @@
     <p id="err-preset" class="error" hidden></p>
   </section>
 
+  <section class="block" id="block-poll" hidden>
+    <label for="pollQuestion" data-i18n="streamdeck.pi.pollQuestion">Poll question</label>
+    <input id="pollQuestion" type="text" maxlength="100" autocomplete="off">
+    <label for="pollOptions" data-i18n="streamdeck.pi.pollOptions">Options, one per line (2 to 6)</label>
+    <textarea id="pollOptions" rows="4"></textarea>
+    <label for="pollDuration" data-i18n="streamdeck.pi.pollDuration">Duration (seconds)</label>
+    <input id="pollDuration" type="number" min="15" max="3600" step="1">
+    <p class="hint" data-i18n="streamdeck.pi.pollHint"></p>
+  </section>
+
+  <!-- A destination key shows one issue and a "+N" badge; a key cannot be
+       hovered, so every current issue is listed here. Filled by pi.js with
+       textContent only: the lines carry server words. -->
+  <section class="block" id="block-issues" hidden>
+    <label data-i18n="streamdeck.pi.issues">Current issues</label>
+    <ul id="issues" class="issues"></ul>
+    <p id="issues-empty" class="hint" hidden></p>
+  </section>
+
   <section class="block" id="block-install-wide" hidden>
     <p class="hint" data-i18n="streamdeck.pi.installWide"></p>
   </section>

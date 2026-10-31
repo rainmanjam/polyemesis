@@ -90,6 +90,56 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	}
 	changed := row.Profile.Tracks[idx] != before
 
+	lw, storeErr, updateErr := s.persistTrackLevels(row, changed)
+	switch {
+	case storeErr != nil:
+		writeStoreError(w, storeErr)
+		return
+	case updateErr != nil:
+		writeError(w, http.StatusBadRequest, updateErr.Error())
+		return
+	}
+	applied, reason, updated, warnings, rw := lw.applied, lw.reason, lw.updated, lw.warnings, lw.reconcileWarn
+	resp := map[string]any{"applied": applied, "destination": updated}
+	if reason != "" {
+		resp["reason"] = reason
+	}
+	if len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	// The change is stored whether or not the reconcile succeeded; a failed one
+	// is reported the way every other mutation reports it (#709), not as a 500
+	// that would read as "nothing happened".
+	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// levelWrite is what persistTrackLevels did: the stored row, and how the level
+// change took effect.
+type levelWrite struct {
+	updated  *db.Destination
+	warnings []string
+	// applied is "live" or "restart"; reason says why when it is not plainly
+	// live.
+	applied, reason string
+	// reconcileWarn is reconcileNow's sentence when the reconcile failed.
+	reconcileWarn string
+}
+
+// persistTrackLevels stores a destination whose track levels (mute, gain) the
+// caller has edited, reconciles, and reports whether the change went live.
+//
+// THE ONE PATH A LEVEL REACHES A STORED DESTINATION. POST
+// .../tracks/{track}/gain and the OBS bridge's scene rules both come through
+// here, so a scene switch is held to exactly the rules the Stream Deck's mute
+// key is: persist first, repair first, reconcile, and read the outcome back
+// rather than assume it. The caller holds s.trackGainMu across the read, the
+// edit and this call.
+//
+// Two errors because they answer differently: storeErr is the repair's (a
+// store failure, writeStoreError), updateErr is the write's (a 400 carrying
+// the store's validation sentence).
+func (s *Server) persistTrackLevels(row *db.Destination, changed bool) (lw levelWrite, storeErr, updateErr error) {
+	id := row.ID
 	// THE OWNING ENGINE, as handleRestartDestination explains: s.eng() is the
 	// default programme's, which has never heard of another programme's
 	// destination and would report on nothing. nil when the programme has no
@@ -105,16 +155,14 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// (TestEveryDestinationWriteIsRepairedFirst).
 	warnings, err := s.dropUnsendableSettings(row)
 	if err != nil {
-		writeStoreError(w, err)
-		return
+		return lw, err, nil
 	}
 
 	// Persist first. Everything below reads the stored profile, so a restart
 	// triggered by the reconcile, or any later one, rebuilds with this level.
 	updated, err := s.store.UpdateDestination(row)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		return lw, nil, err
 	}
 	rw := s.reconcileNow("the track level")
 
@@ -141,15 +189,5 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		// or absent from the ingest), so nothing was restarted.
 		applied, reason = "live", "the track is not part of the running mix, so the level is stored and changes nothing on the output yet"
 	}
-	resp := map[string]any{"applied": applied, "destination": updated}
-	if reason != "" {
-		resp["reason"] = reason
-	}
-	if len(warnings) > 0 {
-		resp["warnings"] = warnings
-	}
-	// The change is stored whether or not the reconcile succeeded; a failed one
-	// is reported the way every other mutation reports it (#709), not as a 500
-	// that would read as "nothing happened".
-	writeMutation(w, http.StatusOK, rw, resp)
+	return levelWrite{updated: updated, warnings: warnings, applied: applied, reason: reason, reconcileWarn: rw}, nil, nil
 }

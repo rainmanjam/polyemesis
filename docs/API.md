@@ -45,6 +45,7 @@ Every token carries a scope, chosen when it is created:
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
+| `obs` | **`POST /obs/events` and nothing else**, not even a `GET`, `/ws`, `/events` or `/mcp`. It is the token you paste into the OBS script, whose settings OBS keeps in plain text. Whoever reads that file can make the OBS bridge do what it is configured to do: start its destinations, stop them (ending their YouTube broadcasts, if stopping is turned on) and apply scene rules. They can do nothing else. See [OBS-BRIDGE.md](OBS-BRIDGE.md). |
 
 An `mcp-` token is accepted at `POST /mcp` and nowhere else. Every route in this
 document, `/ws` and `/events` answer it exactly as they answer no token at all,
@@ -182,7 +183,7 @@ encode per candidate encoder and rewrites the install's capability cache.
 `/hls/*`, the dashboard's preview playlist, is **mounted at the root, not under
 `/api/v1`**: `/hls/{source}/index.m3u8` for a given programme, and the bare
 `/hls/index.m3u8` as an alias for the default one. It is now **session-only** — no
-bearer of either scope. Requesting a playlist starts the on-demand preview encoder and
+bearer of any scope. Requesting a playlist starts the on-demand preview encoder and
 polling keeps it running, and hls.js in the console authenticates with the
 session cookie anyway.
 
@@ -396,7 +397,7 @@ tokens are for.
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
 | `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
-| `GET` | `/overlay/events` | A chat overlay's display stream (SSE). Needs its overlay key in `X-Overlay-Key` |
+| `GET` | `/overlay/events` | A chat overlay's display stream (SSE), including the poll widget's `poll.display`. Needs its overlay key in `X-Overlay-Key` |
 
 Both of these, and the media origin at `/playout/*`, sit outside every
 authenticated group — a viewer has no account and never will — and are guarded
@@ -552,7 +553,7 @@ does not get to change what another operator's console shows them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
-| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of either scope is refused |
+| `POST` | `/debug/export` | Session-only, and **audited**. Downloads the debug bundle; a token of any scope is refused |
 | `GET` | `/stats` | System, bitrate, relay counters |
 | `GET` | `/levels` | Current audio levels, and `feed`: `none`, `live` or `stale` (see below) |
 | `GET` | `/source` | Probed track layout |
@@ -651,6 +652,48 @@ Inter that ship embedded, plus anything you drop in `<data-directory>/fonts/`,
 with the built-in ones marked. The route exists so the UI offers what this
 install actually has rather than a hard-coded list a build or a data directory
 could contradict.
+
+### OBS bridge
+
+| Method | Path |
+|---|---|
+| `GET` `PUT` | `/obs` |
+| `PUT` | `/obs/password` |
+| `POST` | `/obs/events` |
+
+The OBS bridge starts and stops destinations when OBS starts and stops
+streaming, and applies a routing preset when OBS switches scene. Setup, and
+the two ways polyemesis learns about OBS, are in [OBS-BRIDGE.md](OBS-BRIDGE.md).
+
+`GET /obs` answers `{"config": {...}, "status": {...}}`. `config` is what `PUT
+/obs` stores: `enabled`, `connect`, `url`, `hasPassword`, `sourceId`,
+`destinations`, `startOnStream`, `stopOnStream`, `stopAcknowledged`,
+`stopGraceSeconds` and `scenes` (`[{scene, preset, opts?, destinations?}]`).
+`status` is the live state: the obs-websocket `connection` (`state` is `off`,
+`connecting`, `connected`, `unreachable`, `refused` or `incompatible`, with a
+`detail` sentence), whether OBS is `streaming` (`null` until something has
+said), the current `scene`, `stopPendingUntil` while a grace period runs, and
+the last ten `lastActions` with one row per destination. A read token may call
+it, and is sent `url` blanked.
+
+`PUT /obs` replaces the whole configuration; a field you leave out is off. It is
+refused with `400` when `stopOnStream` is set without `stopAcknowledged`. That
+is the same warning `POST /destinations/stop-all` gives: stopping a YouTube
+destination ends its broadcast for good. It is also refused when a destination
+does not exist or is on another programme than `sourceId`, when `url` is not
+`ws://` or `wss://`, or when `url` carries a user, a password or a query
+string. `hasPassword` cannot be set this way. Admin scope.
+
+`PUT /obs/password` with `{"password": "..."}` seals the obs-websocket
+password, as `/settings/mqtt-password` does for the broker. `GET /obs` never
+returns it, and an empty password clears it. Admin scope.
+
+`POST /obs/events` is how the OBS script reports a fact:
+`{"event": "stream.started"}`, `{"event": "stream.stopped"}` or `{"event":
+"scene.changed", "scene": "Just Chatting"}`. It answers `202` once the fact is
+accepted; what the bridge then did appears on `GET /obs` and as `obs.*` events
+on `/events`. It answers `409` while the bridge is switched off and `400` for
+anything else. An `obs` or `admin` token may call it.
 
 ### Sources
 
@@ -764,6 +807,14 @@ install is `400 source_required`, and an install with no source at all answers
 `/destinations/{id}/start` and `/stop`, so the bulk control is exactly N presses
 of the per-destination button and can never be more destructive than it.
 
+**Broadcast delay ([BROADCAST-DELAY.md](BROADCAST-DELAY.md)).** A destination's
+`delaySeconds` is 0 to 900. `POST /destinations/{id}/stop` on a delayed
+destination lets its buffered tail air before it stops, and the answer carries
+`drainingSeconds`. `POST /destinations/{id}/stop?now=true` cuts the tail
+instead. It also cuts a tail that is already airing from an earlier stop, and
+then the answer has `"cut": true`. `now` must be `true` or `false`; anything else is `400`.
+`stop-all` and `DELETE` always cut.
+
 **`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
 it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
 (below), and a dialog in the console is a confirmation a script or a replayed
@@ -866,6 +917,22 @@ no backup), `backupError` (why a requested backup does not exist) and
 to). `backupProcess` is deliberately separate from `process`: a backup that has
 been dead for an hour beside a healthy primary is the one state this must not
 hide.
+
+**Destination signals on the status (unreleased):** four optional fields, each
+absent while there is nothing to report.
+
+| Field | Present when | Value |
+|---|---|---|
+| `restartStorm` | More than 5 respawns in the last 15 minutes, the threshold of `PolyemesisDestinationRestartStorm` | The respawn count in that window |
+| `droppingFrames` | At least 1% of the frames in the last 10 seconds were dropped, by the destination's own FFmpeg or by the rendition that encodes its video | The frames dropped in that window |
+| `accountHealth` | The connected account is not healthy | `expiring`, `refreshFailing` or `expired`. The state only: the refresh error stays on `GET /platforms/accounts` |
+| `platformHealth` | YouTube rates the stream `bad`, or reports an error-severity configuration issue | `{"platform", "status", "issues"}`: YouTube's own status word and its issue codes |
+
+`platformHealth` is read through the destination's connected account, read-only,
+at most once every 5 minutes per destination, and only while the destination is
+delivering. Twitch has no stream-health API, so a Twitch destination never
+carries the field. The Stream Deck plugin reads all four; see
+[STREAM-DECK.md](STREAM-DECK.md#what-the-faces-mean).
 
 **Expert mode splices arbitrary arguments into an FFmpeg command line.** Treat
 access to it as equivalent to shell access. `dry-run` tells you whether the
@@ -1017,10 +1084,11 @@ partial file behind.
 |---|---|
 | `GET` | `/automod/matrix` |
 | `GET` | `/automod/stats` |
+| `POST` | `/automod/test` |
 
 Automod's *configuration* lives inside `/settings` — the matrix, the rules and
-the model options all round-trip through that blob. Only two things need routes
-of their own.
+the model options all round-trip through that blob. Only a few things need
+routes of their own.
 
 `GET /automod/matrix` renders every cell with an `available` flag and, where it
 is false, a `reason`. **Availability is derived from what each platform can
@@ -1031,7 +1099,18 @@ a client builds its table from the server's list rather than a second copy free
 to drift.
 
 `GET /automod/stats` reports model spend and health — calls this hour against
-the ceiling, failures, and the last error.
+the ceiling, failures, and the last error. The top-level numbers are the
+primary model checker's; `primary` and `secondary` carry each checker's own,
+with `fallbacks`, `failedOpen` and `lastDecidedBy` beside them.
+
+`POST /automod/test` is the Test button. It sends three synthetic messages to
+the connection in the body (`checker`, `protocol`, `preset`, `endpoint`,
+`model`, `timeoutSeconds`, `minConfidence`, `instruction`) and, on a pass,
+records the pass a checker needs before it can be enabled. **Session only**: no
+API token can run it. The stored key is sent only to the endpoint it is bound
+to; to test another address, put its key in `key`. `PUT /settings/automod-key`
+takes `{"key", "checker"}`, where `checker` is `primary` (the default) or
+`secondary`. See [AUTOMOD.md](AUTOMOD.md#the-model-tier).
 
 A `PUT /settings` that arms a cell whose checker is not configured (no enabled
 rule, or the model off or without an endpoint) is a 400 that names the cell.
@@ -1391,6 +1470,31 @@ One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
 the channel and returns success. polyemesis refuses an empty id before the URL
 is built.
+
+### Chat polls
+
+| Method | Path |
+|---|---|
+| `GET` | `/polls`, `/polls/{id}`, `/polls/export` |
+| `POST` | `/polls`, `/polls/{id}/end` |
+
+`POST /polls` starts a poll and answers `201` with it:
+
+```json
+{"question": "Next map?", "options": ["Dust", "Mirage"], "durationSeconds": 120,
+ "mirrorTwitch": true, "mirrorYouTube": false}
+```
+
+A second poll while one runs is `409`; a question, option or duration outside
+the limits is `400`. `POST /polls/{id}/end` ends it early (`409` if that poll
+is not the one running). `GET /polls` is `{"current": …, "history": […]}`,
+newest first, with `?since=`, `?until=` (RFC 3339) and `?limit=`.
+`GET /polls/export` is CSV by default (`?format=json`, `?id=N`).
+
+A poll is counts per option and per platform, and never names a voter, so the
+three `GET`s are open to `read` tokens. Starting and ending post into every
+chat as you and need `admin`. The rules, the poll widget and native Twitch polls
+are in [POLLS.md](POLLS.md).
 
 ## WebSocket
 

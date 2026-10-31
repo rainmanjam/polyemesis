@@ -10,6 +10,7 @@ const labels = {
   pipeline: "Pipeline",
   platforms: "Platforms",
   overlays: "Overlays",
+  obs: "OBS bridge",
   security: "Security",
   danger: "Danger zone",
   debug: "Debug",

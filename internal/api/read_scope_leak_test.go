@@ -12,6 +12,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -361,6 +362,23 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 	}); err != nil {
 		t.Fatalf("plant schedule: %v", err)
 	}
+
+	// A finished chat poll, at a fixed time so the bodies are stable, and a
+	// poll engine so the three poll GETs answer rather than 503. Its result is
+	// counts with no voter in it; the sweep checks that is all a read token
+	// receives from the list, the row and the CSV export.
+	if s.polls == nil {
+		s.polls = polls.New(store, s.stream)
+	}
+	at := time.Date(2026, 3, 1, 21, 0, 0, 0, time.UTC)
+	if _, err := store.CreatePoll(db.Poll{
+		Question: "Next map?", Options: []string{"Dust", "Mirage"}, DurationS: 60, State: "ended",
+		StartedAt: at, EndsAt: at.Add(time.Minute), EndedAt: at.Add(time.Minute),
+		Result: json.RawMessage(`{"options":[{"label":"Dust","votes":2,"byPlatform":{"twitch":2}},` +
+			`{"label":"Mirage","votes":1,"byPlatform":{"youtube":1}}],"total":3,"byPlatform":{"twitch":2,"youtube":1}}`),
+	}); err != nil {
+		t.Fatalf("plant poll: %v", err)
+	}
 }
 
 // bearer stamps a token onto a request the way a script would.
@@ -390,6 +408,13 @@ func leakRoutes() []string {
 		// The Record key's state: enabled, a state word and a human reason for a
 		// disk halt. A read a read-scoped token may make; no credential is in it.
 		"/api/v1/recording",
+		// The OBS bridge's configuration and status (#16). A read a read-scoped
+		// token may make, with the obs-websocket address blanked for it. The
+		// obs-websocket password is not one of this sweep's sentinels because
+		// NO body carries it, admin included, so the sentinel witness could
+		// never see it; TestTheOBSWebsocketPasswordAppearsInNoResponseLogEvent
+		// AuditOrMetric is its leak test.
+		"/api/v1/obs",
 		"/api/v1/status",
 		"/api/v1/source",
 		"/api/v1/destinations",
@@ -512,6 +537,10 @@ func leakRoutes() []string {
 		"/api/v1/library/sessions/1",
 		"/api/v1/renditions/1",
 		"/api/v1/schedules/1",
+		// Chat polls (#14): counts per option and platform, never a voter.
+		"/api/v1/polls",
+		"/api/v1/polls/1",
+		"/api/v1/polls/export",
 	}
 }
 

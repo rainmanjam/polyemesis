@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, KeyRound, Plus, Trash2 } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { AlertTriangle, Plus, Trash2 } from "lucide-react";
+import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,15 +13,17 @@ import {
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SecretInput } from "@/components/SecretInput";
+import { AutomodModelChecker } from "@/components/AutomodModelChecker";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ACTION_KEYS,
-  confidenceOutOfRange,
-  MAX_CONFIDENCE,
-  MIN_CONFIDENCE,
+  anyTimeout,
+  CATEGORY_KEYS,
+  categoryActionOf,
+  MODEL_CATEGORIES,
   modelStatus,
+  SUGGESTED_CATEGORY_ACTIONS,
   nextRuleId,
   ruleProblems,
   ruleReach,
@@ -30,7 +32,9 @@ import {
 import { useT } from "@/lib/i18n";
 import type {
   AutomodAction,
+  AutomodModel,
   AutomodModelStats,
+  AutomodPreset,
   AutomodRule,
   Settings,
 } from "@/lib/types";
@@ -155,11 +159,11 @@ export function AutomodConfig({
 
   const [stats, setStats] = useState<AutomodModelStats | null>(null);
   const [statsFailed, setStatsFailed] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [replacing, setReplacing] = useState(false);
-  const [keyBusy, setKeyBusy] = useState(false);
-  const [keyNote, setKeyNote] = useState<string | null>(null);
-  const [keyError, setKeyError] = useState<string | null>(null);
+  const [presets, setPresets] = useState<AutomodPreset[]>([]);
+  const [categories, setCategories] = useState<readonly string[]>(MODEL_CATEGORIES);
+  const [showSecondary, setShowSecondary] = useState(
+    settings.automod?.secondary?.enabled === true,
+  );
   const [deleting, setDeleting] = useState<AutomodRule | null>(null);
 
   const loadStats = useCallback(async () => {
@@ -178,6 +182,24 @@ export function AutomodConfig({
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  // The provider presets and the category list, from the server that enforces
+  // them. A failure leaves the page usable on what it already shows: the
+  // fields still edit, only the preset dropdown is empty.
+  useEffect(() => {
+    let live = true;
+    api
+      .automodMatrix()
+      .then((m) => {
+        if (!live) return;
+        setPresets(m.presets ?? []);
+        if (m.modelCategories?.length) setCategories(m.modelCategories);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   if (!automod?.model) {
     return (
@@ -201,6 +223,8 @@ export function AutomodConfig({
     setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
+  const secondary = automod.secondary;
+
   function patchModel(patch: Partial<typeof model>) {
     onChange({
       ...settings,
@@ -208,39 +232,21 @@ export function AutomodConfig({
     });
   }
 
-  /** Stores or clears the key, immediately.
-   *
-   *  Not part of the page's draft, because it is not part of the settings
-   *  document: PUT /settings/automod-key seals it separately so GET /settings
-   *  can never carry it. That makes this the one control on the card that acts
-   *  before the operator presses Save, which is why it reports its own outcome
-   *  rather than leaving them to assume. */
-  async function storeKey(value: string) {
-    setKeyBusy(true);
-    setKeyError(null);
-    setKeyNote(null);
-    try {
-      const res = await api.setAutomodKey(value);
-      // The draft is corrected so the card stops offering to set a key that is
-      // now set. The server derives hasApiKey on every read, so this cannot
-      // outlive a refresh as a lie.
-      patchModel({ hasApiKey: res.hasApiKey });
-      setApiKey("");
-      setReplacing(false);
-      setKeyNote(value === "" ? t("automod.keyCleared") : t("automod.keyStored"));
-      // The stored key is applied by rebuilding the checker, which resets the
-      // per-connector failure counters — so the panel beside it is stale the
-      // moment this returns.
-      void loadStats();
-    } catch (e) {
-      setKeyError(
-        t("automod.keyFailed", {
-          detail: e instanceof ApiError ? e.message : String(e),
-        }),
-      );
-    } finally {
-      setKeyBusy(false);
-    }
+  function patchSecondary(patch: Partial<AutomodModel>) {
+    if (!secondary) return;
+    onChange({
+      ...settings,
+      automod: { ...automod!, secondary: { ...secondary, ...patch } },
+    });
+  }
+
+  /** "" puts a category back on the default action. The whole table is sent,
+   *  because the server REPLACES it on save (a dropped key means default). */
+  function setCategoryAction(cat: string, a: AutomodAction | "") {
+    const next = { ...model.categoryActions };
+    if (a === "") delete next[cat];
+    else next[cat] = a;
+    patchModel({ categoryActions: next });
   }
 
   const rejectedRule = serverRejection(saveError);
@@ -420,52 +426,7 @@ export function AutomodConfig({
           <CardDescription>{t("automod.modelDesc")}</CardDescription>
         </CardHeader>
 
-        <CardContent className="grid gap-3">
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div>
-              <Label htmlFor="automod-model-enabled">
-                {t("automod.modelEnabled")}
-              </Label>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("automod.modelEnabledNote")}
-              </p>
-            </div>
-            <Switch
-              id="automod-model-enabled"
-              checked={model.enabled}
-              onCheckedChange={(v) => patchModel({ enabled: v })}
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="automod-model-endpoint">
-                {t("automod.endpoint")}
-              </Label>
-              <Input
-                id="automod-model-endpoint"
-                value={model.endpoint}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => patchModel({ endpoint: e.target.value })}
-              />
-              <span className="text-sm text-muted-foreground">
-                {t("automod.endpointNote")}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="automod-model-name">{t("automod.modelName")}</Label>
-              <Input
-                id="automod-model-name"
-                value={model.model}
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => patchModel({ model: e.target.value })}
-              />
-            </div>
-          </div>
-
+        <CardContent className="grid gap-4">
           <div className="flex flex-col gap-1">
             <Label htmlFor="automod-model-instruction">
               {t("automod.instruction")}
@@ -473,7 +434,8 @@ export function AutomodConfig({
             {/* A textarea, because this is a prompt. It is the operator's own
                 sentence about what counts as abuse in their community, it is
                 sent with every message, and a single-line input hides all but
-                the first few words of the thing being decided by. */}
+                the first few words of the thing being decided by. Both
+                checkers are asked with it. */}
             <Textarea
               id="automod-model-instruction"
               rows={3}
@@ -485,212 +447,170 @@ export function AutomodConfig({
             </span>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="automod-model-confidence">
-                {t("automod.minConfidence")}
-              </Label>
-              <Input
-                id="automod-model-confidence"
-                type="number"
-                step={0.05}
-                min={MIN_CONFIDENCE}
-                max={MAX_CONFIDENCE}
-                className="w-28"
-                value={model.minConfidence}
-                aria-invalid={confidenceOutOfRange(model.minConfidence)}
-                onChange={(e) =>
-                  patchModel({ minConfidence: Number(e.target.value) })
-                }
-              />
-              <span className="text-sm text-muted-foreground">
-                {t("automod.minConfidenceNote")}
-              </span>
-              {/* THE ONLY PLACE THIS CAN BE SAID. The server does not refuse a
-                  floor outside the scale: it logs, keeps 0.8, and carries on —
-                  so a 0 typed here (act on every opinion the model has) or an
-                  80 typed as a percentage (act on none of them, ever) is
-                  silent everywhere else. */}
-              {confidenceOutOfRange(model.minConfidence) && (
-                <Problem>{t("automod.confidenceOutOfRange")}</Problem>
+          <section
+            role="group"
+            aria-label={t("automod.primaryTitle")}
+            className="grid gap-2 rounded-md border p-3"
+          >
+            <h3 className="text-sm font-medium">{t("automod.primaryTitle")}</h3>
+            <p className="text-xs text-muted-foreground">{t("automod.primaryDesc")}</p>
+            <AutomodModelChecker
+              slot="primary"
+              value={model}
+              onPatch={patchModel}
+              presets={presets}
+              // The top-level counters are the primary's, on every server
+              // version -- an older one sends nothing else.
+              stats={stats}
+              statsFailed={statsFailed}
+              instruction={model.instruction}
+              onKeyChanged={() => void loadStats()}
+              enableLabel="automod.modelEnabled"
+              enableNote="automod.modelEnabledNote"
+            />
+          </section>
+
+          {secondary && (
+            <section
+              role="group"
+              aria-label={t("automod.secondaryTitle")}
+              className="grid gap-2 rounded-md border p-3"
+            >
+              <h3 className="text-sm font-medium">{t("automod.secondaryTitle")}</h3>
+              <p className="text-xs text-muted-foreground">{t("automod.secondaryDesc")}</p>
+              {/* Rendered only once asked for, or when it is already on: an
+                  optional fallback should not double the length of the card
+                  for an operator who will never want one. */}
+              {showSecondary ? (
+                <AutomodModelChecker
+                  slot="secondary"
+                  value={secondary}
+                  onPatch={patchSecondary}
+                  presets={presets}
+                  stats={stats?.secondary ?? null}
+                  statsFailed={statsFailed}
+                  instruction={model.instruction}
+                  onKeyChanged={() => void loadStats()}
+                  enableLabel="automod.secondaryEnabled"
+                  enableNote="automod.modelEnabledNote"
+                />
+              ) : (
+                <div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setShowSecondary(true)}
+                  >
+                    {t("automod.secondaryShow")}
+                  </Button>
+                </div>
               )}
-            </div>
+            </section>
+          )}
+
+          {/* WHICH CHECKER DECIDED, and how often the fallback had to. */}
+          {stats && (stats.fallbacks ?? 0) > 0 && (
+            <span className="text-sm text-muted-foreground">
+              {t("automod.fallbacks", { count: stats.fallbacks ?? 0 })}
+            </span>
+          )}
+          {stats && (stats.failedOpen ?? 0) > 0 && (
+            <Problem>{t("automod.failedOpen", { count: stats.failedOpen ?? 0 })}</Problem>
+          )}
+          {stats?.lastDecidedBy && (
+            <span className="text-sm text-muted-foreground">
+              {stats.lastDecidedBy === "secondary"
+                ? t("automod.lastDecidedSecondary")
+                : t("automod.lastDecidedPrimary")}
+            </span>
+          )}
+
+          <section
+            role="group"
+            aria-label={t("automod.categoryTitle")}
+            className="grid gap-2 rounded-md border p-3"
+          >
+            <h3 className="text-sm font-medium">{t("automod.categoryTitle")}</h3>
+            <p className="text-xs text-muted-foreground">{t("automod.categoryDesc")}</p>
 
             <div className="flex flex-col gap-1">
-              <Label htmlFor="automod-model-calls">
-                {t("automod.maxCalls")}
-              </Label>
-              <Input
-                id="automod-model-calls"
-                type="number"
-                min={0}
-                className="w-28"
-                value={model.maxCallsPerHour}
-                onChange={(e) =>
-                  patchModel({ maxCallsPerHour: Number(e.target.value) })
-                }
-              />
-              <span className="text-sm text-muted-foreground">
-                {t("automod.maxCallsNote")}
-              </span>
-              {/* THE READING, BESIDE THE CEILING IT IS BOUNDED BY. A ceiling
-                  with no spend beside it is a number an operator guesses at
-                  and never revisits. */}
-              {statsFailed && (
-                <span className="text-sm text-muted-foreground">
-                  {t("automod.spendUnread")}
-                </span>
-              )}
-              {stats && (
-                <span className="text-sm text-muted-foreground">
-                  {stats.ceiling > 0
-                    ? t("automod.spend", {
-                        used: stats.callsThisHour,
-                        ceiling: stats.ceiling,
-                      })
-                    : t("automod.spendNoCeiling", { used: stats.callsThisHour })}
-                </span>
-              )}
-              {stats && stats.failures > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  {t("automod.spendFailures", { count: stats.failures })}
-                </span>
-              )}
-              {stats?.lastError && (
-                <Problem>
-                  {t("automod.lastError", { detail: stats.lastError })}
-                </Problem>
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="automod-model-timeout">
-                {t("automod.answerTimeout")}
-              </Label>
-              <Input
-                id="automod-model-timeout"
-                type="number"
-                min={1}
-                className="w-28"
-                value={model.timeoutSeconds}
-                onChange={(e) =>
-                  patchModel({ timeoutSeconds: Number(e.target.value) })
-                }
-              />
-              <span className="text-sm text-muted-foreground">
-                {t("automod.answerTimeoutNote")}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-2">
               <ActionSelect
                 id="automod-model-action"
                 label={t("automod.modelAction")}
                 value={model.action}
                 onChange={(a) => patchModel({ action: a })}
               />
-              {/* The two timeouts are not the same timeout, and conflating them
-                  is a bug this feature has already had: the one above is how
-                  long to wait for an answer, this one is how long the viewer
-                  the model flags stays silenced. */}
-              {model.action === "timeout" && (
-                <div className="flex flex-col gap-1">
-                  <Label htmlFor="automod-model-ban-timeout">
-                    {t("automod.banTimeout")}
-                  </Label>
-                  <Input
-                    id="automod-model-ban-timeout"
-                    type="number"
-                    min={1}
-                    className="w-28"
-                    value={model.timeoutForBan ?? ""}
-                    onChange={(e) =>
-                      patchModel({ timeoutForBan: Number(e.target.value) })
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* THE KEY. Never rendered, only replaced. */}
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <div className="flex items-center gap-2">
-              <KeyRound className="size-4 shrink-0" aria-hidden />
-              <span className="text-xs font-medium">{t("automod.apiKey")}</span>
-              <span className="text-xs text-muted-foreground">
-                {model.hasApiKey ? t("automod.keySet") : t("automod.keyUnset")}
+              <span className="text-sm text-muted-foreground">
+                {t("automod.modelActionNote")}
               </span>
             </div>
 
-            {model.hasApiKey && !replacing ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setReplacing(true)}
-                >
-                  {t("automod.replaceKey")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  disabled={keyBusy}
-                  onClick={() => void storeKey("")}
-                >
-                  {t("automod.clearKey")}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex min-w-48 flex-1 flex-col gap-1">
-                  <Label htmlFor="automod-model-key">
-                    {t("automod.newKey")}
-                  </Label>
-                  <SecretInput
-                    id="automod-model-key"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                  />
+            {categories.map((cat) => {
+              const set = categoryActionOf(model, cat);
+              const suggested = SUGGESTED_CATEGORY_ACTIONS[cat];
+              const id = `automod-category-${cat}`;
+              return (
+                <div key={cat} className="flex flex-wrap items-end gap-2">
+                  <div className="flex flex-col gap-1">
+                    <Label htmlFor={id}>{t(CATEGORY_KEYS[cat] ?? "automod.catOther")}</Label>
+                    <select
+                      id={id}
+                      className="h-8 rounded-md border border-input bg-transparent px-2 text-[12px]"
+                      value={set ?? ""}
+                      onChange={(e) => setCategoryAction(cat, e.target.value as AutomodAction | "")}
+                    >
+                      <option value="">
+                        {t("automod.categoryDefault", { action: t(ACTION_KEYS[model.action]) })}
+                      </option>
+                      {(Object.keys(ACTION_KEYS) as AutomodAction[]).map((a) => (
+                        <option key={a} value={a}>
+                          {t(ACTION_KEYS[a])}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {suggested && (
+                    <span className="pb-1 text-sm text-muted-foreground">
+                      {t("automod.categorySuggested", { action: t(ACTION_KEYS[suggested]) })}
+                    </span>
+                  )}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={keyBusy || apiKey.trim() === ""}
-                  onClick={() => void storeKey(apiKey.trim())}
-                >
-                  {t("automod.saveKey")}
-                </Button>
-                {model.hasApiKey && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setReplacing(false);
-                      setApiKey("");
-                    }}
-                  >
-                    {t("common.cancel")}
-                  </Button>
-                )}
+              );
+            })}
+            <div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  patchModel({
+                    categoryActions: { ...model.categoryActions, ...SUGGESTED_CATEGORY_ACTIONS },
+                  })
+                }
+              >
+                {t("automod.categoryApplySuggested")}
+              </Button>
+            </div>
+
+            {/* The two timeouts are not the same timeout, and conflating them
+                is a bug this feature has already had: the answer timeout is
+                how long to wait for a model, this one is how long a viewer a
+                model flags stays silenced. Shown while any action is one. */}
+            {anyTimeout(model) && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="automod-model-ban-timeout">{t("automod.banTimeout")}</Label>
+                <Input
+                  id="automod-model-ban-timeout"
+                  type="number"
+                  min={1}
+                  className="w-28"
+                  value={model.timeoutForBan ?? ""}
+                  onChange={(e) => patchModel({ timeoutForBan: Number(e.target.value) })}
+                />
               </div>
             )}
-
-            <span className="text-sm text-muted-foreground">
-              {t("automod.keyNeverReturned")}
-            </span>
-            {keyNote && (
-              <span className="text-sm text-muted-foreground" role="status">
-                {keyNote}
-              </span>
-            )}
-            {keyError && <Problem>{keyError}</Problem>}
-          </div>
+          </section>
         </CardContent>
       </Card>
 

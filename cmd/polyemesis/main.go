@@ -29,7 +29,9 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -371,13 +373,16 @@ func run(h *hooks) error {
 	// every settings save; the connector is rebuilt each time and the hourly
 	// allowance must not be. See internal/automod/budget.go.
 	automodBudget := automod.NewBudget()
+	// And the secondary model checker's, for the same reason and kept apart:
+	// each checker spends against the ceiling the operator set for it.
+	automodSecondaryBudget := automod.NewBudget()
 
 	if s, err := store.GetSettings(); err == nil {
 		api.ApplyChatRetention(hub, s.Chat)
 		// Automod, for the same reason: a matrix armed in the UI that quietly
 		// reverts on restart is worse than one that never worked, because the
 		// operator has already stopped checking it.
-		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget)
+		api.ApplyAutomod(hub, store, box, log, s.Automod, automodBudget, automodSecondaryBudget)
 		// Alert delivery, for the third time and the same reason. Safe to call
 		// before the engines exist: the Manager remembers the budget and hands
 		// it to each engine as it is created, so this does not depend on
@@ -416,18 +421,46 @@ func run(h *hooks) error {
 	overlayGate := overlay.New(streamHub)
 	hub.SetDisplay(overlayGate)
 	go overlayGate.Run(ctx)
+	// Chat polls (#14). The counter taps the same verdicts the overlay gate
+	// gets, plus why each removed message went (chat.Tap), and publishes the
+	// poll events into the same hub. A poll open when the last process
+	// stopped lost its votes with it: marked interrupted, never a result.
+	if n, err := store.InterruptOpenPolls(time.Now()); err != nil {
+		log.Warn("polls: could not mark interrupted polls", "err", err)
+	} else if n > 0 {
+		log.Info("polls: a poll was open when the server stopped; marked interrupted", "count", n)
+	}
+	pollEngine := polls.New(store, streamHub, polls.WithSender(hub), polls.WithLogger(log))
+	hub.SetTap(pollEngine)
+	go pollEngine.Run(ctx)
+
+	// The OBS bridge (#16). Built here and handed to the API server, which
+	// installs itself as the bridge's Actions: OBS reaches destinations only
+	// through the server's own start, stop and track-level code. Run dials
+	// obs-websocket when configured to and never returns an error -- OBS
+	// being closed is the normal state of an install between shows.
+	obsBridge := obsbridge.New(obsbridge.Options{
+		Log: log.With("component", "obs"), Pub: streamHub, Load: api.OBSLoader(store, box),
+	})
+	defer obsBridge.Close()
+	// Chat commands (#6): !bitrate, and the moderator-only !switch and !fix.
+	// Off until an operator turns them on; see startChatCommands.
+	startChatCommands(ctx, log, store, eng, hub, bus)
 
 	srv := api.New(api.Options{
 		Diag:      diagRecorder,
 		DiagLevel: diagSwitch,
 		Log:       log, Config: cfg,
 		DB: store, Secrets: box, Engine: eng, Events: bus, Version: version,
-		Chat:          hub,
-		AutomodBudget: automodBudget,
-		Hooks:         hookd,
-		Stream:        streamHub,
-		OverlayGate:   overlayGate,
-		SetupCode:     setupCode,
+		Chat:                   hub,
+		AutomodBudget:          automodBudget,
+		AutomodSecondaryBudget: automodSecondaryBudget,
+		Hooks:                  hookd,
+		Stream:                 streamHub,
+		OverlayGate:            overlayGate,
+		OBS:                    obsBridge,
+		Polls:                  pollEngine,
+		SetupCode:              setupCode,
 		// The same provider the listener serves from. Handing the API its own
 		// would mean a second selfsigned Provider regenerating the material on
 		// disk out from under the running listener.
@@ -436,7 +469,13 @@ func run(h *hooks) error {
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
+	// After api.New, which is what installs the server as the bridge's
+	// Actions: a fact OBS reports before that would be recorded and acted on
+	// by nothing.
+	go obsBridge.Run(ctx)
 	go srv.RefreshLoop(ctx)
+	// The native Twitch poll mirror reads accounts and tokens through the API.
+	pollEngine.SetMirror(srv.PollMirror())
 	// Pre-announces scheduled Facebook broadcasts, so a show on a schedule has
 	// an event page before it starts. Best-effort by construction: it runs
 	// ahead of the stream and nothing downstream waits on it, so a failure
@@ -458,6 +497,11 @@ func run(h *hooks) error {
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())
+	// The connected account's health and YouTube's own stream-health verdict
+	// on each destination's status, for the Stream Deck's destination key. The
+	// health read is paced and read-only; see internal/engine/destsignals.go.
+	eng.SetAccountHealth(srv.AccountHealth())
+	eng.SetPlatformHealth(srv.PlatformHealth())
 
 	// After the API, because the adapters refresh their tokens through it.
 	// Nothing here fails the start: a platform that will not connect is a line

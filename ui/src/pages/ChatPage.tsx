@@ -17,6 +17,7 @@ import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
+import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
@@ -269,6 +270,7 @@ export function ChatPage() {
             </div>
           )}
 
+          <PollPanel />
           <ChatRules statuses={statuses} />
           <ChatStatusList statuses={statuses} />
 

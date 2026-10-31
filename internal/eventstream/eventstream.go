@@ -52,6 +52,11 @@ const (
 	// TopicOverlay is the display projection of chat that an OBS overlay key
 	// may read: see DisplayLine and OverlayVisible.
 	TopicOverlay Topic = "overlay"
+	// TopicOBS is the OBS bridge (#16): what OBS told polyemesis, over
+	// obs-websocket or the OBS script, and whether the link is up.
+	TopicOBS Topic = "obs"
+	// TopicPoll is the cross-platform chat poll (#14, internal/polls).
+	TopicPoll Topic = "poll"
 )
 
 // Event types. The destination and ingest names are the webhook trigger names
@@ -63,9 +68,10 @@ const (
 	TypeDestinationRestarted  Type = "destination.restarted"
 	TypeDestinationLevel      Type = "destination.level"
 	TypeDestinationRolledOver Type = Type(hooks.TriggerDestinationRolledOver)
+	TypeDestinationDelay      Type = "destination.delay"
 	TypeIngestPublished       Type = Type(hooks.TriggerIngestPublished)
 	TypeIngestDisconnected    Type = Type(hooks.TriggerIngestDisconnected)
-	TypeFailoverSwitched      Type = "failover.switched"
+	TypeFailoverSwitched      Type = Type(hooks.TriggerFailoverSwitched)
 	TypeBroadcastLive         Type = "broadcast.live"
 	TypeBroadcastComplete     Type = "broadcast.complete"
 	TypeBroadcastFault        Type = Type(hooks.TriggerBroadcastFault)
@@ -76,8 +82,15 @@ const (
 	TypeChatModeration        Type = "chat.moderation"
 	TypeChatDisplay           Type = "chat.display"
 	TypeChatUndisplay         Type = "chat.undisplay"
+	TypePollStarted           Type = "poll.started"
+	TypePollVote              Type = "poll.vote"
+	TypePollEnded             Type = "poll.ended"
+	TypePollDisplay           Type = "poll.display"
 	TypeAlert                 Type = "alert"
 	TypeStreamGap             Type = "stream.gap"
+	TypeOBSConnection         Type = "obs.connection"
+	TypeOBSStream             Type = "obs.stream"
+	TypeOBSScene              Type = "obs.scene"
 )
 
 // Access says whether a read-scoped API token receives a type. The zero value
@@ -125,9 +138,11 @@ func alertOnTheTimeline(env Envelope) bool {
 // TheCatalogue) and the requirement that each type is shown, by a test that
 // drives its real producer, to actually be emitted (TestEveryCatalogued
 // TypeHasAnEmissionTest). A type for a feature that does not exist yet --
-// polls (#14), viewer samples (#4), the failover degraded reason (#6) -- is
-// added HERE, by that feature, together with the test that proves its producer
-// emits it. Until then it is documented under "Coming with …" and nowhere else.
+// viewer samples (#4) -- is added HERE, by that feature, together with the test
+// that proves its producer emits it. Until then it is documented under "Coming
+// with …" and nowhere else. Polls (#14) did exactly that. The failover degraded
+// reason (#6) needed no new type: it is the "degraded: " reason on
+// failover.switched.
 var catalogue = []Spec{
 	// Destinations. Status is readable by a read token over REST and /ws
 	// already; none of these carries a URL or a stream key, and every free-text
@@ -138,6 +153,7 @@ var catalogue = []Spec{
 	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited.", nil},
 	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart.", nil},
 	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage.", nil},
+	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer.", nil},
 
 	// Ingest and failover.
 	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest.", nil},
@@ -168,12 +184,34 @@ var catalogue = []Spec{
 	// it is still chat a viewer wrote under their name.
 	{TypeChatDisplay, TopicOverlay, Withheld, "A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows.", nil},
 	{TypeChatUndisplay, TopicOverlay, Withheld, "Chat lines that were cleared for display are gone and must leave the screen.", nil},
+	// The poll widget's projection: question, option labels and totals, and
+	// nothing else -- no platform, so a Twitch-only scene shows no rival's
+	// name, and no voter. Withheld from read tokens like every overlay row;
+	// they get the same numbers, with the breakdown, from the poll topic.
+	{TypePollDisplay, TopicOverlay, Withheld, "A poll as the on-stream widget shows it: question, options and totals, with no platform breakdown.", nil},
+
+	// Polls (#14). Granted: the payload is the operator's question, the
+	// options and per-platform COUNTS. Who voted for what stays inside
+	// internal/polls and has no field on any payload, so a read token -- like
+	// the dashboard -- sees the result and never a voter's id or name.
+	{TypePollStarted, TopicPoll, Granted, "A poll opened: question, options, duration, and where it was announced.", nil},
+	{TypePollVote, TopicPoll, Granted, "A poll's running tallies changed; sent at most once a second, never once per vote.", nil},
+	{TypePollEnded, TopicPoll, Granted, "A poll closed, at its time or early: the final tallies with the per-platform breakdown.", nil},
 
 	// Operator alerts, fired and resolved, after alerts.Event.Redacted. A read
 	// token gets the ones GET /timeline already shows it and no others: the
 	// audit half of the alert catalogue is not on the timeline, and a stream
 	// that sent it would widen what a read token can see.
 	{TypeAlert, TopicAlert, Partly, "An operator alert fired or resolved.", alertOnTheTimeline},
+
+	// The OBS bridge (internal/obsbridge). What OBS reported, never what it was
+	// asked: none of these carries the obs-websocket address or its password,
+	// and the connection's detail is a fixed sentence chosen by polyemesis, not
+	// an error string from the network. Granted, because a read token already
+	// sees every destination these lead to start or stop.
+	{TypeOBSConnection, TopicOBS, Granted, "Polyemesis's link to obs-websocket connected, dropped, or was refused.", nil},
+	{TypeOBSStream, TopicOBS, Granted, "OBS started or stopped streaming, as reported by obs-websocket or the OBS script.", nil},
+	{TypeOBSScene, TopicOBS, Granted, "OBS switched its program scene; preset names the routing rule the scene triggers, if any.", nil},
 
 	// The stream's own bookkeeping. Carries no data from anywhere else.
 	{TypeStreamGap, TopicStream, Granted, "Events this connection asked to replay are no longer held; reconcile over REST.", nil},
@@ -185,6 +223,7 @@ var catalogue = []Spec{
 var overlayVisible = map[Type]bool{
 	TypeChatDisplay:   true,
 	TypeChatUndisplay: true,
+	TypePollDisplay:   true,
 }
 
 // OverlayVisible reports whether an overlay key may be sent t.
@@ -224,6 +263,30 @@ type DisplayBadge struct {
 type DisplayRemoval struct {
 	Platform string   `json:"platform"`
 	IDs      []string `json:"ids"`
+}
+
+// PollDisplay is a poll as the on-stream widget draws it. AN ALLOWLIST, like
+// DisplayLine: question, option labels and totals. There is deliberately no
+// platform (the widget is logo-free and is shown on every overlay, including a
+// Twitch-only one) and no voter of any kind.
+type PollDisplay struct {
+	// ID tells one poll from the next, so a widget resets rather than mixing
+	// two polls' bars. Opaque.
+	ID       string              `json:"id"`
+	Question string              `json:"question"`
+	Options  []PollDisplayOption `json:"options"`
+	Total    int                 `json:"total"`
+	// State is "open", "closing" (counting the last votes automod is still
+	// judging) or "ended".
+	State   string     `json:"state"`
+	EndsAt  time.Time  `json:"endsAt"`
+	EndedAt *time.Time `json:"endedAt,omitempty"`
+}
+
+// PollDisplayOption is one bar of the widget.
+type PollDisplayOption struct {
+	Label string `json:"label"`
+	Votes int    `json:"votes"`
 }
 
 // Catalogue returns every emitted type, in the order docs/EVENTS.md lists them.

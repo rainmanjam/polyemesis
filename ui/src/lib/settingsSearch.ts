@@ -7,6 +7,7 @@ export const SETTINGS_TABS = [
   "pipeline",
   "platforms",
   "overlays",
+  "obs",
   "security",
   "danger",
   "debug",
@@ -46,6 +47,7 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "ingest", key: "set.listeners" },
   { tab: "ingest", key: "set.srtPort", card: "set.listeners", anchor: "listener-srt" },
   { tab: "ingest", key: "set.rtmpPort", card: "set.listeners", anchor: "listener-rtmp" },
+  { tab: "ingest", key: "set.srtlaPort", card: "set.listeners", anchor: "listener-srtla" },
   { tab: "ingest", key: "set.ffmpegTitle" },
   // pipeline
   { tab: "pipeline", key: "set.displayTitle" },
@@ -116,6 +118,8 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "platforms", key: "set.clientId" },
   { tab: "platforms", key: "set.clientSecret" },
   { tab: "platforms", key: "set.connectedAccounts" },
+  // obs bridge (#16): its fields live in ObsBridgeSettings.tsx
+  { tab: "obs", key: "obs.title" },
   // security
   { tab: "security", key: "set.adminPassword" },
   { tab: "security", key: "set.currentPassword", card: "set.adminPassword", anchor: "cur-pw" },

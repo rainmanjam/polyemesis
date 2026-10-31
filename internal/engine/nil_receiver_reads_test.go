@@ -63,6 +63,9 @@ var nilEngineAnswers = map[string]bool{
 	"Reconcile":        false,
 	"PreviewRequested": false,
 	"Stop":             false,
+	// FixSource (#6, chat's !fix) clears a pin and restarts a feed: a mutation,
+	// so a nil engine must not report it done.
+	"FixSource": false,
 	// COMMAND-LINE INPUTS -- Source discards the "known" bit that SourceKnown
 	// keeps, and every caller of it compiles a filtergraph from what it gets
 	// back. Answering with the placeholder layout would hand an operator six

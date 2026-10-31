@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/failreason"
+	"github.com/rainmanjam/polyemesis/internal/polls"
 )
 
 // The MCP tool catalogue. Every entry names the REST request(s) it makes; see
@@ -390,6 +392,11 @@ var (
 		"type":        "boolean",
 		"description": "Must be true to act. Without it nothing happens and the tool answers with what the action would end.",
 	}
+	schemaStopNow = map[string]any{
+		"type": "boolean",
+		"description": "Stop now: cut a broadcast delay's buffered tail instead of letting it air. " +
+			"Default false, which plays the tail out.",
+	}
 )
 
 func checkID(name string, v int64) error {
@@ -468,7 +475,13 @@ func jsonInt(v any) (int64, bool) {
 // the console shows, whether the retry hold is on, and whether the platform
 // reports a different stream key.
 func destHealth(d any) map[string]any {
-	h := pick(d, "id", "name", "platform", "kind", "enabled", "summary", "error", "stalled", "stopWarning", "warnings")
+	h := pick(d, "id", "name", "platform", "kind", "enabled", "summary", "error", "stalled", "stopWarning", "warnings", "delaySeconds")
+	// The broadcast delay's buffer (#11). A draining destination is disabled and
+	// STILL ON THE AIR, which only this says -- and stop_destination with
+	// now:true is how an agent cuts it.
+	if dl, ok := d.(map[string]any)["delay"].(map[string]any); ok {
+		h["delay"] = pick(dl, "seconds", "phase", "fill", "bufferedSeconds", "drainRemainingSeconds", "droppedBytes", "problem")
+	}
 	if p, ok := d.(map[string]any)["process"]; ok && p != nil {
 		h["process"] = pick(p, "state", "restarts", "uptimeSec", "lastError", "nextRetryIn", "stalled", "stalledSec")
 	}
@@ -518,7 +531,7 @@ func destinationRows(v any) []any {
 // act on it. The read-safe view has already masked the URL; it is kept so an
 // agent can tell two YouTube destinations apart by their server.
 func destSummary(d any) map[string]any {
-	return pick(d, "id", "name", "platform", "kind", "enabled", "sourceId", "url", "multitrack")
+	return pick(d, "id", "name", "platform", "kind", "enabled", "sourceId", "url", "multitrack", "delaySeconds")
 }
 
 // --- the catalogue ---
@@ -616,7 +629,7 @@ func mcpCatalogue() []mcpTool {
 					return nil, err
 				}
 				out := destSummary(d)
-				for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience") {
+				for k, v := range pick(d, "profile", "vodProfile", "audioBitrate", "transport", "resilience", "delaySeconds") {
 					out[k] = v
 				}
 				src := a.Source
@@ -697,6 +710,32 @@ func mcpCatalogue() []mcpTool {
 					return nil, err
 				}
 				v, err := c.call(http.MethodGet, "/recordings", nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
+			name: "get_polls", title: "Chat polls", tier: mcpRead,
+			description: "The running chat poll, if any, and recent finished ones, newest first: question, options, vote counts per option and per platform. Counts only; no voter is named.",
+			props: map[string]any{
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "description": "How many finished polls (default 10)."},
+			},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					Limit int `json:"limit"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				if a.Limit == 0 {
+					a.Limit = 10
+				}
+				if a.Limit < 1 || a.Limit > 100 {
+					return nil, argErr("limit must be 1 to 100")
+				}
+				v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {strconv.Itoa(a.Limit)}}, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -888,9 +927,9 @@ func mcpCatalogue() []mcpTool {
 		},
 		{
 			name: "stop_destination", title: "Stop a destination", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
-			confirms:    "every call",
-			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. Needs confirm:true; without it, answers with what the stop would end.",
-			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm},
+			confirms:    "every call, now:true included: cutting a delay's tail ends what viewers are still watching",
+			description: "Stop one destination. If it carries a live YouTube broadcast, the broadcast is completed and cannot return to live. A destination with a broadcast delay plays its buffered tail out before it stops; now:true cuts the tail instead (also cuts a tail already playing). Needs confirm:true; without it, answers with what the stop would end.",
+			props:       map[string]any{"destinationId": schemaDestID, "source": schemaSource, "confirm": schemaConfirm, "now": schemaStopNow},
 			required:    []string{"destinationId"},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 				return c.destAction(raw, "/stop", true)
@@ -949,7 +988,7 @@ func mcpCatalogue() []mcpTool {
 		{
 			name: "stop_all_destinations", title: "Stop all destinations", tier: mcpWrite, destructive: true, idempotent: true, stopping: true,
 			confirms:    "every call",
-			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return. Needs confirm:true; without it, answers with what would end.",
+			description: "Stop every destination of a programme. Every live YouTube broadcast is completed and cannot return, and every broadcast delay is cut: nothing still buffered airs. Needs confirm:true; without it, answers with what would end.",
 			props:       map[string]any{"source": schemaSource, "confirm": schemaConfirm},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 				var a struct {
@@ -1150,6 +1189,69 @@ func mcpCatalogue() []mcpTool {
 			},
 		},
 		{
+			name: "start_poll", title: "Start a chat poll", tier: mcpWrite,
+			confirms:    "every call: it posts into every connected chat as the streamer",
+			description: "Start a chat poll: a question with 2 to 6 options, open for 15 to 3600 seconds. It is announced in every connected chat as the streamer, so it needs confirm:true; without it, answers with the exact message that would be posted. Viewers vote by typing the option's number. One poll at a time.",
+			props: map[string]any{
+				"question": map[string]any{"type": "string", "minLength": 1, "maxLength": polls.MaxQuestion},
+				"options": map[string]any{"type": "array", "minItems": polls.MinOptions, "maxItems": polls.MaxOptions,
+					"items": map[string]any{"type": "string", "minLength": 1, "maxLength": polls.MaxOption}},
+				"durationSeconds": map[string]any{"type": "integer", "minimum": int(polls.MinDuration / time.Second),
+					"maximum": int(polls.MaxDuration / time.Second)},
+				"mirrorTwitch":  map[string]any{"type": "boolean", "description": "Also run it as a native Twitch poll where the channel allows; that chat then votes there."},
+				"mirrorYouTube": map[string]any{"type": "boolean", "description": "Also run it as a YouTube live poll (2 to 4 options, 40 quota units); that chat then votes there."},
+				"confirm":       schemaConfirm,
+			},
+			required: []string{"question", "options", "durationSeconds"},
+			run:      runStartPoll,
+		},
+		{
+			name: "end_poll", title: "End the chat poll", tier: mcpWrite, destructive: true,
+			confirms:    "every call: it closes the poll early and posts the result into every connected chat as the streamer",
+			description: "End the running chat poll early. The result is announced in every chat as the streamer, so it needs confirm:true; without it, answers with the poll it would end.",
+			props: map[string]any{
+				"pollId":  map[string]any{"type": "integer", "minimum": 1, "maximum": mcpMaxID, "description": "From get_polls."},
+				"confirm": schemaConfirm,
+			},
+			required: []string{"pollId"},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					PollID  int64 `json:"pollId"`
+					Confirm bool  `json:"confirm"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				if err := checkID("pollId", a.PollID); err != nil {
+					return nil, err
+				}
+				c.target = fmt.Sprintf("poll %d", a.PollID)
+				if !a.Confirm {
+					// The preview is a READ of GET /polls, which writes nothing
+					// and so is not audited: the poll as it stands, if it is the
+					// running one, so the user sees which question ends.
+					v, err := c.call(http.MethodGet, "/polls", url.Values{"limit": {"1"}}, nil)
+					if err != nil {
+						return nil, err
+					}
+					var running any
+					if cur, ok := v.(map[string]any)["current"].(map[string]any); ok {
+						if id, ok := jsonInt(cur["id"]); ok && id == a.PollID {
+							running = pick(cur, "id", "question", "options", "total", "state", "endsAt")
+						}
+					}
+					return c.refusal("Not done: ending this poll closes it now and posts its result into every "+
+						"connected chat as the streamer. Show the user which poll this is, then call end_poll "+
+						"again with confirm:true.", map[string]any{"pollId": a.PollID, "running": running})
+				}
+				v, err := c.call(http.MethodPost, fmt.Sprintf("/polls/%d/end", a.PollID), nil, nil)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
 			name: "schedule_broadcast", title: "Schedule a start or stop", tier: mcpWrite, destructive: true,
 			confirms: "a scheduled stop, which ends live broadcasts when it runs. A scheduled start ends " +
 				"nothing, and is listed under Automation, where it can be deleted before it runs.",
@@ -1171,12 +1273,43 @@ func mcpCatalogue() []mcpTool {
 	}
 }
 
+// runStartPoll validates locally so the preview shows exactly what would be
+// posted, then starts the poll through POST /polls. The question and options
+// are cleaned the way the engine cleans them, so the preview cannot differ
+// from the announcement.
+func runStartPoll(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+	var a struct {
+		polls.Spec
+		Confirm bool `json:"confirm"`
+	}
+	if err := decodeArgs(raw, &a); err != nil {
+		return nil, err
+	}
+	spec, err := a.Spec.Normalise()
+	if err != nil {
+		return nil, argErr("%s", strings.TrimPrefix(err.Error(), polls.ErrInvalid.Error()+": "))
+	}
+	c.target = "chat poll"
+	if !a.Confirm {
+		return c.refusal("Not done: starting a poll posts this message into every connected chat as the "+
+			"streamer. Show it to the user, then call start_poll again with confirm:true.",
+			map[string]any{"announcement": polls.StartText(spec), "options": spec.Options,
+				"durationSeconds": spec.DurationSeconds})
+	}
+	v, err := c.call(http.MethodPost, "/polls", nil, spec)
+	if err != nil {
+		return nil, err
+	}
+	return c.result(v, false)
+}
+
 // destAction is start, stop and retry: one destination, one POST.
 func (c *mcpCtx) destAction(raw json.RawMessage, suffix string, needsConfirm bool) (*mcp.CallToolResult, error) {
 	var a struct {
 		DestinationID int64  `json:"destinationId"`
 		Source        *int64 `json:"source"`
 		Confirm       bool   `json:"confirm"`
+		Now           bool   `json:"now"`
 	}
 	if needsConfirm {
 		if err := decodeArgs(raw, &a); err != nil {
@@ -1210,6 +1343,14 @@ func (c *mcpCtx) destAction(raw json.RawMessage, suffix string, needsConfirm boo
 			return c.refusal("Not done: stopping this destination ends what it is delivering. "+
 				"Show the user this impact, then call again with confirm:true.", map[string]any{"stopImpact": impact})
 		}
+	}
+	if a.Now {
+		// Through the same REST route, as ?now=true: the cut is the handler's
+		// to make, under the handler's auth and scope.
+		if q == nil {
+			q = url.Values{}
+		}
+		q.Set("now", "true")
 	}
 	v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, suffix), q, nil)
 	if err != nil {

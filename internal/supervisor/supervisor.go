@@ -315,12 +315,43 @@ type Status struct {
 	// nothing else, so the status, MQTT and event payloads are unchanged. A
 	// copy, so a reader can never race noteExit. Nil until the first failure.
 	Failures map[failreason.Cause]int `json:"-"`
+	// RecentRestarts is how many times this process was respawned in the last
+	// RestartStormWindow. NOT JSON, like Rate: Restarts is a lifetime count, and
+	// "kept reconnecting" is a claim about now, which only a window can make.
+	// The engine judges it against RestartStormAbove.
+	RecentRestarts int `json:"-"`
+	// DroppedRecent and FramesRecent are the frames FFmpeg dropped, and the
+	// frames it output, over the last RateWindow of this run, with DropsKnown
+	// false until there is that much history. NOT JSON, for Rate's reason:
+	// Progress.DropFrames is cumulative for the run, so a destination that
+	// dropped a burst at its start would read as dropping for ever. The
+	// engine's verdict is DestStatus.DroppingFrames.
+	DroppedRecent int64 `json:"-"`
+	FramesRecent  int64 `json:"-"`
+	DropsKnown    bool  `json:"-"`
 }
+
+// RestartStormWindow and RestartStormAbove are PolyemesisDestinationRestartStorm
+// in deploy/prometheus/alerts.yml, `increase(..._restarts_total[15m]) > 5`, said
+// in Go so the Stream Deck's "Reconnecting xN" and the Prometheus alert fire on
+// the same destinations. TestTheRestartStormMatchesThePrometheusAlert in the
+// engine reads the rule file, so neither can move alone.
+const (
+	RestartStormWindow = 15 * time.Minute
+	RestartStormAbove  = 5
+)
 
 // RateWindow is how much recent history Status.Rate is measured over. Long
 // enough that one keyframe burst does not swing it, short enough that a
 // collapse shows within the time an operator is still looking.
 const RateWindow = 10 * time.Second
+
+// dropSample is one progress reading for the windowed drop count.
+type dropSample struct {
+	at      time.Time
+	frames  int64
+	dropped int64
+}
 
 // rateSample is one progress reading for the windowed rate.
 type rateSample struct {
@@ -377,7 +408,15 @@ type Process struct {
 	// rate is this run's recent progress, oldest first, for Status.Rate.
 	// Reset on every respawn with mediaAt.
 	rate []rateSample
-	logs *ring
+	// drops is this run's recent frame and drop counts, oldest first, for
+	// Status.DroppedRecent. Reset on every respawn with rate.
+	drops []dropSample
+	// restartAt is when each respawn of the last RestartStormWindow happened,
+	// oldest first, for Status.RecentRestarts. NOT reset on a respawn: a storm
+	// is a run of respawns. Pruned on every append, so it never holds more
+	// than a window's worth.
+	restartAt []time.Time
+	logs      *ring
 	// warmup bounds the decoder warm-up after each spawn. See warmup.go.
 	warmup time.Duration
 	// liveArgs is the argv of the most recent spawn. Equal to spec.Args unless
@@ -1073,6 +1112,7 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 
 		p.mu.Lock()
 		p.restarts++
+		p.noteRestartLocked(time.Now())
 		p.nextRetry = time.Now().Add(backoff)
 		p.mu.Unlock()
 		p.setState(StateReconnecting, msg)
@@ -1253,6 +1293,7 @@ func (p *Process) runOnce(ctx context.Context) ([]string, error) {
 	p.liveSince = time.Time{}
 	p.progress = ffmpeg.Progress{}
 	p.rate = nil
+	p.drops = nil
 	p.mu.Unlock()
 	p.setState(StateRunning, "")
 	p.log.Info("process started", "pid", cmd.Process.Pid)
@@ -1459,6 +1500,66 @@ func (p *Process) sampleRateLocked(at time.Time, outMS int64) {
 	}
 }
 
+// sampleDropsLocked records one progress reading's frame and drop counts. Called
+// with p.mu held, and pruned exactly as sampleRateLocked prunes, so the two
+// windows describe the same seconds.
+func (p *Process) sampleDropsLocked(at time.Time, frames, dropped int64) {
+	p.drops = append(p.drops, dropSample{at: at, frames: frames, dropped: dropped})
+	cut := 0
+	for cut+1 < len(p.drops) && at.Sub(p.drops[cut+1].at) >= RateWindow {
+		cut++
+	}
+	if cut > 0 {
+		p.drops = append(p.drops[:0], p.drops[cut:]...)
+	}
+}
+
+// dropsLocked is the frames dropped, and the frames output, over the window
+// ending at now. Unknown with less than half a window of history, the rule
+// rateLocked keeps. Called with p.mu held.
+//
+// A count that went DOWN is a reset FFmpeg made, not negative drops; it reads
+// as unknown rather than as a healthy zero or a huge rise.
+func (p *Process) dropsLocked(now time.Time) (dropped, frames int64, ok bool) {
+	if len(p.drops) < 2 {
+		return 0, 0, false
+	}
+	first, last := p.drops[0], p.drops[len(p.drops)-1]
+	if now.Sub(first.at) < RateWindow/2 {
+		return 0, 0, false
+	}
+	dropped, frames = last.dropped-first.dropped, last.frames-first.frames
+	if dropped < 0 || frames < 0 {
+		return 0, 0, false
+	}
+	return dropped, frames, true
+}
+
+// noteRestartLocked records one respawn for the storm window. Called with p.mu
+// held. Anything older than the window is dropped as the new one arrives.
+func (p *Process) noteRestartLocked(at time.Time) {
+	p.restartAt = append(p.restartAt, at)
+	cut := 0
+	for cut < len(p.restartAt) && at.Sub(p.restartAt[cut]) > RestartStormWindow {
+		cut++
+	}
+	if cut > 0 {
+		p.restartAt = append(p.restartAt[:0], p.restartAt[cut:]...)
+	}
+}
+
+// recentRestartsLocked is how many respawns fall inside the storm window that
+// ends at now. Called with p.mu held (read is enough).
+func (p *Process) recentRestartsLocked(now time.Time) int {
+	n := 0
+	for _, at := range p.restartAt {
+		if now.Sub(at) <= RestartStormWindow {
+			n++
+		}
+	}
+	return n
+}
+
 // rateLocked is the realtime ratio over the window ending at now. Called with
 // p.mu held.
 //
@@ -1522,6 +1623,7 @@ func (p *Process) noteProgress(pr ffmpeg.Progress) {
 	}
 	p.progress = pr
 	p.sampleRateLocked(time.Now(), pr.OutTimeMS)
+	p.sampleDropsLocked(time.Now(), pr.Frame, pr.DropFrames)
 	if p.mediaAt.IsZero() && pr.OutTimeMS > 0 {
 		p.mediaAt = time.Now()
 		// Delivering again: whatever the previous run failed of is history,
@@ -1860,8 +1962,10 @@ func (p *Process) Status() Status {
 			st.Failures[c] = n
 		}
 	}
+	st.RecentRestarts = p.recentRestartsLocked(time.Now())
 	if p.state == StateRunning {
 		st.Rate, st.RateKnown = p.rateLocked(time.Now())
+		st.DroppedRecent, st.FramesRecent, st.DropsKnown = p.dropsLocked(time.Now())
 	}
 	if p.state == StateRunning && !p.startedAt.IsZero() {
 		t := p.startedAt

@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -1215,6 +1216,13 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Platform: string(d.Platform),
 		Enabled:  d.Enabled,
 		SourceID: d.SourceID,
+		Delay:    metrics.DestDelay{Seconds: d.DelaySeconds},
+	}
+	if dl := d.Delay; dl != nil {
+		md.Delay.Fill = dl.Fill
+		md.Delay.MemBytes, md.Delay.DiskBytes = dl.MemBytes, dl.DiskBytes
+		md.Delay.DroppedBytes = dl.DroppedBytes
+		md.Delay.Draining = dl.Phase == engine.DelayDraining
 	}
 	// The cause CODE and the hold flag only. d.Reason.Line is FFmpeg's stderr,
 	// scrubbed for the status payload but not something to copy into a label:
@@ -1293,6 +1301,7 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 	}
 	engines := s.mgr.Engines()
 	out := make([]metrics.Ingest, 0, len(engines))
+	srtLinks, groups := s.mgr.SRTLinks(), s.mgr.SRTLAGroups()
 	for _, e := range engines {
 		st := e.Status()
 		in := metrics.Ingest{
@@ -1324,6 +1333,15 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		}
 		if b := e.Monitor().Bitrate(); len(b) > 0 {
 			in.BitrateKbps = b[len(b)-1].Kbps
+		}
+		if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
+			in.BondedLinks = len(g.Links)
+		}
+		if fo := st.Failover; fo != nil {
+			in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
+			if l := fo.PrimaryLink; l != nil {
+				in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
+			}
 		}
 		out = append(out, in)
 	}
@@ -1392,6 +1410,16 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.log.Warn("cannot tell whether an automod model key is stored", "err", err)
 	}
+	if has, err := s.store.HasAutomodKeyFor(db.AutomodSlotSecondary); err == nil {
+		settings.Automod.Secondary.HasAPIKey = has
+	} else {
+		s.log.Warn("cannot tell whether a secondary automod model key is stored", "err", err)
+	}
+	// Whether each checker's CURRENT connection has passed Test -- derived
+	// from the pass table, never stored, for the reason newlyEnabledUntested
+	// gives. The console unlocks a checker's switch on it.
+	settings.Automod.Model.Tested = s.checkerTested(automod.SlotPrimary, settings.Automod.Model)
+	settings.Automod.Secondary.Tested = s.checkerTested(automod.SlotSecondary, settings.Automod.Secondary)
 	// The ingest credentials are sealed the same way the MQTT password and the
 	// automod key already were, except that they cannot be moved out of the
 	// blob -- the settings page reads and writes them -- so they are blanked on
@@ -1433,6 +1461,9 @@ type versionedSettings struct {
 func settingsVersion(st db.Settings) string {
 	st.MQTT.HasPassword = false
 	st.Automod.Model.HasAPIKey = false
+	st.Automod.Secondary.HasAPIKey = false
+	st.Automod.Model.Tested = false
+	st.Automod.Secondary.Tested = false
 	b, err := json.Marshal(st)
 	if err != nil {
 		return ""
@@ -1693,6 +1724,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// And the stored armed cells, which newlyArmedOnUnconfigured compares
 		// against. A map is shared memory too, so a clone.
 		storedOn := maps.Clone(settings.Automod.On)
+		// And the stored model-checker blocks, which newlyEnabledUntested
+		// compares against. Copies: only their connection fields are read.
+		storedAutomod := db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
@@ -1769,6 +1803,19 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := newlyArmedOnUnconfigured(storedOn, settings.Automod); err != nil {
 			return err
 		}
+		// AND NO MODEL CHECKER MAY BE SWITCHED ON UNTESTED, nor given a preset
+		// or a category action this build does not have. See
+		// newlyEnabledUntested and automodProviderProblems.
+		if err := automodProviderProblems(settings.Automod); err != nil {
+			return err
+		}
+		if err := newlyEnabledUntested(storedAutomod, settings.Automod, s.store.AutomodTestPass); err != nil {
+			return err
+		}
+		// Derived on the way out, never stored: whatever a client sent for
+		// these is not a fact about this server.
+		settings.Automod.Model.Tested = false
+		settings.Automod.Secondary.Tested = false
 		// A save that touches the ingest section may not leave the mode unset.
 		//
 		// db.IngestUnset is storable on purpose — it is what a fresh install is
@@ -2000,7 +2047,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// deciding on the old cells is the silent no-op this file already warns
 	// about twice. Rebuilding the engine here is also what recompiles a changed
 	// rule -- without it a new pattern would not apply until the next restart.
-	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget)
+	ApplyAutomod(s.chat, s.store, s.box, s.log, settings.Automod, s.automodBudget, s.automodSecondaryBudget)
 	// And the same for alert delivery: a retry budget that stores, returns 200
 	// and keeps chasing on the old count is the third instance of the silent
 	// no-op this handler now guards against three times.
@@ -2856,6 +2903,10 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 		}
 		s.noteOrphanedIngestStream(dest)
 	}
+	// DELETE CUTS a broadcast delay (#11): deleting is not a request to keep
+	// airing what is buffered. Marked before the reconcile so no drain starts,
+	// and cut after it for one already playing from an earlier stop.
+	s.mgr.CutOnStop(id)
 	if err := s.store.DeleteDestination(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -2865,6 +2916,7 @@ func (s *Server) handleDeleteDestination(w http.ResponseWriter, r *http.Request)
 	// FFmpeg child keeps publishing to a destination the console no longer
 	// draws. Nothing else in the product could ever mention it again.
 	rw := s.reconcileNow("the destination delete")
+	s.mgr.CutDelay(id)
 	writeMutation(w, http.StatusOK, rw, map[string]string{"status": "deleted"})
 }
 
@@ -2894,6 +2946,12 @@ type destEffect struct {
 	// row the engine is not carrying, which is not a failure -- it is what a
 	// destination on another source's programme looks like from here.
 	Found bool
+	// DrainingSeconds is set when the stop left a broadcast delay playing its
+	// tail out (#11): the destination is still on the air for this long, and
+	// ?now=true cuts it.
+	DrainingSeconds float64
+	// Cut reports that a delayed tail was discarded by this request.
+	Cut bool
 }
 
 // destControl is the result of applyDestinationEnabled, carrying the two
@@ -2914,12 +2972,25 @@ type destControl struct {
 // operator already has, driven from the same code, rather than a parallel
 // implementation that can drift from it. Nothing here is bulk-specific; the
 // pacing and the per-row reporting live entirely in destinations_bulk.go.
-func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
+//
+// cut is the broadcast-delay kill switch (#11): a stop that CUTS a delayed
+// destination's buffered tail instead of letting it play out. It is marked
+// before the reconcile, so the stop never starts a drain, and any drain already
+// playing is cut after it -- a destination stopped earlier, now told "Stop now".
+func (s *Server) applyDestinationEnabled(id int64, enabled, cut bool) destControl {
+	cut = cut && !enabled
+	if cut {
+		s.mgr.CutOnStop(id)
+	}
 	if err := s.store.SetDestinationEnabled(id, enabled); err != nil {
 		return destControl{StoreErr: err}
 	}
 	if rw := s.reconcileNow("the destination"); rw != "" {
 		return destControl{ReconcileErr: errors.New(rw)}
+	}
+	var wasCut bool
+	if cut {
+		wasCut = s.mgr.CutDelay(id)
 	}
 	// The EFFECT, not just the intent.
 	//
@@ -2956,8 +3027,12 @@ func (s *Server) applyDestinationEnabled(id int64, enabled bool) destControl {
 		if !enabled {
 			eff.Warning = d.StopWarning
 		}
+		if d.Delay != nil && d.Delay.Phase == engine.DelayDraining {
+			eff.DrainingSeconds = d.Delay.DrainRemainingSeconds
+		}
 		break
 	}
+	eff.Cut = wasCut
 	return destControl{Effect: eff}
 }
 
@@ -2967,7 +3042,20 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	ctl := s.applyDestinationEnabled(id, enabled)
+	// ?now=true is "Stop now": a delayed destination's buffered tail is cut,
+	// not aired. Same route, same auth and scope as stop -- it can only ever
+	// put less on the air. Parsed strictly: "now=yes" is refused rather than
+	// silently read as a stop that airs what the operator meant to cut.
+	cut := false
+	if v := r.URL.Query().Get("now"); v != "" {
+		b, perr := strconv.ParseBool(v)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "now must be true or false")
+			return
+		}
+		cut = b
+	}
+	ctl := s.applyDestinationEnabled(id, enabled, cut)
 	if ctl.StoreErr != nil {
 		writeStoreError(w, ctl.StoreErr)
 		return
@@ -2989,7 +3077,13 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 			if ctl.Effect.Warning != "" {
 				resp["warning"] = ctl.Effect.Warning
 			}
+			if ctl.Effect.DrainingSeconds > 0 {
+				resp["drainingSeconds"] = ctl.Effect.DrainingSeconds
+			}
 		}
+	}
+	if ctl.Effect.Cut {
+		resp["cut"] = true
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -10,6 +10,153 @@ its first tagged release.
 
 ### Added
 
+- **OBS bridge: go live and stop when OBS does.** Polyemesis now hears
+  about OBS in one of two ways. It can connect to obs-websocket 5 on your LAN
+  or over Tailscale: the password is stored sealed, the link reconnects on its
+  own, and its state shows in Settings. Or the new OBS Python script
+  (`integrations/obs`) can post to `POST /api/v1/obs/events` when polyemesis
+  cannot reach OBS. When OBS starts streaming, the destinations you picked
+  start. When it stops, they stop too, if you have turned that on. Turning it
+  on asks you to accept that stopping ends a YouTube broadcast for good, and
+  you can set a grace period that a quick restart of OBS cancels. A dropped
+  connection or OBS reconnecting never stops anything. Scene rules map an OBS
+  scene to a routing preset. A switch is applied as live track mutes and never
+  restarts a destination; anything that would need a restart is skipped, and
+  the status says why. New `obs` token scope: it reaches
+  `POST /api/v1/obs/events` and nothing else. New events `obs.connection`,
+  `obs.stream` and `obs.scene`. See [docs/OBS-BRIDGE.md](docs/OBS-BRIDGE.md).
+- **Streamer.bot actions.** `integrations/streamerbot` adds actions that call
+  the REST API with a token you keep in a Streamer.bot global: go live, stop
+  all, start or stop a destination, mute or unmute a track, recording on or
+  off, and a status line. Mix It Up can make the same calls from
+  `actions.json`. It is source plus setup steps, not an import string. See
+  [integrations/streamerbot/README.md](integrations/streamerbot/README.md).
+- **Broadcast delay per destination.** One destination can hold its output
+  back by up to 15 minutes (`delaySeconds`, 0 to 900) so you can cut
+  something before it airs there. Every other destination is unaffected and
+  video is still copied. The card shows "Delayed 30 s" and the buffer filling,
+  and the Stream Deck key shows a delay marker. Stop plays the buffered tail
+  out before the destination ends. The card then says "Airing delayed buffer:
+  N s left" with **Cut now**. **Stop now** (`?now=true` on the stop route, or
+  `now: true` on the MCP tool), Stop all and delete cut the tail at once.
+  Failover passes through the delay. Changing the delay while live restarts
+  the destination. YouTube goes live, and is ended, only when the delayed data
+  arrives and when the tail has played out. Up to 64 MiB per destination is
+  held in RAM, and the rest spills to the data directory. Disk use is capped
+  at the delay at 50 Mbit/s and must leave the recording guard's free-space
+  floor. When the buffer runs out of room it drops data and keeps the delay.
+  New: `destination.delay` events, `polyemesis_destination_delay_*` metrics,
+  and the delay in MCP status tools. See
+  [BROADCAST-DELAY.md](docs/BROADCAST-DELAY.md).
+
+- **Chat polls across every platform.** Ask a question with 2 to 6 options
+  from the console's Polls panel, a Stream Deck key or an AI assistant over
+  MCP (`start_poll`). Polyemesis posts it into every connected chat. Viewers
+  vote by typing the number or `!vote N`, one vote per viewer per platform,
+  and the last vote counts. Automod-blocked messages are not votes, and a
+  banned or timed-out viewer's vote is dropped for the rest of the poll. The
+  result shows live with a per-platform breakdown. History is kept and can be
+  exported as CSV or JSON. Results are counts only and never name a voter, so
+  `read` tokens can see them. A logo-free poll widget for OBS uses your chat
+  overlay's key and style. The `poll.started`, `poll.vote`, `poll.ended` and
+  `poll.display` events are on the events stream. Optionally, a poll also
+  runs as a native Twitch poll and as a YouTube live poll. While one runs,
+  that chat votes there: its typed numbers are not counted, so nobody is
+  counted twice. If the native poll fails or stops early, typed votes count
+  again. Twitch's count updates live. YouTube's count is merged when the poll
+  closes, because its API can't read a running poll. A YouTube poll costs 40
+  API quota units and is skipped if they don't fit above the send reserve.
+  The Twitch mirror adds the `channel:manage:polls` scope, so **connected
+  Twitch accounts are marked "reconnect needed" once.** YouTube needs no new
+  scope. Over MCP, `get_polls` is in the Read level, and `start_poll` and
+  `end_poll` are in Control and both ask for confirmation first, because each
+  posts into every chat as the streamer. See [docs/POLLS.md](docs/POLLS.md).
+- **Degraded-link failover.** Failover can now leave a primary that is still
+  connected but failing. Set a bitrate floor, an RTT ceiling and a loss ceiling
+  (RTT and loss for SRT and SRTLA encoders only), and how long a breach must
+  last, per programme on its ingest settings. The backup, the playlist or the slate then goes on air, and the reason
+  starts `degraded: ` and says what was measured. The link must read healthy
+  for the same time before it counts as recovered, and your return rule then
+  applies. Off by default. The reason reaches status, the timeline, the events
+  stream, a new appended `failover.switched` webhook trigger, MQTT
+  (`failoverReason`, `degraded`) and the Stream Deck. New metrics:
+  `polyemesis_failover_degraded`, `polyemesis_failover_active`,
+  `polyemesis_ingest_link_rtt_seconds`, `polyemesis_ingest_link_loss_ratio`
+  and `polyemesis_srtla_links`, graphed in the Grafana Ingest row. See
+  [docs/LINK-HEALTH.md](docs/LINK-HEALTH.md).
+- **SRTLA receiver for bonded IRL encoders.** Set **Settings → Ingest → SRTLA
+  bonding port**, for example 5000/udp, and BELABOX, Moblin or IRL Pro can bond
+  several cellular links into one SRT publish to a programme, using its usual
+  token. The source card shows each link's bitrate and share. Off by default.
+  It is native Go code, tested against BELABOX's reference `srtla_send`; no
+  AGPL code was copied. See [docs/SRTLA.md](docs/SRTLA.md).
+- **Chat commands.** `!bitrate` for anyone, and `!switch
+  primary|backup|playlist|slate|auto` and `!fix` for moderators and the
+  broadcaster, acting on one chosen programme and answered through the chat
+  send. Off by default. See
+  [docs/LINK-HEALTH.md](docs/LINK-HEALTH.md#chat-commands).
+- **Live link stats on the source card.** An SRT publisher now shows its
+  bitrate and its loss over the last second or so.
+- **Automod: two model checkers, with automatic fallback.** The primary
+  defaults to a typed-decision moderation model on the **Jev** protocol:
+  hosted TypeSafe Jev (`jev-1.14.0`), or a local Jev-compatible model such as
+  `laya` on Ollama. An optional **fallback** speaks the OpenAI-compatible
+  protocol. It is asked only when the primary times out, errors, gives a reply
+  it cannot read, runs out of budget or is rate-limited. A message passes
+  unchecked only when both fail. See
+  [docs/AUTOMOD.md](docs/AUTOMOD.md#the-model-tier).
+  - **Presets:** OpenAI, Cerebras, Groq, OpenRouter, Ollama and Custom on the
+    OpenAI-compatible side; TypeSafe Jev, Ollama (laya) and Custom on the Jev
+    side. Each preset carries its JSON mode (strict `json_schema` where the
+    provider enforces it), its reasoning setting (`reasoning_effort: "none"`
+    for Cerebras), and a privacy line on the card that says where messages
+    go.
+  - **Separate settings:** each checker has its own key (bring your own;
+    polyemesis ships none), budget, timeout and counters.
+  - **Test first:** a checker can't be switched on until its **Test** button
+    has passed three made-up messages. The server enforces this.
+  - **Keys stay bound:** every key is bound to the endpoint it was entered
+    for, and is never sent anywhere else. Moving the address clears the key
+    unless you tested the new address with its key.
+  - **Jev gating:** the confidence floor applies to Jev's probability that
+    the message breaks your rule. Between 0.5 and the floor, a message is only
+    flagged.
+  - **Per-category actions:** harassment, hate speech, threats, sexual
+    content, spam and other each get their own action. Every category starts
+    on flag; the card suggests spam → delete and timeouts for the rest.
+  - **Local presets are flag-only.** The card warns that CPU-only hosts will
+    probably miss the timeout.
+  - **Who decided:** the card, the moderation log and `chat.moderation` events
+    (`decidedBy`) say which checker made each decision.
+  - **Upgrades:** a model block saved before this is read as
+    OpenAI-compatible with a custom address, so existing setups keep working
+    unchanged. The single model action carries over to every category.
+
+- **Stream Deck: a Destination key shows every issue polyemesis reports for its
+  stream.** Beside the states it already showed, the key now shows:
+  - **Reconnecting ×N**: more than five restarts in 15 minutes, the threshold of
+    the restart-storm alert.
+  - **Dropping frames**: for a destination fed by a rendition, or one that
+    re-encodes. A destination that passes its video straight through never
+    shows it.
+  - **YouTube: poor**: YouTube's own stream-health verdict, for a destination
+    with a connected account.
+  - **Reconnect account** (red) or **Account expiring**.
+  - **On backup source**, **On playlist**, **On slate** or **Source degraded**:
+    shown on every destination its programme feeds, not only on the Failover
+    key.
+
+  When several are true at once, the key shows the most severe one with a
+  **+N** badge. During a restart storm on an expired account, the key holds red
+  **Reconnect account** through every reconnect instead of flipping colour. The key's settings list every current issue. The plugin adds no
+  requests. `GET /api/v1/status` gains four optional destination fields:
+  `restartStorm`, `droppingFrames`, `accountHealth` and `platformHealth`. Each
+  is absent while there is nothing to report. `accountHealth` is the state word
+  only, so a read token sees no account detail. The YouTube read is read-only,
+  happens at most once every 5 minutes per destination, and one read is shared
+  by every destination on a channel. Twitch has no stream-health API, so a
+  Twitch destination never shows a platform face. See
+  [docs/STREAM-DECK.md](docs/STREAM-DECK.md#what-the-faces-mean).
 - **A startup warning on FFmpeg 9.0 and 9.0.1.** Both releases shipped a
   scheduler change that can misorder output, end streams early and use extreme
   memory, and 9.0.2 reverted it (FFmpeg commit 9d4ca2122). A destination that
@@ -330,6 +477,14 @@ its first tagged release.
 
 ### Fixed
 
+- **The source card's "retrans" count was always 0.** It counted
+  retransmissions the listener had sent, which a receive-only listener never
+  does. It now counts the retransmitted packets received.
+
+- **Automod no longer pays the model for a message a rule already removed.**
+  While the model checker was on, every non-empty message was sent to it,
+  including ones the free checkers had just deleted. Those answers could change
+  nothing. Messages the free checkers only flag are still sent.
 - **`install.sh --ffmpeg force` downloads again.** It pinned a BtbN daily
   build, and BtbN deletes dailies after about two weeks, so every forced
   FFmpeg install failed with a 404. It now pins the month-end release

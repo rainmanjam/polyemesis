@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -123,10 +124,16 @@ func (e *Engine) streamLevelLocked(id int64, n liveNote) {
 		At:     time.Now(),
 		Source: &hooks.SourceRef{ID: e.sourceID, Name: e.sourceName},
 		Reason: n.reason,
-		Data:   map[string]string{"applied": n.applied},
 	}
+	data := map[string]string{"applied": n.applied}
+	env.Data = data
 	if d := e.dests[id]; d != nil && d.row != nil {
 		env.Destination = &hooks.DestinationRef{ID: id, Name: d.row.Name, Platform: string(d.row.Platform)}
+		if d.row.DelaySeconds > 0 {
+			// The change reached the FFmpeg; the audience hears it this much
+			// later, behind the broadcast delay (#11).
+			data["delaySeconds"] = strconv.Itoa(d.row.DelaySeconds)
+		}
 	} else {
 		env.Destination = &hooks.DestinationRef{ID: id}
 	}
@@ -175,6 +182,10 @@ func (e *Engine) streamFailover(st *FailoverStatus) {
 			"backupLive":    st.BackupLive,
 			"backupEnabled": st.BackupEnabled,
 			"slateEnabled":  st.SlateEnabled,
+			// The degraded-link detail (#6), "" when the link is healthy. Reason
+			// already starts "degraded: " when the link caused the switch; this
+			// is the structured half, so a consumer need not parse the sentence.
+			"degraded": st.Degraded,
 		},
 	})
 }

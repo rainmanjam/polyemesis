@@ -160,6 +160,8 @@ const DOCS_BY_SECTION = {
      * multitrack SRT out of OBS is configured on the RECORDING tab as a Custom
      * Output (FFmpeg), not on the Stream tab where everyone looks first. It is
      * also, conveniently, where "OBS SRT" belongs in a sentence. */
+    ["SRTLA.md", "SRTLA: bonded IRL encoders over several links",
+      "A native SRTLA receiver for BELABOX, Moblin and IRL Pro: several cellular links bonded into one SRT publish, with per-link stats on the source card."],
     ["OBS.md", "OBS SRT setup: multitrack audio to one ingest",
       "Sending OBS multitrack audio over SRT is a Custom Output on the Recording tab, not the Stream tab. Encoder settings that work, plus RTMP fallback."],
     ["TLS.md", "TLS certificates for a self-hosted SRT server",
@@ -195,6 +197,8 @@ const DOCS_BY_SECTION = {
       "Regex and rate checkers that run in-process, an optional external model that is off by default, and a per-platform matrix that grants each of them permission."],
     ["OVERLAY.md", "Chat overlay and OBS dock for every platform",
       "One display-only chat overlay for OBS across Twitch, YouTube, Kick, Facebook and Rumble. Per-scene platform filters, style presets, and a key that reads nothing else."],
+    ["POLLS.md", "Chat polls across every platform",
+      "One poll asked in every connected chat and counted as one result. Vote rules, automod and moderation, the on-stream widget, native Twitch polls and export."],
     ["CONFIGURATION.md", "Configuration: config.yaml and the web UI",
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
@@ -203,6 +207,10 @@ const DOCS_BY_SECTION = {
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
     ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",
       "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
+    ["BROADCAST-DELAY.md", "Broadcast delay: hold one destination back up to 15 minutes",
+      "Delay one platform's copy of the stream to cut something before it airs. Stop plays the tail out; Stop now, Stop all and delete cut it. RAM and disk are bounded."],
+    ["LINK-HEALTH.md", "Degraded-link failover, link stats and chat commands",
+      "Leave a primary that is still connected but failing: bitrate, RTT and loss thresholds, live link stats, and !bitrate, !switch and !fix in chat."],
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
       "A value on an FFmpeg command line replaces the process running it; track levels now change live instead. What a restart costs, and what a save tells you."],
     ["UPGRADING.md", "Upgrading polyemesis and its database",
@@ -222,6 +230,8 @@ const DOCS_BY_SECTION = {
       "GET /api/v1/events streams destination, ingest, failover, go-live, recording, chat and alert events as SSE, with replay. Event catalogue and examples."],
     ["MCP.md", "MCP server: connect an AI assistant",
       "POST /mcp lets Claude Desktop, Claude Code or any MCP client read status and failure causes, and with an admin token start, stop and go live. Tools, scopes, confirmations, setup."],
+    ["OBS-BRIDGE.md", "OBS and Streamer.bot: go live when OBS does",
+      "Start and stop destinations when OBS starts and stops streaming, and switch routing presets per scene, over obs-websocket or the OBS script. Streamer.bot actions."],
     ["MQTT.md", "MQTT telemetry and Home Assistant",
       "Retained state on an MQTT 5.0 broker, so a consumer that was offline still gets the current answer. The topic tree, the payloads, and Home Assistant."],
     ["API.md", "HTTP API reference — polyemesis /api/v1",

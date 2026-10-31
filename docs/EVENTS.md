@@ -164,6 +164,7 @@ real producer, to actually be emitted.
 | `destination.restarted` | destination | yes | A destination's process was respawned after it exited. |
 | `destination.level` | destination | yes | A level (gain or mute) change reached a destination, applied live or by a restart. |
 | `destination.rolledover` | destination | yes | A file destination continued into a new file because the configured one already held footage. |
+| `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer. |
 | `ingest.published` | ingest | yes | Data started arriving on a programme's ingest. |
 | `ingest.disconnected` | ingest | yes | Nothing has arrived on a programme's ingest for the disconnect window. |
 | `failover.switched` | failover | yes | A programme switched between its primary, backup and slate sources. |
@@ -177,7 +178,14 @@ real producer, to actually be emitted.
 | `chat.moderation` | chat | no | A moderation action was taken, by an operator or by automod. |
 | `chat.display` | overlay | no | A chat line cleared for on-screen display: judged by automod and stripped to what an overlay shows. |
 | `chat.undisplay` | overlay | no | Chat lines that were cleared for display are gone and must leave the screen. |
+| `poll.display` | overlay | no | A poll as the on-stream widget shows it: question, options and totals, with no platform breakdown. |
+| `poll.started` | poll | yes | A poll opened: question, options, duration, and where it was announced. |
+| `poll.vote` | poll | yes | A poll's running tallies changed; sent at most once a second, never once per vote. |
+| `poll.ended` | poll | yes | A poll closed, at its time or early: the final tallies with the per-platform breakdown. |
 | `alert` | alert | partly | An operator alert fired or resolved. |
+| `obs.connection` | obs | yes | Polyemesis's link to obs-websocket connected, dropped, or was refused. |
+| `obs.stream` | obs | yes | OBS started or stopped streaming, as reported by obs-websocket or the OBS script. |
+| `obs.scene` | obs | yes | OBS switched its program scene; preset names the routing rule the scene triggers, if any. |
 | `stream.gap` | stream | yes | Events this connection asked to replay are no longer held; reconcile over REST. |
 
 ### Destinations
@@ -226,17 +234,61 @@ report every destination's lifetime count.
 `data: {"applied": "live"}` means it reached the running process without a
 reconnect. `{"applied": "restart"}` comes with a `reason`, the one the
 destination card shows. See [HOT-RELOAD.md](HOT-RELOAD.md).
+On a destination with a broadcast delay, `data` also has `"delaySeconds"`:
+the process has the change now, and viewers hear it that many seconds later.
+
+On a destination with a broadcast delay, `destination.up`, `.down`, `.held`
+and `.restarted` carry `"delaySeconds"` in `data`. `up` then means the
+delayed programme reached the platform.
+
+`destination.delay` follows a destination's broadcast delay
+([BROADCAST-DELAY.md](BROADCAST-DELAY.md)). `reason` is the phase it entered:
+
+- `buffering`: the destination started and is filling its delay. It has no
+  FFmpeg yet, by design.
+- `on-air`: the delayed data is reaching it and its FFmpeg has started.
+- `draining`: it was stopped and is airing its buffered tail.
+  `data.drainRemainingSeconds` says for how long. Stop now cuts it.
+- `drained`: the tail is out and the destination has stopped.
+- `cut`: Stop now discarded the tail.
+- `dropping`: the buffer ran out of room and is dropping data to keep the
+  delay. `error` says why (disk budget, free-space floor). Sent at most once a
+  minute.
+
+```json
+{"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,
+ "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0}
+```
+
+`drainRemainingSeconds` and `droppedBytes` appear only when non-zero.
 
 ### Ingest and failover
 
-`ingest.published` and `ingest.disconnected` are the webhook triggers.
+`ingest.published` and `ingest.disconnected` are the webhook triggers, and so
+is `failover.switched`.
 
 `failover.switched` carries `reason` (why it moved) and:
 
 ```json
-{"active": "slate", "pinned": "", "switches": 3, "primaryLive": false,
- "backupLive": false, "backupEnabled": true, "slateEnabled": true}
+{"active": "slate", "pinned": "", "switches": 3, "primaryLive": true,
+ "backupLive": false, "backupEnabled": true, "slateEnabled": true,
+ "degraded": "bitrate 640 kbps below 800 kbps for 5s"}
 ```
+
+**A degraded link.** With
+[degraded-link failover](LINK-HEALTH.md#degraded-link-failover) on, the selector
+also leaves a primary that is still delivering but below the operator's
+bitrate, RTT or loss thresholds. That switch's `reason` starts `degraded: `,
+then says what the selector did and, in brackets, what was measured:
+
+```
+degraded: the primary ingest's link is degraded and no backup is on air (bitrate 640 kbps below 800 kbps for 5s)
+```
+
+`data.degraded` is the bracketed part on its own, and is `""` while the link
+is healthy, so a consumer need not parse the sentence. `primaryLive` stays
+`true`: the encoder never stopped, which is what separates this from a
+disconnect.
 
 ### Go-live and stop
 
@@ -292,7 +344,11 @@ actions are not announced.
 ```
 
 `action` is one of `delete`, `hide`, `unhide`, `hide_local`, `ban`, `timeout`
-or `unban`. `by` is `operator` or `automod`.
+or `unban`. `by` is `operator` or `automod`. When automod's model checker
+made the decision, `decidedBy` says which one: `primary`, or `secondary` when
+the primary could not answer and the fallback did (see
+[AUTOMOD.md](AUTOMOD.md#the-model-tier)). It is absent for an operator's action
+and for automod's rules and history checkers.
 
 ### Overlay
 
@@ -310,10 +366,66 @@ it here. Read tokens are refused it, as they are refused chat.
 Unlike `chat.message`, a line is published only after automod has judged the
 message. A message automod removes is never published here.
 
+`poll.display` is the poll widget's projection (see [POLLS.md](POLLS.md)):
+`{id, question, options: [{label, votes}], total, state, endsAt, endedAt?}`.
+It names no platform and no voter. Every overlay key receives it whatever its
+platform filter, because there is nothing platform-specific in it to filter.
+It is republished every 15 seconds while a poll is open, so an overlay that
+connects mid-poll draws it without waiting for a vote.
+
 Replay treats a removed line differently for an overlay key: a `chat.display`
 that a later `chat.undisplay` removed is never replayed to an overlay, whatever
 `Last-Event-ID` it resumes from. An admin subscriber is replayed both events,
 in the order they happened.
+
+### OBS
+
+The `obs` topic is the [OBS bridge](OBS-BRIDGE.md): what OBS reported, by
+obs-websocket or by the OBS script, and whether polyemesis's own link to
+obs-websocket is up. None of these events carries the obs-websocket address or
+its password. A read token receives all three.
+
+- `obs.connection` is `{state, detail?}`. `state` is `off`, `connecting`,
+  `connected`, `unreachable`, `refused` or `incompatible`. `detail` is one of
+  polyemesis's own sentences, never an error from the network. The event fires
+  when the state changes, not on every reconnect attempt.
+- `obs.stream` is `{state, via, sync?, stopInSeconds?}`. `state` is `started`
+  or `stopped`, and `via` is `websocket` or `script`. `sync` marks a state read
+  after (re)connecting rather than a change OBS announced, and the bridge acts
+  on nothing marked `sync`. `stopInSeconds` is present on a stop that will stop
+  destinations, and gives the grace period.
+- `obs.scene` is `{scene, via, sync?, preset?}`. `preset` names the routing
+  preset the scene's rule applies.
+
+A fact reported twice is published once: by both ways in, or by a reconnect
+that finds OBS where it was. What the bridge then did to each destination is
+on `GET /api/v1/obs` under `status.lastActions`, and as the usual
+`destination.up` and `destination.down` events.
+### Polls
+
+The `poll` topic is a polyemesis-run chat poll (see [POLLS.md](POLLS.md)).
+All three types carry the same payload, the poll as it stands:
+
+```json
+{"id": 12, "question": "Next map?", "state": "open",
+ "options": [{"label": "Dust", "votes": 41, "byPlatform": {"twitch": 30, "youtube": 11}},
+             {"label": "Mirage", "votes": 17, "byPlatform": {"twitch": 9, "youtube": 8}}],
+ "total": 58, "byPlatform": {"twitch": 39, "youtube": 19},
+ "durationSeconds": 120, "startedAt": "…", "endsAt": "…",
+ "announced": [{"platform": "twitch", "ok": true}],
+ "native": [{"platform": "twitch", "status": "mirrored", "votes": [12, 3]}]}
+```
+
+`native[].status` is `mirrored`, `stopped` (the platform's poll ended early),
+`skipped` or `failed`, with a `reason`.
+
+`state` is `open`, `closing`, `ended` or `interrupted`. `closing` is the few
+seconds after the time is up while automod finishes judging the last votes.
+`poll.vote` is coalesced: at most one a second while votes are arriving.
+
+There is no voter in any of them, by design. Who voted for what never
+leaves the poll counter, so a read token is sent these events: it gets the
+same counts the dashboard shows and nothing more.
 
 ### Alerts
 
@@ -441,7 +553,7 @@ stream works over HTTP/1.1 and HTTP/2 unchanged. The server sets no write
 timeout, which would end every stream. Each write has its own deadline instead,
 so a client that stops reading does not hold a connection open for ever.
 
-## Coming with #14, #4 and #6
+## Coming with #4
 
 These are agreed but **not emitted yet**. The features that produce them do not
 exist in this build. Each will be added to the catalogue by the feature that
@@ -450,9 +562,7 @@ consumer against them yet.
 
 | Planned | Comes with | What it will carry |
 |---|---|---|
-| `poll.started`, `poll.vote`, `poll.ended` | #14 cross-platform chat polls | a polyemesis-run poll, its tallies and result |
 | `viewers.sample` | #4 cross-platform analytics | the periodic per-platform viewer sample |
-| a `degraded: …` reason on failover switches | #6 degraded-link failover | why a link was judged degraded |
 
 ## Known limitations
 

@@ -29,7 +29,7 @@ var approvedFields = map[string][]string{
 	"SourceState": {
 		"id", "name", "slug", "live", "ingestMode", "ingestError",
 		"bitrateKbps", "uptimeSec", "restarts", "lossPercent", "recording",
-		"destinations", "destinationsUp", "failover", "at",
+		"destinations", "destinationsUp", "failover", "failoverReason", "degraded", "at",
 	},
 	"DestState": {
 		"id", "name", "slug", "platform", "kind", "enabled", "running",

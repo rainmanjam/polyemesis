@@ -43,7 +43,7 @@ Thirteen, deliberately. Each one earns its place below.
 | Module | Version | Used by |
 | --- | --- | --- |
 | `github.com/bluenviron/gortmplib` | v1.0.1 | `internal/rtmpserver` |
-| `github.com/datarhei/gosrt` | v0.11.0 | `internal/srtserver` |
+| `github.com/datarhei/gosrt` | v0.11.0 | `internal/srtserver`; also `internal/srtla`'s tests and `scripts/srtla-interop` |
 | `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
 | `github.com/go-chi/chi/v5` | v5.3.2 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |

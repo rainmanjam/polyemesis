@@ -127,7 +127,7 @@ is included too.
 | Row | What it shows |
 |---|---|
 | Overview | Programmes, ingests receiving, destinations delivering, enabled destinations that are **not** delivering while their programme is receiving, held destinations, engines down, uptime and version |
-| Ingest | Bitrate arriving per programme, whether anything is arriving and whether the programme has a running engine, ingest restarts, and relay throughput, drops and subscribers |
+| Ingest | Bitrate arriving per programme, whether anything is arriving and whether the programme has a running engine, ingest restarts, and relay throughput, drops and subscribers. Then [link health](LINK-HEALTH.md): whether the primary's link is degraded and whether the primary is on air, the primary's SRT RTT and loss, and how many links a bonded [SRTLA](SRTLA.md) encoder is using |
 | Destinations | Whether each destination is delivering; **why each failing destination is failing, and whether it is held**; failures by cause over time and over the whole range; delivery speed; output bitrate; restarts, dropped frames and stalls |
 | Host | Host and polyemesis CPU, as a share of the whole host; memory |
 | Recording | Free space on the recordings volume, used space, and the segment count |

@@ -137,11 +137,36 @@ type Ingest struct {
 	// a running engine, which is all of them but one sweep, is right without
 	// setting it.
 	NoEngine bool
+	// Failover is the programme's source-selector tier, nil while it is off.
+	Failover *Failover
+	// BondedLinks is how many network links the programme's encoder is
+	// bonding through the SRTLA receiver right now; 0 when it is not bonding.
+	BondedLinks int
 }
+
+// Failover is a programme's selector tier and the primary's link health (#6).
+type Failover struct {
+	// Active is the source on air: primary, backup, playlist or slate.
+	Active string
+	// Degraded is the primary's link judged degraded right now.
+	Degraded bool
+	// RTTMs and LossPercent are the primary's SRT link figures, nil when not
+	// measured -- an RTMP or pull primary, or degraded-link failover off.
+	RTTMs       *float64
+	LossPercent *float64
+}
+
+// failoverSources is every kind the selector can put on air, emitted for every
+// programme with a tier so that `source="slate"` sits at 0 rather than
+// appearing only once the slate has been used.
+var failoverSources = []string{"primary", "backup", "playlist", "slate"}
 
 // Destination is one output, plus the labels identifying it.
 type Destination struct {
 	Process
+	// Delay is the broadcast delay (#11): configured seconds, and the buffer
+	// while a line exists. Zero for a destination with no delay.
+	Delay    DestDelay
 	ID       int64
 	Name     string
 	Kind     string
@@ -226,6 +251,7 @@ func Render(s Snapshot) string {
 	renderIngests(&d, s.Ingests)
 	renderDestinations(&d, s.Destinations)
 	renderRelay(&d, s.Ingests)
+	renderFailover(&d, s.Ingests)
 	renderRecordings(&d, s.Recordings)
 	renderHost(&d, s.Host)
 	renderAlerts(&d, s.Alerts)
@@ -456,6 +482,54 @@ func renderDestinationReasons(d *doc, sorted []Destination, ident func(Destinati
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_held", boolValue(dest.Held), ident(dest)...)
 	}
+
+	renderDelay(d, sorted, ident)
+}
+
+// DestDelay is one destination's broadcast delay on the scrape.
+type DestDelay struct {
+	Seconds int
+	// Fill is the share of the delay the buffer holds, 0 to 1.
+	Fill         float64
+	MemBytes     int64
+	DiskBytes    int64
+	DroppedBytes uint64
+	// Draining is a stopped destination still airing its delayed tail.
+	Draining bool
+}
+
+// renderDelay is the broadcast delay's series (#11). The bytes are the bound
+// the design promises -- RAM and disk, separately -- so an operator can
+// alert on the disk filling before the buffer has to drop.
+func renderDelay(d *doc, sorted []Destination, ident func(Destination) []label) {
+	d.family("polyemesis_destination_delay_seconds", "gauge",
+		"The destination's configured broadcast delay; 0 when it has none.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_seconds", float64(dest.Delay.Seconds), ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_buffer_fill", "gauge",
+		"How much of the broadcast delay the buffer holds, 0 to 1; 1 while on air.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_buffer_fill", dest.Delay.Fill, ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_buffer_bytes", "gauge",
+		"Bytes the broadcast delay buffer holds, by tier: memory or disk.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_buffer_bytes", float64(dest.Delay.MemBytes),
+			append(ident(dest), label{"tier", "memory"})...)
+		d.sample("polyemesis_destination_delay_buffer_bytes", float64(dest.Delay.DiskBytes),
+			append(ident(dest), label{"tier", "disk"})...)
+	}
+	d.family("polyemesis_destination_delay_dropped_bytes_total", "counter",
+		"Bytes the broadcast delay buffer dropped for want of room, keeping the delay; resets when the destination restarts.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_dropped_bytes_total", float64(dest.Delay.DroppedBytes), ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_draining", "gauge",
+		"1 while a stopped destination is still airing its delayed tail.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_draining", boolValue(dest.Delay.Draining), ident(dest)...)
+	}
 }
 
 // knownCause folds anything outside the published enum into unknown, so a
@@ -497,6 +571,56 @@ func renderRelay(d *doc, ins []Ingest) {
 		d.family(fam.name, fam.typ, fam.help)
 		for _, in := range sorted {
 			d.sample(fam.name, fam.value(in.Relay), ingestIdent(in)...)
+		}
+	}
+}
+
+// renderFailover emits the selector tier and the primary's link health.
+//
+// THE DEGRADED GAUGE IS EVERY PROGRAMME'S, at 0 when the tier is off, for the
+// usual reason: an alert on `polyemesis_failover_degraded == 1` must evaluate
+// before the first degradation. The link figures are the opposite case and are
+// absent until measured, because 0 ms RTT and 0% loss are claims about a link.
+func renderFailover(d *doc, ins []Ingest) {
+	sorted := sortedIngests(ins)
+
+	d.family("polyemesis_failover_degraded", "gauge",
+		"1 while the programme's primary link is judged degraded by degraded-link failover; 0 otherwise, including when failover is off.")
+	for _, in := range sorted {
+		d.sample("polyemesis_failover_degraded", boolValue(in.Failover != nil && in.Failover.Degraded), ingestIdent(in)...)
+	}
+
+	d.family("polyemesis_failover_active", "gauge",
+		"Source on air for a programme with failover on; 1 for the active source. Absent while failover is off.")
+	for _, in := range sorted {
+		if in.Failover == nil {
+			continue
+		}
+		for _, src := range failoverSources {
+			d.sample("polyemesis_failover_active", boolValue(in.Failover.Active == src),
+				append(ingestIdent(in), label{"source", src})...)
+		}
+	}
+
+	d.family("polyemesis_ingest_link_rtt_seconds", "gauge",
+		"Smoothed SRT round-trip time of the programme's primary encoder. Absent unless the primary is SRT or SRTLA and degraded-link failover is on.")
+	for _, in := range sorted {
+		if in.Failover != nil && in.Failover.RTTMs != nil {
+			d.sample("polyemesis_ingest_link_rtt_seconds", *in.Failover.RTTMs/1000, ingestIdent(in)...)
+		}
+	}
+
+	d.family("polyemesis_srtla_links", "gauge",
+		"Network links the programme's encoder is bonding through the SRTLA receiver; 0 when it is not bonding.")
+	for _, in := range sorted {
+		d.sample("polyemesis_srtla_links", float64(in.BondedLinks), ingestIdent(in)...)
+	}
+
+	d.family("polyemesis_ingest_link_loss_ratio", "gauge",
+		"Share of SRT data packets found missing over the last interval, 0-1. Absent under the same conditions as the RTT.")
+	for _, in := range sorted {
+		if in.Failover != nil && in.Failover.LossPercent != nil {
+			d.sample("polyemesis_ingest_link_loss_ratio", *in.Failover.LossPercent/100, ingestIdent(in)...)
 		}
 	}
 }

@@ -34,6 +34,7 @@ import { AutomodMatrix } from "@/components/AutomodMatrix";
 import { PlaylistEditor } from "@/components/PlaylistEditor";
 import { Badge } from "@/components/ui/badge";
 import { OverlaySettings } from "@/components/OverlaySettings";
+import { ObsBridgeSettings } from "@/components/ObsBridgeSettings";
 import { DangerZone } from "@/components/DangerZone";
 import { PairingCheck } from "@/components/PairingCheck";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -99,6 +100,8 @@ import {
   type ReadState,
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
+import { DegradedLinkSettings } from "@/components/DegradedLinkSettings";
+import { ChatCommandSettings } from "@/components/ChatCommandSettings";
 import type {
   AcmeCheckId,
   AcmeCheckStatus,
@@ -107,6 +110,7 @@ import type {
   TokenScope,
   CertInfo,
   ChatRetentionSettings,
+  ListenerSettings,
   CredentialCheck,
   FailoverReturn,
   IngestMode,
@@ -347,6 +351,7 @@ export function SettingsPage() {
           pipeline: t("set.tabPipeline"),
           platforms: t("set.tabPlatforms"),
           overlays: t("set.tabOverlays"),
+          obs: t("obs.tab"),
           security: t("set.tabSecurity"),
           danger: t("danger.title"),
           debug: t("set.tabDebug"),
@@ -372,6 +377,11 @@ export function SettingsPage() {
               Platforms: it mints credentials, and it is where an operator goes
               to rotate one. */}
           <TabsTrigger value="overlays">{t("set.tabOverlays")}</TabsTrigger>
+          {/* The OBS bridge (#16): OBS starting, stopping and switching scene
+              drives destinations. Its own section because it holds a
+              credential (the obs-websocket password) and a stop switch that
+              ends broadcasts. */}
+          <TabsTrigger value="obs">{t("obs.tab")}</TabsTrigger>
           <TabsTrigger value="security">{t("set.tabSecurity")}</TabsTrigger>
           {/* Last, set apart and in the down tone (A17): the section that only
               holds what cannot be undone. Debug, which used to sit here, is on
@@ -435,6 +445,9 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="overlays">
           <OverlaySettings />
+        </TabsContent>
+        <TabsContent value="obs">
+          <ObsBridgeSettings />
         </TabsContent>
         <TabsContent value="security">
           <SecuritySettings system={system} />
@@ -593,6 +606,15 @@ function IngestSettings({
             </>
           )}
 
+          {/* Degraded-link failover's thresholds (#6) are this programme's, so
+              they sit with its ingest. They take effect without a restart; see
+              docs/LINK-HEALTH.md. */}
+          <DegradedLinkSettings
+            idPrefix="ingest-degraded"
+            value={draft.ingest.degraded}
+            onChange={(degraded) => setDraft({ ...draft, ingest: { ...draft.ingest, degraded } })}
+          />
+
           {/* Saving ingest settings reconciles the ingest, which restarts the
               FFmpeg child and drops every viewer. That is sometimes exactly
               what an operator means to do -- so this is a warning stating the
@@ -659,8 +681,8 @@ function ListenerPortsCard({
   setListeners,
   footer,
 }: {
-  listeners: { srtPort: number; rtmpPort: number };
-  setListeners: (patch: Partial<{ srtPort: number; rtmpPort: number }>) => void;
+  listeners: ListenerSettings;
+  setListeners: (patch: Partial<ListenerSettings>) => void;
   footer?: React.ReactNode;
 }) {
   const t = useT();
@@ -693,6 +715,18 @@ function ListenerPortsCard({
               value={listeners.rtmpPort}
               onChange={(e) => setListeners({ rtmpPort: Number(e.target.value) })}
             />
+          </div>
+          <div className="col-span-2 flex flex-col gap-1">
+            <Label htmlFor="listener-srtla">{t("set.srtlaPort")}</Label>
+            <Input
+              id="listener-srtla"
+              type="number"
+              min={0}
+              max={LIMITS.port.max}
+              value={listeners.srtlaPort ?? 0}
+              onChange={(e) => setListeners({ srtlaPort: Number(e.target.value) })}
+            />
+            <span className="text-sm text-muted-foreground">{t("set.srtlaPortNote")}</span>
           </div>
         </div>
         {footer}
@@ -1014,6 +1048,11 @@ function PipelineSettings({
       </Card>
 
       <MultitrackHardware draft={draft} setDraft={setDraft} />
+
+      <ChatCommandSettings
+        value={draft.chatCommands}
+        onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
 
       <Card>
         <CardHeader>
@@ -3206,6 +3245,7 @@ function TransportSecurity({ system }: { system: SystemInfo | null }) {
 const SCOPE_HINT: Record<TokenScope, TranslationKey> = {
   read: "set.tokenScopeReadHint",
   admin: "set.tokenScopeAdminHint",
+  obs: "set.tokenScopeObsHint",
   "mcp-read": "set.tokenScopeMcpReadHint",
   "mcp-admin": "set.tokenScopeMcpAdminHint",
 };
@@ -3307,6 +3347,7 @@ function ApiTokens() {
                 {/* MCP tokens work at /mcp and nowhere else; see McpAccessCard. */}
                 <SelectItem value="mcp-read">{t("set.tokenScopeMcpRead")}</SelectItem>
                 <SelectItem value="mcp-admin">{t("set.tokenScopeMcpAdmin")}</SelectItem>
+                <SelectItem value="obs">{t("set.tokenScopeObs")}</SelectItem>
               </SelectContent>
             </Select>
           </div>

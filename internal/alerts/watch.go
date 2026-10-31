@@ -103,6 +103,12 @@ type DestState struct {
 	ID      int64
 	Name    string
 	Enabled bool
+	// Buffering is a destination filling its broadcast delay (#11): enabled,
+	// with no process yet BY DESIGN, for up to fifteen minutes. Not down.
+	Buffering bool
+	// DelaySeconds is the destination's broadcast delay, 0 for none. Carried
+	// so the events stream can say an edge is about the delayed programme.
+	DelaySeconds int
 	// Running is the engine's verdict, not the process's: a destination with no
 	// process because the engine could not compile its graph is down.
 	Running  bool
@@ -423,8 +429,11 @@ func (w *Watcher) watchDestinations(s Snapshot, now time.Time) []Event {
 			rate = &rateWindow{}
 			w.rate[d.ID] = rate
 		}
-		if !d.Enabled {
-			// A destination the operator turned off is not down. Clearing the
+		if !d.Enabled || d.Buffering {
+			// A destination the operator turned off is not down. Nor is one
+			// holding its output back for a broadcast delay: it has no process
+			// until the delayed data is due, and paging somebody about it
+			// fifteen minutes before it is meant to start would be noise. Clearing the
 			// state means turning it back on starts the clock fresh instead of
 			// firing on the time it spent disabled.
 			*st = downState{}

@@ -63,7 +63,8 @@ function loadInspector(action: string) {
   const ids = [
     "url", "token", "caPem", "sourceId", "destinationId", "presetId", "err-preset", "result",
     "admin-warning", "test", "block-source", "block-destination", "block-preset", "block-install-wide",
-    "block-track", "trackDestination", "track", "err-track",
+    "block-track", "trackDestination", "track", "err-track", "block-issues", "issues", "issues-empty",
+    "block-poll", "pollQuestion", "pollOptions", "pollDuration",
   ];
   const selects = ["presetId", "trackDestination", "track"];
   const els = Object.fromEntries(ids.map((id) => [id, element(id, selects.includes(id))]));
@@ -78,6 +79,7 @@ function loadInspector(action: string) {
         "streamdeck.pi.trackChoose": "Choose a track",
         "streamdeck.pi.notListed": "{id} (not listed)",
         "streamdeck.pi.destinationsFailed": "No list",
+        "streamdeck.pi.noIssues": "Nothing reported",
       },
     },
   };
@@ -152,6 +154,29 @@ describe("inspector preset picker", () => {
     expect(record.els["block-install-wide"]!.hidden).toBe(false);
     const preset = loadInspector("com.polyemesis.streamdeck.preset");
     expect(preset.els["block-source"]!.hidden).toBe(false);
+  });
+});
+
+describe("inspector poll fields", () => {
+  const POLL = "com.polyemesis.streamdeck.poll";
+
+  it("shows the poll fields and no programme field on the poll key, and only there", () => {
+    const poll = loadInspector(POLL);
+    expect(poll.els["block-poll"]!.hidden).toBe(false);
+    expect(poll.els["block-source"]!.hidden).toBe(true);
+    const preset = loadInspector("com.polyemesis.streamdeck.preset");
+    expect(preset.els["block-poll"]!.hidden).toBe(true);
+  });
+
+  it("shows the saved poll, and saves the options one per line as a list", () => {
+    const { els, sent, receive, change } = loadInspector(POLL);
+    receive("didReceiveSettings", { settings: { pollQuestion: "Next map?", pollOptions: ["Dust", "Mirage"], pollDuration: 60 } });
+    expect(els.pollQuestion!.value).toBe("Next map?");
+    expect(els.pollOptions!.value).toBe("Dust\nMirage");
+    expect(els.pollDuration!.value).toBe("60");
+    els.pollOptions!.value = "Dust\n\n Mirage \nNuke";
+    change("pollOptions");
+    expect(settingsSent(sent).at(-1)).toEqual({ pollQuestion: "Next map?", pollOptions: ["Dust", "Mirage", "Nuke"], pollDuration: 60 });
   });
 });
 
@@ -244,5 +269,39 @@ describe("inspector track picker", () => {
 
   it("does not show the track block on other keys", () => {
     expect(loadInspector("com.polyemesis.streamdeck.destination").els["block-track"]!.hidden).toBe(true);
+  });
+});
+
+const DEST = "com.polyemesis.streamdeck.destination";
+
+describe("inspector issue list", () => {
+  it("shows the list only on a destination key, and asks the plugin for it on opening", () => {
+    const { els, sent } = loadInspector(DEST);
+    expect(els["block-issues"]!.hidden).toBe(false);
+    expect(sent).toContainEqual(expect.objectContaining({ event: "sendToPlugin", payload: { type: "issues" } }));
+    expect(loadInspector(MUTE).els["block-issues"]!.hidden).toBe(true);
+  });
+
+  it("lists every issue the plugin sends, in its order, as text", () => {
+    const { els, receive } = loadInspector(DEST);
+    const lines = ["Reconnect account", "Reconnecting ×8", "<b>Source degraded</b>: loss 4%"];
+    receive("sendToPropertyInspector", { type: "issues", issues: lines });
+    expect(els.issues!.children.map((c) => c.textContent)).toEqual(lines);
+    expect(els["issues-empty"]!.hidden).toBe(true);
+  });
+
+  it("says nothing is reported for an empty list, and replaces an earlier list", () => {
+    const { els, receive } = loadInspector(DEST);
+    receive("sendToPropertyInspector", { type: "issues", issues: ["Dropping frames"] });
+    receive("sendToPropertyInspector", { type: "issues", issues: [] });
+    expect(els.issues!.children).toEqual([]);
+    expect(els["issues-empty"]!.hidden).toBe(false);
+    expect(els["issues-empty"]!.textContent).toBe("Nothing reported");
+  });
+
+  it("ignores a list that is not a list of strings", () => {
+    const { els, receive } = loadInspector(DEST);
+    receive("sendToPropertyInspector", { type: "issues", issues: [{ html: "<img onerror=x>" }, 3, "Account expiring"] });
+    expect(els.issues!.children.map((c) => c.textContent)).toEqual(["Account expiring"]);
   });
 });

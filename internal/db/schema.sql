@@ -185,9 +185,59 @@ CREATE TABLE IF NOT EXISTS mqtt_creds (
 -- The automod model's API key, sealed. Same reasoning as mqtt_creds above: a
 -- key in the settings blob is a key returned by GET /settings.
 CREATE TABLE IF NOT EXISTS automod_creds (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    updated_at  INTEGER NOT NULL,
+    endpoint_fp TEXT                     -- the endpoint this key may be sent to; see automod_binding.go
+);
+
+-- The SECONDARY automod model checker's API key, sealed. A table of its own
+-- because automod_creds is a CHECK (id = 1) singleton, and widening that check
+-- is a table rebuild on every install for a column that already works.
+CREATE TABLE IF NOT EXISTS automod_secondary_creds (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    updated_at  INTEGER NOT NULL,
+    endpoint_fp TEXT                     -- the endpoint this key may be sent to
+);
+
+-- A key typed for a Test against an address that is NOT the checker's saved
+-- endpoint. Held here, bound to that address, and never sent anywhere else;
+-- adopted only when a settings write moves the checker to exactly that
+-- address, in the same transaction (db.rebindAutomodKeysTx).
+CREATE TABLE IF NOT EXISTS automod_pending_creds (
+    slot        TEXT PRIMARY KEY CHECK (slot IN ('primary', 'secondary')),
+    key_enc     BLOB NOT NULL,           -- secretbox sealed
+    endpoint_fp TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+
+-- Which connection each automod model checker last passed the Test button
+-- with. Not a secret: a digest of protocol, preset, endpoint and model. Kept
+-- out of the settings blob because every field of that blob is writable through
+-- PUT /settings, and a pass a client could write is not a pass. Setting a key
+-- deletes its checker's row, so a new key has to be tested too.
+CREATE TABLE IF NOT EXISTS automod_checker_tests (
+    slot        TEXT PRIMARY KEY CHECK (slot IN ('primary', 'secondary')),
+    fingerprint TEXT NOT NULL,
+    passed_at   INTEGER NOT NULL
+);
+
+-- The OBS bridge (#16). Its configuration is a JSON document of its own rather
+-- than a block in the settings blob: nothing else reads it, and keeping it out
+-- of the blob keeps it out of every settings save and settings shape guard.
+CREATE TABLE IF NOT EXISTS obs_bridge (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
-    key_enc    BLOB NOT NULL,           -- secretbox sealed
+    config     TEXT NOT NULL,           -- obsbridge.Config, JSON
     updated_at INTEGER NOT NULL
+);
+
+-- The obs-websocket password, sealed. Same reasoning as mqtt_creds: the bridge
+-- configuration is served to the page, so the password cannot live in it.
+CREATE TABLE IF NOT EXISTS obs_creds (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    password_enc BLOB NOT NULL,         -- secretbox sealed
+    updated_at   INTEGER NOT NULL
 );
 
 -- The operator's own OAuth developer app. polyemesis cannot ship these.
@@ -636,3 +686,22 @@ CREATE TABLE IF NOT EXISTS mcp_access (
     levels     TEXT    NOT NULL DEFAULT '["read"]',  -- JSON array of read|content|control
     updated_at INTEGER NOT NULL DEFAULT 0
 );
+-- Chat polls (#14, internal/polls). One row per poll, written when it opens and
+-- again when it closes.
+--
+-- result is the poll's JSON as the API serves it: question, options, totals and
+-- the per-platform breakdown. It holds COUNTS ONLY. Who voted for what is kept
+-- in memory by the counter for the life of the poll and is never written here,
+-- so neither the history nor its export can name a voter.
+CREATE TABLE IF NOT EXISTS polls (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question    TEXT    NOT NULL,
+    options     TEXT    NOT NULL,              -- JSON array of option labels
+    duration_s  INTEGER NOT NULL,
+    state       TEXT    NOT NULL,              -- open | ended | interrupted
+    started_at  INTEGER NOT NULL,
+    ends_at     INTEGER NOT NULL,
+    ended_at    INTEGER NOT NULL DEFAULT 0,
+    result      TEXT    NOT NULL DEFAULT '{}'  -- JSON polls.Result
+);
+CREATE INDEX IF NOT EXISTS idx_polls_started ON polls(started_at);

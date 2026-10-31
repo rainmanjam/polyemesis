@@ -271,6 +271,9 @@ export interface Destination {
   /** Reconnect policy. Always present in a server response and empty for a
    *  destination that has not opted in. */
   resilience?: DestResilience;
+  /** Broadcast delay in seconds, 0 to 900 (#11). Absent or 0 is off. Changing
+   *  it while live restarts this destination. */
+  delaySeconds?: number;
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;
@@ -802,12 +805,34 @@ export interface FailureReason {
   at: string;
 }
 
+/** A destination's broadcast delay buffer (#11). */
+export interface DelayStatus {
+  seconds: number;
+  /** buffering: filling, nothing aired yet. on-air: releasing. draining:
+   *  stopped, and still airing its buffered tail until drainRemainingSeconds
+   *  runs out -- Stop now cuts it. */
+  phase: "buffering" | "on-air" | "draining";
+  /** 0 to 1: how much of the delay the buffer holds. */
+  fill: number;
+  bufferedSeconds: number;
+  drainRemainingSeconds?: number;
+  memBytes: number;
+  diskBytes: number;
+  droppedBytes?: number;
+  problem?: string;
+}
+
 export interface DestStatus {
   id: DestinationId;
   name: string;
   kind: DestKind;
   platform: Platform;
   enabled: boolean;
+  /** The configured broadcast delay, whenever the row has one. */
+  delaySeconds?: number;
+  /** The live buffer, while there is one. A draining destination is disabled
+   *  and still on the air; this is the only field that says so. */
+  delay?: DelayStatus | null;
   summary: string;
   tracks: number[] | null;
   filterComplex: string;
@@ -888,6 +913,17 @@ export interface DestStatus {
    *  out. Not a warning: the destination is publishing correctly, one track
    *  short of what was configured, and the fix is a toggle not a repair. */
   vodAudioDropped?: string;
+  /** Respawns in the last 15 minutes, present only when more than five: the
+   *  threshold of the PolyemesisDestinationRestartStorm alert. */
+  restartStorm?: number;
+  /** Frames dropped over the last few seconds, present only when that is at
+   *  least one percent of the frames output. */
+  droppingFrames?: number;
+  /** The connected account's health state, present only when it is not ok. */
+  accountHealth?: "expiring" | "refreshFailing" | "expired";
+  /** The platform's own verdict on the stream, present only while it is poor.
+   *  YouTube only. */
+  platformHealth?: { platform: string; status: string; issues?: string[] };
 }
 
 /** One advisory note about a negotiated Enhanced Broadcasting configuration. */
@@ -1118,6 +1154,12 @@ export interface FailoverStatus {
   slateEnabled: boolean;
   feed?: ProcessStatus | null;
   backup?: ProcessStatus | null;
+  /** Set while the primary's link is judged degraded: the measured
+   *  explanation, e.g. "bitrate 640 kbps below 800 kbps for 5s". Present even
+   *  when the primary stayed on air because there was nowhere to switch to. */
+  degraded?: string;
+  /** Present while degraded-link failover is on. */
+  primaryLink?: LinkReading;
 }
 
 /** peak[track][channel] and rms[track][channel], in dBFS. */
@@ -1221,7 +1263,29 @@ export interface SourceView extends Source {
     rttMs: number;
     lossPackets: number;
     retransPackets: number;
+    /** Over the last interval; 0 until one has elapsed. */
+    bitrateKbps: number;
+    lossPercent: number;
   };
+  /** The SRTLA group behind `link` when the encoder is bonding several network
+   *  links: one row per link. `link` is then the merged session. */
+  bonded?: {
+    upstreamLocal: string;
+    since: string;
+    links: Array<{
+      peer: string;
+      since: string;
+      lastSeen: string;
+      packets: number;
+      bytes: number;
+      bitrateKbps: number;
+      /** This link's share of the group's bytes over the last interval, 0-1. */
+      share: number;
+    }> | null;
+  };
+  /** Degraded-link explanation for this programme's primary, when judged
+   *  degraded. See FailoverStatus.degraded. */
+  degraded?: string;
   /** Uplink for a source on the RTMP listener, when a publisher is connected.
    *  TCP has no RTT or loss to report, so only who and since are here. */
   rtmpLink?: {
@@ -1283,11 +1347,15 @@ export interface Settings {
     rtmp: { app: string; streamKey: string };
     /** Optional so a client that predates pull can still PUT settings. */
     pull?: PullSettings;
+    /** This programme's degraded-link failover thresholds (#6). On the ingest
+     *  because it is per programme: failover itself is install-wide, but link
+     *  quality belongs to one encoder's uplink. */
+    degraded?: DegradedSettings;
   };
   /** Where the server binds. Install-wide: there is one SRT listener serving
    *  every source (told apart by token) and one RTMP listener serving at most
    *  one. Optional so a client that predates the change can still PUT. */
-  listeners?: { srtPort: number; rtmpPort: number };
+  listeners?: ListenerSettings;
   /** Synthetic sources. Optional for the same reason. */
   synth?: {
     /** Synthesises a silent stereo track when the ingest probes with no audio
@@ -1347,6 +1415,9 @@ export interface Settings {
   /** Alert delivery policy. Optional so a client that predates it can still
    *  PUT settings. See AlertSettings below. */
   alerts?: AlertSettings;
+  /** Chat commands (#6). Optional so a client that predates it can still PUT
+   *  settings. */
+  chatCommands?: ChatCommandSettings;
   /** The version of the document this was read at, as GET /settings served it.
    *
    *  Sent back on the next PUT, which the server refuses (409,
@@ -1548,6 +1619,44 @@ export interface FailoverSettings {
   /** A file playlist as a failover candidate beside the slate: something that
    *  plays, rather than something that just holds. */
   playlist?: PlaylistSettings;
+}
+
+/** The shared listeners. One SRT and one RTMP port serve every programme, told
+ *  apart by publish token; the SRTLA receiver (#6), off at 0, merges a bonded
+ *  encoder's links into one session on the SRT port. */
+export interface ListenerSettings {
+  srtPort: number;
+  rtmpPort: number;
+  srtlaPort?: number;
+}
+
+/** Chat commands: !bitrate for anyone, !switch and !fix for moderators and
+ *  the broadcaster. Off by default, because it gives every moderator of every
+ *  connected channel control of what is on air. */
+export interface ChatCommandSettings {
+  enabled: boolean;
+  /** The programme the commands act on; 0 is the default programme. */
+  sourceId?: number;
+}
+
+/** Link-health thresholds. Each is independent and 0 switches it off. RTT and
+ *  loss are measured for SRT and SRTLA primaries only; an RTMP or pull primary
+ *  is judged on bitrate alone. */
+export interface DegradedSettings {
+  enabled: boolean;
+  minBitrateKbps?: number;
+  maxRttMs?: number;
+  maxLossPercent?: number;
+  /** How long a breach -- and a recovery -- must last. 0 means the default. */
+  sustainSeconds?: number;
+}
+
+/** The primary's last measurement. Each figure is absent until measured, and
+ *  RTT and loss are absent for an RTMP or pull primary: absent is not zero. */
+export interface LinkReading {
+  bitrateKbps?: number;
+  rttMs?: number;
+  lossPercent?: number;
 }
 
 // -------------------------------------------------------------------- mqtt
@@ -1757,7 +1866,7 @@ export interface StorageState {
  *  because narrowing a credential a running script is holding would break it
  *  without anyone being told.
  */
-export type TokenScope = "read" | "admin" | "mcp-read" | "mcp-admin";
+export type TokenScope = "read" | "admin" | "obs" | "mcp-read" | "mcp-admin";
 
 /** An MCP capability level. The tools in each are fixed by the server
  *  (GET /mcp/access lists them); Content and Control are only ever reachable
@@ -3306,6 +3415,86 @@ export interface AutomodModel {
   timeoutForBan?: number;
   minConfidence: number;
   instruction: string;
+  /** "jev" or "openai". A block stored before there was a choice reads back
+   *  as "openai", which is the only protocol there was. */
+  protocol?: AutomodProtocol;
+  /** A preset ID from GET /automod/matrix's `presets`. The server reads the
+   *  preset's JSON mode, reasoning setting and flag-only lock from its own
+   *  table by this ID. */
+  preset?: string;
+  /** Model category -> action. A category not named gets `action`. Read from
+   *  the primary only; the secondary applies the primary's table. */
+  categoryActions?: Record<string, AutomodAction>;
+  /** Derived: this checker's current connection has passed Test. A value
+   *  sent back is ignored. */
+  tested?: boolean;
+}
+
+/** The wire protocol a model checker speaks. */
+export type AutomodProtocol = "jev" | "openai";
+
+/** One of the two model checkers. */
+export type AutomodSlot = "primary" | "secondary";
+
+/** Where a preset sends the messages it is asked about. */
+export type AutomodPrivacy = "local" | "hosted_us" | "relay" | "unknown";
+
+/** A provider preset, served by GET /automod/matrix. */
+export interface AutomodPreset {
+  id: string;
+  protocol: AutomodProtocol;
+  /** The provider's own name: a brand, not translated. */
+  name: string;
+  endpoint: string;
+  model: string;
+  jsonMode?: string;
+  reasoningEffort?: string;
+  compact?: boolean;
+  privacy: AutomodPrivacy;
+  /** Local presets are flag-only, whatever the category table says. */
+  local: boolean;
+}
+
+/** One canned message's outcome in a Test run. */
+export interface AutomodTestCase {
+  case: "harmless" | "abusive" | "spam";
+  ok: boolean;
+  flagged: boolean;
+  action?: AutomodAction;
+  category?: string;
+  confidence?: number;
+  latencyMs: number;
+  error?: string;
+}
+
+/** What POST /automod/test answers. */
+export interface AutomodTestResult {
+  passed: boolean;
+  problem?: "error" | "harmless_flagged" | "abusive_missed";
+  cases: AutomodTestCase[];
+  checker: AutomodSlot;
+  /** True when this connection may now be enabled. */
+  tested: boolean;
+  /** A typed key passed for an address that is not the saved one: it is
+   *  held, and becomes this checker's key when that address is saved. */
+  keyPending?: boolean;
+}
+
+/** The connection a Test button sends: what is on screen, saved or not. The
+ *  key is not in it -- the server uses the checker's sealed one. */
+export interface AutomodTestRequest {
+  /** Only when testing an address that is not the saved one: the server sends
+   *  a checker's sealed key nowhere but the endpoint it was saved for. A typed
+   *  key that passes is sealed for the checker. */
+  key?: string;
+  checker: AutomodSlot;
+  protocol: AutomodProtocol;
+  preset: string;
+  endpoint: string;
+  model: string;
+  timeoutSeconds: number;
+  minConfidence: number;
+  instruction: string;
 }
 
 export interface AutomodSettings {
@@ -3315,7 +3504,11 @@ export interface AutomodSettings {
   on?: Record<string, boolean>;
   rules?: AutomodRule[];
   history: AutomodHistory;
+  /** The PRIMARY model checker, and the policy both checkers share. */
   model: AutomodModel;
+  /** The optional fallback, asked only when the primary could not answer.
+   *  Optional here so a document from an older server still types. */
+  secondary?: AutomodModel;
 }
 
 /** What the operator sees about model spend and health. */
@@ -3325,6 +3518,16 @@ export interface AutomodModelStats {
   failures: number;
   lastError?: string;
   lastCallAt?: string;
+  /** The rest is set by servers with two model checkers. The top-level
+   *  counters above are the primary's. */
+  protocol?: AutomodProtocol;
+  preset?: string;
+  decisions?: number;
+  primary?: AutomodModelStats;
+  secondary?: AutomodModelStats;
+  fallbacks?: number;
+  failedOpen?: number;
+  lastDecidedBy?: AutomodSlot;
 }
 
 /** The server-rendered matrix. Rows, columns and availability all come from the
@@ -3338,6 +3541,10 @@ export interface AutomodMatrixView {
   actions: AutomodAction[];
   checkers: AutomodChecker[];
   platforms: string[];
+  /** The model-checker vocabulary. Optional so an older server still types. */
+  protocols?: AutomodProtocol[];
+  presets?: AutomodPreset[];
+  modelCategories?: string[];
 }
 
 // ------------------------------------------------- lifecycle webhooks
@@ -3356,7 +3563,10 @@ export type HookTrigger =
   /** Polyemesis stopped retrying a destination after repeated quick
    *  rejections; nothing happens until Retry. Sent once per hold, after the
    *  destination's down if it was live. */
-  | "destination.held";
+  | "destination.held"
+  /** A programme's source selector put another source on air. A switch caused
+   *  by a degraded link has a reason starting "degraded: ". */
+  | "failover.switched";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot
@@ -3446,4 +3656,73 @@ export interface RenditionConcern {
   detail: string;
   source: string;
   checked: string;
+}
+
+/* ------------------------------------------------------------- OBS bridge */
+
+/** One OBS scene mapped to a routing preset (#16). Applied as live mutes on
+ *  the tracks already in each destination's mix; see docs/OBS-BRIDGE.md. */
+export interface ObsSceneRule {
+  scene: string;
+  preset: string;
+  opts?: PresetOpts;
+  /** Empty means all of the bridge's destinations. */
+  destinations?: number[];
+}
+
+/** GET and PUT /api/v1/obs's configuration. The obs-websocket password is not
+ *  here: it is write-only, on PUT /obs/password, and `hasPassword` is all the
+ *  page is told. */
+export interface ObsConfig {
+  enabled: boolean;
+  connect: boolean;
+  /** Blank for a read token. */
+  url: string;
+  hasPassword: boolean;
+  sourceId: number | null;
+  destinations: number[];
+  startOnStream: boolean;
+  stopOnStream: boolean;
+  stopAcknowledged: boolean;
+  stopGraceSeconds: number;
+  scenes: ObsSceneRule[];
+}
+
+export type ObsConnState = "off" | "connecting" | "connected" | "unreachable" | "refused" | "incompatible";
+
+/** What one bridge action did to one destination. */
+export interface ObsOutcome {
+  id: number;
+  name: string;
+  /** started | stopped | warned | failed | skipped | applied */
+  outcome: string;
+  message?: string;
+}
+
+export interface ObsActionRecord {
+  at: string;
+  action: "start" | "stop" | "scene";
+  via: "websocket" | "script";
+  scene?: string;
+  preset?: string;
+  results: ObsOutcome[];
+}
+
+export interface ObsStatus {
+  connection: {
+    state: ObsConnState;
+    detail?: string;
+    since: string;
+    obsStudioVersion?: string;
+    obsWebSocketVersion?: string;
+  };
+  streaming: boolean | null;
+  scene?: string;
+  stopPendingUntil?: string;
+  lastActions: ObsActionRecord[];
+}
+
+export interface ObsResponse {
+  config: ObsConfig;
+  status: ObsStatus;
 }

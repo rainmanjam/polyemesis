@@ -43,6 +43,48 @@ type DisplaySink interface {
 	Retract(p db.Platform, account string, messageIDs []string)
 }
 
+// Tap is a second observer of the same verdicts, for a consumer that must know
+// WHY a message went and not only which ids: the chat poll's vote counter
+// (internal/polls).
+//
+// The DisplaySink's Retract is one list of ids for three different events,
+// which is all an overlay needs and is wrong for a vote. A cleared room is not
+// a judgement on anyone, so it must not void a vote. A ban is a judgement on
+// the PERSON, and it has to reach the counter even when none of their messages
+// is still in the history ring -- retractUser can only list ids it still holds,
+// and a vote cast early in a busy chat has long scrolled out by the time a
+// moderator acts. One deleted or hidden message voids that message.
+//
+// Same calling rules as DisplaySink: synchronous, on the adapter goroutine,
+// the automod worker or a moderation call, in program order for any one
+// message. Implementations must not block and must not call back into the hub.
+type Tap interface {
+	Offer(m Message, d Display)
+	Judge(p db.Platform, account, messageID string, d Display)
+	// RetractMessage: one message was deleted or hidden, here or on the
+	// platform.
+	RetractMessage(p db.Platform, account, messageID string)
+	// RetractAuthor: a person was banned or timed out, by an operator, by
+	// automod or on the platform's own dashboard.
+	RetractAuthor(p db.Platform, account, authorID string)
+	// ClearRoom: the platform cleared the whole chat. A housekeeping action,
+	// not a verdict on any message in it.
+	ClearRoom(p db.Platform, account string)
+}
+
+// SetTap attaches the tap. Nil detaches it.
+func (h *Hub) SetTap(t Tap) {
+	h.mu.Lock()
+	h.tap = t
+	h.mu.Unlock()
+}
+
+func (h *Hub) currentTap() Tap {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.tap
+}
+
 // SetDisplay attaches the overlay's sink. Nil detaches it.
 func (h *Hub) SetDisplay(d DisplaySink) {
 	h.mu.Lock()
@@ -74,12 +116,39 @@ func (h *Hub) offerDisplay(m Message, d Display) {
 	if s := h.displaySink(); s != nil {
 		s.Offer(m, d)
 	}
+	if t := h.currentTap(); t != nil {
+		t.Offer(m, d)
+	}
 }
 
 func (h *Hub) judgeDisplay(p db.Platform, account, id string, d Display) {
 	if s := h.displaySink(); s != nil {
 		s.Judge(p, account, id, d)
 	}
+	if t := h.currentTap(); t != nil {
+		t.Judge(p, account, id, d)
+	}
+}
+
+// tapMessage, tapAuthor and tapRoom tell the tap why something went. Called
+// from retract and retractUser beside retractDisplay, whatever the history
+// ring still held.
+func (h *Hub) tapMessage(p db.Platform, account, id string) {
+	if t := h.currentTap(); t != nil {
+		t.RetractMessage(p, account, id)
+	}
+}
+
+func (h *Hub) tapAuthor(p db.Platform, account, authorID string) {
+	t := h.currentTap()
+	if t == nil {
+		return
+	}
+	if authorID == "" {
+		t.ClearRoom(p, account)
+		return
+	}
+	t.RetractAuthor(p, account, authorID)
 }
 
 func (h *Hub) retractDisplay(p db.Platform, account string, ids []string) {

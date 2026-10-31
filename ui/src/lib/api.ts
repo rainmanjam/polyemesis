@@ -15,8 +15,13 @@ import type {
   TokenScope,
   McpAccess,
   McpLevel,
+  ObsConfig,
+  ObsResponse,
   AutomodMatrixView,
   AutomodModelStats,
+  AutomodSlot,
+  AutomodTestRequest,
+  AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
   BulkDestReport,
@@ -106,6 +111,7 @@ import type {
   TimelineRow,
 } from "./types";
 import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
+import type { Poll, PollSpec, PollsResponse } from "./polls";
 
 const BASE = "/api/v1";
 
@@ -496,8 +502,18 @@ export const api = {
   automodStats: () => get<AutomodModelStats>("/automod/stats"),
   /** Sets or clears the model API key. Empty clears it. The key is never
    *  returned by any endpoint, so the UI can only ever report that one is set. */
-  setAutomodKey: (key: string) =>
-    put<{ hasApiKey: boolean }>("/settings/automod-key", { key }),
+  setAutomodKey: (key: string, checker?: AutomodSlot) =>
+    put<{ hasApiKey: boolean }>(
+      "/settings/automod-key",
+      // The primary sends no `checker`, which is what every server reads as
+      // the primary -- including one that predates there being two.
+      checker === undefined || checker === "primary" ? { key } : { key, checker },
+    ),
+  /** Runs the Test button: three synthetic messages against the connection
+   *  on screen, with the checker's sealed key. A pass is what lets the server
+   *  accept that checker being switched on. */
+  testAutomodChecker: (req: AutomodTestRequest) =>
+    post<AutomodTestResult>("/automod/test", req),
 
   // --- media uploads ---
   media: () => get<MediaFile[]>("/media"),
@@ -579,6 +595,12 @@ export const api = {
   mcpAccess: () => get<McpAccess>("/mcp/access"),
   setMcpAccess: (enabled: boolean, levels?: McpLevel[]) =>
     put<McpAccess>("/mcp/access", levels ? { enabled, levels } : { enabled }),
+  // --- chat polls (#14) ---
+  /** The running poll (or null) and the history, newest first. */
+  listPolls: (limit?: number) => get<PollsResponse>("/polls" + (limit ? `?limit=${limit}` : "")),
+  startPoll: (spec: PollSpec) => post<Poll>("/polls", spec),
+  /** Ends it early. The result may still say "closing" for a few seconds. */
+  endPoll: (id: number) => post<Poll>(`/polls/${id}/end`),
 
   // --- chat overlays (session-only) ---
   listOverlays: () => get<OverlaysResponse>("/overlays"),
@@ -691,6 +713,13 @@ export const api = {
    *  time. An empty string CLEARS the stored password. */
   putMqttPassword: (password: string) =>
     put<{ hasPassword: boolean }>("/settings/mqtt-password", { password }),
+  /** The OBS bridge (#16): configuration and live status. */
+  getObs: () => get<ObsResponse>("/obs"),
+  /** Replaces the whole bridge configuration; a field left out is off. */
+  putObs: (cfg: ObsConfig) => put<ObsResponse>("/obs", cfg),
+  /** The obs-websocket password, write-only, for the reason
+   *  putMqttPassword is. An empty string clears it. */
+  putObsPassword: (password: string) => put<{ hasPassword: boolean }>("/obs/password", { password }),
   /** Per-item readiness for the configured playlist -- whether the upload
    *  behind each entry still exists and has what the selector needs to play
    *  it. Separate from getSettings() because settings only carries what the
@@ -760,8 +789,12 @@ export const api = {
     put<{ ids: DestinationId[] }>("/destinations/order", { ids }),
   startDestination: (id: DestinationId) =>
     post<{ enabled: boolean }>(`/destinations/${id}/start`),
-  stopDestination: (id: DestinationId) =>
-    post<{ enabled: boolean }>(`/destinations/${id}/stop`),
+  /** `now` is the broadcast delay's "Stop now" (#11): the buffered tail is
+   *  cut instead of airing. It also cuts a tail that is already draining. */
+  stopDestination: (id: DestinationId, now = false) =>
+    post<{ enabled: boolean; drainingSeconds?: number; cut?: boolean }>(
+      `/destinations/${id}/stop${now ? "?now=true" : ""}`,
+    ),
   restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
   /** Live per-track mute or gain (I4). Writes the STORED live mix and

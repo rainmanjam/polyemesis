@@ -125,6 +125,12 @@ func modelFor(tweak func(*automod.ModelConfig)) *automod.Model {
 	if tweak != nil {
 		tweak(&cfg)
 	}
+	// The key this suite holds is issued for the endpoint under test. The
+	// connector sends a key only to the endpoint it is bound to (see
+	// internal/db/automod_binding.go), so the suite has to say so.
+	if cfg.KeyBinding == "" {
+		cfg.KeyBinding = db.NormalizeEndpoint(cfg.Endpoint)
+	}
 	// A budget per model here, deliberately: each check in this suite is its own
 	// scenario and must not inherit spend from the one before it. The install
 	// shares one (see cmd/polyemesis/main.go); a test harness wants isolation.

@@ -261,3 +261,29 @@ func TestMQTTLiveIsWhetherTheStreamIsArriving(t *testing.T) {
 		}
 	}
 }
+
+// Degraded-link failover (#6) on the retained source topic: the selector's
+// reason, with its "degraded: " prefix, and the degraded flag that is set even
+// when nothing moved. A Home Assistant automation keyed on `failover` alone
+// cannot see a degraded primary that had nowhere to go.
+func TestTheRetainedSourceTopicCarriesTheDegradedReason(t *testing.T) {
+	fake := &fakeMQTTEngine{
+		id: 3, name: "IRL",
+		status: engine.Status{Failover: &engine.FailoverStatus{
+			Active:   "slate",
+			Reason:   "degraded: the primary ingest's link is degraded and no backup is on air (bitrate 300 kbps below 800 kbps for 5s)",
+			Degraded: "bitrate 300 kbps below 800 kbps for 5s",
+		}},
+	}
+	r := &mqttRunner{version: "test", engines: func() []mqttEngine { return []mqttEngine{fake} }}
+	src := r.snapshot().Sources[0].State
+	if src.Failover != "slate" {
+		t.Errorf("failover = %q, want slate", src.Failover)
+	}
+	if !strings.HasPrefix(src.FailoverReason, "degraded: ") {
+		t.Errorf("failoverReason = %q, want the degraded: reason", src.FailoverReason)
+	}
+	if src.Degraded != "bitrate 300 kbps below 800 kbps for 5s" {
+		t.Errorf("degraded = %q", src.Degraded)
+	}
+}

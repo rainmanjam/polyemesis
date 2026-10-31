@@ -11,6 +11,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
+	"github.com/rainmanjam/polyemesis/internal/srtla"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 )
 
@@ -71,6 +72,15 @@ type sourceView struct {
 	// keeps `link` meaning exactly what it meant before, which is what stops
 	// this from being a breaking change to every existing consumer.
 	RTMPLink *rtmpserver.LinkStats `json:"rtmpLink,omitempty"`
+	// Degraded is set while this programme's primary link is judged degraded
+	// by degraded-link failover (#6): the measured explanation, e.g. "bitrate
+	// 640 kbps below 800 kbps for 5s". Selector text, never an encoder's.
+	Degraded string `json:"degraded,omitempty"`
+	// Bonded is the SRTLA group behind Link when the encoder is bonding
+	// several network links through the SRTLA receiver (#6): one row per
+	// link, with its own bitrate and share. Link then describes the merged
+	// SRT session as the listener sees it, from loopback.
+	Bonded *srtla.GroupStats `json:"bonded,omitempty"`
 	// Destinations and Renditions are what a delete would take with it.
 	//
 	// Counts rather than prose, and computed server-side rather than guessed by
@@ -141,6 +151,7 @@ func readScopeCannotSeePublishTokens(r *http.Request) bool {
 
 func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) sourceView {
 	var link *srtserver.LinkStats
+	var bonded *srtla.GroupStats
 	var rtmpLink *rtmpserver.LinkStats
 	legacyKey := ""
 	publishing := false
@@ -174,10 +185,19 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 	if s.mgr != nil {
 		publishing = s.mgr.SharedIngestPublishing(src.ID)
 		link = linkForCard(s.mgr.SRTLinks(), src.ID)
+		bonded = bondedFor(link, s.mgr.SRTLAGroups())
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
+	degraded := ""
+	if s.mgr != nil {
+		if fo := s.mgr.Engine(src.ID).Failover(); fo != nil {
+			degraded = fo.Degraded
+		}
+	}
 	view := sourceView{
+		Bonded:         bonded,
+		Degraded:       degraded,
 		Publishing:     publishing,
 		Link:           link,
 		RTMPLink:       rtmpLink,
@@ -302,6 +322,21 @@ func linkForCard(links []srtserver.LinkStats, sourceID int64) *srtserver.LinkSta
 	return pickLink(links, sourceID, func(l srtserver.LinkStats) (int64, bool) {
 		return l.SourceID, l.Backup
 	})
+}
+
+// bondedFor finds the SRTLA group feeding link: the SRT listener sees a bonded
+// session's peer as the receiver's own socket towards it, which is the group's
+// UpstreamLocal. Nil when link is not bonded.
+func bondedFor(link *srtserver.LinkStats, groups []srtla.GroupStats) *srtla.GroupStats {
+	if link == nil {
+		return nil
+	}
+	for i := range groups {
+		if groups[i].UpstreamLocal == link.Peer {
+			return &groups[i]
+		}
+	}
+	return nil
 }
 
 // rtmpLinkForCard is the same choice on the RTMP listener. It delegates rather

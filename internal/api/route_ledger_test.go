@@ -678,6 +678,10 @@ var excusedRoutes = map[string]coverageExcus{
 	// for every principal including one holding a valid overlay key there.
 	"GET /overlay/k/{key}":      spa(),
 	"GET /overlay/dock/k/{key}": spa(),
+	// The poll widget (#14): the same SPA bundle, sessionless, in both key
+	// forms.
+	"GET /overlay/poll":         spa(),
+	"GET /overlay/poll/k/{key}": spa(),
 	// The overlay key's two routes. Outside every auth group, and a read
 	// token is nothing to them: without the overlay's own key in its own
 	// header every principal gets the same 401. The counterparts open them

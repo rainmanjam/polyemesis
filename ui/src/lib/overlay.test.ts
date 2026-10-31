@@ -6,6 +6,14 @@ import {
   expireLines,
   keyFromHash,
   overlayLocation,
+  pollWidgetPathUrl,
+  pollWidgetUrl,
+  applyPoll,
+  pollPercents,
+  pollSecondsLeft,
+  pollVisible,
+  POLL_LINGER_MS,
+  type PollDisplay,
   overlayPathUrl,
   overlayUrl,
   removeLines,
@@ -44,24 +52,32 @@ describe("the OBS URL", () => {
 
 describe("which page this is, and its key", () => {
   it("reads every overlay URL the server serves, both forms, overlay and dock", () => {
-    expect(overlayLocation("/overlay", "#key=pov_a")).toEqual({ key: "pov_a", dock: false });
-    expect(overlayLocation("/overlay/dock", "#key=pov_a")).toEqual({ key: "pov_a", dock: true });
-    expect(overlayLocation("/overlay/k/pov_a", "")).toEqual({ key: "pov_a", dock: false });
+    expect(overlayLocation("/overlay", "#key=pov_a")).toEqual({ key: "pov_a", dock: false, poll: false });
+    expect(overlayLocation("/overlay/dock", "#key=pov_a")).toEqual({ key: "pov_a", dock: true, poll: false });
+    expect(overlayLocation("/overlay/k/pov_a", "")).toEqual({ key: "pov_a", dock: false, poll: false });
     // The dock is told apart by its prefix, not by a path that ends in /dock:
     // the path form ends in the key.
-    expect(overlayLocation("/overlay/dock/k/pov_a", "")).toEqual({ key: "pov_a", dock: true });
-    expect(overlayLocation("/overlay/k/pov_a%2Db/", "")).toEqual({ key: "pov_a-b", dock: false });
-    expect(overlayLocation("/overlay/", "")).toEqual({ key: "", dock: false });
+    expect(overlayLocation("/overlay/dock/k/pov_a", "")).toEqual({ key: "pov_a", dock: true, poll: false });
+    expect(overlayLocation("/overlay/k/pov_a%2Db/", "")).toEqual({ key: "pov_a-b", dock: false, poll: false });
+    expect(overlayLocation("/overlay/", "")).toEqual({ key: "", dock: false, poll: false });
   });
   // Both present only when somebody edited a URL by hand. The path is the one
   // the page was served under, so it wins; the fragment is not a fallback for
   // a path key that is present.
   it("prefers the path key when the URL carries both", () => {
-    expect(overlayLocation("/overlay/k/pov_path", "#key=pov_frag")).toEqual({ key: "pov_path", dock: false });
+    expect(overlayLocation("/overlay/k/pov_path", "#key=pov_frag")).toEqual({ key: "pov_path", dock: false, poll: false });
+  });
+  it("reads the poll widget's two URLs as the poll page, never as the chat overlay", () => {
+    expect(overlayLocation("/overlay/poll", "#key=pov_a")).toEqual({ key: "pov_a", dock: false, poll: true });
+    expect(overlayLocation("/overlay/poll/k/pov_b", "")).toEqual({ key: "pov_b", dock: false, poll: true });
+    expect(new URL(pollWidgetUrl("https://box.example", "pov_k")).pathname).toBe("/overlay/poll");
+    expect(pollWidgetUrl("https://box.example", "pov_k")).toBe("https://box.example/overlay/poll#key=pov_k");
+    expect(pollWidgetPathUrl("https://box.example", "a/b")).toBe("https://box.example/overlay/poll/k/a%2Fb");
   });
   it("is not an overlay page for anything else, including near misses", () => {
     for (const p of ["/", "/overlays", "/overlay/x", "/overlay/k", "/overlay/k/", "/overlay/k/a/b",
-      "/overlay/dock/x", "/overlay/dock/k/", "/settings/overlay", "/watch"]) {
+      "/overlay/dock/x", "/overlay/dock/k/", "/overlay/poll/x", "/overlay/poll/k/", "/overlay/dock/poll",
+      "/overlay/polls", "/settings/overlay", "/watch"]) {
       expect(overlayLocation(p, "#key=pov_a"), p).toBeNull();
     }
   });
@@ -139,5 +155,70 @@ describe("runOverlayStream", () => {
       expect(c.headers[OVERLAY_KEY_HEADER]).toBe("pov_secret");
     }
     expect(calls[1].headers["Last-Event-ID"]).toBe("x-3");
+  });
+});
+
+describe("the poll widget's rules", () => {
+  const poll = (over: Partial<PollDisplay> = {}): PollDisplay => ({
+    id: "poll-1", question: "Next map?", total: 4, state: "open",
+    options: [{ label: "Dust", votes: 3 }, { label: "Mirage", votes: 1 }],
+    endsAt: new Date(10_000).toISOString(), ...over,
+  });
+
+  it("takes the newest update for the same poll, and a new poll replaces the old", () => {
+    const a = applyPoll(null, poll(), 1);
+    const b = applyPoll(a, poll({ total: 5 }), 2);
+    expect(b?.total).toBe(5);
+    const c = applyPoll(b, poll({ id: "poll-2", question: "Snack?" }), 3);
+    expect(c?.id).toBe("poll-2");
+    expect(c?.receivedAt).toBe(3);
+    // Something that is not a poll changes nothing.
+    expect(applyPoll(c, { id: 7 } as unknown as PollDisplay, 4)).toBe(c);
+  });
+
+  it("shows a poll while it is open or closing, and its result for a while after", () => {
+    const now = 100_000;
+    expect(pollVisible(null, now)).toBe(false);
+    expect(pollVisible({ ...poll(), receivedAt: 0 }, now)).toBe(true);
+    expect(pollVisible({ ...poll({ state: "closing" }), receivedAt: 0 }, now)).toBe(true);
+    const ended = { ...poll({ state: "ended", endedAt: new Date(now).toISOString() }), receivedAt: now };
+    expect(pollVisible(ended, now + POLL_LINGER_MS - 1)).toBe(true);
+    expect(pollVisible(ended, now + POLL_LINGER_MS)).toBe(false);
+    expect(pollVisible({ ...poll({ state: "interrupted" }), receivedAt: now }, now)).toBe(false);
+  });
+
+  it("does not show a long-finished poll replayed on a reconnect", () => {
+    const now = 10 * 60_000;
+    // Received just now (a replay), but the server ended it minutes ago.
+    const replayed = { ...poll({ state: "ended", endedAt: new Date(now - 5 * 60_000).toISOString() }), receivedAt: now };
+    expect(pollVisible(replayed, now)).toBe(false);
+  });
+
+  it("works out shares and the time left", () => {
+    expect(pollPercents(poll())).toEqual([75, 25]);
+    expect(pollPercents(poll({ total: 0, options: [{ label: "a", votes: 0 }, { label: "b", votes: 0 }] }))).toEqual([0, 0]);
+    expect(pollSecondsLeft(poll(), 4_500)).toBe(6);
+    expect(pollSecondsLeft(poll(), 20_000)).toBe(0);
+    expect(pollSecondsLeft(poll({ endsAt: "nope" }), 0)).toBe(0);
+  });
+});
+
+describe("runOverlayStream and the poll", () => {
+  it("hands poll.display to onPoll, and a chat-only handler set never sees it", async () => {
+    const body = frame("x-1", "poll.display", { id: "poll-1", question: "q", options: [], total: 0, state: "open", endsAt: "" }) +
+      frame("x-2", "chat.display", { id: "d1", platform: "twitch", name: "n", text: "hi", at: "" });
+    const run = async (h: Parameters<typeof runOverlayStream>[1]) => {
+      const responses = [sseResponse(body), new Response("{}", { status: 401 })];
+      await runOverlayStream("pov_k", h, new AbortController().signal,
+        (async () => responses.shift()!) as unknown as typeof fetch, async () => {});
+    };
+    const onPoll = vi.fn();
+    const onDenied = vi.fn();
+    await run({ onPoll, onDenied });
+    expect(onPoll).toHaveBeenCalledWith(expect.objectContaining({ id: "poll-1" }));
+    // The chat overlay's handlers: no onPoll, and nothing throws.
+    const onLine = vi.fn();
+    await run({ onLine, onRemove: vi.fn(), onDenied });
+    expect(onLine).toHaveBeenCalledTimes(1);
   });
 });

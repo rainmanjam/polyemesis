@@ -126,6 +126,16 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 				"the MCP endpoint takes an API token (Authorization: Bearer ...), not a browser session")
 			return
 		}
+		// /mcp is outside requireScope. mcpEndpoint refuses every scope that is
+		// not an MCP scope, the obs scope included; this earlier refusal only
+		// gives the OBS script's token an answer that names the one route it
+		// does reach (obsScopePatterns). While MCP is switched off, mcpGate
+		// answers 404 before either check runs.
+		if p.token.Scope == db.ScopeOBS {
+			writeError(w, http.StatusForbidden,
+				"this API token has the \"obs\" scope, which reaches POST /api/v1/obs/events and nothing else")
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

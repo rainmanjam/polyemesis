@@ -26,14 +26,14 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 91 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 116 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
-| `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 1 |
+| `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 2 |
 | `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 10 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
-The 51 are the ones that reach an FFmpeg argv. The five classes hold 153 fields
+The 51 are the ones that reach an FFmpeg argv. The five classes hold 179 fields
 between them, and `reload.go` is the authority for every number on this page.
 
 ### Applied live — nothing is replaced
@@ -71,8 +71,12 @@ between them, and `reload.go` is the authority for every number on this page.
 
 - **Ingest:** `ingest.mode`, the SRT and RTMP blocks, `ingest.pull.*`,
   `ingest.annotations.*` (which recompiles every routing graph).
+  `ingest.degraded.*`, the [degraded-link](LINK-HEALTH.md) thresholds, are the
+  exception: they are live, read by the failover sweep twice a second.
 - **Listeners:** `listeners.rtmpPort` is in the ingest child's argv.
-  `listeners.srtPort` **rebinds a shared socket**.
+  `listeners.srtPort` **rebinds a shared socket**, and so does
+  `listeners.srtlaPort`, the [SRTLA](SRTLA.md) receiver's port; moving the SRT
+  port also restarts the SRTLA receiver that forwards into it.
 - **Recorder:** `segmentSeconds`, `stems`, `stemCodec`, and `enabled`.
 - **Preview and playout:** every geometry, bitrate and muxer field.
 - **Renditions:** geometry, fps, bitrate, encoder, preset, GOP, deinterlace,

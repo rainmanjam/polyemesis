@@ -2,8 +2,13 @@ import type { TranslationKey } from "./i18n";
 import type {
   AutomodAction,
   AutomodChecker,
+  AutomodModel,
+  AutomodPreset,
+  AutomodPrivacy,
+  AutomodProtocol,
   AutomodRule,
   AutomodSettings,
+  AutomodTestResult,
 } from "./types";
 
 /* ===========================================================================
@@ -75,13 +80,18 @@ export function checkerReady(
     return usable ? READY : { ready: false, reason: "automod.noRules" };
   }
   if (checker === "model") {
-    const m = a?.model;
-    if (!m?.enabled) return { ready: false, reason: "automod.modelOff" };
+    // EITHER model checker makes the column live, as on the server
+    // (checkerConfigured): there is one model column, and a fallback running
+    // alone -- its primary switched off -- still decides.
+    const on = [a?.model, a?.secondary].filter(
+      (m): m is AutomodModel => m?.enabled === true,
+    );
+    if (on.length === 0) return { ready: false, reason: "automod.modelOff" };
     // modelConfigFrom copies the stored endpoint over DefaultModelConfig's,
     // including an empty one, so a blank field is a POST to "" — an error on
     // every call, and the model path fails open. The checker exists and can
     // never find anything, which is worth saying differently from "off".
-    if (m.endpoint.trim() === "") {
+    if (on.every((m) => m.endpoint.trim() === "")) {
       return { ready: false, reason: "automod.modelNoEndpoint" };
     }
     return READY;
@@ -213,4 +223,109 @@ export function ruleReach(
     platforms.add(platform);
   }
   return platforms.size;
+}
+
+/* ---------------------------------------------------- model-checker providers */
+
+/** A checker's CONNECTION, as the server fingerprints it for a Test pass:
+ *  protocol, preset, endpoint and model. The console unlocks a checker's
+ *  switch only while what is on screen is what passed. */
+export function connectionOf(m: AutomodModel): string {
+  return [m.protocol ?? "openai", m.preset ?? "", m.endpoint.trim(), m.model.trim()].join("\u0000");
+}
+
+/** The presets for one protocol, in the server's order. */
+export function presetsFor(
+  presets: readonly AutomodPreset[],
+  protocol: AutomodProtocol,
+): AutomodPreset[] {
+  return presets.filter((p) => p.protocol === protocol);
+}
+
+/** The preset a checker is on, or undefined when the server did not send the
+ *  table (an older server) or names one this console does not know. */
+export function presetOf(
+  presets: readonly AutomodPreset[],
+  m: AutomodModel,
+): AutomodPreset | undefined {
+  return presets.find((p) => p.id === m.preset && p.protocol === (m.protocol ?? "openai"));
+}
+
+/** Whether a preset is a Custom one, whose name is translated rather than a
+ *  provider's brand. */
+export function isCustomPreset(p: AutomodPreset): boolean {
+  return p.id === "custom" || p.id === "jev-custom";
+}
+
+export const PRIVACY_KEYS: Record<AutomodPrivacy, TranslationKey> = {
+  local: "automod.privacyLocal",
+  hosted_us: "automod.privacyHostedUS",
+  relay: "automod.privacyRelay",
+  unknown: "automod.privacyUnknown",
+};
+
+/** The categories a model may answer with, for an older server that does not
+ *  send `modelCategories`. Same order as internal/automod.ModelCategories. */
+export const MODEL_CATEGORIES = [
+  "harassment",
+  "hate_speech",
+  "threat",
+  "sexual_content",
+  "spam",
+  "other",
+] as const;
+
+export const CATEGORY_KEYS: Record<string, TranslationKey> = {
+  harassment: "automod.catHarassment",
+  hate_speech: "automod.catHateSpeech",
+  threat: "automod.catThreat",
+  sexual_content: "automod.catSexualContent",
+  spam: "automod.catSpam",
+  other: "automod.catOther",
+};
+
+/** The suggested per-category actions -- shown beside each row and applied
+ *  only when the operator asks. Every category STARTS on flag; these are what
+ *  the spike measured as producing no innocent timeouts on its best checkers. */
+export const SUGGESTED_CATEGORY_ACTIONS: Readonly<Record<string, AutomodAction>> = {
+  spam: "delete",
+  harassment: "timeout",
+  hate_speech: "timeout",
+  threat: "timeout",
+};
+
+/** The action a category is set to, or undefined for "use the default". */
+export function categoryActionOf(
+  m: AutomodModel,
+  category: string,
+): AutomodAction | undefined {
+  return m.categoryActions?.[category];
+}
+
+/** Whether any configured action -- the default or a category's -- is a
+ *  timeout, which is when the viewer-silence duration means something. */
+export function anyTimeout(m: AutomodModel): boolean {
+  return (
+    m.action === "timeout" ||
+    Object.values(m.categoryActions ?? {}).some((a) => a === "timeout")
+  );
+}
+
+export const TEST_CASE_KEYS: Record<string, TranslationKey> = {
+  harmless: "automod.testCaseHarmless",
+  abusive: "automod.testCaseAbusive",
+  spam: "automod.testCaseSpam",
+};
+
+/** The one-line verdict on a Test run. */
+export function testVerdictKey(r: AutomodTestResult): TranslationKey {
+  if (r.passed) return "automod.testPassed";
+  switch (r.problem) {
+    case "harmless_flagged":
+      return "automod.testFailedHarmless";
+    case "abusive_missed":
+      return "automod.testFailedAbusive";
+    default:
+      return "automod.testFailedError";
+  }
 }

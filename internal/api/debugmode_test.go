@@ -369,3 +369,80 @@ func TestTheHandlerBuiltSetCoversAPullSourceCredential(t *testing.T) {
 		}
 	}
 }
+
+// The obs-websocket password is declared to the debug bundle's scrub set. No
+// code logs it today; this holds the set to covering it if some code ever does.
+func TestTheHandlerBuiltSetCoversTheOBSWebsocketPassword(t *testing.T) {
+	// A shape alerts.Redact does not recognise on its own -- no "password="
+	// beside it -- so only the declared set can mask it.
+	secret := "OBSWS" + strings.Repeat("Zq9", 6)
+
+	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	sw := diag.NewSwitch(slog.LevelInfo)
+	srv, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
+	sign := login(t, h)
+	if err := srv.store.PutOBSPassword(srv.box, secret); err != nil {
+		t.Fatal(err)
+	}
+	r := jsonRequest(t, http.MethodPut, "/api/v1/debug", map[string]any{"recording": true})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("enable = %d (%s)", w.Code, w.Body.String())
+	}
+	log := slog.New(diag.NewHandler(slog.NewTextHandler(io.Discard, nil), rec))
+	log.Info("a hypothetical future log line", "detail", "handshake with "+secret)
+
+	r = jsonRequest(t, http.MethodPost, "/api/v1/debug/export", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export = %d (%s)", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), secret) {
+		t.Error("the exported bundle carries the obs-websocket password")
+	}
+	if !strings.Contains(w.Body.String(), "hypothetical future log line") {
+		t.Error("positive control: the line never reached the bundle, so the absence proves nothing")
+	}
+}
+
+// An obs-websocket password set WHILE debug recording is on is a literal the
+// recording's scrub set has never held. #21 closed that window for the automod
+// keys (refreshDiagSecrets after a key is stored); #16's password, which #21
+// never saw, goes through the same rebuild. Found integrating Wave 2.
+//
+// Mutation: drop the refreshDiagSecrets call in handlePutOBSPassword. Observed
+// FAIL (the bundle carried the password).
+func TestAnOBSPasswordSetWhileRecordingIsScrubbedFromTheBundle(t *testing.T) {
+	secret := "OBSWS" + strings.Repeat("Kx7", 6)
+
+	rec := diag.NewRecorder(64, alerts.NewSecretSet(nil))
+	sw := diag.NewSwitch(slog.LevelInfo)
+	_, h, _ := testServerWith(t, Options{Diag: rec, DiagLevel: sw})
+	sign := login(t, h)
+	r := jsonRequest(t, http.MethodPut, "/api/v1/debug", map[string]any{"recording": true})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("enable = %d (%s)", w.Code, w.Body.String())
+	}
+	r = jsonRequest(t, http.MethodPut, "/api/v1/obs/password", map[string]any{"password": secret})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("set password = %d (%s)", w.Code, w.Body.String())
+	}
+	log := slog.New(diag.NewHandler(slog.NewTextHandler(io.Discard, nil), rec))
+	log.Info("a hypothetical future log line", "detail", "handshake with "+secret)
+
+	r = jsonRequest(t, http.MethodPost, "/api/v1/debug/export", nil)
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export = %d (%s)", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), secret) {
+		t.Error("the exported bundle carries an obs-websocket password set while recording")
+	}
+	if !strings.Contains(w.Body.String(), "hypothetical future log line") {
+		t.Error("positive control: the line never reached the bundle, so the absence proves nothing")
+	}
+}

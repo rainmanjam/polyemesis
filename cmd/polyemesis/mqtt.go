@@ -343,6 +343,8 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 		src.Recording = st.Recorder != nil && st.Recorder.State == supervisor.StateRunning
 		if st.Failover != nil {
 			src.Failover = string(st.Failover.Active)
+			src.FailoverReason = st.Failover.Reason
+			src.Degraded = st.Failover.Degraded
 		}
 
 		item := mqtt.SourceSnapshot{}

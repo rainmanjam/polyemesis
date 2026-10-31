@@ -158,6 +158,9 @@ type Server struct {
 	// like guessing. Shared with internal/rtmpserver -- see internal/authgate
 	// for why this is not forked per protocol.
 	gate *authgate.Gate
+	// peerHost names the lockout bucket for a connecting peer; nil means
+	// authgate.PeerHost. See SetPeerHost.
+	peerHost atomic.Pointer[func(net.Addr) string]
 }
 
 // BindReport is which address families the listener asked for and which it got.
@@ -287,6 +290,50 @@ type session struct {
 	// evicted marks a session displaced by a takeover, so its read loop knows
 	// not to log the close as a failure.
 	evicted atomic.Bool
+	// rate turns the accumulated counters into per-interval figures. Guarded by
+	// its own lock because Stats and Link are called from several goroutines.
+	rateMu sync.Mutex
+	rate   rateWindow
+}
+
+// rateWindow differences accumulated counters into rates over the last
+// interval of at least rateMinInterval.
+//
+// Interval, not since-connect: SRT's loss counter only rises, so a link that
+// dropped a burst an hour ago would read as lossy for the rest of the show,
+// and degraded-link failover would never clear. And a minimum interval rather
+// than "since the last call": several readers call Stats at different cadences,
+// and differencing whatever sliver separates two of them makes the figure
+// jump between noise and truth.
+type rateWindow struct {
+	at                time.Time
+	bytes, recv, loss uint64
+	kbps, lossPct     float64
+	have              bool
+}
+
+const rateMinInterval = time.Second
+
+// update folds one reading in and returns the current rate. ok is false until
+// a full interval has been seen, and again after any counter goes backwards,
+// which is a new connection rather than negative traffic.
+func (w *rateWindow) update(now time.Time, bytes, recv, loss uint64) (kbps, lossPct float64, ok bool) {
+	if w.at.IsZero() || bytes < w.bytes || recv < w.recv || loss < w.loss {
+		*w = rateWindow{at: now, bytes: bytes, recv: recv, loss: loss}
+		return 0, 0, false
+	}
+	dt := now.Sub(w.at)
+	if dt < rateMinInterval {
+		return w.kbps, w.lossPct, w.have
+	}
+	w.kbps = float64(bytes-w.bytes) * 8 / dt.Seconds() / 1000
+	dRecv, dLoss := recv-w.recv, loss-w.loss
+	w.lossPct = 0
+	if total := dRecv + dLoss; total > 0 {
+		w.lossPct = float64(dLoss) * 100 / float64(total)
+	}
+	w.at, w.bytes, w.recv, w.loss, w.have = now, bytes, recv, loss, true
+	return w.kbps, w.lossPct, true
 }
 
 func (s *session) fresh(now time.Time) bool {
@@ -297,6 +344,27 @@ func (s *session) fresh(now time.Time) bool {
 		return now.Sub(s.started) < StaleAfter
 	}
 	return now.Sub(time.Unix(0, last)) < StaleAfter
+}
+
+// SetPeerHost replaces how a connecting peer is named for the wrong-token
+// lockout. The SRTLA receiver (#6) forwards every bonded publisher from its own
+// loopback socket, so keyed by peer host they would all share one bucket and one
+// sender's guesses would lock every bonded encoder out; the receiver knows the
+// real sender and the Manager wires that in here. fn returns the bucket name;
+// returning authgate.PeerHost(addr) is the default behaviour.
+func (s *Server) SetPeerHost(fn func(net.Addr) string) {
+	if fn == nil {
+		s.peerHost.Store(nil)
+		return
+	}
+	s.peerHost.Store(&fn)
+}
+
+func (s *Server) peerHostOf(addr net.Addr) string {
+	if fn := s.peerHost.Load(); fn != nil {
+		return (*fn)(addr)
+	}
+	return authgate.PeerHost(addr)
 }
 
 // New builds a server. Nothing binds until Start.
@@ -595,7 +663,7 @@ func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 	// Checked before the token is even looked at, so a peer already blocked
 	// for guessing wrong tokens does not get a fresh lookup on every retry.
 	// See internal/authgate for why this is scoped per peer rather than global.
-	host := authgate.PeerHost(req.RemoteAddr())
+	host := s.peerHostOf(req.RemoteAddr())
 	if s.gate.Blocked(host) {
 		s.log.Debug("srt connect refused: peer is rate-limited after repeated wrong tokens",
 			"peer", peer)
@@ -777,6 +845,11 @@ type LinkStats struct {
 	RTTMs      float64   `json:"rttMs"`
 	LossPkts   uint64    `json:"lossPackets"`
 	RetransPkt uint64    `json:"retransPackets"`
+	// BitrateKbps and LossPercent are over the last interval (see rateWindow),
+	// zero until one has elapsed. LossPercent is the share of data packets the
+	// receiver found missing, the figure degraded-link failover compares.
+	BitrateKbps float64 `json:"bitrateKbps"`
+	LossPercent float64 `json:"lossPercent"`
 }
 
 // Stats reports every established publisher.
@@ -789,21 +862,48 @@ func (s *Server) Stats() []LinkStats {
 	s.mu.Unlock()
 
 	out := make([]LinkStats, 0, len(sessions))
+	now := time.Now()
 	for _, sess := range sessions {
-		var st srt.Statistics
-		sess.conn.Stats(&st)
-		out = append(out, LinkStats{
-			SourceID:   sess.key.SourceID,
-			Backup:     sess.key.Backup,
-			Peer:       sess.peer,
-			Since:      sess.started,
-			Bytes:      sess.bytes.Load(),
-			RTTMs:      st.Instantaneous.MsRTT,
-			LossPkts:   st.Accumulated.PktRecvLoss,
-			RetransPkt: st.Accumulated.PktRetrans,
-		})
+		out = append(out, sess.linkStats(now))
 	}
 	return out
+}
+
+// Link reports one publisher -- a source's primary or its standby -- or false
+// when that slot has nobody publishing.
+func (s *Server) Link(sourceID int64, backup bool) (LinkStats, bool) {
+	s.mu.Lock()
+	sess, ok := s.live[PublisherKey{SourceID: sourceID, Backup: backup}]
+	s.mu.Unlock()
+	if !ok {
+		return LinkStats{}, false
+	}
+	return sess.linkStats(time.Now()), true
+}
+
+func (sess *session) linkStats(now time.Time) LinkStats {
+	var st srt.Statistics
+	sess.conn.Stats(&st)
+	bytes := sess.bytes.Load()
+	sess.rateMu.Lock()
+	kbps, loss, _ := sess.rate.update(now, bytes, st.Accumulated.PktRecv, st.Accumulated.PktRecvLoss)
+	sess.rateMu.Unlock()
+	return LinkStats{
+		SourceID: sess.key.SourceID,
+		Backup:   sess.key.Backup,
+		Peer:     sess.peer,
+		Since:    sess.started,
+		Bytes:    bytes,
+		RTTMs:    st.Instantaneous.MsRTT,
+		LossPkts: st.Accumulated.PktRecvLoss,
+		// PktRecvRetrans, not PktRetrans: this end RECEIVES. PktRetrans counts
+		// retransmissions this socket SENT, which on a listener that only
+		// receives is zero for ever -- the card showed "retrans 0" over a link
+		// that was retransmitting constantly.
+		RetransPkt:  st.Accumulated.PktRecvRetrans,
+		BitrateKbps: kbps,
+		LossPercent: loss,
+	}
 }
 
 // Publishing reports whether a source currently has a live publisher in EITHER

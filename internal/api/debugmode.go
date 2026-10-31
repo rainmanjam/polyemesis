@@ -1,12 +1,15 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/diag"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 )
@@ -145,18 +148,7 @@ func (s *Server) handleSetDebug(w http.ResponseWriter, r *http.Request) {
 			//
 			// The pattern worth naming is that each omission was an inventory
 			// nobody enumerated, not a mistake in the code that was written.
-			dests, dErr := s.store.ListDestinations()
-			srcs, sErr := s.store.ListSources()
-			accts, aErr := s.store.ListPlatformAccounts()
-			// AND THE INSTALL-WIDE INGEST, INCLUDING THE FAILOVER BACKUP. The
-			// selector logs the backup pull URL in full at the moment it switches
-			// to it -- which is exactly when an operator is recording, because
-			// switching to backup is the fault they are capturing.
-			set, gErr := s.store.GetSettings()
-			if dErr == nil && sErr == nil && aErr == nil && gErr == nil {
-				lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
-				lits = append(lits, engine.AccountSecrets(accts)...)
-				lits = append(lits, engine.SettingsSecrets(set)...)
+			if lits, err := s.diagSecretLiterals(); err == nil {
 				s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
 			} else {
 				// Refused rather than recorded: turning on a recorder whose
@@ -218,5 +210,61 @@ func (s *Server) handleExportDebug(w http.ResponseWriter, r *http.Request) {
 		// The status is already written; all that is left is to say so
 		// somewhere an operator can find it.
 		s.log.Error("debug bundle write failed", "err", err)
+	}
+}
+
+// diagSecretLiterals is every credential this install holds that a debug
+// bundle must never carry: destinations, sources, connected accounts, the
+// install-wide ingest and failover settings, and the automod model keys. The
+// comments inside say how each one was found missing.
+func (s *Server) diagSecretLiterals() ([]string, error) {
+	dests, dErr := s.store.ListDestinations()
+	srcs, sErr := s.store.ListSources()
+	accts, aErr := s.store.ListPlatformAccounts()
+	// AND THE INSTALL-WIDE INGEST, INCLUDING THE FAILOVER BACKUP. The
+	// selector logs the backup pull URL in full at the moment it switches
+	// to it -- which is exactly when an operator is recording, because
+	// switching to backup is the fault they are capturing.
+	set, gErr := s.store.GetSettings()
+	if err := errors.Join(dErr, sErr, aErr, gErr); err != nil {
+		return nil, err
+	}
+	lits := append(engine.DestinationSecrets(dests), engine.SourceSecrets(srcs)...)
+	lits = append(lits, engine.AccountSecrets(accts)...)
+	lits = append(lits, engine.SettingsSecrets(set)...)
+	// AND THE AUTOMOD MODEL KEYS. No code path logs them -- the connectors
+	// return status codes, never bodies or headers -- but this set is the
+	// backstop for the path nobody wrote down, and a bring-your-own key in a
+	// bundle sent to a stranger is a stranger spending the operator's money.
+	for _, slot := range []string{string(automod.SlotPrimary), db.AutomodSlotSecondary} {
+		if k, err := s.store.GetAutomodKeyFor(s.box, slot); err == nil && k != "" {
+			lits = append(lits, k)
+		}
+		if k, err := s.store.GetAutomodPendingKey(s.box, slot); err == nil && k != "" {
+			lits = append(lits, k)
+		}
+	}
+	// The obs-websocket password (#16). Nothing logs it -- it is used once,
+	// inside obsbridge.AuthString -- and it is declared anyway, because
+	// "nothing logs it" is a claim about today's code and this set is what
+	// stands behind tomorrow's. Best effort: a password that cannot be read is
+	// one that cannot be logged.
+	if pw, err := s.store.GetOBSPassword(s.box); err == nil && pw != "" {
+		lits = append(lits, pw)
+	}
+	return lits, nil
+}
+
+// refreshDiagSecrets rebuilds the bundle's scrub set when a credential
+// changes WHILE recording is on -- the residual handleSetDebug names. Called
+// when an automod key is set; a no-op when nothing is recording.
+func (s *Server) refreshDiagSecrets() {
+	if s.diag == nil || !s.diag.Recording() {
+		return
+	}
+	if lits, err := s.diagSecretLiterals(); err == nil {
+		s.diag.SetSecrets(alerts.NewSecretSet(s.log, lits...))
+	} else {
+		s.log.Warn("could not rebuild the debug recording's redaction set", "err", err)
 	}
 }

@@ -323,6 +323,26 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
+	"GET /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"POST /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"GET /api/v1/polls/export": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"GET /api/v1/polls/{id}": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
+	"POST /api/v1/polls/{id}/end": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
+		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
+		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +
+		"engine by polls_test.go.",
 	"GET /api/v1/events": "the events hub is not wired into this fixture (Options.Stream " +
 		"is nil), so the route answers 503 at once. That is about the BUILD, not a source: " +
 		"in production main wires the hub unconditionally, and with no source the stream " +
@@ -338,6 +358,11 @@ var freshInstallSubsystemRefusals = map[string]string{
 		"dashboard. The route the dashboard would draw an empty state from is " +
 		"/setup, which answers 200 with sources:0. See handleHealth for why only the " +
 		"database and the engine can reach 503 and the recording floor cannot.",
+	"POST /api/v1/obs/events": "the OBS bridge is not wired into this fixture (Options.OBS " +
+		"is nil), the same build-not-source reason as /events above: main builds the " +
+		"bridge unconditionally, and in production this route answers 409 while the " +
+		"bridge is switched off and 202 once it is on, with or without a source. The " +
+		"route is driven by obs_test.go.",
 	"POST /api/v1/playout/analytics/reset": "playout is not running, which on an " +
 		"install with no source is permanent rather than incidental -- the playout " +
 		"origin is an engine's. It is NOT given codeNoSource: the same 503 answers on " +

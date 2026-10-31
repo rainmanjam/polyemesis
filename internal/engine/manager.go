@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/authgate"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -19,6 +21,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/rtmpserver"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
+	"github.com/rainmanjam/polyemesis/internal/srtla"
 	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/stats"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
@@ -39,6 +42,11 @@ import (
 // destinations would quietly bind onto the first programme's traffic. One
 // allocator, handed to every engine.
 type Manager struct {
+	// drains is the install-wide record of which engine has which destination
+	// draining its broadcast delay, shared by every engine this builds. See
+	// drainRegistry.
+	drains *drainRegistry
+
 	log   *slog.Logger
 	cfg   config.Config
 	store *db.DB
@@ -135,8 +143,13 @@ type Manager struct {
 	srtAddr  string
 	rtmp     *rtmpserver.Server
 	rtmpAddr string
-	engines  map[int64]*Engine
-	order    []int64 // source ids in display order, so Default is deterministic
+	// srtla is the bonding receiver (#6) in front of srt, nil while its port
+	// is 0 or the SRT listener is down -- it has nowhere to deliver without it.
+	srtla         *srtla.Server
+	srtlaAddr     string
+	srtlaUpstream string
+	engines       map[int64]*Engine
+	order         []int64 // source ids in display order, so Default is deterministic
 	// retiredAlerts and retiring keep a deleted programme's alert delivery
 	// counts in the install's totals. See RetiredAlertStats. Under mu.
 	retiredAlerts alerts.Stats
@@ -188,6 +201,8 @@ type engineSettings struct {
 	stream        *eventstream.Hub
 	lifecycle     LifecycleObserver
 	keyChecker    KeyChecker
+	accountHealth AccountHealthReader
+	platHealth    PlatformHealthChecker
 	// alertGate is not a setting anybody saves: NewManager builds it once.
 	// It rides here anyway because this is the one path every engine is
 	// configured through, and an engine that missed it would publish its own
@@ -240,6 +255,8 @@ func (m *Manager) applyEngineSettings(eng *Engine, s engineSettings) {
 	eng.SetStream(s.stream)
 	eng.SetLifecycle(s.lifecycle)
 	eng.SetKeyChecker(s.keyChecker)
+	eng.SetAccountHealth(s.accountHealth)
+	eng.SetPlatformHealth(s.platHealth)
 	eng.SetAlertGate(s.alertGate)
 }
 
@@ -315,6 +332,7 @@ func NewManager(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg
 		tools:   tools,
 		bus:     bus,
 		alloc:   relay.NewPortAllocator(relayPortBase, relayPortSpan),
+		drains:  newDrainRegistry(),
 		engines: map[int64]*Engine{},
 		host:    stats.NewHost(),
 	}
@@ -435,6 +453,10 @@ func (m *Manager) Start(ctx context.Context) error {
 	// FIRST, so it is in the log above the noise of everything coming up.
 	m.warnAboutUnreadableStreamKeys()
 
+	// Before any engine can start a delayed destination: a previous process's
+	// delay spill is an old programme, and nothing may ever release it (#11).
+	sweepDelayRoot(m.cfg.DataDir)
+
 	// Before the engines and outside the error paths below: the resource
 	// sampler describes the box, so it is worth having on an install where not
 	// one source came up -- that is exactly the install an operator is staring
@@ -548,11 +570,19 @@ func (m *Manager) Sync() error {
 			m.log.Error("cannot build engine for source", "source", id, "err", err)
 			continue
 		}
+		// The SRT link probe for degraded-link failover (#6). Before Start,
+		// because the selector sweep that reads it starts there; it reads the
+		// listener through the manager on every call, so a rebind on a port
+		// change is picked up without re-wiring any engine.
+		eng.linkProbe = m.srtLinkHealth
 		// Before Start, and through the ONE function every save also goes
 		// through: a setting this path forgot would work on every engine the
 		// operator already had and silently not on the one they just added.
 		// See engineSettings.
 		m.applyEngineSettings(eng, m.engineSettingsSnapshot())
+		// Before Start, so no destination this engine starts can miss a drain
+		// of the same id in another programme.
+		eng.drains = m.drains
 		if err := eng.Start(ctx); err != nil {
 			m.log.Error("cannot start engine for source", "source", id, "err", err)
 			eng.Stop()
@@ -593,6 +623,7 @@ func (m *Manager) reconcileSharedIngest() {
 		(*srtserver.Server).Stop,
 		func(addr string) (*srtserver.Server, error) {
 			s := srtserver.New(m.log, addr, m.lookupToken)
+			s.SetPeerHost(m.srtPeerHost)
 			return s, s.Start()
 		})
 	// BOTH LISTENERS BIND, ALWAYS. The port is the switch, not the source list.
@@ -644,7 +675,62 @@ func (m *Manager) reconcileSharedIngest() {
 	m.mu.Lock()
 	m.srt, m.srtAddr = srt, srtAddr
 	m.rtmp, m.rtmpAddr = rtmp, rtmpAddr
+	bonded, bondedAddr, bondedUp := m.srtla, m.srtlaAddr, m.srtlaUpstream
 	m.mu.Unlock()
+
+	// The SRTLA receiver, AFTER the SRT listener because it forwards into it,
+	// and off whenever that listener is down: it would have nowhere to deliver.
+	// An SRT port change restarts it too -- the upstream is fixed at New -- or
+	// it would go on forwarding to a port nothing listens on.
+	upstream := ""
+	if srt != nil {
+		upstream = fmt.Sprintf("127.0.0.1:%d", st.Listeners.SRTPort)
+	}
+	if bonded != nil && bondedUp != upstream {
+		bonded.Stop()
+		m.log.Info("srtla receiver stopped", "reason", "the srt listener it forwards to moved")
+		bonded, bondedAddr = nil, ""
+	}
+	bonded, bondedAddr = reconcileListener(m.log, "srtla", st.Listeners.SRTLAPort,
+		st.Listeners.SRTLAPort != 0 && upstream != "", bonded, bondedAddr,
+		(*srtla.Server).Stop,
+		func(addr string) (*srtla.Server, error) {
+			s := srtla.New(m.log, srtla.Config{Listen: addr, Upstream: upstream})
+			return s, s.Start()
+		})
+	m.mu.Lock()
+	m.srtla, m.srtlaAddr, m.srtlaUpstream = bonded, bondedAddr, upstream
+	m.mu.Unlock()
+}
+
+// SRTLAGroups reports the bonding receiver's groups and links, nil when it is
+// off.
+func (m *Manager) SRTLAGroups() []srtla.GroupStats {
+	m.mu.RLock()
+	srv := m.srtla
+	m.mu.RUnlock()
+	if srv == nil {
+		return nil
+	}
+	return srv.Stats()
+}
+
+// srtPeerHost names a connecting SRT peer for the listener's wrong-token
+// lockout. A bonded publisher arrives from the SRTLA receiver's loopback
+// socket, so it is named after the sender that created its group instead --
+// otherwise one sender guessing tokens would lock every bonded encoder out.
+func (m *Manager) srtPeerHost(addr net.Addr) string {
+	if ua, ok := addr.(*net.UDPAddr); ok && ua.IP.IsLoopback() {
+		m.mu.RLock()
+		srv := m.srtla
+		m.mu.RUnlock()
+		if srv != nil {
+			if host, ok := srv.SenderHost(addr.String()); ok {
+				return "srtla:" + host
+			}
+		}
+	}
+	return authgate.PeerHost(addr)
 }
 
 // reconcileListener brings one shared listener to match its configured port,
@@ -1035,6 +1121,24 @@ func (m *Manager) SRTLinks() []srtserver.LinkStats {
 	return srv.Stats()
 }
 
+// srtLinkHealth is one publisher's RTT and interval loss from the shared SRT
+// listener, for an engine's degraded-link monitor. False when the listener is
+// down or that slot has nobody publishing over SRT -- which is also every RTMP
+// and pull primary, and is what makes their RTT and loss thresholds inert.
+func (m *Manager) srtLinkHealth(sourceID int64, backup bool) (linkHealth, bool) {
+	m.mu.RLock()
+	srv := m.srt
+	m.mu.RUnlock()
+	if srv == nil {
+		return linkHealth{}, false
+	}
+	l, ok := srv.Link(sourceID, backup)
+	if !ok {
+		return linkHealth{}, false
+	}
+	return linkHealth{rttMs: l.RTTMs, lossPct: l.LossPercent}, true
+}
+
 // RTMPLinks reports the live publishers on the shared RTMP listener.
 //
 // Separate from SRTLinks, and returning a different type, because the two
@@ -1146,9 +1250,10 @@ func (m *Manager) StopWithin(ctx context.Context) {
 	// a source that has gone quiet" case measured above: 15s and still alive,
 	// killed as a group, recording left with no trailer. So it comes down at
 	// the bottom too.
-	srt, rtmp := m.srt, m.rtmp
+	srt, rtmp, bonded := m.srt, m.rtmp, m.srtla
 	m.srt, m.srtAddr = nil, ""
 	m.rtmp, m.rtmpAddr = nil, ""
+	m.srtla, m.srtlaAddr, m.srtlaUpstream = nil, "", ""
 	engines := make([]*Engine, 0, len(m.engines))
 	for _, eng := range m.engines {
 		engines = append(engines, eng)
@@ -1187,7 +1292,11 @@ func (m *Manager) StopWithin(ctx context.Context) {
 	}
 	wg.Wait()
 
-	// After the engines, so the children finalised against a live feed.
+	// After the engines, so the children finalised against a live feed; and
+	// the bonding receiver before the SRT listener it feeds.
+	if bonded != nil {
+		bonded.Stop()
+	}
 	if srt != nil {
 		srt.Stop()
 	}
@@ -1418,6 +1527,18 @@ func (m *Manager) SetLifecycle(o LifecycleObserver) {
 // any created later, through the same one path as SetLifecycle.
 func (m *Manager) SetKeyChecker(k KeyChecker) {
 	m.saveEngineSetting(func(s *engineSettings) { s.keyChecker = k })
+}
+
+// SetAccountHealth attaches the connected-account health reader behind
+// DestStatus.AccountHealth to every engine, now and to any created later.
+func (m *Manager) SetAccountHealth(r AccountHealthReader) {
+	m.saveEngineSetting(func(s *engineSettings) { s.accountHealth = r })
+}
+
+// SetPlatformHealth attaches the platform stream-health reader behind
+// DestStatus.PlatformHealth to every engine, now and to any created later.
+func (m *Manager) SetPlatformHealth(c PlatformHealthChecker) {
+	m.saveEngineSetting(func(s *engineSettings) { s.platHealth = c })
 }
 
 // SetAlertRetry applies the alert delivery budget to every engine, now and to

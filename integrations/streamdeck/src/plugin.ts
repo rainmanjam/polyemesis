@@ -90,6 +90,11 @@ function surfaceFor(a: Action<JsonObject>, kind: SurfaceKind, settings: KeySetti
     async setFeedback(payload) {
       if (a.isDial()) await a.setFeedback(payload);
     },
+    async showIssues(lines) {
+      // Only to this key's own inspector: the SDK sends to whichever inspector is open, and the list
+      // of one destination must never land in another key's.
+      if (streamDeck.ui.action?.id === a.id) await streamDeck.ui.sendToPropertyInspector({ type: "issues", issues: lines });
+    },
   };
 }
 
@@ -185,6 +190,19 @@ export class PresetKey extends PolyAction {
   }
 }
 
+@action({ UUID: `${PLUGIN}.poll` })
+export class PollKey extends PolyAction {
+  readonly kind = "poll" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressPollDown(ev.action.id);
+  }
+
+  override onKeyUp(ev: KeyUpEvent): Promise<void> {
+    return rt().pressHoldUp(ev.action.id);
+  }
+}
+
 @action({ UUID: `${PLUGIN}.failover` })
 export class FailoverKey extends PolyAction {
   readonly kind = "failover" as const;
@@ -244,6 +262,7 @@ streamDeck.actions.registerAction(new StopAllKey());
 streamDeck.actions.registerAction(new StopDestinationKey());
 streamDeck.actions.registerAction(new RecordKey());
 streamDeck.actions.registerAction(new PresetKey());
+streamDeck.actions.registerAction(new PollKey());
 streamDeck.actions.registerAction(new FailoverKey());
 streamDeck.actions.registerAction(new TrackMuteKey());
 streamDeck.actions.registerAction(new TrackGainDial());
@@ -264,6 +283,10 @@ streamDeck.ui.onSendToPlugin(async (ev: SendToPluginEvent<JsonValue, JsonObject>
     // The preset picker reads the saved pairing, never the inspector's form: a token typed but not saved
     // must not be what lists the presets.
     await streamDeck.ui.sendToPropertyInspector(await presetList());
+  } else if (msg.type === "issues") {
+    // A destination key's inspector, opening: the list its key last painted. Read from the runtime, never
+    // fetched: the inspector adds no request to the install.
+    await streamDeck.ui.sendToPropertyInspector({ type: "issues", issues: rt().issuesFor(ev.action.id) ?? [] });
   } else if (msg.type === "destinations") {
     // The same rule as the presets: the saved pairing lists them, never the inspector's form.
     await streamDeck.ui.sendToPropertyInspector(await destinationList(keySettings({ sourceId: msg.sourceId }).sourceId));

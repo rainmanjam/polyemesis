@@ -111,11 +111,28 @@ func TestHeldIsSubscribableAndAppendedAfterEveryExistingTrigger(t *testing.T) {
 	if !KnownTrigger(TriggerDestinationHeld) {
 		t.Fatal("destination.held cannot be subscribed to")
 	}
+	// Seventh: appended after the six that existed before it. failover.switched
+	// (#6) was appended after it in turn, which is the same rule applied again.
 	all := AllTriggers()
-	if all[len(all)-1] != TriggerDestinationHeld {
-		t.Errorf("AllTriggers ends with %q; a new trigger is appended so no picker row moves", all[len(all)-1])
+	if all[6] != TriggerDestinationHeld {
+		t.Errorf("AllTriggers[6] is %q; a new trigger is appended so no picker row moves", all[6])
 	}
 	if TriggerDestinationHeld != "destination.held" {
 		t.Errorf("the trigger is %q; the events stream has always called this destination.held", TriggerDestinationHeld)
+	}
+}
+
+// failover.switched (#6) is appended LAST, after destination.held, so no row of
+// the settings picker moves under an operator who has learned it.
+func TestFailoverSwitchedIsSubscribableAndAppendedLast(t *testing.T) {
+	if !KnownTrigger(TriggerFailoverSwitched) {
+		t.Fatal("failover.switched cannot be subscribed to")
+	}
+	all := AllTriggers()
+	if all[len(all)-1] != TriggerFailoverSwitched {
+		t.Errorf("AllTriggers ends with %q, want failover.switched appended last", all[len(all)-1])
+	}
+	if TriggerFailoverSwitched != "failover.switched" {
+		t.Errorf("the trigger is %q; the alert and the events stream already call this failover.switched", TriggerFailoverSwitched)
 	}
 }

@@ -11,6 +11,7 @@ import {
   Pencil,
   Play,
   RefreshCw,
+  Scissors,
   Square,
   Undo2,
   Trash2,
@@ -27,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { StatusReason } from "@/components/signature/StatusReason";
+import { DelayPanel } from "@/components/DelayPanel";
 import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { ExperimentalBadge } from "@/components/Experimental";
@@ -69,6 +71,7 @@ export function DestinationCard({
   dest,
   onStart,
   onStop,
+  onStopNow,
   onRestart,
   onEdit,
   onDelete,
@@ -86,6 +89,10 @@ export function DestinationCard({
   dest: DestStatus;
   onStart: () => void;
   onStop: () => void;
+  /** The broadcast delay's "Stop now" (#11): stop and discard the buffered
+   *  tail, or cut a tail already draining. Optional: only a delayed
+   *  destination is offered it. */
+  onStopNow?: () => void;
   onRestart: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -458,6 +465,7 @@ export function DestinationCard({
             Amber rather than red for the same reason the field is not `error`:
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
+        <DelayPanel dest={dest} onCutNow={onStopNow} busy={busy} />
         {dest.stopWarning && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -640,6 +648,22 @@ export function DestinationCard({
               }
             >
               <Play /> {t("common.start")}
+            </Button>
+          )}
+          {/* STOP NOW, for a delayed destination that is still on (#11). The
+              plain Stop above plays the buffered tail out; this one discards
+              it, so nothing more of this programme airs. No undo countdown:
+              it can only ever put less on the air. */}
+          {dest.enabled && !held.pending && (dest.delaySeconds ?? 0) > 0 && onStopNow && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onStopNow}
+              disabled={busy}
+              title={t("delay.stopNowTitle", { name: dest.name })}
+              data-testid="delay-stop-now"
+            >
+              <Scissors /> {t("delay.stopNow")}
             </Button>
           )}
           {/* Buttons rather than drag: they work from the keyboard, and moving

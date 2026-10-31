@@ -1,6 +1,6 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
-  "excusedCeiling": 58,
+  "excusedCeiling": 60,
   "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
@@ -12,17 +12,17 @@
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 251,
-    "swept": 67,
-    "excused": 58,
-    "denied": 126,
+    "methodPatternPairs": 263,
+    "swept": 71,
+    "excused": 60,
+    "denied": 132,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 53,
+    "invariant": 57,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -128,6 +128,12 @@
       "method": "GET",
       "pattern": "/api/v1/automod/stats",
       "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/automod/test",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -798,6 +804,30 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/obs",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/obs",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/obs/events",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/obs/password",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/overlay/config",
       "coverage": "excused",
       "zeroSource": "unguarded"
@@ -949,6 +979,36 @@
     {
       "method": "POST",
       "pattern": "/api/v1/playout/token",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/polls",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/polls",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/polls/export",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/polls/{id}",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/polls/{id}/end",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -1345,6 +1405,18 @@
     {
       "method": "GET",
       "pattern": "/overlay/k/{key}",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/poll",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/overlay/poll/k/{key}",
       "coverage": "excused",
       "zeroSource": "unguarded"
     },
@@ -1748,6 +1820,11 @@
       "class": "unstable"
     },
     {
+      "path": "/api/v1/obs",
+      "pattern": "GET /api/v1/obs",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/platforms/accounts",
       "pattern": "GET /api/v1/platforms/accounts",
       "class": "invariant",
@@ -1787,6 +1864,21 @@
       "sentinels": [
         "SENTINEL-playout-watch-token-9f3a"
       ]
+    },
+    {
+      "path": "/api/v1/polls",
+      "pattern": "GET /api/v1/polls",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/polls/1",
+      "pattern": "GET /api/v1/polls/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/polls/export",
+      "pattern": "GET /api/v1/polls/export",
+      "class": "invariant"
     },
     {
       "path": "/api/v1/processes",
@@ -1866,6 +1958,7 @@
       "class": "differential",
       "pointers": [
         "/automod/model/endpoint",
+        "/automod/secondary/endpoint",
         "/failover/backup/pull/url",
         "/failover/backup/rtmp/streamKey",
         "/failover/backup/srt/passphrase",
@@ -2425,6 +2518,28 @@
     },
     {
       "route": "GET /overlay/k/{key}",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/poll",
+      "scope": "route",
+      "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
+      "want": {
+        "as": "read",
+        "status": 0,
+        "anonMatchesRead": true
+      },
+      "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /overlay/poll/k/{key}",
       "scope": "route",
       "why": "the player SPA bundle: a build-time embed.FS, byte-identical for every principal. No STATUS is claimed, deliberately: it is 404 with the UI unbuilt and 200 with it built, and pinning either would make this assertion a statement about the build rather than about disclosure. The identity with an anonymous stranger is the claim, and it holds either way.",
       "want": {

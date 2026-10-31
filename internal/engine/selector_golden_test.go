@@ -91,27 +91,35 @@ func allSourceChoices() []sourceChoice {
 								// ask about it.
 								for _, playlistRunning := range bools {
 									for _, autoReturn := range bools {
-										p := dead
-										if primaryLive {
-											p = live(stable)
+										// primaryDegraded is innermost so that
+										// filtering it out yields the
+										// pre-degraded 3200 in their original
+										// order -- see TestAddingTheDegradedBit
+										// MovedNoDecisionThatDidNotInvolveIt.
+										for _, primaryDegraded := range bools {
+											p := dead
+											if primaryLive {
+												p = live(stable)
+											}
+											b := dead
+											if backupLive {
+												b = live(false)
+											}
+											out = append(out, sourceChoice{
+												now:             goldenNow,
+												cur:             cur,
+												pinned:          pinned,
+												primary:         p,
+												backup:          b,
+												backupEnabled:   backupEnabled,
+												slateEnabled:    slateEnabled,
+												playlistRunning: playlistRunning,
+												grace:           goldenGrace,
+												autoReturn:      autoReturn,
+												returnStable:    goldenReturnStable,
+												primaryDegraded: primaryDegraded,
+											})
 										}
-										b := dead
-										if backupLive {
-											b = live(false)
-										}
-										out = append(out, sourceChoice{
-											now:             goldenNow,
-											cur:             cur,
-											pinned:          pinned,
-											primary:         p,
-											backup:          b,
-											backupEnabled:   backupEnabled,
-											slateEnabled:    slateEnabled,
-											playlistRunning: playlistRunning,
-											grace:           goldenGrace,
-											autoReturn:      autoReturn,
-											returnStable:    goldenReturnStable,
-										})
 									}
 								}
 							}
@@ -126,6 +134,24 @@ func allSourceChoices() []sourceChoice {
 
 // goldenRow renders one input and its answer as a single stable line.
 func goldenRow(c sourceChoice) string {
+	kind, reason := chooseSource(c)
+	return fmt.Sprintf(
+		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t playlistRunning=%-5t autoReturn=%-5t primaryDegraded=%-5t => %-7s %q",
+		orNone(c.cur), orNone(c.pinned),
+		c.primary.alive(c.now, c.grace),
+		c.primary.stableFor(c.now) >= c.returnStable,
+		c.backup.alive(c.now, c.grace),
+		c.backupEnabled, c.slateEnabled, c.playlistRunning, c.autoReturn, c.primaryDegraded,
+		orNone(kind), reason,
+	)
+}
+
+// goldenRowBeforeDegraded renders a row in the EXACT format the table used
+// before the degraded-link bit existed -- no primaryDegraded column. It plays
+// the part for #6 that goldenRowBeforeThePlaylist plays for Task 4: adding a
+// column rewrites the text of every row, so the only diff that carries signal
+// is the old format rendered over the rows where the new bit is false.
+func goldenRowBeforeDegraded(c sourceChoice) string {
 	kind, reason := chooseSource(c)
 	return fmt.Sprintf(
 		"cur=%-7s pinned=%-7s primaryLive=%-5t stable=%-5t backupLive=%-5t backupEnabled=%-5t slateEnabled=%-5t playlistRunning=%-5t autoReturn=%-5t => %-7s %q",
@@ -182,7 +208,9 @@ func TestChooseSourceGoldenIsExhaustive(t *testing.T) {
 	// than as a literal, because "4096" is what this looks like to arithmetic
 	// done from memory, and a wrong constant here fails as a count mismatch
 	// that reads like a broken enumeration.
-	const want = 5 * 5 * 2 * 2 * 2 * 2 * 2 * 2 * 2
+	//
+	// 6400 since #6: the degraded-link bit is one more boolean, so exactly 2x.
+	const want = 5 * 5 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2
 	if len(choices) != want {
 		t.Fatalf("enumerated %d inputs, want %d -- the net has a hole in it", len(choices), want)
 	}
@@ -323,6 +351,11 @@ func TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt(t *testing.T) {
 		if c.playlistRunning || c.cur == sourcePlaylist || c.pinned == sourcePlaylist {
 			continue
 		}
+		// And the degraded bit, which postdates both tables: a degraded
+		// primary is not an input either of them could express.
+		if c.primaryDegraded {
+			continue
+		}
 		lines = append(lines, goldenRowBeforeThePlaylist(c))
 	}
 
@@ -377,5 +410,64 @@ func TestAdmittingThePlaylistMovedNoDecisionThatDidNotInvolveIt(t *testing.T) {
 		t.Errorf("%d of %d decisions that predate the playlist changed. Admitting a "+
 			"candidate that is not running must change nothing; do not regenerate "+
 			"anything until each of these is explained.", moved, len(lines))
+	}
+}
+
+// goldenNoDegradedFile is the decision table exactly as it stood before #6
+// admitted the degraded-link bit: 3200 rows in the pre-degraded format, copied
+// byte for byte from selector_golden.txt at dec79685. Like the pre-playout
+// table it has no -update path and is bound to history by a hash in source.
+const goldenNoDegradedFile = "selector_golden_no_degraded.txt"
+
+const goldenNoDegradedSHA256 = "aef43552461f99d098da855f1c087f8f76186d230e168eb557110e1d9af6ecdf"
+
+// TestAddingTheDegradedBitMovedNoDecisionThatDidNotInvolveIt makes the claim
+// #6 has to be able to make: a primary that is NOT degraded is decided exactly
+// as it was before link health existed, reason strings included. Every one of
+// the 3200 pre-degraded inputs is re-rendered in the old format and compared
+// line for line, so a regression hiding in a 6400-row golden rewrite cannot be
+// reviewed past.
+func TestAddingTheDegradedBitMovedNoDecisionThatDidNotInvolveIt(t *testing.T) {
+	var lines []string
+	for _, c := range allSourceChoices() {
+		if c.primaryDegraded {
+			continue
+		}
+		lines = append(lines, goldenRowBeforeDegraded(c))
+	}
+	const want = 5 * 5 * 2 * 2 * 2 * 2 * 2 * 2 * 2
+	if len(lines) != want {
+		t.Fatalf("the pre-degraded subset is %d rows, want %d -- the filter is wrong", len(lines), want)
+	}
+
+	path := filepath.Join("testdata", goldenNoDegradedFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v -- it is a historical record; restore it from history", path, err)
+	}
+	norm := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if sum := sha256.Sum256([]byte(norm)); hex.EncodeToString(sum[:]) != goldenNoDegradedSHA256 {
+		t.Fatalf("%s is not the pre-degraded table (sha256 %s, want %s). It is not a golden "+
+			"file to regenerate: re-cutting it from current code compares the change against "+
+			"itself. Restore it with git checkout -- %s.",
+			path, hex.EncodeToString(sum[:]), goldenNoDegradedSHA256, path)
+	}
+	oldLines := strings.Split(strings.TrimRight(norm, "\n"), "\n")
+	if len(oldLines) != len(lines) {
+		t.Fatalf("%s has %d rows, the pre-degraded subset has %d", path, len(oldLines), len(lines))
+	}
+	moved := 0
+	for i := range lines {
+		if oldLines[i] == lines[i] {
+			continue
+		}
+		moved++
+		if moved <= 12 {
+			t.Errorf("row %d moved with the primary NOT degraded:\n  was: %s\n  now: %s", i, oldLines[i], lines[i])
+		}
+	}
+	if moved > 0 {
+		t.Errorf("%d of %d decisions with a healthy primary changed; link health must only "+
+			"ever move a decision when the primary is degraded", moved, len(lines))
 	}
 }

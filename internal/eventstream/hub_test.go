@@ -328,7 +328,7 @@ func TestAnUncataloguedTypeReachesNobody(t *testing.T) {
 	h := NewHub()
 	sub, _, _ := h.Subscribe(Filter{}, "")
 	defer sub.Close()
-	h.Publish(Envelope{Type: "poll.started"})
+	h.Publish(Envelope{Type: "viewers.sample"})
 	h.Publish(Envelope{Type: TypeStreamGap}) // per-connection, never broadcast
 	if got := drain(sub); len(got) != 0 {
 		t.Errorf("uncatalogued or per-connection types were broadcast: %v", got)

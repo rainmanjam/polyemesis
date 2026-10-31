@@ -152,20 +152,12 @@ func (s *Server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	out := make([]accountView, 0, len(accts))
 	now := time.Now()
 	for _, a := range accts {
-		o, failing := s.acctHealth.get(a.ID)
-		// The list read carries no secrets, so whether a near-expiry account
-		// can refresh is one extra read, for that account only. A failed read
-		// assumes it can: "expired" is a claim this must not make on a guess.
-		canRefresh := true
-		if nearExpiry(a, now) {
-			if full, err := s.store.GetPlatformAccount(s.box, a.ID); err == nil {
-				canRefresh = full.RefreshToken != ""
-			}
-		}
 		out = append(out, accountView{
 			PlatformAccount: a,
 			Reconnect:       oauth.AccountNeedsReconnect(a),
-			Health:          accountHealthFor(a, canRefresh, o, failing, now),
+			// The same derivation the Stream Deck's key reads, through
+			// accountHealthCache: see destsignals.go.
+			Health: s.accountHealthNow(a, now),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

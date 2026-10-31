@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -120,6 +121,18 @@ type IngestSettings struct {
 	// omitempty so a settings blob written before roles existed round-trips
 	// byte-identically.
 	Annotations []routing.TrackAnnotation `json:"annotations,omitempty"`
+	// Degraded is this programme's link-health thresholds for degraded-link
+	// failover (#6): leave a primary that is still delivering, but badly.
+	//
+	// ON THE INGEST, NOT ON FAILOVER, BECAUSE IT IS PER PROGRAMME. Failover's
+	// own settings are install-wide; an ingest block is stored per source, and
+	// link quality is a property of one encoder's uplink -- a bonded cellular
+	// rig and a studio fibre line on the same install want different floors.
+	// The selector reads it from the programme's own ingest.
+	//
+	// A zero value is "off, with no thresholds": it validates, and it is what
+	// a row from before #6 decodes to.
+	Degraded DegradedSettings `json:"degraded"`
 }
 
 // problems reports everything wrong with one ingest configuration.
@@ -197,6 +210,7 @@ func (i IngestSettings) problems() []string {
 		add("rtmp app name is required (it is the /live in the publish URL; " +
 			"the source is addressed by its token, not by this)")
 	}
+	probs = append(probs, i.Degraded.problems()...)
 	return probs
 }
 
@@ -657,6 +671,83 @@ type FailoverSettings struct {
 	// its own top-level section, because it is one more answer to the same
 	// question the slate answers -- what feeds the hub when nothing else does.
 	Playlist PlaylistSettings `json:"playlist"`
+}
+
+// DegradedSettings are a programme's link-health thresholds.
+//
+// Each threshold is independent and 0 switches it off, so an operator can
+// fail over on bitrate alone -- which is the one every ingest mode can measure.
+// RTT and loss come from the SRT protocol's own statistics and are only
+// evaluated for an SRT (or SRTLA-bonded) primary; for RTMP and pull they never
+// trip, and they never read as zero either.
+//
+// A breach has to persist for SustainSeconds before it counts, and a tripped
+// link has to read healthy for the same SustainSeconds before it clears. The
+// second half is the hysteresis: the slate and playlist branches return to a
+// primary at once, without consulting the return mode, so a link hovering at a
+// threshold would otherwise flap the broadcast between the two every sweep.
+type DegradedSettings struct {
+	Enabled bool `json:"enabled"`
+	// MinBitrateKbps trips when the primary delivers less than this.
+	MinBitrateKbps int `json:"minBitrateKbps"`
+	// MaxRTTMs trips when the SRT round-trip time rises above this.
+	MaxRTTMs int `json:"maxRttMs"`
+	// MaxLossPercent trips when the share of SRT packets reported missing over
+	// the last sample interval rises above this.
+	MaxLossPercent float64 `json:"maxLossPercent"`
+	// SustainSeconds is how long a breach, or a recovery, must last. 0 means
+	// DefaultDegradedSustainSeconds, so a row saved before #6 existed -- which
+	// carries a zero here -- is not a validation error on its next save.
+	SustainSeconds int `json:"sustainSeconds"`
+}
+
+// Degraded-link bounds.
+const (
+	DefaultDegradedSustainSeconds = 5
+	MaxDegradedSustainSeconds     = 300
+	MaxDegradedBitrateKbps        = 200_000
+	MaxDegradedRTTMs              = 10_000
+)
+
+// DefaultDegradedSettings is the thresholds a programme starts with: off.
+func DefaultDegradedSettings() DegradedSettings {
+	return DegradedSettings{
+		MinBitrateKbps: 800,
+		MaxRTTMs:       1500,
+		MaxLossPercent: 15,
+		SustainSeconds: DefaultDegradedSustainSeconds,
+	}
+}
+
+// Sustain is SustainSeconds with the zero value resolved.
+func (d DegradedSettings) Sustain() int {
+	if d.SustainSeconds <= 0 {
+		return DefaultDegradedSustainSeconds
+	}
+	return d.SustainSeconds
+}
+
+func (d DegradedSettings) problems() []string {
+	var probs []string
+	add := func(fs string, a ...any) { probs = append(probs, fmt.Sprintf(fs, a...)) }
+	if v := d.MinBitrateKbps; v < 0 || v > MaxDegradedBitrateKbps {
+		add("degraded-link bitrate threshold %d kbps out of range (0-%d)", v, MaxDegradedBitrateKbps)
+	}
+	if v := d.MaxRTTMs; v < 0 || v > MaxDegradedRTTMs {
+		add("degraded-link RTT threshold %d ms out of range (0-%d)", v, MaxDegradedRTTMs)
+	}
+	// NaN fails both comparisons, so it is refused by name rather than let
+	// through as "in range".
+	if v := d.MaxLossPercent; math.IsNaN(v) || v < 0 || v > 100 {
+		add("degraded-link loss threshold %v%% out of range (0-100)", v)
+	}
+	if v := d.SustainSeconds; v < 0 || v > MaxDegradedSustainSeconds {
+		add("degraded-link sustain time %ds out of range (0-%d)", v, MaxDegradedSustainSeconds)
+	}
+	if d.Enabled && d.MinBitrateKbps == 0 && d.MaxRTTMs == 0 && d.MaxLossPercent == 0 {
+		add("degraded-link failover is on but every threshold is off; set at least one")
+	}
+	return probs
 }
 
 // SlateImageProblem reports why the configured still cannot be used, or nil.
@@ -1468,6 +1559,15 @@ type ListenerSettings struct {
 	// used to serve at most one, which was an artifact of `ffmpeg -listen 1`
 	// being unable to demultiplex by path rather than a decision anyone made.
 	RTMPPort int `json:"rtmpPort"`
+	// SRTLAPort is the UDP port of the SRTLA bonding receiver (#6), 0 for off.
+	// Bonded IRL encoders -- BELABOX, Moblin, IRL Pro, srtla_send -- spread one
+	// SRT session over several network links to this port; the receiver
+	// merges them and hands the session to the SRT listener above, so token
+	// authentication and everything after it are exactly the SRT path's.
+	//
+	// Off by default because it is one more open UDP port, and an install
+	// that has no bonded encoder gains nothing from it.
+	SRTLAPort int `json:"srtlaPort"`
 }
 
 func (l ListenerSettings) problems() []string {
@@ -1480,6 +1580,16 @@ func (l ListenerSettings) problems() []string {
 	}
 	if l.SRTPort == l.RTMPPort {
 		probs = append(probs, fmt.Sprintf("srt and rtmp listeners cannot share port %d", l.SRTPort))
+	}
+	if l.SRTLAPort < 0 || l.SRTLAPort > 65535 {
+		probs = append(probs, fmt.Sprintf("srtla receiver port %d out of range (0 turns it off)", l.SRTLAPort))
+	}
+	// Both are UDP, so the same number is a bind conflict, not a choice. RTMP
+	// is TCP and could share the number; it is refused anyway, because "the
+	// same port for two protocols" is a configuration nobody reads correctly
+	// from a firewall rule.
+	if l.SRTLAPort != 0 && (l.SRTLAPort == l.SRTPort || l.SRTLAPort == l.RTMPPort) {
+		probs = append(probs, fmt.Sprintf("the srtla receiver cannot share port %d with the srt or rtmp listener", l.SRTLAPort))
 	}
 	return probs
 }
@@ -1596,6 +1706,25 @@ type Settings struct {
 	Chat       ChatSettings       `json:"chat"`
 	Automod    AutomodSettings    `json:"automod"`
 	Alerts     AlertSettings      `json:"alerts"`
+	// ChatCommands is the chat-driven control of #6: !bitrate, and the
+	// moderator-only !switch and !fix. Top level rather than inside Chat because
+	// it is a control surface over a programme, not a property of the chat
+	// pipeline, and because Chat's fields are spread field by field in the UI.
+	ChatCommands ChatCommandSettings `json:"chatCommands"`
+}
+
+// ChatCommandSettings turns chat commands on and picks the programme they act
+// on.
+//
+// OFF BY DEFAULT, because !switch and !fix put the broadcast in the hands of
+// every moderator of every connected channel -- a decision an operator has to
+// make, not one an upgrade makes for them.
+type ChatCommandSettings struct {
+	Enabled bool `json:"enabled"`
+	// SourceID is the programme the commands report on and switch. 0 means the
+	// default programme. Chat is install-wide and a command names no programme,
+	// so on a multi-programme install exactly one of them answers to chat.
+	SourceID int64 `json:"sourceId"`
 }
 
 // AutomodSettings is everything about automatic chat moderation except the
@@ -1628,8 +1757,19 @@ type AutomodSettings struct {
 	Rules []AutomodRule `json:"rules,omitempty"`
 	// History bounds the sequence detectors.
 	History AutomodHistory `json:"history"`
-	// Model configures the optional external checker.
+	// Model configures the optional external checker -- the PRIMARY one.
+	// Its name predates there being two, and it keeps it: renaming it would
+	// strand every stored blob and every API client.
+	//
+	// It also carries what both checkers share: the Instruction, the legacy
+	// single Action, TimeoutForBan and the per-category action table. The
+	// secondary is a second connection to ask, not a second policy.
 	Model AutomodModel `json:"model"`
+	// Secondary is the OpenAI-compatible fallback (by default), asked about a
+	// message only when the primary could not answer it. Its Instruction,
+	// Action, TimeoutForBan and CategoryActions are not read: the primary's
+	// apply to both.
+	Secondary AutomodModel `json:"secondary"`
 }
 
 // UnmarshalJSON makes a sent matrix REPLACE the stored one instead of merging
@@ -1667,9 +1807,28 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 		PlatformEnabled json.RawMessage `json:"platformEnabled"`
 		On              json.RawMessage `json:"on"`
 		Rules           json.RawMessage `json:"rules"`
+		Model           json.RawMessage `json:"model"`
+		Secondary       json.RawMessage `json:"secondary"`
 	}
 	if err := json.Unmarshal(b, &sent); err != nil {
 		return err
+	}
+	// The category table is a sparse map with the same merge trap as On: a
+	// category the client set back to "use the default" by leaving it out
+	// would otherwise keep its stored action.
+	modelSent, err := sentModelKeys(sent.Model)
+	if err != nil {
+		return err
+	}
+	if modelSent.categoryActions {
+		a.Model.CategoryActions = nil
+	}
+	secondarySent, err := sentModelKeys(sent.Secondary)
+	if err != nil {
+		return err
+	}
+	if secondarySent.categoryActions {
+		a.Secondary.CategoryActions = nil
 	}
 	if len(sent.PlatformEnabled) > 0 {
 		a.PlatformEnabled = nil
@@ -1684,7 +1843,51 @@ func (a *AutomodSettings) UnmarshalJSON(b []byte) error {
 	if len(sent.Rules) > 0 {
 		a.Rules = nil
 	}
-	return json.Unmarshal(b, (*plain)(a))
+	if err := json.Unmarshal(b, (*plain)(a)); err != nil {
+		return err
+	}
+	// A MODEL BLOCK WITHOUT A PROTOCOL WAS WRITTEN BEFORE THERE WAS A CHOICE,
+	// and the only protocol there was is OpenAI-compatible.
+	//
+	// Without this, a pre-#21 blob decoded over DefaultSettings inherits the
+	// new default protocol, Jev. An operator whose checker was pointed at
+	// OpenAI would have their endpoint sent Jev-shaped bodies and fail every
+	// message open; one whose endpoint was blank would have the default Jev
+	// endpoint handed their OpenAI key. Decided by the ABSENCE of the key in
+	// what was decoded, not by comparing values, so an operator who chooses
+	// Jev and saves is never re-read as OpenAI. The preset becomes Custom:
+	// json_object, no reasoning setting, not local -- byte for byte the request
+	// the connector made before presets existed.
+	if len(sent.Model) > 0 && string(sent.Model) != "null" && !modelSent.protocol {
+		a.Model.Protocol = AutomodProtocolOpenAI
+		a.Model.Preset = "custom"
+	}
+	return nil
+}
+
+// AutomodProtocolJev and AutomodProtocolOpenAI mirror automod.ProtocolJev and
+// automod.ProtocolOpenAI, which this package cannot import (automod imports
+// db). internal/api holds the two in step with a test.
+const (
+	AutomodProtocolJev    = "jev"
+	AutomodProtocolOpenAI = "openai"
+)
+
+// sentModelKeyset is which keys a sent model object named.
+type sentModelKeyset struct{ protocol, categoryActions bool }
+
+func sentModelKeys(raw json.RawMessage) (sentModelKeyset, error) {
+	var k sentModelKeyset
+	if len(raw) == 0 || string(raw) == "null" {
+		return k, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return k, err
+	}
+	_, k.protocol = m["protocol"]
+	_, k.categoryActions = m["categoryActions"]
+	return k, nil
 }
 
 // CheckAutomodFields refuses a SENT automod object that names a field this
@@ -1761,6 +1964,25 @@ type AutomodModel struct {
 	TimeoutForBan   int     `json:"timeoutForBan,omitempty"`
 	MinConfidence   float64 `json:"minConfidence"`
 	Instruction     string  `json:"instruction"`
+
+	// Protocol is "jev" or "openai". See AutomodSettings.UnmarshalJSON for
+	// what a stored block without one means.
+	Protocol string `json:"protocol"`
+	// Preset is an internal/automod preset ID. It decides the JSON mode, the
+	// reasoning setting and the local flag-only lock -- read from the preset
+	// table by the server, never from this document.
+	Preset string `json:"preset"`
+	// CategoryActions maps a model category (spam, harassment, hate_speech,
+	// threat, sexual_content, other) to the action a finding in it asks for.
+	// A category not named here gets Action, which is flag by default. Read
+	// from the primary only.
+	CategoryActions map[string]string `json:"categoryActions,omitempty"`
+	// Tested reports that this checker's current connection -- protocol,
+	// preset, endpoint, model and key -- has passed the Test button. DERIVED,
+	// like HasAPIKey: filled on the way out to the settings page, and a value
+	// a client sends is ignored. Enabling a checker that has not passed is
+	// refused by the settings handler.
+	Tested bool `json:"tested"`
 }
 
 // ChatSettings bounds the stored chat scrollback.
@@ -1969,6 +2191,11 @@ func DefaultSettings() Settings {
 			// grandfather clause from ever colliding with a source created
 			// afterwards.
 			RTMP: RTMPSettings{App: "live"},
+			// Off, with thresholds already filled in so switching it on is one
+			// tick: 800 kbps is where a 720p30 picture visibly falls apart, and
+			// the RTT and loss figures are the ones IRL cellular links cross
+			// when they are about to drop.
+			Degraded: DefaultDegradedSettings(),
 			Pull: PullSettings{
 				ReconnectDelayMaxSeconds: ffmpeg.DefaultPullReconnectDelayMax,
 				RTSPTransport:            ffmpeg.DefaultPullRTSPTransport,
@@ -2138,14 +2365,36 @@ func DefaultSettings() Settings {
 				RetainPerAuthor:       24,
 				IdleEvictionSeconds:   600,
 			},
+			// The primary defaults to the Jev protocol on TypeSafe's hosted
+			// endpoint, pinned to a version. Off, and with no key: polyemesis
+			// ships with no account anywhere, and every operator brings their
+			// own. The strings mirror internal/automod's preset table, held in
+			// step by a test in internal/api.
 			Model: AutomodModel{
 				Enabled:         false,
-				Model:           "gpt-4o-mini",
+				Protocol:        AutomodProtocolJev,
+				Preset:          "jev",
+				Endpoint:        "https://api.typesafe.ai/v1/systemone",
+				Model:           "jev-1.14.0",
 				TimeoutSeconds:  4,
 				MaxCallsPerHour: 500,
 				Action:          "flag",
 				MinConfidence:   0.8,
 				Instruction:     "Flag harassment, threats, slurs and targeted abuse. Ordinary criticism, banter and strong language are not abuse.",
+			},
+			// The optional fallback: OpenAI-compatible, on the preset the
+			// spike measured best among them (Cerebras qwen-3.8, 0/165 false
+			// positives with a strict schema and reasoning off).
+			Secondary: AutomodModel{
+				Enabled:         false,
+				Protocol:        AutomodProtocolOpenAI,
+				Preset:          "cerebras",
+				Endpoint:        "https://api.cerebras.ai/v1/chat/completions",
+				Model:           "qwen-3.8-27b",
+				TimeoutSeconds:  4,
+				MaxCallsPerHour: 500,
+				Action:          "flag",
+				MinConfidence:   0.8,
 			},
 		},
 	}
@@ -2182,11 +2431,21 @@ func (s Settings) Validate() error {
 	// automod page carries a zero here and is not misconfigured, it is
 	// unconfigured, and refusing every unrelated settings save over a field
 	// nobody has touched is its own defect.
-	if s.Automod.Model.Enabled {
-		if c := s.Automod.Model.MinConfidence; c < 0.01 || c > 1 {
-			add("automod confidence floor %v is outside 0.01-1 (the model reports "+
-				"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
-				"anything above 1 stops it acting at all)", c)
+	for _, m := range []struct {
+		name string
+		cfg  AutomodModel
+	}{{"", s.Automod.Model}, {"secondary ", s.Automod.Secondary}} {
+		if m.cfg.Enabled {
+			if c := m.cfg.MinConfidence; c < 0.01 || c > 1 {
+				add("automod %sconfidence floor %v is outside 0.01-1 (the model reports "+
+					"certainty on a 0-1 scale, so 0 acts on every opinion it has and "+
+					"anything above 1 stops it acting at all)", m.name, c)
+			}
+		}
+		// Unconditional: a protocol saved while the checker is off is the
+		// one it wakes up with.
+		if p := m.cfg.Protocol; p != "" && p != AutomodProtocolJev && p != AutomodProtocolOpenAI {
+			add("automod %sprotocol %q is not jev or openai", m.name, p)
 		}
 	}
 	// Empty is deliberately accepted as "the default": a client that has never
@@ -2228,6 +2487,9 @@ func (s Settings) Validate() error {
 	for _, p := range s.Failover.problems(s.Ingest) {
 		add("%s", p)
 	}
+	if s.ChatCommands.SourceID < 0 {
+		add("chat commands programme %d is not a programme", s.ChatCommands.SourceID)
+	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)
 	}
@@ -2262,6 +2524,7 @@ func (s Settings) Validate() error {
 		credentialField{"failover.backup.pull.url", s.Failover.Backup.Pull.URL},
 		credentialField{"mqtt.brokerUrl", s.MQTT.BrokerURL},
 		credentialField{"automod.model.endpoint", s.Automod.Model.Endpoint},
+		credentialField{"automod.secondary.endpoint", s.Automod.Secondary.Endpoint},
 	)...)
 
 	if len(probs) > 0 {
@@ -2460,10 +2723,35 @@ func (d *DB) PutSettings(s Settings) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(
+	// ONE TRANSACTION with the automod key re-binding: a write that moves a
+	// model checker's endpoint must not commit while that checker's key is
+	// still bound to the old one, and a key that cannot be cleared must stop
+	// the write rather than be logged and left. See automod_binding.go.
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	before := mergeBaseSettings()
+	var raw string
+	switch err := tx.QueryRow(`SELECT json FROM settings WHERE id = 1`).Scan(&raw); {
+	case err == nil:
+		if before, err = decodeStoredSettings(raw); err != nil {
+			return err
+		}
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO settings (id, json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
-		string(b))
-	return err
+		string(b)); err != nil {
+		return err
+	}
+	if err := rebindAutomodKeysTx(tx, before, s); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // srtPassphraseUnreserved is the alphabet an SRT passphrase may use.

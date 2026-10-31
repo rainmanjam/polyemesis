@@ -381,6 +381,12 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Every automod model key bound to the endpoint it has been sent to. See
+	// MigrateAutomodKeyBinding.
+	if err := d.MigrateAutomodKeyBinding(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// LAST of all -- see MigrateSchemaVersion's comment for why the order
 	// matters and what this does and does not protect (issue #498).
 	if err := d.MigrateSchemaVersion(); err != nil {

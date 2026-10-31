@@ -110,3 +110,26 @@ type moderatingAdapter struct{ *banningAdapter }
 func (moderatingAdapter) Delete(context.Context, string) error { return nil }
 
 var _ Deleter = moderatingAdapter{}
+
+// TestAModelDecisionIsAnnouncedWithTheCheckerThatMadeIt: the moderation event
+// is the audit record, and with two model checkers "automod banned them" is
+// not the whole answer -- which checker decided is, because a secondary that
+// decided only because the primary was down is something an operator reviewing
+// a disputed ban needs to know.
+func TestAModelDecisionIsAnnouncedWithTheCheckerThatMadeIt(t *testing.T) {
+	h, sub := streamedHub(t)
+	inner := &fakeAdapter{
+		platform: db.PlatformTwitch, account: "acct",
+		messages: []Message{{ID: "m1", Author: Author{ID: "u1"}, Text: "hmm"}},
+	}
+	f := automod.Finding{Checker: automod.CheckerModel, Action: automod.ActionBan,
+		Category: automod.CategoryHarassment, DecidedBy: automod.SlotSecondary}
+	h.SetModerator(&stubModerator{verdict: automod.Verdict{Findings: []automod.Finding{f}, Act: []automod.Finding{f}}})
+	if err := h.Attach(context.Background(), &banningAdapter{fakeAdapter: inner}); err != nil {
+		t.Fatal(err)
+	}
+	mod := streamtest.Expect(t, sub, eventstream.TypeChatModeration)
+	if m := mod.Data.(map[string]any); m["decidedBy"] != "secondary" || m["by"] != ActorAutomod {
+		t.Errorf("the model's ban was announced as %v; want by=automod decidedBy=secondary", m)
+	}
+}

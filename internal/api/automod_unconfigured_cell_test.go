@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 // not dead: the moment somebody configured the model, it went live as a ban
 // nobody had knowingly chosen.
 func TestACellOnAnUnconfiguredCheckerCannotBeArmed(t *testing.T) {
-	h, _, sign := sourceServer(t)
+	h, store, sign := sourceServer(t)
 
 	settingsWith := func(edit func(am map[string]any)) map[string]any {
 		var doc map[string]any
@@ -44,7 +45,15 @@ func TestACellOnAnUnconfiguredCheckerCannotBeArmed(t *testing.T) {
 	}), http.StatusBadRequest)
 
 	// Configuring the checker in the SAME save is what the console does, and
-	// it has to work.
+	// it has to work. The connection has passed Test (#21: a model checker
+	// cannot be switched on untested), recorded here directly because this
+	// test is about the matrix, not the Test button.
+	if err := store.PutAutomodTestPass("primary", checkerFingerprint(db.AutomodModel{
+		Protocol: db.AutomodProtocolJev, Preset: "jev",
+		Endpoint: "https://model.example/v1/chat/completions", Model: "jev-1.14.0",
+	})); err != nil {
+		t.Fatal(err)
+	}
 	send(t, h, sign, http.MethodPut, "/api/v1/settings", settingsWith(func(am map[string]any) {
 		model := am["model"].(map[string]any)
 		model["enabled"] = true

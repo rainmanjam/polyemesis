@@ -128,6 +128,31 @@ The family headers are emitted even on an install with nothing configured, for
 the same reason: a `# TYPE polyemesis_ingest_up gauge` with no samples under it
 is what lets you write the alert before the first source exists.
 
+### Failover and link health
+
+[Degraded-link failover](LINK-HEALTH.md#degraded-link-failover) and the
+[SRTLA receiver](SRTLA.md) add five per-programme families, labelled `id` and
+`name` like the ingest series:
+
+- `polyemesis_failover_degraded` is 1 while the primary's link is judged
+  degraded, and 0 otherwise. It is 0, not absent, for a programme with failover
+  off, so an alert on it can be written before the first degradation.
+- `polyemesis_failover_active` has a `source` label (`primary`, `backup`,
+  `playlist`, `slate`) and is 1 for the source on air. It is absent while
+  failover is off.
+- `polyemesis_ingest_link_rtt_seconds` and `polyemesis_ingest_link_loss_ratio`
+  are the primary encoder's SRT round-trip time and its share of missing packets
+  over the last interval (0–1). Only an SRT or SRTLA primary has them, and only
+  while degraded-link failover is on. They are **absent**, not 0, otherwise:
+  0 ms and 0% are claims about a link, and an RTMP primary has made none.
+- `polyemesis_srtla_links` is how many network links the programme's encoder
+  is bonding through the SRTLA receiver, and 0 when it is not bonding.
+
+```promql
+polyemesis_failover_degraded == 1                           # a link is breaking up
+polyemesis_failover_active{source!="primary"} == 1          # not broadcasting the primary
+```
+
 ## Queries to start from
 
 ```promql
@@ -807,6 +832,27 @@ sum by (cause) (increase(polyemesis_destination_failures_total[1h]))
 The shipped Grafana dashboard draws all three, and the shipped
 `PolyemesisDestinationDown` rule names the cause in its description — see
 [GRAFANA.md](GRAFANA.md).
+
+### Broadcast delay
+
+A destination with a broadcast delay ([BROADCAST-DELAY.md](BROADCAST-DELAY.md))
+adds these, labelled `id` and `name`. A destination with no delay reports 0:
+
+- `polyemesis_destination_delay_seconds`: the configured delay.
+- `polyemesis_destination_delay_buffer_fill`: how much of the delay the buffer
+  holds, 0 to 1. It is 1 while on air.
+- `polyemesis_destination_delay_buffer_bytes{tier}`: bytes held, with `tier`
+  `memory` or `disk`. These are the two bounded quantities.
+- `polyemesis_destination_delay_dropped_bytes_total`: bytes dropped for want
+  of room. The delay was kept and the platform saw a gap. Resets when the
+  destination restarts.
+- `polyemesis_destination_delay_draining`: 1 while a stopped destination is
+  still airing its delayed tail.
+
+```promql
+increase(polyemesis_destination_delay_dropped_bytes_total[5m]) > 0   # the delay is losing data
+polyemesis_destination_delay_draining == 1                           # stopped, still on the air
+```
 
 ### Held after three quick rejections
 
