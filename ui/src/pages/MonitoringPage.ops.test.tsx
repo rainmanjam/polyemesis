@@ -35,6 +35,7 @@ const state = vi.hoisted(() => ({
   processes: [] as unknown[],
   destinationCalls: 0,
   failDestinations: false,
+  cpuCeiling: 85,
 }));
 
 vi.mock("@/hooks/useLiveData", () => ({
@@ -67,6 +68,7 @@ vi.mock("@/lib/api", async () => {
           : Promise.resolve([]);
       },
       listTimeline: () => Promise.resolve([]),
+      jobsOverview: () => Promise.resolve({ policy: { cpuCeilingPercent: state.cpuCeiling } }),
     },
   };
 });
@@ -86,6 +88,7 @@ afterEach(() => {
   state.processes = [];
   state.destinationCalls = 0;
   state.failDestinations = false;
+  state.cpuCeiling = 85;
 });
 
 const proc = (name: string, pstate: string) => ({
@@ -110,6 +113,16 @@ describe("MonitoringPage: one sentence says whether the stream is healthy (A66)"
     expect(
       await screen.findByText(translate("en", "mon.verdictProcessesFailed", { count: 1 })),
     ).toBeTruthy();
+  });
+
+  it("never says all is running while a process is reconnecting or stopped (A66)", async () => {
+    state.processes = [proc("preview", "running"), proc("ingest", "reconnecting")];
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
+
+    expect(
+      await screen.findByText(translate("en", "mon.verdictSomeNotRunning", { running: 1, count: 2 })),
+    ).toBeTruthy();
+    expect(screen.queryByText(translate("en", "mon.verdictAllRunning", { count: 2 }))).toBeNull();
   });
 
   it("says all is running when every process is up and nothing is failing", async () => {
@@ -173,5 +186,16 @@ describe("MonitoringPage: process state uses the shared status pill (A73)", () =
     render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
 
     await waitFor(() => expect(document.querySelector('[data-tone="bad"]')).not.toBeNull());
+  });
+});
+
+describe("MonitoringPage: the CPU warning follows the Jobs ceiling (A71)", () => {
+  it("names the saved Jobs CPU ceiling as the threshold on the CPU tile", async () => {
+    state.cpuCeiling = 70;
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
+
+    expect(
+      await screen.findByText(translate("en", "mon.cpuWarnsAbove", { pct: 70 })),
+    ).toBeTruthy();
   });
 });

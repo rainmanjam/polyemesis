@@ -423,7 +423,10 @@ its first tagged release.
   behind a button, and shows a dash rather than 0% before the first sample. On
   the first-run and sign-in screen, a wrong setup code or a dropped connection
   keeps what you typed, validation shows inline, and the setup-code help is
-  readable at 12px and up.
+  readable at 12px and up. Monitoring's CPU warning follows the Jobs CPU ceiling
+  you saved, and its status sentence counts processes that are not running. The
+  System page opens with the version, the ingest state and the host load, and
+  the debug recorder sits under Support tools.
 
 - **One status vocabulary, ready for the pages.** `lib/status.ts` maps every
   process, destination, delay, rendition, recorder, clip-buffer, ingest and

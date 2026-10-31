@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "Connection lost. Retrying automatically.",
   "jobs.gateCpuOverCeiling": "CPU over ceiling",
   "jobs.cancelRunningTitle": "Stop this running job?",
-  "jobs.cancelRunningDescription": "The progress so far is lost. You can submit the job again from the library.",
+  "jobs.cancelRunningDescription": "The progress so far is lost.",
   "jobs.cancelRunningConfirm": "Stop job",
   "mon.verdictProcessesFailed": "{count} failed. The log shows why.",
   "mon.verdictAllRunning": "All {count} running, none failed.",
-  "mon.verdictIngestLoss": "Packets are being lost on the ingest right now.",
+  "mon.verdictIngestLoss": "Packets have been lost or dropped on the relay.",
   "mon.expertShow": "Show advanced FFmpeg arguments",
   "mon.expertHide": "Hide advanced FFmpeg arguments",
   "mon.expertClosedHint": "Raw flags for a live output. Saving restarts that output.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Linux install: sudo journalctl -u polyemesis | grep -A2 'setup code', or sudo cat /var/lib/polyemesis/setup-code.",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis, or docker exec polyemesis cat /data/setup-code.",
   "auth.setupCodeOther": "Anywhere else: the server printed the code when it started and saved it in the file setup-code in its data directory.",
-  "mon.verdictSeeLog": "See the log"
+  "mon.verdictSeeLog": "See the log",
+  "mon.verdictSomeNotRunning": "{running} of {count} running.",
+  "mon.cpuWarnsAbove": "Warns above {pct}%, the Jobs CPU ceiling.",
+  "system.statusTitle": "Machine status",
+  "system.version": "Version",
+  "system.supportTools": "Support tools"
 }

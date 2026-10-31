@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "Koneksi terputus. Mencoba lagi secara otomatis.",
   "jobs.gateCpuOverCeiling": "CPU di atas batas",
   "jobs.cancelRunningTitle": "Hentikan pekerjaan yang sedang berjalan ini?",
-  "jobs.cancelRunningDescription": "Kemajuan sejauh ini akan hilang. Anda dapat mengirim ulang pekerjaan dari pustaka.",
+  "jobs.cancelRunningDescription": "Kemajuan sejauh ini akan hilang.",
   "jobs.cancelRunningConfirm": "Hentikan pekerjaan",
   "mon.verdictProcessesFailed": "{count} gagal. Log menunjukkan penyebabnya.",
   "mon.verdictAllRunning": "Semua {count} berjalan, tidak ada yang gagal.",
-  "mon.verdictIngestLoss": "Paket sedang hilang pada input saat ini.",
+  "mon.verdictIngestLoss": "Paket telah hilang atau dibuang di relay.",
   "mon.expertShow": "Tampilkan argumen FFmpeg lanjutan",
   "mon.expertHide": "Sembunyikan argumen FFmpeg lanjutan",
   "mon.expertClosedHint": "Flag mentah untuk output yang sedang live. Menyimpan akan memulai ulang output itu.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Instalasi Linux: sudo journalctl -u polyemesis | grep -A2 'setup code', atau sudo cat /var/lib/polyemesis/setup-code.",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis, atau docker exec polyemesis cat /data/setup-code.",
   "auth.setupCodeOther": "Lainnya: server mencetak kode saat mulai dan menyimpannya di berkas setup-code dalam direktori datanya.",
-  "mon.verdictSeeLog": "Lihat log"
+  "mon.verdictSeeLog": "Lihat log",
+  "mon.verdictSomeNotRunning": "{running} dari {count} berjalan.",
+  "mon.cpuWarnsAbove": "Peringatan di atas {pct}%, batas CPU Pekerjaan.",
+  "system.statusTitle": "Status mesin",
+  "system.version": "Versi",
+  "system.supportTools": "Alat dukungan"
 }

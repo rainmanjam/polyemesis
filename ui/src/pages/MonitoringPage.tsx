@@ -39,6 +39,7 @@ import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
 import { toneForState } from "@/lib/signal";
 import { processStatus } from "@/lib/status";
 import { StatusPill } from "@/components/StatusPill";
+import { EmptyState } from "@/components/EmptyState";
 import {
   VERDICT_WINDOW_SEC,
   collapseRepeats,
@@ -517,6 +518,15 @@ export function MonitoringPage() {
   const [processesLoaded, setProcessesLoaded] = useState(false);
   // Expert mode (raw FFmpeg arguments) is closed until asked for (A67).
   const [expertOpen, setExpertOpen] = useState(false);
+  // The CPU warning is the Jobs CPU ceiling the operator saved, so the two pages
+  // cannot disagree about when the machine is too busy (A71). 85 until read.
+  const [cpuWarn, setCpuWarn] = useState(85);
+  useEffect(() => {
+    api
+      .jobsOverview()
+      .then((v) => setCpuWarn(v.policy.cpuCeilingPercent))
+      .catch(() => setCpuWarn(85));
+  }, []);
   const [history, setHistory] = useState<LogLine[]>([]);
   // ?process=<name> opens the log on one process: the "Show log" links on a
   // destination card and on a timeline row land here (A9, A13). Followed on
@@ -722,6 +732,7 @@ export function MonitoringPage() {
   // the calm case. It does not reuse the Dashboard verdict, which is still to
   // be unified (A3, A73); it reads the same process states the table does.
   const failedCount = processes.filter((p) => p.status.state === "failed").length;
+  const runningCount = processes.filter((p) => p.status.state === "running").length;
   const losing = (status?.relay.dropped ?? 0) > 0 || (status?.relay.lossPercent ?? 0) > 0;
 
   return (
@@ -738,7 +749,9 @@ export function MonitoringPage() {
               ? t("mon.verdictProcessesFailed", { count: failedCount })
               : losing
                 ? t("mon.verdictIngestLoss")
-                : t("mon.verdictAllRunning", { count: processes.length })}
+                : runningCount === processes.length
+                  ? t("mon.verdictAllRunning", { count: processes.length })
+                  : t("mon.verdictSomeNotRunning", { running: runningCount, count: processes.length })}
           </span>
           {failedCount > 0 && (
             <Button
@@ -760,13 +773,16 @@ export function MonitoringPage() {
             <Stat
               labelKey="mon.hostCpu"
               value={system ? pct(system.cpuPercent) : "—"}
-              tone={(system?.cpuPercent ?? 0) > 85 ? "warn" : "default"}
+              tone={(system?.cpuPercent ?? 0) > cpuWarn ? "warn" : "default"}
             />
             <div className="mt-1 text-micro text-muted-foreground">
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
-            {(system?.cpuPercent ?? 0) > 85 && (
+            <div className="mt-1 text-tiny text-muted-foreground">
+              {t("mon.cpuWarnsAbove", { pct: cpuWarn })}
+            </div>
+            {(system?.cpuPercent ?? 0) > cpuWarn && (
               <TileRemedy text={t("mon.remedy.cpu")} to="/renditions" label={t("reason.action.renditions")} />
             )}
           </CardContent>
@@ -922,15 +938,16 @@ export function MonitoringPage() {
               )}
           </CardHeader>
           <CardContent className="flex flex-col gap-1.5">
-            {processes.length === 0 && (
-              <div className="py-3 text-center text-tiny text-muted-foreground">
-                {processesLoaded ? (
-                  t("mon.noProcesses")
-                ) : (
+            {/* Loading is a spinner; an answered empty list is the kit's empty
+                state, which says what the absence means (A68). */}
+            {processes.length === 0 &&
+              (processesLoaded ? (
+                <EmptyState title={t("mon.noProcesses")} className="py-4" />
+              ) : (
+                <div className="py-3 text-center text-tiny text-muted-foreground">
                   <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
-                )}
-              </div>
-            )}
+                </div>
+              ))}
             {processes.map(({ status: p, command }) => {
               const tone = toneForState(p.state);
               return (

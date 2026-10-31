@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "Зв'язок втрачено. Повторюємо спробу автоматично.",
   "jobs.gateCpuOverCeiling": "ЦП вище порога",
   "jobs.cancelRunningTitle": "Зупинити це завдання, що виконується?",
-  "jobs.cancelRunningDescription": "Досягнутий прогрес буде втрачено. Завдання можна надіслати знову з медіатеки.",
+  "jobs.cancelRunningDescription": "Досягнутий прогрес буде втрачено.",
   "jobs.cancelRunningConfirm": "Зупинити завдання",
   "mon.verdictProcessesFailed": "{count} з помилкою. У журналі видно причину.",
   "mon.verdictAllRunning": "Усі {count} працюють, збоїв немає.",
-  "mon.verdictIngestLoss": "Зараз на вході втрачаються пакети.",
+  "mon.verdictIngestLoss": "На ретрансляторі втрачено або відкинуто пакети.",
   "mon.expertShow": "Показати розширені аргументи FFmpeg",
   "mon.expertHide": "Приховати розширені аргументи FFmpeg",
   "mon.expertClosedHint": "Сирі прапорці для працюючого виходу. Збереження перезапустить цей вихід.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Встановлення на Linux: sudo journalctl -u polyemesis | grep -A2 'setup code' або sudo cat /var/lib/polyemesis/setup-code.",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis або docker exec polyemesis cat /data/setup-code.",
   "auth.setupCodeOther": "Інакше: сервер вивів код під час запуску і зберіг його у файл setup-code у каталозі даних.",
-  "mon.verdictSeeLog": "Відкрити журнал"
+  "mon.verdictSeeLog": "Відкрити журнал",
+  "mon.verdictSomeNotRunning": "Працюють {running} з {count}.",
+  "mon.cpuWarnsAbove": "Попередження вище {pct}%, поріг ЦП із завдань.",
+  "system.statusTitle": "Стан машини",
+  "system.version": "Версія",
+  "system.supportTools": "Інструменти підтримки"
 }

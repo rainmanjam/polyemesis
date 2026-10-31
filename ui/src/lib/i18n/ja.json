@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "接続が切れました。自動的に再試行します。",
   "jobs.gateCpuOverCeiling": "CPU が上限超過",
   "jobs.cancelRunningTitle": "実行中のジョブを停止しますか？",
-  "jobs.cancelRunningDescription": "これまでの進捗は失われます。ライブラリから再度ジョブを投入できます。",
+  "jobs.cancelRunningDescription": "これまでの進捗は失われます。",
   "jobs.cancelRunningConfirm": "ジョブを停止",
   "mon.verdictProcessesFailed": "{count} 件が失敗。ログで原因を確認できます。",
   "mon.verdictAllRunning": "{count} 件すべて稼働中、失敗はありません。",
-  "mon.verdictIngestLoss": "現在、入力でパケットが失われています。",
+  "mon.verdictIngestLoss": "リレーでパケットが失われたか破棄されています。",
   "mon.expertShow": "詳細な FFmpeg 引数を表示",
   "mon.expertHide": "詳細な FFmpeg 引数を隠す",
   "mon.expertClosedHint": "配信中の出力に対する生のフラグです。保存するとその出力が再起動します。",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Linux にインストールした場合: sudo journalctl -u polyemesis | grep -A2 'setup code'、または sudo cat /var/lib/polyemesis/setup-code",
   "auth.setupCodeDocker": "Docker の場合: docker logs polyemesis、または docker exec polyemesis cat /data/setup-code",
   "auth.setupCodeOther": "それ以外: サーバーは起動時にコードを表示し、データディレクトリの setup-code ファイルに保存しています。",
-  "mon.verdictSeeLog": "ログを見る"
+  "mon.verdictSeeLog": "ログを見る",
+  "mon.verdictSomeNotRunning": "{count} 件中 {running} 件が稼働中。",
+  "mon.cpuWarnsAbove": "{pct}% を超えると警告。ジョブの CPU 上限です。",
+  "system.statusTitle": "マシンの状態",
+  "system.version": "バージョン",
+  "system.supportTools": "サポートツール"
 }

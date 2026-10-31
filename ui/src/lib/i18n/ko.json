@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "연결이 끊겼습니다. 자동으로 다시 시도합니다.",
   "jobs.gateCpuOverCeiling": "CPU 상한 초과",
   "jobs.cancelRunningTitle": "실행 중인 작업을 중지하시겠습니까?",
-  "jobs.cancelRunningDescription": "지금까지의 진행 상황이 사라집니다. 라이브러리에서 작업을 다시 제출할 수 있습니다.",
+  "jobs.cancelRunningDescription": "지금까지의 진행 상황이 사라집니다.",
   "jobs.cancelRunningConfirm": "작업 중지",
   "mon.verdictProcessesFailed": "{count}개 실패. 로그에서 원인을 확인하세요.",
   "mon.verdictAllRunning": "{count}개 모두 실행 중, 실패한 항목 없음.",
-  "mon.verdictIngestLoss": "지금 입력에서 패킷이 손실되고 있습니다.",
+  "mon.verdictIngestLoss": "릴레이에서 패킷이 손실되거나 버려졌습니다.",
   "mon.expertShow": "고급 FFmpeg 인수 표시",
   "mon.expertHide": "고급 FFmpeg 인수 숨기기",
   "mon.expertClosedHint": "라이브 출력의 원시 플래그입니다. 저장하면 해당 출력이 다시 시작됩니다.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Linux 설치: sudo journalctl -u polyemesis | grep -A2 'setup code' 또는 sudo cat /var/lib/polyemesis/setup-code",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis 또는 docker exec polyemesis cat /data/setup-code",
   "auth.setupCodeOther": "그 밖의 경우: 서버가 시작할 때 코드를 출력했고, 데이터 디렉터리의 setup-code 파일에 저장했습니다.",
-  "mon.verdictSeeLog": "로그 보기"
+  "mon.verdictSeeLog": "로그 보기",
+  "mon.verdictSomeNotRunning": "{count}개 중 {running}개 실행 중.",
+  "mon.cpuWarnsAbove": "{pct}%를 넘으면 경고, 작업의 CPU 상한입니다.",
+  "system.statusTitle": "머신 상태",
+  "system.version": "버전",
+  "system.supportTools": "지원 도구"
 }

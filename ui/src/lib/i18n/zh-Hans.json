@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "连接已断开，正在自动重试。",
   "jobs.gateCpuOverCeiling": "CPU 超过上限",
   "jobs.cancelRunningTitle": "停止这个正在运行的任务？",
-  "jobs.cancelRunningDescription": "已完成的进度将丢失。可以从素材库重新提交该任务。",
+  "jobs.cancelRunningDescription": "已完成的进度将丢失。",
   "jobs.cancelRunningConfirm": "停止任务",
   "mon.verdictProcessesFailed": "{count} 个失败。日志会显示原因。",
   "mon.verdictAllRunning": "{count} 个全部运行中，没有失败。",
-  "mon.verdictIngestLoss": "输入端正在丢失数据包。",
+  "mon.verdictIngestLoss": "中继上已有数据包丢失或被丢弃。",
   "mon.expertShow": "显示高级 FFmpeg 参数",
   "mon.expertHide": "隐藏高级 FFmpeg 参数",
   "mon.expertClosedHint": "用于直播输出的原始参数。保存会重启该输出。",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Linux 安装：sudo journalctl -u polyemesis | grep -A2 'setup code'，或 sudo cat /var/lib/polyemesis/setup-code。",
   "auth.setupCodeDocker": "Docker：docker logs polyemesis，或 docker exec polyemesis cat /data/setup-code。",
   "auth.setupCodeOther": "其他情况：服务器启动时打印了该代码，并保存在其数据目录的 setup-code 文件中。",
-  "mon.verdictSeeLog": "查看日志"
+  "mon.verdictSeeLog": "查看日志",
+  "mon.verdictSomeNotRunning": "{count} 个中 {running} 个正在运行。",
+  "mon.cpuWarnsAbove": "超过 {pct}% 时警告，即任务的 CPU 上限。",
+  "system.statusTitle": "机器状态",
+  "system.version": "版本",
+  "system.supportTools": "支持工具"
 }

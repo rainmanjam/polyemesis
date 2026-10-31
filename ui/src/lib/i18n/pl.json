@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "Utracono połączenie. Ponawianie automatycznie.",
   "jobs.gateCpuOverCeiling": "CPU powyżej limitu",
   "jobs.cancelRunningTitle": "Zatrzymać to uruchomione zadanie?",
-  "jobs.cancelRunningDescription": "Dotychczasowy postęp przepadnie. Zadanie można ponownie zgłosić z biblioteki.",
+  "jobs.cancelRunningDescription": "Dotychczasowy postęp przepadnie.",
   "jobs.cancelRunningConfirm": "Zatrzymaj zadanie",
   "mon.verdictProcessesFailed": "{count} z błędem. Dziennik pokazuje przyczynę.",
   "mon.verdictAllRunning": "Wszystkie {count} działają, żadne nie zawiodło.",
-  "mon.verdictIngestLoss": "Na wejściu właśnie tracone są pakiety.",
+  "mon.verdictIngestLoss": "Na przekaźniku utracono lub odrzucono pakiety.",
   "mon.expertShow": "Pokaż zaawansowane argumenty FFmpeg",
   "mon.expertHide": "Ukryj zaawansowane argumenty FFmpeg",
   "mon.expertClosedHint": "Surowe flagi dla działającego wyjścia. Zapis uruchamia to wyjście ponownie.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Instalacja na Linuksie: sudo journalctl -u polyemesis | grep -A2 'setup code' albo sudo cat /var/lib/polyemesis/setup-code.",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis albo docker exec polyemesis cat /data/setup-code.",
   "auth.setupCodeOther": "W innym przypadku: serwer wypisał kod przy starcie i zapisał go w pliku setup-code w katalogu danych.",
-  "mon.verdictSeeLog": "Zobacz dziennik"
+  "mon.verdictSeeLog": "Zobacz dziennik",
+  "mon.verdictSomeNotRunning": "Działa {running} z {count}.",
+  "mon.cpuWarnsAbove": "Ostrzega powyżej {pct}%, limit CPU zadań.",
+  "system.statusTitle": "Stan maszyny",
+  "system.version": "Wersja",
+  "system.supportTools": "Narzędzia pomocy technicznej"
 }

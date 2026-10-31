@@ -3187,11 +3187,11 @@
   "jobs.connectionLostRetrying": "Verbindung verloren. Es wird automatisch erneut versucht.",
   "jobs.gateCpuOverCeiling": "CPU über Grenze",
   "jobs.cancelRunningTitle": "Diesen laufenden Auftrag stoppen?",
-  "jobs.cancelRunningDescription": "Der bisherige Fortschritt geht verloren. Der Auftrag kann in der Mediathek erneut eingereicht werden.",
+  "jobs.cancelRunningDescription": "Der bisherige Fortschritt geht verloren.",
   "jobs.cancelRunningConfirm": "Auftrag stoppen",
   "mon.verdictProcessesFailed": "{count} fehlgeschlagen. Das Protokoll zeigt, warum.",
   "mon.verdictAllRunning": "Alle {count} laufen, keiner ist fehlgeschlagen.",
-  "mon.verdictIngestLoss": "Auf dem Eingang gehen gerade Pakete verloren.",
+  "mon.verdictIngestLoss": "Auf dem Relay wurden Pakete verloren oder verworfen.",
   "mon.expertShow": "Erweiterte FFmpeg-Argumente anzeigen",
   "mon.expertHide": "Erweiterte FFmpeg-Argumente ausblenden",
   "mon.expertClosedHint": "Rohe Flags für einen laufenden Ausgang. Speichern startet diesen Ausgang neu.",
@@ -3202,5 +3202,10 @@
   "auth.setupCodeLinux": "Linux-Installation: sudo journalctl -u polyemesis | grep -A2 'setup code' oder sudo cat /var/lib/polyemesis/setup-code.",
   "auth.setupCodeDocker": "Docker: docker logs polyemesis oder docker exec polyemesis cat /data/setup-code.",
   "auth.setupCodeOther": "Sonst: Der Server hat den Code beim Start ausgegeben und in der Datei setup-code in seinem Datenverzeichnis gespeichert.",
-  "mon.verdictSeeLog": "Protokoll ansehen"
+  "mon.verdictSeeLog": "Protokoll ansehen",
+  "mon.verdictSomeNotRunning": "{running} von {count} laufen.",
+  "mon.cpuWarnsAbove": "Warnt ab {pct} %, der CPU-Grenzwert der Jobs.",
+  "system.statusTitle": "Status des Rechners",
+  "system.version": "Version",
+  "system.supportTools": "Support-Werkzeuge"
 }
