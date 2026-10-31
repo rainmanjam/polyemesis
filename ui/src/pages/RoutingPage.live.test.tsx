@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { translate } from "@/lib/i18n";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -564,5 +565,51 @@ describe("RoutingPage: the Save reason and the destination list (A28, A29)", () 
     await renderPage();
     const summary = await screen.findByText("Tracks 1, 2");
     expect(summary.className).not.toMatch(/\btruncate\b/);
+  });
+});
+
+/* app-council A95: Routing uses the kit's save model. The edit is held in a
+ * draft behind an explicit Save, and <SaveStatus> beside the Save button says
+ * where the draft is: "Unsaved changes", "Saved", or a failure that keeps the
+ * draft. Before, a failed save was a toast that vanished and nothing on the
+ * page said the routing was still unsaved. Live mute and gain are the other
+ * half of the rule: they apply at once and never enter the draft (pinned in
+ * the "live mute" block above). */
+describe("the save status beside Save", () => {
+  const status = () => {
+    const el = document.querySelector("[data-save-state]");
+    expect(el, "no SaveStatus on the routing page").not.toBeNull();
+    return el as HTMLElement;
+  };
+
+  it("says Unsaved changes while the draft differs, then Saved once it is written", async () => {
+    await renderPage();
+    expect(status().getAttribute("data-save-state")).toBe("clean");
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    expect(status().textContent).toBe(translate("en", "save.dirty"));
+    await save();
+    await waitFor(() => expect(status().textContent).toBe(translate("en", "save.saved")));
+  });
+
+  it("says the save failed, keeps the draft, and keeps Save available to retry", async () => {
+    updateDestination.mockRejectedValueOnce(new Error("the server is restarting"));
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await save();
+    await waitFor(() => expect(status().getAttribute("data-save-state")).toBe("failed"));
+    expect(status().textContent).toBe(translate("en", "save.failed"));
+    expect((screen.getByLabelText("Include track 3") as HTMLButtonElement).getAttribute("data-state")).toBe("checked");
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it("clears a failure as soon as the operator edits again", async () => {
+    updateDestination.mockRejectedValueOnce(new Error("the server is restarting"));
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await save();
+    await waitFor(() => expect(status().getAttribute("data-save-state")).toBe("failed"));
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    // The failure is history once the draft moves on; the edit is pending again.
+    expect(status().getAttribute("data-save-state")).toBe("dirty");
   });
 });

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { DisabledReason } from "@/components/DisabledReason";
+import { SaveStatus } from "@/components/SaveStatus";
+import { saveStateOf } from "@/lib/saveModel";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -204,6 +206,11 @@ export function RoutingPage() {
   const [annotationsStored, setAnnotationsStored] = useState<boolean | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // app-council A95: the save model's other two facts, per destination, so a
+  // "Saved" or a failure never follows the operator to another destination.
+  // Derived against the selection below rather than reset in an effect.
+  const [savedFor, setSavedFor] = useState<DestinationId | null>(null);
+  const [failedFor, setFailedFor] = useState<DestinationId | null>(null);
   const [loading, setLoading] = useState(true);
 
   // ---- what survives switching the second mix off ----
@@ -361,15 +368,23 @@ export function RoutingPage() {
     }
   }, [id, list]);
 
+  // An edit to the draft. It makes the draft dirty and retires a "Saved" or a
+  // failure that described the draft before it (the useSaveModel rule).
+  const markDirty = useCallback(() => {
+    setDirty(true);
+    setSavedFor(null);
+    setFailedFor(null);
+  }, []);
+
   const patch = useCallback((next: Partial<RoutingProfile>) => {
     setProfile((p) => (p ? { ...p, ...next } : p));
-    setDirty(true);
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   const patchVod = useCallback((next: Partial<RoutingProfile>) => {
     setVodProfile((p) => (p ? { ...p, ...next } : p));
-    setDirty(true);
-  }, []);
+    markDirty();
+  }, [markDirty]);
 
   // ---- annotations ----
   //
@@ -445,6 +460,8 @@ export function RoutingPage() {
     const sentProfile = profile;
     const sentVod = vodProfile;
     setSaving(true);
+    setFailedFor(null);
+    setSavedFor(null);
     try {
       // Every optional field goes out explicitly, including the nulls: the
       // server decodes over the stored row, so an omitted `loudness` would
@@ -468,6 +485,7 @@ export function RoutingPage() {
             : t("route.savedRestarting", { name: selected.name }),
       );
       setLiveRefusals({});
+      setSavedFor(selected.id);
       const fresh = await api.listDestinations();
       // Compared after the LAST await: an edit can land during the PUT or the
       // list read. If the draft is still the one that was sent, the stored row
@@ -482,6 +500,9 @@ export function RoutingPage() {
       }
       setList(fresh);
     } catch (err) {
+      // The draft is kept (dirty stays true) so a retry needs no retyping, and
+      // SaveStatus keeps saying so after the toast has gone.
+      setFailedFor(selected.id);
       toast.error(err instanceof Error ? err.message : t("route.couldNotSaveTheRouting"));
     } finally {
       setSaving(false);
@@ -505,6 +526,8 @@ export function RoutingPage() {
     stashedVod.current = null;
     writeVodStash(found.destination.id, null);
     setDirty(false);
+    setSavedFor(null);
+    setFailedFor(null);
   };
 
   // Shared by both mixes. `mix` says which profile asked, so an archive preset
@@ -607,7 +630,7 @@ export function RoutingPage() {
         const wasDirty = draftRef.current.dirty;
         if (mix === "live") setProfile(after);
         else setVodProfile(after);
-        setDirty(true);
+        markDirty();
         // Undo puts back the very draft the preset replaced, dirty flag and all,
         // and only while the same destination is still selected.
         toast.success(t("route.presetApplied"), {
@@ -628,7 +651,7 @@ export function RoutingPage() {
         return null;
       }
     },
-    [shownPresetOpts, editedSourceId, t],
+    [shownPresetOpts, editedSourceId, t, markDirty],
   );
 
   const applyPreset = useCallback(
@@ -992,6 +1015,18 @@ export function RoutingPage() {
   }
 
   const saveReason = !dirty ? t("route.nothingToSave") : null;
+  // app-council A95: the kit's save model. Mute and gain apply at once and
+  // never reach the draft; everything else waits for Save, and this says where
+  // the draft is. The draft itself stays in this page's own state rather than
+  // in useSaveModel: the hook never reseeds a dirty draft when `stored` moves
+  // (lib/saveModel.ts), while this page must reseed on a destination switch
+  // and skip exactly one reseed after a live level change (keepDraftFor).
+  const saveState = saveStateOf({
+    dirty,
+    saving,
+    failed: selected !== null && failedFor === selected.id,
+    justSaved: selected !== null && savedFor === selected.id,
+  });
   return (
     <div className="p-3">
       <PageHeader
@@ -1009,6 +1044,7 @@ export function RoutingPage() {
               {saving ? <Loader2 className="animate-spin" /> : <Save />}
               {t("common.save")}
             </Button>
+            <SaveStatus state={saveState} />
             <DisabledReason id={saveReasonId} reason={saveReason} className="max-w-xs text-right" />
           </>
         }
@@ -1146,7 +1182,7 @@ export function RoutingPage() {
                 }
                 setVodProfile(next);
                 vodEnabledRef.current = next !== null;
-                setDirty(true);
+                markDirty();
               }}
               twitchRtmp={twitchRtmp}
               multitrack={selected.multitrack ?? false}
