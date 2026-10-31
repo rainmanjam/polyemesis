@@ -14,6 +14,9 @@ untouched. A change to a track's gain or mute alone does not restart even that
 destination: it is applied to the running process, except on Windows and for a
 matrix cell's gain. See
 [HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel).
+On the console's Routing page every edit, gain and mute included, waits for
+**Save changes**; the Stream Deck, MCP and API mute and gain controls still apply
+at once.
 
 ---
 

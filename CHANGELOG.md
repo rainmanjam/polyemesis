@@ -414,6 +414,24 @@ its first tagged release.
 
 ### Changed
 
+- **Routing has one save model (app-council A26, A27).** Every edit, mute and
+  gain included, now waits for Save changes in a single bottom bar with
+  Discard; mute and gain no longer apply the moment they move, and the header
+  Save is gone. Loudness, A/V delay, ducking, the VOD mix and the compiled
+  result sit in a collapsed Advanced section, with the FFmpeg filter graph
+  behind "Show FFmpeg graph". The destination PUT is unchanged.
+- **The Jobs Policy tab leads with four decisions (app-council A63).** Default
+  mode, jobs at once and the CPU ceiling and resume levels come first, under a
+  sentence that reads them back. The twelve tuning settings sit behind an
+  Advanced section that opens by itself whenever one differs from its default
+  or is out of range. Revert and Save policy stay on screen with a save status.
+- **On phones the Dashboard shows destinations first (app-council A87).** Below
+  the desktop breakpoint the destinations and Go live come straight after the
+  on-air strip; Chat and Pipeline, the failover note and Stream info are
+  collapsed sections below them. The desktop layout is unchanged.
+- **Monitoring lists processes in a compact table (app-council A72).** Process,
+  State, Restarts, Uptime and Errors, with failed and reconnecting processes
+  first; a row expands to the cause, remedy, PID, log and full command.
 - **One status vocabulary across the console (app-council A91).** "Not
   running" had four spellings side by side: the on-air counts said "stopped",
   the cards those destinations were said OFF, the ingest chip said "Offline"
