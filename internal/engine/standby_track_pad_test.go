@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
@@ -130,5 +131,73 @@ func TestAMultiTrackDestinationStartedWhileAOneTrackStandbyIsOnAirStillPublishes
 	}
 	if aEnd := streamEnd(t, ffprobeBin, outPath, "a"); aEnd < 9 {
 		t.Errorf("the destination published %.2fs of audio for a 10s standby", aEnd)
+	}
+}
+
+// THE SLATE CARRIES EVERY TRACK A MULTI-TRACK PRIMARY MIX READS.
+//
+// The slate used to publish one silent track whatever the primary carried, so a
+// destination compiled for two tracks could not bind to it either, in the same
+// way as a one-track backup. The slate is built at the primary's format, and it
+// now publishes one silent track per primary track, all at that format.
+//
+// MUTATION: publish one track (drop the spec.AudioTracks mapping). Observed: FAIL,
+// one map and no second silent track.
+func TestTheSlateCarriesOneSilentTrackPerTrackAMultiTrackPrimaryMixReads(t *testing.T) {
+	e := conformEngine()
+	spec, _ := e.slateSpec(db.DefaultSettings(), "udp://127.0.0.1:21005", 0)
+	if spec.AudioTracks != len(primaryMono441) {
+		t.Fatalf("slate publishes %d audio track(s) for a %d-track primary: a destination compiled for the primary cannot bind to it",
+			spec.AudioTracks, len(primaryMono441))
+	}
+	args := ffmpeg.SlateArgs(spec)
+	if n := strings.Count(strings.Join(args, " "), "-map 1:a:0"); n != len(primaryMono441) {
+		t.Errorf("the slate maps %d silent audio track(s), want %d: %q", n, len(primaryMono441), args)
+	}
+}
+
+// A two-track destination started during the slate binds and publishes, in
+// real FFmpeg, the same way the one-track standby case does.
+//
+// MUTATION: as above. Observed: FAIL, the destination exits at bind time.
+func TestAMultiTrackDestinationStartedDuringTheSlateStillPublishesItsAudio(t *testing.T) {
+	ffmpegBin, ffprobeBin := offsetBenchTools(t)
+	e := conformEngine()
+	spec, _ := e.slateSpec(db.DefaultSettings(), "udp://127.0.0.1:2", 23)
+	spec.Preset = "ultrafast"
+	src := routing.Source{Tracks: []routing.Track{
+		{Index: 0, Channels: 1, Codec: "aac", Layout: "mono"},
+		{Index: 1, Channels: 1, Codec: "aac", Layout: "mono"},
+	}}
+	prof := routing.Profile{Mode: routing.ModeSimple, Normalize: routing.NormOff, SampleRate: 48000,
+		Tracks: []routing.TrackSel{{Track: 0, Enabled: true, Gain: 1}, {Track: 1, Enabled: true, Gain: 1}}}
+	res, err := routing.Compile(prof, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	slateBytes := runHop(t, ffmpegBin, ffmpeg.SlateArgs(spec), "", filepath.Join(dir, "slate.ts"), 10)
+	relayPath := filepath.Join(dir, "relay.ts")
+	if err := os.WriteFile(relayPath, slateBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "destination.mkv")
+	args := ffmpeg.DestinationArgs(ffmpeg.DestSpec{
+		Kind: ffmpeg.DestFile, Target: outPath, RelayURL: "udp://127.0.0.1:3",
+		FilterComplex: res.FilterComplex, AudioOutLabel: res.OutLabel,
+		AudioBitrate: 128, SampleRate: 48000,
+	})
+	args = swapArg(t, args, "-i", relayPath)
+	dest := exec.Command(ffmpegBin, append([]string{"-y"}, args...)...)
+	var destErr strings.Builder
+	dest.Stderr = &destErr
+	if err := dest.Run(); err != nil {
+		t.Fatalf("the two-track destination could not start on the slate: %v\n%s", err, tail(destErr.String(), 12))
+	}
+	if h := hiddenSeconds(t, ffmpegBin, ffprobeBin, outPath); h > 0.1 {
+		t.Errorf("%.2fs of audio is hidden behind the timestamps", h)
+	}
+	if aEnd := streamEnd(t, ffprobeBin, outPath, "a"); aEnd < 9 {
+		t.Errorf("the destination published %.2fs of audio for a 10s slate", aEnd)
 	}
 }

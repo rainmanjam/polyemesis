@@ -2157,6 +2157,12 @@ func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.Sl
 	if len(audio) > 0 && audio[0].Index == 0 {
 		spec.SampleRate, spec.AudioChannels = audio[0].SampleRate, audio[0].Channels
 	}
+	// One silent track per primary track, so a destination compiled for the
+	// primary binds to the slate as it does to a conformed standby (see
+	// conformedFeedArgs). A one-track primary keeps the single track.
+	if len(audio) >= 2 {
+		spec.AudioTracks = len(audio)
+	}
 	// Geometry from the probe, never from a form: matching the departed ingest
 	// is what gives a `-c:v copy` destination a chance of riding the change, and
 	// a hand-typed 1080p over a 720p camera would be exactly the silent
