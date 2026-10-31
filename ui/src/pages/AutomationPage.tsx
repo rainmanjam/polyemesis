@@ -62,7 +62,7 @@ import {
   scheduleActionLabel,
   type ScheduleAction,
 } from "@/lib/scheduleActions";
-import { scheduleBlock } from "@/lib/scheduleCreate";
+import { formForAction, scheduleBlock } from "@/lib/scheduleCreate";
 
 export type AlertFormat = "json" | "discord" | "slack";
 export type AlertSeverity = "info" | "warning" | "critical";
@@ -1278,26 +1278,10 @@ function ScheduleDialog({
               <Label htmlFor="sch-action">{t("auto.action")}</Label>
               <Select
                 value={form.action}
-                onValueChange={(v) => {
-                  const action = v as ScheduleAction;
-                  const playlist = action.startsWith("playlist.");
-                  setForm({
-                    ...form,
-                    action,
-                    // A playlist schedule that also names destinations is
-                    // refused by the server, so a stale pick from before the
-                    // switch must not ride along invisibly.
-                    destinationIds: playlist ? [] : form.destinationIds,
-                    // A54: an All destinations ticked for a START does not
-                    // carry into a STOP. "Every destination" on a stop takes
-                    // the whole broadcast down, so it is ticked for the stop
-                    // itself or not at all.
-                    allDestinations:
-                      playlist || (action === "stop" && form.action !== "stop")
-                        ? false
-                        : form.allDestinations,
-                  });
-                }}
+                // What the switch does to the destination choice lives in
+                // formForAction (A54): a playlist clears both, and an All
+                // ticked for a start does not carry into a stop.
+                onValueChange={(v) => setForm({ ...form, ...formForAction(form, v as ScheduleAction) })}
               >
                 <SelectTrigger id="sch-action">
                   <SelectValue />

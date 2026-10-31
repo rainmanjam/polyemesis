@@ -100,3 +100,24 @@ export function scheduleBlock(
 
   return { kind: "ok" };
 }
+
+/** What switching the action does to the destination choice (app-council A54).
+ *
+ *  - A playlist action names no destination, so both the list and All are
+ *    cleared: a stale pick riding along invisibly is a 400 from the server.
+ *  - An All destinations ticked for a START does not carry into a STOP. Every
+ *    destination on a stop takes the whole broadcast down, so it is ticked for
+ *    the stop itself or not at all. The reverse (stop to start) keeps it: the
+ *    consequence only gets smaller.
+ *
+ *  A function rather than an inline handler so the rule is testable without
+ *  driving a Radix Select, which jsdom cannot open. */
+export function formForAction(
+  form: ScheduleFormFacts,
+  action: ScheduleAction,
+): { action: ScheduleAction; destinationIds: number[]; allDestinations: boolean } {
+  const ids = [...(form.destinationIds ?? [])];
+  if (isPlaylistAction(action)) return { action, destinationIds: [], allDestinations: false };
+  const intoStop = action === "stop" && form.action !== "stop";
+  return { action, destinationIds: ids, allDestinations: intoStop ? false : Boolean(form.allDestinations) };
+}

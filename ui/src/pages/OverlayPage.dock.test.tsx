@@ -25,6 +25,14 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
+function sse(id: string, text: string): Response {
+  const env = { id, type: "chat.display", data: { id, platform: "twitch", name: "v", text, at: "" } };
+  const body = `id: ${id}\nevent: chat.display\ndata: ${JSON.stringify(env)}\n\n`;
+  return new Response(new ReadableStream({
+    start(c) { c.enqueue(new TextEncoder().encode(body)); c.close(); },
+  }), { status: 200 });
+}
+
 const en = (k: Parameters<typeof translate>[1]) => translate("en", k);
 
 describe("the OBS dock's failure and loading states", () => {
@@ -56,18 +64,23 @@ describe("the OBS dock's failure and loading states", () => {
   it("treats a server error as unreachable too, and recovers when it answers", async () => {
     window.history.replaceState(null, "", "/overlay/dock#key=pov_ok");
     let calls = 0;
+    let streamed = false;
     vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
       if (String(url).endsWith("/overlay/config")) {
         calls++;
         if (calls === 1) return new Response("{}", { status: 502 });
         return new Response(JSON.stringify({ name: "x", platforms: [], style }), { status: 200 });
       }
-      return new Response("", { status: 401 });
+      if (streamed) return new Response("", { status: 401 });
+      streamed = true;
+      return sse("a", "back on air");
     }));
     render(<OverlayPage />);
     await waitFor(() => expect(screen.getByText(en("overlay.dockNetworkError"))).toBeTruthy());
-    // The dock retries on its own: an OBS dock has no reload button anyone uses.
-    await waitFor(() => expect(screen.queryByText(en("overlay.dockNetworkError"))).toBeNull(), { timeout: 5000 });
+    // The dock retries on its own: an OBS dock has no reload button anyone
+    // uses. Proven by a chat line arriving, not merely by the error going.
+    await waitFor(() => expect(screen.getByText("back on air")).toBeTruthy(), { timeout: 5000 });
+    expect(screen.queryByText(en("overlay.dockNetworkError"))).toBeNull();
   });
 
   it("shows a small loading line instead of a blank panel while the config loads", async () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { runAtUnset, scheduleBlock, type ScheduleFormFacts } from "./scheduleCreate";
+import { formForAction, runAtUnset, scheduleBlock, type ScheduleFormFacts } from "./scheduleCreate";
 
 const NOW = Date.parse("2026-08-20T12:00:00Z");
 
@@ -205,5 +205,37 @@ describe("AutomationPage, the schedule dialog", () => {
     const src = page();
     expect(src).not.toContain("{(status?.destinations ?? []).map((d) => (");
     expect(src).toContain("const destinationsKnown = status !== null;");
+  });
+});
+
+/* app-council A54: what changing the action does to the destination choice. */
+describe("formForAction", () => {
+  const f = (over: Partial<ScheduleFormFacts>): ScheduleFormFacts => form(over);
+
+  it("does not carry an All destinations ticked for a start into a stop", () => {
+    // Every destination on a stop takes the whole broadcast down: it is
+    // ticked for the stop itself or not at all.
+    const next = formForAction(f({ action: "start", allDestinations: true }), "stop");
+    expect(next).toEqual({ action: "stop", destinationIds: [], allDestinations: false });
+  });
+
+  it("keeps All destinations when the action stays a stop", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true }), "stop");
+    expect(next.allDestinations).toBe(true);
+  });
+
+  it("keeps a stop's choice when it becomes a start", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true }), "start");
+    expect(next.allDestinations).toBe(true);
+  });
+
+  it("keeps named destinations across start and stop", () => {
+    const next = formForAction(f({ action: "start", allDestinations: false, destinationIds: [4, 5] }), "stop");
+    expect(next.destinationIds).toEqual([4, 5]);
+  });
+
+  it("clears both for a playlist action, which names no destination", () => {
+    const next = formForAction(f({ action: "stop", allDestinations: true, destinationIds: [4] }), "playlist.start");
+    expect(next).toEqual({ action: "playlist.start", destinationIds: [], allDestinations: false });
   });
 });
