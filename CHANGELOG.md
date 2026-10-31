@@ -8,29 +8,6 @@ its first tagged release.
 
 ## [Unreleased]
 
-### Changed
-
-- **Dashboard: clearer on-air answer and one filled start action.** The on-air
-  strip counts live, stopped and failing destinations against the whole install
-  ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
-  a fault. It says "Ingest is not receiving" instead of "All healthy" when every
-  destination is up over a feed that is not arriving. Its End all is now Stop all
-  and opens the same confirmation as the toolbar. The stop-all dialog is shorter
-  and no longer points at a Start all button that does not exist; it says to start
-  again with Go live. Go live is the one filled start action: Add destination and
-  each stopped card's Start are outline buttons. The metadata card is titled
-  Stream info. The Go live sheet marks a running destination LIVE, not READY, and
-  wraps long source names instead of cutting them off. A "0 accounts" figure no
-  longer sits beside the Go live card when no platform account is connected.
-  The strip's full-screen view is named Full-screen status.
-- **Shell: keyboard and phone fixes.** A Skip to content link comes first on
-  every page. The closed mobile nav drawer is removed from the tab order. On a
-  phone the header now shows the on-air answer beside the menu (the live count, or
-  Off air). System moves into the Operations group beside Monitoring, and the
-  settings group is headed Setup.
-- **Chat composer.** When no platform can send, the field reads "Chat not
-  connected" and the reason sits beneath it instead of being clipped.
-
 ### Added
 
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
@@ -437,6 +414,28 @@ its first tagged release.
 
 ### Changed
 
+- **Dashboard: clearer on-air answer and one filled start action.** The on-air
+  strip counts live, stopped and failing destinations against the whole install
+  ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
+  a fault. It says "Ingest is not receiving" instead of "All healthy" when every
+  destination is up over a feed that is not arriving. Its End all is now Stop all
+  and opens the same confirmation as the toolbar. The stop-all dialog is shorter
+  and no longer points at a Start all button that does not exist; it says to start
+  again with Go live. Go live is the one filled start action: Add destination and
+  each stopped card's Start are outline buttons. The metadata card is titled
+  Stream info. The Go live sheet marks a running destination LIVE, not READY, and
+  wraps long source names instead of cutting them off. A "0 accounts" figure no
+  longer sits beside the Go live card when no platform account is connected.
+  The strip's full-screen view is named Full-screen status.
+- **Shell: keyboard and phone fixes.** A Skip to content link comes first on
+  every page. The closed mobile nav drawer is removed from the tab order. On a
+  phone the header now shows the on-air answer beside the menu (the live count, or
+  Off air). System moves into the Operations group beside Monitoring, and the
+  settings group is headed Setup.
+- **Chat composer.** When no platform can send, the field reads "Chat not
+  connected" and the reason sits beneath it instead of being clipped.
+
+
 - **Jobs, Monitoring and sign-in say what they mean.** Jobs says once, in place,
   when the server cannot be reached, instead of a red toast every four seconds.
   Cancelling a running transcode asks first; a queued job still cancels on the
@@ -547,12 +546,26 @@ its first tagged release.
   above loudness compliance, state dBFS above the readouts, and announce a clip
   in words. Routing shows why Save is greyed beside the button, and destination
   names and routing summaries wrap rather than truncate.
-### Fixed
 
-- **A failed refresh no longer hides the timeline.** The incidents already on
-  screen stay, with a line saying how old the list is. A failed destination list
-  in Expert mode is said, with a retry. Numeric policy fields no longer snap to
-  the minimum while you type.
+- **Clips, Recordings and Playout read more plainly.** A replay buffer that is
+  enabled but not running reads Waiting, not Ready. With the buffer off, Clips
+  shows one empty state with a Turn on rolling buffer button, and the capture
+  presets appear only while it runs. The buffer window is an editable draft with
+  an explicit Apply, so the three-second refresh no longer overwrites an edit.
+  Recordings shows recorder status as a status pill, marks a live segment
+  Recording now, leaves a blank retention box empty while Save stays off, and
+  says 0 means no limit. Switching recording off while the stream is live asks
+  first. In Playout, turning Public on or Protection open asks first; turning
+  them off saves at once.
+- **Chat: keyboard, attention and polls.** Enter that confirms an IME
+  composition no longer sends the message. Message rows are reachable from the
+  keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New
+  messages are announced once instead of on every line. The attention banner
+  names each platform that needs work, with its reason, and the poll form sits
+  behind a disclosure. The Twitch mirror option appears only when Twitch is
+  connected. Hide all on a user card works in batches of five and reports a
+  partial failure as "Hid X of Y lines; N failed". The ban action in the message
+  menu is now Open card to ban.
 
 ### Removed
 
@@ -567,6 +580,12 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **A failed refresh no longer hides the timeline.** The incidents already on
+  screen stay, with a line saying how old the list is. A failed destination list
+  in Expert mode is said, with a retry. Numeric policy fields no longer snap to
+  the minimum while you type.
+
 
 - **A destination's restart count now includes restarts caused by live level
   changes.** Two restarts were never counted. One is the restart that keeps a
