@@ -12,9 +12,13 @@ import (
 
 // A SCHEDULE THAT NAMES DESTINATIONS MUST NOT BE STORED NAMING NONE.
 //
-// Empty destinationIds is not "no destinations". scheduleTargets reads it as
+// Empty destinationIds was not "no destinations". scheduleTargets read it as
 // EVERY destination on this install, because "start the show" usually names
-// nothing and that is the commonest shape the feature has. So the two lists sit
+// nothing and that is the commonest shape the feature has. Since app-council
+// A54 "every destination" is the explicit allDestinations, and an emptied stop
+// is refused by Validate as well -- but this guard stays, because an emptied
+// list on an old client's start, or on a row that is already every
+// destination, would still be read the old way. So the two lists sit
 // at opposite ends of the blast radius while looking like neighbours, and a
 // request that loses its ids on the way in is silently converted from one into
 // the other -- for a `stop` schedule, into "stop every broadcast on this box",
@@ -70,9 +74,11 @@ func TestCreatingAScheduleCannotTurnNamedDestinationsIntoAllOfThem(t *testing.T)
 			// The operator has to be told WHICH way it would have gone wrong.
 			// "invalid destinationIds" would leave them re-sending the same
 			// body with the same null in it.
-			if !strings.Contains(msg, "EVERY destination") {
-				t.Fatalf("the refusal does not say that an empty list means every "+
-					"destination, which is the whole reason this is refused: %q", msg)
+			// app-council A54: the way to say "every destination" is now a
+			// field, so the refusal names it.
+			if !strings.Contains(msg, "allDestinations") {
+				t.Fatalf("the refusal does not name allDestinations, the way to say "+
+					"every destination on purpose: %q", msg)
 			}
 		})
 	}
@@ -108,24 +114,29 @@ func TestAScheduleThatNamesRealDestinationsKeepsThem(t *testing.T) {
 	}
 }
 
-func TestAScheduleThatNamesNoDestinationsStillMeansAllOfThem(t *testing.T) {
-	// The second control, and the more important one. An empty list is the
-	// commonest shape this feature has -- "start the show" names nothing -- so
-	// a guard that refused it would switch scheduling off for most installs
-	// while passing every test above.
+func TestAScheduleThatChoosesAllDestinationsStillMeansAllOfThem(t *testing.T) {
+	// The second control, and the more important one. "Every destination" is
+	// the commonest shape this feature has -- "start the show" names nothing --
+	// so a guard that refused it would switch scheduling off for most installs
+	// while passing every test above. Since app-council A54 it is said with
+	// allDestinations rather than with an empty list; an old client's empty
+	// start still means it (schedule_all_destinations_test.go).
 	h, _, sign := sourceServer(t)
 
 	body := dailySchedule()
 	body["action"] = "stop"
+	body["allDestinations"] = true
 	created := createSchedule(t, h, sign, body)
-	if got := storedTargets(t, created); len(got) != 0 {
-		t.Fatalf("destinationIds = %v, want none: an omitted list means every destination", got)
+	if got := storedTargets(t, created); len(got) != 0 || created["allDestinations"] != true {
+		t.Fatalf("destinationIds = %v all = %v, want every destination", got, created["allDestinations"])
 	}
 
 	// Explicitly empty is the same request, sent by a client that spells it out.
-	created = createSchedule(t, h, sign, scheduleWithTargets())
-	if got := storedTargets(t, created); len(got) != 0 {
-		t.Fatalf("an explicitly empty destinationIds was not accepted as-is: %v", got)
+	body = scheduleWithTargets()
+	body["allDestinations"] = true
+	created = createSchedule(t, h, sign, body)
+	if got := storedTargets(t, created); len(got) != 0 || created["allDestinations"] != true {
+		t.Fatalf("an explicitly empty destinationIds with allDestinations was not accepted as-is: %v", got)
 	}
 }
 
@@ -155,8 +166,8 @@ func TestUpdatingAScheduleCannotTurnNamedDestinationsIntoAllOfThem(t *testing.T)
 	for _, ids := range [][]any{{nil}, {float64(0)}, {float64(-3), float64(0)}} {
 		msg := mustJSONError(t, h, sign, http.MethodPut, "/api/v1/schedules/"+id,
 			scheduleWithTargets(ids...), http.StatusBadRequest)
-		if !strings.Contains(msg, "EVERY destination") {
-			t.Fatalf("the refusal does not say what an empty list would have meant: %q", msg)
+		if !strings.Contains(msg, "allDestinations") {
+			t.Fatalf("the refusal does not name allDestinations: %q", msg)
 		}
 	}
 
@@ -176,12 +187,15 @@ func TestUpdatingAScheduleCannotTurnNamedDestinationsIntoAllOfThem(t *testing.T)
 		t.Fatalf("destinationIds = %v after a legitimate edit, want [9]", ids)
 	}
 
-	// And so does clearing the list on purpose. An operator who genuinely means
-	// "every destination" must still be able to say so on an existing schedule.
-	send(t, h, sign, http.MethodPut, "/api/v1/schedules/"+id, dailySchedule(), http.StatusOK)
+	// And so does switching to every destination on purpose. An operator who
+	// genuinely means it must still be able to say so on an existing schedule
+	// -- with allDestinations since app-council A54.
+	all := scheduleWithTargets()
+	all["allDestinations"] = true
+	send(t, h, sign, http.MethodPut, "/api/v1/schedules/"+id, all, http.StatusOK)
 	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/schedules/"+id, nil, http.StatusOK), &got)
-	if ids := storedTargets(t, got); len(ids) != 0 {
-		t.Fatalf("destinationIds = %v, want none: an omitted list is a legitimate edit", ids)
+	if ids := storedTargets(t, got); len(ids) != 0 || got["allDestinations"] != true {
+		t.Fatalf("destinationIds = %v all = %v, want every destination", ids, got["allDestinations"])
 	}
 }
 

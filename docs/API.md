@@ -337,13 +337,21 @@ tokens are for.
   An absent body means unconfirmed. A body that is present and malformed — or
   that misspells the field — is a `400`, so a client that meant to confirm is
   never read as one that did not.
+- **A start or stop schedule says what it acts on.** It names destinations in
+  `destinationIds`, or sets `allDestinations: true` for every destination on
+  this install — never neither and never both, or the answer is `400` naming
+  `allDestinations`. An empty list used to mean every destination; upgraded
+  schedules were set to `allDestinations: true`, and a client that omits the
+  field keeps working: a new `start` with no list still means every
+  destination, and an edit with no list keeps what the schedule already says.
+  Only a new `stop` with nothing named, or an edit that empties a named stop, is
+  refused. See [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md).
 - **A schedule whose `destinationIds` cannot be resolved is refused, not
-  emptied.** An empty `destinationIds` means *every destination on this
-  install*, which is the correct reading of "no filter given" — but a list that
-  arrives with entries and resolves to nothing is a different thing, and it used
-  to normalise to empty before validation saw it. A `stop` schedule that named
-  three destinations then fired against every broadcast on the box, and stopping
-  a YouTube broadcast completes it permanently.
+  emptied.** A list that arrives with entries and resolves to nothing used to
+  normalise to empty before validation saw it, and an empty list then meant
+  every destination. A `stop` schedule that named three destinations fired
+  against every broadcast on the box, and stopping a YouTube broadcast completes
+  it permanently.
 
   So both the create and the update route compare the length before and after
   normalisation, and answer `400` when a non-empty list empties. `[null]` and

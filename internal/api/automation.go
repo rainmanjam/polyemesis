@@ -390,8 +390,8 @@ type scheduleView struct {
 // It warns rather than refusing because the schedule works either way -- what
 // the bound limits is the pre-announced event page, not the go-live path. And
 // it could not refuse consistently even if that were wanted:
-// Schedule.DestinationIDs is empty for "every destination", which is the
-// commonest shape, so a save-time refusal cannot always tell whether a Facebook
+// Schedule.AllDestinations is "every destination", which is the commonest
+// shape, so a save-time refusal cannot always tell whether a Facebook
 // destination is involved, and a Facebook destination created tomorrow would
 // change the answer.
 func (s *Server) scheduleWarnings(sc scheduler.Schedule, now time.Time) []string {
@@ -491,14 +491,15 @@ type destinationID int64
 func (d *destinationID) UnmarshalJSON(b []byte) error {
 	if strings.TrimSpace(string(b)) == "null" {
 		return errors.New("destinationIds contains a null, which is not a destination. " +
-			"It is also not the same as sending no list at all: an empty destinationIds " +
-			"means EVERY destination on this install")
+			"It is also not the same as sending no list at all, and not a way of saying " +
+			"every destination: send allDestinations: true for that")
 	}
 	var n int64
 	if err := json.Unmarshal(b, &n); err != nil {
 		return fmt.Errorf("destinationIds contains %s, which is not a destination id. "+
-			"An entry that cannot be read is an entry that would be dropped, and a "+
-			"destinationIds that ends up empty means EVERY destination on this install", b)
+			"An entry that cannot be read is an entry that would be dropped, and a list "+
+			"that loses its entries is not the request that was sent. To act on every "+
+			"destination, send allDestinations: true", b)
 	}
 	*d = destinationID(n)
 	return nil
@@ -512,11 +513,15 @@ type scheduleRequest struct {
 	Action         scheduler.Action `json:"action"`
 	Kind           scheduler.Kind   `json:"kind"`
 	DestinationIDs []destinationID  `json:"destinationIds"`
-	TZ             string           `json:"tz"`
-	AtMinutes      int              `json:"atMinutes"`
-	Days           []time.Weekday   `json:"days"`
-	RunAt          time.Time        `json:"runAt"`
-	GraceSeconds   int              `json:"graceSeconds"`
+	// AllDestinations is a pointer so ABSENT is not FALSE (app-council A54).
+	// A client older than the field omits it, and what that means depends on
+	// the row and the action -- see allDestinationsFor.
+	AllDestinations *bool          `json:"allDestinations"`
+	TZ              string         `json:"tz"`
+	AtMinutes       int            `json:"atMinutes"`
+	Days            []time.Weekday `json:"days"`
+	RunAt           time.Time      `json:"runAt"`
+	GraceSeconds    int            `json:"graceSeconds"`
 }
 
 func (q scheduleRequest) applyTo(sc scheduler.Schedule) scheduler.Schedule {
@@ -533,12 +538,48 @@ func (q scheduleRequest) applyTo(sc scheduler.Schedule) scheduler.Schedule {
 	for _, id := range q.DestinationIDs {
 		sc.DestinationIDs = append(sc.DestinationIDs, int64(id))
 	}
+	sc.AllDestinations = q.allDestinationsFor(sc)
 	sc.TZ = q.TZ
 	sc.AtMinutes = q.AtMinutes
 	sc.Days = append([]time.Weekday(nil), q.Days...)
 	sc.RunAt = q.RunAt
 	sc.GraceSeconds = q.GraceSeconds
 	return sc
+}
+
+// allDestinationsFor decides AllDestinations for this request, given the row it
+// is applied to (the zero Schedule on a create). app-council A54.
+//
+// Sent, it is what the client said. Absent -- every client written before the
+// field -- it falls back in this order:
+//
+//   - a list was sent: the client named destinations, so not all of them;
+//   - the row already says every destination: keep it. This is the old client
+//     editing a migrated schedule, and the enable switch on the schedule list
+//     is exactly that: it sends the whole row back without a field it has
+//     never heard of;
+//   - a start: an empty list meant every destination before this change, and
+//     "start the show" is still the commonest schedule there is;
+//   - anything else -- a stop -- is false, and Validate refuses it with a
+//     message naming allDestinations. There is no safe guess for a stop: to an
+//     old client an empty list meant "stop the whole broadcast", and that is
+//     the reading this change exists to stop making on anybody's behalf.
+//
+// It reads the REQUEST's action, not the row's, because applyTo has already
+// written it: an old client switching a named start to a stop with the list
+// cleared gets the refusal, not the start's fallback.
+func (q scheduleRequest) allDestinationsFor(sc scheduler.Schedule) bool {
+	if q.AllDestinations != nil {
+		return *q.AllDestinations
+	}
+	if len(q.DestinationIDs) > 0 {
+		return false
+	}
+	if sc.AllDestinations {
+		return true
+	}
+	// "" is a start: Normalized fills it in, after this has run.
+	return q.Action == scheduler.ActionStart || q.Action == ""
 }
 
 // refuseEmptiedTargets rejects a schedule whose destination list arrived
@@ -597,10 +638,10 @@ func refuseEmptiedTargets(w http.ResponseWriter, named int, sc scheduler.Schedul
 	writeError(w, http.StatusBadRequest, fmt.Sprintf(
 		"destinationIds named %d destination(s) and none of them survived as a usable "+
 			"id. Storing this schedule with an empty list would not be the request that "+
-			"was sent: an empty destinationIds means EVERY destination on this install, "+
-			"so a stop schedule that named three would take down every broadcast on the "+
-			"box instead. Send positive destination ids, or omit destinationIds entirely "+
-			"if every destination really is what you mean.", named))
+			"was sent: an empty list once meant EVERY destination on this install, so a "+
+			"stop schedule that named three would have taken down every broadcast on the "+
+			"box. Send positive destination ids, or set allDestinations: true if every "+
+			"destination really is what you mean.", named))
 	return true
 }
 

@@ -377,6 +377,8 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 		Action:  scheduler.ActionStart,
 		Kind:    scheduler.KindOnce,
 		RunAt:   time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		// A destination schedule says what it acts on (app-council A54).
+		AllDestinations: true,
 	}); err != nil {
 		t.Fatalf("plant schedule: %v", err)
 	}

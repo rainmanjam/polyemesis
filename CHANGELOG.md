@@ -414,6 +414,16 @@ its first tagged release.
 
 ### Changed
 
+- **Schedules: "All destinations" is an explicit choice.** A start or stop
+  schedule now names its destinations or ticks **All destinations**
+  (`allDestinations` in the API). It can no longer mean every destination by
+  leaving the list empty, which for a stop meant "stop the whole broadcast" by
+  accident. The editor will not save a schedule with nothing chosen, and its hint
+  says what the action does. Existing schedules with an empty list were set to
+  All destinations on upgrade and behave as before. API clients that do not send
+  the field keep working, except a new stop with no destinations, which is
+  refused with a message naming `allDestinations`. See
+  [docs/SCHEDULED-BROADCAST.md](docs/SCHEDULED-BROADCAST.md).
 - **Dashboard: clearer on-air answer and one filled start action.** The on-air
   strip counts live, stopped and failing destinations against the whole install
   ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
