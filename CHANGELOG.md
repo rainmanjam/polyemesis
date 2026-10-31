@@ -10,6 +10,18 @@ its first tagged release.
 
 ### Added
 
+- **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in
+  (OAuth 2.0 with PKCE, `broadcast.read`, `broadcast.write`, `offline.access`,
+  `users.read`, `tweet.read`), stream-source minting, go-live and end, chat read
+  over the Activity API, chat send (140 characters), and mute, unmute and delete.
+  **Switched off until X whitelists the app.** Set `POLYEMESIS_X_LIVESTREAM=1`
+  once it is approved; until then the operator sees "needs X Livestream access
+  (app must be whitelisted by X)" and pasting the key works as before. X has no
+  hide action, so moderation offers delete and mute only. PROVISIONAL until a
+  whitelisted app has run it live: the PKCE acceptance, the broadcast.chat
+  payload, and the activity stream's app bearer, which is supplied as
+  `POLYEMESIS_X_APP_BEARER`. Titles are set at go-live only, so a live title
+  cannot change.
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,

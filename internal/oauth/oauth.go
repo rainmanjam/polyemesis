@@ -167,6 +167,9 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		// connect time, instead of leaving them to discover it from a refusal
 		// mid-broadcast. See vimeo.go and entitlement.go.
 		db.PlatformVimeo: NewVimeo(opts...),
+		// X (Twitter) sign-in is open to everyone; the Livestream family behind it
+		// is whitelisted by X and switched off until the app is. See x.go.
+		db.PlatformX: NewX(opts...),
 	}
 }
 
@@ -809,6 +812,28 @@ func guides() []SetupGuide {
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
 				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
 					"resource over the streamkey:read scope, the same way it does for the other platforms.",
+			},
+		},
+		{
+			Platform:        db.PlatformX,
+			Name:            "X (Twitter) Live",
+			ConsoleURL:      "https://console.x.com",
+			RedirectPath:    "/api/v1/oauth/x/callback",
+			Supported:       true,
+			ManualStreamKey: true,
+			Scopes:          (&X{}).Scopes(),
+			Note: "Read this first: X's Livestream API is open only to apps X has whitelisted. " +
+				"Signing in works for any X account, and polyemesis tells you at connect time whether " +
+				"your app reaches the Livestream family. Until it does, paste the server URL and stream " +
+				"key from X's producer tooling; streaming works exactly the same. X also needs the " +
+				"account to be allowed to broadcast (X Premium or more than 1,000 followers for listing).",
+			Steps: []string{
+				"Request Livestream API access with the Livestream access form (linked from docs.x.com/livestream-api/getting-started). X reviews it and whitelists the app by its developer App ID.",
+				"Open console.x.com, create a project and an app, and copy the Client ID and Client secret.",
+				"Under the app's user authentication settings, add exactly the redirect URI shown below.",
+				"Copy the Client ID and Client secret into the fields on this page and save.",
+				"Go to a destination and click Connect account. X will ask you to grant access.",
+				"If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
 			},
 		},
 		{

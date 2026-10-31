@@ -36,6 +36,9 @@ var adapterTypes = map[db.Platform]any{
 	db.PlatformTwitch:   (*TwitchAdapter)(nil),
 	db.PlatformYouTube:  (*YouTubeAdapter)(nil),
 	db.PlatformFacebook: (*FacebookAdapter)(nil),
+	// X has Deleter (DELETE .../chat/{id}) and Banner (mute and unmute). It has
+	// no Hider, because X offers no hide action.
+	db.PlatformX: (*XAdapter)(nil),
 }
 
 // implements reports what the platform's adapter can actually do.

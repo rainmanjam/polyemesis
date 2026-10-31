@@ -149,52 +149,24 @@ remembered from a page of documentation.
 destination saved before then is kept, switched off, so you can read its
 settings and delete it when you are ready.
 
-**X (Twitter) — paste your key, and the "there is no API" this page used to
-carry was wrong.** It said X's developer platform covers posts, users, media
-and the post firehose, not live-video ingest, and that "streaming" in X's
-documentation means streaming posts. That was read off X's navigation index,
-which has no Broadcasts section. The spec X actually serves does:
-`api.x.com/2/openapi.json` (read 2026-08-16, "X API v2" 2.167) declares 149
-paths and 178 operations, of which nine paths and thirteen operations sit under
-the tag **Broadcasts** — glossed "Endpoints related to live broadcasts and
-their chat" — under two scopes nothing else in the whole spec uses:
-`broadcast.read` and `broadcast.write`.
+**X (Twitter) — the Livestream API is real, and X whitelists each app for it.**
+X publishes a Livestream API (the Broadcasts and Chat families, under the
+`broadcast.read` and `broadcast.write` scopes, plus `/2/sources` and
+`/2/users/{id}/sources` for stream keys). Sign-in, stream-key minting,
+go-live and end, metadata, chat read and send, and chat moderation are built
+in `internal/oauth/x.go` and `internal/chat/x.go`. **All of it sits behind
+X's whitelist, and it is switched off until the app is whitelisted.** The
+switch is the `POLYEMESIS_X_LIVESTREAM` environment variable. Until then the
+operator sees "needs X Livestream access (app must be whitelisted by X)", and
+pasting the server URL and stream key from X's producer tooling works exactly
+as before.
 
-**The row still reads *Unverified* everywhere but the stream key, and those
-seven cells are the honest answer rather than a leftover.** polyemesis has a
-provider written against that family —
-`internal/oauth/x.go`, the OAuth flow and the two broadcast reads — and it is
-deliberately **not registered**: there is no X entry in the provider set, no
-setup guide and no *Connect account* button. The house rule is the one Rumble's
-viewer-stats cell already states: a capability nothing implements is not a
-capability, so a *Works* here would send you looking for a sign-in that does
-not exist. Nor is *Not possible* available, since X's own spec contradicts it.
-None of the four words means "documented and unbuilt"; *Unverified* is the
-fail-open one.
-
-There is a second reason not to promise anything. **X publishes no access tier
-for Broadcasts**: no pricing or tier page names the family, so whether your
-account can call those endpoints at all is a question only a live request
-answers.
-
-So today: create the source in X's own producer tooling and copy the URL and key
-across. **The key stays pasted even if the rest lands**, and the reason is
-narrow — X *consumes* a key (`source_id` is required when a broadcast is
-created, and is echoed back on every broadcast object) but publishes nothing
-that mints or enumerates one. polyemesis could confirm a binding it was given;
-it could not obtain one.
-
-What the family does publish, for anyone weighing whether to wait: title,
-description, language and the chat toggle on a **scheduled** broadcast
-(`POST`/`PUT /2/broadcasts/scheduled`, with `POST /2/broadcasts/scheduled/{id}/live`
-to publish it) and no metadata update on an already-live one, so a title change
-mid-show is not in it; chat history over `GET /2/broadcasts/{id}/chat` and
-sending over `POST` to the same path, capped at **140 characters**, which is X's
-bound and not ours; muting a viewer, lifting the mute, and deleting a message
-over `/2/broadcasts/{id}/chat/mutes` and `chat/{message_id}`; and
-`total_watching` and `total_watched` on the broadcast object, which X documents
-nothing about — all 26 fields in that schema are undescribed strings, so the
-numbers are readable but their unit and freshness are not stated.
+Every cell in the X row stays *Unverified* except the stream key, which is
+*By hand*. That is deliberate: no live request from a whitelisted app has
+confirmed any of the built paths yet. Two gates apply on top of the whitelist:
+X's Broadcasts list refuses accounts without X Premium or more than 1,000
+followers (HTTP 412), and X has **no hide action**, so chat moderation offers
+mute, unmute and delete only.
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
 distinction matters and this page used to collapse it. Instagram's platform
