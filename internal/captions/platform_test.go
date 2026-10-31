@@ -93,3 +93,14 @@ func TestYouTubePOSTNeedsADelayOfExactlyThirtyOrSixtySeconds(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEmptyModeIsRefusedForEveryPlatform. The empty string is not a mode, but
+// Embedded is empty on some platforms, so a naive match would accept it. Input
+// from the API is hostile, so the empty mode is refused everywhere.
+func TestAnEmptyModeIsRefusedForEveryPlatform(t *testing.T) {
+	for _, p := range []string{"twitch", "youtube", "facebook", "kick", "unknown"} {
+		if Allowed(p, "", true) || Allowed(p, "", false) {
+			t.Fatalf("Allowed(%q, empty mode) = true, want refused", p)
+		}
+	}
+}

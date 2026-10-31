@@ -78,6 +78,11 @@ func Allowed(platform string, mode Mode, facebookFlag bool) bool {
 	if mode == ModeOff {
 		return true
 	}
+	if mode == "" {
+		// The empty string is not a mode. Embedded is empty on some platforms, so
+		// it must be refused here rather than matched against it.
+		return false
+	}
 	s := SupportFor(platform)
 	if s.Status == "skipped" || (s.Mode != mode && s.Embedded != mode) {
 		return false

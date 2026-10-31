@@ -200,12 +200,14 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 	}
 	in.held.pkts = append(in.held.pkts, append([]byte(nil), p...))
 	if len(in.held.pkts) > maxHeldPackets {
-		// The unit is too long to keep collecting. It is queued as it stands and
-		// the rest of its packets pass through unchanged, as continuations with no
-		// start do above.
-		in.held.unchanged = true
+		// The unit is too long to keep collecting. Everything queued is sent now,
+		// in stream order, with the unit's head ahead of the packets that follow.
+		// Those packets then pass through unchanged, as continuations with no start
+		// do above. Sending the queue here keeps the picture's head from being
+		// overtaken by its own tail.
 		in.ready = append(in.ready, in.held)
 		in.held = nil
+		return in.releaseReady()
 	}
 	return nil
 }

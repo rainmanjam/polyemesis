@@ -569,3 +569,87 @@ func TestInjectorStopsHoldingAPictureWhoseStartIsNeverFollowedByAnotherPayloadSt
 		t.Fatalf("a single access unit holds %d packets, want at most %d", len(inj.held.pkts), maxHeldPackets)
 	}
 }
+
+// TestInjectorKeepsAPESInStreamOrderWhenItsPacketsOverflowTheHoldCap covers one
+// picture that runs past the per-unit cap. The head of the picture was queued
+// when the cap was hit, so the packets after it must not reach the output before
+// it. Read back, the picture must come out whole, with its bytes unchanged.
+func TestInjectorKeepsAPESInStreamOrderWhenItsPacketsOverflowTheHoldCap(t *testing.T) {
+	var cc uint8
+	head := auFor(false)
+	pes := append(pesHeader(90000), head...)
+	pad := make([]byte, (maxHeldPackets+100)*184)
+	pes = append(pes, pad...)
+	in := append(psFixture(0x1B), pesPackets(testVideoPID, &cc, pes, nil)...)
+	inj := NewInjector(NewSchedule(0))
+	out := append(inj.Write(in), inj.Flush()...)
+	units := videoUnits(t, parsePackets(t, out), testVideoPID)
+	if len(units) != 1 {
+		t.Fatalf("%d video units came out, want the one picture", len(units))
+	}
+	want := append(append([]byte(nil), head...), pad...)
+	if !bytes.Equal(units[0].es, want) {
+		t.Fatalf("the picture came out out of order or altered after the hold cap was hit")
+	}
+}
+
+// TestInjectorReleasesEveryAccessUnitOnceWhenItsSlotNeverFinalises checks the
+// frozen-clock stream from the bounds test end to end. Every picture must come
+// out exactly once after Flush, not only stay within the cap.
+func TestInjectorReleasesEveryAccessUnitOnceWhenItsSlotNeverFinalises(t *testing.T) {
+	var cc uint8
+	in := psFixture(0x1B)
+	const n = 500
+	for i := 0; i < n; i++ {
+		in = append(in, pesPackets(testVideoPID, &cc, append(pesHeader(90000), auFor(false)...), nil)...)
+	}
+	inj := NewInjector(NewSchedule(0))
+	out := append(inj.Write(in), inj.Flush()...)
+	if got := len(videoUnits(t, parsePackets(t, out), testVideoPID)); got != n {
+		t.Fatalf("%d video units came out, want %d", got, n)
+	}
+}
+
+// TestInjectorResumesCaptionsInOrderAcrossABackwardClockJump covers a 20 second
+// backward jump in the middle of a stream. Every picture must come out once and
+// in input order, and the captions queued for the new timeline must resume.
+func TestInjectorResumesCaptionsInOrderAcrossABackwardClockJump(t *testing.T) {
+	var cc uint8
+	in := psFixture(0x1B)
+	var wantPTS []int64
+	for i := 0; i < 30; i++ {
+		pts := int64(40*90000 + i*frameTicks)
+		wantPTS = append(wantPTS, pts)
+		in = append(in, pesPackets(testVideoPID, &cc, append(pesHeader(pts), auFor(false)...), nil)...)
+	}
+	for i := 0; i < 30; i++ {
+		pts := int64(20*90000 + i*frameTicks)
+		wantPTS = append(wantPTS, pts)
+		in = append(in, pesPackets(testVideoPID, &cc, append(pesHeader(pts), auFor(false)...), nil)...)
+	}
+	sched := NewSchedule(0)
+	sched.Add(Cue{StartPTS: 20 * 90000, EndPTS: 25 * 90000, Text: "BACK"})
+	inj := NewInjector(sched)
+	out := append(inj.Write(in), inj.Flush()...)
+
+	units := videoUnits(t, parsePackets(t, out), testVideoPID)
+	if len(units) != len(wantPTS) {
+		t.Fatalf("%d video units came out, want %d", len(units), len(wantPTS))
+	}
+	var got []int64
+	var pairs []Pair
+	for _, u := range units {
+		got = append(got, u.pts)
+		for _, nal := range splitAnnexB(u.es) {
+			if p, ok := ccPairOf(nal); ok && p != nullPair {
+				pairs = append(pairs, p)
+			}
+		}
+	}
+	if !reflect.DeepEqual(got, wantPTS) {
+		t.Fatalf("the pictures came out out of input order across the clock jump")
+	}
+	if len(pairs) == 0 || pairs[0] != PopOnScript("BACK")[0] {
+		t.Fatalf("captions did not resume on the new timeline after the clock jump")
+	}
+}
