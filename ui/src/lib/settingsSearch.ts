@@ -117,6 +117,11 @@ export const SETTINGS_INDEX: readonly SettingsEntry[] = [
   { tab: "platforms", key: "set.redirectUri" },
   { tab: "platforms", key: "set.clientId" },
   { tab: "platforms", key: "set.clientSecret" },
+  // Each card names its pair in the platform's own words (lib/
+  // platformCredentialLabels.ts), so "App ID" has to find the Facebook card.
+  { tab: "platforms", key: "credLabels.appId" },
+  { tab: "platforms", key: "credLabels.appSecret" },
+  { tab: "platforms", key: "credLabels.clientIdentifier" },
   { tab: "platforms", key: "set.connectedAccounts" },
   // obs bridge (#16): its fields live in ObsBridgeSettings.tsx
   { tab: "obs", key: "obs.title" },
