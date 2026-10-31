@@ -8,6 +8,29 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dashboard: clearer on-air answer and one filled start action.** The on-air
+  strip counts live, stopped and failing destinations against the whole install
+  ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
+  a fault. It says "Ingest is not receiving" instead of "All healthy" when every
+  destination is up over a feed that is not arriving. Its End all is now Stop all
+  and opens the same confirmation as the toolbar. The stop-all dialog is shorter
+  and no longer points at a Start all button that does not exist; it says to start
+  again with Go live. Go live is the one filled start action: Add destination and
+  each stopped card's Start are outline buttons. The metadata card is titled
+  Stream info. The Go live sheet marks a running destination LIVE, not READY, and
+  wraps long source names instead of cutting them off. A "0 accounts" figure no
+  longer sits beside the Go live card when no platform account is connected.
+  The strip's full-screen view is named Full-screen status.
+- **Shell: keyboard and phone fixes.** A Skip to content link comes first on
+  every page. The closed mobile nav drawer is removed from the tab order. On a
+  phone the header now shows the on-air answer beside the menu (the live count, or
+  Off air). System moves into the Operations group beside Monitoring, and the
+  settings group is headed Setup.
+- **Chat composer.** When no platform can send, the field reads "Chat not
+  connected" and the reason sits beneath it instead of being clipped.
+
 ### Added
 
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
