@@ -61,6 +61,16 @@ func drainingOf(e *Engine, id int64) *destination {
 	return e.draining[id]
 }
 
+// retiringOf is the destination finishDrain has taken out of e.draining and is
+// still tearing down. It leaves e.retiring only once teardownDest has returned
+// -- after the FFmpeg is stopped, the private hub released AND the spill
+// deleted -- so it, not any one of those, is the "teardown is over" signal.
+func retiringOf(e *Engine, id int64) *destination {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.retiring[id]
+}
+
 func eventually(t *testing.T, what string, within time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -167,17 +177,29 @@ func TestStoppingADelayedDestinationPlaysTheTailOutBeforeItIsTornDown(t *testing
 		t.Fatal("a draining line is still taking new input from upstream")
 	}
 
-	eventually(t, "the drain to finish", 6*time.Second, func() bool {
-		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil
+	// WAIT FOR THE WHOLE TEARDOWN, NOT ONE STEP OF IT. finishDrain moves the
+	// destination from e.draining to e.retiring, runs teardownDest, and only
+	// then drops it from e.retiring; until it does, Status reports it as
+	// transitioning, with its process. This used to wait for draining and dests
+	// to empty and then for the private hub to lose its subscriber -- but the
+	// unsubscribe is in the MIDDLE of teardownDest, ahead of closeDelay deleting
+	// the spill, which on Windows is slow enough that the status read below
+	// landed while the destination was still retiring and reported its
+	// process. The retiring entry is removed under e.mu after teardownDest has
+	// returned, so once it is gone every step of the teardown has happened.
+	eventually(t, "the drain and its teardown to finish", 9*time.Second, func() bool {
+		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
+			retiringOf(e, row.ID) == nil
 	})
-	eventually(t, "the teardown to release the private hub", 3*time.Second, func() bool {
-		return !slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, ""))
-	})
+	if slices.Contains(d.delay.hub.Subscribers(), destSubName(row.ID, "")) {
+		t.Fatal("the teardown finished without releasing the private hub")
+	}
 	if got := d.delay.hub.Stats().RxPackets; got < 200 {
 		t.Fatalf("the drain released %d of 200 datagrams before the stop", got)
 	}
 	if st := statusFor(t, e, row.ID); st.Delay != nil || st.Process != nil {
-		t.Fatalf("a drained destination still reports delay %+v process %v", st.Delay, st.Process)
+		t.Fatalf("a drained destination still reports delay %+v process %v (transitioning %v)",
+			st.Delay, st.Process, st.Transitioning)
 	}
 }
 
