@@ -225,8 +225,13 @@ destination.up
 ```
 
 `destination.restarted` reports the supervisor respawning the same process:
-`data: {"restarts": 9, "since": 2}`. A new process does not count. That covers
-a settings change that rebuilt the destination, and Retry. The first time a
+`data: {"restarts": 9, "since": 2}`. It also reports a restart that a live
+level change caused. One kind keeps a live mute or gain when a failover or a
+new ingest session changes the audio format. The other replaces a level change
+that the running FFmpeg refused, and on Windows that is every level change. The
+replacement process continues the old count. Any other new process does not
+count. That covers a settings change that rebuilt the destination, and Retry.
+The first time a
 destination is seen it is not announced either, so a restarted server does not
 report every destination's lifetime count.
 
