@@ -120,12 +120,12 @@ func TestAStoredVerdictNeverCarriesTheSecretItWasReachedOn(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	srv.recordCredCheck(db.PlatformTwitch, oauth.CheckResult{
+	srv.recordCredCheck(db.PlatformTwitch, "an-id", secret, oauth.CheckResult{
 		Platform: db.PlatformTwitch,
 		State:    oauth.CheckRejected,
 		Method:   oauth.MethodClientCredentials,
 		Detail:   "platform said: invalid client secret " + secret,
-	}, secret)
+	})
 
 	list, body := listCreds(t, h, sign)
 	if strings.Contains(body, secret) {
@@ -148,8 +148,30 @@ func TestScrubbingABlankSecretLeavesTheSentenceAlone(t *testing.T) {
 func TestAVerdictForARemovedPairIsDroppedNotStored(t *testing.T) {
 	srv, h, _ := testServer(t, config.Config{})
 	sign := login(t, h)
-	srv.recordCredCheck(db.PlatformTwitch, oauth.CheckResult{State: oauth.CheckVerified}, "")
+	srv.recordCredCheck(db.PlatformTwitch, "", "", oauth.CheckResult{State: oauth.CheckVerified})
 	if list, _ := listCreds(t, h, sign); len(list) != 0 {
 		t.Fatalf("list = %+v, want no row for a pair that is not stored", list)
+	}
+}
+
+// A check that finishes after the operator saved a different pair is about the
+// pair it checked, so the list must not show its verdict on the new one. The
+// handler drops it; the save of the new pair runs its own check.
+//
+// Mutation: key RecordPlatformCredsCheck by platform alone. The new pair then
+// lists "verified" and this fails.
+func TestAVerdictForAPairReplacedWhileItWasCheckedIsNotShownOnTheNewPair(t *testing.T) {
+	srv, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	if err := store.PutPlatformCreds(srv.box, db.PlatformTwitch, "first-id", "first-fake"); err != nil {
+		t.Fatalf("seed first: %v", err)
+	}
+	if err := store.PutPlatformCreds(srv.box, db.PlatformTwitch, "second-id", "second-fake"); err != nil {
+		t.Fatalf("seed second: %v", err)
+	}
+	srv.recordCredCheck(db.PlatformTwitch, "first-id", "first-fake", oauth.CheckResult{State: oauth.CheckVerified})
+	list, _ := listCreds(t, h, sign)
+	if len(list) != 1 || list[0].LastCheck != nil {
+		t.Fatalf("list = %+v, want the second pair with no verdict", list)
 	}
 }
