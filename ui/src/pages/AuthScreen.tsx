@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 
 const MIN_PASSWORD = 8;
@@ -66,8 +66,15 @@ export function AuthScreen({
   const [confirm, setConfirm] = useState("");
   const [setupCode, setSetupCode] = useState("");
   const [busy, setBusy] = useState(false);
+  // The one error on the form, shown inline where the operator is looking. A
+  // validation problem used to be a toast that vanished before it was read (A75).
+  const [error, setError] = useState("");
 
   const isSetup = mode === "setup";
+  // Computed once per render: the four segments and the line below all read it.
+  const strength = scorePassword(password);
+  // Shown under Confirm while the operator types, not after they press the button.
+  const mismatch = isSetup && confirm.length > 0 && password !== confirm;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,16 +82,17 @@ export function AuthScreen({
 
     if (isSetup) {
       if (password.length < MIN_PASSWORD) {
-        toast.error(t("i18nSweep.passwordTooShort", { count: MIN_PASSWORD }));
+        setError(t("i18nSweep.passwordTooShort", { count: MIN_PASSWORD }));
         return;
       }
       if (password !== confirm) {
-        toast.error(t("auth.passwordMismatch"));
+        setError(t("auth.passwordMismatch"));
         return;
       }
     }
 
     setBusy(true);
+    setError("");
     try {
       if (isSetup) {
         await api.setup(username.trim() || "admin", password, setupCode.trim());
@@ -94,9 +102,14 @@ export function AuthScreen({
       }
       onDone();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("auth.somethingWentWrong"));
-      setPassword("");
-      setConfirm("");
+      setError(err instanceof Error ? err.message : t("auth.somethingWentWrong"));
+      // Only a rejected password is cleared, because it must be retyped. A wrong
+      // setup code or a dropped connection keeps what was typed: the password is
+      // not what went wrong, and retyping it is the cost of a typo elsewhere (A75).
+      if (err instanceof ApiError && err.status === 401) {
+        setPassword("");
+        setConfirm("");
+      }
     } finally {
       setBusy(false);
     }
@@ -140,9 +153,19 @@ export function AuthScreen({
                     required
                     autoFocus
                   />
-                  <span id="setupCode-hint" className="text-[10px] leading-relaxed text-muted-foreground">
-                    {t("auth.setupCodeHint")}
-                  </span>
+                  {/* The routes to the code, one per line, behind a disclosure. The
+                      four commands used to share one dense paragraph with no word
+                      on which applies (A76). */}
+                  <details id="setupCode-hint" className="text-sm text-muted-foreground">
+                    <summary className="cursor-pointer hover:text-foreground">
+                      {t("auth.setupCodeWhere")}
+                    </summary>
+                    <div className="mt-1 flex flex-col gap-1 leading-relaxed">
+                      <p>{t("auth.setupCodeLinux")}</p>
+                      <p>{t("auth.setupCodeDocker")}</p>
+                      <p>{t("auth.setupCodeOther")}</p>
+                    </div>
+                  </details>
                 </div>
               )}
               <div className="flex flex-col gap-1">
@@ -177,10 +200,10 @@ export function AuthScreen({
                           <div
                             key={seg}
                             className={`h-1 flex-1 rounded-full ${
-                              scorePassword(password).score >= seg
-                                ? scorePassword(password).score <= 1
+                              strength.score >= seg
+                                ? strength.score <= 1
                                   ? "bg-down"
-                                  : scorePassword(password).score === 2
+                                  : strength.score === 2
                                     ? "bg-warn"
                                     : "bg-live"
                                 : "bg-border"
@@ -188,10 +211,17 @@ export function AuthScreen({
                           />
                         ))}
                       </div>
-                      <span className="text-[10px] text-muted-foreground" aria-live="polite">
+                      <p className="text-sm text-muted-foreground">
                         {t("i18nSweep.passwordMin", { count: MIN_PASSWORD })}
-                        {scorePassword(password).label ? ` · ${t(STRENGTH_KEYS[scorePassword(password).score])}` : ""}
+                        {strength.label ? ` · ${t(STRENGTH_KEYS[strength.score])}` : ""}
                         {password.length > 0 && password.length < 20 ? ` · ${t("i18nSweep.passwordLengthHelps")}` : ""}
+                      </p>
+                      {/* The live region holds ONLY the strength word, so a screen
+                          reader announces a change of strength, not every keystroke
+                          (A77). It is visually hidden; the sentence above is the
+                          visible copy. */}
+                      <span className="sr-only" aria-live="polite">
+                        {strength.label ? t(STRENGTH_KEYS[strength.score]) : ""}
                       </span>
                       {/* WHAT THIS PASSWORD DOES, AND WHAT IT DOES NOT.
                           It protects the UI and the API. It encrypts nothing:
@@ -204,7 +234,7 @@ export function AuthScreen({
                           a database WITHOUT that key file leaves every destination
                           disabled -- which is by design, and is otherwise found
                           out during a restore, which is the worst moment. */}
-                      <p className="mt-2 rounded border border-border bg-card-raised/40 p-2 text-[10px] leading-relaxed text-muted-foreground">
+                      <p className="mt-2 rounded border border-border bg-card-raised/40 p-2 text-sm leading-relaxed text-muted-foreground">
                         {t("i18nSweep.passwordProtects")}
                       </p>
                     </>
@@ -220,9 +250,22 @@ export function AuthScreen({
                     value={confirm}
                     autoComplete="new-password"
                     onChange={(e) => setConfirm(e.target.value)}
+                    aria-invalid={mismatch || undefined}
+                    aria-describedby={mismatch ? "confirm-error" : undefined}
                     required
                   />
+                  {mismatch && (
+                    <p id="confirm-error" className="text-sm text-down">
+                      {t("auth.passwordMismatch")}
+                    </p>
+                  )}
                 </div>
+              )}
+
+              {error && (
+                <p role="alert" className="text-sm text-down">
+                  {error}
+                </p>
               )}
 
               <Button type="submit" disabled={busy} className="mt-1">
