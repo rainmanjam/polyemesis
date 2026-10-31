@@ -497,6 +497,9 @@ func run(h *hooks) error {
 	// reconciles, and every broadcast on the box sits in "testing" for ever.
 	eng.SetLifecycle(srv.Lifecycle())
 	go srv.LifecycleLoop(ctx)
+	// Planned rollover (#19): the sweep that replaces a live broadcast before its platform cap, and the OBS scene
+	// trigger it listens to. See internal/api/rollover.go.
+	go srv.RolloverLoop(ctx)
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())

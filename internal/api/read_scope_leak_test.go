@@ -613,6 +613,11 @@ func leakRoutes() []string {
 		// occurrences. A read a read-scoped token may make. Titles and descriptions are the operator's
 		// own text; no credential is stored in either.
 		"/api/v1/schedules/1/template",
+		// Planned rollover (#19): one destination's settings and countdown, and the table of platform caps. The view
+		// carries the operator's quiet window and OBS scene name, the session's broadcast id and the cap's source
+		// link, and never a stream key or a token.
+		"/api/v1/destinations/1/rollover",
+		"/api/v1/rollover/limits",
 		"/api/v1/recurring/occurrences",
 		// Chat polls (#14): counts per option and platform, never a voter.
 		"/api/v1/polls",

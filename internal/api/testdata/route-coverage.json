@@ -9,20 +9,20 @@
   "inertCeiling": 7,
   "varianceExemptCeiling": 6,
   "shapeFloor": 29,
-  "guardedFloor": 24,
+  "guardedFloor": 27,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 270,
-    "swept": 73,
+    "methodPatternPairs": 274,
+    "swept": 75,
     "excused": 60,
-    "denied": 137,
+    "denied": 139,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 59,
+    "invariant": 61,
     "inertSubsetOfInvariant": 7,
     "explainedVariance": 2,
     "unstable": 4
@@ -445,6 +445,24 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/restart",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/{id}/rollover",
+      "coverage": "swept",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/destinations/{id}/rollover",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/rollover/run",
       "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
@@ -1139,6 +1157,12 @@
       "zeroSource": "guarded"
     },
     {
+      "method": "GET",
+      "pattern": "/api/v1/rollover/limits",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "POST",
       "pattern": "/api/v1/routing/compile",
       "coverage": "swept",
@@ -1749,6 +1773,11 @@
       ]
     },
     {
+      "path": "/api/v1/destinations/1/rollover",
+      "pattern": "GET /api/v1/destinations/{id}/rollover",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/destinations/2",
       "pattern": "GET /api/v1/destinations/{id}",
       "class": "differential",
@@ -1972,6 +2001,11 @@
     {
       "path": "/api/v1/renditions/presets",
       "pattern": "GET /api/v1/renditions/presets",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/rollover/limits",
+      "pattern": "GET /api/v1/rollover/limits",
       "class": "invariant"
     },
     {
