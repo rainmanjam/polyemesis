@@ -3387,7 +3387,7 @@
   "routingUx.saveChanges": "Enregistrer les modifications",
   "routingUx.unsavedNone": "Aucune modification non enregistrée.",
   "jobsPolicyUx.jobsAtOnce": "Tâches simultanées",
-  "jobsPolicyUx.summaryCpu": "Les tâches attendent tant que {above} et reprennent quand elle redescend à {resume} %.",
+  "jobsPolicyUx.summaryCpu": "Les tâches attendent tant que {above} et reprennent quand il redescend à {resume} %.",
   "jobsPolicyUx.summaryCpuAbove": "le CPU dépasse {ceiling} %",
   "jobsPolicyUx.summaryNoCeiling": "Aucun plafond CPU : les tâches démarrent quelle que soit la charge.",
   "jobsPolicyUx.summaryOff": "La politique de ressources est désactivée : les tâches s’exécutent dès qu’une place se libère.",
