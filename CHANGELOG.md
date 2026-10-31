@@ -30,6 +30,34 @@ its first tagged release.
   the same track, and so does live gain except in a matrix VOD mix (gain there
   is per cell). Twitch acceptance of the two-track publish is PROVISIONAL until
   a live test on a Twitch test channel.
+- **Live captions, part 1: the in-band path (#8, not yet switched on).** New
+  `internal/captions` package. It builds CEA-608 pop-on captions (RCL, row
+  addressing, 32-column wrapping, EOC and EDM, the basic and special character
+  sets), and a Go SEI injector that rewrites the H.264 PID of an MPEG-TS stream
+  so each picture carries the caption pair due at its presentation time. Pairs
+  are keyed on picture timestamps, not arrival order, so B-frames read back in
+  order; a short reorder window is the only added latency. Verified by FFmpeg's
+  own CEA-608 decoder (host FFmpeg 9.0.2) reading the injected captions back.
+  **PROVISIONAL:** the Twitch path needs a live check on a test channel before
+  it is offered. Nothing calls it yet: no API route, no UI control, and no
+  destination path runs the injector.
+- Caption text policy: vocabulary spellings and profanity masking, applied once
+  at the emit boundary so every output shows the same words. Timing, track and
+  speaker are unchanged.
+- Per-destination caption mode (`destinations.caption_mode`, default `off`).
+  There is no control yet, so no operator can set it. Twitch SEI is marked go,
+  and its on-stream display still needs a live check. YouTube's embedded
+  CEA-608 route is go. YouTube's caption POST is provisional and needs a 30 s
+  or 60 s broadcast delay. Facebook SEI stays off behind a flag. Kick is
+  skipped: Kick documents no caption route for live streams.
+- Burn-in filter builder for the `subtitles` filter. The shipped image's FFmpeg
+  (8.1.3-r0 on the pinned `alpine:3.24` digest) has `subtitles` (libass) and
+  `drawtext`; checked in a local container on 2026-10-31, amd64 only. Not yet
+  wired into renditions.
+- The injector drops video packets whose adaptation field runs past the packet
+  and counts them. It bounds the units it holds, releasing units over the cap
+  unchanged, and it restarts its caption schedule on a clock jump in either
+  direction.
 
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason

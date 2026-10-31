@@ -26,6 +26,8 @@ func servedHarness(t *testing.T, mutate func(*db.PlayoutSettings)) (*harness, ht
 	writeSegment(t, h.dir, "hd/seg_00000.ts", 64, 0)
 	writeSegment(t, h.dir, "hd/init-0.m4s", 64, 0)
 	writeSegment(t, h.dir, "hd/secrets.txt", 64, 0)
+	// The live caption sidecar sits at the playout root, beside the ladder.
+	writeSegment(t, h.dir, "captions.vtt", 64, 0)
 	return h, h.Handler("/playout/")
 }
 
@@ -50,6 +52,7 @@ func TestHandlerServesOnlyMediaAndManifestFiles(t *testing.T) {
 		{"a dash manifest", "/playout/hd/" + DASHManifest, http.StatusOK, "application/dash+xml"},
 		{"an mpeg-ts segment", "/playout/hd/seg_00000.ts", http.StatusOK, "video/mp2t"},
 		{"a cmaf init segment", "/playout/hd/init-0.m4s", http.StatusOK, "video/iso.segment"},
+		{"the live caption sidecar, served as WebVTT for players", "/playout/captions.vtt", http.StatusOK, "text/vtt"},
 		{"anything else in the directory", "/playout/hd/secrets.txt", http.StatusNotFound, ""},
 		{"a bare variant path is not a directory listing", "/playout/hd/", http.StatusNotFound, ""},
 		{"the root is not a directory listing", "/playout/", http.StatusNotFound, ""},
