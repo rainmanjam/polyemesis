@@ -25,13 +25,19 @@ its first tagged release.
   at the emit boundary so every output shows the same words. Timing, track and
   speaker are unchanged.
 - Per-destination caption mode (`destinations.caption_mode`, default `off`).
-  There is no control yet, so no operator can set it. Twitch SEI is the one
-  built path marked go. YouTube's caption POST is
-  provisional and needs a 30 s or 60 s broadcast delay. Facebook SEI stays off
-  behind a flag. Kick is skipped: Kick documents no caption route for live
-  streams.
-- Burn-in filter builder for the `subtitles` filter, which the shipped FFmpeg
-  image supports. Not yet wired into renditions.
+  There is no control yet, so no operator can set it. Twitch SEI is marked go,
+  and its on-stream display still needs a live check. YouTube's embedded
+  CEA-608 route is go. YouTube's caption POST is provisional and needs a 30 s
+  or 60 s broadcast delay. Facebook SEI stays off behind a flag. Kick is
+  skipped: Kick documents no caption route for live streams.
+- Burn-in filter builder for the `subtitles` filter. The shipped image's FFmpeg
+  (8.1.3-r0 on the pinned `alpine:3.24` digest) has `subtitles` (libass) and
+  `drawtext`; checked in a local container on 2026-10-31, amd64 only. Not yet
+  wired into renditions.
+- The injector drops video packets whose adaptation field runs past the packet
+  and counts them. It bounds the units it holds, releasing units over the cap
+  unchanged, and it restarts its caption schedule on a clock jump in either
+  direction.
 
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason

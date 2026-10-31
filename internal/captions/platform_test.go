@@ -44,8 +44,13 @@ func TestEachCaptionModeIsOnlyOfferedOnItsOwnPlatform(t *testing.T) {
 	if Allowed("twitch", ModeYouTubePOST, true) {
 		t.Fatalf("twitch accepted the YouTube POST mode")
 	}
-	if Allowed("youtube", ModeSEI, true) {
-		t.Fatalf("youtube accepted the Twitch SEI mode")
+	// YouTube's embedded CEA-608 route is the same SEI carriage, so the SEI mode
+	// is allowed for YouTube. It is the only route the SEI mode unlocks there.
+	if !Allowed("youtube", ModeSEI, false) {
+		t.Fatalf("youtube refused the embedded CEA-608 (SEI) route, which is GO")
+	}
+	if Allowed("youtube", ModeFacebookSEI, true) {
+		t.Fatalf("youtube accepted the Facebook SEI mode")
 	}
 	if SupportFor("twitch").Status != "go" {
 		t.Fatalf("twitch SEI is not marked go")

@@ -126,18 +126,29 @@ const resetSlots = 10 * 30
 // within the lookahead is visible to the slots that depend on it.
 //
 // A picture far behind the newest one is a discontinuity: the source reconnected
-// or the timestamps wrapped. The slot state belongs to the old timeline, so it is
-// dropped and the schedule starts again at the new position.
-func (s *Schedule) Claim(pts int64) {
+// or the timestamps wrapped. A picture far ahead of it is one too: the source
+// stalled and resumed, or the clock was reset upward. Either way the slot state
+// belongs to the old timeline, so it is dropped and the schedule starts again at
+// the new position. Claim reports whether that happened, so the caller can release
+// the units it was still holding for the old timeline.
+//
+// A claim for a slot that is already final is ignored. Nothing after the cursor
+// could change its answer, and recording it would add state nothing removes.
+func (s *Schedule) Claim(pts int64) (reset bool) {
 	k := slotOf(pts)
-	if s.anyClaimed && k < s.maxClaimed-resetSlots {
+	if s.anyClaimed && (k < s.maxClaimed-resetSlots || k > s.maxClaimed+resetSlots) {
 		s.restart(k)
+		reset = true
+	}
+	if k < s.cursor {
+		return reset
 	}
 	s.claimed[k] = true
 	if !s.anyClaimed || k > s.maxClaimed {
 		s.maxClaimed = k
 		s.anyClaimed = true
 	}
+	return reset
 }
 
 // Final reports whether the pair for pts can no longer change: enough later
@@ -152,6 +163,14 @@ func (s *Schedule) Final(pts int64) bool {
 // and a second picture on the same slot gets the null pair.
 func (s *Schedule) PairAt(pts int64) Pair {
 	s.Claim(pts)
+	return s.answer(pts)
+}
+
+// answer returns the pair for pts without claiming it. The injector claims a
+// picture when it first arrives, and answers for it later, when its slot is
+// due. Answering must not claim again, or a unit held across a clock jump would
+// restart the schedule a second time.
+func (s *Schedule) answer(pts int64) Pair {
 	k := slotOf(pts)
 	s.finalise(k)
 	p, ok := s.slots[k]
@@ -172,6 +191,7 @@ func (s *Schedule) finalise(last int64) {
 	// request; nothing in the skipped stretch can still be claimed in order.
 	if last-s.cursor > slotWindow {
 		s.cursor = last - slotWindow
+		s.prune()
 	}
 	for ; s.cursor <= last; s.cursor++ {
 		old := s.cursor - slotWindow
@@ -191,6 +211,29 @@ func (s *Schedule) finalise(last int64) {
 			s.queue = s.queue[1:]
 		}
 		s.slots[s.cursor] = p
+	}
+}
+
+// prune drops every slot entry that is older than the reorder window behind the
+// cursor. The per-slot deletes in finalise only remove the one slot that falls out
+// of the window each step, so a jump that skips slots would leave the older ones
+// behind. A jump is rare, so walking the maps here costs little.
+func (s *Schedule) prune() {
+	floor := s.cursor - slotWindow
+	for k := range s.claimed {
+		if k < floor {
+			delete(s.claimed, k)
+		}
+	}
+	for k := range s.slots {
+		if k < floor {
+			delete(s.slots, k)
+		}
+	}
+	for k := range s.used {
+		if k < floor {
+			delete(s.used, k)
+		}
 	}
 }
 

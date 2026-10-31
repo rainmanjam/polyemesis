@@ -36,7 +36,24 @@ type InjectorStats struct {
 	Injected    int
 	Unsupported int
 	PCRInMiddle int
+	// Malformed is the video packets dropped because their adaptation field
+	// claims more bytes than the packet holds.
+	Malformed int
 }
+
+// The caps that keep the injector's memory bounded whatever the stream does. A
+// picture is claimed on its first packet and waits for its slot to finalise, so
+// a stream whose timestamps stop advancing would otherwise queue units forever.
+// A PES whose next start never arrives would grow its packet list forever. Both
+// are cut off here. Units over a cap go out unchanged, without their caption.
+const (
+	// maxHeldPackets bounds one access unit's packets, about 770 KB.
+	maxHeldPackets = 4096
+	// maxReadyUnits bounds the access units queued behind their caption slots.
+	maxReadyUnits = 64
+	// maxBufferedBytes bounds everything the injector holds, in bytes.
+	maxBufferedBytes = 16 << 20
+)
 
 // Injector holds the state of one stream. It is not safe for concurrent use: a
 // destination's stream is fed from one goroutine.
@@ -64,6 +81,9 @@ type accessUnit struct {
 	pkts   [][]byte
 	pts    int64
 	hasPTS bool
+	// unchanged marks a unit that went over a cap or was released by a clock
+	// discontinuity. It is passed on as it arrived, with no caption.
+	unchanged bool
 }
 
 // NewInjector returns an injector that takes its caption pairs from sched.
@@ -119,9 +139,38 @@ func (in *Injector) packet(p []byte) []byte {
 		in.parsePMT(p)
 		return p
 	case in.videoPID != 0 && pid == in.videoPID:
+		if !validAdaptation(p) {
+			// The packet cannot be read, so it is dropped rather than passed through
+			// out of order with the access unit it belongs to.
+			in.stats.Malformed++
+			return nil
+		}
 		return in.video(p, pusi)
 	}
 	return p
+}
+
+// validAdaptation reports whether a packet's adaptation field fits inside the
+// packet. Every later read of the field depends on this, so it is checked once,
+// where the packet enters the injector.
+func validAdaptation(p []byte) bool {
+	if (p[3]>>4)&0x2 == 0 {
+		return true
+	}
+	n := int(p[4])
+	return n <= tsPacketSize-5 && 5+n <= len(p)
+}
+
+// bufferedBytes is the size of every access unit the injector is holding.
+func (in *Injector) bufferedBytes() int {
+	n := 0
+	for _, au := range in.ready {
+		n += len(au.pkts) * tsPacketSize
+	}
+	if in.held != nil {
+		n += len(in.held.pkts) * tsPacketSize
+	}
+	return n
 }
 
 // video collects the packets of the H.264 PID into access units. A unit is
@@ -134,11 +183,15 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 		}
 		au := &accessUnit{pkts: [][]byte{append([]byte(nil), p...)}}
 		au.pts, au.hasPTS = pesPTSOf(p)
-		if au.hasPTS {
-			in.sched.Claim(au.pts)
+		var out []byte
+		if au.hasPTS && in.sched.Claim(au.pts) {
+			// The clock jumped. Units queued from before the jump belong to the old
+			// timeline, so they go out unchanged rather than waiting on slots that
+			// the new timeline will never finalise.
+			out = in.releaseReady()
 		}
 		in.held = au
-		return in.drain(false)
+		return append(out, in.drain(false)...)
 	}
 	if in.held == nil {
 		// Continuation before any start: it cannot be rebuilt, so it goes out as
@@ -146,7 +199,26 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 		return in.renumber([][]byte{append([]byte(nil), p...)})
 	}
 	in.held.pkts = append(in.held.pkts, append([]byte(nil), p...))
+	if len(in.held.pkts) > maxHeldPackets {
+		// The unit is too long to keep collecting. It is queued as it stands and
+		// the rest of its packets pass through unchanged, as continuations with no
+		// start do above.
+		in.held.unchanged = true
+		in.ready = append(in.ready, in.held)
+		in.held = nil
+	}
 	return nil
+}
+
+// releaseReady sends every queued unit unchanged and empties the queue. It is
+// the response to a clock discontinuity, where no caption slot is coming.
+func (in *Injector) releaseReady() []byte {
+	var out []byte
+	for _, au := range in.ready {
+		out = append(out, in.renumber(au.pkts)...)
+	}
+	in.ready = nil
+	return out
 }
 
 // drain emits complete access units from the front of the queue for as long as
@@ -158,10 +230,16 @@ func (in *Injector) drain(all bool) []byte {
 	var out []byte
 	for len(in.ready) > 0 {
 		au := in.ready[0]
-		if !all && au.hasPTS && !in.sched.Final(au.pts) {
+		overCap := len(in.ready) > maxReadyUnits || in.bufferedBytes() > maxBufferedBytes
+		if !all && !overCap && !au.unchanged && au.hasPTS && !in.sched.Final(au.pts) {
 			break
 		}
 		in.ready = in.ready[1:]
+		if overCap && !au.unchanged {
+			// The slot never became final, and waiting longer would grow the queue.
+			// Send the unit as it is so the queue shrinks back under its cap.
+			au.unchanged = true
+		}
 		out = append(out, in.emitAccessUnit(au)...)
 	}
 	return out
@@ -179,6 +257,9 @@ func (in *Injector) releaseHeld() {
 // packets on renumbered when that is not safe to do.
 func (in *Injector) emitAccessUnit(au *accessUnit) []byte {
 	pkts := au.pkts
+	if au.unchanged {
+		return in.renumber(pkts)
+	}
 	pes, firstAF, ok := reassemble(pkts)
 	if !ok || !au.hasPTS {
 		// No presentation time means no key for the caption, so the picture is
@@ -199,7 +280,7 @@ func (in *Injector) emitAccessUnit(au *accessUnit) []byte {
 		return in.renumber(pkts)
 	}
 
-	pair := in.sched.PairAt(au.pts)
+	pair := in.sched.answer(au.pts)
 	newES := insertCCSEI(es, pair)
 	in.stats.Injected++
 

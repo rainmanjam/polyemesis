@@ -24,24 +24,32 @@ type Support struct {
 	// Reason is the sentence shown to the operator. It is required for "skipped"
 	// and for "provisional", and empty for "go".
 	Reason string
+	// Embedded is a second route the platform accepts, carried in the video
+	// itself, and is "" when there is none. It is allowed with the same rules as
+	// Mode, and it is what the operator uses while Mode is provisional.
+	Embedded Mode
 }
 
 // platforms is the decision table from the #8 spike, in one place so the UI and
 // the API read the same answer. Kick is skipped because no documented route
 // exists, and a path built without one would be a guess shown as a feature.
 var platforms = map[string]Support{
-	// PROVISIONAL: the SEI route is documented by Twitch, but whether Twitch
-	// displays the injected CEA-608 on the stream is a live check on a test
-	// channel with a minted key. Until that passes, the status is "go" for the
-	// build and the operator is shown that display is unverified.
+	// Status "go" is the build state. The SEI route is documented by Twitch, but
+	// whether Twitch displays the injected CEA-608 on the stream is still a live
+	// check on a test channel with a minted key. That display check is recorded in
+	// the CHANGELOG and the docs, and it does not change this status.
 	"twitch": {
 		Mode:   ModeSEI,
 		Status: "go",
 	},
+	// YouTube has two documented routes. The embedded CEA-608 route is the same
+	// SEI carriage Twitch uses, and it is GO. The caption POST is PROVISIONAL, so
+	// the platform's status and Reason describe the POST route.
 	"youtube": {
-		Mode:   ModeYouTubePOST,
-		Status: "provisional",
-		Reason: "the caption POST body format is not yet confirmed against a live YouTube ingest; the embedded CEA-608 path is the working fallback",
+		Mode:     ModeYouTubePOST,
+		Embedded: ModeSEI,
+		Status:   "provisional",
+		Reason:   "the caption POST body format is not yet confirmed against a live YouTube ingest; the embedded CEA-608 path is the working fallback",
 	},
 	"facebook": {
 		Mode:   ModeFacebookSEI,
@@ -71,7 +79,7 @@ func Allowed(platform string, mode Mode, facebookFlag bool) bool {
 		return true
 	}
 	s := SupportFor(platform)
-	if s.Status == "skipped" || s.Mode != mode {
+	if s.Status == "skipped" || (s.Mode != mode && s.Embedded != mode) {
 		return false
 	}
 	if mode == ModeFacebookSEI {

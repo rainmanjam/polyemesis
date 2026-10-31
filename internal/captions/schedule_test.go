@@ -193,3 +193,45 @@ func TestCaptionsResumeAfterTheStreamsTimestampsJumpBackwards(t *testing.T) {
 		t.Fatalf("no caption went out after the timestamps jumped backwards; the schedule is stuck on its old slots")
 	}
 }
+
+// TestScheduleKeepsItsSlotStateBoundedAcrossRepeatedClockJumps covers a clock that
+// jumps forward and back many times. Each forward jump used to leave the slots
+// from before it in the maps, so the maps grew with every jump. The state must
+// stay around the reorder window however many jumps the stream makes.
+func TestScheduleKeepsItsSlotStateBoundedAcrossRepeatedClockJumps(t *testing.T) {
+	s := NewSchedule(0)
+	clock := int64(10 * 90000)
+	for i := 0; i < 2000; i++ {
+		switch {
+		case i%50 == 0:
+			// A forward jump well past the reorder window, but inside the ten second
+			// discontinuity threshold, so it is handled by finalise and not restart.
+			clock += 2 * 90000
+		case i%97 == 0:
+			clock -= 90000 // a backward jump of one second, also inside the threshold
+		default:
+			clock += tick30
+		}
+		s.PairAt(clock)
+	}
+	if n := len(s.claimed) + len(s.slots) + len(s.used); n > 4*slotWindow {
+		t.Fatalf("slot state holds %d entries after repeated clock jumps, want at most %d", n, 4*slotWindow)
+	}
+}
+
+// TestScheduleIgnoresAClaimForASlotThatIsAlreadyFinal covers a late picture. Its
+// slot is final, so claiming it again must not add state that nothing will ever
+// remove.
+func TestScheduleIgnoresAClaimForASlotThatIsAlreadyFinal(t *testing.T) {
+	s := NewSchedule(0)
+	for i := int64(0); i < 100; i++ {
+		s.PairAt(100*90000 + i*tick30)
+	}
+	before := len(s.claimed)
+	for i := 0; i < 50; i++ {
+		s.Claim(100*90000 - int64(i+1)*slotTicks*3)
+	}
+	if after := len(s.claimed); after > before {
+		t.Fatalf("claims for final slots grew the claimed map from %d to %d entries", before, after)
+	}
+}

@@ -508,3 +508,64 @@ func TestInjectorPassesVideoThroughUntilItsPMTHasBeenSeen(t *testing.T) {
 		t.Fatalf("video before PSI was altered")
 	}
 }
+
+// TestInjectorDropsAVideoPacketWhoseAdaptationFieldRunsPastThePacket covers a
+// malformed packet from the encoder. Its adaptation field length, 200, is longer
+// than the 188-byte packet, so the field cannot be read. The injector must not
+// panic on it, because a panic would take the relay down with the stream. The
+// packet is dropped and counted, and the packets around it still go out.
+func TestInjectorDropsAVideoPacketWhoseAdaptationFieldRunsPastThePacket(t *testing.T) {
+	bad := make([]byte, tsPacketSize)
+	bad[0] = tsSyncByte
+	bad[1] = 0x40 | byte(testVideoPID>>8) // payload unit start on the video PID
+	bad[2] = byte(testVideoPID & 0xFF)
+	bad[3] = 0x30 // adaptation field and payload
+	bad[4] = 200  // length byte: runs past the packet
+	in := append(psFixture(0x1B), bad...)
+	inj := NewInjector(NewSchedule(0))
+	out := append(inj.Write(in), inj.Flush()...)
+	if !bytes.Equal(out, psFixture(0x1B)) {
+		t.Fatalf("the malformed packet was not dropped, or the PSI around it was altered")
+	}
+	if got := inj.Stats().Malformed; got != 1 {
+		t.Fatalf("Stats().Malformed = %d, want 1", got)
+	}
+}
+
+// TestInjectorBoundsTheAccessUnitsItHoldsWhileTheirSlotsNeverFinalise covers a
+// stream whose presentation times stop advancing. Every picture then lands on the
+// same caption slot, which never becomes final, so the units waiting for it would
+// pile up without limit. The queue must stay within its cap, and what is over it
+// goes out unchanged rather than being held.
+func TestInjectorBoundsTheAccessUnitsItHoldsWhileTheirSlotsNeverFinalise(t *testing.T) {
+	var cc uint8
+	var in []byte
+	in = append(in, psFixture(0x1B)...)
+	for i := 0; i < 5000; i++ {
+		in = append(in, pesPackets(testVideoPID, &cc, append(pesHeader(90000), auFor(false)...), nil)...)
+	}
+	inj := NewInjector(NewSchedule(0))
+	_ = inj.Write(in)
+	if n := len(inj.ready); n > maxReadyUnits {
+		t.Fatalf("%d access units wait on a slot that never finalises, want at most %d", n, maxReadyUnits)
+	}
+	if b := inj.bufferedBytes(); b > maxBufferedBytes {
+		t.Fatalf("%d bytes are buffered, want at most %d", b, maxBufferedBytes)
+	}
+}
+
+// TestInjectorStopsHoldingAPictureWhoseStartIsNeverFollowedByAnotherPayloadStart
+// covers a single access unit that never ends. Its packets must stop being
+// collected once they pass the per-unit cap, so that a stream without picture
+// starts cannot grow the buffer without limit.
+func TestInjectorStopsHoldingAPictureWhoseStartIsNeverFollowedByAnotherPayloadStart(t *testing.T) {
+	var cc uint8
+	pes := append(pesHeader(90000), auFor(false)...)
+	pes = append(pes, make([]byte, (maxHeldPackets+100)*184)...)
+	in := append(psFixture(0x1B), pesPackets(testVideoPID, &cc, pes, nil)...)
+	inj := NewInjector(NewSchedule(0))
+	_ = inj.Write(in)
+	if inj.held != nil && len(inj.held.pkts) > maxHeldPackets {
+		t.Fatalf("a single access unit holds %d packets, want at most %d", len(inj.held.pkts), maxHeldPackets)
+	}
+}
