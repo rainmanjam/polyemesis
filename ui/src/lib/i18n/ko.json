@@ -1040,7 +1040,7 @@
   "play.watching": "현재 시청 중",
   "play.watchingNow": "지금 보는 사람",
   "play.watchingNow.hint": "지금 내장 플레이어에 접속해 있는 시청자.",
-  "play.whichProgramme": "공개할 프로그램",
+  "play.whichProgramme": "시청자용 프로그램",
   "play.whoCanWatch": "볼 수 있는 사람",
   "play.audienceTitle": "시청자",
   "play.audienceDesc": "시청자는 세그먼트를 계속 가져오는 동안 집계됩니다.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0은 해당 한도를 두지 않는다는 뜻입니다.",
   "rec.retentionInvalid": "모든 칸을 채워 주세요. 세그먼트 길이는 10~86400초여야 하며, 한도는 음수일 수 없습니다.",
   "rec.stopWhileLiveTitle": "방송 중에 녹화를 끌까요?",
-  "rec.stopWhileLiveDescription": "지금 방송이 나가고 있습니다. 지금 녹화를 끄면 이 방송의 파일 기록이 멈춥니다. 이미 만든 녹화본은 유지됩니다."
+  "rec.stopWhileLiveDescription": "지금 방송이 나가고 있습니다. 지금 녹화를 끄면 이 방송의 파일 기록이 멈춥니다. 이미 만든 녹화본은 유지됩니다.",
+  "clips.bufferLiveNote": "버퍼 스위치는 즉시 적용되는 토글이며 저장되는 설정이 아닙니다. 재시작하면 다시 꺼집니다.",
+  "play.confirmPublicTitle": "로그인하지 않은 사람에게도 이 방송을 제공할까요?",
+  "play.confirmPublicDescription": "링크를 가진 누구나 세션 없이 볼 수 있습니다. 끄면 다시 관리자만 볼 수 있습니다.",
+  "play.confirmPublicAction": "공개 시청 켜기",
+  "play.confirmOpenTitle": "이 서버에 접근할 수 있는 누구나 보게 할까요?",
+  "play.confirmOpenDescription": "보호가 열려 비밀번호나 토큰을 묻지 않습니다. 시청자 주소에 접근할 수 있는 누구나 볼 수 있습니다.",
+  "play.confirmOpenAction": "보호 열기"
 }

@@ -1040,7 +1040,7 @@
   "play.watching": "Viendo ahora",
   "play.watchingNow": "Viendo ahora",
   "play.watchingNow.hint": "Espectadores conectados ahora mismo al reproductor integrado.",
-  "play.whichProgramme": "Qué programa es público",
+  "play.whichProgramme": "Programa para los espectadores",
   "play.whoCanWatch": "Quién puede ver",
   "play.audienceTitle": "Audiencia",
   "play.audienceDesc": "Un espectador cuenta mientras siga descargando segmentos.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 significa sin límite para ese tope.",
   "rec.retentionInvalid": "Completa todos los campos. La duración del segmento debe estar entre 10 y 86400 segundos, y los topes no pueden ser negativos.",
   "rec.stopWhileLiveTitle": "¿Detener la grabación mientras el directo está en curso?",
-  "rec.stopWhileLiveDescription": "Hay una emisión en curso. Desactivar la grabación ahora detiene los archivos de este directo. Las grabaciones ya hechas se conservan."
+  "rec.stopWhileLiveDescription": "Hay una emisión en curso. Desactivar la grabación ahora detiene los archivos de este directo. Las grabaciones ya hechas se conservan.",
+  "clips.bufferLiveNote": "El interruptor del búfer es un conmutador en vivo, no un ajuste guardado: vuelve a estar apagado tras un reinicio.",
+  "play.confirmPublicTitle": "¿Servir este directo a personas que no han iniciado sesión?",
+  "play.confirmPublicDescription": "Cualquiera con el enlace podrá verlo sin sesión. Desactívalo para limitar otra vez la visualización a los administradores.",
+  "play.confirmPublicAction": "Activar visualización pública",
+  "play.confirmOpenTitle": "¿Permitir que cualquiera que pueda llegar a este servidor vea el directo?",
+  "play.confirmOpenDescription": "La protección quedará abierta, así que no se pedirá contraseña ni token. Cualquiera que pueda llegar a la dirección del espectador puede verlo.",
+  "play.confirmOpenAction": "Abrir protección"
 }

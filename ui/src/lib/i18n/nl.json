@@ -1040,7 +1040,7 @@
   "play.watching": "Kijken nu",
   "play.watchingNow": "Kijken nu",
   "play.watchingNow.hint": "Kijkers die op dit moment met de ingebouwde speler verbonden zijn.",
-  "play.whichProgramme": "Welk programma is openbaar",
+  "play.whichProgramme": "Programma voor kijkers",
   "play.whoCanWatch": "Wie mag kijken",
   "play.audienceTitle": "Publiek",
   "play.audienceDesc": "Een kijker telt mee zolang die segmenten blijft ophalen.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 betekent geen limiet voor die grens.",
   "rec.retentionInvalid": "Vul elk veld in. De segmentlengte moet tussen 10 en 86400 seconden liggen en de limieten kunnen niet negatief zijn.",
   "rec.stopWhileLiveTitle": "Opnemen stoppen terwijl de stream live is?",
-  "rec.stopWhileLiveDescription": "Er wordt uitgezonden. Opnemen nu uitzetten stopt de bestanden voor deze stream. Opnames die al gemaakt zijn, blijven bewaard."
+  "rec.stopWhileLiveDescription": "Er wordt uitgezonden. Opnemen nu uitzetten stopt de bestanden voor deze stream. Opnames die al gemaakt zijn, blijven bewaard.",
+  "clips.bufferLiveNote": "De bufferschakelaar is een live schakelaar, geen opgeslagen instelling: na een herstart staat hij weer uit.",
+  "play.confirmPublicTitle": "Deze stream aanbieden aan mensen die niet zijn ingelogd?",
+  "play.confirmPublicDescription": "Iedereen met de link kan zonder sessie kijken. Zet dit uit om kijken weer tot beheerders te beperken.",
+  "play.confirmPublicAction": "Openbaar kijken aanzetten",
+  "play.confirmOpenTitle": "Iedereen die deze server kan bereiken laten kijken?",
+  "play.confirmOpenDescription": "De beveiliging wordt open, dus er wordt geen wachtwoord of token gevraagd. Iedereen die het kijkadres kan bereiken, kan kijken.",
+  "play.confirmOpenAction": "Beveiliging openzetten"
 }

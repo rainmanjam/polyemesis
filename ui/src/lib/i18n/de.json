@@ -1040,7 +1040,7 @@
   "play.watching": "Sehen gerade zu",
   "play.watchingNow": "Sehen gerade zu",
   "play.watchingNow.hint": "Zuschauer, die gerade mit dem eingebauten Player verbunden sind.",
-  "play.whichProgramme": "Welches Programm ist öffentlich",
+  "play.whichProgramme": "Programm für Zuschauer",
   "play.whoCanWatch": "Wer zusehen darf",
   "play.audienceTitle": "Publikum",
   "play.audienceDesc": "Ein Zuschauer zählt, solange er weiter Segmente abruft.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 bedeutet für diese Grenze keine Begrenzung.",
   "rec.retentionInvalid": "Fülle jedes Feld aus. Die Segmentlänge muss 10 bis 86400 Sekunden betragen, und die Grenzen dürfen nicht negativ sein.",
   "rec.stopWhileLiveTitle": "Aufnahme während des laufenden Streams beenden?",
-  "rec.stopWhileLiveDescription": "Eine Sendung läuft gerade. Wenn du die Aufnahme jetzt ausschaltest, werden die Dateien für diesen Stream beendet. Bereits gemachte Aufnahmen bleiben erhalten."
+  "rec.stopWhileLiveDescription": "Eine Sendung läuft gerade. Wenn du die Aufnahme jetzt ausschaltest, werden die Dateien für diesen Stream beendet. Bereits gemachte Aufnahmen bleiben erhalten.",
+  "clips.bufferLiveNote": "Der Pufferschalter ist ein Live-Umschalter, keine gespeicherte Einstellung: Nach einem Neustart ist er wieder aus.",
+  "play.confirmPublicTitle": "Diesen Stream für nicht angemeldete Personen bereitstellen?",
+  "play.confirmPublicDescription": "Jeder mit dem Link kann ohne Sitzung zusehen. Schalte dies aus, um das Zusehen wieder auf Administratoren zu beschränken.",
+  "play.confirmPublicAction": "Öffentliches Ansehen einschalten",
+  "play.confirmOpenTitle": "Jedem, der diesen Server erreichen kann, das Ansehen erlauben?",
+  "play.confirmOpenDescription": "Der Schutz wird offen sein, daher wird kein Passwort oder Token abgefragt. Jeder, der die Zuschaueradresse erreichen kann, kann zusehen.",
+  "play.confirmOpenAction": "Schutz öffnen"
 }

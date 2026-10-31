@@ -1043,7 +1043,7 @@
   "play.watching": "Watching now",
   "play.watchingNow": "Watching now",
   "play.watchingNow.hint": "Viewers connected to the built-in player right now.",
-  "play.whichProgramme": "Which programme is public",
+  "play.whichProgramme": "Programme for viewers",
   "play.whoCanWatch": "Who can watch",
   "play.audienceTitle": "Audience",
   "play.audienceDesc": "A viewer is counted while they keep pulling segments.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 means no limit for that cap.",
   "rec.retentionInvalid": "Fill in every box. Segment length must be 10 to 86400 seconds, and the caps cannot be negative.",
   "rec.stopWhileLiveTitle": "Stop recording while the stream is live?",
-  "rec.stopWhileLiveDescription": "A broadcast is going out. Turning recording off now stops the files for this stream. Recordings already made are kept."
+  "rec.stopWhileLiveDescription": "A broadcast is going out. Turning recording off now stops the files for this stream. Recordings already made are kept.",
+  "clips.bufferLiveNote": "The buffer switch is a live toggle, not a saved setting: it is off again after a restart.",
+  "play.confirmPublicTitle": "Serve this stream to people who are not signed in?",
+  "play.confirmPublicDescription": "Anyone with the link can watch without a session. Turn this off to limit viewing to administrators again.",
+  "play.confirmPublicAction": "Turn on public viewing",
+  "play.confirmOpenTitle": "Let anyone who can reach this server watch?",
+  "play.confirmOpenDescription": "Protection will be open, so no password or token is asked for. Anyone who can reach the viewer address can watch.",
+  "play.confirmOpenAction": "Open protection"
 }

@@ -1040,7 +1040,7 @@
   "play.watching": "当前观看人数",
   "play.watchingNow": "当前观看人数",
   "play.watchingNow.hint": "此刻连接到内置播放器的观众。",
-  "play.whichProgramme": "哪个节目是公开的",
+  "play.whichProgramme": "面向观众的节目",
   "play.whoCanWatch": "谁可以观看",
   "play.audienceTitle": "观众",
   "play.audienceDesc": "观众在持续拉取分段期间会被计入。",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 表示该上限不设限制。",
   "rec.retentionInvalid": "请填写每个方框。分段长度须为 10 到 86400 秒，上限不能为负数。",
   "rec.stopWhileLiveTitle": "直播进行中，是否停止录制？",
-  "rec.stopWhileLiveDescription": "正在直播。现在关闭录制会停止本次直播的文件写入，已经录制的内容会保留。"
+  "rec.stopWhileLiveDescription": "正在直播。现在关闭录制会停止本次直播的文件写入，已经录制的内容会保留。",
+  "clips.bufferLiveNote": "缓冲开关是即时开关，并非会保存的设置：重启之后它又会回到关闭状态。",
+  "play.confirmPublicTitle": "要向未登录的用户提供此直播吗？",
+  "play.confirmPublicDescription": "拥有链接的任何人都可以无需会话观看。关闭此项可将观看限制为管理员。",
+  "play.confirmPublicAction": "开启公开观看",
+  "play.confirmOpenTitle": "允许能够访问此服务器的任何人观看吗？",
+  "play.confirmOpenDescription": "保护将被打开，因此不会要求密码或令牌。任何能访问观众地址的人都可以观看。",
+  "play.confirmOpenAction": "开放保护"
 }

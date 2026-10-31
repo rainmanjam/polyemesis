@@ -1040,7 +1040,7 @@
   "play.watching": "Stanno guardando",
   "play.watchingNow": "Stanno guardando ora",
   "play.watchingNow.hint": "Spettatori connessi in questo momento al player integrato.",
-  "play.whichProgramme": "Quale programma è pubblico",
+  "play.whichProgramme": "Programma per gli spettatori",
   "play.whoCanWatch": "Chi può guardare",
   "play.audienceTitle": "Pubblico",
   "play.audienceDesc": "Uno spettatore viene contato finché continua a scaricare segmenti.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 significa nessun limite per quel tetto.",
   "rec.retentionInvalid": "Compila tutti i campi. La durata del segmento deve essere tra 10 e 86400 secondi e i limiti non possono essere negativi.",
   "rec.stopWhileLiveTitle": "Interrompere la registrazione mentre il flusso è in onda?",
-  "rec.stopWhileLiveDescription": "È in corso una trasmissione. Disattivare ora la registrazione interrompe i file di questo flusso. Le registrazioni già fatte restano."
+  "rec.stopWhileLiveDescription": "È in corso una trasmissione. Disattivare ora la registrazione interrompe i file di questo flusso. Le registrazioni già fatte restano.",
+  "clips.bufferLiveNote": "L'interruttore del buffer è un comando a caldo, non un'impostazione salvata: dopo un riavvio è di nuovo spento.",
+  "play.confirmPublicTitle": "Trasmettere questo flusso a chi non ha effettuato l'accesso?",
+  "play.confirmPublicDescription": "Chiunque abbia il link può guardare senza una sessione. Disattivalo per limitare di nuovo la visione agli amministratori.",
+  "play.confirmPublicAction": "Attiva la visione pubblica",
+  "play.confirmOpenTitle": "Consentire la visione a chiunque possa raggiungere questo server?",
+  "play.confirmOpenDescription": "La protezione sarà aperta, quindi non verrà richiesta alcuna password o token. Chiunque possa raggiungere l'indirizzo degli spettatori può guardare.",
+  "play.confirmOpenAction": "Apri la protezione"
 }

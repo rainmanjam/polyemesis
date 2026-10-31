@@ -520,6 +520,11 @@ export function ClipsPage() {
                   bytes: bytes(view?.usage.maxBytes ?? 0),
                 })}
               </p>
+              {/* The switch is a live toggle until it is persisted (A14 is not
+                  built yet), so the page says so instead of implying a restart keeps it. */}
+              <p className="text-micro text-muted-foreground">
+                {t("clips.bufferLiveNote")}
+              </p>
             </CardContent>
           </Card>
         </div>

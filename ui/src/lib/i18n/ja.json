@@ -1040,7 +1040,7 @@
   "play.watching": "現在の視聴者",
   "play.watchingNow": "現在の視聴者数",
   "play.watchingNow.hint": "今この瞬間、内蔵プレーヤーに接続している視聴者。",
-  "play.whichProgramme": "公開するプログラム",
+  "play.whichProgramme": "視聴者向けの番組",
   "play.whoCanWatch": "視聴できる人",
   "play.audienceTitle": "視聴者",
   "play.audienceDesc": "視聴者はセグメントを取得し続けている間カウントされます。",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 はその上限を設けないことを意味します。",
   "rec.retentionInvalid": "すべての欄に入力してください。セグメント長は10〜86400秒で、上限は負の値にできません。",
   "rec.stopWhileLiveTitle": "配信中ですが録画を停止しますか？",
-  "rec.stopWhileLiveDescription": "配信が行われています。今録画をオフにすると、この配信のファイルは止まります。既存の録画は残ります。"
+  "rec.stopWhileLiveDescription": "配信が行われています。今録画をオフにすると、この配信のファイルは止まります。既存の録画は残ります。",
+  "clips.bufferLiveNote": "バッファのスイッチは即時切り替えであり、保存される設定ではありません。再起動するとまたオフになります。",
+  "play.confirmPublicTitle": "サインインしていない人にもこの配信を見せますか？",
+  "play.confirmPublicDescription": "リンクを持っている人は、セッションなしで視聴できます。オフにすると、視聴は再び管理者だけに戻ります。",
+  "play.confirmPublicAction": "公開視聴をオンにする",
+  "play.confirmOpenTitle": "このサーバーに接続できる全員に視聴を許可しますか？",
+  "play.confirmOpenDescription": "保護が解除されるため、パスワードもトークンも求められません。視聴者のアドレスに接続できる人は誰でも視聴できます。",
+  "play.confirmOpenAction": "保護を解除する"
 }

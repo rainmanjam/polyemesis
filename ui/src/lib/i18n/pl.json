@@ -1040,7 +1040,7 @@
   "play.watching": "Ogląda teraz",
   "play.watchingNow": "Ogląda teraz",
   "play.watchingNow.hint": "Widzowie połączeni w tej chwili z wbudowanym odtwarzaczem.",
-  "play.whichProgramme": "Który program jest publiczny",
+  "play.whichProgramme": "Program dla widzów",
   "play.whoCanWatch": "Kto może oglądać",
   "play.audienceTitle": "Widownia",
   "play.audienceDesc": "Widz jest liczony, dopóki pobiera kolejne segmenty.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 oznacza brak limitu dla tego progu.",
   "rec.retentionInvalid": "Uzupełnij wszystkie pola. Długość segmentu musi wynosić od 10 do 86400 sekund, a limity nie mogą być ujemne.",
   "rec.stopWhileLiveTitle": "Zatrzymać nagrywanie, gdy transmisja trwa?",
-  "rec.stopWhileLiveDescription": "Trwa emisja. Wyłączenie nagrywania teraz zatrzyma pliki tej transmisji. Nagrania już zrobione zostaną zachowane."
+  "rec.stopWhileLiveDescription": "Trwa emisja. Wyłączenie nagrywania teraz zatrzyma pliki tej transmisji. Nagrania już zrobione zostaną zachowane.",
+  "clips.bufferLiveNote": "Przełącznik bufora działa na żywo i nie jest zapisywanym ustawieniem: po ponownym uruchomieniu znów jest wyłączony.",
+  "play.confirmPublicTitle": "Udostępnić tę transmisję osobom niezalogowanym?",
+  "play.confirmPublicDescription": "Każdy, kto ma link, może oglądać bez sesji. Wyłącz to, aby ograniczyć oglądanie znów do administratorów.",
+  "play.confirmPublicAction": "Włącz publiczne oglądanie",
+  "play.confirmOpenTitle": "Pozwolić oglądać każdemu, kto może połączyć się z tym serwerem?",
+  "play.confirmOpenDescription": "Zabezpieczenie będzie otwarte, więc nie będzie pytać o hasło ani token. Każdy, kto może dotrzeć do adresu widza, może oglądać.",
+  "play.confirmOpenAction": "Otwórz zabezpieczenie"
 }

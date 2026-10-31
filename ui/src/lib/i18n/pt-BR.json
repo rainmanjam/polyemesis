@@ -1040,7 +1040,7 @@
   "play.watching": "Assistindo agora",
   "play.watchingNow": "Assistindo agora",
   "play.watchingNow.hint": "Espectadores conectados agora ao player embutido.",
-  "play.whichProgramme": "Qual programa é público",
+  "play.whichProgramme": "Programa para os espectadores",
   "play.whoCanWatch": "Quem pode assistir",
   "play.audienceTitle": "Audiência",
   "play.audienceDesc": "Um espectador é contado enquanto continua baixando segmentos.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 significa sem limite para esse teto.",
   "rec.retentionInvalid": "Preencha todos os campos. A duração do segmento deve estar entre 10 e 86400 segundos, e os limites não podem ser negativos.",
   "rec.stopWhileLiveTitle": "Parar a gravação enquanto a transmissão está no ar?",
-  "rec.stopWhileLiveDescription": "Há uma transmissão no ar. Desligar a gravação agora interrompe os arquivos desta transmissão. As gravações já feitas são mantidas."
+  "rec.stopWhileLiveDescription": "Há uma transmissão no ar. Desligar a gravação agora interrompe os arquivos desta transmissão. As gravações já feitas são mantidas.",
+  "clips.bufferLiveNote": "O interruptor do buffer é uma chave ao vivo, não uma configuração salva: ele volta a ficar desligado depois de um reinício.",
+  "play.confirmPublicTitle": "Servir esta transmissão a pessoas que não estão conectadas?",
+  "play.confirmPublicDescription": "Qualquer pessoa com o link pode assistir sem sessão. Desligue para limitar a exibição novamente aos administradores.",
+  "play.confirmPublicAction": "Ativar exibição pública",
+  "play.confirmOpenTitle": "Permitir que qualquer pessoa que alcance este servidor assista?",
+  "play.confirmOpenDescription": "A proteção ficará aberta, então nenhuma senha ou token será pedido. Qualquer pessoa que alcance o endereço do espectador pode assistir.",
+  "play.confirmOpenAction": "Abrir a proteção"
 }

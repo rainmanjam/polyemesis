@@ -1040,7 +1040,7 @@
   "play.watching": "Sedang menonton",
   "play.watchingNow": "Sedang menonton",
   "play.watchingNow.hint": "Penonton yang saat ini tersambung ke pemutar bawaan.",
-  "play.whichProgramme": "Program mana yang bersifat publik",
+  "play.whichProgramme": "Program untuk penonton",
   "play.whoCanWatch": "Siapa yang boleh menonton",
   "play.audienceTitle": "Penonton",
   "play.audienceDesc": "Penonton dihitung selama mereka terus mengambil segmen.",
@@ -3191,5 +3191,12 @@
   "rec.zeroNoLimit": "0 berarti tanpa batas untuk batas itu.",
   "rec.retentionInvalid": "Isi semua kotak. Panjang segmen harus 10 sampai 86400 detik, dan batas tidak boleh negatif.",
   "rec.stopWhileLiveTitle": "Hentikan rekaman saat siaran sedang berjalan?",
-  "rec.stopWhileLiveDescription": "Siaran sedang berjalan. Mematikan rekaman sekarang akan menghentikan berkas untuk siaran ini. Rekaman yang sudah dibuat tetap disimpan."
+  "rec.stopWhileLiveDescription": "Siaran sedang berjalan. Mematikan rekaman sekarang akan menghentikan berkas untuk siaran ini. Rekaman yang sudah dibuat tetap disimpan.",
+  "clips.bufferLiveNote": "Sakelar penyangga adalah tombol langsung, bukan pengaturan tersimpan: setelah dimulai ulang ia kembali nonaktif.",
+  "play.confirmPublicTitle": "Sajikan siaran ini ke orang yang belum masuk?",
+  "play.confirmPublicDescription": "Siapa pun yang punya tautannya bisa menonton tanpa sesi. Matikan ini untuk membatasi tontonan hanya untuk administrator lagi.",
+  "play.confirmPublicAction": "Nyalakan tontonan publik",
+  "play.confirmOpenTitle": "Izinkan siapa pun yang bisa menjangkau server ini menonton?",
+  "play.confirmOpenDescription": "Proteksi akan dibuka, jadi tidak ada kata sandi atau token yang diminta. Siapa pun yang bisa menjangkau alamat penonton dapat menonton.",
+  "play.confirmOpenAction": "Buka proteksi"
 }
