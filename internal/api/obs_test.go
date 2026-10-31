@@ -531,7 +531,18 @@ func TestASceneRuleIsExpressedAsMutesOnTheTracksAlreadyInTheMix(t *testing.T) {
 	}
 }
 
+// withLiveLevels pins liveLevelsSupported for one test and restores the real
+// one after. The default is false on Windows, so a test of the applied path
+// must say so rather than inherit the runner's OS.
+func withLiveLevels(t *testing.T, ok bool) {
+	t.Helper()
+	orig := liveLevelsSupported
+	liveLevelsSupported = func() bool { return ok }
+	t.Cleanup(func() { liveLevelsSupported = orig })
+}
+
 func TestASceneSwitchAppliesItsRuleThroughTheTrackLevelPath(t *testing.T) {
+	withLiveLevels(t, true)
 	o := obsServer(t)
 	sel := o.createDest(t, "twitch")
 	src := onlySourceID(t, o.h, o.sign)
@@ -572,8 +583,7 @@ func TestASceneSwitchIsNotAppliedWhereLiveLevelsAreNotAvailable(t *testing.T) {
 	if _, err := o.s.store.UpdateDestination(row); err != nil {
 		t.Fatal(err)
 	}
-	liveLevelsSupported = func() bool { return false }
-	t.Cleanup(func() { liveLevelsSupported = func() bool { return true } })
+	withLiveLevels(t, false)
 	out := o.s.applySceneLevels(sel, obsbridge.SceneRule{Scene: "x", Preset: routing.PresetMicOnly})
 	if out.Outcome != string(bulkSkipped) || !strings.Contains(out.Message, "Windows") {
 		t.Fatalf("on a platform without live levels: %+v", out)
