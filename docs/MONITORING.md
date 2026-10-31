@@ -735,6 +735,10 @@ It keeps eight event types, the stream-shaped subset of the alerts above:
 - `destination.falling_behind` and `destination.caught_up`
 - `ingest.lost` and `ingest.recovered`
 
+If a refresh fails, the rows already on screen stay, with a line saying when
+they were last read. The card only shows a bare failure when there was no list
+to keep.
+
 A destination restart shows as a down followed by a recovered. A stream
 ending is not on it, because nothing raises that event.
 
