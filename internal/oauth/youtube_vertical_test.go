@@ -61,16 +61,6 @@ const ytVerticalCreated = `{"id":"stream-new-vert","snippet":{"title":"polyemesi
 	"cdn":{"ingestionType":"rtmp","ingestionInfo":{
 		"streamName":"key-new-vert","ingestionAddress":"rtmp://v2.example/live2"}}}`
 
-// findCapture returns the first recorded request with this method and path, or nil.
-func findCapture(log []capture, method, path string) *capture {
-	for i := range log {
-		if log[i].Method == method && log[i].Path == path {
-			return &log[i]
-		}
-	}
-	return nil
-}
-
 // TestTheFirstRTMPFallbackNeverAdoptsAVerticalStream pins the zero-options path, which is
 // what reusableStream and Ingest use. The vertical stream is listed first, so only the
 // title marker keeps it out.
