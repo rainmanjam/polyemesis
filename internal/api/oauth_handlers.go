@@ -94,7 +94,7 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 	// three clicks from making valid is obstructive rather than protective.
 	//
 	check := s.providers.CheckCredentialsFor(r.Context(), platform, req.ClientID, req.ClientSecret)
-	s.recordCredCheck(platform, check, req.ClientSecret)
+	s.recordCredCheck(platform, req.ClientID, req.ClientSecret, check)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"platform":  platform,
 		"hasSecret": true,
@@ -118,7 +118,7 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	check := s.providers.CheckCredentialsFor(r.Context(), platform, creds.ClientID, creds.ClientSecret)
-	s.recordCredCheck(platform, check, creds.ClientSecret)
+	s.recordCredCheck(platform, creds.ClientID, creds.ClientSecret, check)
 	writeJSON(w, http.StatusOK, check)
 }
 
@@ -133,9 +133,19 @@ func (s *Server) handleCheckCreds(w http.ResponseWriter, r *http.Request) {
 // today, but a platform error body quoted back into one is exactly the kind of
 // change that would put a client secret on disk in the clear and into every
 // settings page load, and nothing at this layer would notice.
-func (s *Server) recordCredCheck(platform db.Platform, check oauth.CheckResult, secret string) {
-	if err := s.store.RecordPlatformCredsCheck(platform, string(check.State), string(check.Method),
-		scrubSecret(check.Detail, secret), time.Now()); err != nil {
+//
+// The verdict is stored against the pair that was CHECKED (clientID, secret),
+// so a slow check that finishes after the operator saved a different pair is
+// dropped rather than written onto the new one. That is the expected outcome
+// of a race the operator caused, not a fault, so it is logged at Info.
+func (s *Server) recordCredCheck(platform db.Platform, clientID, secret string, check oauth.CheckResult) {
+	err := s.store.RecordPlatformCredsCheck(s.box, platform, clientID, secret, string(check.State),
+		string(check.Method), scrubSecret(check.Detail, secret), time.Now())
+	switch {
+	case err == nil:
+	case errors.Is(err, db.ErrStaleCredsCheck):
+		s.log.Info("dropped a credential verdict for a pair that was replaced while it was checked", "platform", platform)
+	default:
 		s.log.Warn("could not store the credential check verdict", "platform", platform, "err", err)
 	}
 }

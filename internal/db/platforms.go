@@ -108,19 +108,60 @@ func (d *DB) ListPlatformCreds() ([]PlatformCreds, error) {
 	return out, rows.Err()
 }
 
-// RecordPlatformCredsCheck stores the verdict a check reached on the pair that
-// is stored now (settings-council R10). ErrNotFound when no pair is stored, so
-// a verdict can never outlive the credentials it was about.
-func (d *DB) RecordPlatformCredsCheck(p Platform, state, method, detail string, at time.Time) error {
+// ErrStaleCredsCheck is returned by RecordPlatformCredsCheck when the pair the
+// check ran against is no longer the one stored: the operator saved another
+// pair while the check was in flight. The verdict is dropped, not written onto
+// the new pair, which has (or will get) its own check.
+var ErrStaleCredsCheck = errors.New("the checked credentials are no longer the stored ones")
+
+// RecordPlatformCredsCheck stores the verdict a check reached on the pair
+// clientID/clientSecret (settings-council R10). ErrNotFound when no pair is
+// stored, so a verdict can never outlive the credentials it was about.
+//
+// KEYED TO THE CHECKED PAIR, not to the platform. The check is an outbound
+// call that can take seconds, and an operator can save another pair while it
+// runs; a verdict keyed by platform alone then lands on the new pair, and the
+// settings page says "verified" over credentials nobody checked. So the stored
+// pair is read first and compared with what was checked (the secret after
+// decryption, since the sealed form differs on every save), and the write is
+// a compare-and-swap on the sealed blob that was read: a save that lands
+// between the read and the write changes the blob and the write matches no
+// row. updated_at cannot do this job, because it is in whole seconds and two
+// saves in one second share it. Either way ErrStaleCredsCheck.
+func (d *DB) RecordPlatformCredsCheck(box *secrets.Box, p Platform, clientID, clientSecret,
+	state, method, detail string, at time.Time) error {
+	var (
+		storedID string
+		enc      []byte
+	)
+	err := d.sql.QueryRow(`SELECT client_id, client_secret_enc FROM platform_creds WHERE platform = ?`, p).
+		Scan(&storedID, &enc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if storedID != clientID {
+		return ErrStaleCredsCheck
+	}
+	storedSecret, err := box.Open(enc)
+	if err != nil {
+		return err
+	}
+	if storedSecret != clientSecret {
+		return ErrStaleCredsCheck
+	}
 	res, err := d.sql.Exec(`UPDATE platform_creds SET check_state=?, check_method=?, check_detail=?, checked_at=?
-		WHERE platform = ?`, state, method, detail, at.Unix(), p)
+		WHERE platform = ? AND client_id = ? AND client_secret_enc = ?`,
+		state, method, detail, at.Unix(), p, clientID, enc)
 	if err != nil {
 		return err
 	}
 	if n, err := res.RowsAffected(); err != nil {
 		return err
 	} else if n == 0 {
-		return ErrNotFound
+		return ErrStaleCredsCheck
 	}
 	return nil
 }

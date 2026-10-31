@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestARecordedCredentialVerdictIsListedWithTheTimeItWasReached(t *testing.T)
 	}
 
 	at := time.Unix(1_800_000_000, 0)
-	if err := d.RecordPlatformCredsCheck(PlatformTwitch, "rejected", "client_credentials",
+	if err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "an-id", "a-secret", "rejected", "client_credentials",
 		"The platform refused these credentials.", at); err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestSavingANewPairDropsTheVerdictTheOldPairEarned(t *testing.T) {
 	if err := d.PutPlatformCreds(box, PlatformTwitch, "old-id", "old-secret"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if err := d.RecordPlatformCredsCheck(PlatformTwitch, "verified", "client_credentials",
+	if err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "old-id", "old-secret", "verified", "client_credentials",
 		"ok", time.Now()); err != nil {
 		t.Fatalf("record: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestSavingANewPairDropsTheVerdictTheOldPairEarned(t *testing.T) {
 // creating a verdict for no pair.
 func TestRecordingAVerdictWithNoStoredPairIsNotFound(t *testing.T) {
 	d := testDB(t)
-	err := d.RecordPlatformCredsCheck(PlatformYouTube, "verified", "format", "", time.Now())
+	err := d.RecordPlatformCredsCheck(testBox(t), PlatformYouTube, "an-id", "a-secret", "verified", "format", "", time.Now())
 	if err != ErrNotFound {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -142,5 +143,67 @@ func TestMigratePlatformCredsCheckKeepsAnExistingPairAndAddsTheColumns(t *testin
 	}
 	if len(list) != 1 || list[0].ClientID != "kept-id" || list[0].LastCheck != nil {
 		t.Fatalf("list = %+v, want the stored pair with no verdict", list)
+	}
+}
+
+// A SLOW CHECK OF A PAIR THAT WAS REPLACED WHILE IT RAN DOES NOT LAND ON THE
+// NEW PAIR. The check is an outbound call to the platform and can take
+// seconds; an operator who pastes pair B while pair A's check is still in
+// flight used to see A's "verified" written onto B, because the verdict was
+// keyed by platform alone. It is now keyed to the pair it was reached on, and
+// a verdict for a pair that is no longer stored is dropped as stale.
+func TestAVerdictForAPairThatWasReplacedMidCheckIsDroppedNotWrittenOntoTheNewPair(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+	if err := d.PutPlatformCreds(box, PlatformTwitch, "pair-a-id", "pair-a-fake"); err != nil {
+		t.Fatalf("put A: %v", err)
+	}
+	// The operator saves B while A's check is still running.
+	if err := d.PutPlatformCreds(box, PlatformTwitch, "pair-b-id", "pair-b-fake"); err != nil {
+		t.Fatalf("put B: %v", err)
+	}
+	// A's check finishes now, and its verdict is about A.
+	err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "pair-a-id", "pair-a-fake",
+		"verified", "client_credentials", "ok", time.Now())
+	if !errors.Is(err, ErrStaleCredsCheck) {
+		t.Fatalf("err = %v, want ErrStaleCredsCheck for a verdict about a replaced pair", err)
+	}
+	list, err := d.ListPlatformCreds()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].ClientID != "pair-b-id" || list[0].LastCheck != nil {
+		t.Fatalf("list = %+v, want pair B with no verdict: A's verdict was written onto B", list)
+	}
+}
+
+// The same race with the client ID unchanged and only the secret replaced, in
+// the same second. updated_at is in whole seconds, so it cannot tell the two
+// saves apart; the pair itself can.
+func TestAVerdictForAReplacedSecretUnderTheSameClientIDInTheSameSecondIsDropped(t *testing.T) {
+	d := testDB(t)
+	box := testBox(t)
+	if err := d.PutPlatformCreds(box, PlatformKick, "same-id", "first-fake"); err != nil {
+		t.Fatalf("put first: %v", err)
+	}
+	if err := d.PutPlatformCreds(box, PlatformKick, "same-id", "second-fake"); err != nil {
+		t.Fatalf("put second: %v", err)
+	}
+	err := d.RecordPlatformCredsCheck(box, PlatformKick, "same-id", "first-fake",
+		"verified", "client_credentials", "ok", time.Now())
+	if !errors.Is(err, ErrStaleCredsCheck) {
+		t.Fatalf("err = %v, want ErrStaleCredsCheck", err)
+	}
+	// And the check of the pair that IS stored still lands.
+	if err := d.RecordPlatformCredsCheck(box, PlatformKick, "same-id", "second-fake",
+		"rejected", "client_credentials", "refused", time.Now()); err != nil {
+		t.Fatalf("record current pair: %v", err)
+	}
+	list, err := d.ListPlatformCreds()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if list[0].LastCheck == nil || list[0].LastCheck.State != "rejected" {
+		t.Fatalf("last check = %+v, want the stored pair's own rejected verdict", list[0].LastCheck)
 	}
 }

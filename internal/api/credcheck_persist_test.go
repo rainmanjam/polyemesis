@@ -74,7 +74,7 @@ func TestARecheckReplacesTheStoredVerdict(t *testing.T) {
 	if err := store.PutPlatformCreds(srv.box, db.PlatformYouTube, "my-streaming-project", "s"); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := store.RecordPlatformCredsCheck(db.PlatformYouTube, "verified", "format", "stale", time.Unix(1_700_000_000, 0)); err != nil {
+	if err := store.RecordPlatformCredsCheck(srv.box, db.PlatformYouTube, "my-streaming-project", "s", "verified", "format", "stale", time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("seed verdict: %v", err)
 	}
 
