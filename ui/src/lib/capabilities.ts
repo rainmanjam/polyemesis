@@ -354,8 +354,8 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     presetId: "x",
     name: "X (Twitter) Live",
     tier: "manual",
-    summary: "caps.x.summary",
-    readFirst: "caps.x.readFirst",
+    summary: "wave3.x.summary",
+    readFirst: "wave3.x.readFirst",
     caps: {
       sso: "unknown",
       streamKey: "manual",
@@ -367,7 +367,8 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
       broadcastLifecycle: "unknown",
     },
     reasons: {
-      sso: "caps.x.sso",
+      sso: "wave3.x.sso",
+      streamKey: "wave3.x.streamKey",
     },
   },
   {
