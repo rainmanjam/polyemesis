@@ -5546,6 +5546,7 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 			ds.DropFrames = d.Process.Progress.DropFrames
 			ds.DupFrames = d.Process.Progress.DupFrames
 			ds.Restarts = d.Process.Restarts
+			ds.RestartCause = string(d.Process.RestartCause)
 		}
 		snap.Destinations = append(snap.Destinations, ds)
 	}

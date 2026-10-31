@@ -63,3 +63,23 @@ func TestInheritRestartsContinuesThePredecessorsCountPlusOne(t *testing.T) {
 		t.Errorf("recent restarts = %d, want 3", st.RecentRestarts)
 	}
 }
+
+// THE CAUSE OF THE LAST COUNTED RESTART TRAVELS WITH THE COUNT.
+//
+// A live-level restart and a crash respawn both move Status.Restarts, and the
+// destination.restarted event read the same sentence for both: "the process
+// exited and was started again", which is false for a restart the engine made
+// to apply a level. The status now says which kind the latest restart was.
+//
+// Mutation: drop the RestartCauseLevel assignment in RestartCounted. Observed:
+// FAIL, the cause reads as an exit.
+func TestRestartCountedRecordsThatTheRestartWasALiveLevelChange(t *testing.T) {
+	p := testProcess(t, fakeSleep(time.Minute), Spec{AutoRestart: true})
+	p.Start()
+	waitFor(t, "the child to run", func() bool { return p.Status().State == StateRunning })
+	p.RestartCounted(t.Context())
+	waitFor(t, "the child to run again", func() bool { return p.Status().State == StateRunning })
+	if got := p.Status().RestartCause; got != RestartCauseLevel {
+		t.Fatalf("restart cause = %q after a live-level restart, want %q", got, RestartCauseLevel)
+	}
+}

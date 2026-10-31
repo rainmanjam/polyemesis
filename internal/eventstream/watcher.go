@@ -5,6 +5,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // Watcher turns one programme's sweep into stream events: the webhook edges the
@@ -87,7 +88,7 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 		if seen && d.Restarts > prev {
 			env := Envelope{
 				Type: TypeDestinationRestarted, At: snap.At, Destination: ref,
-				Reason: "the process exited and was started again",
+				Reason: restartReason(d.RestartCause),
 				Error:  d.Error,
 			}
 			data := map[string]int{"restarts": d.Restarts, "since": d.Restarts - prev}
@@ -107,4 +108,14 @@ func (w *Watcher) Observe(src hooks.SourceRef, snap alerts.Snapshot, edges []hoo
 		}
 	}
 	return out
+}
+
+// restartReason says why a destination restarted, for the destination.restarted
+// event. A crash respawn exited on its own; a level restart is the engine
+// applying a live audio level, and the child did not exit for it.
+func restartReason(cause string) string {
+	if cause == string(supervisor.RestartCauseLevel) {
+		return "a live audio level change restarted the output, so the process was started again"
+	}
+	return "the process exited and was started again"
 }
