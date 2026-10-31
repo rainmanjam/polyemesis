@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // YouTube's planned rollover (#19): replace a live broadcast with a fresh one on the same ingest, before the
@@ -274,4 +276,59 @@ func firstNonEmptyString(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// BroadcastRollover is the optional capability for a platform whose live broadcast can be replaced without the
+// destination being torn down. Only YouTube has one today; a platform with no such method is never offered a
+// rollover action, and its countdown is shown but not acted on.
+type BroadcastRollover interface {
+	Provider
+	RollOverBroadcast(ctx context.Context, accessToken string, req RolloverRequest) (*RolloverOutcome, error)
+	RolloverSessionStart(ctx context.Context, accessToken, broadcastID string) (time.Time, error)
+}
+
+var _ BroadcastRollover = (*YouTube)(nil)
+
+// RolloverFor reports whether a platform has a broadcast rollover, and the bool is the whole answer the caller
+// branches on, as with LifecycleFor.
+func RolloverFor(p db.Platform) (BroadcastRollover, bool) {
+	prov, err := Get(p)
+	if err != nil {
+		return nil, false
+	}
+	br, ok := prov.(BroadcastRollover)
+	return br, ok
+}
+
+// RolloverSessionStart reads the platform's own live start for a broadcast: snippet.actualStartTime. It is zero
+// when YouTube has not recorded one yet, and the caller then waits rather than counting from a guess.
+func (y *YouTube) RolloverSessionStart(ctx context.Context, accessToken, broadcastID string) (time.Time, error) {
+	id := strings.TrimSpace(broadcastID)
+	if id == "" {
+		return time.Time{}, fmt.Errorf("a YouTube broadcast id is required to read its start time")
+	}
+	var list struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				ActualStartTime string `json:"actualStartTime"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+	q := url.Values{}
+	q.Set("part", "id,snippet")
+	q.Set("id", id)
+	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+		return time.Time{}, err
+	}
+	for _, it := range list.Items {
+		if it.ID != id {
+			continue
+		}
+		if parsed := parseYouTubeTime(it.Snippet.ActualStartTime); parsed != nil {
+			return *parsed, nil
+		}
+		return time.Time{}, nil
+	}
+	return time.Time{}, fmt.Errorf("YouTube no longer lists broadcast %s on this channel", id)
 }

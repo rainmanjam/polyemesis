@@ -537,3 +537,41 @@ func TestAReplacementThatCannotBeRemovedIsNamedSoItCanBeDeletedByHand(t *testing
 		t.Errorf("the error does not say where to delete the page: %v", re)
 	}
 }
+
+// TestTheSessionStartIsThePlatformsOwnActualStartTime checks what the margin counts from. The platform's actual
+// start is read from the broadcast, so a daemon that began watching a show late still counts the cap from when the
+// show really went live. A broadcast that has no actual start yet reports zero, and nothing is counted.
+func TestTheSessionStartIsThePlatformsOwnActualStartTime(t *testing.T) {
+	actual := time.Date(2026, 10, 31, 18, 5, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != ytBroadcastsPath || r.URL.Query().Get("id") != "old-1" {
+			t.Errorf("unexpected request %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		_, _ = fmt.Fprintf(w, `{"items":[{"id":"old-1","snippet":{"actualStartTime":%q}}]}`, actual.Format(time.RFC3339))
+	}))
+	defer srv.Close()
+	y := NewYouTube(WithBaseURL(srv.URL))
+	got, err := y.RolloverSessionStart(context.Background(), "tok", "old-1")
+	if err != nil {
+		t.Fatalf("session start: %v", err)
+	}
+	if !got.Equal(actual) {
+		t.Errorf("session start = %s, want the platform's actual start %s", got, actual)
+	}
+}
+
+// TestASessionWithNoActualStartYetReportsZero keeps an unstarted broadcast from being counted from a made-up moment.
+func TestASessionWithNoActualStartYetReportsZero(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"items":[{"id":"old-1","snippet":{}}]}`))
+	}))
+	defer srv.Close()
+	y := NewYouTube(WithBaseURL(srv.URL))
+	got, err := y.RolloverSessionStart(context.Background(), "tok", "old-1")
+	if err != nil {
+		t.Fatalf("session start: %v", err)
+	}
+	if !got.IsZero() {
+		t.Errorf("session start = %s, want zero until YouTube reports one", got)
+	}
+}
