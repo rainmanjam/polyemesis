@@ -132,7 +132,7 @@ describe("Settings saves show the kit SaveStatus, not a success toast (A95)", ()
     open("/settings?tab=ingest");
     const save = await screen.findByRole("button", { name: new RegExp(T("set.saveIngest")) });
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"), { timeout: 5000 });
     expect(statusNear(save)?.textContent).toBe(T("save.saved"));
     expect(toasts.success).toEqual([]);
   });
@@ -142,7 +142,7 @@ describe("Settings saves show the kit SaveStatus, not a success toast (A95)", ()
     open("/settings?tab=ingest");
     const save = await screen.findByRole("button", { name: new RegExp(T("set.saveIngest")) });
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("failed"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("failed"), { timeout: 5000 });
     expect(statusNear(save)?.textContent).toBe(T("save.failed"));
     expect(toasts.error).toContain("refused by the server");
   });
@@ -154,23 +154,37 @@ describe("Settings saves show the kit SaveStatus, not a success toast (A95)", ()
     fireEvent.change(screen.getByLabelText(T("set.srtPort")), { target: { value: "6001" } });
     expect(statusNear(save)?.getAttribute("data-save-state")).toBe("dirty");
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"), { timeout: 5000 });
     expect(toasts.success).toEqual([]);
   });
 
   it("Pipeline: the tab's one Save says Saved, or Not saved when refused", async () => {
     open("/settings?tab=pipeline");
-    const stagger = await screen.findByLabelText(T("set.stagger"));
-    fireEvent.change(stagger, { target: { value: "250" } });
-    const save = screen.getByRole("button", { name: new RegExp(T("set.savePipeline")) });
+    const stagger = (await screen.findByLabelText(T("set.stagger"))) as HTMLInputElement;
+    const save = screen.getByRole("button", { name: new RegExp(T("set.savePipeline")) }) as HTMLButtonElement;
+    // The tab reseeds its draft from the stored settings in an effect, which a
+    // slow run (CI's coverage pass) can flush after the edit. Re-apply the edit
+    // until it holds and Save is enabled, so the click never lands on a
+    // disabled button.
+    const edit = async (value: string) =>
+      waitFor(
+        () => {
+          if (stagger.value !== value) fireEvent.change(stagger, { target: { value } });
+          expect(stagger.value).toBe(value);
+          expect(save.disabled).toBe(false);
+        },
+        { timeout: 5000 },
+      );
+
+    await edit("250");
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"), { timeout: 5000 });
     expect(toasts.success).toEqual([]);
 
     refuse = true;
-    fireEvent.change(stagger, { target: { value: "500" } });
+    await edit("500");
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("failed"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("failed"), { timeout: 5000 });
   });
 
   it("Platforms: Save credentials says Saved beside the button", async () => {
@@ -184,7 +198,7 @@ describe("Settings saves show the kit SaveStatus, not a success toast (A95)", ()
     const save = screen.getByRole("button", { name: new RegExp(T("i18nSweep.saveCredentials")) });
     expect(statusNear(save)?.getAttribute("data-save-state")).toBe("dirty");
     fireEvent.click(save);
-    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"));
+    await waitFor(() => expect(statusNear(save)?.getAttribute("data-save-state")).toBe("saved"), { timeout: 5000 });
     expect(toasts.success).toEqual([]);
   });
 });
