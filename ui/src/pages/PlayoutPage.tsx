@@ -56,6 +56,7 @@ import type {
 } from "@/lib/types";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import { DisabledReason } from "@/components/DisabledReason";
+import { EmptyState } from "@/components/EmptyState";
 import { SaveStatus } from "@/components/SaveStatus";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useSaveModel } from "@/lib/saveModel";
@@ -880,9 +881,11 @@ export function VariantsCard({
       </CardHeader>
       <CardContent className="grid gap-2">
         {play.variants.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {t("play.noRungs")}
-          </p>
+          <EmptyState
+            icon={Radio}
+            title={t("play.noRungs")}
+            action={{ label: t("play.addRung"), onClick: add, disabled: busy }}
+          />
         )}
 
         {play.variants.map((v, i) => (
@@ -902,17 +905,20 @@ export function VariantsCard({
           />
         ))}
 
-        <div>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={busy || play.variants.length >= MAX_VARIANTS}
-            onClick={add}
-          >
-            <Plus />
-            {t("play.addRung")}
-          </Button>
-        </div>
+        {/* With none, the empty state above carries this same action. */}
+        {play.variants.length > 0 && (
+          <div>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || play.variants.length >= MAX_VARIANTS}
+              onClick={add}
+            >
+              <Plus />
+              {t("play.addRung")}
+            </Button>
+          </div>
+        )}
       </CardContent>
 
       <ConfirmDestructive
@@ -1320,7 +1326,7 @@ export function PackagingCard({
         subject={{ unnamed: true }}
         title={t("play.applyConfirmTitle")}
         description={t("play.applyConfirmDescription")}
-        consequencesLabel={t("play.removeRungDrops")}
+        consequencesLabel={t("play.applyInterrupts")}
         consequences={[{ label: t("play.watching"), count: viewers }]}
         confirmLabel={t("play.applyRestart")}
         tone="caution"
@@ -1358,15 +1364,20 @@ export function AdvancedSection({
 }) {
   const t = useT();
   const id = useId();
-  const [open, setOpen] = useState(false);
+  // Open from the start when the only explanation for a problem is inside:
+  // no quality levels means nothing is served once playout is on, and a level
+  // that failed says why on its own row. A rung failing later opens it too.
+  const rungFailing = (variants ?? []).some((v) => Boolean(v.error));
+  const [open, setOpen] = useState(() => play.variants.length === 0 || rungFailing);
   const [dirtyParts, setDirtyParts] = useState<Record<string, boolean>>({});
   const markDirty = useCallback((key: string, d: boolean) => {
     setDirtyParts((cur) => (cur[key] === d ? cur : { ...cur, [key]: d }));
   }, []);
   const markPackaging = useCallback((d: boolean) => markDirty("packaging", d), [markDirty]);
   const dirty = Object.values(dirtyParts).some(Boolean);
-  const shown = open || dirty;
+  const shown = open || dirty || rungFailing;
   const reason = dirty ? t("play.applyOrDiscardFirst") : null;
+  const locked = dirty || rungFailing;
   return (
     <section className="mt-3 rounded-md border border-border">
       <button
@@ -1374,10 +1385,10 @@ export function AdvancedSection({
         className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left"
         aria-expanded={shown}
         aria-controls={`${id}-body`}
-        aria-disabled={dirty || undefined}
+        aria-disabled={locked || undefined}
         aria-describedby={disabledDescribedBy(`${id}-reason`, reason)}
         onClick={() => {
-          if (!dirty) setOpen(!open);
+          if (!locked) setOpen(!open);
         }}
       >
         <span className="text-base font-semibold">{t("play.advanced")}</span>

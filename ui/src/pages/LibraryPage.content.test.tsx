@@ -93,7 +93,7 @@ describe("Library transcription status (app-council A38)", () => {
     );
     await screen.findByText("Transcripts: off");
     const link = screen.getByRole("link", { name: /Install whisper\.cpp/ });
-    expect(link.getAttribute("href")).toContain("polyemesis.com/docs/configuration");
+    expect(link.getAttribute("href")).toContain("github.com/ggml-org/whisper.cpp");
     expect(screen.queryByText(/transcription\.binary/)).toBeNull();
     // Search still works over existing transcripts; it just stops promising
     // everything anyone said.

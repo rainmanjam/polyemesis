@@ -138,11 +138,13 @@ interface PlayerTarget {
   atMs?: number;
 }
 
-/** Where "Install whisper.cpp" points: the configuration page on the site,
- *  which documents the whisper.cpp binary and how it is found. A link rather
- *  than the config key itself, which meant nothing to an operator reading the
- *  Library (app-council A38). */
-const WHISPER_DOCS_URL = "https://polyemesis.com/docs/configuration#configyaml";
+/** Where "Install whisper.cpp" points: whisper.cpp's own project page, which
+ *  carries its install and build instructions. Polyemesis finds the binary on
+ *  $PATH (whisper-cli, whisper or whisper-cpp; docs/MODULES.md), so installing
+ *  it is the whole fix and no polyemesis page documents more than that. A link
+ *  rather than the config.yaml key the note used to end in, which meant nothing
+ *  to an operator reading the Library (app-council A38). */
+const WHISPER_DOCS_URL = "https://github.com/ggml-org/whisper.cpp";
 
 export function LibraryPage() {
   const t = useT();
@@ -412,15 +414,12 @@ export function LibraryPage() {
         <Card className="mb-3">
           <CardContent className="px-0 py-0">
             {results.hits.length === 0 ? (
-              <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                {t("lib.noHits")}
-                {!view?.transcribeAvailable && (
-                  <>
-                    {" "}
-                    {t("lib.searchTranscribeUnavailable")}
-                  </>
-                )}
-              </div>
+              <EmptyState
+                icon={Search}
+                title={t("lib.noHits")}
+                body={view?.transcribeAvailable ? undefined : t("lib.searchTranscribeUnavailable")}
+                className="m-3 border-0"
+              />
             ) : (
               <ul className="divide-y divide-border">
                 {results.hits.map((h) => (

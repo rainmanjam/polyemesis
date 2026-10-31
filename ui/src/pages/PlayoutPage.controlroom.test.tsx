@@ -196,6 +196,30 @@ describe("AdvancedSection (app-council A17)", () => {
   });
 });
 
+describe("AdvancedSection opens itself when the answer is inside", () => {
+  const section = (p: PlayoutSettings, variants: PlayoutAdminView["status"]["variants"] = []) =>
+    render(
+      <AdvancedSection play={p} variants={variants} renditions={[]} busy={false} viewers={0} onSave={vi.fn()} onApply={vi.fn()} />,
+    );
+
+  it("starts open with no quality levels, since nothing is served without one", () => {
+    section(play({ variants: [] }));
+    expect(screen.getByRole("button", { name: /Advanced/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Add a quality level" })).toBeTruthy();
+  });
+
+  it("opens and stays open while a level reports an error", () => {
+    section(play(), [
+      { name: "main", audioTrack: 0, running: false, bandwidth: 0, playlist: "", viewers: 0, error: "muxer exited" },
+    ] as never);
+    const toggle = screen.getByRole("button", { name: /Advanced/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("muxer exited")).toBeTruthy();
+  });
+});
+
 describe("Status line and the off state (app-council A17, A18)", () => {
   it("says playout is on, who can watch and how many are watching", () => {
     render(<ExposureBanner view={view({ viewers: 7 })} busy={false} onTurnOn={vi.fn()} />);
