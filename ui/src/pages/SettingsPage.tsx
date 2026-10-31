@@ -141,6 +141,7 @@ import type {
   TlsMode,
   TlsStatus,
 } from "@/lib/types";
+import { MoreAbout } from "@/components/MoreAbout";
 
 export function SettingsPage() {
   const t = useT();
@@ -676,22 +677,6 @@ function ScopeNote({ programme }: { programme?: string | null }) {
         {t("settingsUx.scopeOthersOnSources")}
       </Link>
     </span>
-  );
-}
-
-/** A card description cut to one plain line, with the full explanation one
- *  click away (settings-council R11). The long text is unchanged; it is only
- *  no longer the first thing the operator has to read. */
-function MoreAbout({ children }: { children: React.ReactNode }) {
-  const t = useT();
-  return (
-    <details className="group text-sm text-muted-foreground">
-      <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-sm underline-offset-2 hover:text-foreground hover:underline">
-        <ChevronDown aria-hidden className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-        {t("settingsUx.more")}
-      </summary>
-      <div className="mt-1">{children}</div>
-    </details>
   );
 }
 
@@ -1545,7 +1530,7 @@ function PipelineSettings({
               onCheckedChange={(v) => setDraft({ ...draft, synth: { silenceOnVideoOnly: v } })}
             />
           </div>
-          <span className="text-sm text-muted-foreground">{t("set.synthesiseNote")}</span>
+          <MoreAbout lead={t("set.synthesiseLead")}>{t("set.synthesiseNote")}</MoreAbout>
         </CardContent>
       </Card>
 
@@ -1793,7 +1778,7 @@ function PipelineSettings({
                       />
                     </div>
                   </div>
-                  <span className="text-sm text-muted-foreground">{t("set.slateEncoderNote")}</span>
+                  <MoreAbout lead={t("set.slateEncoderLead")}>{t("set.slateEncoderNote")}</MoreAbout>
                 </>
               )}
 
@@ -2278,9 +2263,7 @@ function MultitrackHardware({
             on knowing that Twitch reads the DECLARATION, so the mechanism is
             stated here rather than left to be inferred from a refusal. */}
         <Experimental>{t("set.ebExperimental")}</Experimental>
-        <span className="text-sm text-muted-foreground">
-          {t("set.ebGpuWhy")}
-        </span>
+        <MoreAbout lead={t("set.ebGpuLead")}>{t("set.ebGpuWhy")}</MoreAbout>
         {gpus.map((g, i) => (
           <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
             <div className="flex flex-wrap items-end gap-2">

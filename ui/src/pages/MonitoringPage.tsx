@@ -59,6 +59,7 @@ import {
   type ProcessInfo,
 } from "@/lib/types";
 import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { MoreAbout } from "@/components/MoreAbout";
 
 const LOG_LEVEL_CLASS: Record<string, string> = {
   fatal: "text-down",
@@ -300,9 +301,9 @@ export function ExpertPanel() {
             </Button>
           </div>
         )}
-        <p className="text-tiny text-muted-foreground">
+        <MoreAbout lead={t("mon.expertLead")}>
           {tn("mon.expertIntro", { flag: <code className="font-mono">-i</code> })}
-        </p>
+        </MoreAbout>
 
         {selected === "" ? (
           <EmptyState title={t("mon.chooseDestinationToEdit")} />

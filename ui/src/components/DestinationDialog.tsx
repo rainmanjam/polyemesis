@@ -80,6 +80,7 @@ import type {
   SourceView,
   RenditionConcern,
 } from "@/lib/types";
+import { MoreAbout } from "@/components/MoreAbout";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -2254,7 +2255,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   negotiation that does not succeed is the EXPECTED outcome on
                   the machine most operators run this on, so saying it in amber
                   would train them to read a normal broadcast as broken. */}
-              <span className="text-sm text-muted-foreground">{t("addDest.multitrackHelp")}</span>
+              <MoreAbout lead={t("addDest.multitrackLead")}>{t("addDest.multitrackHelp")}</MoreAbout>
               {/* The two things the sentence above leaves out, and both are
                   things an operator would otherwise have to guess: nothing is
                   asked at all until the machine's GPU is declared, and the
@@ -2469,9 +2470,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   />
                 </div>
               </div>
-              <span className="text-sm text-muted-foreground">
-                {t("dest.muxQueuePair")}
-              </span>
+              <MoreAbout lead={t("dest.muxQueuePairLead")}>{t("dest.muxQueuePair")}</MoreAbout>
 
               <div className="flex flex-col gap-1 border-t border-border pt-3">
                 <Label htmlFor="dest-delay">{t("delay.field")}</Label>
@@ -2544,7 +2543,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   }
                   className="w-24"
                 />
-                <span className="text-sm text-muted-foreground">{t("addDest.giveUpHelp")}</span>
+                <MoreAbout lead={t("addDest.giveUpLead")}>{t("addDest.giveUpHelp")}</MoreAbout>
               </div>
             </div>
           </details>
