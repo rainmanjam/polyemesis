@@ -9,6 +9,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // THE LAST VERDICT SURVIVES A RELOAD (settings-council R10).
@@ -101,5 +102,54 @@ func TestTheListedVerdictCarriesNoSecret(t *testing.T) {
 	_, body := listCreds(t, h, sign)
 	if strings.Contains(body, secret) {
 		t.Fatalf("the credentials list carries the client secret: %s", body)
+	}
+}
+
+// A checker sentence that quotes the secret back is stored without it. No
+// checker does that today; the scrub is what keeps a future one -- or a
+// platform error body echoed into a detail -- from writing a client secret to
+// disk and serving it on every list read.
+//
+// Mutation: pass `check.Detail` instead of `scrubSecret(...)` in
+// recordCredCheck. The list then carries the secret and this fails.
+func TestAStoredVerdictNeverCarriesTheSecretItWasReachedOn(t *testing.T) {
+	srv, h, store := testServer(t, config.Config{})
+	sign := login(t, h)
+	secret := strings.Repeat("z", 5) + "-fixture-" + strings.Repeat("4", 5)
+	if err := store.PutPlatformCreds(srv.box, db.PlatformTwitch, "an-id", secret); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	srv.recordCredCheck(db.PlatformTwitch, oauth.CheckResult{
+		Platform: db.PlatformTwitch,
+		State:    oauth.CheckRejected,
+		Method:   oauth.MethodClientCredentials,
+		Detail:   "platform said: invalid client secret " + secret,
+	}, secret)
+
+	list, body := listCreds(t, h, sign)
+	if strings.Contains(body, secret) {
+		t.Fatalf("the stored verdict carries the secret: %s", body)
+	}
+	if len(list) != 1 || list[0].LastCheck == nil || !strings.Contains(list[0].LastCheck.Detail, "[redacted]") {
+		t.Fatalf("list = %+v, want the verdict stored with the secret replaced", list)
+	}
+}
+
+func TestScrubbingABlankSecretLeavesTheSentenceAlone(t *testing.T) {
+	if got := scrubSecret("The platform accepted these credentials.", " "); got != "The platform accepted these credentials." {
+		t.Fatalf("scrubSecret with a blank secret = %q", got)
+	}
+}
+
+// A verdict with no pair behind it (the pair was removed while the check was
+// in flight) is logged and dropped: it must not create a row, and it must not
+// turn a finished request into an error.
+func TestAVerdictForARemovedPairIsDroppedNotStored(t *testing.T) {
+	srv, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	srv.recordCredCheck(db.PlatformTwitch, oauth.CheckResult{State: oauth.CheckVerified}, "")
+	if list, _ := listCreds(t, h, sign); len(list) != 0 {
+		t.Fatalf("list = %+v, want no row for a pair that is not stored", list)
 	}
 }
