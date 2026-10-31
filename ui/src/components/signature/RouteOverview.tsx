@@ -1,5 +1,5 @@
 import { useId, type KeyboardEvent } from "react";
-import { disabledDescribedBy } from "@/lib/disabledReason";
+import { DisabledReason } from "@/components/DisabledReason";
 import { ShieldAlert, ShieldCheck, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,7 @@ interface RouteOverviewProps {
 }
 
 export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }: RouteOverviewProps) {
+  const gridId = useId();
   const t = useT();
   const dests: OverviewDest[] = rows.map((r) => ({ ...r, enabled: true }));
   const hit = musicReachingVod(dests, music)[0];
@@ -102,6 +103,9 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
           <tbody>
             {rows.map((row, ri) => {
               const d: OverviewDest = { ...row, enabled: true };
+              // app-council A28: one visible reason per read-only row, in its
+              // header, which every cell of the row is described by.
+              const reasonId = `${gridId}-row-${row.id}-reason`;
               return (
                 <tr
                   key={row.id}
@@ -112,6 +116,13 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
                       <StatusDot tone={row.tone} size="sm" />
                       <span className="truncate">{row.name}</span>
                     </span>
+                    {row.kind === "matrix" && (
+                      <DisabledReason
+                        id={reasonId}
+                        reason={t("routing.overview.matrixOnly")}
+                        className="mt-0.5 font-normal"
+                      />
+                    )}
                   </th>
                   <td className="px-2 py-1.5">
                     <RightsChip state={musicRights(d, music)} />
@@ -126,6 +137,7 @@ export function RouteOverview({ rows, tracks, music, onToggle, onSelect, onFix }
                         music={music}
                         data-row={ri}
                         data-col={ci}
+                        reasonId={row.kind === "matrix" ? reasonId : undefined}
                         onToggle={onToggle}
                         onSelect={onSelect}
                       />
@@ -199,6 +211,7 @@ function OverviewCell({
   music,
   onToggle,
   onSelect,
+  reasonId,
   ...position
 }: {
   row: OverviewRow;
@@ -208,11 +221,10 @@ function OverviewCell({
   music: number[];
   onToggle: (track: number) => void;
   onSelect: (id: number) => void;
+  /** The row header's visible read-only reason, for a matrix row. */
+  reasonId?: string;
 } & { "data-row": number; "data-col": number }) {
   const t = useT();
-  // A28: a matrix cell is read-only, and the reason is announced through the
-  // cell, not only in a title that a disabled button never shows.
-  const matrixReasonId = useId();
   const state: CellState = cellState(dest, trackIndex, music);
   // The live mix and the VOD mix are separate, so an amber cell still says what
   // the live mix does on this track: clicking it toggles that, not the archive.
@@ -244,10 +256,7 @@ function OverviewCell({
       })}
       aria-pressed={state !== "off"}
       disabled={row.kind === "matrix"}
-      aria-describedby={disabledDescribedBy(
-        matrixReasonId,
-        row.kind === "matrix" ? t("routing.overview.matrixOnly") : null,
-      )}
+      aria-describedby={reasonId}
       onClick={onClick}
       className={cn(
         "relative inline-flex h-9 w-14 flex-col items-center justify-center rounded-md border transition-colors",
@@ -257,11 +266,6 @@ function OverviewCell({
         state === "off" && "border-border bg-transparent",
       )}
     >
-      {row.kind === "matrix" && (
-        <span id={matrixReasonId} className="sr-only">
-          {t("routing.overview.matrixOnly")}
-        </span>
-      )}
       <span className="flex items-center gap-1">
         <span
           aria-hidden

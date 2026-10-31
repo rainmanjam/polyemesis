@@ -107,14 +107,22 @@ describe("RouteOverview editing", () => {
     expect((cell as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("says why a matrix cell is read-only, through the cell's description", () => {
-    // A28. The reason used to be a title on a disabled button, which no pointer,
-    // keyboard or screen reader ever reaches. It is now the cell's description.
+  it("says why a matrix row is read-only in visible text, and every cell points at it", () => {
+    // app-council A28. The reason was a title on a disabled button, which no
+    // pointer, keyboard or screen reader reaches, and then screen-reader text
+    // inside each cell, which a sighted operator never sees. It is now one
+    // visible line in the row header (DisabledReason), and each cell's
+    // description points at it.
     renderGrid();
     const cell = screen.getByRole("button", { name: /Host mic to Archive/i });
     const reasonId = cell.getAttribute("aria-describedby");
     expect(reasonId).toBeTruthy();
-    expect(document.getElementById(reasonId as string)?.textContent).toContain("Mix matrix destination");
+    const reason = document.getElementById(reasonId as string) as HTMLElement;
+    expect(reason.textContent).toContain("Mix matrix destination");
+    expect(reason.className, "the reason is hidden from sighted operators").not.toContain("sr-only");
+    expect(reason.closest("th"), "the reason is not in the row header").not.toBeNull();
+    // Once per row, not once per cell.
+    expect(screen.getAllByText(/Mix matrix destination/)).toHaveLength(1);
   });
 
   it("offers the fix on the selected row's music hit, and calls it", () => {
