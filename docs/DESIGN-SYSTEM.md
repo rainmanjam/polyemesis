@@ -84,8 +84,8 @@ be — six steps, no more, because a seventh gets chosen by accident.
 
 | Token | Size / line | For |
 |---|---|---|
-| `--text-micro` | 10px / 14px | Units, axis labels, meter scales |
-| `--text-tiny` | 11px / 16px | Hints under a field, secondary stats |
+| `--text-micro` | 10px / 14px | Units, axis labels, meter scales. **Never content.** |
+| `--text-tiny` | 11px / 16px | Metadata only: a count, a timestamp. Content is 12px or more. |
 | `--text-sm` | 12px / 18px | Table cells, form labels — the console default |
 | `--text-base` | 14px / 20px | Body prose, dialog copy |
 | `--text-lg` | 18px / 24px | Card titles |
@@ -95,6 +95,65 @@ be — six steps, no more, because a seventh gets chosen by accident.
 character-by-character: stream keys, URLs, topic names, hex colours, timecodes.
 That is a correctness rule, not a stylistic one — a proportional font makes `l`
 and `1` in a stream key indistinguishable.
+
+#### The 12px floor for content
+
+Anything a person reads as content is at least `--text-sm` (12px): labels,
+values, warnings, notes, status words, badges and table headers. `text-micro`
+(10px) is for units and axis or scale labels only. `lib/text-size-floor.test.ts`
+enforces this as a ratchet: a file may hold no more `text-micro`, `text-[9px]`
+or `text-[10px]` than its recorded count, and the shared primitives in
+`components/ui` and `components/signature` hold the floor outright. Lower the
+count when you convert a usage; do not raise it.
+
+### Console kit
+
+The shared patterns a page should use, rather than inventing its own. Each one
+has a test, and each names the audit finding it closes.
+
+**Empty state.** `components/EmptyState.tsx`. Props: `icon?`, `title`, `body?`
+(one line), `action?` (one primary button). Use it wherever a list or panel has
+nothing in it, so Routing, Clips, Recordings, Jobs and Chat answer the same way.
+Every string is passed in already translated.
+
+**Status words.** `lib/status.ts` returns a `StatusReading` (`labelKey`, `tone`,
+`indicator`) for every domain: `processStatus`, `destinationStatus`,
+`delayStatus`, `renditionStatus`, `recorderStatus`, `clipBufferStatus`,
+`ingestPhaseStatus` and `outputStatus`. Render it with
+`components/StatusPill.tsx`. The tone is `ok` (on air, the only green), `warn`
+(a transition, or something that needs a look), `bad` (failed) or `idle`
+(not running by choice or by absence). The indicator is the non-colour cue:
+filled, dashed, cross or ring. These are presentation words only. Never send
+them to the server and never rename a state value; the API, MQTT, webhook and
+Stream Deck vocabularies are contracts. A new state goes in `lib/status.ts`
+with a test, not into a page.
+
+**Confirmation.** `components/ConfirmDestructive.tsx`. Use it for every
+destructive or live-affecting action; never `window.confirm`. Two conventions:
+
+- **Name the effect.** Pass `consequence`, one short sentence that names the
+  exact change on a live thing: "Stops publishing to YouTube. The broadcast can
+  be restarted." A bare "Are you sure?" is not a confirmation.
+- **Pick the tone.** `tone="destructive"` (the default) is for what does not
+  come back: a deleted file, a revoked credential. `tone="caution"` is for a
+  live action that can be undone, such as a stop, a cancel or making a stream
+  public. Caution uses an amber icon and a default button, and its label is a
+  verb. Pass `confirmLabel`; the fallback is "Confirm".
+
+**Save model.** One rule for the whole console (A95). A **toggle or a choice
+applies at once**, and the page says so; it never has a dirty state. A
+**number, text or group of fields uses an explicit Save**: hold the edit in a
+draft with `useSaveModel` (`lib/saveModel.ts`), show `SaveStatus` beside the
+button, and keep the draft if the write fails. Never save on blur. A blur save
+loses an edit that was never blurred and gives no sign that anything was written.
+
+**Disabled with a reason.** `components/DisabledReason.tsx`. A title tooltip on
+a disabled control never shows: the Button primitive sets `pointer-events-none`,
+and a disabled button cannot take focus. So when a control is disabled, print
+the reason as visible text beside it, and link the two with `aria-describedby`
+(`disabledDescribedBy` in `lib/disabledReason.ts`). The reason says what would
+unlock the control, not what is wrong with the operator. It renders nothing
+while the control is enabled.
 
 ### Typefaces
 

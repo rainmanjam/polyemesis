@@ -60,7 +60,7 @@ export function Stat({
       // people never found.
       title={hint}
     >
-      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+      <div className="text-sm uppercase tracking-wider text-muted-foreground">
         {t(labelKey, labelParams)}
       </div>
       <div

@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 /* ===========================================================================
    One confirmation for every destructive action.
@@ -61,6 +62,16 @@ interface ConfirmDestructiveBase {
    *  `t("confirm.alsoRemoves")` rather than a literal, and it is resolved
    *  inside the component because a default parameter cannot call a hook. */
   consequencesLabel?: string;
+  /** One short sentence that names the exact effect on a live thing, shown as
+   *  the lead line before the description (A4-A6, A15, A60). "Stops publishing
+   *  to YouTube. The broadcast can be restarted." beats "Are you sure?". Use it
+   *  on every live-affecting action; it is the convention, see DESIGN-SYSTEM.md. */
+  consequence?: string;
+  /** `destructive` (default) is for things that do not come back: the red
+   *  alert icon and the red button. `caution` is for a live action that can be
+   *  undone (stop, cancel, make public): amber icon, default button, and a verb
+   *  label. Existing callers keep the destructive look without changing. */
+  tone?: "destructive" | "caution";
   confirmLabel?: string;
   onConfirm: () => void | Promise<void>;
 }
@@ -117,11 +128,14 @@ export function ConfirmDestructive({
   requireTyping = false,
   consequences,
   consequencesLabel,
+  consequence,
+  tone = "destructive",
   confirmLabel,
   confirmDisabled = false,
   onConfirm,
 }: Readonly<ConfirmDestructiveProps>) {
   const t = useT();
+  const caution = tone === "caution";
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -176,9 +190,14 @@ export function ConfirmDestructive({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-down" />
+            <AlertTriangle className={cn("h-4 w-4 shrink-0", caution ? "text-warn" : "text-down")} />
             {title}
           </DialogTitle>
+          {consequence && (
+            <p data-testid="confirm-consequence" className="text-sm font-semibold text-foreground">
+              {consequence}
+            </p>
+          )}
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
@@ -270,11 +289,11 @@ export function ConfirmDestructive({
             {t("common.cancel")}
           </Button>
           <Button
-            variant="destructive"
+            variant={caution ? "default" : "destructive"}
             onClick={() => void run()}
             disabled={!unlocked || busy || confirmDisabled}
           >
-            {confirmLabel ?? t("common.delete")}
+            {confirmLabel ?? t(caution ? "common.confirm" : "common.delete")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -10,6 +10,11 @@ its first tagged release.
 
 ### Added
 
+- **Shared console kit.** One empty state (`EmptyState`), one status pill and
+  vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
+  (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
+  `SaveStatus`). Pages pick these up as they are touched. See
+  [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md).
 - **OBS bridge: go live and stop when OBS does.** Polyemesis now hears
   about OBS in one of two ways. It can connect to obs-websocket 5 on your LAN
   or over Tailscale: the password is stored sealed, the link reconnects on its
@@ -408,6 +413,18 @@ its first tagged release.
   table for each use case, with sports and esports added.
 
 ### Changed
+
+- **One status vocabulary, ready for the pages.** `lib/status.ts` maps every
+  process, destination, delay, rendition, recorder, clip-buffer, ingest and
+  output state to one translated word, a tone and a non-colour indicator. The
+  words are presentation only: the API, MQTT, webhook and Stream Deck values are
+  unchanged. Pages adopt it as they are touched.
+- **Badges, table headers and select labels are 12px.** Status badges, table
+  column headers and dropdown and select group labels moved from the 10px micro
+  step to 12px.
+- **Confirmation dialog: consequence line and caution tone.** `ConfirmDestructive`
+  accepts a one-sentence `consequence` and `tone="caution"` for reversible live
+  actions. The default look is unchanged, so existing callers do not change.
 
 - **Each platform card names its credentials the way that platform's console
   does.** Settings → Platforms used to label every card "Client ID" and "Client

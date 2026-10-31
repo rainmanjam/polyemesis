@@ -394,7 +394,7 @@ export function Timeline({
               }}
             />
           )}
-          <div className="tnum rounded-[3px] bg-popover px-1 py-0.5 text-center font-mono text-[10px] text-foreground shadow">
+          <div className="tnum rounded-[3px] bg-popover px-1 py-0.5 text-center font-mono text-sm text-foreground shadow">
             {timecode(hover)}
           </div>
         </div>
