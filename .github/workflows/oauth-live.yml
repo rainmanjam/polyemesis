@@ -33,7 +33,9 @@
 # and nothing in this run can leak a secret because none is present. If a
 # credential set is ever added to this workflow, read the suite's step 8 first:
 # it reports lengths and character classes rather than values, and the driver's
-# redact() is the backstop underneath that.
+# redact() is the backstop underneath that. And never set
+# POLY_OAUTH_ALLOW_BROADCAST here: it makes step 8 create a public Facebook
+# live video, which is a thing an operator chooses at a desk, not a cron job.
 name: oauth (live platforms)
 
 on:
@@ -49,6 +51,7 @@ on:
       - "internal/oauth/**"
       - "scripts/acceptance-oauth.sh"
       - "scripts/acceptance_oauth_driver.go"
+      - "scripts/internal/oauthlive/**"
       - ".github/workflows/oauth-live.yml"
 
 permissions:

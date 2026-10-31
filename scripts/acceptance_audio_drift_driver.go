@@ -15,7 +15,9 @@
 //
 //	setup <backup|slate>  set up, enable failover onto a backup ingest or a slate
 //	publishkey            print the source's publish key (the backup's is <key>.backup)
-//	adddest <name> <url>  add one RTMP destination carrying track 0 only
+//	adddest <name> <url> [tracks]
+//	                      add one RTMP destination; tracks is how many of the
+//	                      ingest's tracks it mixes, from track 0 (default 1)
 //	gain <name> <gain>    change track 0's gain live on one destination
 //	pin <kind>            put a source on air by hand (primary|backup|slate|auto)
 //	status                print "<active> <switches>"
@@ -65,9 +67,17 @@ func main() {
 		driverlib.Login(user, pass)
 		driverlib.PublishKey()
 	case "adddest":
-		need(5, "adddest <name> <rtmp-url>")
+		need(5, "adddest <name> <rtmp-url> [tracks]")
 		driverlib.Login(user, pass)
-		addDest(os.Args[3], os.Args[4])
+		tracks := 1
+		if len(os.Args) > 5 {
+			n, err := strconv.Atoi(os.Args[5])
+			if err != nil || n < 1 || n > driverlib.ProfileTracks {
+				driverlib.Die("tracks must be 1.." + strconv.Itoa(driverlib.ProfileTracks) + ", not " + os.Args[5])
+			}
+			tracks = n
+		}
+		addDest(os.Args[3], os.Args[4], tracks)
 	case "gain":
 		need(5, "gain <name> <gain>")
 		driverlib.Login(user, pass)
@@ -132,18 +142,26 @@ func enableFailover(slate bool) {
 	fmt.Println("FAILOVER_OK")
 }
 
-// addDest creates one RTMP destination on track 0.
+// addDest creates one RTMP destination mixing tracks 0..tracks-1.
+//
+// More than one is the MULTI-track graph, whose every leg ends in routing's
+// trackAlign (first_pts=0) -- the shape a format-changing switch used to put
+// the stream's runtime in front of, because a rebuilt leg pads from zero.
 //
 // Normalisation off, so nothing between the source and the sink smooths the
 // level difference the shell uses to tell the primary's tone from the
 // backup's. The URL names the sink's path; the sink accepts any key.
-func addDest(name, url string) {
+func addDest(name, url string, tracks int) {
+	on := make([]int, tracks)
+	for i := range on {
+		on[i] = i
+	}
 	driverlib.CreateDest(name, map[string]any{
 		"name": name, "kind": "rtmp", "platform": "custom",
 		"url": url, "streamKey": name,
 		"enabled": true, "audioBitrate": 128,
 		"profile": map[string]any{
-			"mode": "simple", "tracks": driverlib.Sel(0), "matrix": []any{},
+			"mode": "simple", "tracks": driverlib.Sel(on...), "matrix": []any{},
 			"normalize": "off", "sampleRate": 48000,
 		},
 	})

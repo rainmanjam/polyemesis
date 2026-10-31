@@ -778,8 +778,8 @@ func guides() []SetupGuide {
 					"that is the one that offers Facebook Login and the Live Video permissions.",
 				"Add the “Facebook Login” product. Under Facebook Login → Settings, switch on “Client OAuth login” and " +
 					"“Web OAuth login”, and add exactly the redirect URI shown below under “Valid OAuth Redirect URIs”.",
-				"In App settings → Basic, copy the App ID and App Secret into the fields on this page. The App ID is " +
-					"the client ID and the App Secret is the client secret.",
+				"In App settings → Basic, copy the App ID and the App Secret (click Show beside it) into the " +
+					"App ID and App Secret fields on this page and save.",
 				"Decide the target. Streaming to your own profile needs publish_video. Streaming to a Page needs " +
 					"pages_manage_posts and pages_read_engagement, plus pages_show_list so polyemesis can offer you " +
 					"the Page to pick. polyemesis asks for all of them; you can decline the ones you do not want on " +
@@ -837,8 +837,9 @@ func guides() []SetupGuide {
 				"Open developer.vimeo.com → My Apps and click Create an app. Any name and description will do.",
 				"On the app's page, under OAuth redirect authentication, add exactly the redirect URI shown below. " +
 					"Leave implicit authentication switched off — polyemesis exchanges the code server-side.",
-				"Copy the Client Identifier and Client Secret into the fields on this page and save. Vimeo can " +
-					"verify this pair immediately, so a typo is caught here rather than at consent time.",
+				"Copy the Client identifier and a Client secret (under Manage App Secrets) into the fields on " +
+					"this page and save. Vimeo can verify this pair immediately, so a typo is caught here rather " +
+					"than at consent time.",
 				"Go to a destination and click Connect account. Vimeo asks you to approve the public and private " +
 					"scopes, which is what lets polyemesis read which member the token belongs to.",
 				"Watch the message that comes back from connecting. It says whether your account reaches Vimeo's " +

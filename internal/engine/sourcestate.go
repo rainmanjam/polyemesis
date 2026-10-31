@@ -89,6 +89,16 @@ type sourceState struct {
 
 	// videoInfo is the probed video stream, or nil for a video-less ingest.
 	videoInfo *ffmpeg.VideoStream
+
+	// audio is the probed audio tracks, sample rate and all, in a:N order.
+	//
+	// Kept beside source rather than inside it because routing.Track has no
+	// sample rate and must not grow one: source is the JSON the UI renders and
+	// sameSource compares, so a rate there would restart every destination the
+	// first time an encoder's rate was measured. What needs the rate is the
+	// selector, which conforms the slate and the backup to it -- see
+	// audioToConformTo. Moves with source at both sites, like videoInfo.
+	audio []ffmpeg.AudioStream
 }
 
 // layoutForProcessBuilding is the layout, plus whether it may be compiled into a
@@ -121,9 +131,10 @@ func (s *sourceState) arrivingNow() bool { return s.probed }
 // together, which is the invariant this type exists to keep.
 //
 // Callers must hold the engine's mu.
-func (s *sourceState) commitProbe(src routing.Source, video *ffmpeg.VideoStream, mode db.IngestMode) {
+func (s *sourceState) commitProbe(src routing.Source, video *ffmpeg.VideoStream, audio []ffmpeg.AudioStream, mode db.IngestMode) {
 	s.source = src
 	s.videoInfo = video
+	s.audio = append([]ffmpeg.AudioStream(nil), audio...)
 	s.probed = true
 	s.measured = true
 	s.measuredMode = mode
@@ -145,7 +156,26 @@ func (s *sourceState) invalidate() {
 	// what made the probe-resurrection race hard to see.
 	s.measuredMode = db.IngestUnset
 	s.source = routing.DefaultSource()
+	s.audio = nil
 	s.sourceGen++
+}
+
+// audioToConformTo is the primary's measured audio format, track by track, or
+// nil when there is none to match.
+//
+// Gated on measured, not probed, for the reason the file comment gives: the
+// question is asked precisely while the primary is AWAY -- that is when the
+// slate and the backup go on air -- and an outage clears probed while the
+// layout it measured stays true. Nil for a placeholder layout, and for a
+// video-only primary, whose audio is the silence tier's 48 kHz stereo and is
+// already what an unconformed slate publishes.
+//
+// Callers must hold the engine's mu.
+func (s *sourceState) audioToConformTo() []ffmpeg.AudioStream {
+	if !s.measured || len(s.audio) == 0 {
+		return nil
+	}
+	return append([]ffmpeg.AudioStream(nil), s.audio...)
 }
 
 // clearProbed records that nothing is arriving, WITHOUT touching the layout.
