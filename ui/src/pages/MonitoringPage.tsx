@@ -1116,7 +1116,11 @@ export function MonitoringPage() {
               {/* app-council A83: the kit's empty state, set in the sans face
                   and without its own border inside the log box. */}
               {merged.length === 0 ? (
-                <EmptyState title={t("mon.noLogLines")} className="border-0 font-sans" />
+                <EmptyState
+                  title={t("mon.noLogLinesTitle")}
+                  body={t("mon.noLogLinesBody")}
+                  className="border-0 font-sans"
+                />
               ) : groups.length === 0 ? (
                 <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />
               ) : (

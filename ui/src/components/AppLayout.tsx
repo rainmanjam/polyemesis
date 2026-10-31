@@ -278,7 +278,7 @@ export function AppLayout({
         >
           <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
           <span className={liveCount > 0 ? "text-foreground" : "text-muted-foreground"}>
-            {liveCount > 0 ? liveLabel : t("onAir.offAir")}
+            {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
           </span>
         </span>
 

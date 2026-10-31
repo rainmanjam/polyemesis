@@ -35,6 +35,8 @@ describe("headerLive", () => {
       count: 3,
       key: "chrome.liveCountProgramme",
       params: { programme: "Main", count: 3 },
+      offKey: "chrome.offAirProgramme",
+      offParams: { programme: "Main" },
     });
   });
 
@@ -44,6 +46,7 @@ describe("headerLive", () => {
       count: 2,
       key: "chrome.liveCountAll",
       params: { count: 2 },
+      offKey: "onAir.offAir",
     });
   });
 
@@ -60,10 +63,24 @@ describe("headerLive", () => {
       count: 2,
       key: "chrome.liveCount",
       params: { count: 2 },
+      offKey: "onAir.offAir",
     });
   });
 
   it("counts nothing before the first status frame", () => {
     expect(headerLive({ destinations: undefined, programme: 1, programmes, sourceCount: 2 }).count).toBe(0);
+  });
+
+  it("names the programme when it is off air, so another programme's broadcast does not read as this one's", () => {
+    const destinations = [stopped(1, 1), running(4, 2)];
+    const r = headerLive({ destinations, programme: 1, programmes, sourceCount: 2 });
+    expect(r.count).toBe(0);
+    expect(r.offKey).toBe("chrome.offAirProgramme");
+    expect(r.offParams).toEqual({ programme: "Main" });
+  });
+
+  it("keeps the plain Off air where there is no programme to name", () => {
+    const r = headerLive({ destinations: [], programme: 1, programmes: [programmes[0]], sourceCount: 1 });
+    expect(r.offKey).toBe("onAir.offAir");
   });
 });

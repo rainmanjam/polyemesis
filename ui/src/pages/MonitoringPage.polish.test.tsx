@@ -86,7 +86,7 @@ describe("MonitoringPage: no English literals around the figures (app-council A9
 describe("MonitoringPage: empty lists use the kit's EmptyState (app-council A83)", () => {
   it("shows the log panel's empty message as an EmptyState, not a bare line", () => {
     render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
-    const title = screen.getByText(translate("en", "mon.noLogLines"));
+    const title = screen.getByText(translate("en", "mon.noLogLinesTitle"));
     expect(title.className).toContain("font-semibold");
     expect(title.closest(".border-dashed")).not.toBeNull();
   });

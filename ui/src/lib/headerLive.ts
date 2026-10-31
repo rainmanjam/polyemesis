@@ -18,6 +18,11 @@ export interface HeaderLive {
   count: number;
   key: TranslationKey;
   params: TranslateParams;
+  /** What to say when `count` is 0: the programme's name with "Off air" when
+   *  the count is scoped to one, so the phone's on-air line does not say a
+   *  bare "Off air" while another programme is broadcasting. */
+  offKey: TranslationKey;
+  offParams?: TranslateParams;
 }
 
 interface DestLike {
@@ -38,12 +43,18 @@ export function headerLive({
 }): HeaderLive {
   const live = (destinations ?? []).filter((d) => d.process?.state === "running");
   if (sourceCount <= 1) {
-    return { count: live.length, key: "chrome.liveCount", params: { count: live.length } };
+    return { count: live.length, key: "chrome.liveCount", params: { count: live.length }, offKey: "onAir.offAir" };
   }
   const name = programme == null ? undefined : programmes.find((p) => p.id === programme)?.name;
   if (name !== undefined) {
     const count = live.filter((d) => d.sourceId === programme).length;
-    return { count, key: "chrome.liveCountProgramme", params: { programme: name, count } };
+    return {
+      count,
+      key: "chrome.liveCountProgramme",
+      params: { programme: name, count },
+      offKey: "chrome.offAirProgramme",
+      offParams: { programme: name },
+    };
   }
-  return { count: live.length, key: "chrome.liveCountAll", params: { count: live.length } };
+  return { count: live.length, key: "chrome.liveCountAll", params: { count: live.length }, offKey: "onAir.offAir" };
 }
