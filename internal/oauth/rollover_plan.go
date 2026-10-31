@@ -235,6 +235,12 @@ func parseClock(s string) (int, bool) {
 	return t.Hour()*60 + t.Minute(), true
 }
 
+// RolloverDebounceEnds is the moment the debounce after a rollover ends, given when that rollover ran. The manual run
+// uses it too, so a click made just after a rollover is refused rather than rolling the new broadcast over again.
+func RolloverDebounceEnds(last time.Time) time.Time {
+	return last.Add(rolloverMinInterval)
+}
+
 // RolloverConfig is the operator's settings as the planner and the API accept them.
 type RolloverConfig struct {
 	MarginMinutes int

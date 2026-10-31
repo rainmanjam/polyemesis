@@ -41,6 +41,10 @@ import (
 // not need more, and the platform calls it makes are the cost that matters.
 const rolloverSweepInterval = 30 * time.Second
 
+// errRolloverTooSoon refuses a manual run inside the debounce after a rollover. The sweep already waits that long, so a
+// manual run is held to the same rule: the broadcast a rollover just created is not rolled over again at once.
+var errRolloverTooSoon = errors.New("a rollover ran less than ten minutes ago; wait before rolling over again")
+
 // rolloverMaxDetail bounds what a failure puts into the timeline and the webhook. An error from a platform can carry
 // a response body, so it is cut short here and not trusted to be short.
 const rolloverMaxDetail = 240
@@ -209,15 +213,18 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		// Not announced, so there is no broadcast to replace and nothing to count from.
 		return false, nil
 	}
+	if force && !cfg.LastRolloverAt.IsZero() && now.Before(oauth.RolloverDebounceEnds(cfg.LastRolloverAt)) {
+		return false, errRolloverTooSoon
+	}
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
 		start, err := c.sessionStart(ctx, d, bid, now)
 		if err != nil {
 			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", err)
 			return false, err
 		}
-		if start.IsZero() {
+		if start.IsZero() && !force {
 			// The platform has not recorded the live start yet. Nothing is counted from a guess: the session is not
-			// stored, and the next sweep reads the start again.
+			// stored, and the next sweep reads the start again. A manual run needs no countdown, so it goes ahead.
 			return false, nil
 		}
 		if err := c.store.SetRolloverSession(d.ID, bid, start, now); err != nil {

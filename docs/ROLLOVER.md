@@ -57,7 +57,7 @@ reported. PROVISIONAL.
 | `GET /api/v1/rollover/limits` | The platform caps, with their sources and how well each is established. |
 | `GET /api/v1/destinations/{id}/rollover` | One destination's settings, its countdown and what the planner would do now. |
 | `PUT /api/v1/destinations/{id}/rollover` | Save the settings: `enabled`, `marginMinutes`, `quietStart`, `quietEnd`, `quietZone`, `obsScene`. A bad value is refused with the reason. |
-| `POST /api/v1/destinations/{id}/rollover/run` | Roll over now. Refused with a 409 if the destination is not delivering or the platform is countdown only. |
+| `POST /api/v1/destinations/{id}/rollover/run` | Roll over now. Refused with a 409 if the destination is not delivering, the platform is countdown only, or a rollover ran in the last ten minutes. |
 
 ## Events
 
@@ -75,5 +75,6 @@ planned, so a late look at the stream never shortens the margin.
 
 - The countdown card and the settings control in the console. The API above
   serves the same data.
-- The chat notice before a rollover. There is no chat send path to reuse.
+- The chat notice before a rollover. A send path exists (`chat.Hub.Send`), but
+  no notice is built in this release.
 - Twitch replacement by a second session, and Facebook or Kick rollover.

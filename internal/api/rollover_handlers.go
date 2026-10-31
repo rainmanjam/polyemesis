@@ -195,7 +195,7 @@ func (s *Server) handleRunRollover(w http.ResponseWriter, r *http.Request) {
 	}
 	err = s.rollover.RunNow(r.Context(), id)
 	switch {
-	case errors.Is(err, errRolloverNotLive), errors.Is(err, errRolloverNoAction):
+	case errors.Is(err, errRolloverNotLive), errors.Is(err, errRolloverNoAction), errors.Is(err, errRolloverTooSoon):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "no such destination")

@@ -505,9 +505,11 @@ func TestConcurrentSweepsAndSceneSwitchesRollTheSameBroadcastOnce(t *testing.T) 
 	r.enable(1, "Be Right Back")
 	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
 
+	// A manual run is part of the race too: it skips the planner, so only the debounce stops it rolling the broadcast a
+	// sweep just created. Whichever of the three gets the lock first does the rollover, and the rest are refused.
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
-		wg.Add(2)
+		wg.Add(3)
 		go func() {
 			defer wg.Done()
 			r.c.sweepOnce(context.Background())
@@ -516,10 +518,62 @@ func TestConcurrentSweepsAndSceneSwitchesRollTheSameBroadcastOnce(t *testing.T) 
 			defer wg.Done()
 			r.c.noteScene("Be Right Back", false, r.now.Add(time.Duration(i)*time.Second))
 		}(i)
+		go func() {
+			defer wg.Done()
+			_ = r.c.RunNow(context.Background(), 1)
+		}()
 	}
 	wg.Wait()
 
 	if n := len(r.yt.rolls); n != 1 {
 		t.Fatalf("replacements requested = %d, want exactly 1 for one due rollover", n)
+	}
+}
+
+// TestAManualRunInsideTheDebounceIsRefusedAndRollsNothing checks that a click made just after a rollover is held to the
+// same ten minutes the sweep waits. Without it, the operator's click would roll over the broadcast the rollover had only
+// just created. The refusal is a 409 that says why, and the platform is not asked.
+func TestAManualRunInsideTheDebounceIsRefusedAndRollsNothing(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 {
+		t.Fatalf("setup: rollovers = %d, want 1", len(r.yt.rolls))
+	}
+
+	r.now = r.now.Add(2 * time.Minute)
+	err := r.c.RunNow(context.Background(), 1)
+	if !errors.Is(err, errRolloverTooSoon) {
+		t.Fatalf("manual run two minutes after a rollover: err = %v, want errRolloverTooSoon", err)
+	}
+	if len(r.yt.rolls) != 1 {
+		t.Errorf("the platform was asked again inside the debounce: %d rollovers", len(r.yt.rolls))
+	}
+
+	r.now = r.now.Add(11 * time.Minute)
+	if err := r.c.RunNow(context.Background(), 1); err != nil {
+		t.Fatalf("manual run after the debounce: err = %v, want a rollover", err)
+	}
+	if len(r.yt.rolls) != 2 {
+		t.Errorf("rollovers after the debounce = %d, want 2", len(r.yt.rolls))
+	}
+}
+
+// TestAManualRunWithNoRecordedStartStillRollsOver checks the other side of the wait rule. The sweep waits for the
+// platform's start, but an operator who asks for a rollover on a stream YouTube has not yet stamped must not be told
+// "not delivering" for a destination that is. A manual run needs no countdown, so it goes ahead.
+func TestAManualRunWithNoRecordedStartStillRollsOver(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = time.Time{}
+
+	if err := r.c.RunNow(context.Background(), 1); err != nil {
+		t.Fatalf("manual run with no recorded start: err = %v, want the rollover to go ahead", err)
+	}
+	if len(r.yt.rolls) != 1 {
+		t.Errorf("rollovers = %d, want 1", len(r.yt.rolls))
 	}
 }
