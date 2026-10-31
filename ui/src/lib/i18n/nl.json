@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Fouten",
   "procTable.toggle": "Details van {process}",
   "procTable.showCommand": "Opdracht tonen",
-  "procTable.hideCommand": "Opdracht verbergen"
+  "procTable.hideCommand": "Opdracht verbergen",
+  "dashMobile.chatPipeline": "Chat en verwerkingsketen",
+  "dashMobile.streamInfo": "Streaminfo (titel, tags, categorie)"
 }

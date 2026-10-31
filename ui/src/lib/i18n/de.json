@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Fehler",
   "procTable.toggle": "Details zu {process}",
   "procTable.showCommand": "Befehl anzeigen",
-  "procTable.hideCommand": "Befehl ausblenden"
+  "procTable.hideCommand": "Befehl ausblenden",
+  "dashMobile.chatPipeline": "Chat und Verarbeitungskette",
+  "dashMobile.streamInfo": "Stream-Infos (Titel, Tags, Kategorie)"
 }

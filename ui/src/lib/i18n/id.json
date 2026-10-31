@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Galat",
   "procTable.toggle": "Detail untuk {process}",
   "procTable.showCommand": "Tampilkan perintah",
-  "procTable.hideCommand": "Sembunyikan perintah"
+  "procTable.hideCommand": "Sembunyikan perintah",
+  "dashMobile.chatPipeline": "Obrolan dan alur proses",
+  "dashMobile.streamInfo": "Info siaran (judul, tag, kategori)"
 }

@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Errors",
   "procTable.toggle": "Details for {process}",
   "procTable.showCommand": "Show command",
-  "procTable.hideCommand": "Hide command"
+  "procTable.hideCommand": "Hide command",
+  "dashMobile.chatPipeline": "Chat and pipeline",
+  "dashMobile.streamInfo": "Stream info (title, tags, category)"
 }

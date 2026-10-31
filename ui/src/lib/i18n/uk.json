@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Помилки",
   "procTable.toggle": "Подробиці: {process}",
   "procTable.showCommand": "Показати команду",
-  "procTable.hideCommand": "Сховати команду"
+  "procTable.hideCommand": "Сховати команду",
+  "dashMobile.chatPipeline": "Чат і конвеєр",
+  "dashMobile.streamInfo": "Відомості про трансляцію (назва, теги, категорія)"
 }

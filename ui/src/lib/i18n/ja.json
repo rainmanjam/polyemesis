@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "エラー",
   "procTable.toggle": "{process} の詳細",
   "procTable.showCommand": "コマンドを表示",
-  "procTable.hideCommand": "コマンドを隠す"
+  "procTable.hideCommand": "コマンドを隠す",
+  "dashMobile.chatPipeline": "チャットとパイプライン",
+  "dashMobile.streamInfo": "配信情報（タイトル、タグ、カテゴリ）"
 }

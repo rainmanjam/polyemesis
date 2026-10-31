@@ -51,6 +51,8 @@ import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
 import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
+import { NarrowDisclosure } from "@/components/NarrowDisclosure";
+import { useIsNarrow } from "@/hooks/useIsNarrow";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
 import { useLiveData } from "@/hooks/useLiveData";
@@ -1155,9 +1157,34 @@ function SideColumn({ stacked, children }: { stacked: boolean; children: ReactNo
   return <>{children}</>;
 }
 
+/** The page's three reorderable sections, in the order a width calls for
+ *  (app-council A87).
+ *
+ *  Wide: today's page -- the preview, Ingest, Chat and Pipeline row, then the
+ *  stream-info composer, then the destinations.
+ *
+ *  Narrow: the destinations first, because they are what a phone is opened to
+ *  check and they used to start about 2,000px down. Then the Ingest card, still
+ *  open (with Chat and Pipeline behind a disclosure inside the same grid), then
+ *  the failover-exposure line, which on a desktop sits above the list, then the
+ *  composer behind its own disclosure.
+ *
+ *  REORDERED IN THE DOM, NOT WITH CSS `order`. A visual order the DOM does not
+ *  share is a phone where VoiceOver and the Tab key still visit Chat before the
+ *  destinations they were moved below. The sections are keyed siblings of one
+ *  parent, so React MOVES them when the order changes rather than remounting
+ *  them: the chat feed and a half-typed title survive an iPad being turned. */
+function orderSections(
+  narrow: boolean,
+  s: { top: ReactNode; composer: ReactNode; destinations: ReactNode; exposure: ReactNode },
+): ReactNode[] {
+  return narrow ? [s.destinations, s.top, s.exposure, s.composer] : [s.top, s.composer, s.destinations];
+}
+
 export function Dashboard() {
   const stateLabel = useStateLabel();
   const t = useT();
+  const narrow = useIsNarrow();
   const { status, bitrate, snapshotKnown, programme } = useLiveData();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [settingsPreview, setSettingsPreview] = useState(true);
@@ -1487,6 +1514,10 @@ export function Dashboard() {
   /* The top row's shape, from one call so its two halves cannot disagree.
    * See lib/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
+  // One element, drawn in one of two places by width (see orderSections).
+  const exposure = (
+    <FailoverExposure notice={failoverNotice(destinations.filter((d) => d.enabled).length, failover)} />
+  );
 
   /* The first-run checklist, shown in place of the "no destinations" sentence
    * when a source exists and nothing is configured to send it anywhere. Every
@@ -1750,7 +1781,9 @@ export function Dashboard() {
        * destination area -- the thing lanes exist to organise -- moves up the
        * page instead of further down it.
        */}
-      <div className={cn("grid gap-3", topRow.gridClass)}>
+      {orderSections(narrow, {
+      top: (
+      <div key="top" className={cn("grid gap-3", topRow.gridClass, narrow && "mt-4")}>
         {/* ---------- preview + ingest ---------- */}
         {/* min-w-0: a grid item's min width is its content's by default, so a
             long SRT address would widen the column instead of wrapping. */}
@@ -1908,6 +1941,9 @@ export function Dashboard() {
             side an operator reads mid-broadcast. It renders honestly when
             nothing is connected — "no platforms connected", not an error — so
             it costs an install with no accounts nothing but a heading. */}
+        {/* On a phone, behind one closed disclosure below the Ingest card;
+            on a desktop the wrapper has no box at all (NarrowDisclosure). */}
+        <NarrowDisclosure narrow={narrow} label={t("dashMobile.chatPipeline")}>
         <SideColumn stacked={topRow.sideStacked}>
           <ChatPanel className="h-80" />
 
@@ -1988,12 +2024,24 @@ export function Dashboard() {
             </CardContent>
           </Card>
         </SideColumn>
+        </NarrowDisclosure>
       </div>
+      ),
 
-      <GoLiveComposer />
+      composer: (
+        <NarrowDisclosure key="composer" narrow={narrow} label={t("dashMobile.streamInfo")} className="mt-3">
+          <GoLiveComposer />
+        </NarrowDisclosure>
+      ),
 
-      {/* ---------- destinations ---------- */}
-      <div className="mt-4">
+      // Below the list on a phone, above it on a desktop: see orderSections.
+      // Not wrapped in a second disclosure: its argument is already behind
+      // one ("Why this matters", A85), and what stays open is one line.
+      exposure: <div key="exposure" className="mt-3">{exposure}</div>,
+
+      destinations: (
+      /* ---------- destinations ---------- */
+      <div key="destinations" className="mt-4">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold tracking-tight">
             {t("route.destinations")}
@@ -2017,12 +2065,7 @@ export function Dashboard() {
             This clears itself when the setting changes and returns if it
             changes back, so what is on screen is the current exposure rather
             than a record of who clicked what. */}
-        <FailoverExposure
-          notice={failoverNotice(
-            destinations.filter((d) => d.enabled).length,
-            failover,
-          )}
-        />
+        {!narrow && exposure}
 
         {/* Beside the list it acts on, not in the header row: the outcome list
             below the buttons needs the full width to put a destination name and
@@ -2167,6 +2210,8 @@ export function Dashboard() {
           </div>
         )}
       </div>
+      ),
+      })}
 
       <DestinationDialog
         open={dialogOpen}

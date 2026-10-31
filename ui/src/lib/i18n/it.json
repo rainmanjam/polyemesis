@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Errori",
   "procTable.toggle": "Dettagli di {process}",
   "procTable.showCommand": "Mostra comando",
-  "procTable.hideCommand": "Nascondi comando"
+  "procTable.hideCommand": "Nascondi comando",
+  "dashMobile.chatPipeline": "Chat e pipeline di elaborazione",
+  "dashMobile.streamInfo": "Info della diretta (titolo, tag, categoria)"
 }

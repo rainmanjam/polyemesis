@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "错误",
   "procTable.toggle": "{process} 的详情",
   "procTable.showCommand": "显示命令",
-  "procTable.hideCommand": "隐藏命令"
+  "procTable.hideCommand": "隐藏命令",
+  "dashMobile.chatPipeline": "聊天和处理管线",
+  "dashMobile.streamInfo": "直播信息（标题、标签、分类）"
 }

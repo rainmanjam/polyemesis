@@ -3404,5 +3404,7 @@
   "procTable.colErrors": "Hatalar",
   "procTable.toggle": "{process} ayrıntıları",
   "procTable.showCommand": "Komutu göster",
-  "procTable.hideCommand": "Komutu gizle"
+  "procTable.hideCommand": "Komutu gizle",
+  "dashMobile.chatPipeline": "Sohbet ve işlem hattı",
+  "dashMobile.streamInfo": "Yayın bilgileri (başlık, etiketler, kategori)"
 }
