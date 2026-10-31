@@ -154,7 +154,8 @@ test.describe("the Dashboard on a phone", () => {
     await page.goto("/");
     await expect(page.locator("main")).toBeVisible();
     // The Ingest card is the one whose content (the SRT address) widened it.
-    await expect(page.getByText("Ingest", { exact: true }).first()).toBeVisible();
+    // Inside <main>: the header's own "Ingest" label is hidden below sm.
+    await expect(page.locator("main").getByText("Ingest", { exact: true }).first()).toBeVisible();
 
     const m = await page.evaluate(() => {
       const vw = document.documentElement.clientWidth;
