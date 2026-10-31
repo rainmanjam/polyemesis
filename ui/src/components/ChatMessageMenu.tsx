@@ -190,7 +190,7 @@ export function ChatMessageMenu({
             ban, one banner over the whole menu would now be a lie. */}
         {(noAuthor || blanket) !== "" && (
           <>
-            <DropdownMenuLabel className="whitespace-normal text-[10px] font-normal leading-snug text-warn">
+            <DropdownMenuLabel className="whitespace-normal text-sm font-normal leading-snug text-warn">
               {noAuthor || blanket}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -229,7 +229,7 @@ export function ChatMessageMenu({
             still live underneath, so a single banner over everything would say
             something untrue about the one control that works. */}
         {personReason !== "" && (
-          <DropdownMenuLabel className="whitespace-normal text-[10px] font-normal leading-snug text-warn">
+          <DropdownMenuLabel className="whitespace-normal text-sm font-normal leading-snug text-warn">
             {personReason}
           </DropdownMenuLabel>
         )}
@@ -308,7 +308,7 @@ export function ChatMessageMenu({
             that can do nothing at all has already said so at the top of the
             menu, and saying it twice in a five-item menu is noise. */}
         {onDelete && deleteReason !== "" && (
-          <DropdownMenuLabel className="whitespace-normal text-[10px] font-normal leading-snug text-warn">
+          <DropdownMenuLabel className="whitespace-normal text-sm font-normal leading-snug text-warn">
             {deleteReason}
           </DropdownMenuLabel>
         )}

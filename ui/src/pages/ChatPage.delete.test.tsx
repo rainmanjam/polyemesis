@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 
 import type { ChatMessage } from "@/lib/types";
 
@@ -79,7 +80,7 @@ afterEach(cleanup);
 
 describe("deleting a chat message", () => {
   it("does not reach the platform on the first click", async () => {
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     await waitFor(() => expect(screen.getByText("Delete this message?")).toBeTruthy());
     expect(remove).not.toHaveBeenCalled();
@@ -89,7 +90,7 @@ describe("deleting a chat message", () => {
     // The actual guard against the mis-click this exists for. The pointer is
     // over one message when the decision is made and over the next one by the
     // time the hover-revealed icon arrives under it.
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     // Scoped to the dialog: the line is also still on the timeline behind it,
     // which is the point — the operator compares the two.
@@ -98,14 +99,14 @@ describe("deleting a chat message", () => {
   });
 
   it("names where the message goes, and what the reversible option is", async () => {
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     await waitFor(() => expect(screen.getByText(/removed on Twitch/)).toBeTruthy());
     expect(screen.getByText(/hide it instead/)).toBeTruthy();
   });
 
   it("deletes once confirmed", async () => {
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     await waitFor(() => expect(confirm()).toBeTruthy());
     fireEvent.click(confirm());
@@ -114,7 +115,7 @@ describe("deleting a chat message", () => {
   });
 
   it("deletes nothing when the operator backs out", async () => {
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     await waitFor(() => expect(confirm()).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -124,7 +125,7 @@ describe("deleting a chat message", () => {
 
   it("asks again for the next message rather than staying unlocked", async () => {
     // A confirmation that a previous one left dismissed is not a confirmation.
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.click(trash());
     await waitFor(() => expect(confirm()).toBeTruthy());
     fireEvent.click(confirm());
@@ -142,7 +143,7 @@ describe("deleting a chat message", () => {
  * rather than in each of the three components that can start a delete. */
 describe("every way into a delete", () => {
   it("asks when the delete comes from the right-click menu", async () => {
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.contextMenu(row());
     await waitFor(() =>
       expect(screen.getByRole("menuitem", { name: /Delete message/ })).toBeTruthy(),
@@ -170,7 +171,7 @@ describe("every way into a delete", () => {
       truncated: false,
       retentionNote: "",
     });
-    render(<ChatPage />);
+    render(<MemoryRouter><ChatPage /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText("Search chat history"), {
       target: { value: "offending" },
     });

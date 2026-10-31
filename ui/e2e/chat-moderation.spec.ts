@@ -166,7 +166,7 @@ test.describe("the right-click menu", () => {
 
     await expect(page.getByRole("menuitem", { name: /View history/ })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Time out 10 min" })).toBeVisible();
-    await expect(page.getByRole("menuitem", { name: /Ban permanently/ })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /Open card to ban/ })).toBeVisible();
   });
 
   test("double-click opens the same menu, for pointers with no right button", async ({ page }) => {
@@ -210,7 +210,7 @@ test.describe("the right-click menu", () => {
     });
 
     await page.getByText("this is the comment to find").click({ button: "right" });
-    await page.getByRole("menuitem", { name: /Ban permanently/ }).click();
+    await page.getByRole("menuitem", { name: /Open card to ban/ }).click();
 
     // It opens the card, which confirms. Friction has to be proportional to the
     // consequence, and the one irreversible action must not be a single click
