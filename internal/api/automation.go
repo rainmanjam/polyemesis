@@ -16,6 +16,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/clips"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/meters"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -857,7 +858,15 @@ func (s *Server) handleSetClipBuffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := eng.SetClipBuffer(req.Enabled, req.WindowSeconds); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// 400 only for a window the request should not have asked for. The
+		// switch is now stored before it is applied (app-council A14), and a
+		// disk that refused that write is the server's fault: a 400 would tell
+		// the operator to change a request that was fine.
+		status := http.StatusInternalServerError
+		if errors.Is(err, engine.ErrClipWindowRange) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	// The SAME engine that was just written to. Two reaches here would let the

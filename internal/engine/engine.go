@@ -108,6 +108,7 @@ var stopTimeout = 12 * time.Second
 // that breaks it. -race cannot: an inversion is perfectly synchronised until
 // the moment it deadlocks.
 //
+//	0  clipSetMu                -- SetClipBuffer, held across its store write and Reconcile
 //	1  reconcileMu              -- held for the whole of a Reconcile
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
@@ -350,11 +351,14 @@ type Engine struct {
 	// settings field of its own. See SetLoudnessMonitor.
 	loudOff bool
 	// clip is the rolling capture buffer, nil unless it has been switched on.
-	clipCap  *clips.Capturer
-	clipCfg  clips.Config
-	clipOn   bool
-	clipSig  string
-	clipPort int
+	clipCap *clips.Capturer
+	clipCfg clips.Config
+	clipOn  bool
+	// clipSetMu serialises SetClipBuffer, which stores the switch before it
+	// applies it and must not interleave with itself (app-council A14).
+	clipSetMu sync.Mutex
+	clipSig   string
+	clipPort  int
 	// clipHub is which relay the buffer subscribed to, held for the same
 	// reason metersHub is: an orphaned subscription forwards to a port the
 	// allocator has since handed to somebody else.
@@ -862,7 +866,38 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 	// id alone so an event raised before that still identifies its programme.
 	e.hookWatch = hooks.NewWatcher(hooks.SourceRef{ID: sourceID}, hooks.WatchConfig{})
 	e.streamWatch = eventstream.NewWatcher()
+	e.loadClipBuffer()
 	return e, nil
+}
+
+// loadClipBuffer restores this programme's stored clip-buffer switch and window
+// (app-council A14), so a restart comes back the way the operator left it
+// instead of quietly off.
+//
+// In New rather than in Start or effectiveSettings: it is read once per engine,
+// before the first reconcile can act on it, and never again -- SetClipBuffer
+// keeps memory and storage in step from then on. A failed read is logged and
+// leaves the buffer off, the state every install had before this was stored: an
+// engine that will not build because of a convenience switch would take the
+// whole programme off air over it.
+func (e *Engine) loadClipBuffer() {
+	if e.store == nil {
+		return
+	}
+	stored, err := e.store.GetSourceClipBuffer(e.sourceID)
+	if err != nil {
+		e.log.Warn("clip buffer setting unreadable; leaving the buffer off",
+			"source", e.sourceID, "err", err)
+		return
+	}
+	cfg := e.clipCfg
+	if stored.WindowSeconds >= clips.MinWindowSeconds && stored.WindowSeconds <= clips.MaxWindowSeconds {
+		cfg.WindowSeconds = stored.WindowSeconds
+	}
+	e.mu.Lock()
+	e.clipCfg = cfg.Normalized()
+	e.clipOn = stored.Enabled
+	e.mu.Unlock()
 }
 
 // Playout exposes the public origin so the API can mount its media handler and
@@ -4518,6 +4553,11 @@ func (e *Engine) teardownClips(c *clips.Capturer, port int, hub *relay.Hub) {
 	e.log.Info("clip buffer stopped")
 }
 
+// ErrClipWindowRange is SetClipBuffer refusing a window it cannot hold. The API
+// answers it 400; any other SetClipBuffer error is the server's fault, not the
+// request's.
+var ErrClipWindowRange = errors.New("clip window out of range")
+
 // SetClipBuffer turns the rolling capture buffer on or off and sizes its
 // window.
 //
@@ -4525,18 +4565,38 @@ func (e *Engine) teardownClips(c *clips.Capturer, port int, hub *relay.Hub) {
 // that costs memory whether or not anybody uses it, and an upgrade must not
 // silently start holding a hundred megabytes of somebody's 4K feed. Passing
 // zero seconds keeps the current window.
+//
+// THE SWITCH IS STORED BEFORE IT IS APPLIED (app-council A14), per programme,
+// so a restart restores it. Stored first and outside e.mu: a write that fails
+// returns the error with memory untouched, so the switch on the page never
+// claims a state the next boot will not come back in. Holding e.mu across the
+// write would stall every reader of the engine on the disk.
 func (e *Engine) SetClipBuffer(enabled bool, windowSeconds int) error {
-	e.mu.Lock()
+	if windowSeconds > 0 &&
+		(windowSeconds < clips.MinWindowSeconds || windowSeconds > clips.MaxWindowSeconds) {
+		return fmt.Errorf("%w: %ds is outside %d-%d", ErrClipWindowRange,
+			windowSeconds, clips.MinWindowSeconds, clips.MaxWindowSeconds)
+	}
+	// One change at a time: two toggles racing between the read below and the
+	// write after the store could otherwise leave memory and disk disagreeing.
+	e.clipSetMu.Lock()
+	defer e.clipSetMu.Unlock()
+	e.mu.RLock()
 	cfg := e.clipCfg
+	e.mu.RUnlock()
 	if windowSeconds > 0 {
-		if windowSeconds < clips.MinWindowSeconds || windowSeconds > clips.MaxWindowSeconds {
-			e.mu.Unlock()
-			return fmt.Errorf("clip window %ds out of range (%d-%d)",
-				windowSeconds, clips.MinWindowSeconds, clips.MaxWindowSeconds)
-		}
 		cfg.WindowSeconds = windowSeconds
 	}
-	e.clipCfg = cfg.Normalized()
+	cfg = cfg.Normalized()
+	if e.store != nil {
+		if err := e.store.SetSourceClipBuffer(e.sourceID, db.SourceClipBuffer{
+			Enabled: enabled, WindowSeconds: cfg.WindowSeconds,
+		}); err != nil {
+			return fmt.Errorf("store the clip buffer setting: %w", err)
+		}
+	}
+	e.mu.Lock()
+	e.clipCfg = cfg
 	e.clipOn = enabled
 	e.mu.Unlock()
 	return e.Reconcile()
@@ -4626,6 +4686,10 @@ type ClipStatus struct {
 	// than a row of zeroes that look like a stalled stream.
 	Buffer *clips.Stats `json:"buffer,omitempty"`
 	Dir    string       `json:"dir"`
+	// WindowSeconds is the configured window whether or not the buffer runs,
+	// so a page can show the window a switched-off buffer will come back with
+	// (it is stored, app-council A14) rather than a guess.
+	WindowSeconds int `json:"windowSeconds"`
 }
 
 // ClipBuffer reports the capture buffer's state.
@@ -4637,10 +4701,10 @@ func (e *Engine) ClipBuffer() ClipStatus {
 		return ClipStatus{}
 	}
 	e.mu.RLock()
-	c, on, dir := e.clipCap, e.clipOn, e.clipCfg.Dir
+	c, on, dir, window := e.clipCap, e.clipOn, e.clipCfg.Dir, e.clipCfg.WindowSeconds
 	e.mu.RUnlock()
 
-	st := ClipStatus{Enabled: on, Running: c != nil, Dir: dir}
+	st := ClipStatus{Enabled: on, Running: c != nil, Dir: dir, WindowSeconds: window}
 	if c != nil {
 		s := c.Stats()
 		st.Buffer = &s

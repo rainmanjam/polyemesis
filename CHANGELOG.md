@@ -515,7 +515,7 @@ its first tagged release.
   pending changes and lists what moves on air before Save (A7). The on-air
   strip shows the time on air and an End all button (A8). Presets open a
   review before they apply, the matrix has an undo history, and three starter
-  presets stay in view (A14). Debug recording moves to a System page, and
+  presets stay in view (UX Council A14). Debug recording moves to a System page, and
   Settings ends with a Danger zone (A17). Delete dialogs count what still uses
   the thing being deleted (A18). Routing, Renditions, playout, meters, chat,
   clips, library, Jobs, Automation, Monitoring, Settings and the destination
@@ -557,6 +557,15 @@ its first tagged release.
   says 0 means no limit. Switching recording off while the stream is live asks
   first. In Playout, turning Public on or Protection open asks first; turning
   them off saves at once.
+- **The Clips buffer stays on after a restart (app-council A14).** The rolling
+  buffer's switch and window are now saved per programme, so a programme whose
+  buffer was on comes back with it on, at the same window, after an upgrade,
+  reboot or crash. A programme that never turned it on, including every one on
+  an upgraded install, still starts with it off. The Clips page no longer says
+  the switch is off after a restart; it says the switch is saved. A failure to
+  save the switch is reported as a server error and leaves the buffer as it
+  was. `GET /clips` now carries the configured `windowSeconds` even while the
+  buffer is off.
 - **Chat: keyboard, attention and polls.** Enter that confirms an IME
   composition no longer sends the message. Message rows are reachable from the
   keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New

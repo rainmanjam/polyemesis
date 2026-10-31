@@ -1192,6 +1192,14 @@ On `PUT /clips/buffer`, a `windowSeconds` of `0` or less means **leave the
 window unchanged**, so a page that only toggles the switch does not need to know
 the current value.
 
+The buffer's switch and window are **stored per programme** and survive a
+restart: a programme whose buffer was on comes back with it on, at the same
+window. A programme that has never set it, including every one that predates
+this, boots with it off. A failure to store the switch answers `500` and leaves
+the buffer as it was; only a window outside the bounds answers `400`. The
+`buffer` object in `GET /clips` carries `windowSeconds` (the configured window)
+even while the buffer is off.
+
 `GET /clips`, `POST /clips` and `PUT /clips/buffer` are programme-scoped — the
 buffer belongs to one source — so on an install with more than one they need
 `?source=<id>`. See [Conventions](#conventions). `DELETE /clips/{name}` and
