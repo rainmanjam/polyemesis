@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Bu köken üzerinde pano kullanılamıyor.",
   "dash.connectPrompt": "Yayın başlığınızı, açıklamanızı ve kategorinizi tüm platformlarda tek seferde ayarlamak için Ayarlar → Platform kimlik bilgileri altından bir YouTube, Twitch, Facebook veya Kick hesabı bağlayın. Her biri farklı bir alt kümeyi kabul eder — form hangilerinin kabul edildiğini belirtir ve gönderebildiğini gönderir.",
   "dash.noAccountsTitle": "Bağlı platform hesabı yok",
-  "dash.connectAccount": "Hesap bağla",
   "dash.copyIngestUrl": "Giriş URL'sini kopyala",
   "dash.couldNotLoadTheDestination": "Hedef yüklenemedi.",
   "dash.couldNotPushTheMetadata": "Meta veriler gönderilemedi.",

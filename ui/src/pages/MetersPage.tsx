@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { AlertTriangle } from "lucide-react";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -438,9 +439,12 @@ export function MetersPage() {
             monitorOn === null ? (
               <DisabledReason id={monitorReasonId} reason={t("meters.monitorUnknown")} />
             ) : (
-              <p className="text-[11px] text-muted-foreground">
-                {monitorOn ? t("meters.nothingToMeasure") : t("meters.monitorOff")}
-              </p>
+              // app-council A83: the kit's empty state, which also lifts this
+              // off the 11px step.
+              <EmptyState
+                title={monitorOn ? t("meters.emptyTitle") : t("meters.monitorOffTitle")}
+                body={monitorOn ? t("meters.emptyBody") : t("meters.monitorOffBody")}
+              />
             )
           ) : (
             reports.map((rep) => (

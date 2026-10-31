@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Het klembord is niet beschikbaar op deze origin.",
   "dash.connectPrompt": "Verbind een YouTube-, Twitch-, Facebook- of Kick-account in Instellingen → Platformgegevens om je streamtitel, -beschrijving en -categorie op elk platform tegelijk in te stellen. Elk platform accepteert een andere deelverzameling — de composer benoemt welke, en stuurt wat hij kan.",
   "dash.noAccountsTitle": "Geen platformaccounts gekoppeld",
-  "dash.connectAccount": "Account koppelen",
   "dash.copyIngestUrl": "Ingangs-URL kopiëren",
   "dash.couldNotLoadTheDestination": "Kon de bestemming niet laden.",
   "dash.couldNotPushTheMetadata": "Kon de metadata niet versturen.",

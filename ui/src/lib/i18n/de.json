@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Die Zwischenablage ist auf diesem Origin nicht verfügbar.",
   "dash.connectPrompt": "Verbinden Sie unter Einstellungen → Plattform-Zugangsdaten ein YouTube-, Twitch-, Facebook- oder Kick-Konto, um Titel, Beschreibung und Kategorie Ihres Streams auf allen Plattformen gleichzeitig zu setzen. Jede akzeptiert eine andere Teilmenge — der Editor nennt welche und überträgt, was er kann.",
   "dash.noAccountsTitle": "Keine Plattformkonten verbunden",
-  "dash.connectAccount": "Konto verbinden",
   "dash.copyIngestUrl": "Eingangs-URL kopieren",
   "dash.couldNotLoadTheDestination": "Das Ziel konnte nicht geladen werden.",
   "dash.couldNotPushTheMetadata": "Die Metadaten konnten nicht übertragen werden.",

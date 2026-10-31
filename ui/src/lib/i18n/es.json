@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "El portapapeles no está disponible en este origen.",
   "dash.connectPrompt": "Conecte una cuenta de YouTube, Twitch, Facebook o Kick en Ajustes → Credenciales de plataforma para fijar el título, la descripción y la categoría de su transmisión en todas las plataformas a la vez. Cada una acepta un subconjunto distinto: el compositor indica cuál y envía lo que puede.",
   "dash.noAccountsTitle": "No hay cuentas de plataforma conectadas",
-  "dash.connectAccount": "Conectar una cuenta",
   "dash.copyIngestUrl": "Copiar la URL de entrada",
   "dash.couldNotLoadTheDestination": "No se pudo cargar el destino.",
   "dash.couldNotPushTheMetadata": "No se pudieron enviar los metadatos.",

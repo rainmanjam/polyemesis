@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "このオリジンではクリップボードを利用できません。",
   "dash.connectPrompt": "設定 → プラットフォーム認証情報で YouTube、Twitch、Facebook、Kick のアカウントを接続すると、配信のタイトル、説明、カテゴリーをすべてのプラットフォームへ一度に設定できます。受け付ける項目はプラットフォームごとに異なります。作成画面がどれを受け付けるかを示し、送れるものを送ります。",
   "dash.noAccountsTitle": "プラットフォームアカウントが未接続です",
-  "dash.connectAccount": "アカウントを接続",
   "dash.copyIngestUrl": "入力 URL をコピー",
   "dash.couldNotLoadTheDestination": "配信先を読み込めませんでした。",
   "dash.couldNotPushTheMetadata": "メタデータを送信できませんでした。",

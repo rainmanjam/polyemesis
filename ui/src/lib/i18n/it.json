@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Gli appunti non sono disponibili su questa origine.",
   "dash.connectPrompt": "Collega un account YouTube, Twitch, Facebook o Kick in Impostazioni → Credenziali piattaforma per impostare titolo, descrizione e categoria dello stream su tutte le piattaforme in una volta sola. Ognuna ne accetta un sottoinsieme diverso — il compositore indica quale, e invia ciò che può.",
   "dash.noAccountsTitle": "Nessun account di piattaforma collegato",
-  "dash.connectAccount": "Collega un account",
   "dash.copyIngestUrl": "Copia l'URL di ingresso",
   "dash.couldNotLoadTheDestination": "Impossibile caricare la destinazione.",
   "dash.couldNotPushTheMetadata": "Impossibile inviare i metadati.",

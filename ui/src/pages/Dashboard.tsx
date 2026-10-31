@@ -49,6 +49,7 @@ import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
+import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
@@ -376,9 +377,10 @@ export function GoLiveComposer() {
 
       {targets.length === 0 ? (
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {t("dash.connectPrompt")}
-          </p>
+          {/* app-council A83: the kit's empty state. No button: the card is
+              also drawn outside the router (the composer's own tests), and the
+              sentence names the place, Settings -> Platform credentials. */}
+          <EmptyState title={t("dash.noAccountsTitle")} body={t("dash.connectPrompt")} />
         </CardContent>
       ) : (
         <CardContent className="grid gap-4 lg:grid-cols-2">
@@ -2061,22 +2063,19 @@ export function Dashboard() {
             }}
           />
         ) : destinations.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-              <p className="text-sm text-muted-foreground">
-            {t("dash.noDestinations")}
-              </p>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus /> {t("firstRun.addDestination")}
-              </Button>
-            </CardContent>
-          </Card>
+          // app-council A83: the kit's empty state.
+          <EmptyState
+            icon={Plus}
+            title={t("dash.noDestinationsTitle")}
+            body={t("dash.noDestinationsBody")}
+            action={{
+              label: t("firstRun.addDestination"),
+              onClick: () => {
+                setEditing(null);
+                setDialogOpen(true);
+              },
+            }}
+          />
         ) : (
           <div className="flex flex-col gap-5">
             {lanes.laned ? (
@@ -2117,7 +2116,7 @@ export function Dashboard() {
                     </LazyBoundary>
                     <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
                       {lane.destinations.length === 0 ? (
-                        <p className="text-tiny text-muted-foreground">{t("dash.destNoneHere")}</p>
+                        <EmptyState title={t("dash.destNoneHere")} className="xl:col-span-2" />
                       ) : (
                         lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
                       )}

@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Papan klip tidak tersedia pada origin ini.",
   "dash.connectPrompt": "Hubungkan akun YouTube, Twitch, Facebook, atau Kick di Pengaturan → Kredensial platform untuk menyetel judul, deskripsi, dan kategori siaran Anda di semua platform sekaligus. Masing-masing menerima bagian yang berbeda — penyusunnya menyebutkan yang mana, dan mengirim apa yang bisa.",
   "dash.noAccountsTitle": "Belum ada akun platform yang terhubung",
-  "dash.connectAccount": "Hubungkan akun",
   "dash.copyIngestUrl": "Salin URL masukan",
   "dash.couldNotLoadTheDestination": "Tidak dapat memuat tujuan.",
   "dash.couldNotPushTheMetadata": "Tidak dapat mengirim metadata.",

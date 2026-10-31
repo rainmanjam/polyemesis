@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "在此源站上无法使用剪贴板。",
   "dash.connectPrompt": "在“设置 → 平台凭据”中连接 YouTube、Twitch、Facebook 或 Kick 账号，即可一次性在所有平台上设置直播标题、简介和分类。每个平台接受的字段并不相同——编辑器会标明是哪些，并推送它能推送的部分。",
   "dash.noAccountsTitle": "尚未连接平台账号",
-  "dash.connectAccount": "连接账号",
   "dash.copyIngestUrl": "复制输入 URL",
   "dash.couldNotLoadTheDestination": "无法加载该推流目标。",
   "dash.couldNotPushTheMetadata": "无法推送元数据。",

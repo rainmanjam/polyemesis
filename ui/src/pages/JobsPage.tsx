@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -665,10 +666,10 @@ function JobTable({
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
 
+  // app-council A83: the kit's empty state. Post-production is submitted
+  // from the library, which the sentence says, so there is no button here.
   if (jobs.length === 0) {
-    return (
-      <div className="px-3 py-8 text-center text-sm text-muted-foreground">{empty}</div>
-    );
+    return <EmptyState title={empty} className="m-3" />;
   }
 
   return (

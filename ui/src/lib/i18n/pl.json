@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Schowek nie jest dostępny w tej domenie.",
   "dash.connectPrompt": "Podłącz konto YouTube, Twitch, Facebook lub Kick w Ustawienia → Poświadczenia platform, aby ustawić tytuł, opis i kategorię transmisji na wszystkich platformach naraz. Każda przyjmuje inny podzbiór — formularz wskazuje który i wysyła to, co może.",
   "dash.noAccountsTitle": "Brak połączonych kont platform",
-  "dash.connectAccount": "Połącz konto",
   "dash.copyIngestUrl": "Kopiuj adres URL wejścia",
   "dash.couldNotLoadTheDestination": "Nie udało się wczytać celu.",
   "dash.couldNotPushTheMetadata": "Nie udało się wysłać metadanych.",

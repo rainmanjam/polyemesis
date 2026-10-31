@@ -91,10 +91,10 @@ afterEach(() => {
   cleanup();
 });
 
-const draw = () =>
+const draw = (over?: Partial<Status>) =>
   render(
     <MemoryRouter>
-      <LiveDataContext.Provider value={live}>
+      <LiveDataContext.Provider value={over ? ({ ...live, status: { ...status, ...over } } as LiveData) : live}>
         <Dashboard />
       </LiveDataContext.Provider>
     </MemoryRouter>,
@@ -125,5 +125,23 @@ describe("Dashboard lanes: headings say what the number counts and whether the l
     const glyph = (h: HTMLElement) => h.querySelector("[data-lane-cue]")?.getAttribute("data-lane-cue");
     expect(glyph(a)).toBe("on-air");
     expect(glyph(b)).toBe("off-air");
+  });
+});
+
+describe("Dashboard: empty lists use the kit's EmptyState (app-council A83)", () => {
+  it("draws a programme with no destinations as an EmptyState inside its lane", async () => {
+    draw({ destinations: [dest(1, 1, true)] } as Partial<Status>);
+    const title = await screen.findByText(translate("en", "dash.destNoneHere"));
+    expect(title.className).toContain("font-semibold");
+    expect(title.closest(".border-dashed")).not.toBeNull();
+  });
+
+  it("draws an install with no destinations as an EmptyState whose action opens Add destination", async () => {
+    draw({ destinations: [] } as Partial<Status>);
+    const title = await screen.findByText(translate("en", "dash.noDestinationsTitle"));
+    const box = title.closest(".border-dashed") as HTMLElement;
+    expect(box).not.toBeNull();
+    expect(box.textContent).toContain(translate("en", "dash.noDestinationsBody"));
+    expect(box.querySelector("button")?.textContent).toContain(translate("en", "firstRun.addDestination"));
   });
 });

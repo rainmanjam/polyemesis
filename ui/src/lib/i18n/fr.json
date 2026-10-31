@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Le presse-papiers n'est pas disponible sur cette origine.",
   "dash.connectPrompt": "Connectez un compte YouTube, Twitch, Facebook ou Kick dans Paramètres → Identifiants de plateforme pour définir le titre, la description et la catégorie de votre flux sur toutes les plateformes à la fois. Chacune n'en accepte qu'un sous-ensemble différent — le composeur indique lequel, et envoie ce qu'il peut.",
   "dash.noAccountsTitle": "Aucun compte de plateforme connecté",
-  "dash.connectAccount": "Connecter un compte",
   "dash.copyIngestUrl": "Copier l'URL d'entrée",
   "dash.couldNotLoadTheDestination": "Impossible de charger la destination.",
   "dash.couldNotPushTheMetadata": "Impossible d'envoyer les métadonnées.",

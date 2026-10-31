@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "A área de transferência não está disponível nesta origem.",
   "dash.connectPrompt": "Conecte uma conta do YouTube, Twitch, Facebook ou Kick em Configurações → Credenciais de plataforma para definir o título, a descrição e a categoria da sua transmissão em todas as plataformas de uma vez. Cada uma aceita um subconjunto diferente — o compositor indica quais, e envia o que puder.",
   "dash.noAccountsTitle": "Nenhuma conta de plataforma conectada",
-  "dash.connectAccount": "Conectar uma conta",
   "dash.copyIngestUrl": "Copiar a URL de entrada",
   "dash.couldNotLoadTheDestination": "Não foi possível carregar o destino.",
   "dash.couldNotPushTheMetadata": "Não foi possível enviar os metadados.",

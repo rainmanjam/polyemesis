@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { DisabledReason } from "@/components/DisabledReason";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useNavigate, useParams } from "react-router";
@@ -979,11 +980,13 @@ export function RoutingPage() {
     return (
       <div className="p-3">
         <PageHeader title={t("route.title")} />
-        <Card>
-          <CardContent className="py-8 text-center text-[12px] text-muted-foreground">
-            {t("route.noDestinations")}
-          </CardContent>
-        </Card>
+        {/* app-council A83: the kit's empty state. Destinations are added
+            on the Dashboard, so the action goes there. */}
+        <EmptyState
+          title={t("dash.noDestinationsTitle")}
+          body={t("route.noDestinations")}
+          action={{ label: t("route.goToDashboard"), onClick: () => navigate("/") }}
+        />
       </div>
     );
   }

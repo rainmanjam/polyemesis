@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "Clipboard is unavailable on this origin.",
   "dash.connectPrompt": "Connect a YouTube, Twitch, Facebook or Kick account in Settings → Platform credentials to set your stream title, description and category on every platform at once. Each one accepts a different subset — the composer names which, and pushes what it can.",
   "dash.noAccountsTitle": "No platform accounts connected",
-  "dash.connectAccount": "Connect an account",
   "dash.copyIngestUrl": "Copy ingest URL",
   "dash.couldNotLoadTheDestination": "Could not load the destination.",
   "dash.couldNotPushTheMetadata": "Could not push the metadata.",

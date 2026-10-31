@@ -271,11 +271,7 @@ export function SourcesPage() {
         <NoProgrammeYet
           title={t("empty.sourcesTitle")}
           body={t("empty.sourcesBody")}
-          action={
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus className="h-3.5 w-3.5" /> {t("sources.addSource")}
-            </Button>
-          }
+          action={{ label: t("sources.addSource"), onClick: () => setCreating(true) }}
         />
       ) : (
         <div className="flex flex-col gap-3">

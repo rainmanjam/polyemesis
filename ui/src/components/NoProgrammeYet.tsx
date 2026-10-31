@@ -1,7 +1,6 @@
-import { Link } from "react-router";
+import { useNavigate } from "react-router";
 import { RadioTower } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState, type EmptyStateAction } from "@/components/EmptyState";
 import { useT } from "@/lib/i18n";
 
 /* The empty state for an install that has no source.
@@ -32,21 +31,18 @@ export function NoProgrammeYet({
 }: {
   title: string;
   body: string;
-  action?: React.ReactNode;
+  action?: EmptyStateAction;
 }) {
   const t = useT();
+  const navigate = useNavigate();
+  // app-council A83: drawn by the kit's EmptyState, so this state and every
+  // other "nothing here yet" on the console are one shape.
   return (
-    <Card>
-      <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-        <RadioTower className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <p className="text-[13px] font-semibold tracking-tight">{title}</p>
-        <p className="max-w-prose text-[12px] text-muted-foreground">{body}</p>
-        {action ?? (
-          <Button asChild size="sm">
-            <Link to="/sources">{t("empty.goToSources")}</Link>
-          </Button>
-        )}
-      </CardContent>
-    </Card>
+    <EmptyState
+      icon={RadioTower}
+      title={title}
+      body={body}
+      action={action ?? { label: t("empty.goToSources"), onClick: () => navigate("/sources") }}
+    />
   );
 }

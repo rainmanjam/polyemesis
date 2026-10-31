@@ -439,7 +439,6 @@
   "dash.clipboardUnavailable": "이 출처에서는 클립보드를 사용할 수 없습니다.",
   "dash.connectPrompt": "설정 → 플랫폼 자격 증명에서 YouTube, Twitch, Facebook, Kick 계정을 연결하면 방송 제목, 설명, 카테고리를 모든 플랫폼에 한 번에 설정할 수 있습니다. 받아들이는 항목은 플랫폼마다 다릅니다. 작성 화면이 어느 것을 받는지 알려 주고, 보낼 수 있는 것을 보냅니다.",
   "dash.noAccountsTitle": "연결된 플랫폼 계정이 없습니다",
-  "dash.connectAccount": "계정 연결",
   "dash.copyIngestUrl": "입력 URL 복사",
   "dash.couldNotLoadTheDestination": "대상을 불러올 수 없습니다.",
   "dash.couldNotPushTheMetadata": "메타데이터를 전송할 수 없습니다.",
