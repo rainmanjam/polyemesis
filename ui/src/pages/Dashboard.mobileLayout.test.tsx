@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { Dashboard } from "./Dashboard";
@@ -90,17 +90,32 @@ const routes: Record<string, unknown> = {
   "/api/v1/metadata/broadcast-window": { accounts: [] },
 };
 
-function stubMatchMedia(narrow: boolean) {
+/** A matchMedia stub that answers NARROW_QUERY with `narrow`. The returned
+ *  function changes the answer and tells every listener, as a browser does
+ *  when the window crosses the breakpoint. */
+function stubMatchMedia(narrow: boolean): (next: boolean) => void {
+  let current = narrow;
+  // Only NARROW_QUERY's listeners: other hooks (lib/motion.ts) ask their own
+  // questions, and their answers do not change here.
+  const listeners = new Set<(e: { matches: boolean }) => void>();
   window.matchMedia = ((query: string) => ({
-    matches: narrow && query === NARROW_QUERY,
+    get matches() {
+      return current && query === NARROW_QUERY;
+    },
     media: query,
     onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => {
+      if (query === NARROW_QUERY) listeners.add(fn);
+    },
+    removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.delete(fn),
     addListener: () => {},
     removeListener: () => {},
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
+  return (next) => {
+    current = next;
+    for (const fn of listeners) fn({ matches: next });
+  };
 }
 
 beforeEach(() => {
@@ -136,6 +151,7 @@ function draw() {
 const before = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
 const chatPipelineLabel = translate("en", "dashMobile.chatPipeline");
+const failoverLabel = translate("en", "dashMobile.failoverOff");
 const streamInfoLabel = translate("en", "dashMobile.streamInfo");
 
 describe("Dashboard below the lg breakpoint (A87)", () => {
@@ -157,13 +173,63 @@ describe("Dashboard below the lg breakpoint (A87)", () => {
     expect(before(chatToggle, infoToggle)).toBe(true);
   });
 
-  it("moves the failover-exposure line below the destination list", async () => {
+  it("moves the failover-exposure line below the destination list, behind a closed disclosure", async () => {
     stubMatchMedia(true);
     draw();
 
+    const toggle = await screen.findByRole("button", { name: failoverLabel });
     const lead = await screen.findByText(translate("en", "i18nSweep.noFailoverLead"));
     const card = await screen.findByText("Dest 1");
-    expect(before(card, lead), "the standing failover line still pushes the list down").toBe(true);
+    expect(before(card, toggle), "the standing failover line still pushes the list down").toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(lead.closest("[hidden]"), "the failover line is open on a phone").not.toBeNull();
+
+    fireEvent.click(toggle);
+    expect(lead.closest("[hidden]")).toBeNull();
+  });
+
+  it("draws no failover toggle on an install that has failover on", async () => {
+    const saved = routes["/api/v1/settings"];
+    routes["/api/v1/settings"] = { ...(saved as object), failover: { enabled: true } };
+    try {
+      stubMatchMedia(true);
+      draw();
+      await screen.findByRole("button", { name: chatPipelineLabel });
+      // Let the settings read land, then look: a toggle that opens onto nothing
+      // is the noise this would add to every protected install.
+      await screen.findByText("Dest 1");
+      await act(async () => {});
+      expect(screen.queryByRole("button", { name: failoverLabel })).toBeNull();
+    } finally {
+      routes["/api/v1/settings"] = saved;
+    }
+  });
+
+  it("keeps a half-typed stream title when the window crosses the breakpoint", async () => {
+    // The sections are moved, not remounted, when the order changes; a
+    // remount would empty the composer an operator was typing in.
+    const saved = routes["/api/v1/metadata"];
+    routes["/api/v1/metadata"] = {
+      targets: [{ accountId: 1, platform: "twitch", accountName: "Studio", caps: { fields: ["title"], titleMax: 140 } }],
+      last: null,
+    };
+    try {
+      const setNarrow = stubMatchMedia(true);
+      const { container } = draw();
+      await screen.findByText("0/140");
+      const title = container.querySelector<HTMLInputElement>("#golive-title")!;
+      fireEvent.change(title, { target: { value: "Friday night" } });
+
+      act(() => setNarrow(false));
+      expect(screen.queryByRole("button", { name: streamInfoLabel }), "still the phone layout").toBeNull();
+      expect(container.querySelector<HTMLInputElement>("#golive-title")!.value).toBe("Friday night");
+
+      act(() => setNarrow(true));
+      expect(screen.getByRole("button", { name: streamInfoLabel })).toBeTruthy();
+      expect(container.querySelector<HTMLInputElement>("#golive-title")!.value).toBe("Friday night");
+    } finally {
+      routes["/api/v1/metadata"] = saved;
+    }
   });
 
   it("starts Chat, Pipeline and Stream info collapsed, and opens them on a press", async () => {

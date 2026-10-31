@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "显示命令",
   "procTable.hideCommand": "隐藏命令",
   "dashMobile.chatPipeline": "聊天和处理管线",
-  "dashMobile.streamInfo": "直播信息（标题、标签、分类）"
+  "dashMobile.streamInfo": "直播信息（标题、标签、分类）",
+  "dashMobile.failoverOff": "故障切换已关闭"
 }

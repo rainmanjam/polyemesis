@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Befehl anzeigen",
   "procTable.hideCommand": "Befehl ausblenden",
   "dashMobile.chatPipeline": "Chat und Verarbeitungskette",
-  "dashMobile.streamInfo": "Stream-Infos (Titel, Tags, Kategorie)"
+  "dashMobile.streamInfo": "Stream-Infos (Titel, Tags, Kategorie)",
+  "dashMobile.failoverOff": "Ausfallsicherung ist aus"
 }

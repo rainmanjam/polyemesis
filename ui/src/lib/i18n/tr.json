@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Komutu göster",
   "procTable.hideCommand": "Komutu gizle",
   "dashMobile.chatPipeline": "Sohbet ve işlem hattı",
-  "dashMobile.streamInfo": "Yayın bilgileri (başlık, etiketler, kategori)"
+  "dashMobile.streamInfo": "Yayın bilgileri (başlık, etiketler, kategori)",
+  "dashMobile.failoverOff": "Yük devretme kapalı"
 }

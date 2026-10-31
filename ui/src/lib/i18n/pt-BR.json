@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Mostrar comando",
   "procTable.hideCommand": "Ocultar comando",
   "dashMobile.chatPipeline": "Chat e pipeline de processamento",
-  "dashMobile.streamInfo": "Informações da transmissão (título, tags, categoria)"
+  "dashMobile.streamInfo": "Informações da transmissão (título, tags, categoria)",
+  "dashMobile.failoverOff": "O failover está desligado"
 }

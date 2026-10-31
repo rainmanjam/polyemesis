@@ -1515,9 +1515,8 @@ export function Dashboard() {
    * See lib/dashboardLayout.ts and #614. */
   const topRow = topRowLayout(lanes.laned);
   // One element, drawn in one of two places by width (see orderSections).
-  const exposure = (
-    <FailoverExposure notice={failoverNotice(destinations.filter((d) => d.enabled).length, failover)} />
-  );
+  const notice = failoverNotice(destinations.filter((d) => d.enabled).length, failover);
+  const exposure = <FailoverExposure notice={notice} />;
 
   /* The first-run checklist, shown in place of the "no destinations" sentence
    * when a source exists and nothing is configured to send it anywhere. Every
@@ -2035,9 +2034,15 @@ export function Dashboard() {
       ),
 
       // Below the list on a phone, above it on a desktop: see orderSections.
-      // Not wrapped in a second disclosure: its argument is already behind
-      // one ("Why this matters", A85), and what stays open is one line.
-      exposure: <div key="exposure" className="mt-3">{exposure}</div>,
+      // On a phone it is closed like the other detail sections, and only
+      // exists when there is something to say: a protected install gets no
+      // toggle that opens onto nothing.
+      exposure:
+        notice.kind === "none" ? null : (
+          <NarrowDisclosure key="exposure" narrow={narrow} label={t("dashMobile.failoverOff")} className="mt-3">
+            {exposure}
+          </NarrowDisclosure>
+        ),
 
       destinations: (
       /* ---------- destinations ---------- */

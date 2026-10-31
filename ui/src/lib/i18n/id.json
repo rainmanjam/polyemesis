@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Tampilkan perintah",
   "procTable.hideCommand": "Sembunyikan perintah",
   "dashMobile.chatPipeline": "Obrolan dan alur proses",
-  "dashMobile.streamInfo": "Info siaran (judul, tag, kategori)"
+  "dashMobile.streamInfo": "Info siaran (judul, tag, kategori)",
+  "dashMobile.failoverOff": "Failover nonaktif"
 }

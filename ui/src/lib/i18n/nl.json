@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Opdracht tonen",
   "procTable.hideCommand": "Opdracht verbergen",
   "dashMobile.chatPipeline": "Chat en verwerkingsketen",
-  "dashMobile.streamInfo": "Streaminfo (titel, tags, categorie)"
+  "dashMobile.streamInfo": "Streaminfo (titel, tags, categorie)",
+  "dashMobile.failoverOff": "Failover staat uit"
 }

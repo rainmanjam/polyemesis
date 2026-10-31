@@ -3406,5 +3406,6 @@
   "procTable.showCommand": "Mostrar comando",
   "procTable.hideCommand": "Ocultar comando",
   "dashMobile.chatPipeline": "Chat y canalización",
-  "dashMobile.streamInfo": "Información de la emisión (título, etiquetas, categoría)"
+  "dashMobile.streamInfo": "Información de la emisión (título, etiquetas, categoría)",
+  "dashMobile.failoverOff": "La conmutación por error está desactivada"
 }
