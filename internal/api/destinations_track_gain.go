@@ -89,6 +89,16 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		row.Profile.Tracks[idx].Gain = *body.Gain
 	}
 	changed := row.Profile.Tracks[idx] != before
+	// THE VOD MIX FOLLOWS THE SAME FADER. A destination with a second mix carries
+	// the same source in both, so a live mute or gain on a track reaches the VOD
+	// mix's copy of that track too. A track the VOD mix does not select is left
+	// out, so a live change to the music bed cannot put it back into the archive.
+	// In a matrix VOD mix the gain is per cell and structural, so only mute mirrors.
+	if row.VODProfile != nil {
+		if mirrored := mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain); mirrored {
+			changed = true
+		}
+	}
 
 	lw, storeErr, updateErr := s.persistTrackLevels(row, changed)
 	switch {
@@ -111,6 +121,27 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// is reported the way every other mutation reports it (#709), not as a 500
 	// that would read as "nothing happened".
 	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// mirrorTrackLevel applies a live mute and gain to the VOD mix's copy of track,
+// and reports whether anything moved. A track the VOD mix does not select is not
+// added: the second mix's selection is its own decision, made in the routing
+// editor, and a live control must not change what it contains.
+func mirrorTrackLevel(vod *routing.Profile, track int, muted *bool, gain *float64) bool {
+	for i := range vod.Tracks {
+		if vod.Tracks[i].Track != track {
+			continue
+		}
+		before := vod.Tracks[i]
+		if muted != nil {
+			vod.Tracks[i].Muted = *muted
+		}
+		if gain != nil && vod.Mode != routing.ModeMatrix {
+			vod.Tracks[i].Gain = *gain
+		}
+		return vod.Tracks[i] != before
+	}
+	return false
 }
 
 // levelWrite is what persistTrackLevels did: the stored row, and how the level

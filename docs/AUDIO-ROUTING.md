@@ -88,8 +88,16 @@ In the UI: **Routing → pick the destination → Second (VOD) audio mix**. The
 switch there is off on every destination and switching it on opens a second copy
 of the same editor the live mix uses — the same track picks, mix matrix, music
 rights, loudness, delay and ducking, compiled and shown as its own filter graph.
-It is seeded from the live mix, so the first edit you make is the actual
-difference you wanted.
+It is seeded from the live mix with **music excluded**, so the archive does not
+carry the music bed unless you add it back, and the first edit you make is the
+actual difference you wanted. A mute or gain you set live on a track reaches the
+second mix's copy of that track too. In a matrix second mix only the mute does,
+because the gain there is per cell. A track the second mix does not select is
+never added by a live change.
+
+The second mix needs an FFmpeg that writes two audio tracks into FLV. polyemesis
+checks this once at startup. If the check fails, the second mix is dropped on the
+destination card with the reason, and the live mix goes out alone.
 
 Over the API, two fields on the destination, both off by default:
 

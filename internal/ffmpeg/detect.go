@@ -104,6 +104,10 @@ type Tools struct {
 	// everywhere, exactly like the -protocols and -encoders checks.
 	EncoderCaps []EncoderCapability `json:"encoderCaps"`
 
+	// flvTwoAudio is the verdict of ProbeTwoAudioFLV: whether this binary writes
+	// a second audio track into FLV. Nil until the probe runs; see TwoAudioFLV.
+	flvTwoAudio *FLVTwoAudioResult
+
 	// mu guards the fields the encoder probe writes. Detection is a startup
 	// snapshot that RefreshEncoderCapabilities can replace underneath a
 	// running server, so readers cannot assume they are the only ones here.
@@ -244,6 +248,10 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 	t.checkSRT(ctx)
 	t.checkEncoders(ctx)
 	t.checkFilters(ctx)
+	// The VOD track's second audio mix needs this binary to write two audio
+	// streams into FLV. Measured once here, at the same place as the encoder
+	// probe; the engine's plan reads the verdict and never runs it.
+	_ = t.ProbeTwoAudioFLV(ctx)
 	return t, nil
 }
 

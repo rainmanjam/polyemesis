@@ -124,6 +124,15 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		switch {
 		case row.VODProfile == nil || cerr != nil:
 			// Nothing to pair, or nothing worth pairing.
+		case flvRefused(e.tools) != "":
+			// THIS FFMPEG CANNOT WRITE A SECOND AUDIO TRACK INTO FLV. The probe
+			// ran (ffmpeg.Tools.ProbeTwoAudioFLV) and the second stream did not
+			// survive the muxer, so pairing would push a one-track file while the
+			// argv says two. The live mix goes out alone and the card carries the
+			// probe's own words. Applies to every RTMP destination, not only
+			// Twitch, because the FLV muxer is the same for all of them. An
+			// unprobed binary is not refused: see ffmpeg.Tools.TwoAudioFLV.
+			p.vodDropped = "the second (VOD) audio track is not being sent: " + flvRefused(e.tools)
 		case provisional:
 			// SAY SO. This arm used to share the one above and set no note, so a
 			// destination on an unprobed ingest dropped its second mix on every

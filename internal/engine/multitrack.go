@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/multitrack"
 )
 
@@ -125,8 +126,25 @@ func twitchOneAudioTrack(row *db.Destination) bool {
 // Twitch RTMP one, and it opted into Enhanced Broadcasting. Where the opt-in is
 // ABSENT the pair is refused at plan time instead -- see planDestinations --
 // because that answer does not depend on anything a network call could say.
+//
+// PROVISIONAL (#15): Twitch accepting the two-audio-track Enhanced RTMP publish,
+// and keeping track 2, is not verified. It needs a live test stream on a Twitch
+// test channel (the plan's RMS check of live against VOD). No platform account
+// was used to build this. Fallback if Twitch refuses: the plan's Go FLV muxer,
+// not yet built.
 func vodNeedsNegotiation(row *db.Destination) bool {
 	return row != nil && row.VODProfile != nil && twitchOneAudioTrack(row) && wantsMultitrack(row)
+}
+
+// flvRefused is the reason this binary cannot carry a second audio track in an
+// FLV, or "" when it can or has never been asked. Only a probe that ran and
+// failed refuses; see ffmpeg.Tools.TwoAudioFLV for why unknown is not a refusal.
+func flvRefused(tools *ffmpeg.Tools) string {
+	ok, probed, reason := tools.TwoAudioFLV()
+	if probed && !ok {
+		return reason
+	}
+	return ""
 }
 
 // noteVODWithoutMultitrack is what an operator is told when they configured a

@@ -22,6 +22,15 @@ its first tagged release.
   payload, and the activity stream's app bearer, which is supplied as
   `POLYEMESIS_X_APP_BEARER`. Titles are set at go-live only, so a live title
   cannot change.
+- **Twitch VOD track (#15): what is verified and what is not.** The second
+  (VOD) mix is now checked against this FFmpeg before it is sent: a binary
+  that cannot write two audio tracks into FLV drops the VOD mix with its
+  reason on the card, and the live stream goes out alone. A new second mix
+  defaults to everything except music. Live mute reaches the VOD mix's copy of
+  the same track, and so does live gain except in a matrix VOD mix (gain there
+  is per cell). Twitch acceptance of the two-track publish is PROVISIONAL until
+  a live test on a Twitch test channel.
+
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
