@@ -1,23 +1,31 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
   Captions,
+  CaptionsOff,
   ChevronDown,
   ChevronRight,
+  CirclePlay,
   Download,
+  ExternalLink,
   Film,
+  FileVideoCamera,
   Image as ImageIcon,
+  Layers,
   Loader2,
   Pencil,
   Scissors,
   Search,
-  Sparkles,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { SaveStatus } from "@/components/SaveStatus";
+import { useSaveModel } from "@/lib/saveModel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -130,6 +138,12 @@ interface PlayerTarget {
   atMs?: number;
 }
 
+/** Where "Install whisper.cpp" points: the configuration page on the site,
+ *  which documents the whisper.cpp binary and how it is found. A link rather
+ *  than the config key itself, which meant nothing to an operator reading the
+ *  Library (app-council A38). */
+const WHISPER_DOCS_URL = "https://polyemesis.com/docs/configuration#configyaml";
+
 export function LibraryPage() {
   const t = useT();
   const [view, setView] = useState<LibraryView | null>(null);
@@ -152,6 +166,10 @@ export function LibraryPage() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [player, setPlayer] = useState<PlayerTarget | null>(null);
   const [editing, setEditing] = useState<LibrarySession | null>(null);
+  // app-council A37: uploads are a source-ingest feature, so they open from a
+  // header button instead of taking the top of the archive.
+  const [uploadsOpen, setUploadsOpen] = useState(false);
+  const transcriptsOffId = useId();
 
   const load = useCallback(async () => {
     try {
@@ -237,6 +255,16 @@ export function LibraryPage() {
   }
 
   const filtersActive = Boolean(tag || since || until || onlyTranscribed);
+  // app-council A38: one short status in the header instead of a paragraph
+  // that ended in a config.yaml key. Searching still works over whatever is
+  // already transcribed, so only the placeholder changes.
+  const transcriptsOff = Boolean(view?.jobsAvailable && !view.transcribeAvailable);
+  const clearFilters = () => {
+    setTag("");
+    setSince("");
+    setUntil("");
+    setOnlyTranscribed(false);
+  };
 
   return (
     <div className="p-3">
@@ -244,6 +272,32 @@ export function LibraryPage() {
         title={t("lib.title")}
         subtitle={t("lib.subtitle")}
         actions={
+          <div className="flex flex-wrap items-center gap-2">
+          {transcriptsOff && (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-sm">
+              <CaptionsOff aria-hidden="true" className="h-3.5 w-3.5 text-warn" />
+              <span id={transcriptsOffId}>{t("lib.transcriptsOff")}</span>
+              <a
+                href={WHISPER_DOCS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+              >
+                {t("lib.installWhisper")}
+                <ExternalLink aria-hidden="true" className="h-3 w-3" />
+              </a>
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            aria-expanded={uploadsOpen}
+            aria-controls="library-uploads"
+            onClick={() => setUploadsOpen(!uploadsOpen)}
+          >
+            <Upload />
+            {t("lib.uploadMedia")}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -267,19 +321,28 @@ export function LibraryPage() {
               }
             }}
             title={t("lib.regroupTitle")}
+            aria-describedby="library-regroup-explain"
           >
-            <Sparkles />
+            <Layers />
             {t("lib.regroup")}
           </Button>
+          </div>
         }
       />
+      {/* app-council A39: what Rebuild sessions does, in one visible line;
+          the tooltip keeps the detail. */}
+      <p id="library-regroup-explain" className="-mt-1 mb-3 text-sm text-muted-foreground">
+        {t("lib.regroupExplain")}
+      </p>
 
-      {/* Uploads sit above search because they are the one thing on this page
-          an operator ADDS rather than searches. Everything below is a view of
-          what the server already recorded. */}
-      <div className="mb-3">
-        <MediaUploads />
-      </div>
+      {/* app-council A37: closed until asked for. Uploads are a way to feed a
+          source, not part of the archive, and they used to push the sessions
+          about 220px down with "Nothing uploaded yet." */}
+      {uploadsOpen && (
+        <div id="library-uploads" className="mb-3">
+          <MediaUploads />
+        </div>
+      )}
 
       {/* ---------------- search: the top of the page, not a filter drawer ---- */}
       <Card className="mb-3">
@@ -289,7 +352,7 @@ export function LibraryPage() {
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("lib.searchPlaceholder")}
+              placeholder={t(transcriptsOff ? "lib.searchPlaceholderOff" : "lib.searchPlaceholder")}
               className="h-9 border-0 bg-transparent text-[13px] focus-visible:ring-0"
               aria-label={t("lib.searchTranscripts")}
             />
@@ -354,9 +417,7 @@ export function LibraryPage() {
                 {!view?.transcribeAvailable && (
                   <>
                     {" "}
-                    {view?.transcribeNote
-                      ? t("lib.searchTranscribeUnavailableNote", { note: view.transcribeNote })
-                      : t("lib.searchTranscribeUnavailable")}
+                    {t("lib.searchTranscribeUnavailable")}
                   </>
                 )}
               </div>
@@ -424,12 +485,7 @@ export function LibraryPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => {
-              setTag("");
-              setSince("");
-              setUntil("");
-              setOnlyTranscribed(false);
-            }}
+            onClick={clearFilters}
           >
             {t("lib.clearFilters")}
           </Button>
@@ -441,33 +497,27 @@ export function LibraryPage() {
         </span>
       </div>
 
-      {/* The whole explanation for the greyed captions button lived in a
-          `title` on a disabled <button>, and button.tsx sets
-          `disabled:pointer-events-none` -- so it never reached a pointer and
-          never reached a screen reader either. The prose that did exist only
-          rendered inside an EMPTY SEARCH RESULT, which an operator browsing
-          their recordings never sees.
-
-          A warning rather than a control, deliberately: the button cannot be
-          made to work from here, so the only fix available is to say why once,
-          in reading order, above the rows whose buttons are greyed. */}
-      {view?.jobsAvailable && !view.transcribeAvailable && (
-        <p className="mb-2 text-tiny text-warn">
-          {t("lib.transcribeUnavailable")}
-          {view.transcribeNote ? ` ${view.transcribeNote}` : ""}
-        </p>
-      )}
+      {/* The reason the captions buttons are greyed used to be a paragraph
+          here, ending in a config.yaml key. It is now the header's "Transcripts:
+          off" status (app-council A38), which each greyed button names through
+          aria-describedby, so it is read out where the control is. */}
 
       {/* ---------------- sessions ---------------- */}
       <div className="flex flex-col gap-2">
-        {sessions.length === 0 && (
-          <Card>
-            <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              {view?.sessions.length
-                ? t("lib.noSessionMatch") : t("lib.nothingRecorded")}
-            </CardContent>
-          </Card>
-        )}
+        {sessions.length === 0 &&
+          (view?.sessions.length ? (
+            <EmptyState
+              icon={Search}
+              title={t("lib.noSessionMatch")}
+              action={filtersActive ? { label: t("lib.clearFilters"), onClick: clearFilters } : undefined}
+            />
+          ) : (
+            <EmptyState
+              icon={Film}
+              title={t("lib.noRecordingsTitle")}
+              body={t("lib.nothingRecorded")}
+            />
+          ))}
         {sessions.map((s) => (
           <SessionCard
             key={s.id}
@@ -475,7 +525,7 @@ export function LibraryPage() {
             expanded={expanded === s.id}
             jobsAvailable={view?.jobsAvailable ?? false}
             transcribeAvailable={view?.transcribeAvailable ?? false}
-            transcribeNote={view?.transcribeNote}
+            transcriptsOffId={transcriptsOff ? transcriptsOffId : undefined}
             onToggle={() => setExpanded(expanded === s.id ? null : s.id)}
             onEdit={() => setEditing(s)}
             onPlay={(recordingId) => setPlayer({ recordingId })}
@@ -493,7 +543,7 @@ export function LibraryPage() {
                 recordings={view?.ungrouped ?? []}
                 jobsAvailable={view?.jobsAvailable ?? false}
                 transcribeAvailable={view?.transcribeAvailable ?? false}
-                transcribeNote={view?.transcribeNote}
+                transcriptsOffId={transcriptsOff ? transcriptsOffId : undefined}
                 onPlay={(id) => setPlayer({ recordingId: id })}
                 onChanged={load}
               />
@@ -575,7 +625,7 @@ function SessionCard({
   expanded,
   jobsAvailable,
   transcribeAvailable,
-  transcribeNote,
+  transcriptsOffId,
   onToggle,
   onEdit,
   onPlay,
@@ -585,7 +635,9 @@ function SessionCard({
   expanded: boolean;
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
-  transcribeNote?: string;
+  /** The header's "Transcripts: off" status, which a greyed captions button
+   *  names as its reason. */
+  transcriptsOffId?: string;
   onToggle: () => void;
   onEdit: () => void;
   onPlay: (recordingId: number) => void;
@@ -693,7 +745,7 @@ function SessionCard({
               recordings={recordings ?? []}
               jobsAvailable={jobsAvailable}
               transcribeAvailable={transcribeAvailable}
-              transcribeNote={transcribeNote}
+              transcriptsOffId={transcriptsOffId}
               onPlay={onPlay}
               onChanged={() => {
                 void loadMembers();
@@ -795,14 +847,14 @@ function RecordingList({
   recordings,
   jobsAvailable,
   transcribeAvailable,
-  transcribeNote,
+  transcriptsOffId,
   onPlay,
   onChanged,
 }: {
   recordings: LibraryRecording[];
   jobsAvailable: boolean;
   transcribeAvailable: boolean;
-  transcribeNote?: string;
+  transcriptsOffId?: string;
   onPlay: (id: number) => void;
   onChanged: () => void;
 }) {
@@ -815,9 +867,7 @@ function RecordingList({
 
   if (recordings.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-            {t("lib.noSegments")}
-      </div>
+      <EmptyState title={t("lib.noSegments")} className="m-3 border-0 py-4" />
     );
   }
 
@@ -863,9 +913,12 @@ function RecordingList({
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
               title={r.assets.proxy ? t("lib.playProxy") : t("lib.noProxyYet")}
             >
-              <Film
+              {/* app-council A40: a play glyph, not the Film icon that also
+                  meant "generate proxy" two buttons to the right. */}
+              <CirclePlay
+                aria-hidden="true"
                 className={cn(
-                  "h-3.5 w-3.5 shrink-0",
+                  "h-4 w-4 shrink-0",
                   r.assets.proxy ? "text-primary" : "text-muted-foreground",
                 )}
               />
@@ -888,7 +941,7 @@ function RecordingList({
                 </Badge>
               )}
               {active.map((j) => (
-                <Badge key={j.id} variant={j.blocked ? "warn" : "live"} title={j.reason ?? ""}>
+                <Badge key={j.id} variant={j.blocked ? "warn" : "live"}>
                   {j.label ?? j.kind}
                   {j.state === "running" ? ` ${Math.round(j.progress * 100)}%` : ""}
                 </Badge>
@@ -904,13 +957,8 @@ function RecordingList({
                     disabled={working || !transcribeAvailable}
                     onClick={() => submit(r, "transcribe")}
                     aria-label={t("lib.transcribe")}
-                    title={
-                      transcribeAvailable
-                        ? t("lib.transcribeEachTrackOnIts")
-                        : t("lib.transcriptionUnavailableReason", {
-                            note: transcribeNote ?? t("lib.whisperNotFound"),
-                          })
-                    }
+                    aria-describedby={transcribeAvailable ? undefined : transcriptsOffId}
+                    title={transcribeAvailable ? t("lib.transcribeEachTrackOnIts") : undefined}
                   >
                     <Captions />
                   </Button>
@@ -922,7 +970,7 @@ function RecordingList({
                     aria-label={t("lib.generateProxy")}
                     title={t("lib.generateProxyTitle")}
                   >
-                    <Film />
+                    <FileVideoCamera />
                   </Button>
                   <Button variant="ghost" size="icon-sm" asChild aria-label={t("lib.clip")}>
                     {/* The clip editor owns in and out points, keyframes and
@@ -949,6 +997,15 @@ function RecordingList({
                 <Trash2 />
               </Button>
             </div>
+            {/* app-council A40: why a job is waiting, as row text. It was a
+                title on a badge, which touch and keyboard users never see. */}
+            {active
+              .filter((j) => j.blocked && j.reason)
+              .map((j) => (
+                <p key={`why-${j.id}`} className="w-full text-sm text-warn">
+                  {t("lib.jobBlocked", { job: j.label ?? j.kind, reason: j.reason ?? "" })}
+                </p>
+              ))}
           </li>
         );
       })}
@@ -964,6 +1021,50 @@ function RecordingList({
         }}
       />
     </ul>
+  );
+}
+
+/** One track's speaker name. A typed field, so it is a draft with an explicit
+ *  Apply and a save status (useSaveModel), not a blur save: a blur save lost a
+ *  name typed into a dialog that was then closed, and said nothing when it
+ *  did write one (A95, the rule app-council A20 applies to Playout). */
+function SpeakerField({
+  track,
+  speaker,
+  busy,
+  onSave,
+}: {
+  track: number;
+  speaker: string;
+  busy: boolean;
+  /** Throws on failure. */
+  onSave: (speaker: string) => Promise<void>;
+}) {
+  const t = useT();
+  const model = useSaveModel<string>({
+    stored: speaker,
+    onSave: (v) => onSave(v.trim()),
+  });
+  return (
+    <>
+      <Input
+        value={model.draft}
+        placeholder={t("lib.speakerPlaceholder")}
+        aria-label={t("lib.speakerFor", { n: track })}
+        disabled={busy}
+        className="h-6 flex-1 text-tiny"
+        onChange={(e) => model.setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && model.dirty && !e.nativeEvent.isComposing) void model.save();
+        }}
+      />
+      {model.dirty && (
+        <Button size="sm" variant="secondary" className="h-6" disabled={busy} onClick={() => void model.save()}>
+          {t("common.apply")}
+        </Button>
+      )}
+      <SaveStatus state={model.state} />
+    </>
   );
 }
 
@@ -1062,6 +1163,8 @@ export function PlayerDialog({
       await load();
     } catch (err) {
       toast.error(errText(err, t("lib.couldNotSaveSpeaker")));
+      // Thrown on, so SpeakerField's draft stays and says "Not saved".
+      throw err;
     } finally {
       setBusy(false);
     }
@@ -1190,24 +1293,11 @@ export function PlayerDialog({
                       <span className="shrink-0 font-mono text-micro text-muted-foreground">
                         {t("lib.trackLabel", { n: tr.track })}
                       </span>
-                      {/* Committed on blur, like every other field this dialog
-                          saves this way (the session title, a rung's name):
-                          typing "Ana" one keystroke at a time must not fire a
-                          save per letter. Keyed by the loaded speaker so a
-                          successful save re-seeds the field rather than
-                          fighting the next render with a stale draft. */}
-                      <Input
-                        key={`speaker-${tr.track}-${tr.speaker ?? ""}`}
-                        defaultValue={tr.speaker ?? ""}
-                        placeholder={t("lib.speakerPlaceholder")}
-                        aria-label={t("lib.speakerFor", { n: tr.track })}
-                        disabled={busy}
-                        className="h-6 flex-1 text-tiny"
-                        onBlur={(e) => {
-                          const v = e.currentTarget.value.trim();
-                          if (v !== (tr.speaker ?? "")) void saveSpeaker(tr.track, v);
-                          else e.currentTarget.value = tr.speaker ?? "";
-                        }}
+                      <SpeakerField
+                        track={tr.track}
+                        speaker={tr.speaker ?? ""}
+                        busy={busy}
+                        onSave={(v) => saveSpeaker(tr.track, v)}
                       />
                       <Button
                         variant="ghost"

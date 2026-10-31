@@ -113,3 +113,34 @@ describe("RecordingsPage recording switch during a live broadcast (A23)", () => 
     );
   });
 });
+
+/* A95/A20: the retention policy uses the console's one save model. Save is
+ * offered once a number changes, the line beside it says Unsaved changes, then
+ * Saved; the empty list is the kit empty state. */
+describe("RecordingsPage retention save model (A95)", () => {
+  it("says Unsaved changes, writes once on Save, then says Saved", async () => {
+    putSettings.mockClear();
+    render(<RecordingsPage />);
+    const max = (await waitFor(() => {
+      const el = document.getElementById("rec-gb");
+      if (!el) throw new Error("retention field not rendered yet");
+      return el;
+    })) as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save retention policy" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(max, { target: { value: "80" } });
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    expect(save.disabled).toBe(false);
+
+    fireEvent.click(save);
+    await waitFor(() => expect(putSettings).toHaveBeenCalledTimes(1));
+    expect((putSettings.mock.calls[0][0] as typeof SETTINGS).recording.maxGb).toBe(80);
+    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+  });
+
+  it("shows the kit empty state when there are no recordings", async () => {
+    render(<RecordingsPage />);
+    expect(await screen.findByText("No recordings yet")).toBeTruthy();
+  });
+});

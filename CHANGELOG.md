@@ -580,6 +580,19 @@ its first tagged release.
   Saved or Not saved. Labels are plainer: Quality levels, Original (no
   re-encode), Rewind window, Audio track (number, from 0). The settings, API
   and saved values are unchanged.
+- **Library, Recordings and the trim editor say what they are for (app-council
+  A37-A41).** Library's media upload card opens from an Upload media button
+  instead of sitting above the archive. When transcription is off, the header
+  shows "Transcripts: off" with an Install whisper.cpp link instead of a
+  paragraph ending in a config.yaml key; search stays on for the transcripts
+  you already have, and each greyed captions button names that status as its
+  reason. Regroup is now Rebuild sessions, with a one-line explanation under
+  the title. The play indicator and Generate proxy no longer share the film
+  icon, and a waiting job's reason is printed on its row. A track's speaker
+  name saves with Apply rather than on leaving the field. The clip editor is
+  titled Trim recording. Recordings' retention policy says Unsaved changes,
+  Saving and Saved beside its Save button, and Library, Recordings and Clips
+  use the same empty state.
 - **Chat: keyboard, attention and polls.** Enter that confirms an IME
   composition no longer sends the message. Message rows are reachable from the
   keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New

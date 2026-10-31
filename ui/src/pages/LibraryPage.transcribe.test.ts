@@ -6,28 +6,18 @@ import { join } from "node:path";
 /* The whole explanation for a greyed captions button lived in a `title` on a
  * disabled <button>, and ui/src/components/ui/button.tsx sets
  * `disabled:pointer-events-none` -- so the title never reaches a pointer and is
- * not exposed to a screen reader either. The prose that did exist rendered only
- * inside an EMPTY SEARCH RESULT, which an operator browsing their recordings
- * never sees.
+ * not exposed to a screen reader either.
  *
- * A placement defect has no separable decision function to test, so this pins
- * the placement itself: the sentence has to be in the page body, outside both
- * the `title` and the search branch. */
+ * app-council A38 moved the explanation from a paragraph (which ended in a
+ * config.yaml key) to the header's "Transcripts: off" status, and each greyed
+ * button names that status through aria-describedby. The rendered behaviour is
+ * pinned in LibraryPage.content.test.tsx; these keep the two source-level
+ * facts that a render cannot show. */
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
 
 describe("LibraryPage", () => {
-  it("prints the transcription reason as prose, not only in an unreachable title", () => {
-    const src = read("ui/src/pages/LibraryPage.tsx");
-    expect(src).toContain('t("lib.transcribeUnavailable")');
-    expect(src).toContain("view?.jobsAvailable && !view.transcribeAvailable");
-    // Rendered as page text, not as an attribute on the disabled control.
-    // text-tiny is the design-system token for 11px (docs/DESIGN-SYSTEM.md) --
-    // same rendered size as the literal this pinned before that token existed.
-    expect(src).toContain('<p className="mb-2 text-tiny text-warn">');
-  });
-
   it("still keeps the button disabled, because the fix is a warning and not a control", () => {
     // Nothing here makes transcription possible; the only honest change is to
     // say why, where it can be read.
