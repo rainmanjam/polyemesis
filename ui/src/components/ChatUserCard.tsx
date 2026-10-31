@@ -390,7 +390,7 @@ export function ChatUserCard({
               and a world apart to the person pressing them, and the pane
               offers no way to find that out at the moment of the decision. */}
           <p className="text-[10px] leading-relaxed text-muted-foreground">
-            {t("chatCard.undoNote")}{" "}
+            {t("chatCard.undoNote")} {t("chatCard.localHideNote")}{" "}
             {hideUpstream.ok
               ? t("chatCard.upstreamNote", { platform: accent.label })
               : hideUpstream.reason}

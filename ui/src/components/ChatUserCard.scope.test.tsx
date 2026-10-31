@@ -140,7 +140,17 @@ describe("#783: hiding from viewers, which no operator could ask for", () => {
 
   it("makes the difference between hiding and deleting legible", async () => {
     draw("facebook");
-    await waitFor(() => expect(screen.getByText(/Hiding can be undone/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Hiding from viewers can be undone/)).toBeTruthy());
+  });
+
+  it("does not describe 'Hide here only' as reversible, because nothing here reverses it", async () => {
+    // The undo sentence used to say "Hiding can be undone" with no scope, so a
+    // moderator who pressed "Hide here only" read it as covering that button.
+    // The server forgets a local hide (chat.go: "a local hide is forgotten, not
+    // flagged"), so the card has to say so beside the button it describes.
+    draw("facebook");
+    await waitFor(() => expect(screen.getByText(/cannot be undone from this card/)).toBeTruthy());
+    expect(screen.queryByText(/^Hiding can be undone/)).toBeNull();
   });
 
   it("renders the upstream hide inert with its reason where it cannot work", async () => {

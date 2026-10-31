@@ -161,12 +161,32 @@ function MessageRow({
       }
     : undefined;
 
+  // The keyboard route to the same menu. A row takes focus (Tab), and the menu
+  // opens from the keys a keyboard user already has for "menu here": Enter, the
+  // ContextMenu key, and Shift+F10. Keys pressed on the name or delete buttons
+  // inside the row belong to those buttons, so they are ignored here.
+  const openMenuFromKeyboard = onMenu
+    ? (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (e.target !== e.currentTarget) return;
+        const menuKey =
+          e.key === "Enter" || e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+        if (!menuKey) return;
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        onMenu(m, { x: r.left + 16, y: r.top + r.height / 2 });
+      }
+    : undefined;
+
   return (
     <div
+      role="group"
+      aria-roledescription={t("chatpage.messageRole")}
+      tabIndex={onMenu ? 0 : undefined}
+      onKeyDown={openMenuFromKeyboard}
       onContextMenu={openMenu}
       onDoubleClick={openMenu}
       className={cn(
-        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised",
+        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         accent.rule,
         m.echo && "bg-primary-dim/40",
       )}
@@ -250,7 +270,7 @@ function MessageRow({
           disabled={busy || !deletable.ok}
           aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
           title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex"
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex group-focus-within:flex pointer-coarse:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
@@ -308,7 +328,10 @@ export function ChatTimeline({
         onScroll={onScroll}
         className="h-full overflow-y-auto py-1"
         role="log"
-        aria-live="polite"
+        // The log stays silent. Announcing every line on a busy stream is
+        // noise a screen reader user cannot stop; the status region below
+        // announces the one thing that matters while scrolled up.
+        aria-live="off"
         aria-relevant="additions"
       >
         {messages.length === 0
@@ -323,6 +346,10 @@ export function ChatTimeline({
                 compact={compact}
               />
             ))}
+      </div>
+
+      <div role="status" aria-live="polite" className="sr-only">
+        {behind > 0 ? t("chatpage.newCount", { count: behind }) : ""}
       </div>
 
       {behind > 0 && (
@@ -502,6 +529,10 @@ export function ChatComposer({
           onKeyDown={(e) => {
             // Enter sends, Shift+Enter breaks the line. The other way round
             // makes a chat box feel like a form.
+            // An IME confirms a candidate with an Enter that belongs to the
+            // composition, not to the message. isComposing is the standard
+            // signal; Safari reports the same keystroke as keyCode 229.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               void send();
