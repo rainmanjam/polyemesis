@@ -143,3 +143,25 @@ export function outputStatus(state: OutputState): StatusReading {
       return reading("state.off", "idle");
   }
 }
+
+/** What a platform row on Settings → Platforms says about it
+ *  (settings-council R1, R10). One word per row, in this order of precedence:
+ *  an account that has to reconnect outranks "connected", because a token that
+ *  lost a permission stops working mid-show; a pair the platform refused
+ *  outranks "saved", because "saved" over a refused pair is what an operator
+ *  re-reads for an hour. "Credentials saved" is a warning, not a pass: nothing
+ *  can be streamed through it until an account is connected. */
+export function platformSetupStatus(input: {
+  supported: boolean;
+  hasSecret: boolean;
+  lastCheckState?: "verified" | "unverified" | "rejected" | "unreachable";
+  accounts: number;
+  reconnectNeeded: boolean;
+}): StatusReading {
+  if (input.reconnectNeeded) return reading("settingsUx.pillReconnect", "warn");
+  if (input.accounts > 0) return reading("settingsUx.pillConnected", "ok");
+  if (!input.supported) return reading("settingsUx.pillManualKey", "idle");
+  if (input.hasSecret && input.lastCheckState === "rejected") return reading("settingsUx.pillCredsRejected", "bad");
+  if (input.hasSecret) return reading("settingsUx.pillCredsSaved", "warn");
+  return reading("settingsUx.pillNotSetUp", "idle");
+}

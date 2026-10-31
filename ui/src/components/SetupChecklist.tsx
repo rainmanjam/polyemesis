@@ -39,6 +39,7 @@ export function SetupChecklist({
   ingestUrl,
   onCopyIngest,
   onAddDestination,
+  onGoLive,
   addresses = [],
   onCopyAddress,
 }: Readonly<{
@@ -46,6 +47,10 @@ export function SetupChecklist({
   ingestUrl: string;
   onCopyIngest: () => void;
   onAddDestination: () => void;
+  /** Where the step-5 button goes. Optional: the Dashboard draws the go-live
+   *  control beside this list. The Settings Overview passes the Dashboard
+   *  route, so the button never renders as a control that does nothing. */
+  onGoLive?: () => void;
   /** The source's publish rows, host filled in (A1): its address, and in RTMP
    *  mode a `streamKey` row, offered as a copy and never displayed. */
   addresses?: readonly { proto: string; url: string }[];
@@ -191,7 +196,7 @@ export function SetupChecklist({
 
                   {id === 5 && (
                     <div className="mt-1 flex flex-col items-start gap-1.5">
-                      <Button size="sm" disabled={state === "locked"}>
+                      <Button size="sm" disabled={state === "locked"} onClick={onGoLive}>
                         {t("golive.trigger")}
                       </Button>
                       {state === "locked" && checklist.reason && (
