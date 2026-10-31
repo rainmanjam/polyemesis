@@ -3377,5 +3377,13 @@
   "settingsUx.tileTokens": "API-токенов: {n}",
   "settingsUx.tileBackedUp": "Резервная копия secret.key подтверждена",
   "settingsUx.tileNotBackedUp": "Резервная копия secret.key не подтверждена",
-  "settingsUx.saveCredsNeedsBoth": "Заполните оба поля, чтобы сохранить. Сохранённый секрет больше не показывается, поэтому вставляйте его заново при любом изменении."
+  "settingsUx.saveCredsNeedsBoth": "Заполните оба поля, чтобы сохранить. Сохранённый секрет больше не показывается, поэтому вставляйте его заново при любом изменении.",
+  "routingUx.muteGainTitle": "Отключение звука и усиление",
+  "routingUx.muteGainHint": "Изменения ждут кнопки «Сохранить изменения», как и любая другая правка на этой странице.",
+  "routingUx.advanced": "Дополнительно",
+  "routingUx.advancedSummary": "громкость, задержка A/V, дакинг, VOD-микс и граф FFmpeg",
+  "routingUx.showGraph": "Показать граф FFmpeg",
+  "routingUx.hideGraph": "Скрыть граф FFmpeg",
+  "routingUx.saveChanges": "Сохранить изменения",
+  "routingUx.unsavedNone": "Несохранённых изменений нет."
 }

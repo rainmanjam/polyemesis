@@ -3377,5 +3377,13 @@
   "settingsUx.tileTokens": "Tokeny API: {n}",
   "settingsUx.tileBackedUp": "Kopia secret.key potwierdzona",
   "settingsUx.tileNotBackedUp": "Kopia secret.key niepotwierdzona",
-  "settingsUx.saveCredsNeedsBoth": "Wypełnij oba pola, aby zapisać. Zapisany sekret nie jest już nigdy pokazywany, więc wklej go ponownie przy każdej zmianie."
+  "settingsUx.saveCredsNeedsBoth": "Wypełnij oba pola, aby zapisać. Zapisany sekret nie jest już nigdy pokazywany, więc wklej go ponownie przy każdej zmianie.",
+  "routingUx.muteGainTitle": "Wyciszenie i wzmocnienie",
+  "routingUx.muteGainHint": "Zmiany czekają na „Zapisz zmiany”, jak każda inna edycja na tej stronie.",
+  "routingUx.advanced": "Zaawansowane",
+  "routingUx.advancedSummary": "głośność, opóźnienie A/V, ducking, miks VOD i graf FFmpeg",
+  "routingUx.showGraph": "Pokaż graf FFmpeg",
+  "routingUx.hideGraph": "Ukryj graf FFmpeg",
+  "routingUx.saveChanges": "Zapisz zmiany",
+  "routingUx.unsavedNone": "Brak niezapisanych zmian."
 }

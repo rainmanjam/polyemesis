@@ -3377,5 +3377,13 @@
   "settingsUx.tileTokens": "API-токенів: {n}",
   "settingsUx.tileBackedUp": "Резервну копію secret.key підтверджено",
   "settingsUx.tileNotBackedUp": "Резервну копію secret.key не підтверджено",
-  "settingsUx.saveCredsNeedsBoth": "Заповніть обидва поля, щоб зберегти. Збережений секрет більше не показується, тому вставляйте його знову за будь-якої зміни."
+  "settingsUx.saveCredsNeedsBoth": "Заповніть обидва поля, щоб зберегти. Збережений секрет більше не показується, тому вставляйте його знову за будь-якої зміни.",
+  "routingUx.muteGainTitle": "Вимкнення звуку та підсилення",
+  "routingUx.muteGainHint": "Зміни чекають на «Зберегти зміни», як і будь-яке інше редагування на цій сторінці.",
+  "routingUx.advanced": "Додатково",
+  "routingUx.advancedSummary": "гучність, затримка A/V, дакінг, VOD-мікс і граф FFmpeg",
+  "routingUx.showGraph": "Показати граф FFmpeg",
+  "routingUx.hideGraph": "Сховати граф FFmpeg",
+  "routingUx.saveChanges": "Зберегти зміни",
+  "routingUx.unsavedNone": "Незбережених змін немає."
 }

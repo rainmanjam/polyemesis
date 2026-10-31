@@ -3377,5 +3377,13 @@
   "settingsUx.tileTokens": "Tokens de API: {n}",
   "settingsUx.tileBackedUp": "Backup do secret.key confirmado",
   "settingsUx.tileNotBackedUp": "Backup do secret.key não confirmado",
-  "settingsUx.saveCredsNeedsBoth": "Preencha os dois campos para salvar. Um segredo salvo nunca é mostrado de novo, então cole-o outra vez a cada alteração."
+  "settingsUx.saveCredsNeedsBoth": "Preencha os dois campos para salvar. Um segredo salvo nunca é mostrado de novo, então cole-o outra vez a cada alteração.",
+  "routingUx.muteGainTitle": "Mudo e ganho",
+  "routingUx.muteGainHint": "As alterações aguardam \"Salvar alterações\", como qualquer outra edição nesta página.",
+  "routingUx.advanced": "Avançado",
+  "routingUx.advancedSummary": "loudness, atraso A/V, ducking, mix VOD e o grafo do FFmpeg",
+  "routingUx.showGraph": "Mostrar grafo do FFmpeg",
+  "routingUx.hideGraph": "Ocultar grafo do FFmpeg",
+  "routingUx.saveChanges": "Salvar alterações",
+  "routingUx.unsavedNone": "Nenhuma alteração não salva."
 }

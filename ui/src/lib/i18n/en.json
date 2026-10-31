@@ -3377,5 +3377,13 @@
   "settingsUx.tileTokens": "API tokens: {n}",
   "settingsUx.tileBackedUp": "secret.key backup confirmed",
   "settingsUx.tileNotBackedUp": "secret.key backup not confirmed",
-  "settingsUx.saveCredsNeedsBoth": "Fill in both fields to save. A stored secret is never shown again, so paste it again with any change."
+  "settingsUx.saveCredsNeedsBoth": "Fill in both fields to save. A stored secret is never shown again, so paste it again with any change.",
+  "routingUx.muteGainTitle": "Mute and gain",
+  "routingUx.muteGainHint": "Changes wait for Save changes, like every other edit on this page.",
+  "routingUx.advanced": "Advanced",
+  "routingUx.advancedSummary": "loudness, A/V delay, ducking, VOD mix and the FFmpeg graph",
+  "routingUx.showGraph": "Show FFmpeg graph",
+  "routingUx.hideGraph": "Hide FFmpeg graph",
+  "routingUx.saveChanges": "Save changes",
+  "routingUx.unsavedNone": "No unsaved changes."
 }

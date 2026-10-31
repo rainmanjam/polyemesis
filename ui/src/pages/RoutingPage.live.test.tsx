@@ -8,18 +8,17 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { RoutingPage } from "./RoutingPage";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
-import { ApiError, api, type DestinationWithRouting } from "@/lib/api";
+import { api, type DestinationWithRouting } from "@/lib/api";
 import { autoApi } from "@/lib/autoApi";
 import type { TrackLevelResult } from "@/lib/liveTrackLevel";
 import type { Destination, RoutingProfile, RoutingResult } from "@/lib/types";
 
-/* I4 on the routing page, rendered whole so the wiring is what is tested.
+/* The routing page, rendered whole so the wiring is what is tested.
  *
- *  - A live mute or gain goes to the per-track route, not through Save, and the
- *    outcome reads as the server reported it.
+ *  - Mute and gain are pending draft edits like every other (A26): nothing is
+ *    written until Save changes, which sends one PUT; Discard restores.
  *  - A stored `muted` survives every path that ends in a profile PUT.
- *  - The live change does not wipe an unsaved draft, and the next Save does
- *    not undo it. */
+ *  - Advanced starts collapsed and the FFmpeg graph is behind a button (A27). */
 
 afterEach(cleanup);
 beforeAll(() => {
@@ -160,7 +159,7 @@ async function renderPage() {
       </TooltipProvider>
     </LiveDataContext.Provider>,
   );
-  await screen.findByRole("button", { name: "Mute track 1" });
+  await screen.findAllByRole("button", { name: "Mute track 1" });
 }
 
 /** The tracks the last Save sent. */
@@ -171,7 +170,7 @@ function savedTracks() {
   return body.profile.tracks;
 }
 
-const saveButton = () => screen.getAllByRole("button", { name: /^save$/i })[0] as HTMLButtonElement;
+const saveButton = () => screen.getByRole("button", { name: /^save changes$/i }) as HTMLButtonElement;
 
 async function save() {
   await waitFor(() => expect(saveButton().disabled).toBe(false));
@@ -180,85 +179,144 @@ async function save() {
 
 const muteButtons = () => screen.queryAllByRole("button", { name: /^(un)?mute track/i });
 
-describe("live mute on the routing page", () => {
-  it("goes to the per-track route of the destination's programme, not through Save", async () => {
+const saveState = () => document.querySelector("[data-save-state]")?.getAttribute("data-save-state");
+
+/* app-council A26: ONE save model. Mute and gain used to go straight to the
+ * per-track live route while every other edit waited for Save, so the page had
+ * two save models and two save surfaces. Now every edit, mute and gain
+ * included, is a pending edit in the draft: nothing is written until Save
+ * changes, Save writes the draft in one PUT (the server applies a level-only
+ * change live on its own, ffmpeg.MaskLiveVolumes), and Discard puts the stored
+ * value back. */
+describe("one save model: mute and gain wait for Save changes (A26)", () => {
+  // MUTATION: pass the live route's rows to the live editor again. Observed: FAIL.
+  it("a mute is a pending edit: no write until Save changes, then one PUT", async () => {
     await renderPage();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    expect(setTrackLevel).toHaveBeenCalledWith(7, 0, { muted: true }, 3);
-    expect(updateDestination).not.toHaveBeenCalled();
-    expect((await screen.findByTestId("live-level-outcome")).textContent).toBe("Applied live");
-    // Nothing is pending: the change is already stored.
-    expect(saveButton().disabled).toBe(true);
+    // Pending, not applied: the draft is dirty and nothing went to the server.
+    expect(saveState()).toBe("dirty");
     expect(screen.getByRole("button", { name: "Unmute track 1" })).toBeTruthy();
-  });
-
-  it("shows a restart as a visible notice with the server's reason", async () => {
-    setTrackLevel.mockResolvedValueOnce({
-      applied: "restart",
-      reason: "the destination is not running",
-      destination: stored,
-    });
-    await renderPage();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    const note = await screen.findByTestId("live-level-outcome");
-    expect(note.textContent).toBe("Applied by restart: the destination is not running");
-    expect(note.className).toMatch(/text-warn/);
-  });
-
-  it("keeps an unsaved draft, and the next Save does not undo the live mute", async () => {
-    await renderPage();
-    // An unsaved edit: track 3 into the mix.
-    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
-    await waitFor(() => expect(saveButton().disabled).toBe(false));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    await screen.findByRole("button", { name: "Unmute track 1" });
-    // The draft survived the list update and is still pending.
-    expect((screen.getByLabelText("Include track 3") as HTMLButtonElement).getAttribute("data-state")).toBe("checked");
+    expect(setTrackLevel).not.toHaveBeenCalled();
+    expect(updateDestination).not.toHaveBeenCalled();
     await save();
+    expect(updateDestination).toHaveBeenCalledTimes(1);
+    expect(savedTracks().find((s) => s.track === 0)?.muted).toBe(true);
+    expect(setTrackLevel).not.toHaveBeenCalled();
+  });
+
+  it("a gain is a pending edit, and Save sends it in the same single PUT", async () => {
+    await renderPage();
+    const thumb = screen.getAllByRole("slider")[0];
+    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
+    expect(saveState()).toBe("dirty");
+    expect(saveButton().disabled).toBe(false);
+    expect(updateDestination).not.toHaveBeenCalled();
+    await save();
+    expect(updateDestination).toHaveBeenCalledTimes(1);
+    expect(savedTracks().find((s) => s.track === 0)?.gain).toBe(0.95);
+    // The stored mute on track 2 rides along untouched.
+    expect(savedTracks().find((s) => s.track === 1)?.muted).toBe(true);
+    expect(setTrackLevel).not.toHaveBeenCalled();
+  });
+
+  it("Discard puts the stored mute and gain back and writes nothing", async () => {
+    await renderPage();
+    // Track 2 is stored muted: unmute it, and move track 1's gain.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unmute track 2" })));
+    await act(async () => fireEvent.keyDown(screen.getAllByRole("slider")[0], { key: "ArrowLeft" }));
+    expect(screen.getByRole("button", { name: "Mute track 2" })).toBeTruthy();
+    expect(screen.getAllByText("95%").length).toBeGreaterThan(0);
+    expect(saveState()).toBe("dirty");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /^discard$/i })));
+    expect(screen.getByRole("button", { name: "Unmute track 2" })).toBeTruthy();
+    expect(screen.queryAllByText("95%")).toHaveLength(0);
+    expect(saveState()).toBe("clean");
+    expect(updateDestination).not.toHaveBeenCalled();
+    expect(setTrackLevel).not.toHaveBeenCalled();
+  });
+
+  it("a mute and an unsaved track go out together in one Save", async () => {
+    await renderPage();
+    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
+    await save();
+    expect(updateDestination).toHaveBeenCalledTimes(1);
     const sent = savedTracks();
     expect(sent.find((s) => s.track === 0)?.muted).toBe(true);
     expect(sent.find((s) => s.track === 2)?.enabled).toBe(true);
   });
 
-  it("a 409 disables every mute with the server's reason, shown once", async () => {
-    setTrackLevel.mockRejectedValueOnce(new ApiError(409, "passes its audio through unchanged"));
+  it("drops the 'apply without Save' copy and says changes wait for Save", async () => {
     await renderPage();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    expect((await screen.findByTestId("live-level-notice")).textContent).toBe(
-      "passes its audio through unchanged",
-    );
-    for (const b of muteButtons()) expect((b as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(translate("en", "route.live.hint"))).toBeNull();
+    expect(screen.getAllByText(translate("en", "routingUx.muteGainHint")).length).toBeGreaterThan(0);
   });
 
-  it("a 404 disables that track's mute and says why under it", async () => {
-    setTrackLevel.mockRejectedValueOnce(new ApiError(404, "track is not part of this destination's selection"));
+  it("has exactly one Save button on the page", async () => {
     await renderPage();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    expect((await screen.findByTestId("live-block-0")).textContent).toMatch(/not part of/);
-    expect((screen.getByRole("button", { name: "Mute track 1" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Unmute track 2" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getAllByRole("button", { name: /^save( changes)?$/i })).toHaveLength(1);
   });
 
-  it("an audio-copy destination never calls the route and says why", async () => {
+  it("an audio-copy destination disables mute and says why", async () => {
     stored = dest({ kind: "srt", audio: { copy: true } } as Partial<Destination>);
     await renderPage();
-    expect(screen.getByTestId("live-level-notice").textContent).toMatch(/audio through unchanged/);
+    expect(screen.getAllByTestId("live-level-notice")[0].textContent).toMatch(/audio through unchanged/);
     for (const b of muteButtons()) expect((b as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("a track ticked but not saved cannot take a live mute and says to save first", async () => {
+  it("a mute under the second (VOD) mix changes only the second mix", async () => {
+    stored = dest({ vodProfile: { ...storedProfile(), tracks: [{ track: 0, enabled: true, gain: 1 }] } } as Partial<Destination>);
     await renderPage();
-    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
-    expect((screen.getByRole("button", { name: "Mute track 3" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId("live-block-2").textContent).toMatch(/^Save first/);
+    // Each mix's editor carries its own row of mutes.
+    expect(screen.getAllByRole("button", { name: "Mute track 1" })).toHaveLength(2);
+    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Mute track 1" })[1]));
+    await save();
+    const body = updateDestination.mock.calls[0][1] as { profile: RoutingProfile; vodProfile: RoutingProfile };
+    expect(body.vodProfile.tracks.find((s) => s.track === 0)?.muted).toBe(true);
+    expect(body.profile.tracks.find((s) => s.track === 0)?.muted).toBeFalsy();
+    expect(setTrackLevel).not.toHaveBeenCalled();
+  });
+});
+
+/* app-council A27: Presets, Mute and gain and Music rights stay in the main
+ * column; loudness, A/V delay, ducking, the second mix and the compiled graph
+ * move into an Advanced section that starts collapsed, and the graph itself is
+ * behind a button rather than printed. */
+describe("the editor's layout (A27)", () => {
+  const advanced = () => screen.getByTestId("routing-advanced") as HTMLDetailsElement;
+
+  // MUTATION: render the Advanced <details> with `open`. Observed: FAIL.
+  it("starts with Advanced collapsed, holding loudness, delay, ducking and the VOD mix", async () => {
+    await renderPage();
+    expect(advanced().tagName).toBe("DETAILS");
+    expect(advanced().open).toBe(false);
+    expect(advanced().querySelector("summary")?.textContent).toContain(translate("en", "routingUx.advanced"));
+    // Still mounted while closed, so a second mix's compile error keeps blocking Save.
+    expect(advanced().contains(screen.getByLabelText("Delay direction"))).toBe(true);
+    expect(advanced().contains(document.getElementById("vod-enabled"))).toBe(true);
+    expect(advanced().contains(screen.getByText(translate("en", "route.result")))).toBe(true);
+    // The core job stays outside it.
+    expect(advanced().contains(screen.getByRole("button", { name: "Mute track 1" }))).toBe(false);
+    expect(advanced().contains(screen.getByText(translate("en", "routing.presets.title")))).toBe(false);
+    expect(advanced().contains(screen.getByText(translate("en", "routingUx.muteGainTitle")))).toBe(false);
   });
 
-  it("the second (VOD) mix's editor carries no live control", async () => {
-    stored = dest({ vodProfile: storedProfile() } as Partial<Destination>);
+  // MUTATION: render the FilterString unconditionally. Observed: FAIL.
+  it("does not print the FFmpeg graph until Show FFmpeg graph is pressed", async () => {
     await renderPage();
-    // Three rows in the live editor; the VOD editor's rows add none.
-    expect(muteButtons()).toHaveLength(3);
-    expect(screen.getAllByLabelText("Include track 1")).toHaveLength(2);
+    await waitFor(() => expect(api.compileRouting).toHaveBeenCalled());
+    const show = await screen.findByRole("button", { name: translate("en", "routingUx.showGraph") });
+    expect(show.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/volume@trk0/)).toBeNull();
+    await act(async () => fireEvent.click(show));
+    expect(show.getAttribute("aria-expanded")).toBe("true");
+    expect(await screen.findByText(/volume@trk0/)).toBeTruthy();
+  });
+
+  it("keeps the /routing/:id deep link selecting the destination in the rail", async () => {
+    await renderPage();
+    const rail = screen.getByRole("button", { name: /^Twitch/ });
+    expect(rail.className).toMatch(/bg-primary-dim/);
   });
 });
 
@@ -313,28 +371,6 @@ describe("an edit made while Save is out", () => {
     await waitFor(() => expect(api.listDestinations).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(saveButton().disabled).toBe(true));
     expect(screen.getByLabelText("Include track 3").getAttribute("data-state")).toBe("checked");
-  });
-});
-
-describe("a live level shows what the server stored", () => {
-  // MUTATION: merge `change` instead of storedLevel(res, ...) in applyLevel. Observed: FAIL.
-  it("merges the answer's stored gain, not the request's own value", async () => {
-    // The server holds a different gain from the one asked for (a clamp, or
-    // another client's change that landed first).
-    setTrackLevel.mockImplementation(async (_id: number, track: number) => {
-      const tr = stored.profile.tracks.find((s) => s.track === track)!;
-      tr.gain = 0.6;
-      return { applied: "live", destination: structuredClone(stored) } as TrackLevelResult;
-    });
-    await renderPage();
-    // An unsaved edit, so the next Save sends the draft the answer was merged into.
-    await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
-    const thumb = screen.getAllByRole("slider")[0];
-    await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
-    await waitFor(() => expect(setTrackLevel).toHaveBeenCalledWith(7, 0, { gain: 0.95 }, 3));
-    await waitFor(() => expect(screen.getAllByText("60%").length).toBeGreaterThan(0));
-    await save();
-    expect(savedTracks().find((s) => s.track === 0)?.gain).toBe(0.6);
   });
 });
 
@@ -420,12 +456,9 @@ describe("the save bar says what Save will do to a running destination", () => {
   });
 
   it("a level-only draft change says it applies live where supported", async () => {
-    // A 404 leaves track 1 on the draft slider, so its gain becomes a pending
-    // level-only edit for Save rather than a live call.
-    setTrackLevel.mockRejectedValueOnce(new ApiError(404, "not in the selection"));
+    // A gain is a pending draft edit now (A26), and a draft that moves only
+    // levels is the one Save the server applies without a restart.
     await renderPage();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
-    await screen.findByTestId("live-block-0");
     const thumb = screen.getAllByRole("slider")[0];
     await act(async () => fireEvent.keyDown(thumb, { key: "ArrowLeft" }));
     await waitFor(() =>
@@ -547,12 +580,12 @@ describe("a matrix Save never moves a polarity to another cell", () => {
 });
 
 describe("RoutingPage: the Save reason and the destination list (A28, A29)", () => {
-  it("links the greyed header Save to the sentence that says why it is greyed", async () => {
+  it("links the greyed Save changes to the sentence that says why it is greyed", async () => {
     // A28. Save is disabled until a route changes, and a title on a disabled
     // button reaches nobody (button.tsx pointer-events-none). The reason is
-    // visible text the button points at.
+    // visible text the button points at. Since A26 the one Save is the bar's.
     await renderPage();
-    const save = (await screen.findAllByRole("button", { name: "Save" }))[0] as HTMLButtonElement;
+    const save = await screen.findByRole("button", { name: "Save changes" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     const reasonId = save.getAttribute("aria-describedby");
     expect(reasonId).toBeTruthy();
@@ -572,9 +605,8 @@ describe("RoutingPage: the Save reason and the destination list (A28, A29)", () 
  * draft behind an explicit Save, and <SaveStatus> beside the Save button says
  * where the draft is: "Unsaved changes", "Saved", or a failure that keeps the
  * draft. Before, a failed save was a toast that vanished and nothing on the
- * page said the routing was still unsaved. Live mute and gain are the other
- * half of the rule: they apply at once and never enter the draft (pinned in
- * the "live mute" block above). */
+ * page said the routing was still unsaved. Since A26 mute and gain are draft
+ * edits too (pinned in the "one save model" block above). */
 describe("the save status beside Save", () => {
   const status = () => {
     const el = document.querySelector("[data-save-state]");
