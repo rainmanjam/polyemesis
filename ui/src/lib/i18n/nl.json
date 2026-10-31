@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "FFmpeg-graaf tonen",
   "routingUx.hideGraph": "FFmpeg-graaf verbergen",
   "routingUx.saveChanges": "Wijzigingen opslaan",
-  "routingUx.unsavedNone": "Geen niet-opgeslagen wijzigingen."
+  "routingUx.unsavedNone": "Geen niet-opgeslagen wijzigingen.",
+  "jobsPolicyUx.jobsAtOnce": "Taken tegelijk",
+  "jobsPolicyUx.summaryCpu": "Taken wachten zolang {above} en gaan verder zodra die zakt tot {resume}%.",
+  "jobsPolicyUx.summaryCpuAbove": "de CPU boven {ceiling}% zit",
+  "jobsPolicyUx.summaryNoCeiling": "Er is geen CPU-plafond, dus taken starten ongeacht de CPU-belasting.",
+  "jobsPolicyUx.summaryOff": "Het resourcebeleid staat uit, dus taken draaien zodra er een plek vrij is.",
+  "jobsPolicyUx.advanced": "Geavanceerd: timing, prioriteit, GPU, temperatuur, accu en geschiedenis ({count} instellingen)",
+  "jobsPolicyUx.show": "Tonen",
+  "jobsPolicyUx.hide": "Verbergen",
+  "jobsPolicyUx.keptOpen": "Blijft open zolang instellingen hier afwijken van de standaard of buiten bereik liggen ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Gewijzigd ten opzichte van de standaard ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Gewijzigd ten opzichte van de standaard.",
+  "jobsPolicyUx.outOfRange": "Buiten bereik. Toegestaan: {min}–{max}."
 }

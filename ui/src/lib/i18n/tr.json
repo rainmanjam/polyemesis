@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "FFmpeg grafiğini göster",
   "routingUx.hideGraph": "FFmpeg grafiğini gizle",
   "routingUx.saveChanges": "Değişiklikleri kaydet",
-  "routingUx.unsavedNone": "Kaydedilmemiş değişiklik yok."
+  "routingUx.unsavedNone": "Kaydedilmemiş değişiklik yok.",
+  "jobsPolicyUx.jobsAtOnce": "Aynı anda iş",
+  "jobsPolicyUx.summaryCpu": "{above} olduğu sürece işler bekler, %{resume} seviyesine düşünce devam eder.",
+  "jobsPolicyUx.summaryCpuAbove": "CPU %{ceiling} üzerinde",
+  "jobsPolicyUx.summaryNoCeiling": "CPU tavanı yok, bu yüzden işler CPU yükünden bağımsız başlar.",
+  "jobsPolicyUx.summaryOff": "Kaynak politikası kapalı, bu yüzden işler boş yer açılır açılmaz çalışır.",
+  "jobsPolicyUx.advanced": "Gelişmiş: zamanlama, öncelik, GPU, sıcaklık, pil ve geçmiş ({count} ayar)",
+  "jobsPolicyUx.show": "Göster",
+  "jobsPolicyUx.hide": "Gizle",
+  "jobsPolicyUx.keptOpen": "Buradaki ayarlar varsayılandan farklı veya aralık dışı olduğu sürece açık kalır ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Varsayılandan değiştirildi ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Varsayılandan değiştirildi.",
+  "jobsPolicyUx.outOfRange": "Aralık dışı. İzin verilen: {min}–{max}."
 }

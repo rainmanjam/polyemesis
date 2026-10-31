@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "Pokaż graf FFmpeg",
   "routingUx.hideGraph": "Ukryj graf FFmpeg",
   "routingUx.saveChanges": "Zapisz zmiany",
-  "routingUx.unsavedNone": "Brak niezapisanych zmian."
+  "routingUx.unsavedNone": "Brak niezapisanych zmian.",
+  "jobsPolicyUx.jobsAtOnce": "Zadania jednocześnie",
+  "jobsPolicyUx.summaryCpu": "Zadania czekają, dopóki {above}, i wznawiają się, gdy spadnie do {resume}%.",
+  "jobsPolicyUx.summaryCpuAbove": "CPU przekracza {ceiling}%",
+  "jobsPolicyUx.summaryNoCeiling": "Brak limitu CPU, więc zadania startują niezależnie od obciążenia.",
+  "jobsPolicyUx.summaryOff": "Polityka zasobów jest wyłączona, więc zadania ruszają, gdy tylko zwolni się miejsce.",
+  "jobsPolicyUx.advanced": "Zaawansowane: czasy, priorytet, GPU, temperatura, bateria i historia ({count} ustawień)",
+  "jobsPolicyUx.show": "Pokaż",
+  "jobsPolicyUx.hide": "Ukryj",
+  "jobsPolicyUx.keptOpen": "Pozostaje otwarte, dopóki ustawienia różnią się od domyślnych lub są poza zakresem ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Zmieniono względem domyślnej ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Zmieniono względem domyślnej.",
+  "jobsPolicyUx.outOfRange": "Poza zakresem. Dozwolone: {min}–{max}."
 }

@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "Показати граф FFmpeg",
   "routingUx.hideGraph": "Сховати граф FFmpeg",
   "routingUx.saveChanges": "Зберегти зміни",
-  "routingUx.unsavedNone": "Незбережених змін немає."
+  "routingUx.unsavedNone": "Незбережених змін немає.",
+  "jobsPolicyUx.jobsAtOnce": "Завдань одночасно",
+  "jobsPolicyUx.summaryCpu": "Завдання чекають, доки {above}, і продовжуються, коли навантаження падає до {resume}%.",
+  "jobsPolicyUx.summaryCpuAbove": "навантаження CPU вище {ceiling}%",
+  "jobsPolicyUx.summaryNoCeiling": "Порогу CPU немає, тож завдання запускаються за будь-якого навантаження.",
+  "jobsPolicyUx.summaryOff": "Політику ресурсів вимкнено, тож завдання запускаються, щойно звільняється місце.",
+  "jobsPolicyUx.advanced": "Додатково: таймінги, пріоритет, GPU, температура, батарея та історія ({count} налаштувань)",
+  "jobsPolicyUx.show": "Показати",
+  "jobsPolicyUx.hide": "Сховати",
+  "jobsPolicyUx.keptOpen": "Лишається відкритим, доки налаштування тут відрізняються від типових або поза діапазоном ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Змінено порівняно з типовим ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Змінено порівняно з типовим.",
+  "jobsPolicyUx.outOfRange": "Поза діапазоном. Дозволено: {min}–{max}."
 }

@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "Tampilkan graf FFmpeg",
   "routingUx.hideGraph": "Sembunyikan graf FFmpeg",
   "routingUx.saveChanges": "Simpan perubahan",
-  "routingUx.unsavedNone": "Tidak ada perubahan yang belum disimpan."
+  "routingUx.unsavedNone": "Tidak ada perubahan yang belum disimpan.",
+  "jobsPolicyUx.jobsAtOnce": "Pekerjaan sekaligus",
+  "jobsPolicyUx.summaryCpu": "Pekerjaan ditahan selama {above} dan dilanjutkan saat turun ke {resume}%.",
+  "jobsPolicyUx.summaryCpuAbove": "CPU di atas {ceiling}%",
+  "jobsPolicyUx.summaryNoCeiling": "Tidak ada batas CPU, jadi pekerjaan dimulai berapa pun beban CPU.",
+  "jobsPolicyUx.summaryOff": "Kebijakan sumber daya nonaktif, jadi pekerjaan berjalan begitu ada slot kosong.",
+  "jobsPolicyUx.advanced": "Lanjutan: waktu, prioritas, GPU, suhu, baterai, dan riwayat ({count} pengaturan)",
+  "jobsPolicyUx.show": "Tampilkan",
+  "jobsPolicyUx.hide": "Sembunyikan",
+  "jobsPolicyUx.keptOpen": "Tetap terbuka selama ada pengaturan yang berbeda dari bawaan atau di luar rentang ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Diubah dari bawaan ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Diubah dari bawaan.",
+  "jobsPolicyUx.outOfRange": "Di luar rentang. Diizinkan: {min}–{max}."
 }

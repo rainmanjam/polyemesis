@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "Показать граф FFmpeg",
   "routingUx.hideGraph": "Скрыть граф FFmpeg",
   "routingUx.saveChanges": "Сохранить изменения",
-  "routingUx.unsavedNone": "Несохранённых изменений нет."
+  "routingUx.unsavedNone": "Несохранённых изменений нет.",
+  "jobsPolicyUx.jobsAtOnce": "Задач одновременно",
+  "jobsPolicyUx.summaryCpu": "Задачи ждут, пока {above}, и продолжаются, когда нагрузка падает до {resume}%.",
+  "jobsPolicyUx.summaryCpuAbove": "загрузка CPU выше {ceiling}%",
+  "jobsPolicyUx.summaryNoCeiling": "Порога CPU нет, поэтому задачи запускаются при любой нагрузке.",
+  "jobsPolicyUx.summaryOff": "Политика ресурсов выключена, поэтому задачи запускаются, как только освобождается место.",
+  "jobsPolicyUx.advanced": "Дополнительно: тайминги, приоритет, GPU, температура, батарея и история ({count} настроек)",
+  "jobsPolicyUx.show": "Показать",
+  "jobsPolicyUx.hide": "Скрыть",
+  "jobsPolicyUx.keptOpen": "Остаётся открытым, пока настройки здесь отличаются от значений по умолчанию или вне диапазона ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Изменено относительно значения по умолчанию ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Изменено относительно значения по умолчанию.",
+  "jobsPolicyUx.outOfRange": "Вне диапазона. Допустимо: {min}–{max}."
 }

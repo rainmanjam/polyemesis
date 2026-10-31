@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "显示 FFmpeg 滤镜图",
   "routingUx.hideGraph": "隐藏 FFmpeg 滤镜图",
   "routingUx.saveChanges": "保存更改",
-  "routingUx.unsavedNone": "没有未保存的更改。"
+  "routingUx.unsavedNone": "没有未保存的更改。",
+  "jobsPolicyUx.jobsAtOnce": "同时运行的作业数",
+  "jobsPolicyUx.summaryCpu": "{above}时作业暂缓，降到 {resume}% 时恢复。",
+  "jobsPolicyUx.summaryCpuAbove": "CPU 高于 {ceiling}%",
+  "jobsPolicyUx.summaryNoCeiling": "未设置 CPU 上限，作业不论 CPU 负载都会启动。",
+  "jobsPolicyUx.summaryOff": "资源策略已关闭，一有空位作业就会运行。",
+  "jobsPolicyUx.advanced": "高级：时间、优先级、GPU、温度、电池和历史（{count} 项设置）",
+  "jobsPolicyUx.show": "显示",
+  "jobsPolicyUx.hide": "隐藏",
+  "jobsPolicyUx.keptOpen": "只要这里有设置与默认值不同或超出范围，就保持展开（{count}）。",
+  "jobsPolicyUx.changedFromDefault": "已更改默认值（{value}）。",
+  "jobsPolicyUx.changedFromDefaultSwitch": "已更改默认值。",
+  "jobsPolicyUx.outOfRange": "超出范围。允许：{min}–{max}。"
 }

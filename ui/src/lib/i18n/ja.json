@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "FFmpeg グラフを表示",
   "routingUx.hideGraph": "FFmpeg グラフを隠す",
   "routingUx.saveChanges": "変更を保存",
-  "routingUx.unsavedNone": "未保存の変更はありません。"
+  "routingUx.unsavedNone": "未保存の変更はありません。",
+  "jobsPolicyUx.jobsAtOnce": "同時実行ジョブ数",
+  "jobsPolicyUx.summaryCpu": "{above}の間はジョブを保留し、{resume}% まで下がると再開します。",
+  "jobsPolicyUx.summaryCpuAbove": "CPU が {ceiling}% を超えている",
+  "jobsPolicyUx.summaryNoCeiling": "CPU 上限がないため、ジョブは CPU 負荷に関係なく開始します。",
+  "jobsPolicyUx.summaryOff": "リソースポリシーはオフのため、空きが出しだいジョブを実行します。",
+  "jobsPolicyUx.advanced": "詳細: タイミング、優先度、GPU、温度、バッテリー、履歴 ({count} 項目)",
+  "jobsPolicyUx.show": "表示",
+  "jobsPolicyUx.hide": "非表示",
+  "jobsPolicyUx.keptOpen": "既定値と異なる設定や範囲外の設定がある間は開いたままです ({count})。",
+  "jobsPolicyUx.changedFromDefault": "既定値から変更 ({value})。",
+  "jobsPolicyUx.changedFromDefaultSwitch": "既定値から変更。",
+  "jobsPolicyUx.outOfRange": "範囲外です。許容範囲: {min}–{max}。"
 }

@@ -114,8 +114,8 @@ async function openPolicy(): Promise<void> {
   await waitFor(() => expect(screen.getByLabelText(translate("en", "jobs.cpuCeiling"))).toBeTruthy());
 }
 
-/** The single Save on the tab. It is sticky and appears only once something is
- *  dirty, which is itself deliberate — see the comment above it. */
+/** The single Save on the tab. It is sticky, always rendered, and enabled once
+ *  something is dirty (A63) -- see the comment above it in JobsPage.tsx. */
 async function save(): Promise<void> {
   const button = await screen.findByRole("button", { name: "Save policy" });
   fireEvent.click(button);

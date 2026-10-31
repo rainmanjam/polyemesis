@@ -3385,5 +3385,17 @@
   "routingUx.showGraph": "Afficher le graphe FFmpeg",
   "routingUx.hideGraph": "Masquer le graphe FFmpeg",
   "routingUx.saveChanges": "Enregistrer les modifications",
-  "routingUx.unsavedNone": "Aucune modification non enregistrée."
+  "routingUx.unsavedNone": "Aucune modification non enregistrée.",
+  "jobsPolicyUx.jobsAtOnce": "Tâches simultanées",
+  "jobsPolicyUx.summaryCpu": "Les tâches attendent tant que {above} et reprennent quand elle redescend à {resume} %.",
+  "jobsPolicyUx.summaryCpuAbove": "le CPU dépasse {ceiling} %",
+  "jobsPolicyUx.summaryNoCeiling": "Aucun plafond CPU : les tâches démarrent quelle que soit la charge.",
+  "jobsPolicyUx.summaryOff": "La politique de ressources est désactivée : les tâches s’exécutent dès qu’une place se libère.",
+  "jobsPolicyUx.advanced": "Avancé : délais, priorité, GPU, température, batterie et historique ({count} réglages)",
+  "jobsPolicyUx.show": "Afficher",
+  "jobsPolicyUx.hide": "Masquer",
+  "jobsPolicyUx.keptOpen": "Reste ouvert tant que des réglages diffèrent de leur valeur par défaut ou sont hors limites ({count}).",
+  "jobsPolicyUx.changedFromDefault": "Modifié par rapport à la valeur par défaut ({value}).",
+  "jobsPolicyUx.changedFromDefaultSwitch": "Modifié par rapport à la valeur par défaut.",
+  "jobsPolicyUx.outOfRange": "Hors limites. Autorisé : {min}–{max}."
 }
