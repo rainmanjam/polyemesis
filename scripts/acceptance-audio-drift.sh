@@ -21,6 +21,16 @@
 #   DRIFT_MODE=slate             44.1 kHz mono primary, the 48 kHz stereo slate
 # Both go out and come back (pin primary), so both rebuilds are measured.
 #
+# DRIFT_TRACKS=2 makes it the MULTI-track case: the primary publishes two audio
+# tracks (E-RTMP multitrack), the backup still one, and both destinations mix
+# tracks 0+1. That graph ends every leg in `aresample=async=1:first_pts=0`, and
+# a rebuilt leg pads exactly as above; it cannot be fixed inside the graph. The
+# fix is upstream: the slate is built at the primary's format and the backup's
+# audio is re-encoded to it on the selector's copy hop, so there is no rebuild.
+# While a one-track standby is on air the two-track mix has no track 1 to sum
+# and is silent, so its time on air is added to the gap allowance, as for the
+# slate.
+#
 # WHAT IS MEASURED, on the last session the RTMP sink recorded per destination:
 #   hidden audio   decoded audio duration minus the span its timestamps cover.
 #                  Padding clamped onto one timestamp is exactly this; a correct
@@ -40,6 +50,9 @@
 #   POLYEMESIS_IMAGE   image to test (default: build this checkout)
 #   DRIFT_PREFIX       docker name prefix (default pe-drift-)
 #   DRIFT_MODE         backup | slate (default backup)
+#   DRIFT_TRACKS       1 | 2: tracks the primary carries and the destinations
+#                      mix (default 1)
+#   DRIFT_HTTP, DRIFT_INGEST  host ports (default 18480, 19355)
 #   DRIFT_RUNTIME      seconds on the primary before the failover (default 90)
 #   DRIFT_AFTER        seconds on the failover source, and again after the
 #                      return (default 30)
@@ -53,6 +66,7 @@ trap 'poly_verdict_trap $?' EXIT
 P="${DRIFT_PREFIX:-pe-drift-}"
 WORK="${1:-${TMPDIR:-/tmp}/polyemesis-acceptance-audio-drift}"
 MODE="${DRIFT_MODE:-backup}"
+TRACKS="${DRIFT_TRACKS:-1}"
 RUNTIME="${DRIFT_RUNTIME:-90}"
 AFTER="${DRIFT_AFTER:-30}"
 # The pass lines. 100 ms is well inside what a viewer notices and two orders of
@@ -63,13 +77,18 @@ MAX_MS=100
 # below the fault. The slate's audio IS silence, so in slate mode its time on
 # air is added.
 MAX_GAP_S=$(( RUNTIME / 3 ))
-HTTP=18480; INGEST=19355
+HTTP="${DRIFT_HTTP:-18480}"; INGEST="${DRIFT_INGEST:-19355}"
 NET="${P}net"; SRV="${P}server"; SINK="${P}sink"
 
 case "$MODE" in
   backup) P_RATE=48000; P_CH=2; FAILTO=backup ;;
   slate)  P_RATE=44100; P_CH=1; FAILTO=slate; MAX_GAP_S=$(( MAX_GAP_S + AFTER )) ;;
   *) poly_preflight_fail "DRIFT_MODE must be backup or slate, not '$MODE'" ;;
+esac
+case "$TRACKS" in
+  1) ;;
+  2) [ "$MODE" = slate ] || MAX_GAP_S=$(( MAX_GAP_S + AFTER )) ;;
+  *) poly_preflight_fail "DRIFT_TRACKS must be 1 or 2, not '$TRACKS'" ;;
 esac
 
 poly_require_docker "the server and the RTMP sink run in containers"
@@ -116,12 +135,16 @@ wait_active() { # wait_active <kind> <seconds>
 # The flash and the beep are the sync marks; the steady tone under the beep
 # keeps the audio from reading as silence.
 MARK='lt(mod(t,2),0.1)'
+# An optional sixth argument is how many audio tracks to publish (default 1);
+# each carries the same tone and marks, so the mix beeps where every track does.
 publish() {
+  local n="${6:-1}" i maps=(-map 0:v)
+  for i in $(seq 1 "$n"); do maps+=(-map 1:a); done
   ffmpeg -hide_banner -loglevel error -re \
     -f lavfi -i "testsrc2=size=640x360:rate=30,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='$MARK'" \
     -f lavfi -i "aevalsrc='0.1*sin(2*PI*$5*t)+if($MARK,0.6*sin(2*PI*3000*t),0)':s=$3" \
     -metadata comment="drift-publisher-${P}$1" \
-    -map 0:v -map 1:a -c:v libx264 -preset veryfast -profile:v high -level 4.0 \
+    "${maps[@]}" -c:v libx264 -preset veryfast -profile:v high -level 4.0 \
     -g 60 -pix_fmt yuv420p -b:v 1000k -c:a aac -b:a 128k -ar "$3" -ac "$4" \
     -t 3600 -f flv "rtmp://127.0.0.1:$INGEST/live/$2" > "publisher-$1.log" 2>&1 &
 }
@@ -165,7 +188,7 @@ measure() {
     printf "%d %s %s %s\n", (d - (al - af + 1024/48000))*1000, s, g, d }'
 }
 
-step "1. Server and an RTMP sink, in containers ($MODE mode)"
+step "1. Server and an RTMP sink, in containers ($MODE mode, $TRACKS track(s))"
 docker network create "$NET" >/dev/null
 docker run -d --name "$SRV" --network "$NET" -e POLYEMESIS_SETUP_CODE \
   -p "$HTTP:8080" -p "$INGEST:1935" "$IMAGE" >/dev/null \
@@ -189,12 +212,12 @@ KEY=$(drive publishkey | tail -1)
 [ -n "$KEY" ] || { bad "no publish key"; exit 1; }
 
 step "2. Primary at $P_RATE Hz x$P_CH; the $FAILTO decodes differently"
-publish primary "$KEY" "$P_RATE" "$P_CH" 1000
+publish primary "$KEY" "$P_RATE" "$P_CH" 1000 "$TRACKS"
 [ "$MODE" = backup ] && publish backup "$KEY.backup" 44100 1 440
 wait_active primary 60 && ok "the primary is on air" || { bad "the primary never went on air"; exit 1; }
 
 for d in restarted:1936 live:1937; do
-  drive adddest "${d%%:*}" "rtmp://$SINK:${d#*:}/live" | grep -q DEST_OK \
+  drive adddest "${d%%:*}" "rtmp://$SINK:${d#*:}/live" "$TRACKS" | grep -q DEST_OK \
     || { bad "could not add destination ${d%%:*}"; exit 1; }
 done
 running=no
@@ -219,7 +242,7 @@ wait_active "$FAILTO" 30 && ok "the $FAILTO took over" || bad "the selector neve
 sleep "$AFTER"
 
 step "4. The primary returns, in its own format"
-publish primary "$KEY" "$P_RATE" "$P_CH" 1000
+publish primary "$KEY" "$P_RATE" "$P_CH" 1000 "$TRACKS"
 sleep 8
 drive pin primary | grep -q PIN_OK || bad "could not put the primary back on air"
 wait_active primary 30 && ok "the primary is back on air" || bad "the primary never came back"

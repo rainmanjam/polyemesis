@@ -273,8 +273,8 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 	// matching the one the copied video carries. reinit_drift_test.go.
 	//
 	// The per-track legs (trackAlign) keep first_pts=0, because nothing else
-	// gives amix a common origin, so a rebuilt MULTI-track graph still pads.
-	// See trackAlign.
+	// gives amix a common origin, so a rebuilt MULTI-track graph would still
+	// pad. The selector keeps that rebuild from happening; see trackAlign.
 	rate := p.SampleRate
 	if rate == 0 {
 		rate = 48000
@@ -333,15 +333,22 @@ func compile(p Profile, src Source, provisional bool, n ns) (Result, error) {
 // no input to sum and produces nothing, as selector.go's slate note says. This
 // makes the return correct; it does not make the outage audible.
 //
-// KNOWN LIMITATION: zero is the right origin only for the graph FFmpeg builds
-// at spawn. When a failover changes the decoded sample rate or channel count,
-// FFmpeg rebuilds the graph mid-run, and every leg of the rebuilt one pads from
-// zero to the current timestamp -- so a multi-track mix goes the stream's
-// runtime behind its video, exactly the fault the final resample no longer has
-// (see compile). It cannot be fixed here: amix sums by sample count, no
-// filter can name "where this graph instance started", and dropping first_pts
-// from the legs loses the late-track alignment above (measured: the tone lands
-// 10 s early). A switch that keeps the format, the common case, is unaffected.
+// ZERO IS THE RIGHT ORIGIN ONLY FOR THE GRAPH FFMPEG BUILDS AT SPAWN. When the
+// decoded sample rate or channel count changes, FFmpeg rebuilds the graph
+// mid-run, and every leg of the rebuilt one pads from zero to the current
+// timestamp -- so a multi-track mix would go the stream's runtime behind its
+// video, exactly the fault the final resample no longer has (see compile). It
+// cannot be fixed here: amix sums by sample count, no filter can name "where
+// this graph instance started", and dropping first_pts from the legs loses the
+// late-track alignment above (measured: the tone lands 10 s early).
+//
+// So it is fixed where the format is chosen, which is the selector: the slate
+// is built at the primary's measured format, and a backup or playlist feed has
+// its audio re-encoded to it on the way in (engine's conformedFeedArgs). A
+// failover then never changes the format a destination decodes, and the graph
+// is never rebuilt. What still rebuilds it is a primary never measured, which
+// leaves nothing to conform to, or one whose decoder emits a different sample
+// format from the AAC the standby is converted to.
 const trackAlign = "aresample=async=1:first_pts=0"
 
 // trackGain is the per-track gain a provisional chain applies by hand, because
