@@ -927,6 +927,23 @@ its first tagged release.
 - **A track's role chip no longer wraps into its meter.** The label column is
   bounded and the chip truncates, with its full name on hover.
 
+- **Recordings keep their finish time.** The 30-second scan re-indexes every
+  segment, and it was clearing the finish time an earlier writer had recorded.
+  A re-index with no finish time of its own now keeps the stored one. Found by
+  #940.
+- **A restarted two-track destination keeps publishing while a one-track
+  standby is on air.** The backup and the playlist now carry one silent pad
+  per primary track, and the slate publishes one silent track per primary
+  track. Before, a destination restarted in that window exited at once and
+  stopped publishing after a few seconds. Verified with real FFmpeg; the
+  Docker drift matrix run is recorded in the PR notes.
+- **A live level restart says so.** `destination.restarted` said "the process
+  exited and was started again" for restarts the engine made to apply a live
+  audio level. It now says a live audio level change restarted the output (#933).
+- **A broadcast delay that is still filling reads "Filling delay".** The
+  destination card and the Renditions chip said Stopped while the buffer filled,
+  before any process existed. They now read Filling delay, in amber.
+
 ## [0.11.0] — 2026-09-24
 
 ### Added
