@@ -171,6 +171,9 @@ export function JobsPage() {
   // rather than as its id: the dialog has to name what is destroyed, and only
   // the job itself knows whether a file is part of that (see CLIP_EXPORT_KIND).
   const [pendingDelete, setPendingDelete] = useState<JobView | null>(null);
+  // A RUNNING job asks first: cancelling it throws away the work already done.
+  // A queued job has no progress to lose, so it cancels on the click (A60).
+  const [pendingCancel, setPendingCancel] = useState<JobView | null>(null);
   // The policy is edited locally and saved explicitly. Live-saving every
   // keystroke of a CPU ceiling would write a policy nobody meant through the
   // half-typed values on the way there.
@@ -180,15 +183,25 @@ export function JobsPage() {
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
+  // A streak of failed polls. The first failure is news and toasts; the ones
+  // after it are the same news every four seconds, so they are said once, in
+  // place, until a poll gets through (A59).
+  const failingRef = useRef(false);
+  const [connectionLost, setConnectionLost] = useState(false);
+
   const load = useCallback(async (): Promise<void> => {
     try {
       const next = await api.jobsOverview();
+      failingRef.current = false;
+      setConnectionLost(false);
       setView(next);
       // An unsaved edit is never clobbered by a poll. The queue's own numbers
       // keep updating; only the form the user is holding is left alone.
       if (!dirtyRef.current) setDraft(next.policy);
     } catch (err) {
-      toast.error(errText(err, t("jobs.couldNotReadTheJob")));
+      if (!failingRef.current) toast.error(errText(err, t("jobs.couldNotReadTheJob")));
+      failingRef.current = true;
+      setConnectionLost(true);
     } finally {
       setLoading(false);
     }
@@ -273,6 +286,19 @@ export function JobsPage() {
     );
   }
 
+  // No answer yet from an unreachable server is not the same as "no queue on
+  // this server", and must not be said as if it were (A59).
+  if (!view && connectionLost) {
+    return (
+      <div className="p-3">
+        <PageHeader title={t("jobs.title")} subtitle={t("jobs.subtitle")} />
+        <p role="status" className="text-sm text-warn">
+          {t("jobs.connectionLostRetrying")}
+        </p>
+      </div>
+    );
+  }
+
   if (!view?.available) {
     return (
       <div className="p-3">
@@ -306,23 +332,34 @@ export function JobsPage() {
                 {t("jobs.runningCount", { count: view.stats.running })}
               </Badge>
             )}
-            <Button
-              variant={view.paused ? "default" : "outline"}
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                act(
-                  () => (view.paused ? api.resumeJobs() : api.pauseJobs()),
-                  view.paused ? t("jobs.queueResumed") : t("jobs.queuePaused"),
-                )
-              }
-            >
-              {view.paused ? <Play /> : <Pause />}
-              {view.paused ? t("jobs.resumeAll") : t("jobs.pauseAll")}
-            </Button>
+            {/* Pause all needs something to pause. Over an empty queue it has no
+                target, so it is not offered; a paused queue always keeps its
+                Resume all, whatever is in it (A64). */}
+            {(view.paused || view.active.length > 0) && (
+              <Button
+                variant={view.paused ? "default" : "outline"}
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  act(
+                    () => (view.paused ? api.resumeJobs() : api.pauseJobs()),
+                    view.paused ? t("jobs.queueResumed") : t("jobs.queuePaused"),
+                  )
+                }
+              >
+                {view.paused ? <Play /> : <Pause />}
+                {view.paused ? t("jobs.resumeAll") : t("jobs.pauseAll")}
+              </Button>
+            )}
           </>
         }
       />
+
+      {connectionLost && (
+        <p role="status" className="mt-2 text-sm text-warn">
+          {t("jobs.connectionLostRetrying")}
+        </p>
+      )}
 
       {/* ---- the gates: what the machine is asserting right now ---- */}
       <GatePanel view={view} />
@@ -348,7 +385,11 @@ export function JobsPage() {
                 jobs={view.active}
                 empty={t("jobs.nothingQueued")}
                 busy={busy}
-                onCancel={(id) => act(() => api.cancelJob(id), t("jobs.jobCancelled"))}
+                onCancel={(id) => {
+                  const job = view.active.find((j) => j.id === id);
+                  if (job?.state === "running") setPendingCancel(job);
+                  else void act(() => api.cancelJob(id), t("jobs.jobCancelled"));
+                }}
                 onRelease={
                   governed
                     ? (id) =>
@@ -437,6 +478,23 @@ export function JobsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Cancelling a running job loses the work done on it (A60). */}
+      <ConfirmDestructive
+        open={pendingCancel !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingCancel(null);
+        }}
+        subject={pendingCancel ? (pendingCancel.label ?? pendingCancel.kind) : ""}
+        title={t("jobs.cancelRunningTitle")}
+        description={t("jobs.cancelRunningDescription")}
+        confirmLabel={t("jobs.cancelRunningConfirm")}
+        onConfirm={() =>
+          pendingCancel
+            ? act(() => api.cancelJob(pendingCancel.id), t("jobs.jobCancelled"))
+            : undefined
+        }
+      />
 
       {/* THE ROW DELETE TAKES THE FILE TOO, and said nothing about it.
           handleDeleteJob (internal/api/jobs.go) calls removeClipExport once the
@@ -534,6 +592,9 @@ function GatePanel({ view }: { view: JobsOverview }) {
             <Badge variant={g.cpuOverCeiling ? "warn" : "outline"} title={t("jobs.hostCpuLoad")}>
               <Cpu className="h-2.5 w-2.5" />
               {g.cpuPercent.toFixed(0)}%
+              {/* The reason a job is held is said in words, not left to the
+                  tooltip that touch and keyboard users never see (A61). */}
+              {g.cpuOverCeiling && <span className="ml-1">{t("jobs.gateCpuOverCeiling")}</span>}
             </Badge>
           )}
           {g?.gpuBusy && (
@@ -1198,6 +1259,29 @@ function NumberField({
   max: number;
   onChange: (n: number) => void;
 }) {
+  // What is typed is kept as text, so an emptied field stays empty. The old
+  // code wrote NaN through as the minimum, so clearing the box to type 70 over
+  // 85 left "1" in it mid-edit (A62). On blur or Enter the value is clamped.
+  const [text, setText] = useState(String(value));
+  // Follows the saved value when it changes from outside, by adjusting state
+  // during render rather than in an effect.
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) {
+    setSeen(value);
+    setText(String(value));
+  }
+
+  const commit = () => {
+    const n = Number.parseInt(text, 10);
+    if (Number.isNaN(n)) {
+      setText(String(value));
+      return;
+    }
+    const clamped = Math.min(max, Math.max(min, n));
+    setText(String(clamped));
+    if (clamped !== value) onChange(clamped);
+  };
+
   return (
     <div className="flex flex-col gap-1">
       <Label htmlFor={id}>{label}</Label>
@@ -1207,13 +1291,24 @@ function NumberField({
         className="tnum font-mono"
         min={min}
         max={max}
-        value={value}
+        value={text}
         onChange={(e) => {
+          setText(e.target.value);
+          // A number is passed up as it is typed, as before. Nothing is
+          // written for an empty field, so NaN no longer becomes the minimum.
           const n = Number.parseInt(e.target.value, 10);
-          onChange(Number.isNaN(n) ? min : n);
+          if (!Number.isNaN(n)) onChange(n);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
         }}
       />
-      {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+      {hint && (
+        <p className="text-sm text-muted-foreground">
+          {hint} <span className="tnum font-mono">({min}–{max})</span>
+        </p>
+      )}
     </div>
   );
 }

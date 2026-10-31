@@ -414,6 +414,17 @@ its first tagged release.
 
 ### Changed
 
+- **Jobs, Monitoring and sign-in say what they mean.** Jobs says once, in place,
+  when the server cannot be reached, instead of a red toast every four seconds.
+  Cancelling a running transcode asks first; a queued job still cancels on the
+  click. The CPU gate says "CPU over ceiling" in words, and Pause all appears only
+  when there is something to pause. Monitoring opens with one status sentence
+  under the title, puts the FFmpeg log full width, keeps raw FFmpeg arguments
+  behind a button, and shows a dash rather than 0% before the first sample. On
+  the first-run and sign-in screen, a wrong setup code or a dropped connection
+  keeps what you typed, validation shows inline, and the setup-code help is
+  readable at 12px and up.
+
 - **One status vocabulary, ready for the pages.** `lib/status.ts` maps every
   process, destination, delay, rendition, recorder, clip-buffer, ingest and
   output state to one translated word, a tone and a non-colour indicator. The
@@ -500,6 +511,11 @@ its first tagged release.
   replaced by a crop of the real routing screen.
 
 ### Fixed
+
+- **A failed refresh no longer hides the timeline.** The incidents already on
+  screen stay, with a line saying how old the list is. A failed destination list
+  in Expert mode is said, with a retry. Numeric policy fields no longer snap to
+  the minimum while you type.
 
 - **The OAuth acceptance suite no longer creates a Facebook live video.**
   `scripts/acceptance-oauth.sh` said its credentialed step "starts no
