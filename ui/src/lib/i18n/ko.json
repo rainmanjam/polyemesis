@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "기본값과 다르거나 범위를 벗어난 설정이 있는 동안 열려 있습니다 ({count}).",
   "jobsPolicyUx.changedFromDefault": "기본값에서 변경됨 ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "기본값에서 변경됨.",
-  "jobsPolicyUx.outOfRange": "범위를 벗어났습니다. 허용 범위: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "범위를 벗어났습니다. 허용 범위: {min}–{max}.",
+  "procTable.caption": "프로세스, 문제 항목 먼저",
+  "procTable.colProcess": "프로세스",
+  "procTable.colState": "상태",
+  "procTable.colErrors": "오류",
+  "procTable.toggle": "{process} 세부 정보",
+  "procTable.showCommand": "명령 표시",
+  "procTable.hideCommand": "명령 숨기기"
 }

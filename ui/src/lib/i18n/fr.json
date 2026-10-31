@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Reste ouvert tant que des réglages diffèrent de leur valeur par défaut ou sont hors limites ({count}).",
   "jobsPolicyUx.changedFromDefault": "Modifié par rapport à la valeur par défaut ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Modifié par rapport à la valeur par défaut.",
-  "jobsPolicyUx.outOfRange": "Hors limites. Autorisé : {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Hors limites. Autorisé : {min}–{max}.",
+  "procTable.caption": "Processus, problèmes en premier",
+  "procTable.colProcess": "Processus",
+  "procTable.colState": "État",
+  "procTable.colErrors": "Erreurs",
+  "procTable.toggle": "Détails de {process}",
+  "procTable.showCommand": "Afficher la commande",
+  "procTable.hideCommand": "Masquer la commande"
 }

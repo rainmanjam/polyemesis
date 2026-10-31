@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Остаётся открытым, пока настройки здесь отличаются от значений по умолчанию или вне диапазона ({count}).",
   "jobsPolicyUx.changedFromDefault": "Изменено относительно значения по умолчанию ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Изменено относительно значения по умолчанию.",
-  "jobsPolicyUx.outOfRange": "Вне диапазона. Допустимо: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Вне диапазона. Допустимо: {min}–{max}.",
+  "procTable.caption": "Процессы, сначала проблемные",
+  "procTable.colProcess": "Процесс",
+  "procTable.colState": "Состояние",
+  "procTable.colErrors": "Ошибки",
+  "procTable.toggle": "Подробности: {process}",
+  "procTable.showCommand": "Показать команду",
+  "procTable.hideCommand": "Скрыть команду"
 }

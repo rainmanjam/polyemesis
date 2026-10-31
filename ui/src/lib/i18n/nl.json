@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Blijft open zolang instellingen hier afwijken van de standaard of buiten bereik liggen ({count}).",
   "jobsPolicyUx.changedFromDefault": "Gewijzigd ten opzichte van de standaard ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Gewijzigd ten opzichte van de standaard.",
-  "jobsPolicyUx.outOfRange": "Buiten bereik. Toegestaan: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Buiten bereik. Toegestaan: {min}–{max}.",
+  "procTable.caption": "Processen, problemen eerst",
+  "procTable.colProcess": "Proces",
+  "procTable.colState": "Status",
+  "procTable.colErrors": "Fouten",
+  "procTable.toggle": "Details van {process}",
+  "procTable.showCommand": "Opdracht tonen",
+  "procTable.hideCommand": "Opdracht verbergen"
 }

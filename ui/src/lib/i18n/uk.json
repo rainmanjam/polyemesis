@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Лишається відкритим, доки налаштування тут відрізняються від типових або поза діапазоном ({count}).",
   "jobsPolicyUx.changedFromDefault": "Змінено порівняно з типовим ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Змінено порівняно з типовим.",
-  "jobsPolicyUx.outOfRange": "Поза діапазоном. Дозволено: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Поза діапазоном. Дозволено: {min}–{max}.",
+  "procTable.caption": "Процеси, спершу проблемні",
+  "procTable.colProcess": "Процес",
+  "procTable.colState": "Стан",
+  "procTable.colErrors": "Помилки",
+  "procTable.toggle": "Подробиці: {process}",
+  "procTable.showCommand": "Показати команду",
+  "procTable.hideCommand": "Сховати команду"
 }

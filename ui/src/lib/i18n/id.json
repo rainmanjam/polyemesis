@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Tetap terbuka selama ada pengaturan yang berbeda dari bawaan atau di luar rentang ({count}).",
   "jobsPolicyUx.changedFromDefault": "Diubah dari bawaan ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Diubah dari bawaan.",
-  "jobsPolicyUx.outOfRange": "Di luar rentang. Diizinkan: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Di luar rentang. Diizinkan: {min}–{max}.",
+  "procTable.caption": "Proses, masalah lebih dulu",
+  "procTable.colProcess": "Proses",
+  "procTable.colState": "Status",
+  "procTable.colErrors": "Galat",
+  "procTable.toggle": "Detail untuk {process}",
+  "procTable.showCommand": "Tampilkan perintah",
+  "procTable.hideCommand": "Sembunyikan perintah"
 }

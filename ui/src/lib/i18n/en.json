@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Kept open while settings here differ from their default or are out of range ({count}).",
   "jobsPolicyUx.changedFromDefault": "Changed from the default ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Changed from the default.",
-  "jobsPolicyUx.outOfRange": "Out of range. Allowed: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Out of range. Allowed: {min}–{max}.",
+  "procTable.caption": "Processes, problems first",
+  "procTable.colProcess": "Process",
+  "procTable.colState": "State",
+  "procTable.colErrors": "Errors",
+  "procTable.toggle": "Details for {process}",
+  "procTable.showCommand": "Show command",
+  "procTable.hideCommand": "Hide command"
 }

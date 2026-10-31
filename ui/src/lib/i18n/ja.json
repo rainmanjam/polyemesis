@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "既定値と異なる設定や範囲外の設定がある間は開いたままです ({count})。",
   "jobsPolicyUx.changedFromDefault": "既定値から変更 ({value})。",
   "jobsPolicyUx.changedFromDefaultSwitch": "既定値から変更。",
-  "jobsPolicyUx.outOfRange": "範囲外です。許容範囲: {min}–{max}。"
+  "jobsPolicyUx.outOfRange": "範囲外です。許容範囲: {min}–{max}。",
+  "procTable.caption": "プロセス（問題のあるものを先頭に）",
+  "procTable.colProcess": "プロセス",
+  "procTable.colState": "状態",
+  "procTable.colErrors": "エラー",
+  "procTable.toggle": "{process} の詳細",
+  "procTable.showCommand": "コマンドを表示",
+  "procTable.hideCommand": "コマンドを隠す"
 }

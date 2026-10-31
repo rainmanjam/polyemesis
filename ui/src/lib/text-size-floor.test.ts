@@ -61,7 +61,7 @@ const ALLOWED: Record<string, number> = {
   "pages/ClipsPage.tsx": 0,
   "pages/Dashboard.tsx": 5,
   "pages/LibraryPage.tsx": 6,
-  "pages/MonitoringPage.tsx": 7,
+  "pages/MonitoringPage.tsx": 6,
   "pages/RecordingsPage.tsx": 2,
 };
 

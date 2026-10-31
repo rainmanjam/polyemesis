@@ -28,18 +28,14 @@ import {
 import { PageHeader } from "@/components/AppLayout";
 import { MonitorTimeline } from "@/components/MonitorTimeline";
 import { Stat } from "@/components/signature/Stat";
-import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { Link, useSearchParams } from "react-router";
-import { StatusDot } from "@/components/signature/StatusDot";
 import { useLiveData, useStaleTracker } from "@/hooks/useLiveData";
 import { useConfirm } from "@/hooks/useConfirm";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
-import { bytes, clockTime, duration, kbps, pct } from "@/lib/format";
-import { toneForState } from "@/lib/signal";
-import { processStatus } from "@/lib/status";
-import { StatusPill } from "@/components/StatusPill";
+import { bytes, clockTime, kbps, pct } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
+import { ProcessTable } from "@/components/ProcessTable";
 import {
   VERDICT_WINDOW_SEC,
   collapseRepeats,
@@ -953,72 +949,11 @@ export function MonitoringPage() {
                   <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
                 </div>
               ))}
-            {processes.map(({ status: p, command }) => {
-              const tone = toneForState(p.state);
-              return (
-                <div key={p.name} className="rounded-md border border-border bg-background p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <StatusDot tone={tone} size="sm" />
-                      <span className="truncate font-mono text-tiny">{p.name}</span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {(errorsByProcess.get(p.name) ?? 0) > 0 && (
-                        <Badge variant="warn">
-                          {t("monitor.processErrors", { count: errorsByProcess.get(p.name) ?? 0 })}
-                        </Badge>
-                      )}
-                      <StatusPill reading={processStatus(p.state)} />
-                    </div>
-                  </div>
-                  <div className="mt-1 grid grid-cols-3 gap-1">
-                    <Stat labelKey="mon.pid" value={p.pid || "—"} tone="muted" />
-                    <Stat
-                      labelKey="mon.uptime"
-                      value={p.state === "running" ? duration(p.uptimeSec) : "—"}
-                      tone="muted"
-                    />
-                    <Stat
-                      labelKey="mon.restarts"
-                      value={p.restarts}
-                      tone={p.restarts > 0 ? "warn" : "muted"}
-                    />
-                  </div>
-                  {p.nextRetryIn ? (
-                    <div className="mt-1 text-sm text-warn">
-                      {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
-                    </div>
-                  ) : null}
-                  {/* #20 + A9: the classified cause, what to do about it, and the
-                      process's own log one click away. The raw lastError stays
-                      for an unclassified failure. */}
-                  {p.reason ? (
-                    <div className="mt-1 flex flex-col gap-1 text-sm text-down">
-                      <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
-                      <FailureRemedy
-                        cause={p.reason.cause}
-                        process={p.name}
-                        onShowLog={() => showLog(p.name)}
-                      />
-                    </div>
-                  ) : (
-                    p.lastError && (
-                      <div className="mt-1 line-clamp-2 break-words text-sm text-down">
-                        {p.lastError}
-                      </div>
-                    )
-                  )}
-                  <details className="mt-1">
-                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
-                      {t("i18nSweep.commandLine")}
-                    </summary>
-                    <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
-                      {command}
-                    </pre>
-                  </details>
-                </div>
-              );
-            })}
+            {/* A72: a compact table, problems first; each row opens to the
+                cause, remedy, PID, log and command the card used to show. */}
+            {processes.length > 0 && (
+              <ProcessTable processes={processes} errorsByProcess={errorsByProcess} onShowLog={showLog} />
+            )}
           </CardContent>
         </Card>
 

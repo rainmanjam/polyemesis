@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Buradaki ayarlar varsayılandan farklı veya aralık dışı olduğu sürece açık kalır ({count}).",
   "jobsPolicyUx.changedFromDefault": "Varsayılandan değiştirildi ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Varsayılandan değiştirildi.",
-  "jobsPolicyUx.outOfRange": "Aralık dışı. İzin verilen: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Aralık dışı. İzin verilen: {min}–{max}.",
+  "procTable.caption": "Süreçler, önce sorunlular",
+  "procTable.colProcess": "Süreç",
+  "procTable.colState": "Durum",
+  "procTable.colErrors": "Hatalar",
+  "procTable.toggle": "{process} ayrıntıları",
+  "procTable.showCommand": "Komutu göster",
+  "procTable.hideCommand": "Komutu gizle"
 }

@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "Se mantiene abierto mientras haya ajustes distintos del valor predeterminado o fuera de rango ({count}).",
   "jobsPolicyUx.changedFromDefault": "Cambiado respecto al valor predeterminado ({value}).",
   "jobsPolicyUx.changedFromDefaultSwitch": "Cambiado respecto al valor predeterminado.",
-  "jobsPolicyUx.outOfRange": "Fuera de rango. Permitido: {min}–{max}."
+  "jobsPolicyUx.outOfRange": "Fuera de rango. Permitido: {min}–{max}.",
+  "procTable.caption": "Procesos, primero los problemas",
+  "procTable.colProcess": "Proceso",
+  "procTable.colState": "Estado",
+  "procTable.colErrors": "Errores",
+  "procTable.toggle": "Detalles de {process}",
+  "procTable.showCommand": "Mostrar comando",
+  "procTable.hideCommand": "Ocultar comando"
 }

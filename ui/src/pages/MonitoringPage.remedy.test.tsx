@@ -81,6 +81,10 @@ const draw = (path = "/monitoring") =>
 describe("Monitoring: every failure comes with its remedy", () => {
   it("a process with a classified reason names it, says what to check, and offers its log", async () => {
     draw();
+    // A72: the process is a table row now; its reason is in the row's detail,
+    // one click on the row's toggle away.
+    const toggle = await screen.findByRole("button", { name: "Details for dest:7" });
+    fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByText("Stream key rejected")).toBeTruthy());
     expect(screen.getByText(/Check the stream key in the platform's dashboard/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Show log" })).toBeTruthy();

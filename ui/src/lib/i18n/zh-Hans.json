@@ -3397,5 +3397,12 @@
   "jobsPolicyUx.keptOpen": "只要这里有设置与默认值不同或超出范围，就保持展开（{count}）。",
   "jobsPolicyUx.changedFromDefault": "已更改默认值（{value}）。",
   "jobsPolicyUx.changedFromDefaultSwitch": "已更改默认值。",
-  "jobsPolicyUx.outOfRange": "超出范围。允许：{min}–{max}。"
+  "jobsPolicyUx.outOfRange": "超出范围。允许：{min}–{max}。",
+  "procTable.caption": "进程（问题优先）",
+  "procTable.colProcess": "进程",
+  "procTable.colState": "状态",
+  "procTable.colErrors": "错误",
+  "procTable.toggle": "{process} 的详情",
+  "procTable.showCommand": "显示命令",
+  "procTable.hideCommand": "隐藏命令"
 }
