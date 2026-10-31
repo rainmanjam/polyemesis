@@ -14,9 +14,10 @@ its first tagged release.
   (VOD) mix is now checked against this FFmpeg before it is sent: a binary
   that cannot write two audio tracks into FLV drops the VOD mix with its
   reason on the card, and the live stream goes out alone. A new second mix
-  defaults to everything except music. Live mute and gain reach the VOD
-  mix's copy of the same track. Twitch acceptance of the two-track publish
-  is PROVISIONAL until a live test on a Twitch test channel.
+  defaults to everything except music. Live mute reaches the VOD mix's copy of
+  the same track, and so does live gain except in a matrix VOD mix (gain there
+  is per cell). Twitch acceptance of the two-track publish is PROVISIONAL until
+  a live test on a Twitch test channel.
 
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
