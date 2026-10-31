@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "명령 숨기기",
   "dashMobile.chatPipeline": "채팅 및 파이프라인",
   "dashMobile.streamInfo": "방송 정보(제목, 태그, 카테고리)",
-  "dashMobile.failoverOff": "장애 조치가 꺼져 있음"
+  "dashMobile.failoverOff": "장애 조치가 꺼져 있음",
+  "wave3.bugs.delayFilling": "지연 채우는 중"
 }

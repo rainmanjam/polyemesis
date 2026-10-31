@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Opdracht verbergen",
   "dashMobile.chatPipeline": "Chat en verwerkingsketen",
   "dashMobile.streamInfo": "Streaminfo (titel, tags, categorie)",
-  "dashMobile.failoverOff": "Failover staat uit"
+  "dashMobile.failoverOff": "Failover staat uit",
+  "wave3.bugs.delayFilling": "Vertraging vult zich"
 }

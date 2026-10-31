@@ -1,7 +1,7 @@
 import { stateLabelKey, type TranslationKey } from "./i18n";
 import type { OutputState } from "./outputStrip";
 import type { IngestPhase } from "./sourceIngest";
-import type { ProcessState, ProcessStatus } from "./types";
+import type { DelayStatus, ProcessState, ProcessStatus } from "./types";
 
 /* ONE VOCABULARY FOR EVERY "IS IT RUNNING" WORD ON THE CONSOLE.
  *
@@ -66,8 +66,16 @@ export function processStatus(state?: ProcessState | null): StatusReading {
  *  Stopped, so a switched-off card is not read as a broadcast that ended
  *  (app-council A2). The card, the Renditions chip and the on-air counts all
  *  take their word from here (A91). */
-export function destinationStatus(enabled: boolean, state?: ProcessState | null): StatusReading {
-  return enabled ? processStatus(state) : reading("state.off", "idle");
+export function destinationStatus(
+  enabled: boolean,
+  state?: ProcessState | null,
+  delayPhase?: DelayStatus["phase"] | null,
+): StatusReading {
+  if (!enabled) return reading("state.off", "idle");
+  // A broadcast delay fills before any process exists, by design (#11). With no
+  // process yet, that is a filling state, not a stopped one.
+  if (!state && delayPhase === "buffering") return reading("wave3.bugs.delayFilling", "warn");
+  return processStatus(state);
 }
 
 /** A broadcast-delay buffer phase (types.ts DelayStatus). Buffering is filling

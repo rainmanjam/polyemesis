@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Ukryj polecenie",
   "dashMobile.chatPipeline": "Czat i potok przetwarzania",
   "dashMobile.streamInfo": "Informacje o transmisji (tytuł, tagi, kategoria)",
-  "dashMobile.failoverOff": "Przełączanie awaryjne jest wyłączone"
+  "dashMobile.failoverOff": "Przełączanie awaryjne jest wyłączone",
+  "wave3.bugs.delayFilling": "Wypełnianie opóźnienia"
 }

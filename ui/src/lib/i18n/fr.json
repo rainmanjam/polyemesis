@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Masquer la commande",
   "dashMobile.chatPipeline": "Chat et chaîne de traitement",
   "dashMobile.streamInfo": "Infos du direct (titre, tags, catégorie)",
-  "dashMobile.failoverOff": "La bascule est désactivée"
+  "dashMobile.failoverOff": "La bascule est désactivée",
+  "wave3.bugs.delayFilling": "Remplissage du différé"
 }

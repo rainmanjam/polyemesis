@@ -660,7 +660,7 @@ function DestChip({ dest }: { dest: DestStatus }) {
       {/* A34: the state in words. A dot alone needed a legend nobody had, and
           a hover title never reaches a touch screen. */}
       <span className="text-muted-foreground">
-        {t(destinationStatus(dest.enabled, dest.process?.state).labelKey)}
+        {t(destinationStatus(dest.enabled, dest.process?.state, dest.delay?.phase).labelKey)}
       </span>
     </span>
   );

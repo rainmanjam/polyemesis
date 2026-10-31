@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Скрыть команду",
   "dashMobile.chatPipeline": "Чат и конвейер",
   "dashMobile.streamInfo": "Сведения о трансляции (название, теги, категория)",
-  "dashMobile.failoverOff": "Резервирование выключено"
+  "dashMobile.failoverOff": "Резервирование выключено",
+  "wave3.bugs.delayFilling": "Заполнение задержки"
 }
