@@ -608,6 +608,9 @@ var excusedRoutes = map[string]coverageExcus{
 	// budget on somebody holding a read token.
 	"GET /api/v1/destinations/{id}/facebook/stream-health": denied(),
 	"GET /api/v1/metadata/broadcast-window":                denied(),
+	// The vertical half's health read (#7). It calls YouTube on the caller's token, so a
+	// read token is refused, the same as the Facebook stream-health read above.
+	"GET /api/v1/destinations/{id}/youtube-vertical": denied(),
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
 	"GET /api/v1/auth/tokens": sessionOnly(),

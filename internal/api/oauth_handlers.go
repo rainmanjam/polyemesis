@@ -942,6 +942,9 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 func (s *Server) ingestOptions(dest *db.Destination, scheduledFor time.Time) oauth.IngestOptions {
 	opts := ingestOptionsFor(dest, scheduledFor)
 	opts.DedicatedIngest = s.needsOwnIngestStream(dest)
+	// The vertical halves of YouTube pairs (#7) are never a fallback candidate. See
+	// verticalStreamIDs and oauth.IngestOptions.ExcludeStreamIDs.
+	opts.ExcludeStreamIDs = s.verticalStreamIDs()
 	return opts
 }
 

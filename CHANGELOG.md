@@ -10,6 +10,17 @@ its first tagged release.
 
 ### Added
 
+- **YouTube vertical half (API, #7; PROVISIONAL).** A YouTube destination can now
+  pair with a 9:16 vertical destination. `POST /api/v1/destinations/{id}/youtube-vertical`
+  creates the vertical liveStream through the API and stores it as its own destination
+  with a portrait rendition. The pair is recorded in polyemesis, not in YouTube:
+  the Live Streaming API cannot attach a vertical companion, so the one-time Live
+  Control Room step (choosing this key as the vertical "second stream key") stays a
+  human action, recorded by `POST .../youtube-vertical/confirm`. The horizontal
+  broadcast never binds to the vertical stream, and the vertical stream is kept out of
+  the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
+  and a failed read stays on that half. The UI option, the sub-row and the Stream Deck
+  face are not built in this change.
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
