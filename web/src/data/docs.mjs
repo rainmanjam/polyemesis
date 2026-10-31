@@ -203,6 +203,8 @@ const DOCS_BY_SECTION = {
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
       "YouTube, Twitch, Kick, Facebook and Rumble. Anything taking RTMP or SRT works with a pasted key; this is what each platform's API lets you automate."],
+    ["RECURRING-EVENTS.md", "Recurring broadcast events: templates and look-ahead",
+      "A title, description, privacy and thumbnail for every show on a schedule, with the next few occurrences created as upcoming events. Skip or retitle one show; YouTube today."],
     ["SCHEDULED-BROADCAST.md", "Broadcasting from a file, on a schedule",
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
     ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",

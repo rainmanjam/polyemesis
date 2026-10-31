@@ -1,10 +1,46 @@
 package db
 
-// MigrateWave3RecurringTemplates is the reserved schema slot for #18 recurring events: templates and occurrences.
+// MigrateWave3RecurringTemplates creates the #18 recurring-events tables: one broadcast template per
+// start schedule, and one row per occurrence per destination that a look-ahead has created.
 //
-// The slot is empty. Its lane fills in this body, and nothing else in
-// db.go, so that lanes do not collide in the Open block. The body must stay
-// idempotent: Open runs on every boot. Use columnExists and ALTER TABLE ADD
-// COLUMN, the pattern MigrateScheduleAllDestinations follows. Its test is
-// wave3_recurring_migrate_test.go.
-func (d *DB) MigrateWave3RecurringTemplates() error { return nil }
+// Both tables are CREATE TABLE IF NOT EXISTS, run on every boot, so the body is idempotent and the
+// schema version does not move: an older binary never reads these tables, so there is nothing it
+// could misread. Neither table declares a foreign key. A schedule or destination can be deleted while
+// a platform event for one of its occurrences still exists, and a cascade would drop the only record
+// of that event. The sweep reconciles orphans instead, deleting the event first and then the row.
+//
+// The reads and writes are in recurring.go. Its test is wave3_recurring_migrate_test.go.
+func (d *DB) MigrateWave3RecurringTemplates() error {
+	_, err := d.sql.Exec(`CREATE TABLE IF NOT EXISTS broadcast_templates (
+		schedule_id    INTEGER PRIMARY KEY,
+		title_pattern  TEXT    NOT NULL,
+		description    TEXT    NOT NULL DEFAULT '',
+		privacy        TEXT    NOT NULL DEFAULT 'public',
+		category       TEXT    NOT NULL DEFAULT '',
+		lookahead      INTEGER NOT NULL DEFAULT 2,
+		thumbnail      BLOB,
+		thumbnail_mime TEXT    NOT NULL DEFAULT '',
+		created_at     INTEGER NOT NULL,
+		updated_at     INTEGER NOT NULL
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = d.sql.Exec(`CREATE TABLE IF NOT EXISTS recurring_occurrences (
+		id                INTEGER PRIMARY KEY AUTOINCREMENT,
+		schedule_id       INTEGER NOT NULL,
+		destination_id    INTEGER NOT NULL,
+		occurrence_at     INTEGER NOT NULL,
+		state             TEXT    NOT NULL,
+		platform_event_id TEXT    NOT NULL DEFAULT '',
+		title             TEXT    NOT NULL DEFAULT '',
+		created_at        INTEGER NOT NULL,
+		updated_at        INTEGER NOT NULL,
+		UNIQUE (schedule_id, destination_id, occurrence_at)
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = d.sql.Exec(`CREATE INDEX IF NOT EXISTS recurring_occurrences_at ON recurring_occurrences (occurrence_at)`)
+	return err
+}

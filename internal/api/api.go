@@ -1347,6 +1347,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Put("/schedules/{id}", s.handleUpdateSchedule)
 			r.Delete("/schedules/{id}", s.handleDeleteSchedule)
 
+			// Recurring broadcast templates (#18): the event a start schedule creates ahead of each
+			// show, and the calendar that lists and skips the occurrences. The sweep is recurring.go.
+			r.Get("/schedules/{id}/template", s.handleGetBroadcastTemplate)
+			r.Put("/schedules/{id}/template", s.handleSaveBroadcastTemplate)
+			r.Delete("/schedules/{id}/template", s.handleDeleteBroadcastTemplate)
+			r.Put("/schedules/{id}/template/thumbnail", s.handleSetBroadcastThumbnail)
+			r.Get("/recurring/occurrences", s.handleListOccurrences)
+			r.Post("/recurring/occurrences/{id}/skip", s.handleSkipOccurrence)
+			r.Post("/recurring/occurrences/{id}/title", s.handleOccurrenceTitle)
+
 			// The rolling clip buffer, and the split down the middle of it.
 			//
 			// The LISTING is files on disk under recordings/clips, one

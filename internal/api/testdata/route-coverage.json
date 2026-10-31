@@ -6,24 +6,24 @@
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
-  "inertCeiling": 6,
+  "inertCeiling": 7,
   "varianceExemptCeiling": 6,
   "shapeFloor": 29,
   "guardedFloor": 24,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 263,
-    "swept": 71,
+    "methodPatternPairs": 270,
+    "swept": 73,
     "excused": 60,
-    "denied": 132,
+    "denied": 137,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 57,
-    "inertSubsetOfInvariant": 6,
+    "invariant": 59,
+    "inertSubsetOfInvariant": 7,
     "explainedVariance": 2,
     "unstable": 4
   },
@@ -1074,6 +1074,24 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/recurring/occurrences",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recurring/occurrences/{id}/skip",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recurring/occurrences/{id}/title",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/renditions",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1171,6 +1189,30 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/schedules/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/schedules/{id}/template/thumbnail",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -1907,6 +1949,12 @@
       "class": "unstable"
     },
     {
+      "path": "/api/v1/recurring/occurrences",
+      "pattern": "GET /api/v1/recurring/occurrences",
+      "class": "invariant",
+      "inert": true
+    },
+    {
       "path": "/api/v1/renditions",
       "pattern": "GET /api/v1/renditions",
       "class": "invariant"
@@ -1939,6 +1987,11 @@
     {
       "path": "/api/v1/schedules/1",
       "pattern": "GET /api/v1/schedules/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/schedules/1/template",
+      "pattern": "GET /api/v1/schedules/{id}/template",
       "class": "invariant"
     },
     {
