@@ -880,6 +880,7 @@
   "media.title": "Medien",
   "media.desc": "Lade eine Datei hoch, um nach Zeitplan daraus zu senden, ganz ohne Encoder. Kopiere ihre Pull-URL in den Eingang der Quelle — Einstellungen → Eingang → Pull für die Standardquelle.",
   "meters.clip": "Clipping",
+  "meters.clipAnnounce": "Übersteuerung auf Spur {n}",
   "meters.clip.hint": "Diese Spur hat 0 dBFS erreicht, es gingen also Samples verloren statt nur laut zu sein. Übersteuerung lässt sich nachgelagert nicht rückgängig machen – senken Sie die Verstärkung am Encoder, nicht hier.",
   "meters.deviation": "Abweichung",
   "meters.deviation.hint": "Wie weit die integrierte Lautheit vom Ziel entfernt liegt. Positiv heißt lauter als das Ziel, und genau das dreht eine Plattform wieder herunter.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Diese füllen nur das Formular vor — ändern Sie vor dem Speichern, was Sie möchten. Die Obergrenzen der Plattformen ändern sich und hängen vom Partnerstatus ab.",
   "rend.signalError": "Fehler",
   "rend.signalIdle": "Inaktiv",
+  "rend.signalNotEncoding": "Kodiert nicht · startet, sobald der erste Feed live geht",
   "rend.sizePct": "Größe (% der Höhe)",
   "rend.softwareEncoderFallback": "einem Software-Encoder",
   "rend.speed": "Geschwindigkeit",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Standardprogramm",
   "set.degraded": "Gestörte Verbindung verlassen",
   "set.degradedDesc": "Auch von einem primären Encoder wegschalten, der noch sendet, aber schlecht. Ein Schwellenwert von 0 ist aus.",
+  "set.degradedThresholds": "Schwellenwerte",
+  "set.degradedSummaryOn": "Ein: wechselt weg, wenn unter {bitrate} kbps, über {rtt} ms oder über {loss} % Verlust",
+  "set.degradedSummaryOff": "Aus. Bei Einschaltung: unter {bitrate} kbps, über {rtt} ms oder über {loss} % Verlust",
   "set.degradedMinBitrate": "Bitrate unter (kbps)",
   "set.degradedMaxRtt": "Umlaufzeit über (ms)",
   "set.degradedMaxLoss": "Paketverlust über (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Ein Encoder sendet an diese Quelle. Beim Übernehmen wird der Eingang neu gestartet und alle Zuschauer werden getrennt.",
   "sources.disabledRefused": "Deaktiviert – Veröffentlichungen werden abgelehnt",
   "sources.enableAria": "{name} aktivieren",
+  "sources.acceptingLabel": "Nimmt an",
+  "sources.enabledConsequence": "Encoder können sich mit dieser Quelle verbinden.",
+  "sources.disabledConsequence": "Encoder, die sich hier verbinden, werden abgewiesen, bis dies eingeschaltet ist.",
   "sources.help.app": "Der RTMP-Anwendungspfad — der Teil der URL zwischen Host und Streamschlüssel. Die meisten Encoder erwarten „live“. Ändern Sie ihn nur, wenn Sie einen Grund dafür haben.",
   "sources.help.ingest": "Wie Ihr Encoder diese Quelle erreicht. SRT übersteht instabile Verbindungen, indem verlorene Pakete erneut gesendet werden, und ist die richtige Standardwahl über das öffentliche Internet. RTMP ist älter und wird überall unterstützt, verschlechtert sich aber auf einer instabilen Leitung stark. Bei „Abrufen“ holt polyemesis den Stream von einer URL, die Sie angeben, statt auf eine Einspeisung zu warten.",
   "sources.help.latencyMs": "Wie lange SRT auf ein verspätetes oder erneut gesendetes Paket wartet, bevor es aufgegeben wird. Höhere Werte überbrücken schlechtere Verbindungen auf Kosten der Verzögerung: Etwa das 2,5-Fache Ihrer Paketumlaufzeit ist ein guter Ausgangspunkt, bei 40 ms RTT also rund 100 ms. Zu niedrig, und ein kurzer Aussetzer wird zu einem sichtbaren Bildfehler.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Letzte Entscheidung: Hauptprüfer",
   "automod.lastDecidedSecondary": "Letzte Entscheidung: Ersatzprüfer",
   "automod.keyPending": "Mit dem eingegebenen Schlüssel bestanden. Er wird zum Schlüssel dieses Prüfers, sobald Sie diese Adresse speichern.",
-  "automod.keyBoundNote": "Der gespeicherte Schlüssel wird nur an die Adresse gesendet, für die er angegeben wurde. Wenn Sie die Adresse ändern, wird er beim Speichern gelöscht, es sei denn, Sie testen die neue Adresse vorher mit ihrem Schlüssel."
+  "automod.keyBoundNote": "Der gespeicherte Schlüssel wird nur an die Adresse gesendet, für die er angegeben wurde. Wenn Sie die Adresse ändern, wird er beim Speichern gelöscht, es sei denn, Sie testen die neue Adresse vorher mit ihrem Schlüssel.",
+  "route.nothingToSave": "Nichts zu speichern, bis sich eine Route ändert."
 }

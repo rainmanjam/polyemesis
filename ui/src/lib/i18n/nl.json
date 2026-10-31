@@ -880,6 +880,7 @@
   "media.title": "Media",
   "media.desc": "Upload een bestand om er volgens schema vanuit uit te zenden, zonder encoder. Kopieer de pull-URL naar de ingest van de bron — Instellingen → Ingest → Pull voor de standaardbron.",
   "meters.clip": "Clipping",
+  "meters.clipAnnounce": "Clipping op spoor {n}",
   "meters.clip.hint": "Deze track raakte 0 dBFS, dus er gingen samples verloren in plaats van dat het alleen hard was. Clipping is verderop niet meer terug te draaien — verlaag de versterking bij de encoder, niet hier.",
   "meters.deviation": "Afwijking",
   "meters.deviation.hint": "Hoe ver de geïntegreerde luidheid van je doel ligt. Positief is harder dan het doel, en dat is precies wat een platform weer terugdraait.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Deze vullen het formulier alvast in en meer niet — pas gerust alles aan voordat je opslaat. Platformplafonds veranderen en verschillen per partnerstatus.",
   "rend.signalError": "Fout",
   "rend.signalIdle": "Inactief",
+  "rend.signalNotEncoding": "Codeert niet · start zodra de eerste feed live gaat",
   "rend.sizePct": "Grootte (% van de hoogte)",
   "rend.softwareEncoderFallback": "een software-encoder",
   "rend.speed": "Snelheid",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Standaardprogramma",
   "set.degraded": "Een verslechterde verbinding verlaten",
   "set.degradedDesc": "Schakel ook weg van een primaire encoder die nog verstuurt, maar slecht. Een drempel van 0 staat uit.",
+  "set.degradedThresholds": "Drempelwaarden",
+  "set.degradedSummaryOn": "Aan: schakelt over bij minder dan {bitrate} kbps, meer dan {rtt} ms of meer dan {loss}% verlies",
+  "set.degradedSummaryOff": "Uit. Bij inschakelen: minder dan {bitrate} kbps, meer dan {rtt} ms of meer dan {loss}% verlies",
   "set.degradedMinBitrate": "Bitrate lager dan (kbps)",
   "set.degradedMaxRtt": "Retourtijd hoger dan (ms)",
   "set.degradedMaxLoss": "Pakketverlies hoger dan (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Er publiceert een encoder naar deze bron. Toepassen herstart de ingang en verbreekt de verbinding met alle kijkers.",
   "sources.disabledRefused": "Uitgeschakeld — publicaties worden geweigerd",
   "sources.enableAria": "{name} inschakelen",
+  "sources.acceptingLabel": "Neemt aan",
+  "sources.enabledConsequence": "Encoders kunnen verbinding maken met deze bron.",
+  "sources.disabledConsequence": "Encoders die hier verbinding maken, worden geweigerd zolang dit uit staat.",
   "sources.help.app": "Het RTMP-applicatiepad — het deel van de URL tussen de host en de streamsleutel. De meeste encoders verwachten “live”. Wijzig het alleen als je daar een reden voor hebt.",
   "sources.help.ingest": "Hoe je encoder deze bron bereikt. SRT overleeft een verbinding met pakketverlies door te hersturen wat verloren ging, en is de juiste standaardkeuze over het publieke internet. RTMP is ouder en wordt overal ondersteund, maar gaat sterk achteruit op een instabiele verbinding. Bij ophalen haalt polyemesis het signaal op van een URL die jij opgeeft, in plaats van te wachten tot er naar toe gepubliceerd wordt.",
   "sources.help.latencyMs": "Hoe lang SRT wacht op een laat of hergestuurd pakket voordat het wordt opgegeven. Hogere waarden vangen slechtere verbindingen op ten koste van vertraging: ongeveer 2,5× je round-trip-tijd is een goed startpunt, dus 40 ms RTT vraagt hier om zo'n 100 ms. Te laag, en een korte hapering wordt een zichtbare storing.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Laatste beslissing: eerste controle",
   "automod.lastDecidedSecondary": "Laatste beslissing: reservecontrole",
   "automod.keyPending": "Geslaagd met de sleutel die je hebt ingevoerd. Die wordt de sleutel van deze controle zodra je dit adres opslaat.",
-  "automod.keyBoundNote": "De opgeslagen sleutel wordt alleen verstuurd naar het adres waarvoor hij is opgegeven. Als je het adres wijzigt, wordt hij bij het opslaan gewist, tenzij je het nieuwe adres eerst met zijn sleutel test."
+  "automod.keyBoundNote": "De opgeslagen sleutel wordt alleen verstuurd naar het adres waarvoor hij is opgegeven. Als je het adres wijzigt, wordt hij bij het opslaan gewist, tenzij je het nieuwe adres eerst met zijn sleutel test.",
+  "route.nothingToSave": "Niets om op te slaan totdat een route verandert."
 }

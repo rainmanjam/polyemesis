@@ -880,6 +880,7 @@
   "media.title": "メディア",
   "media.desc": "ファイルをアップロードすると、エンコーダーなしでスケジュールに沿って配信できます。その取得 URL をソースの入力にコピーしてください。既定のソースなら 設定 → 取り込み → Pull です。",
   "meters.clip": "クリップ",
+  "meters.clipAnnounce": "トラック {n} でクリップしています",
   "meters.clip.hint": "このトラックは0 dBFS に達しました。単に大きいのではなくサンプルが失われています。クリッピングは後段では戻せません。ここではなくエンコーダー側でゲインを下げてください。",
   "meters.deviation": "偏差",
   "meters.deviation.hint": "統合ラウドネスが目標からどれだけ離れているか。プラスは目標より大きいということで、まさにプラットフォームが下げ直す分です。",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "これらはフォームの初期値を入れるだけです。保存前に自由に編集してください。プラットフォームの上限は変わりますし、パートナー資格によっても異なります。",
   "rend.signalError": "エラー",
   "rend.signalIdle": "アイドル",
+  "rend.signalNotEncoding": "エンコードしていません · 最初のフィードがライブになると開始します",
   "rend.sizePct": "サイズ（高さに対する %）",
   "rend.softwareEncoderFallback": "ソフトウェアエンコーダー",
   "rend.speed": "速度",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "既定の番組",
   "set.degraded": "劣化した回線から切り替える",
   "set.degradedDesc": "送信は続いているが品質が悪いメインエンコーダーからも切り替えます。0 にしたしきい値は無効です。",
+  "set.degradedThresholds": "しきい値",
+  "set.degradedSummaryOn": "オン: {bitrate} kbps を下回る、{rtt} ms を超える、または損失 {loss}% を超えると切り替えます",
+  "set.degradedSummaryOff": "オフ。オンにした場合: {bitrate} kbps 未満、{rtt} ms 超、または損失 {loss}% 超",
   "set.degradedMinBitrate": "ビットレートがこれ未満 (kbps)",
   "set.degradedMaxRtt": "往復遅延がこれを超える (ms)",
   "set.degradedMaxLoss": "パケットロスがこれを超える (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "このソースへエンコーダーが配信中です。適用すると入力が再起動し、視聴者全員の接続が切れます。",
   "sources.disabledRefused": "無効 — パブリッシュは拒否されます",
   "sources.enableAria": "{name} を有効にする",
+  "sources.acceptingLabel": "受付中",
+  "sources.enabledConsequence": "エンコーダーはこのソースに接続できます。",
+  "sources.disabledConsequence": "ここに接続するエンコーダーは、これをオンにするまで拒否されます。",
   "sources.help.app": "RTMP のアプリケーションパス、つまり URL のホストとストリームキーの間の部分です。ほとんどのエンコーダーは「live」を想定します。理由がある場合のみ変更してください。",
   "sources.help.ingest": "エンコーダーがこのソースへ到達する方法です。SRT は失われたパケットを再送することで不安定な回線に耐えるため、公衆インターネット経由では既定として適切です。RTMP は古くから広く対応されていますが、不安定な回線では品質が大きく低下します。プルでは、配信されるのを待つ代わりに polyemesis が指定した URL から取得します。",
   "sources.help.latencyMs": "SRT が遅延パケットや再送パケットを諦めるまで待つ時間です。値を大きくすると遅延と引き換えに悪い回線に耐えられます。往復時間の約 2.5 倍が目安で、RTT が 40 ms ならここは約 100 ms です。小さすぎると、わずかな乱れが目に見える不具合になります。",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "最後の判定: 一次チェッカー",
   "automod.lastDecidedSecondary": "最後の判定: 予備チェッカー",
   "automod.keyPending": "入力したキーで合格しました。このアドレスを保存すると、このチェッカーのキーになります。",
-  "automod.keyBoundNote": "保存されたキーは、そのキーを指定したアドレスにだけ送信されます。アドレスを変更すると、先に新しいアドレスをそのキーでテストしない限り、保存時にキーは消去されます。"
+  "automod.keyBoundNote": "保存されたキーは、そのキーを指定したアドレスにだけ送信されます。アドレスを変更すると、先に新しいアドレスをそのキーでテストしない限り、保存時にキーは消去されます。",
+  "route.nothingToSave": "ルートを変更するまで保存するものはありません。"
 }

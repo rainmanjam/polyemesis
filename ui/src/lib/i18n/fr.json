@@ -880,6 +880,7 @@
   "media.title": "Médias",
   "media.desc": "Téléversez un fichier pour diffuser à partir de lui selon un planning, sans encodeur. Copiez son URL de récupération dans l'entrée de la source — Réglages → Entrée → Pull pour la source par défaut.",
   "meters.clip": "Écrêtage",
+  "meters.clipAnnounce": "Écrêtage sur la piste {n}",
   "meters.clip.hint": "Cette piste a atteint 0 dBFS : des échantillons ont été perdus, elle n'était pas seulement forte. L'écrêtage ne se rattrape pas en aval — baissez le gain à l'encodeur, pas ici.",
   "meters.deviation": "Écart",
   "meters.deviation.hint": "De combien la sonie intégrée s'écarte de votre cible. Positif signifie plus fort que la cible, ce qu'une plateforme rabaissera.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Ceci ne fait que préremplir le formulaire — modifiez ce que vous voulez avant d'enregistrer. Les plafonds des plateformes changent et diffèrent selon le statut de partenaire.",
   "rend.signalError": "Erreur",
   "rend.signalIdle": "Inactif",
+  "rend.signalNotEncoding": "Pas d'encodage · démarre quand le premier flux passe en direct",
   "rend.sizePct": "Taille (% de la hauteur)",
   "rend.softwareEncoderFallback": "un encodeur logiciel",
   "rend.speed": "Vitesse",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Programme par défaut",
   "set.degraded": "Quitter une liaison dégradée",
   "set.degradedDesc": "Quitter aussi un encodeur principal qui envoie encore, mais mal. Un seuil à 0 est désactivé.",
+  "set.degradedThresholds": "Seuils",
+  "set.degradedSummaryOn": "Activé : bascule si moins de {bitrate} kbps, plus de {rtt} ms ou plus de {loss} % de perte",
+  "set.degradedSummaryOff": "Désactivé. Si activé : moins de {bitrate} kbps, plus de {rtt} ms ou plus de {loss} % de perte",
   "set.degradedMinBitrate": "Débit inférieur à (kbps)",
   "set.degradedMaxRtt": "Temps aller-retour supérieur à (ms)",
   "set.degradedMaxLoss": "Perte de paquets supérieure à (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Un encodeur publie sur cette source. Appliquer redémarre son entrée et déconnecte tous les spectateurs.",
   "sources.disabledRefused": "Désactivée — les publications sont refusées",
   "sources.enableAria": "Activer {name}",
+  "sources.acceptingLabel": "Accepte",
+  "sources.enabledConsequence": "Les encodeurs peuvent se connecter à cette source.",
+  "sources.disabledConsequence": "Les encodeurs qui se connectent ici sont refusés tant que ceci n'est pas activé.",
   "sources.help.app": "Le chemin d'application RTMP — la partie de l'URL entre l'hôte et la clé de flux. La plupart des encodeurs attendent « live ». Ne le modifiez que si vous avez une raison de le faire.",
   "sources.help.ingest": "Comment votre encodeur atteint cette source. SRT résiste à une connexion avec pertes en retransmettant ce qui manque, et constitue le bon choix par défaut sur l'internet public. RTMP est plus ancien et universellement pris en charge, mais il se dégrade fortement sur une liaison instable. Avec la récupération, polyemesis va chercher le flux à une URL que vous fournissez au lieu d'attendre qu'on lui publie quelque chose.",
   "sources.help.latencyMs": "Combien de temps SRT attendra un paquet tardif ou retransmis avant d'y renoncer. Des valeurs élevées absorbent de moins bonnes connexions au prix d'un délai : environ 2,5 fois votre temps d'aller-retour est un bon point de départ, donc 40 ms de RTT appellent environ 100 ms ici. Trop bas, et un bref accroc devient un défaut visible.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Dernière décision : vérificateur principal",
   "automod.lastDecidedSecondary": "Dernière décision : vérificateur de secours",
   "automod.keyPending": "Réussi avec la clé que vous avez saisie. Elle deviendra la clé de ce vérificateur quand vous enregistrerez cette adresse.",
-  "automod.keyBoundNote": "La clé enregistrée n'est envoyée qu'à l'adresse pour laquelle elle a été donnée. Changer l'adresse l'efface à l'enregistrement, sauf si vous testez d'abord la nouvelle adresse avec sa clé."
+  "automod.keyBoundNote": "La clé enregistrée n'est envoyée qu'à l'adresse pour laquelle elle a été donnée. Changer l'adresse l'efface à l'enregistrement, sauf si vous testez d'abord la nouvelle adresse avec sa clé.",
+  "route.nothingToSave": "Rien à enregistrer tant qu'un routage ne change pas."
 }

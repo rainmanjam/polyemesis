@@ -880,6 +880,7 @@
   "media.title": "Media",
   "media.desc": "Carica un file per trasmetterlo secondo una programmazione, senza encoder. Copia il suo URL di pull nell'ingest della sorgente — Impostazioni → Ingest → Pull per la sorgente predefinita.",
   "meters.clip": "Clipping",
+  "meters.clipAnnounce": "Saturazione sulla traccia {n}",
   "meters.clip.hint": "Questa traccia ha toccato 0 dBFS, quindi si sono persi campioni invece di essere semplicemente forte. Il clipping non si annulla a valle: abbassa il guadagno sull'encoder, non qui.",
   "meters.deviation": "Scostamento",
   "meters.deviation.hint": "Quanto la loudness integrata si discosta dal tuo obiettivo. Positivo significa più forte dell'obiettivo, ed è proprio ciò che una piattaforma riabbasserà.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Questi riempiono il modulo e nulla più — modifica ciò che vuoi prima di salvare. I tetti delle piattaforme cambiano e variano in base allo stato di partner.",
   "rend.signalError": "Errore",
   "rend.signalIdle": "Inattivo",
+  "rend.signalNotEncoding": "Non codifica · si avvia quando il primo feed va in diretta",
   "rend.sizePct": "Dimensione (% dell'altezza)",
   "rend.softwareEncoderFallback": "un encoder software",
   "rend.speed": "Velocità",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Programma predefinito",
   "set.degraded": "Abbandona un collegamento degradato",
   "set.degradedDesc": "Passa oltre anche un encoder principale che trasmette ancora, ma male. Una soglia a 0 è disattivata.",
+  "set.degradedThresholds": "Soglie",
+  "set.degradedSummaryOn": "Attivo: passa all'alternativa sotto {bitrate} kbps, sopra {rtt} ms o oltre il {loss}% di perdita",
+  "set.degradedSummaryOff": "Disattivo. Se attivato: sotto {bitrate} kbps, sopra {rtt} ms o oltre il {loss}% di perdita",
   "set.degradedMinBitrate": "Bitrate inferiore a (kbps)",
   "set.degradedMaxRtt": "Tempo di andata e ritorno superiore a (ms)",
   "set.degradedMaxLoss": "Perdita di pacchetti superiore a (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Un encoder sta pubblicando su questa sorgente. Applicare riavvia il suo ingresso e disconnette tutti gli spettatori.",
   "sources.disabledRefused": "Disattivata — le pubblicazioni vengono rifiutate",
   "sources.enableAria": "Abilita {name}",
+  "sources.acceptingLabel": "In ricezione",
+  "sources.enabledConsequence": "Gli encoder possono connettersi a questa sorgente.",
+  "sources.disabledConsequence": "Gli encoder che si connettono qui vengono rifiutati finché questo non è attivo.",
   "sources.help.app": "Il percorso applicativo RTMP — la parte dell'URL tra l'host e la chiave di stream. La maggior parte degli encoder si aspetta «live». Cambialo solo se hai un motivo.",
   "sources.help.ingest": "Come il tuo encoder raggiunge questa sorgente. SRT sopravvive a una connessione con perdite ritrasmettendo ciò che è andato perso ed è la scelta predefinita giusta su internet pubblica. RTMP è più vecchio e supportato ovunque, ma si degrada molto su un collegamento instabile. Con il prelievo, polyemesis va a prendere il flusso da un URL che indichi tu invece di aspettare che qualcuno pubblichi.",
   "sources.help.latencyMs": "Quanto a lungo SRT attenderà un pacchetto in ritardo o ritrasmesso prima di rinunciarvi. Valori più alti reggono connessioni peggiori al prezzo di un ritardo: circa 2,5 volte il tempo di andata e ritorno è un buon punto di partenza, quindi 40 ms di RTT chiedono circa 100 ms qui. Troppo basso e un breve intoppo diventa un difetto visibile.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Ultima decisione: controllo principale",
   "automod.lastDecidedSecondary": "Ultima decisione: controllo di riserva",
   "automod.keyPending": "Superato con la chiave inserita. Diventerà la chiave di questo controllo quando salverai questo indirizzo.",
-  "automod.keyBoundNote": "La chiave salvata viene inviata solo all'indirizzo per cui è stata fornita. Cambiando l'indirizzo viene cancellata al salvataggio, a meno che tu non provi prima il nuovo indirizzo con la sua chiave."
+  "automod.keyBoundNote": "La chiave salvata viene inviata solo all'indirizzo per cui è stata fornita. Cambiando l'indirizzo viene cancellata al salvataggio, a meno che tu non provi prima il nuovo indirizzo con la sua chiave.",
+  "route.nothingToSave": "Nulla da salvare finché non cambia un instradamento."
 }

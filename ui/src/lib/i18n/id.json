@@ -880,6 +880,7 @@
   "media.title": "Media",
   "media.desc": "Unggah file untuk disiarkan sesuai jadwal, tanpa encoder. Salin URL pull-nya ke ingest sumber — Pengaturan → Ingest → Pull untuk sumber bawaan.",
   "meters.clip": "Kliping",
+  "meters.clipAnnounce": "Clipping di trek {n}",
   "meters.clip.hint": "Trek ini mencapai 0 dBFS, jadi sampel hilang, bukan sekadar keras. Clipping tidak bisa dibatalkan di hilir — turunkan gain di encoder, bukan di sini.",
   "meters.deviation": "Simpangan",
   "meters.deviation.hint": "Seberapa jauh loudness terintegrasi dari target Anda. Positif berarti lebih keras dari target, dan itulah yang akan diturunkan lagi oleh platform.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Ini hanya mengisi awal formulir dan tidak lebih — ubah apa pun sebelum menyimpan. Langit-langit platform berubah dan berbeda menurut status kemitraan.",
   "rend.signalError": "Galat",
   "rend.signalIdle": "Menganggur",
+  "rend.signalNotEncoding": "Tidak mengenkode · mulai saat feed pertama tayang langsung",
   "rend.sizePct": "Ukuran (% dari tinggi)",
   "rend.softwareEncoderFallback": "sebuah encoder perangkat lunak",
   "rend.speed": "Kecepatan",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Program bawaan",
   "set.degraded": "Tinggalkan koneksi yang menurun",
   "set.degradedDesc": "Juga beralih dari encoder utama yang masih mengirim, tetapi buruk. Ambang bernilai 0 berarti nonaktif.",
+  "set.degradedThresholds": "Ambang batas",
+  "set.degradedSummaryOn": "Aktif: beralih jika di bawah {bitrate} kbps, di atas {rtt} md, atau kehilangan di atas {loss}%",
+  "set.degradedSummaryOff": "Nonaktif. Jika diaktifkan: di bawah {bitrate} kbps, di atas {rtt} md, atau kehilangan di atas {loss}%",
   "set.degradedMinBitrate": "Bitrate di bawah (kbps)",
   "set.degradedMaxRtt": "Waktu pulang-pergi di atas (ms)",
   "set.degradedMaxLoss": "Kehilangan paket di atas (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Sebuah encoder sedang mengirim ke sumber ini. Menerapkan akan memulai ulang masukannya dan memutus semua yang sedang menonton.",
   "sources.disabledRefused": "Dinonaktifkan — publikasi ditolak",
   "sources.enableAria": "Aktifkan {name}",
+  "sources.acceptingLabel": "Menerima",
+  "sources.enabledConsequence": "Encoder dapat terhubung ke sumber ini.",
+  "sources.disabledConsequence": "Encoder yang terhubung di sini ditolak sampai ini diaktifkan.",
   "sources.help.app": "Jalur aplikasi RTMP — bagian URL antara host dan kunci siaran. Sebagian besar encoder mengharapkan “live”. Ubah hanya jika Anda punya alasan.",
   "sources.help.ingest": "Bagaimana encoder Anda mencapai sumber ini. SRT bertahan pada koneksi yang banyak kehilangan paket dengan mengirim ulang bagian yang hilang, dan merupakan pilihan bawaan yang tepat melalui internet publik. RTMP lebih tua dan didukung di mana-mana, tetapi kualitasnya turun drastis pada sambungan yang tidak stabil. Dengan mode tarik, polyemesis mengambil sendiri siaran dari URL yang Anda berikan alih-alih menunggu dikirimi.",
   "sources.help.latencyMs": "Berapa lama SRT menunggu paket yang terlambat atau dikirim ulang sebelum menyerah. Nilai lebih tinggi bertahan pada koneksi yang lebih buruk dengan konsekuensi penundaan: sekitar 2,5× waktu pulang-pergi adalah titik awal yang baik, jadi RTT 40 ms membutuhkan sekitar 100 ms di sini. Terlalu rendah, dan gangguan sesaat menjadi cacat yang terlihat.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Keputusan terakhir: pemeriksa utama",
   "automod.lastDecidedSecondary": "Keputusan terakhir: pemeriksa cadangan",
   "automod.keyPending": "Lulus dengan kunci yang Anda ketik. Kunci itu menjadi kunci pemeriksa ini saat Anda menyimpan alamat ini.",
-  "automod.keyBoundNote": "Kunci tersimpan hanya dikirim ke alamat yang menjadi tujuannya. Mengubah alamat akan menghapusnya saat disimpan, kecuali Anda menguji alamat baru dengan kuncinya terlebih dahulu."
+  "automod.keyBoundNote": "Kunci tersimpan hanya dikirim ke alamat yang menjadi tujuannya. Mengubah alamat akan menghapusnya saat disimpan, kecuali Anda menguji alamat baru dengan kuncinya terlebih dahulu.",
+  "route.nothingToSave": "Tidak ada yang disimpan sampai rute berubah."
 }

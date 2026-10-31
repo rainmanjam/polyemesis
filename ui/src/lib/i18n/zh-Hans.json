@@ -880,6 +880,7 @@
   "media.title": "媒体",
   "media.desc": "上传文件即可按计划从中播出，无需编码器。将其拉流地址复制到来源的接入设置中——默认来源为 设置 → 接入 → Pull。",
   "meters.clip": "削波",
+  "meters.clipAnnounce": "音轨 {n} 削波",
   "meters.clip.hint": "此音轨触及 0 dBFS，意味着采样已经丢失，而不只是响。削波在下游无法挽回——请在编码器上降低增益，而不是在这里。",
   "meters.deviation": "偏差",
   "meters.deviation.hint": "整合响度与你的目标相差多少。正值表示比目标更响，而这正是平台会调回去的部分。",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "这些只是给表单填个初值——保存前可以随意修改。平台上限会变化，也会因合作等级而异。",
   "rend.signalError": "错误",
   "rend.signalIdle": "空闲",
+  "rend.signalNotEncoding": "未编码 · 第一路信号上线后开始",
   "rend.sizePct": "大小（占高度的 %）",
   "rend.softwareEncoderFallback": "软件编码器",
   "rend.speed": "速度",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "默认节目",
   "set.degraded": "离开劣化的链路",
   "set.degradedDesc": "主编码器仍在发送但质量很差时也切换离开。设为 0 的阈值即关闭。",
+  "set.degradedThresholds": "阈值",
+  "set.degradedSummaryOn": "开启：低于 {bitrate} kbps、高于 {rtt} ms 或丢包超过 {loss}% 时切换",
+  "set.degradedSummaryOff": "关闭。开启后：低于 {bitrate} kbps、高于 {rtt} ms 或丢包超过 {loss}%",
   "set.degradedMinBitrate": "码率低于 (kbps)",
   "set.degradedMaxRtt": "往返时延高于 (ms)",
   "set.degradedMaxLoss": "丢包率高于 (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "有编码器正在向此源推流。应用会重启其输入，并断开所有正在观看的人。",
   "sources.disabledRefused": "已停用 — 推流将被拒绝",
   "sources.enableAria": "启用 {name}",
+  "sources.acceptingLabel": "接收中",
+  "sources.enabledConsequence": "编码器可以连接到此源。",
+  "sources.disabledConsequence": "在开启之前，连接到此处的编码器会被拒绝。",
   "sources.help.app": "RTMP 的应用路径——地址中位于主机与推流密钥之间的部分。多数编码器默认使用“live”。除非确有需要，否则不要修改。",
   "sources.help.ingest": "编码器如何抵达此源。SRT 通过重传丢失的数据包来适应有丢包的链路，是公网传输的合适默认选项。RTMP 更为老旧但支持广泛，不过在不稳定链路上质量下降明显。选择拉流时，polyemesis 会主动从你提供的地址拉取，而不是等待别人推流过来。",
   "sources.help.latencyMs": "SRT 在放弃一个迟到或重传的数据包之前会等待多久。数值越大越能扛住较差的链路，代价是延迟：约为往返时延的 2.5 倍是不错的起点，因此 40 ms 的 RTT 大约对应这里的 100 ms。设得过低，短暂的抖动就会变成肉眼可见的画面异常。",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "最近一次判定：主检查器",
   "automod.lastDecidedSecondary": "最近一次判定：备用检查器",
   "automod.keyPending": "已使用您输入的密钥通过测试。保存此地址后，它将成为此检查器的密钥。",
-  "automod.keyBoundNote": "已保存的密钥只会发送到为其指定的地址。更改地址后保存时会清除该密钥，除非您先用新地址的密钥进行测试。"
+  "automod.keyBoundNote": "已保存的密钥只会发送到为其指定的地址。更改地址后保存时会清除该密钥，除非您先用新地址的密钥进行测试。",
+  "route.nothingToSave": "在路由更改之前没有可保存的内容。"
 }

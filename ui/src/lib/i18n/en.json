@@ -880,6 +880,7 @@
   "media.title": "Media",
   "media.desc": "Upload a file to broadcast from it on a schedule, with no encoder attached. Copy its pull URL into the source's ingest — Settings → Ingest → Pull for the default source.",
   "meters.clip": "clip",
+  "meters.clipAnnounce": "Clipping on track {n}",
   "meters.clip.hint": "This track hit 0 dBFS, so samples were lost rather than merely loud. Clipping cannot be undone downstream -- lower the gain at the encoder, not here.",
   "meters.deviation": "Deviation",
   "meters.deviation.hint": "How far the integrated loudness sits from your target. Positive is louder than the target, which is what a platform will turn back down.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "These seed the form and nothing more — edit anything before saving. Platform ceilings change and differ by partner status.",
   "rend.signalError": "Error",
   "rend.signalIdle": "Idle",
+  "rend.signalNotEncoding": "Not encoding · starts when the first feed goes live",
   "rend.sizePct": "Size (% of height)",
   "rend.softwareEncoderFallback": "a software encoder",
   "rend.speed": "Speed",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Default programme",
   "set.degraded": "Leave a degraded link",
   "set.degradedDesc": "Also switch away from a primary encoder that is still sending, but badly. A threshold set to 0 is off.",
+  "set.degradedThresholds": "Thresholds",
+  "set.degradedSummaryOn": "On: switches away when below {bitrate} kbps, above {rtt} ms, or over {loss}% loss",
+  "set.degradedSummaryOff": "Off. If switched on: below {bitrate} kbps, above {rtt} ms, or over {loss}% loss",
   "set.degradedMinBitrate": "Bitrate below (kbps)",
   "set.degradedMaxRtt": "Round-trip time above (ms)",
   "set.degradedMaxLoss": "Packet loss above (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "An encoder is publishing to this source. Applying restarts its ingest and drops everyone watching.",
   "sources.disabledRefused": "Disabled — publishes are refused",
   "sources.enableAria": "Enable {name}",
+  "sources.acceptingLabel": "Accepting",
+  "sources.enabledConsequence": "Encoders can connect to this source.",
+  "sources.disabledConsequence": "Encoders that connect here are refused until this is on.",
   "sources.help.app": "The RTMP application path — the part of the URL between the host and the stream key. Most encoders expect “live”. Change it only if you have a reason to.",
   "sources.help.ingest": "How your encoder reaches this source. SRT survives a lossy connection by retransmitting what went missing, and is the right default over the public internet. RTMP is older and universally supported, but it degrades badly on an unstable uplink. Pull makes polyemesis fetch from a URL you provide instead of waiting to be published to.",
   "sources.help.latencyMs": "How long SRT will wait for a late or retransmitted packet before giving up on it. Higher values ride out worse connections at the cost of delay: roughly 2.5× your round-trip time is a good starting point, so a 40 ms RTT wants about 100 ms here. Too low and a brief hiccup becomes a visible glitch.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Last decision: primary checker",
   "automod.lastDecidedSecondary": "Last decision: fallback checker",
   "automod.keyPending": "Passed with the key you typed. It will become this checker's key when you save this address.",
-  "automod.keyBoundNote": "The stored key is sent only to the address it was given for. Changing the address clears it when you save, unless you Test the new address with its key first."
+  "automod.keyBoundNote": "The stored key is sent only to the address it was given for. Changing the address clears it when you save, unless you Test the new address with its key first.",
+  "route.nothingToSave": "Nothing to save until a route changes."
 }

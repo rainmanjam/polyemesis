@@ -880,6 +880,7 @@
   "media.title": "Multimedia",
   "media.desc": "Prześlij plik, aby nadawać z niego według harmonogramu, bez enkodera. Skopiuj jego adres pobierania do wejścia źródła — Ustawienia → Wejście → Pull dla źródła domyślnego.",
   "meters.clip": "Przester",
+  "meters.clipAnnounce": "Przesterowanie na ścieżce {n}",
   "meters.clip.hint": "Ta ścieżka dobiła do 0 dBFS, więc próbki zostały utracone, a nie były jedynie głośne. Przesterowania nie da się cofnąć dalej — obniż wzmocnienie na koderze, nie tutaj.",
   "meters.deviation": "Odchylenie",
   "meters.deviation.hint": "Jak daleko głośność zintegrowana leży od Twojego celu. Wartość dodatnia to głośniej niż cel, a właśnie to platforma ściszy z powrotem.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "To tylko wypełnia formularz wartościami początkowymi — przed zapisaniem możesz zmienić wszystko. Limity platform się zmieniają i zależą od statusu partnera.",
   "rend.signalError": "Błąd",
   "rend.signalIdle": "Bezczynny",
+  "rend.signalNotEncoding": "Nie koduje · startuje, gdy pierwszy sygnał wejdzie na żywo",
   "rend.sizePct": "Rozmiar (% wysokości)",
   "rend.softwareEncoderFallback": "enkodera programowego",
   "rend.speed": "Prędkość",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Program domyślny",
   "set.degraded": "Porzuć osłabione łącze",
   "set.degradedDesc": "Przełączaj też z głównego enkodera, który wciąż nadaje, ale słabo. Próg ustawiony na 0 jest wyłączony.",
+  "set.degradedThresholds": "Progi",
+  "set.degradedSummaryOn": "Włączone: przełącza, gdy poniżej {bitrate} kbps, powyżej {rtt} ms lub strata powyżej {loss}%",
+  "set.degradedSummaryOff": "Wyłączone. Po włączeniu: poniżej {bitrate} kbps, powyżej {rtt} ms lub strata powyżej {loss}%",
   "set.degradedMinBitrate": "Przepływność poniżej (kb/s)",
   "set.degradedMaxRtt": "Czas podróży w obie strony powyżej (ms)",
   "set.degradedMaxLoss": "Utrata pakietów powyżej (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Do tego źródła publikuje enkoder. Zastosowanie zrestartuje jego wejście i odłączy wszystkich oglądających.",
   "sources.disabledRefused": "Wyłączone — publikacje są odrzucane",
   "sources.enableAria": "Włącz {name}",
+  "sources.acceptingLabel": "Przyjmuje",
+  "sources.enabledConsequence": "Enkodery mogą połączyć się z tym źródłem.",
+  "sources.disabledConsequence": "Enkodery łączące się tutaj są odrzucane, dopóki to nie zostanie włączone.",
   "sources.help.app": "Ścieżka aplikacji RTMP — część adresu URL między hostem a kluczem strumienia. Większość enkoderów oczekuje „live”. Zmieniaj ją tylko wtedy, gdy masz ku temu powód.",
   "sources.help.ingest": "Jak Twój enkoder dociera do tego źródła. SRT radzi sobie z zawodnym łączem, retransmitując utracone pakiety, i jest właściwym wyborem domyślnym w publicznym internecie. RTMP jest starszy i obsługiwany wszędzie, ale mocno traci jakość na niestabilnym łączu. Przy pobieraniu polyemesis sam pobiera sygnał z podanego przez Ciebie adresu URL, zamiast czekać, aż ktoś do niego opublikuje.",
   "sources.help.latencyMs": "Jak długo SRT czeka na spóźniony lub retransmitowany pakiet, zanim z niego zrezygnuje. Wyższe wartości przetrwają gorsze łącza kosztem opóźnienia: dobrym punktem wyjścia jest około 2,5× czasu podróży w obie strony, więc przy RTT 40 ms warto ustawić około 100 ms. Zbyt niska wartość sprawia, że krótkie zakłócenie staje się widoczną usterką.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Ostatnia decyzja: kontrola główna",
   "automod.lastDecidedSecondary": "Ostatnia decyzja: kontrola zapasowa",
   "automod.keyPending": "Zaliczono z wpisanym kluczem. Stanie się kluczem tej kontroli po zapisaniu tego adresu.",
-  "automod.keyBoundNote": "Zapisany klucz jest wysyłany tylko na adres, dla którego go podano. Zmiana adresu usuwa go przy zapisie, chyba że najpierw przetestujesz nowy adres z jego kluczem."
+  "automod.keyBoundNote": "Zapisany klucz jest wysyłany tylko na adres, dla którego go podano. Zmiana adresu usuwa go przy zapisie, chyba że najpierw przetestujesz nowy adres z jego kluczem.",
+  "route.nothingToSave": "Nic do zapisania, dopóki trasa się nie zmieni."
 }

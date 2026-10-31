@@ -880,6 +880,7 @@
   "media.title": "Mídia",
   "media.desc": "Envie um arquivo para transmitir a partir dele em uma programação, sem codificador. Copie a URL de pull para a entrada da fonte — Configurações → Entrada → Pull para a fonte padrão.",
   "meters.clip": "Clipping",
+  "meters.clipAnnounce": "Clipagem na faixa {n}",
   "meters.clip.hint": "Esta faixa atingiu 0 dBFS, então amostras foram perdidas em vez de apenas soar alto. O clipping não se desfaz depois: abaixe o ganho no codificador, não aqui.",
   "meters.deviation": "Desvio",
   "meters.deviation.hint": "O quanto a loudness integrada se afasta do seu alvo. Positivo é mais alto que o alvo, que é justamente o que uma plataforma vai baixar de volta.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Isto apenas preenche o formulário — edite o que quiser antes de salvar. Os tetos das plataformas mudam e variam conforme o status de parceiro.",
   "rend.signalError": "Erro",
   "rend.signalIdle": "Ocioso",
+  "rend.signalNotEncoding": "Não está codificando · inicia quando o primeiro feed entrar no ar",
   "rend.sizePct": "Tamanho (% da altura)",
   "rend.softwareEncoderFallback": "um codificador de software",
   "rend.speed": "Velocidade",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Programa padrão",
   "set.degraded": "Sair de um link degradado",
   "set.degradedDesc": "Trocar também de um codificador principal que ainda envia, mas mal. Um limite em 0 fica desligado.",
+  "set.degradedThresholds": "Limites",
+  "set.degradedSummaryOn": "Ligado: troca quando abaixo de {bitrate} kbps, acima de {rtt} ms ou perda acima de {loss}%",
+  "set.degradedSummaryOff": "Desligado. Se ligado: abaixo de {bitrate} kbps, acima de {rtt} ms ou perda acima de {loss}%",
   "set.degradedMinBitrate": "Taxa de bits abaixo de (kbps)",
   "set.degradedMaxRtt": "Tempo de ida e volta acima de (ms)",
   "set.degradedMaxLoss": "Perda de pacotes acima de (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Um codificador está publicando nesta fonte. Aplicar reinicia a entrada e desconecta todos que estão assistindo.",
   "sources.disabledRefused": "Desativada — publicações são recusadas",
   "sources.enableAria": "Ativar {name}",
+  "sources.acceptingLabel": "Aceitando",
+  "sources.enabledConsequence": "Codificadores podem se conectar a esta fonte.",
+  "sources.disabledConsequence": "Codificadores que se conectam aqui são recusados até isto ser ligado.",
   "sources.help.app": "O caminho de aplicação RTMP — a parte da URL entre o host e a chave de transmissão. A maioria dos codificadores espera “live”. Altere apenas se tiver um motivo.",
   "sources.help.ingest": "Como seu codificador alcança esta fonte. O SRT sobrevive a uma conexão com perdas retransmitindo o que faltou, e é o padrão certo pela internet pública. O RTMP é mais antigo e tem suporte universal, mas se degrada muito em um enlace instável. Com “Puxar”, o polyemesis busca o sinal em uma URL que você informar, em vez de esperar que publiquem para ele.",
   "sources.help.latencyMs": "Quanto tempo o SRT esperará por um pacote atrasado ou retransmitido antes de desistir dele. Valores mais altos suportam conexões piores ao custo de atraso: cerca de 2,5× o seu tempo de ida e volta é um bom ponto de partida, então 40 ms de RTT pedem cerca de 100 ms aqui. Baixo demais, e um soluço breve vira uma falha visível.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Última decisão: verificador principal",
   "automod.lastDecidedSecondary": "Última decisão: verificador de reserva",
   "automod.keyPending": "Aprovado com a chave que você digitou. Ela se tornará a chave deste verificador quando você salvar este endereço.",
-  "automod.keyBoundNote": "A chave salva só é enviada ao endereço para o qual foi informada. Mudar o endereço a apaga ao salvar, a menos que você teste o novo endereço com a chave dele antes."
+  "automod.keyBoundNote": "A chave salva só é enviada ao endereço para o qual foi informada. Mudar o endereço a apaga ao salvar, a menos que você teste o novo endereço com a chave dele antes.",
+  "route.nothingToSave": "Nada a salvar até que uma rota mude."
 }

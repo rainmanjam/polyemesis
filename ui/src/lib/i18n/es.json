@@ -880,6 +880,7 @@
   "media.title": "Multimedia",
   "media.desc": "Sube un archivo para emitir desde él según una programación, sin codificador. Copia su URL de extracción en la entrada de la fuente: Ajustes → Entrada → Pull para la fuente predeterminada.",
   "meters.clip": "Recorte",
+  "meters.clipAnnounce": "Saturación en la pista {n}",
   "meters.clip.hint": "Esta pista llegó a 0 dBFS, así que se perdieron muestras en vez de sonar solo fuerte. El recorte no se deshace más adelante: baja la ganancia en el codificador, no aquí.",
   "meters.deviation": "Desviación",
   "meters.deviation.hint": "Cuánto se aleja la sonoridad integrada de tu objetivo. Positivo es más alto que el objetivo, que es justo lo que una plataforma volverá a bajar.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Estos solo rellenan el formulario y nada más: edite lo que quiera antes de guardar. Los techos de las plataformas cambian y difieren según el estado de socio.",
   "rend.signalError": "Error",
   "rend.signalIdle": "Inactivo",
+  "rend.signalNotEncoding": "Sin codificar · se inicia cuando el primer feed salga en directo",
   "rend.sizePct": "Tamaño (% de la altura)",
   "rend.softwareEncoderFallback": "un codificador por software",
   "rend.speed": "Velocidad",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Programa predeterminado",
   "set.degraded": "Abandonar un enlace degradado",
   "set.degradedDesc": "Cambiar también de un codificador principal que sigue enviando, pero mal. Un umbral en 0 está desactivado.",
+  "set.degradedThresholds": "Umbrales",
+  "set.degradedSummaryOn": "Activado: cambia si baja de {bitrate} kbps, supera {rtt} ms o pierde más del {loss} %",
+  "set.degradedSummaryOff": "Desactivado. Si se activa: menos de {bitrate} kbps, más de {rtt} ms o más del {loss} % de pérdida",
   "set.degradedMinBitrate": "Tasa de bits inferior a (kbps)",
   "set.degradedMaxRtt": "Tiempo de ida y vuelta superior a (ms)",
   "set.degradedMaxLoss": "Pérdida de paquetes superior a (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Un codificador está publicando en esta fuente. Aplicar reinicia su entrada y desconecta a todos los que están viendo.",
   "sources.disabledRefused": "Deshabilitada: se rechazan las publicaciones",
   "sources.enableAria": "Activar {name}",
+  "sources.acceptingLabel": "Acepta",
+  "sources.enabledConsequence": "Los codificadores pueden conectarse a esta fuente.",
+  "sources.disabledConsequence": "Los codificadores que se conecten aquí serán rechazados hasta que esto esté activado.",
   "sources.help.app": "La ruta de aplicación RTMP: la parte de la URL entre el host y la clave de transmisión. La mayoría de los codificadores esperan «live». Cámbiela solo si tiene un motivo.",
   "sources.help.ingest": "Cómo llega su codificador a esta fuente. SRT sobrevive a una conexión con pérdidas retransmitiendo lo que falta, y es la opción predeterminada correcta por internet público. RTMP es más antiguo y goza de soporte universal, pero se degrada mucho en un enlace inestable. Con extracción, polyemesis obtiene la señal de una URL que usted indique en lugar de esperar a que le publiquen.",
   "sources.help.latencyMs": "Cuánto esperará SRT un paquete tardío o retransmitido antes de descartarlo. Los valores más altos aguantan peores conexiones a costa de retardo: aproximadamente 2,5 veces su tiempo de ida y vuelta es un buen punto de partida, así que 40 ms de RTT piden unos 100 ms aquí. Demasiado bajo y un pequeño tropiezo se convierte en un fallo visible.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Última decisión: verificador principal",
   "automod.lastDecidedSecondary": "Última decisión: verificador de respaldo",
   "automod.keyPending": "Superado con la clave que escribiste. Será la clave de este verificador cuando guardes esta dirección.",
-  "automod.keyBoundNote": "La clave guardada solo se envía a la dirección para la que se dio. Si cambias la dirección, se borra al guardar, salvo que antes pruebes la nueva dirección con su clave."
+  "automod.keyBoundNote": "La clave guardada solo se envía a la dirección para la que se dio. Si cambias la dirección, se borra al guardar, salvo que antes pruebes la nueva dirección con su clave.",
+  "route.nothingToSave": "Nada que guardar hasta que cambie una ruta."
 }

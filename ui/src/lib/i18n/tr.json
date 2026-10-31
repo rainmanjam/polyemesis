@@ -880,6 +880,7 @@
   "media.title": "Medya",
   "media.desc": "Kodlayıcı olmadan bir zamanlamaya göre yayın yapmak için bir dosya yükleyin. Çekme URL'sini kaynağın girişine kopyalayın — varsayılan kaynak için Ayarlar → Giriş → Pull.",
   "meters.clip": "Kırpılma",
+  "meters.clipAnnounce": "{n}. parçada kırpma var",
   "meters.clip.hint": "Bu parça 0 dBFS'e ulaştı, yani yalnızca yüksek sesli olmakla kalmadı, örnekler kayboldu. Kırpılma sonradan geri alınamaz — kazancı burada değil, kodlayıcıda düşürün.",
   "meters.deviation": "Sapma",
   "meters.deviation.hint": "Bütünleşik ses yüksekliğinin hedefinizden ne kadar uzakta olduğu. Artı değer hedeften daha yüksek demektir ve bir platformun geri kısacağı tam da budur.",
@@ -1239,6 +1240,7 @@
   "rend.seedNote": "Bunlar formu yalnızca başlangıç değerleriyle doldurur — kaydetmeden önce her şeyi düzenleyebilirsiniz. Platform tavanları değişir ve iş ortağı durumuna göre farklılık gösterir.",
   "rend.signalError": "Hata",
   "rend.signalIdle": "Boşta",
+  "rend.signalNotEncoding": "Kodlamıyor · ilk akış yayına geçtiğinde başlar",
   "rend.sizePct": "Boyut (yüksekliğin %'si)",
   "rend.softwareEncoderFallback": "bir yazılım kodlayıcısı",
   "rend.speed": "Hız",
@@ -1536,6 +1538,9 @@
   "set.chatCommandsDefault": "Varsayılan program",
   "set.degraded": "Zayıflayan bağlantıdan ayrıl",
   "set.degradedDesc": "Hâlâ gönderen ama kötü gönderen ana kodlayıcıdan da geçiş yap. 0 olan eşik kapalıdır.",
+  "set.degradedThresholds": "Eşikler",
+  "set.degradedSummaryOn": "Açık: {bitrate} kbps altına, {rtt} ms üstüne veya %{loss} kaybın üstüne çıkınca geçer",
+  "set.degradedSummaryOff": "Kapalı. Açılırsa: {bitrate} kbps altı, {rtt} ms üstü veya %{loss} kayıp üstü",
   "set.degradedMinBitrate": "Bit hızı şunun altında (kbps)",
   "set.degradedMaxRtt": "Gidiş-dönüş süresi şunun üstünde (ms)",
   "set.degradedMaxLoss": "Paket kaybı şunun üstünde (%)",
@@ -1647,6 +1652,9 @@
   "sources.dirtyPublishing": "Bu kaynağa bir kodlayıcı yayın gönderiyor. Uygulamak girişini yeniden başlatır ve izleyen herkesin bağlantısını keser.",
   "sources.disabledRefused": "Devre dışı — yayın gönderimleri reddediliyor",
   "sources.enableAria": "{name} kaynağını etkinleştir",
+  "sources.acceptingLabel": "Kabul ediyor",
+  "sources.enabledConsequence": "Kodlayıcılar bu kaynağa bağlanabilir.",
+  "sources.disabledConsequence": "Buraya bağlanan kodlayıcılar, bu açılana kadar reddedilir.",
   "sources.help.app": "RTMP uygulama yolu — URL'nin ana bilgisayar ile yayın anahtarı arasındaki bölümü. Çoğu kodlayıcı “live” bekler. Yalnızca bir nedeniniz varsa değiştirin.",
   "sources.help.ingest": "Kodlayıcınızın bu kaynağa nasıl ulaştığı. SRT, kaybolanı yeniden ileterek paket kayıplı bir bağlantıda ayakta kalır ve genel internet üzerinde doğru varsayılandır. RTMP daha eskidir ve her yerde desteklenir, ancak kararsız bir hatta ciddi biçimde bozulur. Çekme modunda polyemesis, kendisine yayın gönderilmesini beklemek yerine verdiğiniz bir URL'den akışı kendisi alır.",
   "sources.help.latencyMs": "SRT'nin geciken veya yeniden iletilen bir paketten vazgeçmeden önce ne kadar bekleyeceği. Yüksek değerler gecikme pahasına daha kötü bağlantıları atlatır: gidiş-dönüş süresinin yaklaşık 2,5 katı iyi bir başlangıçtır, yani 40 ms RTT için buraya yaklaşık 100 ms uygundur. Çok düşük olursa kısa bir aksama gözle görülür bir bozulmaya dönüşür.",
@@ -3184,5 +3192,6 @@
   "automod.lastDecidedPrimary": "Son karar: birincil denetleyici",
   "automod.lastDecidedSecondary": "Son karar: yedek denetleyici",
   "automod.keyPending": "Yazdığınız anahtarla geçti. Bu adresi kaydettiğinizde bu denetleyicinin anahtarı olacak.",
-  "automod.keyBoundNote": "Kayıtlı anahtar yalnızca verildiği adrese gönderilir. Adresi değiştirirseniz, önce yeni adresi kendi anahtarıyla test etmediğiniz sürece kaydettiğinizde silinir."
+  "automod.keyBoundNote": "Kayıtlı anahtar yalnızca verildiği adrese gönderilir. Adresi değiştirirseniz, önce yeni adresi kendi anahtarıyla test etmediğiniz sürece kaydettiğinizde silinir.",
+  "route.nothingToSave": "Bir yönlendirme değişene kadar kaydedilecek bir şey yok."
 }
