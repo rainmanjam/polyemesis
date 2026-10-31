@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // THE FFMPEG install.sh PUTS ON A HOST IS ONE BUILD, NAMED BY DATE AND HASH.
@@ -87,5 +88,55 @@ func TestInstallerPinsOneDatedFFmpegBuildByHash(t *testing.T) {
 	}
 	if run >= 0 && run < verify {
 		t.Error("offer_ffmpeg_upgrade runs the downloaded ffmpeg before checking its pinned hash")
+	}
+}
+
+// THE PINNED TAG HAS TO BE ONE BtbN KEEPS, AND ONLY THE MONTH-END ONES ARE.
+//
+// The pin above is only as durable as the release it names. The comment beside
+// it in install.sh said BtbN keeps dated releases "for roughly two years", and
+// that is true of exactly one release per month: the last build of each month.
+// The dailies in between are deleted after about two weeks. On 2026-10-29 the
+// list ran autobuild-2024-11-30, 2024-12-31, ... 2026-09-30 (month-ends only),
+// then 2026-10-16 onward (the recent dailies). The pinned
+// autobuild-2026-09-23-14-55 was a daily, it had been deleted, and every
+// install.sh --ffmpeg force was a 404 that read like a CDN outage.
+//
+// So the date in the tag must be the last day of its month. That is a property
+// of the string, which is all this test can see, and it is the one that decides
+// whether the download still exists next year.
+func TestInstallerPinsAMonthEndFFmpegBuildBtbNKeeps(t *testing.T) {
+	src := installerSource(t)
+	tag := regexp.MustCompile(`(?m)^FFMPEG_BTBN_TAG=autobuild-(\d{4})-(\d{2})-(\d{2})-\d{2}-\d{2}$`).FindStringSubmatch(src)
+	if tag == nil {
+		t.Fatal("install.sh has no FFMPEG_BTBN_TAG=autobuild-YYYY-MM-DD-HH-MM assignment")
+	}
+	day, err := time.Parse("2006-01-02", tag[1]+"-"+tag[2]+"-"+tag[3])
+	if err != nil {
+		t.Fatalf("FFMPEG_BTBN_TAG date %s-%s-%s does not parse: %v", tag[1], tag[2], tag[3], err)
+	}
+	if next := day.AddDate(0, 0, 1); next.Month() == day.Month() {
+		t.Errorf("FFMPEG_BTBN_TAG is dated %s, which is not the last day of its month. "+
+			"BtbN deletes its daily autobuilds after about two weeks and keeps only the "+
+			"last build of each month, so this pin will 404. Pick the month-end release "+
+			"(e.g. autobuild-%s-%s-<last day>-HH-MM) from "+
+			"https://github.com/BtbN/FFmpeg-Builds/releases", day.Format("2006-01-02"), tag[1], tag[2])
+	}
+
+	// A dated release names its assets with the git describe of the build,
+	// n<version>-<commits>-g<hash>, or the bare n<version> when it sat on the
+	// tag. Either way the version in the name has to be the line the asset
+	// belongs to, or the hash pins a file nobody meant.
+	assets := functionBody(t, src, "ffmpeg_static_asset")
+	nameRe := regexp.MustCompile(`ffmpeg-n(\d+)\.(\d+)(?:\.\d+)?(?:-\d+-g[0-9a-f]+)?-linux(?:arm)?64-gpl-(\d+)\.(\d+)\.tar\.xz`)
+	names := nameRe.FindAllStringSubmatch(assets, -1)
+	if len(names) != 2 {
+		t.Fatalf("ffmpeg_static_asset names %d dated BtbN GPL tarballs, want 2 (amd64, arm64)", len(names))
+	}
+	for _, m := range names {
+		if m[1] != m[3] || m[2] != m[4] {
+			t.Errorf("%s: the version in the name is n%s.%s but the series suffix is %s.%s",
+				m[0], m[1], m[2], m[3], m[4])
+		}
 	}
 }

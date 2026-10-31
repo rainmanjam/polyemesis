@@ -184,10 +184,16 @@ else
 fi
 
 FFV=$(docker run --rm --entrypoint ffmpeg "$IMAGE" -hide_banner -version 2>/dev/null | head -1 | awk '{print $3}')
-case "$FFV" in
-  6.*|7.*|8.*) ok "ffmpeg $FFV is >= 6" ;;
-  *)           bad "ffmpeg version unusable: '$FFV'" ;;
-esac
+# The major as a NUMBER, not a list of majors. This used to be a case over
+# 6.*|7.*|8.*, which would have failed the first image built on FFmpeg 9 with
+# "version unusable" while 9.0.2 passes every suite (2026-10-29). The floor is
+# internal/ffmpeg MinMajorVersion; an "n" prefix is a git-tag build's.
+FFMAJ=$(printf '%s' "$FFV" | sed -nE 's/^n?([0-9]+)\..*/\1/p')
+if [ -n "$FFMAJ" ] && [ "$FFMAJ" -ge 6 ]; then
+  ok "ffmpeg $FFV is >= 6"
+else
+  bad "ffmpeg version unusable: '$FFV'"
+fi
 
 # Whole-token match. `grep srt` is no check at all: every build lists srtp,
 # which is Secure RTP and cannot carry an ingest.

@@ -2,6 +2,135 @@
 
 Measured on 2026-08-27, against the actual binaries, not reasoned about.
 
+## Update, 2026-10-29: 9.0.2
+
+**9.0.2 is the 9.x to take, and 9.0 and 9.0.1 are the two to avoid.** Both
+shipped "fftools/ffmpeg_sched: allow throttling decoder outputs" (03dfac5630).
+9.0.2 reverts it ([9d4ca2122](https://github.com/FFmpeg/FFmpeg/commit/9d4ca2122))
+because it can misorder the output interleave, end streams early and use extreme
+memory. A destination is one input, several audio decoders and one filtergraph,
+which is the shape that goes through that path. The 9.0.1 result recorded below
+pre-dates the revert, and `Detect` now prints a startup warning for 9.0/9.0.1
+(`Tools.KnownRegressionWarning`). 8.1.x never had the change: GitHub's compare
+of 03dfac5630 against n8.1.3 says "diverged".
+
+**The packaging blocker is narrower, but still there.** Alpine edge now has
+`ffmpeg 9.0.2-r0`, with VAAPI linked. No stable branch does: 3.24 moved to
+**8.1.3-r0**, which broke the `8.1.2-r0` pin and every image build until the
+Dockerfile was bumped. Putting edge onto 3.24 was measured, not assumed:
+
+| route | result |
+|---|---|
+| `apk add --repository=…/edge/community ffmpeg=9.0.2-r0` on 3.24 | **fails**: needs `libx265.so.216`, `libvpx.so.12`, `libbluray.so.4`, which 3.24 lacks |
+| edge/main + edge/community on 3.24 | installs, and srt, VAAPI, libx264 and the filters are all present. But **104 of 107 packages come from edge** (libstdc++, libgcc, x264, x265, libsrt, libva, glib…) on 3.24's musl and openssl. That userland is unsupported, and it changes under the same tag whenever edge moves |
+| `alpine:edge` base | works and keeps VAAPI, but it is a rolling distribution under a release image |
+
+So the image stays on 8.1.3 until 3.25 (or whichever stable branch comes next)
+packages 9.x. At that point the change is the FROM line plus the pin.
+
+Ubuntu has no 9.x in any release: 26.04 has 8.0.1, and 26.10 and devel have
+8.1.2. So `Dockerfile.vaapi` and `Dockerfile.cuda` stay where they are. Debian
+sid has 9.0.2-4. johnvansickle.com still publishes 7.0.2. BtbN publishes n9.0
+for linux64, linuxarm64, win64 and winarm64, both in the rolling `latest` and
+in dated releases. The month-end `autobuild-2026-09-30-13-08`, which BtbN keeps,
+has `n9.0.2-17-g2a571b6068`.
+
+**What changed between 8.1.2 and 9.0.2 that touches us.** This comes from a diff
+of the two source trees, file by file, over everything we drive.
+
+- `fftools/ffmpeg.c` is **byte-identical**. That covers `-progress` output
+  (`print_report`), the stdin `c` command handling
+  (`check_keyboard_interaction`), `-stats_period` and the main loop. The
+  `Command reply for stream N: ret:R res:` line in `ffmpeg_filter.c` is
+  unchanged too.
+- Removed CLI options (`FFMPEG_OPT_*` dropped at the major bump): `-vsync`,
+  `-filter_script`, `-filter_complex_script`, `-top`, `-qphist`,
+  `-adrift_threshold`, plus the `drop` value of the vsync/fps_mode parser and
+  `source_no_drop` for `-force_key_frames`. Measured: `-vsync` and
+  `-filter_complex_script` exit 8 with "Unrecognized option" on 9.0.2. **None is
+  in our argv.** An operator's expert arguments can carry them, and such a
+  destination will not start on 9.x.
+- NVENC: the named presets, the `*_hq` and `2pass` rate-control modes, `-cbr`
+  and `-2pass` are removed, and the SDK floor is now 11.1. Our argv uses
+  `-preset p4` and `-rc cbr`/`vbr`, so it is unaffected. See HARDWARE.md.
+- libsrt: there is a new `ipv6only` option, and on SRT ≥ 1.5.2 an IPv6
+  **wildcard** listener without it is an error. Our listener binds
+  `srt://0.0.0.0:…`, so it is unaffected. Watch for this if the bind address
+  ever becomes `[::]`.
+- `af_pan`: a new error for an unsupported input channel id. `af_aresample`:
+  ENOMEM handling only. `segment`/`tee`: program transfer to child muxers.
+  `concat`: a recursion-depth limit (10). `dashenc`: two new options. flv,
+  mpegts, matroska, hls, rtmp, amix, volume, loudnorm, alimiter, adelay, atrim,
+  asplit, ebur128, astats: no change, or no change to behaviour we depend on.
+- `transpose_npp` is gone (replaced by `transpose_cuda`). We do not emit any
+  `*_npp` filter.
+- The version banner is unchanged in shape. `opt_common.c` now formats it with
+  `%s`, and the output is still `ffmpeg version <x>`.
+
+**The suites, 2026-10-29.** All runs set `POLYEMESIS_REQUIRE_FFMPEG=1`, so a
+missing binary fails rather than skips. The packages are ffmpeg, supervisor,
+engine, media, meters, clipper, clips, playlistmedia, transcribe, recording,
+rtmpserver, srtserver, multitrack and uploadprobe.
+
+| FFmpeg | where | pass | fail | skip |
+|---|---|---|---|---|
+| 9.0.2 (Homebrew) | macOS arm64 | 3101 | 1¹ | 12² |
+| n9.0.2-17 (BtbN) | Linux container | 3134 | 1³ | 11² |
+| n8.1.2-34-g9b6c8969e0 (BtbN, the staging build's commit) | Linux container | 3139 | 1³ | 4 |
+| n6.1.3 (BtbN, the floor) | Linux container | 3126 | 7⁴ | 11 |
+
+1. `transcribe` TestTheScratchWAVsAreRemovedEvenWhenTheJobFails. It globs the
+   shared TMPDIR, the stub is `exit 1` with no FFmpeg involved, and it passed
+   5/5 in isolation.
+2. Seven rtmpserver #674 reproductions skip by design on any major other than 8
+   (`requireShippedFFmpeg`). The 3 drawtext skips are a Homebrew build without
+   libfreetype.
+3. `meters` TestAnalyserMeasuresThePerDestinationMixAndNotTheIngest ("never
+   bound udp … in 10s"). It is a harness artefact, and that was measured: the
+   plain `golang:*-bookworm` image has no `ss`/`lsof` to see the bind. In a
+   container that has them, `internal/meters` passes 59/59 on 9.0.2, 8.1.2 and
+   6.1.3. This is very likely the same cause as the 2026-08-27 failure below.
+4. The meters artefact, plus the documented below-7.1 limits: multitrack FLV
+   (×1), two audio streams in flv (×3 with subtests), and SIGTERM ignored on a
+   quiet feed (×2). That last one: on 6.1 a recorder or file destination stopped
+   on a silent feed waits out the 8 s grace and is SIGKILLed, because 6.1 does
+   not act on the supervisor's wake. In the measured run the MKV still had a
+   duration. Recorded here rather than gated: 6.x stays the floor, and the cost
+   is a slow stop, not a lost stream.
+
+The acceptance suites ran in Linux containers on BtbN n9.0.2-17 and on n8.1.2-34
+(the staging build's commit), with identical results on both versions. Counts
+are each log's own `N passed, M failed` line:
+
+| suite | 9.0.2 | 8.1.2 |
+|---|---|---|
+| acceptance | 13/0 | 13/0 |
+| acceptance-audio | 36/**4** | 36/**4** |
+| acceptance-renditions | 45/0 | 45/0 |
+| acceptance-ladder | 45/0 | 45/0 |
+| acceptance-encoders | 29/0 | 29/0 |
+| acceptance-tls | 35/0 | 35/0 |
+| acceptance-pull | 11/0 | 11/0 |
+| acceptance-playlist-phase0 | 15/0 | 15/0 |
+| acceptance-synth | 10/0 | 10/0 |
+| acceptance-failover (rerun with `hexdump` in the image) | 27/0 | 27/0 |
+| acceptance-recording-stop | 13/0 | 13/0 |
+
+The four acceptance-audio failures do not depend on the FFmpeg version. They
+are section 9's backwards-compatibility goldens ("the compiled filter changed").
+I4's named `volume@trkN` stages now appear in the graph of an untouched profile.
+That is a ux-overhaul change, not an FFmpeg one.
+
+**I4 live gain on each version.** There are two checks. The first is the
+supervisor's real-FFmpeg test: mute, then gain 2.0, with the RMS measured and
+0 restarts required. It passes on 9.0.2, 8.1.2 and 6.1.3, with reply latencies
+of 8–54 ms. The second is end to end: the built binary, a synthetic 3-track
+ingest, a file destination, and then `POST
+/destinations/1/tracks/0/gain` for gain 0.5, then mute, then unmute at 2.0. On
+**8.1.2, 9.0.2 and 6.1.3**, all three changes report `"applied": "live"` and
+status `levelChange: "applied live"`, with the **same pid and restarts=0**. The
+live path does not need a version gate.
+
 ## Decision: staying on 8.1.2 (2026-08-27)
 
 Taken deliberately, not deferred. The behaviour of 9.0.1 is fine — the

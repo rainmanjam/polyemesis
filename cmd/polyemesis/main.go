@@ -934,6 +934,13 @@ func reportStartup(log *slog.Logger, cfg config.Config, provider *tlsx.Provider,
 	if warn := tools.SRTWarning(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 	}
+	// FFmpeg 9.0/9.0.1: a scheduler regression 9.0.2 reverted. Logged as well as
+	// printed, so it reaches journald on a service install where nobody reads
+	// the banner.
+	if warn := tools.KnownRegressionWarning(); warn != "" {
+		fmt.Printf("\n  WARNING: %s\n", warn)
+		log.Warn("ffmpeg release with a known regression", "detail", warn)
+	}
 	if warn := cfg.InsecureExposureWarning(); warn != "" {
 		fmt.Printf("\n  WARNING: %s\n", warn)
 		log.Warn("insecure exposure", "detail", warn)

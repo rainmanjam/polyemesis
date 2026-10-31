@@ -641,30 +641,44 @@ FFMPEG_PINNED_PROBE=""
 # and cross-check against the digest GitHub computed itself:
 #   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
 #     --jq '.assets[] | select(.name|test("linux(arm)?64-gpl-8.1.tar")) | "\(.digest) \(.name)"'
-# BtbN keeps dated releases for roughly two years (the oldest listed on
-# 2026-09-23 was autobuild-2024-10-31-12-59), so a pin keeps working long after
-# it stops being current. internal/testenv/installer_ffmpeg_pin_test.go refuses
-# `latest`, an undated tag, or a missing hash.
-FFMPEG_BTBN_TAG=autobuild-2026-09-23-14-55
+# PIN A MONTH-END TAG. BtbN keeps ONE release per month for about two years --
+# the last build of that month -- and deletes the dailies in between after about
+# two weeks. This used to pin autobuild-2026-09-23-14-55, a daily; by 2026-10-29
+# it was gone and every `--ffmpeg force` was a 404. The month-end ones are what
+# made the "two years" true (the list on 2026-10-29 ran 2024-11-30, 2024-12-31,
+# ... 2026-09-30, then only October's dailies).
+# internal/testenv/installer_ffmpeg_pin_test.go refuses `latest`, an undated
+# tag, a tag that is not the last day of its month, or a missing hash.
+#
+# The same release carries the 9.0 line, verified the same two ways, for when
+# the image moves to it (Dockerfile: no stable Alpine packages 9.x yet):
+#   ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
+#     68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269
+#   ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz
+#     91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46
+# Never 9.0.0 or 9.0.1: see FFmpeg commit 9d4ca2122 (a scheduler change that
+# misorders output and ends streams early, reverted in 9.0.2).
+FFMPEG_BTBN_TAG=autobuild-2026-09-30-13-08
 
 ffmpeg_static_asset() {
   # BtbN publishes per-architecture GPL tarballs. Only these two are built. A
-  # dated release names the exact point release (n8.1.3); only the rolling
-  # release uses the n8.1-latest names.
+  # dated release names the build by git describe (n8.1.3-9-g29e619e767: the
+  # 8.1.3 tag plus nine release-branch fixes); only the rolling release uses
+  # the n8.1-latest names.
   case "$ARCH" in
-    amd64) echo "ffmpeg-n8.1.3-linux64-gpl-8.1.tar.xz" ;;
-    arm64) echo "ffmpeg-n8.1.3-linuxarm64-gpl-8.1.tar.xz" ;;
+    amd64) echo "ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz" ;;
+    arm64) echo "ffmpeg-n8.1.3-9-g29e619e767-linuxarm64-gpl-8.1.tar.xz" ;;
     *)     echo "" ;;
   esac
 }
 
 # ffmpeg_static_sha256 is the sha256 of ffmpeg_static_asset in FFMPEG_BTBN_TAG.
-# Checked 2026-09-23 against both BtbN's checksums.sha256 and GitHub's own asset
+# Checked 2026-10-29 against both BtbN's checksums.sha256 and GitHub's own asset
 # digest for that release.
 ffmpeg_static_sha256() {
   case "$ARCH" in
-    amd64) echo "8f8d9df68e0b12f401047c244f50ff411f533eb2d306173e73d6a16fb29b320d" ;;
-    arm64) echo "cf0ff6547cc76197fdd5f8377e0b53c9bdd8006d082113149d8909e3b5f36643" ;;
+    amd64) echo "97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79" ;;
+    arm64) echo "10523d1e0be6b3ce62a9708cc50815c4b5eb5f36ae147fbe2afeecda6f2d6845" ;;
     *)     echo "" ;;
   esac
 }

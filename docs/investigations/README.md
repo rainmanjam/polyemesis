@@ -88,6 +88,12 @@ arrive with its restart count attached.
 
 ## FFmpeg 9.0.1 — is the upgrade from 8.1.2 safe?
 
+**Updated 2026-10-29 for 9.0.2:** take 9.0.2 and never 9.0 or 9.0.1. FFmpeg
+reverted a scheduler regression in 9.0.2 (9d4ca2122). Every FFmpeg-using
+package passes on 9.0.2, and I4 live gain works on 6.1.3, 8.1.2 and 9.0.2. The
+image still waits on a stable Alpine 9.x, because edge's ffmpeg does not install
+cleanly on 3.24.
+
 [`ffmpeg-9-upgrade-risk.md`](ffmpeg-9-upgrade-risk.md). Short answer: **not
 yet, and the blocker is packaging rather than behaviour** — Alpine has not
 packaged any 9.x, `edge` included, so `apk add ffmpeg=9.0.1` has nothing to
