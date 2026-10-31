@@ -584,11 +584,14 @@ export function TrackSummary({
           <span
             key={i}
             title={trackChipTitle(i, on, labels?.[i])}
+            data-routed={on}
+            // app-council A89: filled when routed, a dashed outline when
+            // excluded, so the two differ in shape and not in colour alone.
             className={cn(
               "tnum flex h-4 w-4 items-center justify-center rounded-[3px] font-mono text-sm font-bold",
               on
                 ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground",
+                : "border border-dashed border-muted-foreground/60 bg-transparent text-muted-foreground",
             )}
           >
             {i + 1}

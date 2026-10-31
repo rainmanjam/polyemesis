@@ -10,6 +10,7 @@ import {
   MoreVertical,
   Pencil,
   Play,
+  Radio,
   RefreshCw,
   Scissors,
   Square,
@@ -256,8 +257,15 @@ export function DestinationCard({
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            <Badge variant={dest.enabled ? toneBadge[tone] : "outline"}>
-              {dest.enabled ? stateLabel(state) : t("state.stopped")}
+            {/* app-council A2: a switched-off card says Off, not Stopped, so it
+                is not read as a broadcast that ended. app-council A89: a
+                running card's badge carries a glyph, so live does not rest on
+                the fill colour alone. */}
+            <Badge data-testid="card-state-badge" variant={dest.enabled ? toneBadge[tone] : "outline"}>
+              {dest.enabled && state === "running" && (
+                <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
+              )}
+              {dest.enabled ? stateLabel(state) : t("state.off")}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
