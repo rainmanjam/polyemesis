@@ -737,7 +737,7 @@ var destinationPresets = []DestinationPreset{
 
 	// ------------------------------------------------------- video platforms
 	{
-		ID: "x", Name: "X (Twitter) Live", Group: GroupVideo,
+		ID: "x", Name: "X (Twitter) Live", Group: GroupVideo, Platform: PlatformX,
 		Video: &VideoGuidance{
 			Width: 1920, Height: 1080, FPS: 60, KbpsMin: 12000, KbpsMax: 12000, GOPSeconds: 3,
 			Note:   "Live Studio's figures. X's older Media Studio Producer page is still published and disagrees materially (9000 recommended, 720p60), so no maximum is offered until the two reconcile. X ignores variants whose codec or bitrate it does not accept.",
@@ -745,10 +745,9 @@ var destinationPresets = []DestinationPreset{
 		},
 		Transport: PresetRTMPS, Kind: DestRTMP,
 		SeparateKey: true,
-		Notes: "Manual key only. X's API covers posts, users, media and the post firehose — \"streaming\" in its " +
-			"documentation means streaming posts, not ingesting video — so there is no documented endpoint for " +
-			"polyemesis to fetch an ingest from, and none is planned. Create the source in X's own producer tooling " +
-			"and copy the server URL and key from there.",
+		Notes: "Paste the server URL and stream key from X's producer tooling. X's Livestream API can also " +
+			"create the stream source once X has whitelisted polyemesis's app; until then, the paste is the " +
+			"working path. Sign-in and the Livestream features need that whitelist.",
 		Aliases: []string{"twitter", "periscope"},
 	},
 	{

@@ -162,7 +162,11 @@ func TestPresetPlatformsAreKnownIntegrations(t *testing.T) {
 		// keeps SeparateKey because Vimeo issues the ingest per live event and
 		// creating one is Enterprise-only. A reader tempted to "finish" this by
 		// clearing SeparateKey should read internal/oauth/vimeo.go first.
-		PlatformVimeo:  true,
+		PlatformVimeo: true,
+		// X names a platform for sign-in and the Livestream gate, and pastes its
+		// key until X whitelists the app. Like Vimeo, the platform and the paste
+		// are separate answers. See internal/oauth/x.go.
+		PlatformX:      true,
 		PlatformCustom: true,
 		"":             true,
 	}

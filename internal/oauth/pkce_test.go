@@ -182,6 +182,11 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 		// and the standard Vimeo 404 page loads", which is this flag's
 		// lock-everyone-out risk in its least diagnosable form.
 		db.PlatformVimeo: false,
+		// X's Livestream authentication guide recommends OAuth 2.0 authorization
+		// code with PKCE for every new integration, and the consent request
+		// carries code_challenge with S256. PROVISIONAL until one live authorize
+		// request confirms X accepts it.
+		db.PlatformX: true,
 	}
 	for platform, p := range Providers() {
 		w, ok := want[platform]

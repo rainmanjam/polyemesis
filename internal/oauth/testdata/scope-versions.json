@@ -60,6 +60,17 @@
     ]
   },
   {
+    "platform": "x",
+    "scopeVersion": 1,
+    "scopes": [
+      "broadcast.read",
+      "broadcast.write",
+      "offline.access",
+      "tweet.read",
+      "users.read"
+    ]
+  },
+  {
     "platform": "youtube",
     "scopeVersion": 1,
     "scopes": [

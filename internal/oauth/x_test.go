@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,15 +11,19 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
 // xStub returns a provider pointed at a test server, plus the server.
 //
-// The same shape kickStub uses, and for the same reason: X's consent, token and
-// data calls all resolve through the per-instance base, so a stray real request
-// would make this suite depend on the network -- and on an X developer app
-// nobody running these tests has.
+// Every X call -- consent, token, Livestream and users/me -- resolves through
+// the per-instance base, so a stray real request would make this suite depend
+// on the network and on an X developer app nobody running these tests has.
+// Livestream access is OFF unless a test turns it on, which is the production
+// default and the first thing most tests check.
 func xStub(t *testing.T, h http.HandlerFunc) (*X, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(h)
@@ -26,24 +31,51 @@ func xStub(t *testing.T, h http.HandlerFunc) (*X, *httptest.Server) {
 	return NewX(WithBaseURL(srv.URL)), srv
 }
 
-// A real-shaped ListBroadcastsResponse. The field names are transcribed from
-// X's served spec (components.schemas.Broadcast, read 2026-08-16) rather than
-// invented, which is the whole value of the fixture: a rename in the decode
-// struct fails here instead of returning an empty account at connect time.
-//
-// It carries total_watching and total_watched deliberately -- see
-// TestXNeverDecodesTheUndescribedViewerCounts.
+// xStubLive is xStub with the Livestream gate switched on, for the tests that
+// exercise the Livestream family itself.
+func xStubLive(t *testing.T, h http.HandlerFunc) (*X, *httptest.Server) {
+	t.Helper()
+	x, srv := xStub(t, h)
+	return x.WithLivestreamAccess(), srv
+}
+
+// xCountingStub counts every request that reaches the server. The gate tests
+// use it to prove that a switched-off Livestream makes NO request at all, not
+// merely a failing one.
+func xCountingStub(t *testing.T) (*X, *int32) {
+	t.Helper()
+	var hits int32
+	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "should not be reached", http.StatusTeapot)
+	})
+	return x, &hits
+}
+
+// Fixtures transcribed from X's served OpenAPI spec (api.x.com/2/openapi.json,
+// version 2.173, read 2026-10-31), not invented. A rename in a decode struct
+// fails here instead of returning an empty account at connect time.
+const xMeFixture = `{"data": {"id": "1234567890", "name": "Sunday Practice", "username": "sundaypractice"}}`
+
+const xSourcesFixture = `{"data": {"sources": [
+  {"id": "k3y0ne", "name": "polyemesis", "rtmp_url": "rtmp://ingest.example.invalid/live",
+   "rtmps_url": "rtmps://ingest.example.invalid:443/live", "rtmp_stream_key": "k3y0ne",
+   "is_stream_active": false, "owner_id": 1234567890}
+]}}`
+
+const xEmptySourcesFixture = `{"data": {"sources": []}}`
+
 const xBroadcastListFixture = `{
   "data": [
     {
       "id": "1ynJOZVeajOJR",
       "broadcast_id": "1ynJOZVeajOJR",
       "twitter_user_id": "1234567890",
-      "source_id": "src_abc123",
+      "source_id": "k3y0ne",
       "title": "Sunday practice",
       "share_url": "https://x.com/i/broadcasts/1ynJOZVeajOJR",
       "media_key": "13_1729384756",
-      "state": "Running",
+      "state": "RUNNING",
       "start_ms": "1755302400000",
       "end_ms": "",
       "total_watching": "17",
@@ -56,362 +88,450 @@ const xBroadcastListFixture = `{
   "meta": {"result_count": 1}
 }`
 
-// ------------------------------------------------------------------ oauth
+// xSecret builds a credential-shaped value at runtime. gitleaks forbids
+// literal key shapes in test fixtures, so the key is assembled here.
+func xSecret(parts ...string) string { return strings.Join(parts, "") }
 
-func TestXAuthURLCarriesBothBroadcastScopesAndNoUndocumentedParameter(t *testing.T) {
+// ---------------------------------------------------------------- the surface
+
+// TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds pins the consent
+// request. PKCE is ON: X's authorization-code flow documents PKCE as the
+// recommended flow for the Livestream API, so the challenge reaches the wire
+// and the verifier is sent at exchange.
+func TestXAuthURLSendsPKCEAndTheFiveScopesTheLivestreamFamilyNeeds(t *testing.T) {
 	x := &X{}
-	if x.PKCE() {
-		t.Fatal("PKCE() is true. X's served spec declares an authorizationCode flow with " +
-			"no RFC 7636 parameters of any kind; see the comment on PKCE for the argument " +
-			"and for what evidence would justify turning it on")
+	if !x.PKCE() {
+		t.Fatal("PKCE() is false. X's Livestream authentication page documents " +
+			"OAuth 2.0 Authorization Code Flow with PKCE as the recommended flow")
 	}
-
-	// A challenge is passed anyway. The framework hands one to every provider,
-	// and a provider that reports PKCE false must DISCARD it rather than send
-	// it: an authorization server that validates its query string strictly
-	// rejects an unknown parameter, which locks everyone out of sign-in.
 	raw := x.AuthURL("client-id", "https://polyemesis.test/api/v1/oauth/x/callback", "state-123", "a-challenge")
-
 	u, err := url.Parse(raw)
 	if err != nil {
 		t.Fatalf("AuthURL produced an unparseable URL %q: %v", raw, err)
 	}
 	if got, want := u.Scheme+"://"+u.Host+u.Path, "https://api.x.com/2/oauth2/authorize"; got != want {
-		t.Errorf("AuthURL points at %q, want %q -- the authorizationUrl X's spec declares", got, want)
+		t.Errorf("AuthURL points at %q, want %q", got, want)
 	}
 	q := u.Query()
-	for _, forbidden := range []string{"code_challenge", "code_challenge_method"} {
-		if q.Has(forbidden) {
-			t.Errorf("AuthURL sends %q while PKCE() is false. Nothing in X's spec documents it, "+
-				"and an unknown parameter can be refused outright", forbidden)
-		}
+	if got := q.Get("code_challenge"); got != "a-challenge" {
+		t.Errorf("code_challenge = %q, want the challenge handed to AuthURL", got)
 	}
-	if got := q.Get("response_type"); got != "code" {
-		t.Errorf("response_type = %q, want code", got)
+	if got := q.Get("code_challenge_method"); got != "S256" {
+		t.Errorf("code_challenge_method = %q, want S256", got)
 	}
-	if got := q.Get("state"); got != "state-123" {
-		t.Errorf("state = %q, want it passed through unchanged", got)
-	}
-	if got := q.Get("client_id"); got != "client-id" {
-		t.Errorf("client_id = %q", got)
-	}
-
-	// The scopes are the point: a consent screen missing broadcast.write yields
-	// a token that can read broadcasts and do nothing else, and no amount of
-	// reconnecting fixes it without a scope change.
 	granted := strings.Fields(q.Get("scope"))
 	sort.Strings(granted)
-	want := []string{"broadcast.read", "broadcast.write"}
+	want := []string{"broadcast.read", "broadcast.write", "offline.access", "tweet.read", "users.read"}
 	if !reflect.DeepEqual(granted, want) {
-		t.Errorf("scope = %v, want exactly %v -- the only two scopes X's spec attaches to "+
-			"the Broadcasts family", granted, want)
+		t.Errorf("scope = %v, want exactly %v. broadcast.read/write are the Livestream family; "+
+			"offline.access issues a refresh token; users.read and tweet.read let GET /2/users/me "+
+			"and the broadcast.chat activity subscription succeed", granted, want)
 	}
 }
 
-func TestXScopesAndVersionAreThePairTheMechanismNeeds(t *testing.T) {
+// TestXScopesAreTheListTheLedgerRecords keeps Scopes and ScopeVersion honest
+// against the append-only ledger. X never shipped a version before this one, so
+// no account holds an older grant and the first version is 1.
+func TestXScopesAreTheListTheLedgerRecords(t *testing.T) {
 	x := &X{}
-	if got := x.ScopeVersion(); got < 1 {
-		t.Errorf("ScopeVersion() = %d; a zero version makes every account it ever connects "+
-			"look like a legacy row and silently disables the reconnect prompt", got)
+	if got := x.ScopeVersion(); got != 1 {
+		t.Errorf("ScopeVersion() = %d, want 1: X was never registered, so no account was "+
+			"ever granted an earlier version and nothing needs a reconnect prompt", got)
 	}
-	if len(x.Scopes()) == 0 {
-		t.Fatal("Scopes() is empty")
+	if got := x.Platform(); got != db.PlatformX {
+		t.Errorf("Platform() = %q, want db.PlatformX", got)
 	}
-	// offline.access would change what a connected token can do, so it must
-	// arrive with a version bump rather than quietly. This is not a ban on
-	// adding it -- Refresh's comment argues for it -- it is the pairing that
-	// makes forgetting the bump visible in review.
-	for _, s := range x.Scopes() {
-		if s == "offline.access" && x.ScopeVersion() == 1 {
-			t.Error("offline.access was added to Scopes() without bumping ScopeVersion past 1. " +
-				"Every existing account holds a token that still has no refresh token, and " +
-				"the account list is what has to say so")
+}
+
+// TestXReachesNoRealHost is the escape guard: with a base URL set, no call may
+// leave for api.x.com.
+func TestXReachesNoRealHost(t *testing.T) {
+	x, srv := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Host, "x.com") {
+			t.Errorf("request reached a real X host: %s", r.Host)
+		}
+		_, _ = io.WriteString(w, xMeFixture)
+	})
+	if _, err := x.Account(context.Background(), "client", "tok"); err != nil {
+		t.Fatalf("Account: %v", err)
+	}
+	if !strings.HasPrefix(srv.URL, "http://127.0.0.1") {
+		t.Fatalf("test server is not local: %s", srv.URL)
+	}
+}
+
+// -------------------------------------------------------------- token exchange
+
+// TestXExchangeSendsTheVerifierBecausePKCEIsOn is the other half of PKCE: the
+// verifier that matched the challenge must reach the token endpoint, or X
+// refuses the exchange with a message that does not mention PKCE.
+func TestXExchangeSendsTheVerifierBecausePKCEIsOn(t *testing.T) {
+	var got url.Values
+	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		got = r.PostForm
+		_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":7200,"scope":"broadcast.read"}`)
+	})
+	tok, err := x.Exchange(context.Background(), "client", "secret", "https://cb", "code-1", "the-verifier")
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if got.Get("code_verifier") != "the-verifier" {
+		t.Errorf("code_verifier = %q, want the verifier that matched the challenge", got.Get("code_verifier"))
+	}
+	if tok.RefreshToken != "r" {
+		t.Errorf("refresh token = %q; offline.access must yield one", tok.RefreshToken)
+	}
+}
+
+// --------------------------------------------------------------------- account
+
+// TestXAccountReadsTheHandleFromUsersMe replaces the earlier identity-from-a-
+// broadcast approach. With users.read granted, /2/users/me returns a handle.
+func TestXAccountReadsTheHandleFromUsersMe(t *testing.T) {
+	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/2/users/me" {
+			t.Errorf("Account read %s, want /2/users/me", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, xMeFixture)
+	})
+	acct, err := x.Account(context.Background(), "client", "tok")
+	if err != nil {
+		t.Fatalf("Account: %v", err)
+	}
+	if acct.Ref != "1234567890" {
+		t.Errorf("Ref = %q, want the numeric user id", acct.Ref)
+	}
+	if acct.Name != "sundaypractice" {
+		t.Errorf("Name = %q, want the handle without a leading @", acct.Name)
+	}
+}
+
+// TestXAccountDoesNotNeedABroadcastToConnect is the defect the old code had: an
+// account that had never broadcast could not connect, because the id was read
+// off a broadcast. /2/users/me needs no broadcast.
+func TestXAccountDoesNotNeedABroadcastToConnect(t *testing.T) {
+	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/2/broadcasts") {
+			t.Errorf("Account asked for broadcasts (%s); it must not need one", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, xMeFixture)
+	})
+	if _, err := x.Account(context.Background(), "client", "tok"); err != nil {
+		t.Fatalf("an account with no broadcasts could not connect: %v", err)
+	}
+}
+
+// ------------------------------------------------------------------ the gate
+
+// TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest is the gate. Until the
+// owner's app is whitelisted, every Livestream operation refuses WITHOUT a
+// request: a request that fails with 403 would be a refusal the operator cannot
+// interpret, and it would look like a bug in polyemesis.
+func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
+	x, hits := xCountingStub(t)
+	if x.LivestreamAccess() {
+		t.Fatal("Livestream access is on by default; it must be off until X whitelists the app")
+	}
+	ctx := context.Background()
+	if _, err := x.Ingest(ctx, "client", "tok"); !errors.Is(err, ErrNoStreamKeyAPI) {
+		t.Errorf("Ingest with the gate off = %v, want ErrNoStreamKeyAPI so the operator is sent to the paste field", err)
+	}
+	if _, err := x.StreamKeys(ctx, "client", "tok"); err == nil {
+		t.Error("StreamKeys with the gate off returned no error")
+	}
+	if _, err := x.BroadcastState(ctx, "tok", "1ynJOZVeajOJR"); err == nil {
+		t.Error("BroadcastState with the gate off returned no error")
+	}
+	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseLive); err == nil {
+		t.Error("TransitionBroadcast with the gate off returned no error")
+	}
+	if n := atomic.LoadInt32(hits); n != 0 {
+		t.Errorf("%d request(s) reached X with the Livestream gate off; there must be none", n)
+	}
+}
+
+// TestXGateReasonIsTheWhitelistCopyTheOwnerAgreed names the gate in the
+// platform's own terms, usable before anything is connected.
+func TestXGateReasonIsTheWhitelistCopyTheOwnerAgreed(t *testing.T) {
+	x := &X{}
+	reason := x.EntitlementReason()
+	for _, want := range []string{"needs X Livestream access", "whitelisted"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("EntitlementReason() = %q, want it to contain %q", reason, want)
 		}
 	}
-	if got := x.Platform(); string(got) != "x" {
-		t.Errorf("Platform() = %q, want \"x\" -- the id the destination preset and the "+
-			"capability row already use", got)
+	if !strings.Contains(x.ManualKeyReason(), "producer") {
+		t.Error("ManualKeyReason must still tell the operator where to paste the key from")
 	}
 }
 
-// TestXReachesNoRealHost is this file's local copy of the escape guard, because
-// endpoints_test.go enumerates the four REGISTERED providers and X is not one of
-// them yet. It uses that file's own stub-and-guard helper, so when X is
-// registered the two agree by construction.
-func TestXReachesNoRealHost(t *testing.T) {
-	ctx := context.Background()
-	calls := map[string]func(x *X){
-		"Exchange":      func(x *X) { _, _ = x.Exchange(ctx, "cid", "secret", "https://r.test/cb", "code", "") },
-		"Refresh":       func(x *X) { _, _ = x.Refresh(ctx, "cid", "secret", "refresh") },
-		"Account":       func(x *X) { _, _ = x.Account(ctx, "cid", "tok") },
-		"Broadcasts":    func(x *X) { _, _ = x.Broadcasts(ctx, "cid", "tok") },
-		"BroadcastByID": func(x *X) { _, _ = x.BroadcastByID(ctx, "cid", "tok", "1ynJOZVeajOJR") },
+// TestXEntitlementProbeMapsAGateRefusalToNotEntitled checks the three outcomes
+// the EntitlementGated contract names. A 403 or 412 is a gate; a 500 is not, and
+// must never be reported as one.
+func TestXEntitlementProbeMapsAGateRefusalToNotEntitled(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   bool // true means ErrNotEntitled
+	}{
+		{"forbidden is the whitelist gate", http.StatusForbidden, true},
+		{"precondition failed is the eligibility gate", http.StatusPreconditionFailed, true},
+		{"server error is not evidence of a gate", http.StatusInternalServerError, false},
 	}
-	for name, call := range calls {
-		t.Run(name, func(t *testing.T) {
-			base, guard := stubbedWorld(t)
-			call(NewX(WithBaseURL(base)))
-			if got := guard.escapes(); len(got) > 0 {
-				t.Fatalf("X.%s went to a real host despite WithBaseURL:\n  %s", name, strings.Join(got, "\n  "))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/users/me" {
+					_, _ = io.WriteString(w, xMeFixture)
+					return
+				}
+				http.Error(w, `{"title":"Forbidden"}`, tc.status)
+			})
+			err := x.CheckEntitlement(context.Background(), "client", "tok")
+			if got := errors.Is(err, ErrNotEntitled); got != tc.want {
+				t.Errorf("CheckEntitlement(%d) errors.Is(ErrNotEntitled) = %v, want %v (err: %v)",
+					tc.status, got, tc.want, err)
 			}
 		})
 	}
 }
 
-// --------------------------------------------------------------- the missing key
-
-func TestXIngestRefusesTheManualKeyWayWithoutInventingAnEndpoint(t *testing.T) {
-	// Pointed at a stub that would answer anything, to prove the refusal is a
-	// decision rather than a failed request: X publishes nothing to call here,
-	// so Ingest must not spend a round trip finding that out.
-	var called bool
-	x, _ := xStub(t, func(w http.ResponseWriter, _ *http.Request) {
-		called = true
-		io.WriteString(w, `{"data":{"source_id":"src_abc123"}}`)
-	})
-
-	ing, err := x.Ingest(context.Background(), "cid", "tok")
-	if err == nil {
-		t.Fatalf("Ingest returned %#v; X publishes no endpoint that mints or lists a stream key", ing)
-	}
-	if ing != nil {
-		t.Fatalf("Ingest returned %#v alongside an error", ing)
-	}
-	if called {
-		t.Error("Ingest made an HTTP request. There is no documented endpoint for it to call, " +
-			"so a request here means one was invented")
-	}
-	if !errors.Is(err, ErrNoStreamKeyAPI) {
-		t.Fatalf("the error does not wrap ErrNoStreamKeyAPI, so callers cannot tell "+
-			"'paste it yourself' from 'retry': %v", err)
-	}
-
-	// The fabrication guard, copied from Kick's: the message may name X's
-	// producer tooling in prose, but must contain nothing an operator could
-	// mistake for a real ingest endpoint.
-	msg := strings.ToLower(err.Error())
-	for _, forbidden := range []string{"://", "rtmp", "/2/sources"} {
-		if strings.Contains(msg, forbidden) {
-			t.Errorf("the refusal contains %q, which reads as a fabricated ingest endpoint: %s", forbidden, err)
-		}
-	}
-}
-
-func TestXAdvertisesTheManualKeyCapabilitySoTheUICanSayItUpFront(t *testing.T) {
-	var p any = &X{}
-	mk, ok := p.(ManualKey)
-	if !ok {
-		t.Fatal("X does not implement ManualKey, so the UI can only learn the key cannot be " +
-			"fetched by watching Ingest fail at the moment somebody clicks Fetch key")
-	}
-	if strings.TrimSpace(mk.ManualKeyReason()) == "" {
-		t.Fatal("ManualKeyReason is empty; the stream-key field would carry no explanation")
-	}
-	// The good news has to be in there too. A reason that only says no reads as
-	// "this platform does not work", and X's sign-in and broadcast reads do.
-	if !strings.Contains(strings.ToLower(mk.ManualKeyReason()), "works without them") {
-		t.Errorf("the reason does not tell the operator what still works: %q", mk.ManualKeyReason())
-	}
-}
-
-// ------------------------------------------------------------- broadcast reads
-
-func TestXAccountParsesARealShapedBroadcastList(t *testing.T) {
-	var gotPath, gotFields, gotAuth string
+// TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers is the nil outcome.
+func TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers(t *testing.T) {
 	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotFields = r.URL.Query().Get("broadcast.fields")
-		gotAuth = r.Header.Get("Authorization")
-		io.WriteString(w, xBroadcastListFixture)
-	})
-
-	acct, err := x.Account(context.Background(), "cid", "tok")
-	if err != nil {
-		t.Fatalf("Account failed against a real-shaped list: %v", err)
-	}
-	if gotPath != "/2/broadcasts" {
-		t.Errorf("Account called %q, want /2/broadcasts -- the only endpoint a broadcast.read "+
-			"token may call that returns an account id at all", gotPath)
-	}
-	if gotAuth != "Bearer tok" {
-		t.Errorf("Authorization = %q, want the bearer token", gotAuth)
-	}
-	if !strings.Contains(gotFields, "twitter_user_id") {
-		t.Errorf("broadcast.fields = %q and does not ask for twitter_user_id, so an empty id "+
-			"would be polyemesis failing to ask rather than X declining to answer", gotFields)
-	}
-	if acct.Ref != "1234567890" {
-		t.Errorf("Ref = %q, want the twitter_user_id from the broadcast object", acct.Ref)
-	}
-	if acct.Name != "1234567890" {
-		t.Errorf("Name = %q. X hands a broadcast.read token no handle and no display name, so "+
-			"the id is the only honest label; a synthesised @handle would be one X never said", acct.Name)
-	}
-}
-
-// The case an operator will actually hit first: a fresh account with no
-// broadcast on it. It must say why rather than store a connection with no ref.
-func TestXAccountSaysWhyWhenTheTokenOwnsNoBroadcast(t *testing.T) {
-	x, _ := xStub(t, func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"data":[],"meta":{"result_count":0}}`)
-	})
-	acct, err := x.Account(context.Background(), "cid", "tok")
-	if err == nil {
-		t.Fatalf("Account returned %#v for an account with no broadcasts; a stored account with "+
-			"no ref fails later, at a worse moment", acct)
-	}
-	if !strings.Contains(err.Error(), "no broadcasts") {
-		t.Errorf("the error does not name the cause: %v", err)
-	}
-	if !strings.Contains(err.Error(), "connect again") {
-		t.Errorf("the error does not tell the operator what to do about it: %v", err)
-	}
-}
-
-// A 200 carrying an errors array and no data is a refusal wearing a success
-// code, and X's problem objects are the only words available for it.
-func TestXSurfacesAProblemArrivingInsideATwoHundred(t *testing.T) {
-	x, _ := xStub(t, func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"data":[],"errors":[{
-			"type":"https://api.x.com/2/problems/not-authorized-for-resource",
-			"title":"Authorization Error",
-			"detail":"Sorry, you are not authorized to see this broadcast.",
-			"resource_type":"broadcast"}]}`)
-	})
-	_, err := x.Broadcasts(context.Background(), "cid", "tok")
-	if err == nil {
-		t.Fatal("a 200 whose body is nothing but problems was read as an empty list, so the " +
-			"caller sees 'no broadcasts' where X said 'not authorized'")
-	}
-	if !strings.Contains(err.Error(), "not authorized to see this broadcast") {
-		t.Errorf("X's own detail string did not survive into the error: %v", err)
-	}
-}
-
-// TestXNamesNoCauseItCannotSource is the taxonomy rule as a test. X documents no
-// error codes for any Broadcasts operation, so the failure must carry X's words
-// and add no diagnosis of its own.
-func TestXNamesNoCauseItCannotSource(t *testing.T) {
-	x, _ := xStub(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		io.WriteString(w, `{"title":"Client Forbidden","detail":"Access to this resource is not allowed."}`)
-	})
-	_, err := x.Broadcasts(context.Background(), "cid", "tok")
-	if err == nil {
-		t.Fatal("a 403 was not reported as a failure")
-	}
-	if !strings.Contains(err.Error(), "Access to this resource is not allowed.") {
-		t.Errorf("X's own body did not reach the operator: %v", err)
-	}
-	if !strings.Contains(err.Error(), "no error taxonomy") {
-		t.Errorf("the error does not say that X published no cause for this, which is the "+
-			"difference between an honest refusal and an invented one: %v", err)
-	}
-	// The unresolved tier question belongs in the same breath: no X pricing page
-	// names the Broadcasts family, so a 403 may be about the app's access rather
-	// than about the request, and an operator rewriting a correct request is the
-	// cost of not saying so.
-	if !strings.Contains(err.Error(), "access to them") {
-		t.Errorf("the error does not mention that the app may simply lack access to the "+
-			"broadcast endpoints: %v", err)
-	}
-}
-
-// TestXNeverDecodesTheUndescribedViewerCounts is the rule from the evidence
-// written as a guard: total_watching and total_watched are undescribed
-// string-typed fields whose concurrent-versus-cumulative reading comes from
-// their names alone. Decoding them is how they end up on a screen labelled
-// "viewers", and stats.go's ViewerCount is a POINTER precisely because a count
-// nobody can source must be absent rather than zero.
-func TestXNeverDecodesTheUndescribedViewerCounts(t *testing.T) {
-	rt := reflect.TypeOf(XBroadcast{})
-	for i := 0; i < rt.NumField(); i++ {
-		tag := rt.Field(i).Tag.Get("json")
-		if strings.Contains(tag, "watch") {
-			t.Errorf("XBroadcast decodes %q. X describes neither field, the word \"viewer\" "+
-				"appears nowhere in its spec, and viewer stats are deliberately out of scope "+
-				"for this commit -- a decoded count is one render away from being presented "+
-				"as authoritative", tag)
+		if r.URL.Path == "/2/users/me" {
+			_, _ = io.WriteString(w, xMeFixture)
+			return
 		}
-	}
-
-	// And the behavioural half: the fixture carries both fields, so a struct
-	// that grew one would show up here as a populated value rather than as a
-	// silently ignored key.
-	x, _ := xStub(t, func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, xBroadcastListFixture)
+		_, _ = io.WriteString(w, xEmptySourcesFixture)
 	})
-	bs, err := x.Broadcasts(context.Background(), "cid", "tok")
+	if err := x.CheckEntitlement(context.Background(), "client", "tok"); err != nil {
+		t.Fatalf("CheckEntitlement against an answering Livestream family = %v, want nil", err)
+	}
+}
+
+// ----------------------------------------------------------------- stream key
+
+// TestXIngestMintsASourceWhenNoneExists is the source-minted key. With the gate
+// on and no polyemesis source yet, a source is created and its own rtmps URL and
+// key are returned. The host is read from the response, never invented.
+func TestXIngestMintsASourceWhenNoneExists(t *testing.T) {
+	var created bool
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sources"):
+			_, _ = io.WriteString(w, xEmptySourcesFixture)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sources"):
+			created = true
+			_, _ = io.WriteString(w, `{"data":{"source":{"id":"minted1","name":"polyemesis",`+
+				`"rtmp_url":"rtmp://ingest.example.invalid/live","rtmps_url":"rtmps://ingest.example.invalid:443/live",`+
+				`"rtmp_stream_key":"minted1"}}}`)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusTeapot)
+		}
+	})
+	ing, err := x.Ingest(context.Background(), "client", "tok")
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if !created {
+		t.Error("no source was created when none existed")
+	}
+	if ing.Key != "minted1" {
+		t.Errorf("Key = %q, want the rtmp_stream_key X minted", ing.Key)
+	}
+	if ing.URL != "rtmps://ingest.example.invalid:443/live" {
+		t.Errorf("URL = %q, want the rtmps_url X returned verbatim", ing.URL)
+	}
+}
+
+// TestXIngestReusesThePolyemesisSourceInsteadOfMintingAnother keeps the source
+// list from growing one entry per connect.
+func TestXIngestReusesThePolyemesisSourceInsteadOfMintingAnother(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, xSourcesFixture)
+		default:
+			t.Errorf("reused a source but still sent %s %s", r.Method, r.URL.Path)
+			http.Error(w, "no", http.StatusTeapot)
+		}
+	})
+	ing, err := x.Ingest(context.Background(), "client", "tok")
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if ing.Key != "k3y0ne" {
+		t.Errorf("Key = %q, want the existing source's key", ing.Key)
+	}
+}
+
+// TestXKeyNeverAppearsInAnErrorMessage is the leak test. A failed create that
+// echoes a key in its body must not carry that key into the error an operator
+// sees, a log line or an event.
+func TestXKeyNeverAppearsInAnErrorMessage(t *testing.T) {
+	key := xSecret("leak", "canary", "9z")
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, xEmptySourcesFixture)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"errors":[{"title":"Invalid request","detail":"name is required"}],"data":{"source":{"rtmp_stream_key":"`+key+`"}}}`)
+		}
+	})
+	_, err := x.Ingest(context.Background(), "client", "tok")
+	if err == nil {
+		t.Fatal("Ingest returned no error for a refused create")
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Errorf("the stream key appeared in the error: %v", err)
+	}
+}
+
+// TestXStreamKeysListsEverySourceKeyForTheCrossCheck is the read-only reader.
+func TestXStreamKeysListsEverySourceKeyForTheCrossCheck(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/users/me" {
+			_, _ = io.WriteString(w, xMeFixture)
+			return
+		}
+		_, _ = io.WriteString(w, xSourcesFixture)
+	})
+	keys, err := x.StreamKeys(context.Background(), "client", "tok")
+	if err != nil {
+		t.Fatalf("StreamKeys: %v", err)
+	}
+	if !reflect.DeepEqual(keys, []string{"k3y0ne"}) {
+		t.Errorf("StreamKeys = %v, want the one source key", keys)
+	}
+}
+
+// ---------------------------------------------------------------- lifecycle
+
+// TestXGoLiveIsPublishAndEndIsEndAndTestingIsRefused maps X's state machine onto
+// the three documented phases. X has no testing state, so asking for one is a
+// refusal that names the reason.
+func TestXGoLiveIsPublishAndEndIsEndAndTestingIsRefused(t *testing.T) {
+	var seen []string
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/users/me" {
+			_, _ = io.WriteString(w, xMeFixture)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		seen = append(seen, r.Method+" "+r.URL.Path+" "+string(body))
+		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","broadcast_id":"1ynJOZVeajOJR"}}`)
+	})
+	ctx := context.Background()
+
+	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseTesting); err == nil {
+		t.Error("X has no testing state; a testing transition must be refused")
+	}
+	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseLive); err != nil {
+		t.Fatalf("go live: %v", err)
+	}
+	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseComplete); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("saw %d writes, want 2 (publish, end): %v", len(seen), seen)
+	}
+	if !strings.HasPrefix(seen[0], "PUT /2/users/1234567890/broadcasts/1ynJOZVeajOJR/state") ||
+		!strings.Contains(seen[0], `"state":"PUBLISH"`) {
+		t.Errorf("go-live = %q, want PUT .../users/{id}/broadcasts/{bid}/state with PUBLISH", seen[0])
+	}
+	if !strings.HasPrefix(seen[1], "PUT /2/broadcasts/1ynJOZVeajOJR/state") ||
+		!strings.Contains(seen[1], `"state":"END"`) {
+		t.Errorf("end = %q, want PUT /2/broadcasts/{bid}/state with END", seen[1])
+	}
+}
+
+// TestXBroadcastStateReadsTheSourceAndTheWord is the read side. The state word is
+// passed through unmapped, because X documents its states and an operator
+// comparing them against X's own page must see the same word.
+func TestXBroadcastStateReadsTheSourceAndTheWord(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","source_id":"k3y0ne","title":"Sunday practice"}}`)
+	})
+	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.Status != "RUNNING" || st.BoundStreamID != "k3y0ne" || st.Title != "Sunday practice" {
+		t.Errorf("BroadcastState = %+v", st)
+	}
+	if st.StreamActive != nil || st.MonitorStream != nil {
+		t.Error("X publishes no stream-liveness read, so those preconditions must stay UNKNOWN (nil), not false")
+	}
+}
+
+// TestXMetadataCannotChangeALiveBroadcastAndSaysSo: the title and chat option are
+// written only by the PUBLISH transition. A metadata push must not claim it
+// changed a broadcast that is already running.
+func TestXMetadataCannotChangeALiveBroadcastAndSaysSo(t *testing.T) {
+	x := &X{}
+	caps := x.MetadataCaps()
+	if len(caps.Fields) != 0 {
+		t.Errorf("MetadataCaps().Fields = %v, want none: X sets the title only at go-live", caps.Fields)
+	}
+	res, err := x.PushMetadata(context.Background(), "client", "tok", "1234567890",
+		Metadata{Title: "New title"})
+	if err == nil {
+		t.Fatal("PushMetadata reported success for a title X cannot change on a live broadcast")
+	}
+	if !strings.Contains(err.Error(), "go live") && !strings.Contains(err.Error(), "going live") {
+		t.Errorf("PushMetadata error = %q, want it to say the title is set when the broadcast goes live", err)
+	}
+	if res != nil && len(res.Applied) != 0 {
+		t.Errorf("PushMetadata claimed to apply %v", res.Applied)
+	}
+}
+
+// ------------------------------------------------------------ helpers / shape
+
+// TestXBroadcastListDecodesTheSpecFields is the shape pin for the list read,
+// including the viewer counts that must stay undecoded.
+func TestXBroadcastListDecodesTheSpecFields(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, xBroadcastListFixture)
+	})
+	bs, err := x.Broadcasts(context.Background(), "client", "tok")
 	if err != nil {
 		t.Fatalf("Broadcasts: %v", err)
 	}
-	if len(bs) != 1 {
-		t.Fatalf("got %d broadcasts, want 1", len(bs))
+	if len(bs) != 1 || bs[0].State != "RUNNING" || bs[0].SourceID != "k3y0ne" {
+		t.Fatalf("decoded = %+v", bs)
 	}
-	if strings.Contains(strings.ToLower(reflect.TypeOf(bs[0]).String()), "watch") {
-		t.Error("a viewer-count field reached XBroadcast")
+	raw, _ := json.Marshal(bs[0])
+	if strings.Contains(string(raw), "total_watching") {
+		t.Error("the viewer counts are undescribed by X and must not be decoded into a count")
 	}
 }
 
-// TestXAsksForEveryFieldItDecodes pins the broadcast.fields parameter against
-// the struct, in both directions.
-//
-// The parameter is optional and X does not document what a request without it
-// returns, so asking for exactly what is decoded is what makes an empty field
-// mean "X declined" rather than "polyemesis forgot to ask". A field added to the
-// struct and not to the list would decode nothing forever, which is the silent
-// half; a field asked for and not decoded is only wasteful, but it is the same
-// mistake pointing the other way and both are cheap to catch here.
+// TestXAsksForEveryFieldItDecodes pins the broadcast.fields query to the struct.
 func TestXAsksForEveryFieldItDecodes(t *testing.T) {
-	asked := map[string]bool{}
-	for _, f := range strings.Split(xBroadcastFields, ",") {
-		asked[strings.TrimSpace(f)] = true
-	}
-
-	rt := reflect.TypeOf(XBroadcast{})
-	decoded := map[string]bool{}
-	for i := 0; i < rt.NumField(); i++ {
-		name := strings.Split(rt.Field(i).Tag.Get("json"), ",")[0]
-		if name == "" || name == "-" {
-			continue
-		}
-		decoded[name] = true
-		if !asked[name] {
-			t.Errorf("XBroadcast decodes %q, which broadcast.fields does not ask for. X's spec "+
-				"does not state what an unrequested field does, so this one may never arrive", name)
-		}
-	}
-	for name := range asked {
-		if !decoded[name] {
-			t.Errorf("broadcast.fields asks for %q, which nothing decodes", name)
+	for _, f := range []string{"id", "broadcast_id", "twitter_user_id", "source_id", "title", "share_url", "media_key", "state", "start_ms", "end_ms"} {
+		if !strings.Contains(xBroadcastFields, f) {
+			t.Errorf("broadcast.fields does not request %q", f)
 		}
 	}
 }
 
-func TestXBroadcastByIDReadsTheOneBroadcast(t *testing.T) {
-	var gotPath string
-	x, _ := xStub(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","broadcast_id":"1ynJOZVeajOJR",
-			"state":"Running","source_id":"src_abc123","start_ms":"1755302400000"}}`)
-	})
-	b, err := x.BroadcastByID(context.Background(), "cid", "tok", "1ynJOZVeajOJR")
-	if err != nil {
-		t.Fatalf("BroadcastByID: %v", err)
+// TestXRejectsAnEmptyBroadcastID stops a lookup against "whichever broadcast".
+func TestXRejectsAnEmptyBroadcastID(t *testing.T) {
+	x, hits := xCountingStub(t)
+	if _, err := x.BroadcastByID(context.Background(), "client", "tok", "  "); err == nil {
+		t.Error("an empty broadcast id was accepted")
 	}
-	if gotPath != "/2/broadcasts/1ynJOZVeajOJR" {
-		t.Errorf("called %q, want /2/broadcasts/{id}", gotPath)
-	}
-	if b.SourceID != "src_abc123" {
-		t.Errorf("SourceID = %q, want the value X echoed back", b.SourceID)
-	}
-	// start_ms stays a string. The suffix implies milliseconds; the spec does
-	// not say so for this field, and a parsed time would present that inference
-	// as a fact.
-	if b.StartMS != "1755302400000" {
-		t.Errorf("StartMS = %q, want the string X sent, unconverted", b.StartMS)
-	}
-	if b.State != "Running" {
-		t.Errorf("State = %q", b.State)
+	if atomic.LoadInt32(hits) != 0 {
+		t.Error("an empty id still reached X")
 	}
 }

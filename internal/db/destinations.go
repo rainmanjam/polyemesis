@@ -63,6 +63,10 @@ const (
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
 	PlatformRumble Platform = "rumble"
+	// PlatformX is X (Twitter) Livestream. Sign-in and the Livestream family are
+	// behind X's whitelist, so the integration is switched off until the owner's
+	// app is whitelisted. Paste-the-key works either way. See oauth/x.go.
+	PlatformX Platform = "x"
 	// PlatformTrovo is RETIRED. Trovo ceased live streaming on 30 June 2026,
 	// and polyemesis no longer offers it anywhere: no preset, no sign-in, no
 	// create. The constant stays because rows created before the shutdown still
@@ -660,7 +664,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, PlatformX, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}
