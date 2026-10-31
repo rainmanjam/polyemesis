@@ -2791,7 +2791,6 @@
   "addDest.presetNote.tiktok": "TikTok はサーバー URL とキーを配信ごとに、LIVE 権限を付与されたアカウントにのみ発行します。TikTok LIVE Studio または LIVE Center で配信を作成し、両方の項目をそこからコピーしてください。",
   "addDest.presetNote.x": "手動キーのみ対応です。X の API が扱うのは投稿、ユーザー、メディア、投稿のファイアホースで、ドキュメント内の「ストリーミング」は動画の取り込みではなく投稿のストリーミングを指します。そのため polyemesis が取り込み先を取得できる公開エンドポイントはなく、予定もありません。X 独自のプロデューサーツールでソースを作成し、サーバー URL とキーをそこからコピーしてください。",
   "addDest.presetNote.linkedin": "LinkedIn は取り込み URL とキーをイベントごとに発行します。LinkedIn 自身のイベント作成フローか、ページに連携された承認済みストリーミングツールから発行されます。両方をイベントからコピーしてください。",
-  "addDest.presetNote.trovo": "ステップ 2 で Trovo アカウントを接続すると（先に設定でプラットフォームのアプリ認証情報が必要です）、polyemesis が channel_details_self スコープでストリームキーを自ら取得します。いずれの場合もサーバー URL はご自身で入力します。Trovo の取り込みホスト名は地域によって異なり API のどこにも出てこないため、Trovo クリエイターダッシュボード → Stream から一度コピーしてください。その後キーを更新しても URL はそのまま残ります。",
   "addDest.presetNote.dlive": "DLive → Dashboard → Stream settings からサーバー URL とストリームキーをコピーしてください。手動のみで、今後もそのままの見込みです。dev.dlive.tv の DLive 開発者ポータルは名前解決できなくなっており、連携の拠り所となる公開情報がありません。",
   "addDest.presetNote.rumble": "手動キーのみ対応です。Rumble Studio は取り込み URL とキーを配信ごとに発行します。そこで配信を設定し、RTMP の詳細から両方の項目をコピーしてください。Rumble の API ページ (rumble.com/account/api) はログインが必要で何も公開されていないため、連携を作る手がかりがありません。",
   "addDest.presetNote.odysee": "Odysee はチャンネルのライブ配信設定から取り込み URL とキーを発行します。両方をそこからコピーしてください。",
@@ -2922,16 +2921,6 @@
   "caps.kick.chatRead": "Kick はチャットをソケットではなく Webhook で配信するため、polyemesis には外部から到達できる公開 HTTPS URL が必要です。それがないとチャット欄には何も表示されませんが、静かなチャットと誤解されないよう警告を表示します。",
   "caps.kick.moderation": "メッセージの削除。moderation:chat_message:manage を使用します。BAN とタイムアウトは moderation:ban で行います。YouTube と Twitch がタイムアウトを秒単位で数えるのに対し、Kick は「分」単位で数え、上限は 7 日です。polyemesis が換算するので、どのプラットフォームでも同じ単位で指定できます。",
   "caps.kick.viewerStats": "ライブ状態と視聴者数を Kick の livestreams エンドポイントから取得します。",
-  "caps.trovo.summary": "Trovo でサインインすると、polyemesis がストリームキーを取得し、配信開始時にタイトルとカテゴリーを設定し、現在の視聴者数を読み込みます。サーバー URL だけは、最初に一度ご自身でコピーしてください。",
-  "caps.trovo.readFirst": "Trovo は開発者ポータルでクライアントシークレットを発行していません。ドキュメントには「クライアントシークレットをお持ちでない場合は、developer@trovo.live までご連絡ください」と書かれています。Trovo は PKCE を文書化していないため、シークレットがなければ認可コードフローは完了できません。必要になる日より前に依頼しておいてください。それ以外に制限はありません。登録は誰でもでき、以下の機能はすべて公開リファレンスに記載されています。",
-  "caps.trovo.sso": "client_secret を使う OAuth 2.0 認可コードフロー。Trovo は PKCE を文書化していないため、polyemesis も送信しません。また、シークレットはポータルではなく developer@trovo.live からメールで届きます。",
-  "caps.trovo.streamKey": "GET /openplatform/channel から channel_details_self スコープで取得します。ただし、サーバー URL は取得「できません」。Trovo は Ingest ホスト名をリージョンごとに発行し、API のどこにも公開していません。そのため、この項目だけはクリエイターダッシュボードから一度コピーします。その後キーを更新しても、この値はそのまま残ります。この連携ができる前に接続したアカウントは、一度再接続する必要があります。",
-  "caps.trovo.metadata": "タイトルとカテゴリー。POST /openplatform/channels/update を channel_update_self で使用します。Trovo のチャンネル更新は説明を受け付けず、タグもないため、黙って捨てるのではなく「スキップ」として報告します。",
-  "caps.trovo.chatRead": "Trovo はチャットをポーリングや Webhook ではなく WebSocket で配信します。実在し文書化もされていますが、まだここには組み込まれていません。",
-  "caps.trovo.chatSend": "POST /openplatform/chat/send。chat_send_self と send_to_my_channel を使用します。まだここには組み込まれておらず、組み込まれるまでこれらのスコープは意図的に要求していません。先に要求すると、何にも使われない権限が同意画面に並ぶことになるからです。",
-  "caps.trovo.moderation": "POST /openplatform/channels/command を manage_messages で使用し、Trovo 独自のチャットコマンド(先頭のスラッシュなしの “ban xxx”、“mod @xxx”)を実行します。まだここには組み込まれておらず、組み込まれるまでスコープは要求しません。",
-  "caps.trovo.viewerStats": "ライブ状態と視聴者数を、ストリームキーと同じチャンネル読み込みから取得するため、追加の呼び出しも追加のスコープも不要です。Trovo の専用の視聴者エンドポイントではなく、あえて current_viewers を読んでいます。そのエンドポイントの合計はチャンネルの「ログインユーザー総数」と文書化されており、サインイン済みの視聴者しか数えないため、何も示さずに視聴者数を少なく報告してしまうからです。オフライン時は、polyemesis はゼロではなく「数値なし」と表示します。",
-  "caps.trovo.broadcastLifecycle": "Trovo には配信リソースがありません。配信を作成、開始、終了するものは何もないため、ストリームそのものがトリガーとなり、ライブかどうかは観測することしかできません。これはページが見つからなかったからではなく、API リファレンス全体を読んで確認した結論です。",
   "caps.vimeo.summary": "Vimeo でサインインすると、polyemesis はトークンがどのメンバーのものかを読み取り、接続した時点で、あなたのアカウントが Vimeo のライブ API を利用できるかを確認します。入力 URL とストリームキーはライブイベントから貼り付けます。Vimeo はこれらをイベントごとに発行し、イベントの作成は Enterprise 限定です。",
   "caps.vimeo.readFirst": "最初にお読みください:「当社のライブ API は Vimeo Enterprise のお客様のみご利用いただけます」。これは 2026-08-26 に確認した、Vimeo 自身のライブ API リファレンスの文言です。これは権限ではなく契約上の制限です。スコープでも、再接続でも、アプリの設定でも解除できず、Vimeo が公開しているすべてのライブ関連メソッド(イベントの作成、有効化、終了、Ingest、M3U8 再生、サムネイルの取得)に適用されます。サインイン自体はどの Vimeo プランでも可能で、polyemesis は接続した時点で「あなたの」アカウントがライブ API を利用できるかを問い合わせます。そのため、配信の途中ではなく接続時に結果がわかります。Vimeo への配信自体はそれとは関係なく機能します。これまでどおり、イベントの設定パネルから RTMPS の URL とキーを貼り付けてください。また、Vimeo は単発のライブイベントを廃止予定で、使わないよう推奨しているため、定期イベントを作成してください。",
   "caps.vimeo.sso": "api.vimeo.com に対する OAuth 2.0 認可コードフローで、public と private のスコープを使用します。Vimeo では何かを接続する前にクライアント ID とシークレットを検証することもできるため、入力ミスは認証情報ページで見つかります。Vimeo では PKCE が文書化されていないため送信しません。クエリ文字列を厳密に検証する認可サーバーは、未知のパラメーターを即座に拒否するからです。",
@@ -3239,5 +3228,7 @@
   "mon.cpuWarnsAbove": "{pct}% を超えると警告。ジョブの CPU 上限です。",
   "system.statusTitle": "マシンの状態",
   "system.version": "バージョン",
-  "system.supportTools": "サポートツール"
+  "system.supportTools": "サポートツール",
+  "dash.platformRetired.trovo": "Trovo は 2026年6月30日にサービスを終了しました",
+  "dash.platformRetiredCannotStart": "この配信先は今後開始できません。設定は確認できるよう残してあり、いつでも削除できます。"
 }

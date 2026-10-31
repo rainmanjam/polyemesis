@@ -67,6 +67,11 @@ commits = [
   # commits are exempted rather than the path or the value: the path would
   # exempt trovo_test.go forever, and the value would have to be repeated
   # here, putting the strings back into the tree this removed them from.
+  #
+  # STILL NEEDED AFTER TROVO WAS RETIRED. Trovo shut down on 30 June 2026 and
+  # trovo_test.go is gone from the tree, but these two commits are in main's
+  # history for ever, and the push/schedule job scans that full history
+  # (--log-opts HEAD). Dropping them would turn main red on the next push.
   "9405ae12ceede97db38a12e772cbea6d99e1be5c",
   "720ac4bdf3c12107a64dfd492b4a44107f212a7e",
 ]

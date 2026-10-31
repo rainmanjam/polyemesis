@@ -369,6 +369,13 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Destinations on a platform that has shut down (Trovo, 30 June 2026) are
+	// switched off and kept, and that platform's tokens and app credentials are
+	// dropped. See MigrateRetiredPlatforms.
+	if err := d.MigrateRetiredPlatforms(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// AFTER every migration, because it writes to two columns the migrations
 	// above are what create, and because it is the one step that needs the
 	// options applied -- it does nothing at all without a box.

@@ -554,6 +554,29 @@ its first tagged release.
   in Expert mode is said, with a retry. Numeric policy fields no longer snap to
   the minimum while you type.
 
+### Removed
+
+- **Trovo.** Trovo shut down on 30 June 2026, so it is gone from Add
+  destination, the platform presets, the capability matrix and the sign-in
+  options, and the Trovo OAuth provider has been removed. Creating a Trovo
+  destination through the API answers 400, and starting one answers 409, each
+  saying "Trovo shut down on 30 June 2026". A Trovo destination saved before
+  the shutdown is kept: on the first start after upgrading it is switched off,
+  its card says why, and its settings stay readable until you delete it. Stored
+  Trovo account tokens, the Trovo app credentials and any pending Trovo sign-in
+  are deleted from the database at the same time.
+
+### Fixed
+
+- **A destination's restart count now includes restarts caused by live level
+  changes.** Two restarts were never counted. One is the restart that keeps a
+  live mute or gain in place when a failover or a new ingest session changes
+  the audio format. The other is the restart that replaces a level change the
+  running FFmpeg refused, which is every level change on Windows. The card,
+  `polyemesis_destination_restarts_total`, the `destination.restarted` event
+  and the Stream Deck restart-storm key now count each of these once. The
+  backup output's own count, shown on the card, counts them too. A level
+  applied in place is still not a restart.
 - **The OAuth acceptance suite no longer creates a Facebook live video.**
   `scripts/acceptance-oauth.sh` said its credentialed step "starts no
   broadcast", but the step called Facebook's ingest lookup, and that lookup

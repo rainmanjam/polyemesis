@@ -63,15 +63,13 @@ const (
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
 	PlatformRumble Platform = "rumble"
-	// PlatformTrovo is the sixth, and it is the first whose integration fetches
-	// the stream KEY without being able to fetch the ingest URL beside it.
-	//
-	// Trovo publishes the key on its channel resource behind
-	// channel_details_self and publishes the ingest hostname nowhere at all --
-	// it varies by region and lives only in the creator dashboard. So the
-	// preset below still carries an empty URL and still explains itself, while
-	// the connected account fills in the secret half. Recorded here because
-	// "integrated" has meant "both fields arrive" for every previous entry.
+	// PlatformTrovo is RETIRED. Trovo ceased live streaming on 30 June 2026,
+	// and polyemesis no longer offers it anywhere: no preset, no sign-in, no
+	// create. The constant stays because rows created before the shutdown still
+	// carry it, and those rows are the operator's -- they are switched off with
+	// a reason (see RetiredReason and MigrateRetiredPlatforms), kept readable,
+	// and left for the operator to delete. Removing the value would make them
+	// unreadable instead, which is the one outcome worse than unrunnable.
 	PlatformTrovo Platform = "trovo"
 	// PlatformVimeo exists for SIGN-IN, and sign-in is the only thing it can
 	// promise every operator.
@@ -139,6 +137,14 @@ type Destination struct {
 	// this is reversible by restoring the key file rather than by re-enabling
 	// twenty destinations by hand.
 	KeyUnreadable string `json:"keyUnreadable,omitempty"`
+	// Retired is why this destination can no longer run because its platform
+	// no longer exists, empty for every destination on a live platform.
+	//
+	// Like KeyUnreadable it is set by scanDestination and NEVER by a column:
+	// it is a fact about the platform, decided by RetiredReason, so a row read
+	// back always says it and no stored flag can drift from it. WHEN IT IS SET,
+	// Enabled IS FALSE on every read, whatever the column holds.
+	Retired string `json:"retired,omitempty"`
 	// BackupIngestWanted is the operator's intent: "publish a redundant feed
 	// for this destination". It sits here, beside the endpoint it gates, for
 	// the reason stated directly above -- it used to live in FacebookSettings,
@@ -858,6 +864,31 @@ func (d Destination) Validate() error {
 // has one thing to match on.
 var ErrKeyUnreadable = errors.New("the stream key could not be read on this machine")
 
+// ErrPlatformRetired is the sentinel behind every refusal to create, retype to
+// or start a destination on a platform that has shut down. errors.Is it rather
+// than matching the text: the API maps it to a 4xx, and the sentence beside it
+// is for the operator.
+var ErrPlatformRetired = errors.New("platform retired")
+
+// retiredPlatforms is every platform that no longer exists, with the sentence
+// the operator is shown. One map, so the create refusal, the start refusal and
+// the reason on the row cannot say three different things.
+var retiredPlatforms = map[Platform]string{
+	PlatformTrovo: "Trovo shut down on 30 June 2026",
+}
+
+// RetiredReason is why p can no longer be streamed to, or "" for a platform
+// that is still live.
+func (p Platform) RetiredReason() string {
+	return retiredPlatforms[p]
+}
+
+// retiredError is a refusal carrying ErrPlatformRetired and the reason.
+func retiredError(p Platform, what string) error {
+	return fmt.Errorf("%w: %s, so %s; an existing destination stays listed so its settings can be read, and it can be deleted",
+		ErrPlatformRetired, p.RetiredReason(), what)
+}
+
 // keyUnreadableReason is what the operator is shown. It names the fix, because
 // "decryption failed" tells somebody staring at a dead destination nothing they
 // can act on, and the fix really is this small: type the key in again.
@@ -1044,6 +1075,14 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		dst.KeyUnreadable = keyUnreadableReason
 	default:
 		dst.StreamKey, dst.BackupStreamKey = primary, backup
+	}
+	// The other fail-closed point, for the same reason it is here: every read
+	// passes through. A row on a platform that has shut down is reported off
+	// whatever its column says, so nothing that reads it -- the engine's
+	// reconcile above all -- can start it.
+	if reason := dst.Platform.RetiredReason(); reason != "" {
+		dst.Enabled = false
+		dst.Retired = reason
 	}
 	if acct.Valid {
 		v := acct.Int64
@@ -1346,6 +1385,9 @@ func (d *DB) GetDestination(id int64) (*Destination, error) {
 
 // CreateDestination inserts a destination, defaulting anything unset.
 func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
+	if dst.Platform.RetiredReason() != "" {
+		return nil, retiredError(dst.Platform, "a destination can no longer be created for it")
+	}
 	if dst.AudioBitrate == 0 {
 		dst.AudioBitrate = 160
 	}
@@ -1473,6 +1515,25 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	dst.Profile.ApplyDefaults()
 	if err := dst.Validate(); err != nil {
 		return nil, err
+	}
+	// A retired platform's row stays saveable -- renaming it, or retyping it
+	// to a live platform, is the operator tidying up -- but it cannot be
+	// switched on through the back door, and nothing can be retyped TO it.
+	if dst.Platform.RetiredReason() != "" {
+		if dst.Enabled {
+			return nil, retiredError(dst.Platform, "this destination can no longer be started")
+		}
+		var was Platform
+		err := d.sql.QueryRow(`SELECT platform FROM destinations WHERE id=?`, dst.ID).Scan(&was)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if was != dst.Platform {
+			return nil, retiredError(dst.Platform, "a destination can no longer be switched to it")
+		}
 	}
 	// The programme the rendition is held against, or nil for a pairing this
 	// write is not touching. See destinationKeepsItsRendition for why an
@@ -1732,7 +1793,26 @@ func (d *DB) UpdateLifecycle(id int64, apply func(*Destination) bool) (*Destinat
 
 // SetDestinationEnabled flips the run/stop intent without touching anything
 // else, so start/stop never risks rewriting a routing profile.
+//
+// Turning a destination ON is refused for a platform that has shut down, here
+// rather than in each caller: the API's start, the bulk start-all, MCP and the
+// scheduler all arrive at this one write, and the refusal has to reach the
+// operator as a sentence rather than as FFmpeg failing to reach an ingest that
+// no longer exists. Turning one OFF is always allowed.
 func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
+	if enabled {
+		var p Platform
+		err := d.sql.QueryRow(`SELECT platform FROM destinations WHERE id=?`, id).Scan(&p)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if p.RetiredReason() != "" {
+			return retiredError(p, "this destination can no longer be started")
+		}
+	}
 	res, err := d.sql.Exec(`UPDATE destinations SET enabled=?, updated_at=? WHERE id=?`,
 		enabled, time.Now().Unix(), id)
 	if err != nil {
@@ -2081,6 +2161,52 @@ func (d *DB) MigrateStrandedStreamKeys() error {
 	// wrote new pages into the -wal and the old pages still hold the key until a
 	// checkpoint copies over them, so a function whose entire purpose is to
 	// remove a credential from the database has not done it until this runs.
+	return checkpointTruncate(d)
+}
+
+// MigrateRetiredPlatforms switches off every destination on a platform that
+// has shut down, and drops the OAuth material that only that platform used.
+//
+// THE DESTINATIONS ARE KEPT. Their settings are the operator's, and an upgrade
+// that deleted a row would be the one surprise worse than a row that cannot
+// run. Each one is turned off, reads back with Destination.Retired set, and
+// waits for the operator to read it and delete it.
+//
+// THE TOKENS ARE NOT KEPT. A connected account's access and refresh tokens,
+// the operator's developer-app secret and any half-finished authorization are
+// credentials for a service that no longer exists: there is nothing left to
+// use them for and no reason to keep a secret at rest. Deleting the account
+// row also unlinks the destination through the foreign key's ON DELETE SET
+// NULL. Nothing here logs a value, or even a count.
+//
+// IDEMPOTENT BY ITS GUARDS, like MigrateStrandedStreamKeys above: each
+// statement asks about the data in front of it, so the second Open finds
+// nothing and the checkpoint is skipped.
+func (d *DB) MigrateRetiredPlatforms() error {
+	var changed int64
+	for p := range retiredPlatforms {
+		for _, q := range []string{
+			`UPDATE destinations SET enabled = 0 WHERE platform = ? AND enabled <> 0`,
+			`DELETE FROM platform_accounts WHERE platform = ?`,
+			`DELETE FROM platform_creds WHERE platform = ?`,
+			`DELETE FROM oauth_states WHERE platform = ?`,
+		} {
+			res, err := d.sql.Exec(q, string(p))
+			if err != nil {
+				return fmt.Errorf("retire %s: %w", p, err)
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("retire %s: %w", p, err)
+			}
+			changed += n
+		}
+	}
+	if changed == 0 {
+		return nil
+	}
+	// Same reason as MigrateStrandedStreamKeys: the deleted token pages are
+	// still in the -wal until a checkpoint copies over them.
 	return checkpointTruncate(d)
 }
 

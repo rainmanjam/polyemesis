@@ -281,7 +281,10 @@ func (e *Engine) respawnStaleLevels(why string) {
 			}()
 			ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 			defer cancel()
-			p.Restart(ctx)
+			// Counted: this is the output reconnecting, once per live change at
+			// most, and the restart count and the storm signal are how an
+			// operator finds a destination that does it on every failover.
+			p.RestartCounted(ctx)
 			e.publishStatus()
 		}(s.proc)
 	}

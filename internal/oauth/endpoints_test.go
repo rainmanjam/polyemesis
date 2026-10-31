@@ -229,19 +229,6 @@ func TestAStubbedProviderReachesNoRealHost(t *testing.T) {
 				"CheckCredentials": func() { _ = k.CheckCredentials(ctx, cid, secret) },
 			}
 		},
-		"trovo": func(t *testing.T, base string) map[string]func() {
-			tv := NewTrovo(WithBaseURL(base))
-			return map[string]func(){
-				"Exchange":         func() { _, _ = tv.Exchange(ctx, cid, secret, "https://r.test/cb", "code", "") },
-				"Refresh":          func() { _, _ = tv.Refresh(ctx, cid, secret, "refresh") },
-				"Account":          func() { _, _ = tv.Account(ctx, cid, tok) },
-				"Ingest":           func() { _, _ = tv.Ingest(ctx, cid, tok) },
-				"Stats":            func() { _, _ = tv.Stats(ctx, cid, tok) },
-				"SearchCategories": func() { _, _ = tv.SearchCategories(ctx, cid, tok, "chess") },
-				"UpdateChannel":    func() { _ = tv.UpdateChannel(ctx, cid, tok, "100000021", TrovoChannelUpdate{LiveTitle: "x"}) },
-				"PushMetadata":     func() { _, _ = tv.PushMetadata(ctx, cid, tok, "100000021", Metadata{Title: "x", Category: "Chess"}) },
-			}
-		},
 	}
 
 	for platform, build := range providers {
@@ -281,7 +268,6 @@ func TestEveryProviderCallGoesThroughTheInstanceBase(t *testing.T) {
 		"ytAPIBase", "ytConsentBase", "ytTokenBase",
 		"twitchHelixBase", "twitchIDBase",
 		"kickIDBase", "kickAPIBase",
-		"trovoLoginBase", "trovoAPIBase",
 		"vimeoAPIBase",
 	}
 	// A line may mention a constant if it declares it, comments on it, or wraps
@@ -345,7 +331,6 @@ func TestProvidersWithAimsTheWholeSetAtOneStub(t *testing.T) {
 	set := NewSet(WithBaseURL(base))
 
 	for _, p := range []db.Platform{
-		db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook, db.PlatformKick, db.PlatformTrovo,
 		db.PlatformYouTube, db.PlatformTwitch, db.PlatformFacebook, db.PlatformKick,
 		db.PlatformVimeo,
 	} {

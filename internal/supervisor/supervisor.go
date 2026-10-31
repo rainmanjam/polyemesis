@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -831,6 +832,60 @@ func (p *Process) Restart(ctx context.Context) {
 	// take. The selector, which does, calls Stop directly.
 	_ = p.stop(ctx, false)
 	p.Start()
+}
+
+// RestartCounted is Restart for a cycle that is a restart of the output and
+// must read as one: Status.Restarts and the storm window both take it.
+//
+// WHY RESTART ITSELF DOES NOT COUNT. The counter used to move in exactly one
+// place, the supervise loop's retry after a child exited on its own, and the
+// stop inside Restart cancels that loop before it gets there. So a destination
+// the engine cycled because a live level would not survive a source switch
+// read "0 restarts" however often it happened, and the restart-storm signal
+// built on the same numbers never saw it. Restart is also the operator's Retry
+// and the policy revival, which are left exactly as they were: the caller
+// names the restarts that are the output's own.
+//
+// ONCE, and only for a child that was being supervised: the cancelled loop
+// does not count its own exit, and a process with nothing running (never
+// started, or retired) has nothing to restart. Counted after the stop and
+// before the start, so a reader that sees the new child also sees the count.
+func (p *Process) RestartCounted(ctx context.Context) {
+	p.runMu.Lock()
+	wasRunning := p.running && !p.retired
+	p.runMu.Unlock()
+	_ = p.stop(ctx, false)
+	if wasRunning {
+		p.mu.Lock()
+		p.restarts++
+		p.noteRestartLocked(time.Now())
+		p.mu.Unlock()
+	}
+	p.Start()
+}
+
+// InheritRestarts makes p the continuation of prev for counting purposes: p
+// starts from prev's lifetime count and storm window, plus the one restart that
+// replaced prev with p. For the engine's replacement of a destination's
+// process when the replacement IS a restart of the same output (a live level
+// change the child refused); a nil prev or prev == p does nothing.
+//
+// Call before p.Start. The two locks are taken one after the other, never
+// nested, so there is no order to get wrong.
+func (p *Process) InheritRestarts(prev *Process) {
+	if prev == nil || prev == p {
+		return
+	}
+	prev.mu.RLock()
+	n := prev.restarts
+	at := slices.Clone(prev.restartAt)
+	prev.mu.RUnlock()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.restarts += n + 1
+	p.restartAt = append(at, p.restartAt...)
+	p.noteRestartLocked(time.Now())
 }
 
 // ErrStopDeadline reports that Stop gave up waiting and killed the child. Its

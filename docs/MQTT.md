@@ -302,8 +302,9 @@ compile has no process at all, and that is as down as a crashed one. The field
 is `running`, not `live` — `live` belongs to sources only.
 
 `kind` is one of `rtmp`, `srt`, `file` or `audio`. `platform` is one of
-`custom`, `youtube`, `twitch`, `kick`, `facebook`, `rumble`, `trovo` or
-`vimeo`, and is branding rather than transport — a `twitch` destination is an
+`custom`, `youtube`, `twitch`, `kick`, `facebook`, `rumble`, `trovo` (retired:
+Trovo shut down on 30 June 2026, so only a destination saved before then
+carries it) or `vimeo`, and is branding rather than transport — a `twitch` destination is an
 `rtmp` one.
 
 ```jsonc

@@ -174,11 +174,6 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 		db.PlatformFacebook: false,
 		// Kick speaks OAuth 2.1, which folds RFC 7636 into the grant itself.
 		db.PlatformKick: true,
-		// Trovo documents an authorization-code flow that exchanges a
-		// client_secret and mentions no PKCE parameter anywhere in its
-		// reference. Sending a challenge to a provider that has not
-		// documented one is the lock-everyone-out risk this map exists for.
-		db.PlatformTrovo: false,
 		// Vimeo's authentication guide documents four grant types -- client
 		// credentials, authorization code, implicit and device code -- and
 		// mentions no PKCE parameter in any of them; the code flow is a

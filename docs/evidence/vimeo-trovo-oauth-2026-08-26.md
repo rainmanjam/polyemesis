@@ -1,5 +1,8 @@
 # Vimeo and Trovo OAuth and live APIs, checked 2026-08-26
 
+> Trovo shut down on 30 June 2026 and polyemesis no longer integrates with it.
+> The Trovo half of this record is kept as history.
+
 Researched because both appear in the destination preset catalogue
 (`internal/db/platforms.go`) and `docs/PLATFORMS.md` records them as
 *unverified* — "not built, and the platform's API not confirmed either way".
