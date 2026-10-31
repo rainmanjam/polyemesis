@@ -30,6 +30,7 @@ type fakeRolloverStore struct {
 	settings  map[int64]db.RolloverSettings
 	templates map[string]*scheduler.BroadcastTemplate // "destID/broadcastID"
 	results   []string
+	timeline  []db.TimelineEvent
 }
 
 func newFakeRolloverStore() *fakeRolloverStore {
@@ -113,6 +114,19 @@ func (f *fakeRolloverStore) RolloverTemplateFor(id int64, broadcastID string) (*
 		return t, nil
 	}
 	return nil, db.ErrNotFound
+}
+
+func (f *fakeRolloverStore) RecordTimelineEvent(ev db.TimelineEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.timeline = append(f.timeline, ev)
+	return nil
+}
+
+func (f *fakeRolloverStore) timelineRows() []db.TimelineEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]db.TimelineEvent(nil), f.timeline...)
 }
 
 func (f *fakeRolloverStore) GetSchedule(id int64) (*scheduler.Schedule, error) {
@@ -415,4 +429,97 @@ func TestARolloverEmitsItsEventsOnTheStreamThroughTheRealProducer(t *testing.T) 
 	r.yt.err = errors.New("the replacement would not start")
 	r.c.sweepOnce(context.Background())
 	streamtest.Expect(t, sub, eventstream.TypeRolloverFailed)
+}
+
+// TestARolloverWritesItsStartAndItsOutcomeToTheTimeline checks the operator's timeline, which the Monitoring page lists.
+// A rollover that only reached the webhook and the stream would leave nothing for an operator reading history after the
+// show. The rows name the destination by its alert key, so the page can link to it, and the failure row is a warning.
+func TestARolloverWritesItsStartAndItsOutcomeToTheTimeline(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+
+	r.c.sweepOnce(context.Background())
+
+	rows := r.store.timelineRows()
+	if len(rows) != 2 {
+		t.Fatalf("timeline rows = %+v, want the start and the completion", rows)
+	}
+	if rows[0].Type != string(hooks.TriggerRolloverStarted) || rows[1].Type != string(hooks.TriggerRolloverCompleted) {
+		t.Errorf("timeline types = %q, %q; want rollover.started then rollover.completed", rows[0].Type, rows[1].Type)
+	}
+	for _, row := range rows {
+		if row.Subject != "destination:1" {
+			t.Errorf("timeline subject = %q, want destination:1 so the page can link the destination", row.Subject)
+		}
+	}
+
+	r.addDest(2, db.PlatformYouTube, "live-2")
+	r.enable(2, "")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+	r.yt.err = errors.New("the replacement would not start")
+	r.c.sweepOnce(context.Background())
+
+	rows = r.store.timelineRows()
+	last := rows[len(rows)-1]
+	if last.Type != string(hooks.TriggerRolloverFailed) || last.Severity != "warning" {
+		t.Errorf("failure row = %+v, want rollover.failed at warning severity", last)
+	}
+}
+
+// TestAYouTubeSessionWithNoRecordedStartIsWaitedFor checks the rule the platform read states: a zero live start means
+// YouTube has not recorded one yet, so nothing is counted from the moment polyemesis happened to look. Counting from a
+// later moment moves the margin later, which is the wrong direction for a cap. The session is not stored, and the next
+// sweep reads the start again and rolls over on the platform's own time.
+func TestAYouTubeSessionWithNoRecordedStartIsWaitedFor(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = time.Time{}
+
+	r.c.sweepOnce(context.Background())
+
+	if len(r.yt.rolls) != 0 {
+		t.Fatalf("a rollover ran with no recorded start: %+v", r.yt.rolls)
+	}
+	if got := r.store.settings[1].SessionStartedAt; !got.IsZero() {
+		t.Errorf("a guessed session start %s was stored; it must wait for the platform's own", got)
+	}
+
+	// Once YouTube records the start, the very next sweep counts from it and the margin trips.
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 {
+		t.Fatalf("rollovers after the start was recorded = %d, want 1", len(r.yt.rolls))
+	}
+}
+
+// TestConcurrentSweepsAndSceneSwitchesRollTheSameBroadcastOnce is the race the coordinator's lock exists for. The OBS
+// bridge writes scene switches while the sweep reads them, and a sweep that read its settings before another pass
+// rolled the destination over must not roll it over again. Run under -race, the unguarded scene map is a crash; the
+// assertion is that exactly one replacement is requested however the passes interleave.
+func TestConcurrentSweepsAndSceneSwitchesRollTheSameBroadcastOnce(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "Be Right Back")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			r.c.sweepOnce(context.Background())
+		}()
+		go func(i int) {
+			defer wg.Done()
+			r.c.noteScene("Be Right Back", false, r.now.Add(time.Duration(i)*time.Second))
+		}(i)
+	}
+	wg.Wait()
+
+	if n := len(r.yt.rolls); n != 1 {
+		t.Fatalf("replacements requested = %d, want exactly 1 for one due rollover", n)
+	}
 }

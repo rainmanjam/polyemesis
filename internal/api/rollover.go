@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -51,6 +52,7 @@ type rolloverStore interface {
 	GetRollover(destinationID int64) (db.RolloverSettings, error)
 	SetRolloverSession(destinationID int64, broadcastID string, startedAt, now time.Time) error
 	RecordRolloverResult(destinationID int64, trigger, result string, at time.Time) error
+	RecordTimelineEvent(ev db.TimelineEvent) error
 	GetDestination(id int64) (*db.Destination, error)
 	UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error)
 	RolloverTemplateFor(destinationID int64, broadcastID string) (*scheduler.BroadcastTemplate, error)
@@ -87,8 +89,15 @@ type rolloverCoordinator struct {
 	now   func() time.Time
 
 	// scenes is the last live switch to each OBS scene name, fed by the OBS event stream. A scene switch that OBS
-	// reported as a reconnect snapshot never reaches it, so a reconnect is not a cue.
-	scenes map[string]time.Time
+	// reported as a reconnect snapshot never reaches it, so a reconnect is not a cue. The OBS bridge writes it and
+	// the sweep and the card read it from other goroutines, so sceneMu guards it.
+	sceneMu sync.Mutex
+	scenes  map[string]time.Time
+
+	// rollMu serialises every pass over a destination: the sweep and a manual run both go through considerOne, so
+	// the two can never roll the same destination over at once. Each pass re-reads the settings under it, so a pass
+	// that waited sees the rollover the other one just recorded and does not repeat it.
+	rollMu sync.Mutex
 }
 
 func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rolloverHost) *rolloverCoordinator {
@@ -109,11 +118,20 @@ func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rollover
 
 // noteScene records a live OBS scene switch. Sync switches are a state read after (re)connecting, not a change OBS
 // made, and they are dropped here as well as in the planner, so the rule holds even if the planner changes.
-func (c *rolloverCoordinator) noteScene(scene string, sync bool, at time.Time) {
-	if sync || scene == "" {
+func (c *rolloverCoordinator) noteScene(scene string, syncRead bool, at time.Time) {
+	if syncRead || scene == "" {
 		return
 	}
+	c.sceneMu.Lock()
+	defer c.sceneMu.Unlock()
 	c.scenes[scene] = at
+}
+
+// sceneSwitchedAt is the last live switch to a scene, or zero when it has not been seen.
+func (c *rolloverCoordinator) sceneSwitchedAt(scene string) time.Time {
+	c.sceneMu.Lock()
+	defer c.sceneMu.Unlock()
+	return c.scenes[scene]
 }
 
 // rolloverBroadcastID is the broadcast a destination is publishing to. It is the lifecycle's record first, and the
@@ -155,6 +173,15 @@ func (c *rolloverCoordinator) sweepOnce(ctx context.Context) {
 // considerOne is one destination's pass. force is set by a manual run, which skips the planner and its debounce but
 // nothing else: the destination must still be delivering and must have an action.
 func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSettings, force bool) (acted bool, err error) {
+	c.rollMu.Lock()
+	defer c.rollMu.Unlock()
+	// The settings the caller read may be older than a rollover that finished while this pass waited for the lock.
+	// The planner's debounce and a manual run both read LastRolloverAt, so the fresh row is the only one used.
+	fresh, err := c.store.GetRollover(cfg.DestinationID)
+	if err != nil {
+		return false, err
+	}
+	cfg = fresh
 	now := c.now()
 	d, err := c.store.GetDestination(cfg.DestinationID)
 	if err != nil || d == nil {
@@ -188,6 +215,11 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", err)
 			return false, err
 		}
+		if start.IsZero() {
+			// The platform has not recorded the live start yet. Nothing is counted from a guess: the session is not
+			// stored, and the next sweep reads the start again.
+			return false, nil
+		}
 		if err := c.store.SetRolloverSession(d.ID, bid, start, now); err != nil {
 			return false, err
 		}
@@ -208,8 +240,9 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 	return true, nil
 }
 
-// sessionStart is the moment the countdown counts from. YouTube reports its own; Twitch has no such read, so the
-// first moment polyemesis sees the destination on air is used, and that moment is kept in the database.
+// sessionStart is the moment the countdown counts from. YouTube reports its own, and a zero answer means it has not
+// recorded one yet: the caller waits. Twitch has no such read, so the first moment polyemesis sees the destination on
+// air is used, and that moment is kept in the database.
 func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destination, bid string, now time.Time) (time.Time, error) {
 	if d.Platform != db.PlatformYouTube {
 		return now, nil
@@ -222,16 +255,7 @@ func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destinatio
 	if err != nil {
 		return time.Time{}, err
 	}
-	start, err := br.RolloverSessionStart(ctx, acct.AccessToken, bid)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if start.IsZero() {
-		// YouTube has not recorded the start yet, but the bytes are arriving. Counting from now is the conservative
-		// choice: the margin then runs late rather than early, and the platform's own start replaces it next time.
-		return now, nil
-	}
-	return start, nil
+	return br.RolloverSessionStart(ctx, acct.AccessToken, bid)
 }
 
 // planInput turns a stored settings row and the live facts into the planner's input.
@@ -247,7 +271,7 @@ func (c *rolloverCoordinator) planInput(cfg db.RolloverSettings, p db.Platform, 
 		QuietEnd:         cfg.QuietEnd,
 		QuietZone:        cfg.QuietZone,
 		OBSScene:         cfg.OBSScene,
-		SceneSwitchedAt:  c.scenes[cfg.OBSScene],
+		SceneSwitchedAt:  c.sceneSwitchedAt(cfg.OBSScene),
 		LastRolloverAt:   cfg.LastRolloverAt,
 	}
 }
@@ -382,8 +406,11 @@ func (c *rolloverCoordinator) account(ctx context.Context, d *db.Destination) (*
 	return c.host.tokenFor(ctx, *d.AccountID)
 }
 
-// announceEvent sends one rollover event to the webhook and the events stream, through the host.
+// announceEvent sends one rollover event to the webhook and the events stream, through the host, and writes the same
+// event to the operator timeline. The timeline row is what the Monitoring page lists; a failure to write it is logged
+// and does not stop the rollover.
 func (c *rolloverCoordinator) announceEvent(d *db.Destination, p db.Platform, trigger hooks.Trigger, reason string) {
+	c.recordTimeline(d, trigger, reason)
 	if c.host.announce == nil {
 		return
 	}
@@ -398,6 +425,28 @@ func (c *rolloverCoordinator) announceEvent(d *db.Destination, p db.Platform, tr
 		Reason:      clipDetail(reason),
 		At:          c.now(),
 	})
+}
+
+// recordTimeline writes one rollover event to the operator timeline. A failure is a warning in the log and nothing more.
+func (c *rolloverCoordinator) recordTimeline(d *db.Destination, trigger hooks.Trigger, reason string) {
+	if c.store == nil {
+		return
+	}
+	severity := "info"
+	title := "Planned rollover started on " + d.Name
+	switch trigger {
+	case hooks.TriggerRolloverCompleted:
+		title = "Planned rollover completed on " + d.Name
+	case hooks.TriggerRolloverFailed:
+		severity = "warning"
+		title = "Planned rollover failed on " + d.Name
+	}
+	if err := c.store.RecordTimelineEvent(db.TimelineEvent{
+		At: c.now(), Type: string(trigger), Severity: severity, Title: title,
+		Detail: clipDetail(reason), Subject: fmt.Sprintf("destination:%d", d.ID),
+	}); err != nil {
+		c.log.Warn("planned rollover: could not write the timeline row", "destination", d.Name, "err", err)
+	}
 }
 
 // RunNow carries out a rollover on one destination when an operator asks for it. It is the same act the sweep runs,

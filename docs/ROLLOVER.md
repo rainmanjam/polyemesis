@@ -62,9 +62,14 @@ reported. PROVISIONAL.
 ## Events
 
 `rollover.started`, `rollover.completed` and `rollover.failed` go to the
-events stream and to webhooks. See [EVENTS.md](EVENTS.md) and
-[HOOKS.md](HOOKS.md). `reason` names the trigger, and on a failure says what
-happened to the old broadcast.
+events stream, to webhooks and to the operator timeline. The timeline row is
+keyed to its destination, and a failure is recorded at warning severity. See
+[EVENTS.md](EVENTS.md) and [HOOKS.md](HOOKS.md). `reason` names the trigger,
+and on a failure says what happened to the old broadcast.
+
+A countdown for a YouTube destination counts from the start YouTube records for
+the broadcast. Until YouTube records one, no countdown runs and no rollover is
+planned, so a late look at the stream never shortens the margin.
 
 ## Not in this build
 
