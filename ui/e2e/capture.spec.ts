@@ -41,7 +41,10 @@ test("dashboard — the hero shot", async ({ page }) => {
   // is the exact failure docs/media/README.md says this script refuses to
   // produce. "Offline" appears in the header and on the ingest badge and
   // nowhere else, so requiring zero of them cannot pass early.
-  await expect(page.getByText("Offline", { exact: true })).toHaveCount(0, {
+  // The ingest's not-running word is Stopped since app-council A91, and
+  // Stopped can also be a pipeline row's honest answer, so the guard reads the
+  // header ingest chip itself rather than the whole page.
+  await expect(page.getByTestId("chrome-ingest-status")).not.toHaveText("Stopped", {
     timeout: 120_000,
   });
   // BEFORE the placeholder guard below, not after it. Waiting for the
@@ -56,8 +59,6 @@ test("dashboard — the hero shot", async ({ page }) => {
   await shoot(page, `${OUT}/01-dashboard.png`, [
     "Waiting for a stream…",
     "Ingest offline",
-    // Exact: the standalone ingest badge, not every string containing the word.
-    { text: "Offline", exact: true },
   ]);
 
   // The fan-out, framed on its own: thirteen destinations across five

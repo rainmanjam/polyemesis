@@ -116,15 +116,18 @@ export function OnAirBar({
           )}
         </h2>
 
-        {/* Three numbers in words, not a bare ratio ("2/3" reads as a bitrate
-            on a console full of them). Stopped counts EVERY destination the
-            operator has switched off or left idle, so the three add up to the
-            install and a switched-off card is never read as a fault (A2). */}
+        {/* Numbers in words, not a bare ratio ("2/3" reads as a bitrate on a
+            console full of them). Each word is the one the destination cards
+            use (app-council A91): Stopped for an enabled destination that is
+            not running, Off for one the operator switched off. With the
+            connecting and failed marks beside them, which appear only when
+            non-zero, they add up to the install, and a switched-off card is
+            never read as a fault (A2). */}
         <span className="tnum font-mono text-[12px] text-muted-foreground" data-testid="on-air-counts">
           {t("onAir.counts", {
             live: String(air.live),
-            stopped: String(Math.max(0, total - air.live - air.degraded - air.failed)),
-            failing: String(air.failed),
+            stopped: String(Math.max(0, air.enabled - air.live - air.degraded - air.failed)),
+            off: String(Math.max(0, total - air.enabled)),
           })}
         </span>
 

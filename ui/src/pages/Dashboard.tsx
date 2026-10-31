@@ -1442,8 +1442,11 @@ export function Dashboard() {
   // settings read that has not landed is not a fact about the feature.
   const absentLabel = (enabled: boolean | null | undefined) => {
     const verdict = processAbsence(enabled);
-    if (verdict === "disabled") return t("dash.disabled");
-    if (verdict === "idle") return t("dash.idle");
+    // The same two words every status on the console uses (app-council A91):
+    // Off for a feature the operator switched off, Stopped for one that is on
+    // and not running. These said "disabled" and "idle" before.
+    if (verdict === "disabled") return t("state.off");
+    if (verdict === "idle") return t("state.stopped");
     return "—";
   };
   // Whose figures the Ingest card is showing, on an install where that is
@@ -1922,7 +1925,7 @@ export function Dashboard() {
                   // The preview encoder is started on demand and stopped again
                   // when nobody is watching, so having no process is the normal
                   // idle state rather than a fault or a disabled feature.
-                  ["Preview", programmeStatus?.preview, settingsPreview ? t("dash.idle") : t("dash.disabled")],
+                  ["Preview", programmeStatus?.preview, settingsPreview ? t("state.stopped") : t("state.off")],
                   ["Meters", programmeStatus?.meters, absentLabel(featureEnabled?.meters)],
                 ] as const
               ).map(([label, proc, absent]) => {

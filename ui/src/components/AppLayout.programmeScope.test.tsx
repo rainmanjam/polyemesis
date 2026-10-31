@@ -102,7 +102,7 @@ describe("the header ingest chip follows the programme selected in the header", 
     rerender(layout());
 
     expect(chip(), "Studio B's bytes turned Studio A's chip live").toBe(
-      translate("en", "state.offline"),
+      translate("en", "state.stopped"),
     );
     expect(container.textContent, "Studio B's uptime is in Studio A's header").not.toContain(
       "00:12:34",

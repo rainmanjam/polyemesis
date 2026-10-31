@@ -45,6 +45,7 @@ import { reportingStreamCount } from "@/lib/stream-health";
 import type { DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { destinationStatus } from "@/lib/status";
 
 const PLATFORM_LABEL: Record<string, string> = {
   youtube: "YouTube",
@@ -265,7 +266,7 @@ export function DestinationCard({
               {dest.enabled && state === "running" && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {dest.enabled ? stateLabel(state) : t("state.off")}
+              {t(destinationStatus(dest.enabled, state).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

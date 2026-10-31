@@ -84,9 +84,9 @@ describe("StatusPill (A11, A91)", () => {
     expect(container.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("bad");
   });
 
-  it("prints a disabled destination as Stopped in the idle tone", () => {
+  it("prints a disabled destination as Off in the idle tone, the word its card uses (A2, A91)", () => {
     const { container } = render(<StatusPill reading={destinationStatus(false, "running")} />);
-    expect(screen.getByText("Stopped")).toBeTruthy();
+    expect(screen.getByText("Off")).toBeTruthy();
     expect(container.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("idle");
   });
 });

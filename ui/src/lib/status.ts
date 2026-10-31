@@ -56,15 +56,18 @@ const PROCESS_TONE: Record<ProcessState, StatusTone> = {
 };
 
 /** A child process (ingest, encoder, output, recorder). Undefined or null is
- *  the absence of a process, which reads as Offline, the same as stateLabelKey. */
+ *  the absence of a process, which reads as Stopped, the same as stateLabelKey. */
 export function processStatus(state?: ProcessState | null): StatusReading {
   return reading(stateLabelKey(state), state ? PROCESS_TONE[state] : "idle");
 }
 
-/** A destination. Disabled means the operator stopped it, so the process state
- *  underneath is not what the card should say. */
+/** A destination. Disabled means the operator switched it off, so the process
+ *  state underneath is not what the card should say: it reads Off, never
+ *  Stopped, so a switched-off card is not read as a broadcast that ended
+ *  (app-council A2). The card, the Renditions chip and the on-air counts all
+ *  take their word from here (A91). */
 export function destinationStatus(enabled: boolean, state?: ProcessState | null): StatusReading {
-  return enabled ? processStatus(state) : reading("state.stopped", "idle");
+  return enabled ? processStatus(state) : reading("state.off", "idle");
 }
 
 /** A broadcast-delay buffer phase (types.ts DelayStatus). Buffering is filling
@@ -138,7 +141,7 @@ export function outputStatus(state: OutputState): StatusReading {
     case "error":
       return reading("state.failed", "bad");
     case "absent":
-      return reading("state.offline", "idle");
+      return reading("state.stopped", "idle");
     default:
       return reading("state.off", "idle");
   }

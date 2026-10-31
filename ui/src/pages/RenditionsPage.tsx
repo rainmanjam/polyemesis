@@ -77,6 +77,7 @@ import {
   useStateLabel,
   type StateLabeller,
 } from "@/lib/i18n";
+import { destinationStatus } from "@/lib/status";
 
 /** Used until GET /renditions/presets answers, so the form's inputs always
  *  have bounds. The server's copy is authoritative; these only have to be
@@ -649,7 +650,6 @@ export function RenditionsPage() {
  *  this rendition, and deleting it affects them the moment they are enabled. */
 function DestChip({ dest }: { dest: DestStatus }) {
   const t = useT();
-  const stateLabel = useStateLabel();
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
     <span className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm">
@@ -658,7 +658,7 @@ function DestChip({ dest }: { dest: DestStatus }) {
       {/* A34: the state in words. A dot alone needed a legend nobody had, and
           a hover title never reaches a touch screen. */}
       <span className="text-muted-foreground">
-        {dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
+        {t(destinationStatus(dest.enabled, dest.process?.state).labelKey)}
       </span>
     </span>
   );

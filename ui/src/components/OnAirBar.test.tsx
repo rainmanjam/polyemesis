@@ -69,19 +69,22 @@ describe("OnAirBar headline", () => {
 });
 
 describe("OnAirBar counts", () => {
-  it("names the live, stopped and failing counts in words, not as a bare fraction", () => {
+  it("names the live, stopped and off counts in words, not as a bare fraction", () => {
     // "2/3" alone gets read as a bitrate on a console full of them.
     render(<OnAirBar status={status([proc("running"), proc("running", { id: did(2) }), proc("failed", { id: did(3) })])} />);
     expect(screen.getByText(/2 live/)).toBeTruthy();
-    expect(screen.getByText(/1 failing/)).toBeTruthy();
+    expect(screen.getByText(/1 failed/)).toBeTruthy();
   });
 
-  it("counts stopped destinations against the whole install, so a switched-off card is not a fault", () => {
+  it("counts against the whole install, and a switched-off card counts as Off, not Stopped", () => {
     // A2: the denominator used to be enabled destinations only, so "5/5" sat
-    // beside thirteen cards. The three numbers now add up to the install.
+    // beside thirteen cards. The numbers now add up to the install. A91: a
+    // switched-off destination is counted under the word its card shows, Off,
+    // and an enabled one that is not running under Stopped.
     const off = dest({ id: did(4), enabled: false, process: null } as Partial<DestStatus>);
     render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) }), off])} />);
-    expect(screen.getByText("1 live · 1 stopped · 1 failing")).toBeTruthy();
+    expect(screen.getByText("1 live · 0 stopped · 1 off")).toBeTruthy();
+    expect(screen.getByText(/1 failed/)).toBeTruthy();
   });
 
   it("renders no count at all when it would be zero", () => {

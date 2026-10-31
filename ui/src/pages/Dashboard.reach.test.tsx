@@ -199,22 +199,25 @@ describe("Dashboard: the description counter (#786)", () => {
 });
 
 describe("Dashboard: the Ingest card while the backup is on air", () => {
-  it("does not say plain Offline over a live backup, and names the backup", async () => {
+  it("does not say plain Stopped over a live backup, and names the backup", async () => {
     draw();
 
     await screen.findByRole("button", { name: translate("en", "dash.failoverReturn") });
     expect(
       screen.getByText(translate("en", "dash.ingestBackupOnAir")),
-      "the card reads OFFLINE beside an on-air backup panel",
+      "the card reads STOPPED beside an on-air backup panel",
     ).toBeTruthy();
+    // Stopped is the word an absent ingest now reads (A91); Offline is gone.
+    expect(screen.queryByText("Stopped")).toBeNull();
     expect(screen.queryByText("Offline")).toBeNull();
   });
 
-  it("keeps saying Offline when the primary is on air and nothing arrives", async () => {
+  it("keeps saying Stopped when the primary is on air and nothing arrives", async () => {
     draw(live({ status: status({ failover: { ...status().failover!, active: "primary" } }) }));
     await waitFor(() => expect(screen.getByText("Destinations")).toBeTruthy());
     expect(screen.queryByText(translate("en", "dash.ingestBackupOnAir"))).toBeNull();
-    expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
+    // Stopped is the console's one word for an absent process (A91).
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
   });
 
   it("still names the backup when the primary has recovered but the return is manual", async () => {

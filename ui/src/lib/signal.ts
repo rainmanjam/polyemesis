@@ -32,10 +32,10 @@ export function labelForState(state?: ProcessState | null): string {
       return "Starting";
     case "failed":
       return "Failed";
+    // An absent process reads Stopped, as stateLabelKey does (app-council A91).
     case "stopped":
-      return "Stopped";
     default:
-      return "Offline";
+      return "Stopped";
   }
 }
 

@@ -35,15 +35,15 @@ describe("processStatus", () => {
     expect(processStatus("reconnecting").labelKey).toBe("state.reconnecting");
   });
 
-  it("reads an absent process as Offline, the same word stateLabelKey gives", () => {
-    expect(processStatus(undefined)).toEqual({ labelKey: "state.offline", tone: "idle", indicator: "ring" });
-    expect(processStatus(null).labelKey).toBe("state.offline");
+  it("reads an absent process as Stopped, the same word stateLabelKey gives (A91)", () => {
+    expect(processStatus(undefined)).toEqual({ labelKey: "state.stopped", tone: "idle", indicator: "ring" });
+    expect(processStatus(null).labelKey).toBe("state.stopped");
   });
 });
 
 describe("destinationStatus", () => {
-  it("says Stopped for a disabled destination whatever its process still reports", () => {
-    expect(destinationStatus(false, "running")).toEqual({ labelKey: "state.stopped", tone: "idle", indicator: "ring" });
+  it("says Off for a disabled destination whatever its process still reports (A2, A91)", () => {
+    expect(destinationStatus(false, "running")).toEqual({ labelKey: "state.off", tone: "idle", indicator: "ring" });
   });
 
   it("defers to the process state while enabled", () => {
@@ -90,11 +90,11 @@ describe("ingestPhaseStatus and outputStatus", () => {
     expect(ingestPhaseStatus("off").labelKey).toBe("state.off");
   });
 
-  it("output monitor: stale is a warning, error is red, absent is Offline", () => {
+  it("output monitor: stale is a warning, error is red, absent is Stopped", () => {
     expect(outputStatus({ kind: "live", report: {} as never }).tone).toBe("ok");
     expect(outputStatus({ kind: "stale", report: {} as never }).tone).toBe("warn");
     expect(outputStatus({ kind: "error", error: "x" }).labelKey).toBe("state.failed");
-    expect(outputStatus({ kind: "absent" }).labelKey).toBe("state.offline");
+    expect(outputStatus({ kind: "absent" }).labelKey).toBe("state.stopped");
     expect(outputStatus({ kind: "off" }).labelKey).toBe("state.off");
   });
 });

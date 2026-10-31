@@ -244,7 +244,7 @@ export function MetersPage() {
               variant={metersRunning ? "live" : "outline"}
               title={t("meters.metering.hint")}
             >
-              {metersRunning ? t("meters.metering") : t("dash.idle")}
+              {metersRunning ? t("meters.metering") : t("state.stopped")}
             </Badge>
           </div>
         }
