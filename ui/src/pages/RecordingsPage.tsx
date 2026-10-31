@@ -34,7 +34,9 @@ import {
 } from "@/components/ui/table";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
-import { useLiveData } from "@/hooks/useLiveData";
+import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { StatusPill } from "@/components/StatusPill";
+import { recorderStatus } from "@/lib/status";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
 import {
@@ -51,6 +53,7 @@ import { autoApi } from "@/lib/autoApi";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import {
   retentionDirty,
+  retentionProblems,
   retentionDraft,
   savePolicyBody,
   switchPatchBody,
@@ -79,6 +82,16 @@ const stemDownloadUrl = (name: string) =>
 function masterKey(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
+/** A number box that is blank is NaN, not 0: 0 means "no limit" on the server. */
+function numberOrBlank(raw: string): number {
+  return raw.trim() === "" ? Number.NaN : Number(raw);
+}
+
+/** What a retention box shows for a value: blank for NaN, never "NaN". */
+function shownValue(n: number): number | "" {
+  return Number.isNaN(n) ? "" : n;
 }
 
 export function RecordingsPage() {
@@ -204,18 +217,38 @@ export function RecordingsPage() {
   const dirty = settings ? retentionDirty(settings, draft) : false;
 
   const recorderState = status?.recorder?.state;
+  // A broadcast is going out (A23): the one definition the app uses.
+  const ingestLiveNow = useIngestLive();
+  const confirmRecordingOff = useConfirm<boolean>();
+  const problems = draft ? retentionProblems(draft) : [];
 
   return (
     <div className="p-3">
-      <PageHeader
-        title={t("rec.title")}
-        subtitle={t("rec.subtitle")}
-        actions={
-          <Badge variant={recorderState === "running" ? "live" : "outline"}>
-            {recorderState === "running" ? t("rec.recording") : (recorderState ?? t("rec.disabled"))}
-          </Badge>
-        }
-      />
+      <PageHeader title={t("rec.title")} subtitle={t("rec.subtitle")} />
+
+      {/* A25: recording on/off and its status sit in one strip that shows at
+          every width, instead of under a seven-column table on phones. A24: a
+          live row is named in the table below. */}
+      {settings && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+          <div className="flex items-center gap-2">
+            <StatusPill reading={recorderStatus(status?.recorder ?? null)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="rec-enabled" className="flex items-center gap-1">
+              {t("rec.enabled")}
+              <InfoHint body="rec.help.enabled" title="rec.enabled" />
+            </Label>
+            <Switch
+              id="rec-enabled"
+              checked={settings.recording.enabled}
+              onCheckedChange={(v) =>
+                !v && ingestLiveNow ? confirmRecordingOff.ask(true) : saveRecording({ enabled: v })
+              }
+            />
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
         {/* ---------- file list ---------- */}
@@ -287,7 +320,14 @@ export function RecordingsPage() {
                           {/* Both are measured only once the recorder has moved on
                               to the next segment, so the live one reads as dashes. */}
                           <TableCell className="tnum text-right font-mono text-tiny text-muted-foreground">
-                            {r.durationMs > 0 ? shortDuration(r.durationMs) : "—"}
+                            {r.durationMs > 0 ? (
+                              shortDuration(r.durationMs)
+                            ) : recorderState === "running" ? (
+                              // A24: the segment being written is named, not dashes.
+                              <Badge variant="live">{t("rec.recordingNow")}</Badge>
+                            ) : (
+                              "—"
+                            )}
                           </TableCell>
                           <TableCell className="text-center">
                             {r.tracks > 0 ? (
@@ -437,18 +477,6 @@ export function RecordingsPage() {
                 <CardTitle>{t("rec.settingsTitle")}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="rec-enabled" className="flex items-center gap-1">
-                    {t("rec.enabled")}
-                    <InfoHint body="rec.help.enabled" title="rec.enabled" />
-                  </Label>
-                  <Switch
-                    id="rec-enabled"
-                    checked={settings.recording.enabled}
-                    onCheckedChange={(v) => saveRecording({ enabled: v })}
-                  />
-                </div>
-
                 {/* Stems multiply what a session writes by roughly the track
                     count, so this is off by default and stays that way through
                     an upgrade. */}
@@ -497,9 +525,9 @@ export function RecordingsPage() {
                     id="rec-seg"
                     type="number"
                     min={10}
-                    value={draft?.segmentSeconds ?? settings.recording.segmentSeconds}
+                    value={shownValue(draft?.segmentSeconds ?? settings.recording.segmentSeconds)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, segmentSeconds: Number(e.target.value) } : d))
+                      setDraft((d) => (d ? { ...d, segmentSeconds: numberOrBlank(e.target.value) } : d))
                     }
                   />
                 </div>
@@ -514,9 +542,9 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={draft?.maxGb ?? settings.recording.maxGb}
+                    value={shownValue(draft?.maxGb ?? settings.recording.maxGb)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, maxGb: Number(e.target.value) } : d))
+                      setDraft((d) => (d ? { ...d, maxGb: numberOrBlank(e.target.value) } : d))
                     }
                   />
                   <span className="text-micro text-muted-foreground">{t("rec.noSizeLimit")}</span>
@@ -531,9 +559,9 @@ export function RecordingsPage() {
                     id="rec-age"
                     type="number"
                     min={0}
-                    value={draft?.maxAgeHours ?? settings.recording.maxAgeHours}
+                    value={shownValue(draft?.maxAgeHours ?? settings.recording.maxAgeHours)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, maxAgeHours: Number(e.target.value) } : d))
+                      setDraft((d) => (d ? { ...d, maxAgeHours: numberOrBlank(e.target.value) } : d))
                     }
                   />
                   <span className="text-micro text-muted-foreground">{t("rec.keepForever")}</span>
@@ -549,9 +577,9 @@ export function RecordingsPage() {
                     type="number"
                     min={0}
                     step={0.5}
-                    value={draft?.minFreeGb ?? settings.recording.minFreeGb}
+                    value={shownValue(draft?.minFreeGb ?? settings.recording.minFreeGb)}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, minFreeGb: Number(e.target.value) } : d))
+                      setDraft((d) => (d ? { ...d, minFreeGb: numberOrBlank(e.target.value) } : d))
                     }
                   />
                   <span className="text-micro text-muted-foreground">
@@ -559,17 +587,23 @@ export function RecordingsPage() {
                   </span>
                 </div>
 
+                {problems.length > 0 && (
+                  <span role="alert" className="text-sm text-down">{t("rec.retentionInvalid")}</span>
+                )}
                 {dirty && (
-                  <span className="text-micro text-warn">{t("rec.unsavedRetention")}</span>
+                  <span className="text-sm text-warn">{t("rec.unsavedRetention")}</span>
                 )}
                 <Button
                   size="sm"
                   onClick={() => draft && saveRetention(savePolicyBody(settings, draft))}
-                  disabled={saving || !draft}
+                  disabled={saving || !draft || problems.length > 0}
                 >
                   {saving && <Loader2 className="animate-spin" />}
                   {t("rec.savePolicy")}
                 </Button>
+                <p className="text-tiny text-muted-foreground">
+                  {t("rec.zeroNoLimit")}
+                </p>
                 <p className="text-micro text-muted-foreground">
                   {t("rec.retentionNote")}
                 </p>
@@ -578,6 +612,18 @@ export function RecordingsPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDestructive
+        open={confirmRecordingOff.open}
+        onOpenChange={confirmRecordingOff.onOpenChange}
+        subject={t("rec.enabled")}
+        title={t("rec.stopWhileLiveTitle")}
+        description={t("rec.stopWhileLiveDescription")}
+        onConfirm={async () => {
+          confirmRecordingOff.close();
+          saveRecording({ enabled: false });
+        }}
+      />
 
       <ConfirmDestructive
         open={confirmDelete.open}
