@@ -409,6 +409,13 @@ its first tagged release.
 
 ### Changed
 
+- **Each platform card names its credentials the way that platform's console
+  does.** Settings → Platforms used to label every card "Client ID" and "Client
+  secret". The Facebook card now says **App ID** and **App Secret**, which is
+  what Meta's App settings → Basic page shows. Vimeo says **Client identifier**,
+  and Twitch and Kick say **Client Secret**. Under each field, a short hint says
+  where to find it in that platform's console. The values you paste and the API
+  fields they are stored in have not changed.
 - **The site banner and comparison blurbs lead with what polyemesis does.** The
   bar on every page now reads "Free and open source (MIT). One stream in, every
   platform out, each with its own mix." and links to /features. The comparison
@@ -486,6 +493,18 @@ its first tagged release.
   and the Stream Deck restart-storm key now count each of these once. The
   backup output's own count, shown on the card, counts them too. A level
   applied in place is still not a restart.
+- **The OAuth acceptance suite no longer creates a Facebook live video.**
+  `scripts/acceptance-oauth.sh` said its credentialed step "starts no
+  broadcast", but the step called Facebook's ingest lookup, and that lookup
+  creates a `LIVE_NOW` live video. Run with real credentials, it would have left
+  one on the account. A YouTube channel with no stream would also have got a
+  new stream inserted. The default run now creates nothing on any platform.
+  Twitch and Kick read their ingest. YouTube lists its stream keys. Facebook is
+  skipped. `POLY_OAUTH_ALLOW_BROADCAST=1` (the driver's `-allow-broadcast`) opts
+  in to creating one public Facebook live video. The run ends that video, and
+  reports its id, before it exits. The suite also says now that a Kick run
+  rotates the refresh token. The live step moved to `scripts/internal/oauthlive`,
+  where a test fails if the default path calls a method that creates anything.
 
 - **The source card's "retrans" count was always 0.** It counted
   retransmissions the listener had sent, which a receive-only listener never

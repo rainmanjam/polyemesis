@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import en from "./i18n/en.json";
 import { SETTINGS_INDEX, searchSettingsFields } from "./settingsSearch";
+import { CREDENTIAL_LABEL_KEYS } from "./platformCredentialLabels";
 
 /* THE SEARCH INDEX FOLLOWS THE PAGE.
  *
@@ -35,6 +36,9 @@ const elsewhere = [
   ...keysIn(src("../components/DebugSettings.tsx"), ["CardTitle"]),
   ...keysIn(src("../components/DangerZone.tsx"), ["CardTitle"]),
   ...keysIn(src("../components/ObsBridgeSettings.tsx"), ["CardTitle"]),
+  // The platform cards pick their field labels at run time, per platform, so
+  // the keys never appear as literals in SettingsPage.tsx.
+  ...CREDENTIAL_LABEL_KEYS,
 ];
 
 describe("settings search index", () => {

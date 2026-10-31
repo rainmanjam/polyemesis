@@ -88,6 +88,7 @@ import {
   platformSupportsDeviceCode,
 } from "@/lib/platformConnect";
 import { LIMITS } from "@/lib/limits";
+import { credentialLabelsFor } from "@/lib/platformCredentialLabels";
 import { cn } from "@/lib/utils";
 import { pipelineDirty, pipelineSaveCarriesPassword } from "@/lib/pipelineSave";
 import {
@@ -2312,6 +2313,7 @@ export function PlatformCredCard({
   const [copied, setCopied] = useState(false);
   const [check, setCheck] = useState<CredentialCheck | null>(null);
   const [rechecking, setRechecking] = useState(false);
+  const labels = credentialLabelsFor(guide.platform);
 
   useEffect(() => setClientId(creds?.clientId ?? ""), [creds]);
 
@@ -2499,25 +2501,42 @@ export function PlatformCredCard({
 
         {guide.supported && (
           <>
+            {/* Labelled in the platform's own words (Meta's "App ID", X's
+                "OAuth 2.0 Client ID"), with where to find each one, because
+                the operator is copying from that platform's console. The
+                values are still clientId / clientSecret on the wire -- see
+                lib/platformCredentialLabels.ts. */}
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`cid-${guide.platform}`}>{t("set.clientId")}</Label>
+                <Label htmlFor={`cid-${guide.platform}`}>{t(labels.id)}</Label>
                 <Input
                   id={`cid-${guide.platform}`}
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
+                  aria-describedby={labels.idWhere ? `cid-${guide.platform}-where` : undefined}
                   className="font-mono"
                 />
+                {labels.idWhere && (
+                  <span id={`cid-${guide.platform}-where`} className="text-sm text-muted-foreground">
+                    {t(labels.idWhere)}
+                  </span>
+                )}
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`cs-${guide.platform}`}>{t("set.clientSecret")}</Label>
+                <Label htmlFor={`cs-${guide.platform}`}>{t(labels.secret)}</Label>
                 <SecretInput
                   id={`cs-${guide.platform}`}
                   value={clientSecret}
                   placeholder={creds?.hasSecret ? t("i18nSweep.storedEncrypted") : ""}
                   onChange={(e) => setClientSecret(e.target.value)}
+                  aria-describedby={labels.secretWhere ? `cs-${guide.platform}-where` : undefined}
                   className="font-mono"
                 />
+                {labels.secretWhere && (
+                  <span id={`cs-${guide.platform}-where`} className="text-sm text-muted-foreground">
+                    {t(labels.secretWhere)}
+                  </span>
+                )}
               </div>
             </div>
 

@@ -32,10 +32,21 @@
 # its own message, because a suite that blurred them would be reporting a green
 # tally for a package whose refresh path had stopped working.
 #
-# NOTHING HERE MUTATES ANY ACCOUNT. Every credential-free check is a GET or a
-# deliberately-doomed token request. The credentialed step refreshes a token,
-# reads an identity and reads an ingest endpoint; it starts no broadcast and
-# writes no metadata.
+# BY DEFAULT NOTHING HERE CREATES ANYTHING ON ANY ACCOUNT. Every
+# credential-free check is a GET or a deliberately-doomed token request. The
+# credentialed step refreshes a token, reads an identity, reads viewer stats and
+# reads the ingest where reading it has no side effect: Twitch and Kick read it,
+# YouTube lists its stream keys (its Ingest would insert a stream on a channel
+# with none), and Facebook is SKIPPED, because Facebook has no ingest to read --
+# it issues one only by creating a live video. It writes no metadata.
+#
+# Two things a credentialed run does change, and both are said here rather than
+# discovered: the refresh is a real token grant, and Kick ROTATES refresh tokens,
+# so a Kick run spends the POLY_OAUTH_KICK_REFRESH_TOKEN it was given. And with
+# POLY_OAUTH_ALLOW_BROADCAST=1 the Facebook step creates a REAL, PUBLIC live
+# video on the token owner's profile, reads its ingest, and ends it before
+# exiting; ending is not deleting, so an ended live video may stay on the
+# profile. The id is printed so it can be found.
 #
 # EVERY CHECK BELOW WAS PROVEN ABLE TO FAIL against the committed tree, and the
 # exact change that did it is recorded beside each step. One of them earned its
@@ -55,6 +66,9 @@
 #   POLY_OAUTH_<PLATFORM>_REFRESH_TOKEN
 # for PLATFORM in YOUTUBE, TWITCH, FACEBOOK, KICK. A platform missing any of
 # the three skips; a platform with all three runs.
+#   POLY_OAUTH_ALLOW_BROADCAST=1  opt in to creating (and then ending) one
+#                                 public Facebook live video; see above. Any
+#                                 other value, or unset, creates nothing.
 set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
@@ -520,7 +534,14 @@ livecheck() {
   # decides for itself whether it has all three, and answers skipped=true when
   # it does not. One process handling secrets is easier to keep honest than
   # two, and nothing a shell holds in a variable is safe from a stray set -x.
-  out="$(drive live "$plat")"
+  #
+  # The opt-in is the one variable the shell does read, because it is not a
+  # credential: it is the operator saying a broadcast may be created.
+  if [ "${POLY_OAUTH_ALLOW_BROADCAST:-}" = 1 ]; then
+    out="$(drive live -allow-broadcast "$plat")"
+  else
+    out="$(drive live "$plat")"
+  fi
   if [ "$(val "$out" skipped)" = true ]; then
     sk "$plat: no complete POLY_OAUTH_${up}_* credential set; the refresh was not attempted"
     note "set POLY_OAUTH_${up}_CLIENT_ID, _CLIENT_SECRET and _REFRESH_TOKEN to run it"
@@ -595,13 +616,34 @@ livecheck() {
   # Kick preset that could not publish. Reported redacted: a suite that leaked
   # a key while checking that keys are handled correctly would be its own bug
   # report.
-  if [ "$(val "$out" ingestOK)" = true ] && [ "$(val "$out" ingestKeyClean)" = true ]; then
-    ok "$plat: ingest resolved to $(val "$out" ingestScheme)://$(val "$out" ingestHost)/… with a clean $(val "$out" ingestKeyLen)-character key"
-  elif [ "$(val "$out" ingestOK)" = true ]; then
-    bad "$plat: the ingest key is empty or carries whitespace (length $(val "$out" ingestKeyLen))"
-  else
-    bad "$plat: ingest failed: $(val "$out" ingestError)"
+  #
+  # ONE COUNTED CHECK ON EVERY PATH, so EXPECTED_CHECKS holds. A broadcast this
+  # run created and could not end turns the check red whatever the ingest said:
+  # a stray public live video is the failure, not a footnote to a pass.
+  if [ -n "$(val "$out" createdLiveVideo)" ]; then
+    note "created Facebook live video $(val "$out" createdLiveVideo) (POLY_OAUTH_ALLOW_BROADCAST=1)"
   fi
+  if [ "$(val "$out" cleanupOK)" = false ]; then
+    bad "$plat: a live video may be left on the account: $(val "$out" cleanupError)"
+    return
+  fi
+  if [ "$(val "$out" cleanupOK)" = true ]; then
+    note "ended it: status $(val "$out" cleanupStatus), confirmed ended: $(val "$out" cleanupEnded) $(val "$out" cleanupWarning)"
+  fi
+  case "$(val "$out" ingestOK)/$(val "$out" ingestKeyClean)" in
+    skipped/*)
+      sk "$plat: the ingest was not fetched: $(val "$out" ingestSkipReason)" ;;
+    true/true)
+      if [ "$(val "$out" ingestMode)" = keys ]; then
+        ok "$plat: $(val "$out" ingestKeyCount) stream key(s) read without creating anything; all clean, the first $(val "$out" ingestKeyLen) characters"
+      else
+        ok "$plat: ingest resolved to $(val "$out" ingestScheme)://$(val "$out" ingestHost)/… with a clean $(val "$out" ingestKeyLen)-character key"
+      fi ;;
+    true/*)
+      bad "$plat: the ingest key is empty or carries whitespace (length $(val "$out" ingestKeyLen))" ;;
+    *)
+      bad "$plat: ingest failed: $(val "$out" ingestError)" ;;
+  esac
 }
 
 livecheck youtube

@@ -37,15 +37,24 @@
 // echo the secret back -- which is what a run without the control would have
 // shown either way.
 //
+// NOTHING HERE CREATES ANYTHING ON AN ACCOUNT UNLESS ASKED TO. Every command
+// but live uses junk credentials or none. live refreshes a real token and reads
+// what it can do, and by default creates nothing on any platform; the one
+// create it can make -- a Facebook live video, which is the only way Facebook
+// hands out an ingest -- needs -allow-broadcast, and is ended before the
+// command exits. See live.
+//
 // Every command here was proven able to fail; the exact change is recorded in
 // acceptance-oauth.sh beside the step that consumes it.
 //
 //	go run scripts/acceptance_oauth_driver.go <cmd> <platform>
+//	go run scripts/acceptance_oauth_driver.go live [-allow-broadcast] <platform>
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +67,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/scripts/internal/oauthlive"
 )
 
 func main() {
@@ -84,7 +94,7 @@ func main() {
 	case "fb-version":
 		fbVersion()
 	case "live":
-		live(arg(2))
+		live(os.Args[2:])
 	default:
 		fail("unknown command %q", os.Args[1])
 	}
@@ -689,143 +699,52 @@ func servedGraphVersion(endpoint string) string {
 // None of them establishes that a good one succeeds, and the gap between those
 // two is exactly where a refresh that has quietly stopped working lives.
 //
-// Four facts are reported, and the last two are the ones #312 argues for:
+// THE WORK IS IN scripts/internal/oauthlive, not here, because this file is
+// `//go:build ignore` and nothing can test it. This step used to end with
+// Provider.Ingest on every platform, and Facebook's Ingest creates a LIVE_NOW
+// live video -- so a run against a real Facebook account left one behind, under
+// a header that said it started no broadcast. oauthlive's tests now hold the
+// default run to creating nothing, and a test reads THIS file to make sure it
+// calls no Ingest-family method of its own.
 //
-//   - the refresh returned a token at all
-//   - its expiry is far enough ahead to be a real expiry rather than a
-//     already-stale one
-//   - the refreshed token is accepted by the data API, so it is a working
-//     credential and not merely a well-formed string
-//   - Ingest yields a publish URL and a key, which is the field polyemesis
-//     fills in automatically and the one whose hand-typed equivalent shipped
-//     a preset that could not publish
+// BY DEFAULT IT CREATES NOTHING ON ANY PLATFORM. Twitch and Kick read their
+// ingest; YouTube lists its stream keys instead of calling Ingest, which would
+// insert a stream on a channel that has none; Facebook skips, because there is
+// no way to read a Facebook ingest without creating a live video. -allow-broadcast
+// opts in to that one create, and the run ends the live video it made and
+// reports its id. The refresh itself is not gated, and on Kick it rotates the
+// refresh token -- see oauthlive's package comment.
 //
-// NOTHING SECRET IS PRINTED. The stream key is reported as a length and a
-// character-class verdict; the ingest URL is reported as its scheme and host
-// with the path dropped, because some platforms put the key in the path. The
-// access token is never emitted in any form. redact() is the backstop.
-func live(name string) {
-	up := strings.ToUpper(name)
-	clientID := os.Getenv("POLY_OAUTH_" + up + "_CLIENT_ID")
-	clientSecret := os.Getenv("POLY_OAUTH_" + up + "_CLIENT_SECRET")
-	refresh := os.Getenv("POLY_OAUTH_" + up + "_REFRESH_TOKEN")
-	if clientID == "" || clientSecret == "" || refresh == "" {
-		emit("skipped", true)
-		return
+//	go run scripts/acceptance_oauth_driver.go live [-allow-broadcast] <platform>
+func live(args []string) {
+	fs := flag.NewFlagSet("live", flag.ContinueOnError)
+	allow := fs.Bool(oauthlive.AllowBroadcastFlag, false, oauthlive.AllowBroadcastUsage)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: acceptance_oauth_driver.go live [-"+oauthlive.AllowBroadcastFlag+"] <platform>")
+		fs.PrintDefaults()
 	}
-	emit("skipped", false)
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	name := fs.Arg(0)
+	// The flag is accepted after the platform too, because "live facebook
+	// -allow-broadcast" is how people type it, and the flag package stops at
+	// the first positional argument.
+	if err := fs.Parse(fs.Args()[min(1, fs.NArg()):]); err != nil {
+		os.Exit(2)
+	}
+	if fs.NArg() > 0 {
+		fail("unexpected argument %q after the platform", fs.Arg(0))
+	}
+
+	up := strings.ToUpper(name)
+	creds := oauthlive.Creds{
+		ClientID:     os.Getenv("POLY_OAUTH_" + up + "_CLIENT_ID"),
+		ClientSecret: os.Getenv("POLY_OAUTH_" + up + "_CLIENT_SECRET"),
+		RefreshToken: os.Getenv("POLY_OAUTH_" + up + "_REFRESH_TOKEN"),
+	}
 	p := providerFor(name)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
-	tok, err := p.Refresh(ctx, clientID, clientSecret, refresh)
-	if err != nil {
-		emit("refreshed", false)
-		emit("error", err.Error())
-		return
-	}
-	emit("refreshed", true)
-	emit("accessTokenLen", len(tok.AccessToken))
-	emit("gotRefreshToken", tok.RefreshToken != "")
-	// SECONDS OF LIFE, not a boolean. A refresh that hands back a token
-	// expiring in ninety seconds is technically a success and practically the
-	// hour-four failure arriving early, so the number is reported and the
-	// suite decides.
-	if tok.ExpiresAt.IsZero() {
-		emit("expiresInSec", -1)
-	} else {
-		emit("expiresInSec", int(time.Until(tok.ExpiresAt).Seconds()))
-	}
-	// The scopes the platform says the refreshed token carries, compared
-	// against what this build asks for. A platform that quietly dropped one is
-	// the AccountNeedsReconnect case arriving from the other direction.
-	granted := strings.Fields(strings.ReplaceAll(tok.Scopes, ",", " "))
-	var missing []string
-	for _, want := range p.Scopes() {
-		if !contains(granted, want) {
-			missing = append(missing, want)
-		}
-	}
-	emit("scopesReported", len(granted))
-	emit("scopesMissing", strings.Join(missing, " "))
-
-	acct, err := p.Account(ctx, clientID, tok.AccessToken)
-	if err != nil {
-		emit("accountOK", false)
-		emit("accountError", err.Error())
-	} else {
-		emit("accountOK", acct != nil && acct.Ref != "")
-		emit("accountNameLen", len(acct.Name))
-	}
-
-	// THE ONE MEASUREMENT THE UNIT TESTS CANNOT MAKE. Every stats test in
-	// internal/oauth answers from an httptest stub whose body this repo wrote,
-	// so all of them prove the decoder matches the fixture and none prove the
-	// fixture matches the platform. That gap is not hypothetical here: Kick's
-	// stats fallback shipped against a fixture shaped like the struct instead
-	// of like the endpoint, stayed green for as long as it existed, and could
-	// never have worked. This step is the only place the real body is read.
-	//
-	// It is reported, not asserted, for everything except the shape. Whether
-	// the account is live at 3am on a Sunday is not this suite's business, and
-	// a check that failed because nobody was streaming would be turned off
-	// within a week. What IS asserted: that the call succeeds, and that a
-	// viewer count is either absent or a real number -- never the fabricated
-	// zero this whole phase exists to prevent.
-	// Asserted on p rather than resolved through oauth.StatsFor, which would
-	// look up the PACKAGE singleton and ignore the provider this driver built.
-	// Same distinction endpoints.go draws with the Set twin.
-	if st, ok := p.(oauth.LiveStatter); ok {
-		stats, serr := st.Stats(ctx, clientID, tok.AccessToken)
-		switch {
-		case serr != nil:
-			emit("statsOK", false)
-			emit("statsError", serr.Error())
-		default:
-			emit("statsOK", true)
-			emit("statsLive", stats.Live)
-			// Absent and zero are DIFFERENT and the whole point is that the
-			// wire preserves the difference. Reported as a string so the shell
-			// can tell "not reported" from "0" without a second field, which a
-			// numeric zero would have made indistinguishable.
-			if stats.ViewerCount == nil {
-				emit("statsViewers", "not-reported")
-			} else {
-				emit("statsViewers", strconv.Itoa(*stats.ViewerCount))
-			}
-			emit("statsSource", stats.Source)
-		}
-	} else {
-		emit("statsOK", "unsupported")
-	}
-
-	ing, err := p.Ingest(ctx, clientID, tok.AccessToken)
-	if err != nil {
-		emit("ingestOK", false)
-		emit("ingestError", err.Error())
-		return
-	}
-	emit("ingestOK", true)
-	// Scheme and host only. The path is dropped because more than one platform
-	// puts the stream key in it, and a suite that leaked a key while checking
-	// that keys are handled correctly would be its own bug report.
-	if u, perr := url.Parse(ing.URL); perr == nil {
-		emit("ingestScheme", u.Scheme)
-		emit("ingestHost", u.Host)
-	}
-	emit("ingestKeyLen", len(ing.Key))
-	// A key is opaque and platform-specific, so the only universal statement
-	// worth making is that it is printable and has no whitespace -- which is
-	// what #306 turned out to be about, a stored spelling and a wire spelling
-	// that were allowed to differ.
-	emit("ingestKeyClean", ing.Key != "" && ing.Key == strings.TrimSpace(ing.Key) && !strings.ContainsAny(ing.Key, " \t\r\n"))
-}
-
-func contains(hay []string, needle string) bool {
-	for _, h := range hay {
-		if h == needle {
-			return true
-		}
-	}
-	return false
+	oauthlive.Run(ctx, p, creds, oauthlive.Options{AllowBroadcast: *allow}, emit)
 }
