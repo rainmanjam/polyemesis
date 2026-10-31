@@ -499,6 +499,17 @@ its first tagged release.
   text link, which reverses the earlier docs-first order. The CSS drawing is
   replaced by a crop of the real routing screen.
 
+- **Inputs pages say what they are doing.** Renditions reads "Not encoding,
+  starts when the first feed goes live" rather than "Starting" when no encode
+  has been asked for, and each feed chip names its state in words. Sources
+  shows the SRT host and port in clear with a Copy button; the passphrase and
+  stream ID stay masked behind Reveal. The degraded-link thresholds fold behind
+  a summary of the numbers, and the source switch says Accepting or Off, with
+  what that means for an encoder. Add destination on a source opens the
+  destination dialog already on that source. Meters put the per-track levels
+  above loudness compliance, state dBFS above the readouts, and announce a clip
+  in words. Routing shows why Save is greyed beside the button, and destination
+  names and routing summaries wrap rather than truncate.
 ### Fixed
 
 - **The OAuth acceptance suite no longer creates a Facebook live video.**
