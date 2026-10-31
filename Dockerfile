@@ -70,7 +70,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 
 # ---------- stage 3: runtime ----------
 #
-# Alpine 3.24, which ships FFmpeg 8.1.2.
+# Alpine 3.24, which ships FFmpeg 8.1.3.
 #
 # This image sat on 3.22/FFmpeg 6.1.x for a while on the theory that 6.1 was
 # "the series this project is exercised against". That had it backwards. The
@@ -119,10 +119,13 @@ LABEL org.opencontainers.image.title="polyemesis" \
 # thing that drifts is the transcoder, where a behaviour change shows up as a
 # broken stream rather than a build error.
 #
-# Pinned means a rebuild FAILS LOUDLY ("unable to select packages") once Alpine
-# republishes ffmpeg at a new -r revision, since the branch index only carries
-# the current one. That failure is the feature: it is the prompt to bump this
-# on purpose. To bump:
+# Pinned means a rebuild FAILS LOUDLY once Alpine republishes ffmpeg at a new
+# version or -r revision, since the branch index only carries the current one.
+# That failure is the feature: it is the prompt to bump this on purpose. It is
+# also the failure that took every image build down when 3.24 moved from
+# 8.1.2-r0 to 8.1.3-r0 (2026-10), and apk's own words for it -- "unable to
+# select packages" -- did not say what to do. So the RUN below catches it and
+# prints what the branch holds now. To bump:
 #
 #   1. docker run --rm alpine:3.24 sh -c 'apk update >/dev/null && apk list ffmpeg'
 #      (or https://pkgs.alpinelinux.org/packages?name=ffmpeg&branch=v3.24)
@@ -130,16 +133,40 @@ LABEL org.opencontainers.image.title="polyemesis" \
 #   3. Confirm the new build still has SRT before shipping it:
 #      docker run --rm <image> ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 #
-# 8.1.3-r0 verified on linux/amd64 and linux/arm64: srt + rtmp protocols,
-# libx264 and native aac encoders all present.
+# 8.1.3-r0 is what v3.24/community serves for linux/amd64 and linux/arm64
+# (checked 2026-10-29).
+#
+# WHY NOT 9.0.2 HERE YET. No STABLE Alpine branch carries 9.x: 3.24 has 8.1.3,
+# and 9.0.2-r0 exists only in edge. Measured 2026-10-29 rather than assumed:
+#   - `apk add --repository=.../edge/community ffmpeg=9.0.2-r0` on this base
+#     FAILS: edge's ffmpeg links libx265.so.216, libvpx.so.12 and
+#     libbluray.so.4, which 3.24 does not have.
+#   - Adding edge/main as well installs, but 104 of the 107 packages come from
+#     edge (libstdc++, libgcc, x264, x265, libsrt, libva, glib ...) on top of
+#     3.24's musl and openssl: a userland Alpine does not build or support,
+#     and one that changes under the same tag whenever edge moves.
+#   - An alpine:edge base works and keeps VAAPI, but is a rolling distribution
+#     under a release image.
+# So the 9.0.2 move waits for the next stable branch (3.25) to package it, at
+# which point it is the FROM line plus this pin. FFmpeg 9.0.0 and 9.0.1 must not
+# be taken on the way: both carry a scheduler change (reverted in 9.0.2 by
+# FFmpeg commit 9d4ca2122) that misorders output and stops streams early. See
+# docs/investigations/ffmpeg-9-upgrade-risk.md.
 #
 # The trailing grep is not decoration: it fails the build rather than shipping
 # an image whose multitrack SRT ingest cannot work. `grep srt` would be no check
 # at all — every build lists `srtp`, which is a different protocol.
 ARG FFMPEG_VERSION=8.1.3-r0
-RUN apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata \
+RUN if ! apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata; then \
+      echo "FFMPEG_VERSION=${FFMPEG_VERSION} is not in this Alpine branch any more." >&2; \
+      echo "It now serves:" >&2; \
+      apk --no-cache policy ffmpeg >&2 || true; \
+      echo "Set ARG FFMPEG_VERSION in the Dockerfile to that version (see the comment above it), or pass --build-arg FFMPEG_VERSION=<it>." >&2; \
+      exit 1; \
+    fi \
  && adduser -D -u 10001 polyemesis \
- && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
+ && { ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt \
+      || { echo "ffmpeg ${FFMPEG_VERSION} was built without SRT; refusing to ship it" >&2; exit 1; }; }
 COPY --from=build /out/polyemesis /usr/local/bin/polyemesis
 
 # The data directory holds the database, the secret key and recordings.

@@ -72,6 +72,13 @@ can emit a second track to any RTMP destination and its own RTMP server receives
 it as two distinct tracks, but no other platform has been measured accepting
 one, and the `-c:a copy` refusal for RTMP destinations still stands.
 
+**It needs FFmpeg 7.1 or newer on an RTMP destination.** Two audio streams in one
+FLV is the Enhanced RTMP multitrack format, and FFmpeg's flv muxer refuses it
+before 7.1. Measured on n6.1.3 (2026-10-29): the destination exits at start with
+`at most one audio stream is supported in flv` and never publishes. That
+includes Ubuntu 24.04's stock 6.1.1 and the image `Dockerfile.cuda` builds. The
+default image (8.1.3), the VA-API image (8.0.1) and 9.0.2 all carry it.
+
 ### Turning it on
 
 In the UI: **Routing → pick the destination → Second (VOD) audio mix**. The

@@ -605,7 +605,8 @@ refuse to start against.
 | Ubuntu 24.04 LTS (noble) | 6.1.1 | works |
 | Debian 13 (trixie) | 7.1.5 | works |
 | Alpine 3.20 / 3.21 / 3.22 | 6.1.1 / 6.1.2 / 6.1.2 | works |
-| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.2 | works — 8.1.2 is what the shipped image pins and what CI runs |
+| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.3 | works — 8.1.3 is what the shipped image pins; CI runs the 8.1 line |
+| Alpine edge, Debian sid, Arch, Homebrew | 9.0.2 | works — tested on 9.0.2; avoid 9.0.0 and 9.0.1 (below) |
 | RHEL / Rocky / AlmaLinux | not in the base repositories at all | see below |
 | Fedora, Arch, openSUSE | not checked | verify for your release |
 
@@ -616,12 +617,23 @@ is not in this table, or you are reading this much later, run
 rather than trusting the row.
 
 **8.x is the exercised version, not an unknown.** The `Dockerfile` pins
-`FFMPEG_VERSION=8.1.3-r0`, verified on linux/amd64 and linux/arm64, and the host
-test suites pin BtbN's `n8.1-latest-…-gpl-8.1` build on Linux and Windows. The
+`FFMPEG_VERSION=8.1.3-r0`, the version Alpine 3.24 serves on linux/amd64 and
+linux/arm64, and the host test suites pin BtbN's `n8.1-latest-…-gpl-8.1` build
+on Linux and Windows. The
 suites moved off 6.1.1 deliberately: running a version nobody deploys meant a
 defect fatal on one and survivable on the other could stay invisible here for
 months. 6.1.1 and 7.x still clear the floor and still work — they are simply not
 what the container ships.
+
+**9.0.2 works; 9.0.0 and 9.0.1 do not belong in production.** Every package
+that runs FFmpeg passes on 9.0.2 (measured 2026-10-29, Linux and macOS), and the
+`ffmpeg-compat` workflow re-checks it, and the 6.1 floor, on every change to
+those packages. 9.0 and 9.0.1 shipped a scheduler change that can misorder
+output, end streams early and use extreme memory. FFmpeg reverted it in 9.0.2
+([9d4ca2122](https://github.com/FFmpeg/FFmpeg/commit/9d4ca2122)), and
+polyemesis prints a startup warning when it finds either release. The Docker
+image stays on 8.1 until a stable Alpine branch packages 9.x. See
+[`investigations/ffmpeg-9-upgrade-risk.md`](investigations/ffmpeg-9-upgrade-risk.md).
 
 On RHEL and its rebuilds FFmpeg is not shipped at all for licensing reasons —
 RPM Fusion is the usual source. Verify the version it gives you before relying
@@ -638,16 +650,22 @@ include libsrt:
 
 ```bash
 curl -fsSL -o ffmpeg.tar.xz \
-  https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz
+  https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
+echo "68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269  ffmpeg.tar.xz" | sha256sum -c -
 tar xf ffmpeg.tar.xz
 sudo install -m755 ffmpeg-*/bin/ffmpeg ffmpeg-*/bin/ffprobe /usr/local/bin/
 
 /usr/local/bin/ffmpeg -protocols | tr ' ' '\n' | grep -x srt
 ```
 
-Verified 2026-07-26: `ffmpeg-n7.1-latest-linux64-gpl-7.1` reports version
-`n7.1.5` and lists `srt`. These are glibc, x86-64 builds — they will not run on
-Alpine or musl, and `linux64` means amd64, not arm64.
+That is a **month-end** release, which BtbN keeps for about two years. The
+dailies in between are deleted after about two weeks, and the `latest` release
+serves a different build every day. For arm64 use
+`ffmpeg-n9.0.2-17-g2a571b6068-linuxarm64-gpl-9.0.tar.xz` (sha256
+`91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46`). The same
+release has the 8.1 line as `ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz`,
+which is what `install.sh` installs. These are glibc builds — they will not run
+on Alpine or musl.
 
 If you would rather not put them on `PATH`, point the config at them instead:
 
