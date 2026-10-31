@@ -77,3 +77,25 @@ func TestTheRolloverCapsAreRecordedWithTheirValues(t *testing.T) {
 		}
 	}
 }
+
+// TestTheYouTubeArchiveLimitCitesTheArchivePage pins the source of the YouTube
+// 12-hour figure to the archive help page, not the DVR page it was first copied
+// from. The DVR page says DVR "may be limited or unavailable" past 12 hours; the
+// archive page says a longer stream "may not be captured at all", which is the
+// consequence a rollover exists to prevent, so it is the citation the countdown
+// must show.
+func TestTheYouTubeArchiveLimitCitesTheArchivePage(t *testing.T) {
+	for _, l := range PlatformLimits() {
+		if l.PresetID != "youtube" || l.Kind != LimitKindArchiveDuration {
+			continue
+		}
+		if !strings.Contains(l.Source, "support.google.com/youtube/answer/6247592") {
+			t.Errorf("YouTube archive limit cites %q; it must cite the archive help page, answer/6247592", l.Source)
+		}
+		if strings.Contains(l.Source, "9296823") {
+			t.Errorf("YouTube archive limit still cites the DVR page, answer/9296823, which does not state the archive consequence")
+		}
+		return
+	}
+	t.Fatal("no YouTube archive limit recorded")
+}
