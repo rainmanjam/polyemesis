@@ -64,3 +64,18 @@ export function switchPatchBody(
 export function savePolicyBody(server: Settings, draft: RetentionDraft): Settings {
   return { ...server, recording: { ...server.recording, ...draft } };
 }
+
+/** The fields that cannot be saved as typed. A blank box is NaN here, never 0:
+ *  the server reads 0 as "no limit", so a blank cap that became 0 removed the
+ *  disk cap without the operator choosing that (A22). Segment length has the
+ *  server's own bounds (10 to 86400 seconds); the three caps cannot be negative. */
+export function retentionProblems(d: RetentionDraft): (keyof RetentionDraft)[] {
+  const bad: (keyof RetentionDraft)[] = [];
+  if (!(Number.isFinite(d.segmentSeconds) && d.segmentSeconds >= 10 && d.segmentSeconds <= 86400)) {
+    bad.push("segmentSeconds");
+  }
+  for (const k of ["maxGb", "maxAgeHours", "minFreeGb"] as const) {
+    if (!(Number.isFinite(d[k]) && d[k] >= 0)) bad.push(k);
+  }
+  return bad;
+}

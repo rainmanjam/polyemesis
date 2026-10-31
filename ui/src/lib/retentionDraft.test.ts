@@ -93,14 +93,17 @@ describe("RecordingsPage, wired to these decisions", () => {
     const src = recPage();
     // Every number input used to setSettings(). None may again: that is what
     // made the shared object shared.
-    expect(src).toContain("setDraft((d) => (d ? { ...d, segmentSeconds: Number(e.target.value) } : d))");
+    // A blank box is NaN (numberOrBlank), never 0: the server reads 0 as "no limit" (A22).
+    expect(src).toContain("setDraft((d) => (d ? { ...d, segmentSeconds: numberOrBlank(e.target.value) } : d))");
     expect(src).not.toContain("segmentSeconds: Number(e.target.value),");
     expect(src).not.toContain("maxGb: Number(e.target.value) },");
     expect(src).toContain("saveRetention(switchPatchBody(settings, patch))");
     expect(src).toContain("saveRetention(savePolicyBody(settings, draft))");
     // The enable switch used to spread `settings` by hand rather than go
     // through the one function that is careful about it.
-    expect(src).toContain("onCheckedChange={(v) => saveRecording({ enabled: v })}");
+    // Turning it off while a broadcast is live goes through a confirm first (A23),
+    // and every other change still goes through saveRecording.
+    expect(src).toContain("saveRecording({ enabled: v })");
     expect(src).toContain('t("rec.unsavedRetention")');
   });
 

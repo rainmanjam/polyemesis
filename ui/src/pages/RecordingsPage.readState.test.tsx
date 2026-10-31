@@ -55,6 +55,7 @@ vi.mock("@/lib/autoApi", () => ({
 
 vi.mock("@/hooks/useLiveData", () => ({
   useLiveData: () => ({ recordingsRevision: 0, status: null }),
+  useIngestLive: () => false,
 }));
 
 vi.mock("sonner", () => ({

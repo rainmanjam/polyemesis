@@ -99,9 +99,14 @@ export function recorderStatus(recorder?: ProcessStatus | null): StatusReading {
   return recorder ? processStatus(recorder.state) : reading("state.off", "idle");
 }
 
-/** The clip replay buffer. On means it is holding footage ready to clip. */
-export function clipBufferStatus(enabled: boolean): StatusReading {
-  return enabled ? reading("state.ready", "idle") : reading("state.off", "idle");
+/** The clip replay buffer (ClipStatus in the API). Running means it is holding
+ *  footage ready to clip. Switched on but not running is waiting for a stream,
+ *  which is a transition and reads as a warning; it must not read as Ready
+ *  while the capture buttons it would enable are still disabled. */
+export function clipBufferStatus(buffer: { enabled: boolean; running: boolean }): StatusReading {
+  if (buffer.running) return reading("state.ready", "idle");
+  if (buffer.enabled) return reading("state.waiting", "warn");
+  return reading("state.off", "idle");
 }
 
 /** A source's ingest (sourceIngest.ts). Receiving is the only green. */

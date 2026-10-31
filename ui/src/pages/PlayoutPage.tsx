@@ -616,7 +616,7 @@ export function ShareCard({
 
 // -------------------------------------------------------------- protection
 
-function ProtectionCard({
+export function ProtectionCard({
   view,
   play,
   busy,
@@ -630,6 +630,9 @@ function ProtectionCard({
   onSaveSettings: (next: PlayoutSettings) => Promise<void>;
 }) {
   const t = useT();
+  // A15: making the stream reachable by people who are not signed in changes who
+  // can watch, so it asks first. Turning it back to token or off does not.
+  const exposure = useConfirm<"public" | "open">();
   return (
     <Card className="mt-3">
       <CardHeader>
@@ -644,7 +647,11 @@ function ProtectionCard({
           <Select
             value={view.protection}
             disabled={busy}
-            onValueChange={(v) => void onSave({ protection: v as PlayoutProtection })}
+            onValueChange={(v) => {
+              const next = v as PlayoutProtection;
+              if (next === "open" && view.protection !== "open") exposure.ask("open");
+              else void onSave({ protection: next });
+            }}
           >
             <SelectTrigger id="playout-protection" className="max-w-sm">
               <SelectValue />
@@ -673,9 +680,27 @@ function ProtectionCard({
             checked={play.public}
             disabled={busy}
             aria-label={t("play.serveWithoutSession")}
-            onCheckedChange={(pub) => void onSaveSettings({ ...play, public: pub })}
+            onCheckedChange={(pub) => {
+              if (pub) exposure.ask("public");
+              else void onSaveSettings({ ...play, public: pub });
+            }}
           />
         </div>
+        <ConfirmDestructive
+          open={exposure.open}
+          onOpenChange={exposure.onOpenChange}
+          subject={exposure.target === "open" ? t("play.protectionOpen") : t("play.public")}
+          title={exposure.target === "open" ? t("play.confirmOpenTitle") : t("play.confirmPublicTitle")}
+          description={exposure.target === "open" ? t("play.confirmOpenDescription") : t("play.confirmPublicDescription")}
+          confirmLabel={exposure.target === "open" ? t("play.confirmOpenAction") : t("play.confirmPublicAction")}
+          tone="caution"
+          onConfirm={async () => {
+            const kind = exposure.target;
+            exposure.close();
+            if (kind === "public") await onSaveSettings({ ...play, public: true });
+            else if (kind === "open") await onSave({ protection: "open" });
+          }}
+        />
 
         <div className="flex items-start justify-between gap-3 rounded-md border border-border p-2.5">
           <div>

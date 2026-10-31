@@ -69,9 +69,14 @@ describe("delayStatus, renditionStatus, recorderStatus, clipBufferStatus", () =>
     expect(recorderStatus({ state: "running" } as never).labelKey).toBe("state.live");
   });
 
-  it("clip buffer: on is Ready, off is Off", () => {
-    expect(clipBufferStatus(true).labelKey).toBe("state.ready");
-    expect(clipBufferStatus(false).labelKey).toBe("state.off");
+  it("clip buffer: running is Ready, switched on but not running is Waiting, off is Off", () => {
+    expect(clipBufferStatus({ enabled: true, running: true }).labelKey).toBe("state.ready");
+    // On but not running is a warning, not Ready: the capture buttons are still disabled.
+    expect(clipBufferStatus({ enabled: true, running: false })).toMatchObject({
+      labelKey: "state.waiting",
+      tone: "warn",
+    });
+    expect(clipBufferStatus({ enabled: false, running: false }).labelKey).toBe("state.off");
   });
 });
 
@@ -99,7 +104,7 @@ describe("every label the vocabulary can return exists in the English catalogue"
     processStatus("failed"), processStatus("stopped"), processStatus(undefined),
     destinationStatus(false), delayStatus("buffering"), delayStatus("on-air"), delayStatus("draining"),
     renditionStatus("ready"), renditionStatus("transcoding"), renditionStatus("attention"),
-    recorderStatus(null), clipBufferStatus(true), clipBufferStatus(false),
+    recorderStatus(null), clipBufferStatus({ enabled: true, running: true }), clipBufferStatus({ enabled: false, running: false }),
     ingestPhaseStatus("unset"), ingestPhaseStatus("off"), ingestPhaseStatus("unavailable"),
     ingestPhaseStatus("waiting"), ingestPhaseStatus("receiving"),
     outputStatus({ kind: "off" }), outputStatus({ kind: "absent" }), outputStatus({ kind: "starting" }),
