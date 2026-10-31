@@ -203,6 +203,8 @@ const DOCS_BY_SECTION = {
       "Two places a setting can live, and they are not interchangeable. Every config.yaml key, its default, the data directory, and the environment variables."],
     ["PLATFORMS.md", "Streaming platforms: what can be automated",
       "YouTube, Twitch, Kick, Facebook and Rumble. Anything taking RTMP or SRT works with a pasted key; this is what each platform's API lets you automate."],
+    ["ROLLOVER.md", "Planned rollover before platform caps",
+      "Replace a live YouTube broadcast before its 12-hour archive cap, reconnect Twitch before its 48-hour cap, and count down the rest. Triggers: a margin, a quiet window, or an OBS scene."],
     ["RECURRING-EVENTS.md", "Recurring broadcast events: templates and look-ahead",
       "A title, description, privacy and thumbnail for every show on a schedule, with the next few occurrences created as upcoming events. Skip or retitle one show; YouTube today."],
     ["SCHEDULED-BROADCAST.md", "Broadcasting from a file, on a schedule",

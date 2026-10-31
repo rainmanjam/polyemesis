@@ -10,6 +10,13 @@ its first tagged release.
 
 ### Added
 
+- **Planned rollover (preview).** A destination can be replaced before its
+  platform's cap: a live YouTube broadcast is swapped for a new one on the same
+  stream, and a Twitch destination is reconnected. Triggers are a safety margin
+  against a stated cap, a daily quiet window, or an OBS scene. Other platforms
+  show a countdown only. Built against fakes; the YouTube auto-start and Twitch
+  reset behaviour are provisional until checked on a live account. See
+  [docs/ROLLOVER.md](docs/ROLLOVER.md).
 - **Recurring broadcast events (preview).** A start schedule can carry a broadcast
   template: a title pattern with `{date}` and `{time}`, a description, privacy,
   category and thumbnail. The next occurrences (default 2, up to 10) are created as
