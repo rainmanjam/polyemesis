@@ -360,11 +360,18 @@ export function GoLiveComposer() {
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
           <Megaphone className="h-3.5 w-3.5 text-muted-foreground" />
-          {t("golive.title")}
+          {/* This card is the stream's title, tags and category, not the start
+              path: that is the toolbar's Go live, which opens the sheet (A7). */}
+          {t("dash.streamInfo")}
         </CardTitle>
-        <span className="font-mono text-micro text-muted-foreground">
-          {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
-        </span>
+        {/* Shown only when there is an account to count. "0 accounts" beside
+            the live count read as a fault; the card's one sentence says what
+            to do instead (A86). */}
+        {targets.length > 0 && (
+          <span className="font-mono text-micro text-muted-foreground">
+            {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
+          </span>
+        )}
       </CardHeader>
 
       {targets.length === 0 ? (
@@ -1642,6 +1649,9 @@ export function Dashboard() {
             // when somebody replaying the tour from Settings would be looking
             // for it. See ui/src/lib/tourSteps.ts.
             data-tour="add-destination"
+            // Outline, not filled: Go live is the one filled start action on this
+            // page, and Add destination is a secondary one (A9).
+            variant="outline"
             onClick={() => {
               setEditing(null);
               setDialogOpen(true);
@@ -1656,7 +1666,12 @@ export function Dashboard() {
           air, then what is wrong; the preview, the ingest card and the
           destination grid below are the detail behind those two answers rather
           than a flat inventory of the install. See components/OnAirBar.tsx. */}
-      <OnAirBar status={status} failover={failoverState} onEndAll={() => endAllRef.current?.()} />
+      <OnAirBar
+        status={status}
+        failover={failoverState}
+        onEndAll={() => endAllRef.current?.()}
+        ingestReceiving={ingestLive}
+      />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
           renders nothing at all unless this broadcast is off its primary ingest

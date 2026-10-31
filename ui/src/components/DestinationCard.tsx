@@ -636,7 +636,7 @@ export function DestinationCard({
             </Button>
           ) : (
             <Button
-              variant="live"
+              variant="outline"
               size="sm"
               className="flex-1"
               onClick={onStart}

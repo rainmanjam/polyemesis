@@ -244,3 +244,45 @@ describe("Go live sheet: audio and scope (A3)", () => {
     expect(screen.queryByRole("button", { name: /All sources/ })).toBeNull();
   });
 });
+
+describe("Go live sheet: a row that is already live says so (A8)", () => {
+  it("draws a running destination as LIVE rather than READY, and counts only the rows it will start", () => {
+    // The readiness badge used to read READY on a row that was already on air,
+    // while the primary button counted it as something still to start. The row
+    // now says what it is, and the count leaves it out.
+    const running = dest({ id: did(1), enabled: true, process: { state: "running" } });
+    const idle = dest({ id: did(2), name: "Archive", sourceId: 1 });
+    draw([running, idle], { live: [running, idle] });
+
+    const [firstRow] = Array.from(document.querySelectorAll("[data-row]")) as HTMLElement[];
+    expect(within(firstRow).queryByText(T("golive.ready"))).toBeNull();
+    expect(within(firstRow).getAllByText(T("golive.live")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: T("golive.goCount", { count: "1" }) })).toBeTruthy();
+  });
+});
+
+describe("Go live sheet: the source a destination uses is never cut off (A90)", () => {
+  it("wraps a long source name and gives the full name as a tooltip, rather than truncating it", () => {
+    // The source is the one thing an operator confirms before a press, and a
+    // name cut to "Main Programme — St…" cannot be confirmed. It wraps now.
+    const long = "Main Programme — Studio A, Front Room";
+    const longSources = [{ id: 1, name: long }] as unknown as SourceView[];
+    const rows = goLiveRows([dest({ id: did(1), enabled: false, sourceId: 1 })], longSources);
+    render(
+      <GoLiveSheet
+        open
+        onOpenChange={() => {}}
+        rows={rows}
+        live={[]}
+        youtubeAtRisk={0}
+        onStart={async () => {}}
+        onRetry={async () => {}}
+        onFinished={() => {}}
+        paceMs={0}
+      />,
+    );
+    const cell = screen.getByText(long);
+    expect(cell.className).not.toContain("truncate");
+    expect(cell.getAttribute("title")).toBe(long);
+  });
+});

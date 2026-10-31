@@ -10,7 +10,10 @@ import type { DestinationId } from "@/lib/types";
  *  the rows. */
 export type HealthVerdict =
   | { kind: "healthy"; count: number; uptimeSec: number | null }
-  | { kind: "attention"; count: number; total: number; firstDestinationId: DestinationId };
+  | { kind: "attention"; count: number; total: number; firstDestinationId: DestinationId }
+  /** Every destination is up, and the feed feeding them is not arriving. A
+   *  healthy line over that would be the strip's most expensive lie (A3). */
+  | { kind: "no-ingest" };
 
 export function healthVerdict(
   air: OnAir,
@@ -21,6 +24,10 @@ export function healthVerdict(
    *  and the ingest), so without this a slate with every destination running
    *  would read "All healthy" directly above the failover banner. */
   offPrimary = false,
+  /** Whether the selected programme's ingest is receiving bytes (the same
+   *  signal the header chip reads, which is true for SRT with no ingest process).
+   *  Undefined means "not read yet", which must not read as a fault. */
+  ingestReceiving?: boolean,
 ): HealthVerdict | null {
   if (air.enabled === 0) return null;
   // Off the primary is not healthy, whatever the destinations report. The
@@ -39,6 +46,9 @@ export function healthVerdict(
       firstDestinationId: destItems[0].destinationId as DestinationId,
     };
   }
+
+  // Every destination up over a feed that is not arriving is not healthy.
+  if (ingestReceiving === false && air.live > 0) return { kind: "no-ingest" };
 
   // A problem with no destination (the ingest, the renditions) has no card to
   // name and no count to give. The list under the strip says what it is; a

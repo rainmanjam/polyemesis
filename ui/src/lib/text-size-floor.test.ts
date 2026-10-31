@@ -54,7 +54,7 @@ const ALLOWED: Record<string, number> = {
   "components/DestinationCard.tsx": 13,
   "components/FacebookStreamHealth.tsx": 7,
   "components/McpAccessCard.tsx": 3,
-  "components/OnAirBar.tsx": 1,
+  "components/OnAirBar.tsx": 0,
   "components/OverlaySettings.tsx": 11,
   "components/PreviewPlayer.tsx": 3,
   // Scale labels on the meter (dB ticks, peak tags). DESIGN-SYSTEM.md allows
