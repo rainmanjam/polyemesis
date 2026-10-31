@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Резервная копия secret.key не подтверждена",
   "settingsUx.saveCredsNeedsBoth": "Заполните оба поля, чтобы сохранить. Сохранённый секрет больше не показывается, поэтому вставляйте его заново при любом изменении.",
   "routingUx.muteGainTitle": "Отключение звука и усиление",
-  "routingUx.muteGainHint": "Изменения ждут кнопки «Сохранить изменения», как и любая другая правка на этой странице.",
+  "routingUx.muteGainHint": "Отключение звука и усиление ждут кнопки «Сохранить изменения».",
   "routingUx.advanced": "Дополнительно",
   "routingUx.advancedSummary": "громкость, задержка A/V, дакинг, VOD-микс и граф FFmpeg",
   "routingUx.showGraph": "Показать граф FFmpeg",

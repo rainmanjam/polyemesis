@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Sicherung von secret.key nicht bestätigt",
   "settingsUx.saveCredsNeedsBoth": "Füllen Sie beide Felder aus, um zu speichern. Ein gespeichertes Secret wird nie wieder angezeigt, fügen Sie es bei jeder Änderung erneut ein.",
   "routingUx.muteGainTitle": "Stummschaltung und Pegel",
-  "routingUx.muteGainHint": "Änderungen warten auf „Änderungen speichern“, wie jede andere Bearbeitung auf dieser Seite.",
+  "routingUx.muteGainHint": "Stummschaltung und Pegel warten auf „Änderungen speichern“.",
   "routingUx.advanced": "Erweitert",
   "routingUx.advancedSummary": "Lautheit, A/V-Versatz, Ducking, VOD-Mix und der FFmpeg-Graph",
   "routingUx.showGraph": "FFmpeg-Graph anzeigen",

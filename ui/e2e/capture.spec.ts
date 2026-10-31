@@ -138,6 +138,10 @@ test("routing — the thing nothing else does", async ({ page }) => {
 
   // The compiled filtergraph, which is the claim this product makes about
   // being inspectable. Worth its own frame rather than being cropped out.
+  // Since A27 it sits in the collapsed Advanced section, behind a button, so
+  // both are opened first; guarded like the rest of this optional frame.
+  await page.locator('[data-testid="routing-advanced"] summary').first().click().catch(() => {});
+  await page.getByRole("button", { name: "Show FFmpeg graph" }).first().click().catch(() => {});
   const graph = page.locator("text=/pan=stereo/").first();
   if (await graph.isVisible().catch(() => false)) {
     await graph.scrollIntoViewIfNeeded();

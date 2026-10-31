@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Kopia secret.key niepotwierdzona",
   "settingsUx.saveCredsNeedsBoth": "Wypełnij oba pola, aby zapisać. Zapisany sekret nie jest już nigdy pokazywany, więc wklej go ponownie przy każdej zmianie.",
   "routingUx.muteGainTitle": "Wyciszenie i wzmocnienie",
-  "routingUx.muteGainHint": "Zmiany czekają na „Zapisz zmiany”, jak każda inna edycja na tej stronie.",
+  "routingUx.muteGainHint": "Wyciszenie i wzmocnienie czekają na „Zapisz zmiany”.",
   "routingUx.advanced": "Zaawansowane",
   "routingUx.advancedSummary": "głośność, opóźnienie A/V, ducking, miks VOD i graf FFmpeg",
   "routingUx.showGraph": "Pokaż graf FFmpeg",

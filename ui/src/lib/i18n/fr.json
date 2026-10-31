@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Sauvegarde de secret.key non confirmée",
   "settingsUx.saveCredsNeedsBoth": "Remplissez les deux champs pour enregistrer. Un secret enregistré n'est plus jamais affiché : recollez-le à chaque modification.",
   "routingUx.muteGainTitle": "Sourdine et gain",
-  "routingUx.muteGainHint": "Les modifications attendent « Enregistrer les modifications », comme toute autre modification de cette page.",
+  "routingUx.muteGainHint": "La sourdine et le gain attendent « Enregistrer les modifications ».",
   "routingUx.advanced": "Avancé",
   "routingUx.advancedSummary": "sonie, décalage A/V, ducking, mix VOD et le graphe FFmpeg",
   "routingUx.showGraph": "Afficher le graphe FFmpeg",

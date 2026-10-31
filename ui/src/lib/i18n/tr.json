@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "secret.key yedeği onaylanmadı",
   "settingsUx.saveCredsNeedsBoth": "Kaydetmek için iki alanı da doldurun. Kayıtlı bir gizli anahtar bir daha gösterilmez, bu yüzden her değişiklikte yeniden yapıştırın.",
   "routingUx.muteGainTitle": "Sessiz ve kazanç",
-  "routingUx.muteGainHint": "Değişiklikler, bu sayfadaki diğer tüm düzenlemeler gibi \"Değişiklikleri kaydet\" bekler.",
+  "routingUx.muteGainHint": "Sessiz ve kazanç, \"Değişiklikleri kaydet\" bekler.",
   "routingUx.advanced": "Gelişmiş",
   "routingUx.advancedSummary": "ses yüksekliği, A/V gecikmesi, ducking, VOD miksi ve FFmpeg grafiği",
   "routingUx.showGraph": "FFmpeg grafiğini göster",

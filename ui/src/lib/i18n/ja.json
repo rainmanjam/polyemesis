@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "secret.key のバックアップ未確認",
   "settingsUx.saveCredsNeedsBoth": "保存するには両方の欄を入力してください。保存済みのシークレットは二度と表示されないため、変更のたびに貼り付け直してください。",
   "routingUx.muteGainTitle": "ミュートとゲイン",
-  "routingUx.muteGainHint": "変更は、このページの他の編集と同じく「変更を保存」まで適用されません。",
+  "routingUx.muteGainHint": "ミュートとゲインは「変更を保存」まで適用されません。",
   "routingUx.advanced": "詳細設定",
   "routingUx.advancedSummary": "ラウドネス、A/V 遅延、ダッキング、VOD ミックス、FFmpeg グラフ",
   "routingUx.showGraph": "FFmpeg グラフを表示",

@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Cadangan secret.key belum dikonfirmasi",
   "settingsUx.saveCredsNeedsBoth": "Isi kedua kolom untuk menyimpan. Secret yang tersimpan tidak pernah ditampilkan lagi, jadi tempel ulang setiap kali ada perubahan.",
   "routingUx.muteGainTitle": "Bisukan dan penguatan",
-  "routingUx.muteGainHint": "Perubahan menunggu Simpan perubahan, seperti setiap suntingan lain di halaman ini.",
+  "routingUx.muteGainHint": "Bisukan dan penguatan menunggu Simpan perubahan.",
   "routingUx.advanced": "Lanjutan",
   "routingUx.advancedSummary": "kenyaringan, tunda A/V, ducking, campuran VOD, dan graf FFmpeg",
   "routingUx.showGraph": "Tampilkan graf FFmpeg",

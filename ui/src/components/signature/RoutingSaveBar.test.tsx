@@ -35,8 +35,10 @@ describe("RoutingSaveBar", () => {
     expect(bar().textContent).not.toContain("YouTube main");
     const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: /discard/i }) as HTMLButtonElement).disabled).toBe(true);
+    const discard = screen.getByRole("button", { name: /discard/i }) as HTMLButtonElement;
+    expect(discard.disabled).toBe(true);
     const id = save.getAttribute("aria-describedby");
+    expect(discard.getAttribute("aria-describedby")).toBe(id);
     expect(document.getElementById(id as string)?.textContent).toContain("Nothing to save");
   });
 

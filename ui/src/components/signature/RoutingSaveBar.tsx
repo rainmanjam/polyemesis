@@ -129,7 +129,14 @@ export function RoutingSaveBar({
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         <SaveStatus state={saveState} />
         <DisabledReason id={reasonId} reason={reason} className="max-w-xs text-right" />
-        <Button variant="ghost" size="sm" onClick={onDiscard} disabled={saving || !dirty}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDiscard}
+          disabled={saving || !dirty}
+          // Greyed for the same reason as Save changes when nothing is pending.
+          aria-describedby={dirty ? undefined : disabledDescribedBy(reasonId, reason)}
+        >
           <Undo2 /> {t("routing.saveBar.discard")}
         </Button>
         <Button

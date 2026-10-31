@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Copia de secret.key sin confirmar",
   "settingsUx.saveCredsNeedsBoth": "Rellena los dos campos para guardar. Un secreto guardado no se vuelve a mostrar, así que pégalo de nuevo con cualquier cambio.",
   "routingUx.muteGainTitle": "Silencio y ganancia",
-  "routingUx.muteGainHint": "Los cambios esperan a «Guardar cambios», como cualquier otra edición de esta página.",
+  "routingUx.muteGainHint": "El silencio y la ganancia esperan a «Guardar cambios».",
   "routingUx.advanced": "Avanzado",
   "routingUx.advancedSummary": "sonoridad, retardo A/V, ducking, mezcla VOD y el grafo de FFmpeg",
   "routingUx.showGraph": "Mostrar grafo de FFmpeg",

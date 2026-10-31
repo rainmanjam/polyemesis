@@ -189,7 +189,8 @@ const saveState = () => document.querySelector("[data-save-state]")?.getAttribut
  * change live on its own, ffmpeg.MaskLiveVolumes), and Discard puts the stored
  * value back. */
 describe("one save model: mute and gain wait for Save changes (A26)", () => {
-  // MUTATION: pass the live route's rows to the live editor again. Observed: FAIL.
+  // RED FIRST: against the live-apply page (f96576bb) this and the next two
+  // failed on the save state, expected dirty, received clean.
   it("a mute is a pending edit: no write until Save changes, then one PUT", async () => {
     await renderPage();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Mute track 1" })));
@@ -246,7 +247,7 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
     expect(sent.find((s) => s.track === 2)?.enabled).toBe(true);
   });
 
-  it("drops the 'apply without Save' copy and says changes wait for Save", async () => {
+  it("drops the 'apply without Save' copy and says mute and gain wait for Save", async () => {
     await renderPage();
     expect(screen.queryByText(translate("en", "route.live.hint"))).toBeNull();
     expect(screen.getAllByText(translate("en", "routingUx.muteGainHint")).length).toBeGreaterThan(0);

@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "尚未确认备份 secret.key",
   "settingsUx.saveCredsNeedsBoth": "请填写两个字段后保存。已保存的密钥不会再显示，因此每次修改都需要重新粘贴。",
   "routingUx.muteGainTitle": "静音与增益",
-  "routingUx.muteGainHint": "与本页的其他编辑一样，更改要等到“保存更改”才会生效。",
+  "routingUx.muteGainHint": "静音和增益要等到“保存更改”才会生效。",
   "routingUx.advanced": "高级",
   "routingUx.advancedSummary": "响度、音画延迟、闪避、VOD 混音和 FFmpeg 滤镜图",
   "routingUx.showGraph": "显示 FFmpeg 滤镜图",

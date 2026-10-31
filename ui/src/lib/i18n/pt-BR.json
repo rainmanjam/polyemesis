@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Backup do secret.key não confirmado",
   "settingsUx.saveCredsNeedsBoth": "Preencha os dois campos para salvar. Um segredo salvo nunca é mostrado de novo, então cole-o outra vez a cada alteração.",
   "routingUx.muteGainTitle": "Mudo e ganho",
-  "routingUx.muteGainHint": "As alterações aguardam \"Salvar alterações\", como qualquer outra edição nesta página.",
+  "routingUx.muteGainHint": "Mudo e ganho aguardam \"Salvar alterações\".",
   "routingUx.advanced": "Avançado",
   "routingUx.advancedSummary": "loudness, atraso A/V, ducking, mix VOD e o grafo do FFmpeg",
   "routingUx.showGraph": "Mostrar grafo do FFmpeg",

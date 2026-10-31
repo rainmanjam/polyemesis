@@ -3379,7 +3379,7 @@
   "settingsUx.tileNotBackedUp": "Back-up van secret.key niet bevestigd",
   "settingsUx.saveCredsNeedsBoth": "Vul beide velden in om op te slaan. Een opgeslagen secret wordt nooit meer getoond, dus plak het bij elke wijziging opnieuw.",
   "routingUx.muteGainTitle": "Dempen en versterking",
-  "routingUx.muteGainHint": "Wijzigingen wachten op 'Wijzigingen opslaan', net als elke andere bewerking op deze pagina.",
+  "routingUx.muteGainHint": "Dempen en versterking wachten op 'Wijzigingen opslaan'.",
   "routingUx.advanced": "Geavanceerd",
   "routingUx.advancedSummary": "luidheid, A/V-vertraging, ducking, VOD-mix en de FFmpeg-graaf",
   "routingUx.showGraph": "FFmpeg-graaf tonen",
