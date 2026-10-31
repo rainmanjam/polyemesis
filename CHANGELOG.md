@@ -10,6 +10,26 @@ its first tagged release.
 
 ### Added
 
+- **Live captions, part 1: the in-band path (#8, not yet switched on).** New
+  `internal/captions` package. It builds CEA-608 pop-on captions (RCL, row
+  addressing, 32-column wrapping, EOC and EDM, the basic and special character
+  sets), and a Go SEI injector that rewrites the H.264 PID of an MPEG-TS stream
+  so each picture carries the caption pair due at its presentation time. Pairs
+  are keyed on picture timestamps, not arrival order, so B-frames read back in
+  order; a short reorder window is the only added latency. Verified by FFmpeg's
+  own CEA-608 decoder reading the injected captions back. **PROVISIONAL:** the
+  Twitch path needs a live check on a test channel before it is offered.
+- Caption text policy: vocabulary spellings and profanity masking, applied once
+  at the emit boundary so every output shows the same words. Timing, track and
+  speaker are unchanged.
+- Per-destination caption mode (`destinations.caption_mode`, default `off`).
+  Twitch SEI is the one built path marked go. YouTube's caption POST is
+  provisional and needs a 30 s or 60 s broadcast delay. Facebook SEI stays off
+  behind a flag. Kick is skipped: Kick documents no caption route for live
+  streams.
+- Burn-in filter builder for the `subtitles` filter, which the shipped FFmpeg
+  image supports. Not yet wired into renditions.
+
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
