@@ -345,6 +345,13 @@ type IngestOptions struct {
 	// stream whatever this says, so flipping the flag on an established
 	// destination does not mint a second stream for it.
 	DedicatedIngest bool
+	// ExcludeStreamIDs names platform stream ids the first-RTMP fallback must never
+	// adopt. The vertical half of a YouTube pair (#7) is one: it is created on its own,
+	// and if the horizontal destination adopted it, the horizontal broadcast would bind
+	// to the vertical ingest. The title marker covers the zero-options path, which has
+	// nowhere to carry this list. This list covers a stream renamed in Studio, which
+	// drops the marker.
+	ExcludeStreamIDs []string
 	// RotateKey says the OPERATOR ASKED FOR A NEW KEY, which is the one
 	// circumstance in which the key on a destination may change.
 	//

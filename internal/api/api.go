@@ -1165,6 +1165,12 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
+			// YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast. See
+			// youtube_vertical.go. The status read is a GET; create and confirm are POSTs.
+			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical", s.handleCreateYouTubeVertical)
+			r.Get("/destinations/{id}/youtube-vertical", s.handleYouTubeVerticalStatus)
+			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical/confirm", s.handleConfirmYouTubeVertical)
+
 			// Expert mode: hand-edited FFmpeg arguments for one destination.
 			// Preview and dry-run are POSTs because they carry a candidate
 			// edit in the body, not because they change anything — neither
@@ -2050,6 +2056,10 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/facebook/stream-health": true,
 	"/api/v1/destinations/{id}/facebook/end-broadcast": true,
 	"/api/v1/metadata/broadcast-window":                true,
+	// The vertical half's health read (#7). It makes an outbound YouTube call on the
+	// caller's token, which is the same property as the Facebook stream-health read
+	// above: a read-scoped token must not spend the platform budget.
+	"/api/v1/destinations/{id}/youtube-vertical": true,
 
 	// #154: content, not metadata. Media bytes.
 	"/api/v1/recordings/{id}/download":             true,
