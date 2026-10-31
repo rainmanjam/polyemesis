@@ -12,7 +12,7 @@ import { useT, type TranslationKey } from "@/lib/i18n";
 import { routingChanges, type RoutingChange } from "@/lib/routingDiff";
 import type { RoutingProfile } from "@/lib/types";
 
-/* The preset review step (A14).
+/* The preset review step (UX Council A14, #924; not app-council A14).
  *
  * A preset rewrites the whole mix: tracks, matrix, loudness and exclusions in
  * one go. Applying it used to land straight in the draft with a success toast,

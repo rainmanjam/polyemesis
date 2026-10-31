@@ -535,7 +535,7 @@ its first tagged release.
   pending changes and lists what moves on air before Save (A7). The on-air
   strip shows the time on air and an End all button (A8). Presets open a
   review before they apply, the matrix has an undo history, and three starter
-  presets stay in view (A14). Debug recording moves to a System page, and
+  presets stay in view (UX Council A14). Debug recording moves to a System page, and
   Settings ends with a Danger zone (A17). Delete dialogs count what still uses
   the thing being deleted (A18). Routing, Renditions, playout, meters, chat,
   clips, library, Jobs, Automation, Monitoring, Settings and the destination
@@ -577,6 +577,47 @@ its first tagged release.
   says 0 means no limit. Switching recording off while the stream is live asks
   first. In Playout, turning Public on or Protection open asks first; turning
   them off saves at once.
+- **The Clips buffer stays on after a restart (app-council A14).** The rolling
+  buffer's switch and window are now saved per programme, so a programme whose
+  buffer was on comes back with it on, at the same window, after an upgrade,
+  reboot or crash. A programme that never turned it on, including every one on
+  an upgraded install, still starts with it off. The Clips page no longer says
+  the switch is off after a restart; it says the switch is saved. A failure to
+  save the switch is reported as a server error and leaves the buffer as it
+  was. `GET /clips` now carries the configured `windowSeconds` even while the
+  buffer is off.
+- **Playout reads as a control room (app-council A16-A20).** A status line under
+  the title says whether playout is on, who can watch and how many are
+  watching; when it is off, the line carries a Turn on playout button, and the
+  share links are greyed with the reason beside them. Share and Who can watch
+  sit side by side; the quality levels (formerly the ladder) and packaging are
+  in a closed Advanced section. Packaging fields no longer save, and restart
+  the stream, each time one loses focus: the changes are held until Apply and
+  restart stream, the bar counts them and shows each field's previous value,
+  and it asks first, naming the viewers, when anyone is watching. Quality level
+  names and audio tracks apply with their own Apply button. The player page
+  title and description have a Save button and say Unsaved changes, Saving,
+  Saved or Not saved. Labels are plainer: Quality levels, Original (no
+  re-encode), Rewind window, Audio track (number, from 0). The settings, API
+  and saved values are unchanged.
+- **Library, Recordings and the trim editor say what they are for (app-council
+  A37-A41).** Library's media upload card opens from an Upload media button
+  instead of sitting above the archive. When transcription is off, the header
+  shows "Transcripts: off" with an Install whisper.cpp link instead of a
+  paragraph ending in a config.yaml key; search stays on for the transcripts
+  you already have, and each greyed captions button names that status as its
+  reason. Regroup is now Rebuild sessions, with a one-line explanation under
+  the title. The play indicator and Generate proxy no longer share the film
+  icon, and a waiting job's reason is printed on its row. A track's speaker
+  name saves with Apply rather than on leaving the field. The clip editor is
+  titled Trim recording. Recordings' retention policy says Unsaved changes,
+  Saving and Saved beside its Save button, and Library, Recordings and Clips
+  use the same empty state.
+- **Chat overlays say whether OBS is connected (app-council A98).** An
+  overlay draws nothing when it fails, so a broken browser source looked the
+  same as an idle one. Settings now shows, for the selected overlay, how many
+  sources have it open, or when one last did, with a Check again button.
+  `GET /overlays` carries `connected` and `lastSeen` for each overlay.
 - **Chat: keyboard, attention and polls.** Enter that confirms an IME
   composition no longer sends the message. Message rows are reachable from the
   keyboard, and Enter, the context-menu key or Shift+F10 opens their menu. New

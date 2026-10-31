@@ -19,7 +19,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
  * even while it was still waiting for a stream and the capture buttons were
  * disabled. It reads "Waiting" now, through the kit's status map. */
 
-type Buffer = { enabled: boolean; running: boolean; buffer: null | { windowSeconds: number; seconds: number; bytes: number; maxBytes: number; bitrateKbps: number; packets: number; datagrams: number; evicted: number; oversized: number; truncated: boolean; videoFound: boolean }; dir: string };
+type Buffer = { enabled: boolean; running: boolean; windowSeconds?: number; buffer: null | { windowSeconds: number; seconds: number; bytes: number; maxBytes: number; bitrateKbps: number; packets: number; datagrams: number; evicted: number; oversized: number; truncated: boolean; videoFound: boolean }; dir: string };
 
 let serverBuffer: Buffer = { enabled: false, running: false, buffer: null, dir: "/x" };
 
@@ -104,5 +104,35 @@ describe("ClipsPage header status (A11)", () => {
 
     await waitFor(() => expect(screen.getByText("Waiting")).toBeTruthy());
     expect(screen.queryByText("Ready")).toBeNull();
+  });
+});
+
+/* app-council A14. The switch is stored per programme and survives a restart,
+ * so the page no longer apologises that it is "off again after a restart" --
+ * that sentence would now be false. It says the opposite, in readable text,
+ * and a switched-off buffer shows the window it will come back with rather
+ * than a hard-coded 60. */
+describe("ClipsPage buffer persistence (app-council A14)", () => {
+  it("says the switch is saved and no longer claims it is off after a restart", async () => {
+    render(<ClipsPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/stays on after a restart/)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/off again after a restart/)).toBeNull();
+  });
+
+  it("seeds the window from the stored value while the buffer is off", async () => {
+    serverBuffer = { enabled: false, running: false, buffer: null, dir: "/x", windowSeconds: 90 };
+    render(<ClipsPage />);
+    const input = (await screen.findByLabelText("Window (seconds)")) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("90"));
+  });
+});
+
+describe("ClipsPage empty clip list", () => {
+  it("uses the kit empty state with a sentence on what will appear", async () => {
+    render(<ClipsPage />);
+    await waitFor(() => expect(screen.getByText("No clips yet.")).toBeTruthy());
+    expect(screen.getByText(/appears here, ready to download/)).toBeTruthy();
   });
 });

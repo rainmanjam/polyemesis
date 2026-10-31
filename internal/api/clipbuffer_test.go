@@ -171,3 +171,49 @@ func TestLoudnessReportCarriesItsBounds(t *testing.T) {
 		t.Error("reports was null; the meters page would throw rather than show an empty state")
 	}
 }
+
+// app-council A14: PUT /clips/buffer stores the switch for THIS programme, so
+// a restart restores it. The engine-level restart test is in
+// internal/engine/clip_buffer_persist_test.go; this pins that the route is the
+// path that writes it, and that a stale PUT /sources from another tab -- which
+// decodes the body over the stored row and writes it back -- cannot undo it.
+func TestTurningTheClipBufferOnIsStoredForTheProgrammeAndAStaleSourceSaveLeavesIt(t *testing.T) {
+	h, store, sign := sourceServer(t)
+
+	send(t, h, sign, http.MethodPut, "/api/v1/clips/buffer",
+		map[string]any{"enabled": true, "windowSeconds": 40}, http.StatusOK)
+
+	got, err := store.GetSourceClipBuffer(1)
+	if err != nil {
+		t.Fatalf("GetSourceClipBuffer: %v", err)
+	}
+	if !got.Enabled || got.WindowSeconds != 40 {
+		t.Fatalf("stored %+v after switching on at 40s; a restart would bring it back off", got)
+	}
+
+	// A rename from a tab that never saw the buffer change.
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.Name = "Main renamed"
+	send(t, h, sign, http.MethodPut, "/api/v1/sources/1", src, http.StatusOK)
+
+	got, err = store.GetSourceClipBuffer(1)
+	if err != nil {
+		t.Fatalf("GetSourceClipBuffer: %v", err)
+	}
+	if !got.Enabled {
+		t.Error("a source save from another tab switched the stored clip buffer off")
+	}
+
+	send(t, h, sign, http.MethodPut, "/api/v1/clips/buffer",
+		map[string]any{"enabled": false}, http.StatusOK)
+	got, _ = store.GetSourceClipBuffer(1)
+	if got.Enabled {
+		t.Error("switching the buffer off was not stored; a restart would turn it back on")
+	}
+	if got.WindowSeconds != 40 {
+		t.Errorf("switching off forgot the window: stored %ds, want 40", got.WindowSeconds)
+	}
+}

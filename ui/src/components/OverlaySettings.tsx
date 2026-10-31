@@ -22,6 +22,8 @@ import {
 import { ChatOverlayView } from "@/components/overlay/ChatOverlayView";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
+import { StatusDot } from "@/components/signature/StatusDot";
+import { timestamp } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -167,6 +169,9 @@ export function OverlaySettings() {
               })}
             </span>
             {current && (
+              <OverlayConnection overlay={current} onCheck={() => load(current.id)} />
+            )}
+            {current && (
               <OverlayEditor
                 key={`${current.id}-${current.obsKey}`}
                 overlay={current}
@@ -182,6 +187,35 @@ export function OverlaySettings() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Whether OBS is actually connected to this overlay (app-council A98).
+ *
+ *  An overlay draws nothing when it fails -- deliberately, so a broken key
+ *  never paints an error over a stream -- and that made broken look exactly
+ *  like idle from here. The server counts the overlay's open display streams;
+ *  this says the count in words, or when one was last open. The list is read
+ *  once, so Check again re-reads it. Exported for its test. */
+export function OverlayConnection({ overlay, onCheck }: { overlay: ChatOverlay; onCheck: () => void }) {
+  const t = useT();
+  if (overlay.connected === undefined) return null;
+  const connected = overlay.connected > 0;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm" data-overlay-connected={connected}>
+      <StatusDot tone={connected ? "live" : "idle"} />
+      <span className={connected ? "text-foreground" : "text-muted-foreground"}>
+        {connected
+          ? t("overlay.connectedNow", { count: overlay.connected })
+          : overlay.lastSeen
+            ? t("overlay.lastConnected", { time: timestamp(overlay.lastSeen) })
+            : t("overlay.neverConnected")}
+      </span>
+      <Button variant="ghost" size="sm" onClick={onCheck}>
+        <RefreshCw />
+        {t("overlay.checkAgain")}
+      </Button>
+    </div>
   );
 }
 

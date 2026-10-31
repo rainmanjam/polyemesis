@@ -79,7 +79,7 @@ describe("VariantsCard", () => {
     // The count that makes this a decision rather than a click.
     expect(dialog.textContent).toContain("37");
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove rung" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove quality level" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const next = onSave.mock.calls[0][0] as PlayoutSettings;

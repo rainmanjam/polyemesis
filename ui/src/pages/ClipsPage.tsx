@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Download, Loader2, Scissors, Trash2 } from "lucide-react";
+import { Download, Film, Loader2, Scissors, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { SaveStatus } from "@/components/SaveStatus";
 import { StatusPill } from "@/components/StatusPill";
@@ -74,6 +74,10 @@ interface BufferStatus {
   running: boolean;
   buffer?: BufferStats | null;
   dir: string;
+  /** The configured window, present whether or not the buffer runs. It is
+   *  stored per programme (app-council A14), so a switched-off buffer comes
+   *  back with it. Optional: a server older than this does not send it. */
+  windowSeconds?: number;
 }
 
 interface ClipsView {
@@ -112,10 +116,9 @@ export function ClipsPage() {
   const [custom, setCustom] = useState(20);
   // The window is the one field a 3-second poll must not overwrite (A13). It is
   // a draft over the server's window: the poll reseeds it only while clean.
-  const storedWindow =
-    mayClaim(read) && read.value.buffer.buffer
-      ? Math.round(read.value.buffer.buffer.windowSeconds)
-      : 60;
+  const storedWindow = mayClaim(read)
+    ? Math.round(read.value.buffer.buffer?.windowSeconds ?? read.value.buffer.windowSeconds ?? 60)
+    : 60;
   const windowModel = useSaveModel<number>({
     stored: storedWindow,
     onSave: async (windowSeconds) => {
@@ -336,9 +339,12 @@ export function ClipsPage() {
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : clips.length === 0 ? (
-                <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  {t("clips.noneYet")}
-                </div>
+                <EmptyState
+                  icon={Film}
+                  title={t("clips.noneYet")}
+                  body={t("clips.noneYetBody")}
+                  className="mx-3 mb-3 border-0"
+                />
               ) : (
                 <Table>
                   <TableHeader>
@@ -500,9 +506,9 @@ export function ClipsPage() {
                     beside it rather than nowhere, and the sentence says where
                     the number goes instead. */}
                 {!buffer?.enabled && (
-                  <span className="text-micro text-warn">{t("clips.windowAppliesOnEnable")}</span>
+                  <span className="text-sm text-warn">{t("clips.windowAppliesOnEnable")}</span>
                 )}
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("clips.windowNote", {
                     min: view?.bounds.minWindowSeconds ?? 5,
                     max: view?.bounds.maxWindowSeconds ?? 300,
@@ -514,16 +520,18 @@ export function ClipsPage() {
                 <Stat labelKey="clips.clipsKept" value={view?.usage.count ?? 0} />
                 <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
-              <p className="text-micro text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {t("clips.retention", {
                   count: view?.usage.maxClips ?? 0,
                   bytes: bytes(view?.usage.maxBytes ?? 0),
                 })}
               </p>
-              {/* The switch is a live toggle until it is persisted (A14 is not
-                  built yet), so the page says so instead of implying a restart keeps it. */}
-              <p className="text-micro text-muted-foreground">
-                {t("clips.bufferLiveNote")}
+              {/* app-council A14: the switch and the window are stored for this
+                  programme and survive a restart (Engine.SetClipBuffer). The
+                  "off again after a restart" note this replaces was true until
+                  then; it is gone with the behaviour it described. */}
+              <p className="text-sm text-muted-foreground">
+                {t("clips.bufferSavedNote")}
               </p>
             </CardContent>
           </Card>

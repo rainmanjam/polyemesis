@@ -676,6 +676,28 @@ CREATE TABLE IF NOT EXISTS chat_overlays (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_overlays_key ON chat_overlays(overlay_key) WHERE overlay_key != '';
 
+-- The rolling clip buffer's switch and window, ONE ROW PER PROGRAMME
+-- (app-council A14). It used to live only in the engine's memory, so every
+-- restart switched it off. Per programme because the buffer is: Studio B's
+-- operator turning capture on must not start Main's.
+--
+-- NO ROW MEANS OFF, which is what every source that predates this table and
+-- every new source reads. The buffer holds a window of video in memory, and an
+-- upgrade must not start paying for one nobody asked for.
+--
+-- Its own table rather than columns on sources, because PUT /sources/{id}
+-- decodes the request over the stored row and writes every column it carries
+-- back: a stale tab would switch the buffer back to whatever it showed. With no
+-- column there, that path cannot reach it (the same device the token columns
+-- use, #505). window_seconds 0 means the engine's default window.
+CREATE TABLE IF NOT EXISTS source_clip_buffers (
+    source_id      INTEGER PRIMARY KEY,
+    enabled        INTEGER NOT NULL DEFAULT 0,
+    window_seconds INTEGER NOT NULL DEFAULT 0,
+    updated_at     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+
 -- MCP access: whether the /mcp endpoint exists at all, and which capability
 -- levels an MCP token may reach. One row, id 1, written only by the
 -- session-only settings route (internal/api/mcp_access.go). NO ROW MEANS OFF,
