@@ -161,7 +161,7 @@ real producer, to actually be emitted.
 | `destination.up` | destination | yes | A destination started delivering. |
 | `destination.down` | destination | yes | A destination stopped: failed, stalled, disabled or removed; reason says which, cause and failure say why. |
 | `destination.held` | destination | yes | Polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry. |
-| `destination.restarted` | destination | yes | A destination's process was respawned after it exited. |
+| `destination.restarted` | destination | yes | A destination's process was respawned: after it exited, or because a live level change restarted it; reason says which. |
 | `destination.level` | destination | yes | A level (gain or mute) change reached a destination, applied live or by a restart. |
 | `destination.rolledover` | destination | yes | A file destination continued into a new file because the configured one already held footage. |
 | `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer. |

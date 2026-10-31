@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Nascondi comando",
   "dashMobile.chatPipeline": "Chat e pipeline di elaborazione",
   "dashMobile.streamInfo": "Info della diretta (titolo, tag, categoria)",
-  "dashMobile.failoverOff": "Il failover è disattivato"
+  "dashMobile.failoverOff": "Il failover è disattivato",
+  "wave3.bugs.delayFilling": "Riempimento del ritardo"
 }

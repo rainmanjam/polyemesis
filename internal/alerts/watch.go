@@ -147,6 +147,9 @@ type DestState struct {
 	// increase into destination.restarted, from this same snapshot, so a
 	// respawn is announced from the one sampler every other edge comes from.
 	Restarts int
+	// RestartCause is why the latest of those restarts happened, as the
+	// supervisor names it (supervisor.RestartCause). Empty when there is none.
+	RestartCause string
 }
 
 // FailoverState is the source-selector tier, absent when it is off.

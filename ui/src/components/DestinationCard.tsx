@@ -266,7 +266,7 @@ export function DestinationCard({
               {dest.enabled && state === "running" && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {t(destinationStatus(dest.enabled, state).labelKey)}
+              {t(destinationStatus(dest.enabled, state, dest.delay?.phase).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

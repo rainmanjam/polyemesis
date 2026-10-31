@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "コマンドを隠す",
   "dashMobile.chatPipeline": "チャットとパイプライン",
   "dashMobile.streamInfo": "配信情報（タイトル、タグ、カテゴリ）",
-  "dashMobile.failoverOff": "フェイルオーバーはオフです"
+  "dashMobile.failoverOff": "フェイルオーバーはオフです",
+  "wave3.bugs.delayFilling": "ディレイを蓄積中"
 }

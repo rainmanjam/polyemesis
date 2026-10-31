@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Hide command",
   "dashMobile.chatPipeline": "Chat and pipeline",
   "dashMobile.streamInfo": "Stream info (title, tags, category)",
-  "dashMobile.failoverOff": "Failover is off"
+  "dashMobile.failoverOff": "Failover is off",
+  "wave3.bugs.delayFilling": "Filling delay"
 }

@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Befehl ausblenden",
   "dashMobile.chatPipeline": "Chat und Verarbeitungskette",
   "dashMobile.streamInfo": "Stream-Infos (Titel, Tags, Kategorie)",
-  "dashMobile.failoverOff": "Ausfallsicherung ist aus"
+  "dashMobile.failoverOff": "Ausfallsicherung ist aus",
+  "wave3.bugs.delayFilling": "Verzögerung füllt sich"
 }

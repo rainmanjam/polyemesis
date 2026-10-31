@@ -3407,5 +3407,6 @@
   "procTable.hideCommand": "Sembunyikan perintah",
   "dashMobile.chatPipeline": "Obrolan dan alur proses",
   "dashMobile.streamInfo": "Info siaran (judul, tag, kategori)",
-  "dashMobile.failoverOff": "Failover nonaktif"
+  "dashMobile.failoverOff": "Failover nonaktif",
+  "wave3.bugs.delayFilling": "Mengisi jeda"
 }

@@ -50,6 +50,21 @@ describe("destinationStatus", () => {
     expect(destinationStatus(true, "running").labelKey).toBe("state.live");
     expect(destinationStatus(true, "failed").tone).toBe("bad");
   });
+
+  // A broadcast delay fills BEFORE any process exists, by design (#11). The card
+  // read "Stopped" for those minutes, which is the one word that says the
+  // broadcast ended. A filling delay is a filling state, amber, and not stopped.
+  //
+  // Mutation: drop the buffering branch. Observed: FAIL, the label is state.stopped.
+  it("reads a delay that is still filling as filling, never as stopped", () => {
+    const filling = destinationStatus(true, undefined, "buffering");
+    expect(filling).toEqual({ labelKey: "wave3.bugs.delayFilling", tone: "warn", indicator: "dashed" });
+    expect(filling.labelKey).not.toBe("state.stopped");
+    // Once a process is running, the process answers, not the buffer.
+    expect(destinationStatus(true, "running", "on-air").labelKey).toBe("state.live");
+    // A disabled destination still says Off, whatever its buffer does.
+    expect(destinationStatus(false, undefined, "buffering").labelKey).toBe("state.off");
+  });
 });
 
 describe("delayStatus, renditionStatus, recorderStatus, clipBufferStatus", () => {
