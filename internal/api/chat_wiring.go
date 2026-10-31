@@ -253,6 +253,25 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Verify: chat.KickVerifier(s.kickKeys),
 		})
 
+	case db.PlatformX:
+		// X chat is part of the Livestream family, so it is attached only while
+		// the operator's Livestream gate is open (POLYEMESIS_X_LIVESTREAM). With
+		// the gate closed the account stays connected for sign-in and nothing
+		// reads or posts chat for it.
+		if !oauth.NewX().LivestreamAccess() {
+			return nil, fmt.Errorf("X chat needs X Livestream access (app must be whitelisted by X)")
+		}
+		return chat.NewX(chat.XConfig{
+			AccountRef: a.AccountRef,
+			Channel:    a.AccountName,
+			Token:      s.chatToken(a.ID),
+			// PROVISIONAL: the activity stream needs an app-only bearer token,
+			// which the operator supplies from the X developer console. Nothing
+			// here mints it. Empty makes the adapter's Run refuse with a Fatal
+			// error that says so.
+			AppBearer: strings.TrimSpace(os.Getenv("POLYEMESIS_X_APP_BEARER")),
+		})
+
 	case db.PlatformFacebook:
 		// Facebook comments hang off one live video, and the only place its id
 		// survives a restart is the destination's stream key — see

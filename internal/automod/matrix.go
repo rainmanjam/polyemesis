@@ -73,6 +73,7 @@ var Checkers = []Checker{CheckerRules, CheckerHistory, CheckerModel}
 // Platforms is every platform automod can act on.
 var Platforms = []db.Platform{
 	db.PlatformYouTube, db.PlatformTwitch, db.PlatformKick, db.PlatformFacebook,
+	db.PlatformX,
 }
 
 // Cell is one switch: may THIS checker take THIS action on THIS platform.

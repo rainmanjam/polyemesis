@@ -86,6 +86,7 @@ func chatSendLimits() []chatLimit {
 		{Platform: db.PlatformKick, MaxChars: chat.KickMaxMessage},
 		{Platform: db.PlatformTwitch, MaxChars: chat.TwitchMaxMessage},
 		{Platform: db.PlatformYouTube, MaxChars: chat.YouTubeMaxMessage},
+		{Platform: db.PlatformX, MaxChars: chat.XMaxMessage},
 	}
 }
 
