@@ -50,4 +50,13 @@ describe("navigation sections", () => {
       "nav.group.settings",
     ]);
   });
+
+  it("keeps System beside Monitoring under Operations, and out of the settings group (A82)", () => {
+    // Both are where an operator goes to find out why something is wrong. The
+    // settings group had held System, and its heading read "Settings" beside a
+    // link also named Settings.
+    const section = (key: string) => NAV_SECTIONS.find((s) => s.labelKey === key)!;
+    expect(section("nav.group.operations").routes).toEqual(["/jobs", "/monitoring", "/system"]);
+    expect(section("nav.group.settings").routes).toEqual(["/settings"]);
+  });
 });

@@ -72,4 +72,27 @@ describe("healthVerdict", () => {
       uptimeSec: null,
     });
   });
+
+  // A3. The verdict used to read only the destinations and the attention rows.
+  // An ingest that was not receiving -- the header chip's own test for it,
+  // which is bytes arriving rather than a process existing -- was invisible
+  // here, so the strip said "All healthy" over a dead feed.
+  it("does not claim healthy while the ingest is not receiving, even with every destination running", () => {
+    expect(healthVerdict(air({ live: 5, enabled: 5 }), [], 760, false, false)).toEqual({
+      kind: "no-ingest",
+    });
+  });
+
+  it("still says healthy when the ingest is receiving, and when the signal is not known", () => {
+    // Undefined is not false: a page that has not read the ingest yet must not
+    // invent a fault, and an SRT source is receiving with no ingest process.
+    expect(healthVerdict(air({ live: 5, enabled: 5 }), [], 760, false, true)?.kind).toBe("healthy");
+    expect(healthVerdict(air({ live: 5, enabled: 5 }), [], 760)?.kind).toBe("healthy");
+  });
+
+  it("names the destination that needs attention ahead of the missing feed", () => {
+    // A destination that is failing is the more specific thing to act on.
+    const v = healthVerdict(air({ live: 4, enabled: 5, failed: 1 }), [destItem("yt")], null, false, false);
+    expect(v?.kind).toBe("attention");
+  });
 });

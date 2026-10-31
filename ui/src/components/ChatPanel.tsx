@@ -509,8 +509,10 @@ export function ChatComposer({
           }}
           rows={compact ? 1 : 2}
           placeholder={
+            // The field says the state in two words. The reason is text under
+            // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
             senders.length === 0
-              ? t("chatpage.noSender")
+              ? t("chatpage.notConnected")
               : t("chatpage.sendTo", {
                   platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
                 })
@@ -518,6 +520,9 @@ export function ChatComposer({
           className="min-h-0 resize-none text-[12px]"
           aria-label={t("chatpage.composerAria")}
         />
+        {senders.length === 0 && (
+          <p className="text-sm text-muted-foreground">{t("chatpage.noSender")}</p>
+        )}
         <Button size="sm" onClick={() => void send()} disabled={sending || !text.trim()}>
           {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           {!compact && t("chatpage.send")}

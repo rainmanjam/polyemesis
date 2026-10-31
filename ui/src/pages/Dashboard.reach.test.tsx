@@ -278,19 +278,31 @@ describe("Dashboard: bulk start goes through the Go live sheet, bulk stop stays 
     sourceId: 1,
   };
 
+  it("keeps Go live the only filled start action, so Add destination is an outline (A9)", async () => {
+    draw(live({ status: status({ destinations: [oneDest as never] }) }));
+    const add = await screen.findByRole("button", { name: translate("en", "firstRun.addDestination") });
+    expect(add.className).not.toContain("bg-primary");
+    expect(add.className).toContain("border");
+  });
+
   it("offers Go live instead of Start all, and no start fires from the bar itself", async () => {
     draw(live({ status: status({ destinations: [oneDest as never] }) }));
 
     expect(
       await screen.findByRole("button", { name: translate("en", "golive.trigger") }),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: translate("en", "dash.startAll") })).toBeNull();
+    // The bulk Start all button was removed (A5); its copy key is gone too, so
+    // the assertion names the words directly rather than a key that no longer exists.
+    expect(screen.queryByRole("button", { name: "Start all" })).toBeNull();
   });
 
   it("keeps Stop all behind its confirmation", async () => {
     draw(live({ status: status({ destinations: [{ ...oneDest, enabled: true } as never] }) }));
 
-    fireEvent.click(await screen.findByRole("button", { name: translate("en", "dash.stopAll") }));
+    // Two buttons carry this name: the toolbar's and the strip's (A4). Both open
+    // the same confirmation, so either one serves; the toolbar's is outside the strip.
+    const named = await screen.findAllByRole("button", { name: translate("en", "dash.stopAll") });
+    fireEvent.click(named.find((b) => !b.closest('[data-testid="on-air-bar"]')) as HTMLElement);
     expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });
