@@ -150,7 +150,7 @@ var catalogue = []Spec{
 	{TypeDestinationUp, TopicDestination, Granted, "A destination started delivering.", nil},
 	{TypeDestinationDown, TopicDestination, Granted, "A destination stopped: failed, stalled, disabled or removed; reason says which, cause and failure say why.", nil},
 	{TypeDestinationHeld, TopicDestination, Granted, "Polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry.", nil},
-	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited.", nil},
+	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned: after it exited, or because a live level change restarted it; reason says which.", nil},
 	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart.", nil},
 	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage.", nil},
 	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer.", nil},
