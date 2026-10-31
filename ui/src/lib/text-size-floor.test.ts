@@ -58,11 +58,11 @@ const ALLOWED: Record<string, number> = {
   // The unit beside a stat value ("ms", "%"). A unit, not content.
   "components/signature/Stat.tsx": 1,
   "pages/ClipEditor.tsx": 14,
-  "pages/ClipsPage.tsx": 3,
+  "pages/ClipsPage.tsx": 0,
   "pages/Dashboard.tsx": 5,
   "pages/LibraryPage.tsx": 6,
   "pages/MonitoringPage.tsx": 7,
-  "pages/RecordingsPage.tsx": 7,
+  "pages/RecordingsPage.tsx": 2,
 };
 
 const PRIMITIVE_DIRS = ["components/ui/", "components/signature/"];
