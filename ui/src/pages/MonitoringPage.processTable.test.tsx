@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 /* The Monitoring process list is a compact table (app-council A72).
@@ -216,12 +216,30 @@ describe("Monitoring processes: a compact table (A72)", () => {
   });
 
   it("keeps a row open across a re-sort, because it is keyed by name", async () => {
-    state.processes = [proc("ingest", "running"), proc("dest:7", "running")];
-    draw();
-    await table();
-    fireEvent.click(toggleFor("ingest"));
-    expect(toggleFor("ingest").getAttribute("aria-expanded")).toBe("true");
-    expect(toggleFor("dest:7").getAttribute("aria-expanded")).toBe("false");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      state.processes = [proc("ingest", "running"), proc("dest:7", "running")];
+      draw();
+      await table();
+      fireEvent.click(toggleFor("ingest"));
+      expect(toggleFor("ingest").getAttribute("aria-expanded")).toBe("true");
+
+      // The next poll finds dest:7 failed, so it moves to the top. The open
+      // row must follow ingest, not stay on the first position.
+      state.processes = [proc("ingest", "running"), proc("dest:7", "failed")];
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      const t = await table();
+      await waitFor(() =>
+        expect(processRows(t).map((r) => within(r).getByRole("rowheader").textContent?.trim())).toEqual([
+          "dest:7",
+          "ingest",
+        ]),
+      );
+      expect(toggleFor("ingest").getAttribute("aria-expanded")).toBe("true");
+      expect(toggleFor("dest:7").getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
