@@ -422,8 +422,8 @@ var platformCapabilities = []PlatformCapability{
 	},
 	{
 		PresetID: "x", Name: "X (Twitter) Live", Platform: db.PlatformX, Tier: TierManual,
-		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source, go live, end, and read and moderate chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
-		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the sign-in and the Livestream features stay switched off, and the paste works on its own. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
+		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
+		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
 			// Sign-in is built (PKCE, the five scopes) but no live authorize

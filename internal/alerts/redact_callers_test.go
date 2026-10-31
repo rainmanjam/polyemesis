@@ -46,6 +46,7 @@ var redactAllowlist = map[string]string{
 		"credential is in that text by construction -- tokens travel in headers, never in the " +
 		"message -- so there is no literal to declare; the events hub's RedactTree runs again " +
 		"on the poll.* payload.",
+	"internal/api/youtube_vertical.go": "the same residual pass over YouTube's error text (a refused liveStreams.insert for the vertical companion, a failed health read) shown as the 502 body and the health row. The stream key comes back only on a successful create, so a failed one carries none; this is the outer net, not the boundary.",
 	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
 		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +
 		"only ever a header; this is the outer net, not the boundary.",
