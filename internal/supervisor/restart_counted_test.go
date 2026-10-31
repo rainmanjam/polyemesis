@@ -83,3 +83,41 @@ func TestRestartCountedRecordsThatTheRestartWasALiveLevelChange(t *testing.T) {
 		t.Fatalf("restart cause = %q after a live-level restart, want %q", got, RestartCauseLevel)
 	}
 }
+
+// A REFUSED LIVE LEVEL CHANGE IS A LEVEL RESTART TOO.
+//
+// The engine tears a destination down and starts its replacement with the
+// level when the running child cannot take a change in place. That hand-off goes
+// through InheritRestarts, not RestartCounted, so it needs its own cause: the
+// replacement did not exit for it, and the event for it must not say it did.
+//
+// Mutation: set RestartCauseExit in InheritRestarts. Observed: FAIL, the cause
+// reads as an exit.
+func TestAnInheritedRestartIsALiveLevelChangeNotAnExit(t *testing.T) {
+	prev := testProcess(t, fakeSleep(time.Minute), Spec{})
+	p := testProcess(t, fakeSleep(time.Minute), Spec{})
+	p.InheritRestarts(prev)
+	if got := p.Status().RestartCause; got != RestartCauseLevel {
+		t.Fatalf("restart cause = %q after an inherited live-level restart, want %q", got, RestartCauseLevel)
+	}
+}
+
+// A CRASH RESPAWN IS AN EXIT, NOT A LEVEL CHANGE.
+//
+// The counterpart of the test above: the supervise loop's own respawn after a
+// non-zero exit must keep saying so, or the event would blame a level change for
+// every crash.
+//
+// Mutation: set RestartCauseLevel in the supervise loop's respawn. Observed: FAIL.
+func TestACrashRespawnIsReasonedAsAnExitNotALevelChange(t *testing.T) {
+	p := testProcess(t, fakeExit(1), Spec{
+		AutoRestart: true,
+		MinBackoff:  10 * time.Millisecond,
+		MaxBackoff:  10 * time.Millisecond,
+	})
+	p.Start()
+	waitFor(t, "one crash respawn", func() bool { return p.Status().Restarts >= 1 })
+	if got := p.Status().RestartCause; got != RestartCauseExit {
+		t.Fatalf("restart cause = %q after a crash respawn, want %q", got, RestartCauseExit)
+	}
+}
