@@ -64,6 +64,9 @@ async function createSchedule(page: Page, name: string, action: string): Promise
           enabled: false, // Never let a test schedule actually fire.
           action: scheduleAction,
           kind: "daily",
+          // No list and no allDestinations: an old client's shape. A start
+          // still means every destination (app-council A54); a playlist
+          // action names none.
           destinationIds: [],
           tz: "UTC",
           atMinutes: 3 * 60,
@@ -134,11 +137,12 @@ test.describe("the schedule list says what a schedule acts on", () => {
       const startBadge = page
         .getByRole("row")
         .filter({ hasText: "e2e badge start" })
-        .getByText("playlist.start", { exact: true });
+        // app-council A57: the badge carries the translated action label.
+        .getByText("Start the playlist", { exact: true });
       const stopBadge = page
         .getByRole("row")
         .filter({ hasText: "e2e badge stop" })
-        .getByText("playlist.stop", { exact: true });
+        .getByText("Stop the playlist", { exact: true });
       await expect(startBadge).toBeVisible();
 
       // Asserted on the RENDERED colour, not on a class name: the badge's
@@ -154,7 +158,7 @@ test.describe("the schedule list says what a schedule acts on", () => {
       const destStart = page
         .getByRole("row")
         .filter({ hasText: "e2e badge dest" })
-        .getByText("start", { exact: true });
+        .getByText("Start destinations", { exact: true });
       try {
         await openSchedules(page);
         await expect(destStart).toBeVisible();

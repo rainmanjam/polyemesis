@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     enabled         INTEGER NOT NULL DEFAULT 1,
     action          TEXT    NOT NULL DEFAULT 'start',  -- start | stop | playlist.start | playlist.stop
     kind            TEXT    NOT NULL DEFAULT 'once',   -- once | daily | weekly
-    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; empty = every destination, and required empty for a playlist.* action
+    destination_ids TEXT    NOT NULL DEFAULT '[]',     -- JSON array; the named destinations when all_destinations = 0, and required empty for a playlist.* action
     tz              TEXT    NOT NULL DEFAULT '',       -- IANA zone; empty = UTC
     at_minutes      INTEGER NOT NULL DEFAULT 0,        -- minutes past local midnight
     days            TEXT    NOT NULL DEFAULT '[]',     -- JSON array of weekday numbers, Sunday = 0
@@ -373,7 +373,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     grace_seconds   INTEGER NOT NULL DEFAULT 300,
     last_run_at     INTEGER NOT NULL DEFAULT 0,
     created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
+    updated_at      INTEGER NOT NULL,
+    all_destinations INTEGER NOT NULL DEFAULT 0          -- app-council A54: 1 = every destination; a start/stop needs this or a list
 );
 
 -- The durable background job queue. Every heavy task — transcription, proxy

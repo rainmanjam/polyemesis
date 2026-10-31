@@ -121,9 +121,17 @@ type Schedule struct {
 	Enabled bool   `json:"enabled"`
 	Action  Action `json:"action"`
 	Kind    Kind   `json:"kind"`
-	// DestinationIDs is what this schedule acts on. Empty means every
-	// destination, which is what "start the show" usually means.
+	// DestinationIDs is what this schedule acts on when AllDestinations is
+	// off. Empty on a playlist schedule, which acts on no destination.
 	DestinationIDs []int64 `json:"destinationIds"`
+	// AllDestinations is the explicit "every destination on this install"
+	// (app-council A54). It used to be what an EMPTY DestinationIDs meant, and
+	// for a stop that made "nothing ticked" and "stop the whole broadcast" the
+	// same bytes. Now a destination schedule must carry one or the other, and
+	// Validate refuses one that carries neither or both. Existing rows with an
+	// empty list were migrated to this flag (db.MigrateScheduleAllDestinations),
+	// so they act exactly as they did.
+	AllDestinations bool `json:"allDestinations"`
 	// TZ is the IANA zone the wall-clock fields are read in. Empty means UTC —
 	// explicit, not "whatever the server is set to", because the server's zone
 	// is not a thing the operator chose.
@@ -227,6 +235,12 @@ func (s Schedule) Normalized() Schedule {
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	s.DestinationIDs = ids
+	// A playlist schedule acts on no destination, so "every destination" means
+	// nothing there. Cleared rather than refused: it changes nothing the row
+	// does, and two playlist rows that mean the same thing store the same bytes.
+	if s.TargetsPlaylist() {
+		s.AllDestinations = false
+	}
 
 	seenDay := map[time.Weekday]bool{}
 	days := make([]time.Weekday, 0, len(s.Days))
@@ -281,6 +295,23 @@ func (s Schedule) Validate() error {
 	if s.GraceSeconds != 0 && (s.GraceSeconds < MinGraceSeconds || s.GraceSeconds > MaxGraceSeconds) {
 		return fmt.Errorf("schedule %q needs a grace between %d and %d seconds",
 			s.Name, MinGraceSeconds, MaxGraceSeconds)
+	}
+	// Last, so a schedule that is wrong in some other way says that first.
+	// app-council A54. A destination schedule says what it acts on: a list, or
+	// allDestinations. Neither is refused because an empty list used to MEAN
+	// every destination, and for a stop that is the whole broadcast taken down
+	// by a schedule whose author ticked nothing. Both is refused because either
+	// resolution acts on something the author did not say.
+	if !s.TargetsPlaylist() {
+		if len(s.DestinationIDs) == 0 && !s.AllDestinations {
+			return fmt.Errorf("schedule %q names no destinations. Pick the destinations "+
+				"it acts on, or set allDestinations to act on every destination on this "+
+				"install", s.Name)
+		}
+		if len(s.DestinationIDs) > 0 && s.AllDestinations {
+			return fmt.Errorf("schedule %q names %d destination(s) and also sets "+
+				"allDestinations; send one or the other", s.Name, len(s.DestinationIDs))
+		}
 	}
 	return nil
 }

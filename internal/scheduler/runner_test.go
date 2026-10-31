@@ -163,9 +163,9 @@ func TestTickMarksAMissedWindowHandledWithoutActingOnIt(t *testing.T) {
 	}
 }
 
-func TestTickExpandsAnEmptyTargetListToEveryDestination(t *testing.T) {
+func TestTickExpandsAllDestinationsToEveryDestinationOnAStart(t *testing.T) {
 	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
-	store := &fakeStore{rows: []Schedule{oneShot(1, at, func(s *Schedule) { s.DestinationIDs = nil })}}
+	store := &fakeStore{rows: []Schedule{oneShot(1, at, func(s *Schedule) { s.DestinationIDs = nil; s.AllDestinations = true })}}
 	act := &fakeActuator{all: []int64{1, 2, 3}}
 	r := New(quietLog(), store, act)
 
@@ -180,7 +180,7 @@ func TestTickExpandsAnEmptyTargetListToEveryDestination(t *testing.T) {
 
 func TestTickLeavesTheOccurrenceForTheNextSweepWhenTheTargetsCannotBeListed(t *testing.T) {
 	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
-	store := &fakeStore{rows: []Schedule{oneShot(1, at, func(s *Schedule) { s.DestinationIDs = nil })}}
+	store := &fakeStore{rows: []Schedule{oneShot(1, at, func(s *Schedule) { s.DestinationIDs = nil; s.AllDestinations = true })}}
 	act := &fakeActuator{allErr: errors.New("database is locked")}
 	r := New(quietLog(), store, act)
 

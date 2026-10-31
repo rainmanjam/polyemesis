@@ -140,6 +140,8 @@ func seedStartSchedule(t *testing.T, store *db.DB, kind scheduler.Kind, at time.
 	sc := &scheduler.Schedule{
 		Name: "show", Enabled: true, Action: scheduler.ActionStart, Kind: kind,
 		DestinationIDs: destIDs, TZ: "UTC",
+		// No ids is "every destination", said explicitly (app-council A54).
+		AllDestinations: len(destIDs) == 0,
 	}
 	switch kind {
 	case scheduler.KindOnce:
@@ -490,7 +492,7 @@ func TestADistantStopScheduleIsNotWarnedAbout(t *testing.T) {
 	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/schedules", map[string]any{
 		"name": "far off stop", "action": "stop", "kind": "once",
 		"runAt": time.Now().Add(23 * 24 * time.Hour).Format(time.RFC3339),
-		"tz":    "UTC", "enabled": true,
+		"tz":    "UTC", "enabled": true, "allDestinations": true,
 	}, http.StatusCreated), &view)
 
 	if len(view.Warnings) != 0 {

@@ -20,6 +20,7 @@ func daily(mut ...func(*Schedule)) Schedule {
 		ID: 1, Name: "evening show", Enabled: true,
 		Action: ActionStart, Kind: KindDaily,
 		AtMinutes: 19 * 60, TZ: "America/New_York", GraceSeconds: 300,
+		AllDestinations: true,
 	}
 	for _, m := range mut {
 		m(&s)
@@ -141,7 +142,7 @@ func TestOneShotFiresExactlyOnce(t *testing.T) {
 	at := time.Date(2026, 7, 27, 14, 30, 0, 0, time.UTC)
 	s := Schedule{
 		ID: 2, Name: "the broadcast", Enabled: true, Action: ActionStart,
-		Kind: KindOnce, RunAt: at, GraceSeconds: 300,
+		Kind: KindOnce, RunAt: at, GraceSeconds: 300, AllDestinations: true,
 	}.Normalized()
 
 	before := Evaluate(s, at.Add(-time.Minute))
@@ -205,7 +206,7 @@ func TestWeeklyOnlyFiresOnItsDays(t *testing.T) {
 	s := Schedule{
 		ID: 3, Name: "weekend show", Enabled: true, Action: ActionStart, Kind: KindWeekly,
 		AtMinutes: 10 * 60, Days: []time.Weekday{time.Saturday, time.Sunday},
-		GraceSeconds: 300,
+		GraceSeconds: 300, AllDestinations: true,
 	}.Normalized()
 
 	tests := []struct {

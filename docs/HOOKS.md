@@ -4,7 +4,7 @@
 
 When the stream starts, when it stops, when a destination goes live or drops,
 polyemesis POSTs a small JSON body to a URL you own. Set them up under
-**Automation → Webhooks**.
+**Automation → Hooks** (`?tab=hooks`).
 
 ## Hooks are not alerts
 

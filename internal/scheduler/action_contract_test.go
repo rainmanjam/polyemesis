@@ -43,6 +43,9 @@ func TestValidateAcceptsEveryActionItOffers(t *testing.T) {
 			Action: a,
 			Kind:   KindOnce,
 			RunAt:  time.Date(2026, 8, 9, 20, 0, 0, 0, time.UTC),
+			// A destination action must say what it acts on (A54); a
+			// playlist action has the flag cleared by Normalized.
+			AllDestinations: true,
 		}.Normalized()
 		if err := s.Validate(); err != nil {
 			t.Errorf("Validate rejected %q, which AllActions offers: %v", a, err)

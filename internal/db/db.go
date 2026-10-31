@@ -340,6 +340,13 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// schedules.all_destinations, the explicit "every destination", and the
+	// fold of every empty start/stop row into it (app-council A54). See
+	// MigrateScheduleAllDestinations.
+	if err := d.MigrateScheduleAllDestinations(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// The partial unique index that makes two active jobs for one unique target
 	// impossible. A migration rather than a line in schema.sql because the rule
 	// is partial and because an install that already holds a duplicate pair

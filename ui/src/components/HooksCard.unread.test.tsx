@@ -42,7 +42,7 @@ describe("HooksCard: a read that did not answer", () => {
     await waitFor(() => expect(screen.getAllByText(/could not be read/i)).toHaveLength(2));
     // The empty state is a positive claim -- it says the server answered and
     // there is nothing configured.
-    expect(screen.queryByText(/^No webhooks\./)).toBeNull();
+    expect(screen.queryByText("No hooks yet")).toBeNull();
     // And the delivery grid must be gone entirely, not merely accompanied by a
     // warning: a reassuring zero beside a warning is still a reassuring zero.
     expect(screen.queryByText("Sent")).toBeNull();
@@ -54,7 +54,7 @@ describe("HooksCard: a read that did not answer", () => {
     meta.mockResolvedValue(emptyMeta());
     render(<HooksCard />);
 
-    await waitFor(() => expect(screen.getByText(/^No webhooks\./)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("No hooks yet")).toBeTruthy());
     expect(screen.getByText("Sent")).toBeTruthy();
     expect(screen.getByText("Dropped")).toBeTruthy();
   });

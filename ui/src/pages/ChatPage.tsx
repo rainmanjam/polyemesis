@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/AppLayout";
+import { EmptyState } from "@/components/EmptyState";
 import {
   ChatComposer,
   ChatEmpty,
@@ -246,10 +247,12 @@ export function ChatPage() {
               onMenu={(m, at) => setMenu({ m, at })}
               empty={
                 hidden.size > 0 && messages.length > 0 ? (
-                  <div className="flex h-full items-center justify-center px-6 text-center">
-                    <p className="text-sm text-muted-foreground">
-                    {t("chatpage.allFiltered")}
-                    </p>
+                  <div className="flex h-full items-center justify-center p-3">
+                    <EmptyState
+                      icon={MessagesSquare}
+                      title={t("chatpage.emptyFilteredTitle")}
+                      body={t("chatpage.allFiltered")}
+                    />
                   </div>
                 ) : (
                   <ChatEmpty

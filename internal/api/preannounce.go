@@ -153,15 +153,17 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 
 // scheduleTargets reports whether this schedule acts on this destination.
 //
-// An EMPTY DestinationIDs means EVERY destination -- "start the show" usually
-// names nothing, so this is the commonest shape and a rule that skipped it
-// would switch the feature off for most installs.
+// AllDestinations means EVERY destination -- "start the show" usually names
+// nothing, so this is the commonest shape and a rule that skipped it would
+// switch the feature off for most installs. It is the flag and not an empty
+// list (app-council A54), the same reading the runner makes, so a pre-announce
+// can never reach a destination the schedule itself will not start.
 //
 // It is also why the marker is keyed by schedule: two schedules of this shape
 // both reach every Facebook destination, and a marker that could hold only one
 // of them had the two moving one broadcast back and forth forever.
 func scheduleTargets(sc scheduler.Schedule, destID int64) bool {
-	if len(sc.DestinationIDs) == 0 {
+	if sc.AllDestinations {
 		return true
 	}
 	for _, id := range sc.DestinationIDs {

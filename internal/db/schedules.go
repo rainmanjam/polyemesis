@@ -4,13 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
 const scheduleColumns = `id, name, enabled, action, kind, destination_ids, tz,
-	at_minutes, days, run_at, grace_seconds, last_run_at, created_at, updated_at`
+	at_minutes, days, run_at, grace_seconds, last_run_at, created_at, updated_at,
+	all_destinations`
 
 // The reads below, as whole compile-time constants.
 //
@@ -32,7 +34,7 @@ const (
 func scanSchedule(s interface{ Scan(...any) error }) (*scheduler.Schedule, error) {
 	var (
 		sc                 scheduler.Schedule
-		enabled            int
+		enabled, all       int
 		action, kind       string
 		destJSON, daysJSON string
 		runAt, lastRun     int64
@@ -40,16 +42,17 @@ func scanSchedule(s interface{ Scan(...any) error }) (*scheduler.Schedule, error
 	)
 	if err := s.Scan(&sc.ID, &sc.Name, &enabled, &action, &kind, &destJSON, &sc.TZ,
 		&sc.AtMinutes, &daysJSON, &runAt, &sc.GraceSeconds, &lastRun,
-		&created, &updated); err != nil {
+		&created, &updated, &all); err != nil {
 		return nil, err
 	}
 	sc.Enabled = enabled != 0
+	sc.AllDestinations = all != 0
 	sc.Action = scheduler.Action(action)
 	sc.Kind = scheduler.Kind(kind)
 	// A collection that will not parse is left empty rather than failing the
-	// read. Empty destinations means "every destination" and empty days makes a
-	// weekly schedule invalid, so both are visible to the operator instead of
-	// taking the whole list down with them.
+	// read. Empty destinations without all_destinations, and empty days on a
+	// weekly schedule, are both invalid -- so both are visible to the operator,
+	// and neither fires, instead of taking the whole list down with them.
 	if destJSON != "" && destJSON != "[]" {
 		var ids []int64
 		if err := json.Unmarshal([]byte(destJSON), &ids); err == nil {
@@ -127,11 +130,11 @@ func (d *DB) CreateSchedule(s *scheduler.Schedule) (*scheduler.Schedule, error) 
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO schedules
 		(name, enabled, action, kind, destination_ids, tz, at_minutes, days,
-		 run_at, grace_seconds, last_run_at, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 run_at, grace_seconds, last_run_at, created_at, updated_at, all_destinations)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		norm.Name, boolToInt(norm.Enabled), string(norm.Action), string(norm.Kind),
 		dest, norm.TZ, norm.AtMinutes, days, unixOrZero(norm.RunAt),
-		norm.GraceSeconds, unixOrZero(norm.LastRunAt), now, now)
+		norm.GraceSeconds, unixOrZero(norm.LastRunAt), now, now, boolToInt(norm.AllDestinations))
 	if err != nil {
 		return nil, err
 	}
@@ -158,10 +161,11 @@ func (d *DB) UpdateSchedule(s *scheduler.Schedule) (*scheduler.Schedule, error) 
 	}
 	res, err := d.sql.Exec(`UPDATE schedules SET
 		name=?, enabled=?, action=?, kind=?, destination_ids=?, tz=?,
-		at_minutes=?, days=?, run_at=?, grace_seconds=?, updated_at=? WHERE id=?`,
+		at_minutes=?, days=?, run_at=?, grace_seconds=?, updated_at=?,
+		all_destinations=? WHERE id=?`,
 		norm.Name, boolToInt(norm.Enabled), string(norm.Action), string(norm.Kind),
 		dest, norm.TZ, norm.AtMinutes, days, unixOrZero(norm.RunAt),
-		norm.GraceSeconds, time.Now().Unix(), norm.ID)
+		norm.GraceSeconds, time.Now().Unix(), boolToInt(norm.AllDestinations), norm.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -235,4 +239,57 @@ func unixOrZero(t time.Time) int64 {
 		return 0
 	}
 	return t.UTC().Unix()
+}
+
+// MigrateScheduleAllDestinations gives schedules the explicit "every
+// destination" flag (app-council A54) and folds every row that relied on the
+// old meaning of an empty list into it.
+//
+// Before the column, an EMPTY destination_ids on a start or stop schedule meant
+// EVERY destination on the install. Validate now refuses a destination
+// schedule that names nothing and is not all_destinations, so an upgraded row
+// left as it was would be invalid -- Evaluate would skip it for ever, and the
+// operator's "stop everything at 23:00" would silently never fire again. The
+// fold keeps it doing exactly what it did.
+//
+// THE BACKFILL RUNS ON EVERY OPEN, not only the one that adds the column. An
+// older binary run against this database after a rollback writes its empty
+// stop with all_destinations defaulted to 0, which means the same thing to it
+// and nothing to this one. This binary never stores such a row (Validate
+// refuses it), so the UPDATE can only ever touch rows that meant "every
+// destination" when they were written -- and touches none on an ordinary boot.
+//
+// The column check is outside the transaction for the reason
+// MigrateDestinationExpertArgs records: one connection, so a read issued
+// inside a transaction would wait for ever. The ALTER and the backfill share
+// one transaction, so a crash between them cannot leave the column present and
+// an empty stop unflagged.
+//
+// No schema version bump: an older binary never reads the column, and reads
+// the folded rows' empty list as every destination, which is what they mean.
+func (d *DB) MigrateScheduleAllDestinations() error {
+	has, err := columnExists(d.sql, "schedules", "all_destinations")
+	if err != nil {
+		return fmt.Errorf("inspect schedules columns: %w", err)
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("begin schedules.all_destinations: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !has {
+		if _, err := tx.Exec(`ALTER TABLE schedules ADD COLUMN all_destinations INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add schedules.all_destinations: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`UPDATE schedules SET all_destinations = 1
+		WHERE all_destinations = 0
+		  AND action IN ('start', 'stop')
+		  AND destination_ids IN ('[]', '', 'null')`); err != nil {
+		return fmt.Errorf("fold empty schedules into all_destinations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schedules.all_destinations: %w", err)
+	}
+	return nil
 }

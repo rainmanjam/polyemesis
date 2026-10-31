@@ -77,7 +77,9 @@ function draw() {
 
 async function openNewRule() {
   draw();
-  fireEvent.click(await screen.findByRole("button", { name: NEW_RULE }));
+  // The header's button; the empty state offers a second one with the same
+  // name, which is the point of it.
+  fireEvent.click((await screen.findAllByRole("button", { name: NEW_RULE }))[0]);
   return screen.findByRole("dialog");
 }
 
