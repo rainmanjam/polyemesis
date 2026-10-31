@@ -2086,10 +2086,10 @@ const conformAudioKbps = 128
 func conformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []ffmpeg.AudioStream) []string {
 	args := relayFeedArgs(inURL, outURL, offsetSeconds)
 	var conform []string
-	measured := len(primary) > 0
+	allMeasured := len(primary) > 0
 	for _, a := range primary {
 		if a.Index < 0 || a.SampleRate <= 0 || a.Channels <= 0 {
-			measured = false
+			allMeasured = false
 			continue
 		}
 		kbps := a.Bitrate / 1000
@@ -2111,7 +2111,7 @@ func conformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []ff
 	// after it to override it, and every flag here has to come before the
 	// output target to attach to it.
 	at := slices.Index(args, "copy") + 1
-	if !measured || len(primary) < 2 {
+	if !allMeasured || len(primary) < 2 {
 		return slices.Insert(args, at, conform...)
 	}
 	// Two or more primary tracks, all measured: pad to the primary's count. The
