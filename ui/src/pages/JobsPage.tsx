@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -383,7 +384,8 @@ export function JobsPage() {
             <CardContent className="px-0 pb-0">
               <JobTable
                 jobs={view.active}
-                empty={t("jobs.nothingQueued")}
+                empty={t("jobs.nothingQueuedTitle")}
+                emptyBody={t("jobs.nothingQueuedBody")}
                 busy={busy}
                 onCancel={(id) => {
                   const job = view.active.find((j) => j.id === id);
@@ -648,6 +650,7 @@ function GatePanel({ view }: { view: JobsOverview }) {
 function JobTable({
   jobs,
   empty,
+  emptyBody,
   busy,
   onCancel,
   onRetry,
@@ -656,6 +659,8 @@ function JobTable({
 }: {
   jobs: JobView[];
   empty: string;
+  /** One sentence under the empty title, when there is more to say. */
+  emptyBody?: string;
   busy: boolean;
   onCancel?: (id: number) => void;
   onRetry?: (id: number) => void;
@@ -665,10 +670,10 @@ function JobTable({
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
 
+  // app-council A83: the kit's empty state. Post-production is submitted
+  // from the library, which the sentence says, so there is no button here.
   if (jobs.length === 0) {
-    return (
-      <div className="px-3 py-8 text-center text-sm text-muted-foreground">{empty}</div>
-    );
+    return <EmptyState title={empty} body={emptyBody} className="m-3" />;
   }
 
   return (

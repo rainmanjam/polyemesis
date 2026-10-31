@@ -305,9 +305,7 @@ export function ExpertPanel() {
         </p>
 
         {selected === "" ? (
-          <div className="rounded border border-dashed border-border py-6 text-center text-tiny text-muted-foreground">
-            {t("mon.chooseDestinationToEdit")}
-          </div>
+          <EmptyState title={t("mon.chooseDestinationToEdit")} />
         ) : (
           <>
             <div className="grid gap-2.5 sm:grid-cols-2">
@@ -357,7 +355,7 @@ export function ExpertPanel() {
                 {t("mon.clear")}
               </Button>
               {!shown && (
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("mon.resolveHint")}
                 </span>
               )}
@@ -424,7 +422,7 @@ export function ExpertPanel() {
                   {resolved.command.command}
                 </pre>
                 {resolved.command.note && (
-                  <p className="mt-1 text-micro text-muted-foreground">{resolved.command.note}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{resolved.command.note}</p>
                 )}
               </div>
             )}
@@ -444,7 +442,7 @@ export function ExpertPanel() {
                 )}
                 {dryRun.output && (
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                       {t("i18nSweep.ffmpegOutput")}
                     </summary>
                     <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
@@ -492,7 +490,7 @@ function TileRemedy({
   onClick?: () => void;
 }) {
   return (
-    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-micro text-warn">
+    <div data-testid="tile-remedy" className="mt-1.5 flex flex-col items-start gap-1 text-sm text-warn">
       <span>{text}</span>
       {to ? (
         <Link to={to} className="underline underline-offset-2 hover:text-foreground">
@@ -775,7 +773,7 @@ export function MonitoringPage() {
               value={system ? pct(system.cpuPercent) : "—"}
               tone={(system?.cpuPercent ?? 0) > cpuWarn ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
@@ -794,9 +792,14 @@ export function MonitoringPage() {
               value={system ? pct(system.memPercent) : "—"}
               tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
-              {bytes(system?.memUsedBytes ?? 0)} / {bytes(system?.memTotalBytes ?? 0)} · rss{" "}
-              {bytes(system?.procMemBytes ?? 0)}
+            <div className="mt-1 text-sm text-muted-foreground">
+              {/* app-council A93: the words around the figures are translated;
+                  the bare "rss" was English in every locale. */}
+              {t("mon.memProcess", {
+                used: bytes(system?.memUsedBytes ?? 0),
+                total: bytes(system?.memTotalBytes ?? 0),
+                rss: bytes(system?.procMemBytes ?? 0),
+              })}
               <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
             {(system?.memPercent ?? 0) > 90 && (
@@ -807,7 +810,7 @@ export function MonitoringPage() {
         <Card>
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={status ? bytes(status.relay.rxBytes) : "—"} />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monSubscribers", {
                 count: status?.relay.subscribers?.length ?? 0,
                 port: status?.relay.port ?? "—",
@@ -823,7 +826,7 @@ export function MonitoringPage() {
               value={status ? status.relay.dropped : "—"}
               tone={(status?.relay.dropped ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("mon.relayDropsNote")}
               <InfoHint body="mon.relayDrops.hint" title="mon.relayDrops" className="ml-1" />
             </div>
@@ -843,7 +846,7 @@ export function MonitoringPage() {
               value={status ? `${status.relay.lossPercent.toFixed(2)}%` : "—"}
               tone={(status?.relay.lossPercent ?? 0) > 0 ? "warn" : "muted"}
             />
-            <div className="mt-1 text-micro text-muted-foreground">
+            <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monTsMissing", {
                 lost: (status?.relay.tsLost ?? 0).toLocaleString(),
                 total: ((status?.relay.tsPackets ?? 0) + (status?.relay.tsLost ?? 0)).toLocaleString(),
@@ -901,11 +904,12 @@ export function MonitoringPage() {
                     background: "var(--popover)",
                     border: "1px solid var(--border-strong)",
                     borderRadius: 6,
-                    fontSize: 11,
+                    // The text-sm step (12px), not an off-scale 11.
+                    fontSize: 12,
                     fontFamily: "var(--font-mono)",
                   }}
                   labelFormatter={(v) => new Date(v as number).toLocaleTimeString(undefined, { hour12: false })}
-                  formatter={(v) => [kbps(v as number), "ingest"]}
+                  formatter={(v) => [kbps(v as number), t("chrome.ingest")]}
                 />
                 <Area
                   type="monotone"
@@ -980,7 +984,7 @@ export function MonitoringPage() {
                     />
                   </div>
                   {p.nextRetryIn ? (
-                    <div className="mt-1 text-micro text-warn">
+                    <div className="mt-1 text-sm text-warn">
                       {t("i18nSweep.retryingIn", { seconds: p.nextRetryIn.toFixed(0) })}
                     </div>
                   ) : null}
@@ -988,7 +992,7 @@ export function MonitoringPage() {
                       process's own log one click away. The raw lastError stays
                       for an unclassified failure. */}
                   {p.reason ? (
-                    <div className="mt-1 flex flex-col gap-1 text-micro text-down">
+                    <div className="mt-1 flex flex-col gap-1 text-sm text-down">
                       <span className="font-medium">{t(`reason.cause.${p.reason.cause}`)}</span>
                       <FailureRemedy
                         cause={p.reason.cause}
@@ -998,13 +1002,13 @@ export function MonitoringPage() {
                     </div>
                   ) : (
                     p.lastError && (
-                      <div className="mt-1 line-clamp-2 break-words text-micro text-down">
+                      <div className="mt-1 line-clamp-2 break-words text-sm text-down">
                         {p.lastError}
                       </div>
                     )
                   )}
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                       {t("i18nSweep.commandLine")}
                     </summary>
                     <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-1.5 font-mono text-micro text-muted-foreground">
@@ -1109,14 +1113,16 @@ export function MonitoringPage() {
               ref={logRef}
               className="h-[22rem] overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed"
             >
+              {/* app-council A83: the kit's empty state, set in the sans face
+                  and without its own border inside the log box. */}
               {merged.length === 0 ? (
-                <div className="py-6 text-center text-muted-foreground">
-                  {t("mon.noLogLines")}
-                </div>
+                <EmptyState
+                  title={t("mon.noLogLinesTitle")}
+                  body={t("mon.noLogLinesBody")}
+                  className="border-0 font-sans"
+                />
               ) : groups.length === 0 ? (
-                <div className="py-6 text-center text-muted-foreground">
-                  {t("monitor.noMatchingLines")}
-                </div>
+                <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />
               ) : (
                 groups.map((g, i) => (
                   <div key={i} className="flex gap-2">

@@ -57,6 +57,7 @@ import { StatusDot } from "@/components/signature/StatusDot";
 import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
+import { headerLive } from "@/lib/headerLive";
 import { ingestUptimeSec } from "@/lib/dashboardFacts";
 import { useNavCollapsed } from "@/hooks/useNavCollapsed";
 import { toneForState } from "@/lib/signal";
@@ -115,7 +116,7 @@ export function AppLayout({
   username: string;
   onSignOut: () => void;
 }) {
-  const { status, connected, frameError, sourceCount } = useLiveData();
+  const { status, connected, frameError, sourceCount, programme, programmes } = useLiveData();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navCollapsed, toggleNav] = useNavCollapsed();
 
@@ -218,8 +219,13 @@ export function AppLayout({
   const uptime = ingestUptimeSec(ingest, snapshot?.relay, ingestLive);
   const ingestTone = onBackup ? "warn" : ingestLive ? "live" : toneForState(ingest?.state);
   const ingestReason = ingestProblem(ingest, ingestLive, onBackup);
-  const liveCount =
-    status?.destinations.filter((d) => d.process?.state === "running").length ?? 0;
+  // app-council A81: the badge counts the selected programme and says whose
+  // count it is ("Main: 3 live"), or "All programmes" where nothing is
+  // selected. It sat beside the programme-scoped ingest chip printing the
+  // whole install's count with nothing to say so. See lib/headerLive.ts.
+  const live = headerLive({ destinations: status?.destinations, programme, programmes, sourceCount });
+  const liveCount = live.count;
+  const liveLabel = t(live.key, live.params);
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
@@ -272,7 +278,7 @@ export function AppLayout({
         >
           <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
           <span className={liveCount > 0 ? "text-foreground" : "text-muted-foreground"}>
-            {liveCount > 0 ? t("chrome.liveCount", { count: liveCount }) : t("onAir.offAir")}
+            {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
           </span>
         </span>
 
@@ -341,7 +347,7 @@ export function AppLayout({
           {liveCount > 0 && (
             <Badge variant="live" className="hidden sm:inline-flex">
               <StatusDot tone="live" size="sm" />
-              {t("chrome.liveCount", { count: liveCount })}
+              {liveLabel}
             </Badge>
           )}
           {uptime !== null && (

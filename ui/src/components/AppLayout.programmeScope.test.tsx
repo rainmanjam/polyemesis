@@ -129,3 +129,31 @@ describe("the header ingest chip follows the programme selected in the header", 
     );
   });
 });
+
+/* app-council A81. The live badge sat beside this chip counting every running
+ * destination on the install. With Studio A selected and two of its own
+ * destinations live, three of Studio B's made the header read "5 live". The
+ * badge now counts the selected programme and names it. */
+describe("the header live badge counts and names the selected programme", () => {
+  const dest = (id: number, sourceId: number, running: boolean) => ({
+    id,
+    sourceId,
+    name: `d${id}`,
+    process: { state: running ? "running" : "stopped" },
+  });
+
+  it("reads 'Studio A: 2 live' when Studio B carries three more live destinations", () => {
+    current = {
+      ...frame(1, "Studio A", true, 1_000_000, 10),
+      destinations: [dest(1, 1, true), dest(2, 1, true), dest(3, 1, false), dest(4, 2, true), dest(5, 2, true), dest(6, 2, true)],
+    } as unknown as Status;
+    const { container } = render(layout());
+
+    const scoped = translate("en", "chrome.liveCountProgramme", { programme: "Studio A", count: 2 });
+    expect(container.textContent, "the badge does not name and scope to Studio A").toContain(scoped);
+    expect(screen.getByTestId("mobile-on-air").textContent).toContain(scoped);
+    expect(container.textContent, "the install-wide count is back").not.toContain(
+      translate("en", "chrome.liveCount", { count: 5 }),
+    );
+  });
+});

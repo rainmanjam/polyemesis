@@ -65,7 +65,7 @@ export function FacebookStreamHealthPanel({ state }: { state: HealthState }) {
           two platforms are lagging or broken. They are not: Twitch publishes no
           bitrate or frame rate anywhere in its API, so there is nothing to show
           and nothing missing. Saying which is the whole job of this sentence. */}
-      <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+      <p className="mt-1 text-sm leading-snug text-muted-foreground">
         {t("dash.fbOnlyPlatformWithNumbers")}
       </p>
     </div>
@@ -146,7 +146,7 @@ function Body({
                 // here would tell a streamer with a healthy 6 Mbps feed that
                 // their encoder had stopped, and their next move would be to
                 // restart something that was working.
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("dash.notReported")}
                 </span>
               )}
@@ -155,7 +155,7 @@ function Body({
                 // read looks exactly like a field Facebook did not send, and one
                 // of those is a bug on this side. Naming it is what lets somebody
                 // tell them apart from a screenshot.
-                <div className="text-[10px] text-muted-foreground">
+                <div className="text-sm text-muted-foreground">
                   {t("dash.streamHealthUnreadable", {
                     fields: (s.unparsed ?? []).join(", "),
                   })}
@@ -169,5 +169,5 @@ function Body({
 }
 
 function Line({ children }: { children: React.ReactNode }) {
-  return <div className="mt-1 text-[10px] text-muted-foreground">{children}</div>;
+  return <div className="mt-1 text-sm text-muted-foreground">{children}</div>;
 }

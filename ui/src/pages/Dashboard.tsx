@@ -32,7 +32,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { StatusReason } from "@/components/signature/StatusReason";
 import { trackCount, trackLabels } from "@/lib/trackLabels";
 import { useConfirm } from "@/hooks/useConfirm";
-import { Copy, Megaphone, Play, Plus, Radio, RadioTower, RotateCcw, ShieldAlert, Square } from "lucide-react";
+import { Circle, Copy, Megaphone, Play, Plus, Radio, RotateCcw, ShieldAlert, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +49,7 @@ import { DestinationCard } from "@/components/DestinationCard";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
+import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
@@ -368,7 +369,7 @@ export function GoLiveComposer() {
             the live count read as a fault; the card's one sentence says what
             to do instead (A86). */}
         {targets.length > 0 && (
-          <span className="font-mono text-micro text-muted-foreground">
+          <span className="font-mono text-sm text-muted-foreground">
             {targets.length === 1 ? t("i18nSweep.accountsOne") : t("i18nSweep.accountsMany", { count: targets.length })}
           </span>
         )}
@@ -376,9 +377,10 @@ export function GoLiveComposer() {
 
       {targets.length === 0 ? (
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {t("dash.connectPrompt")}
-          </p>
+          {/* app-council A83: the kit's empty state. No button: the card is
+              also drawn outside the router (the composer's own tests), and the
+              sentence names the place, Settings -> Platform credentials. */}
+          <EmptyState title={t("dash.noAccountsTitle")} body={t("dash.connectPrompt")} />
         </CardContent>
       ) : (
         <CardContent className="grid gap-4 lg:grid-cols-2">
@@ -404,7 +406,7 @@ export function GoLiveComposer() {
                 onChange={(e) => setTitle(e.target.value)}
               />
               {overLimit.length > 0 && (
-                <p className="text-micro text-down">
+                <p className="text-sm text-down">
                   {t("i18nSweep.titleTooLong", { platforms: overLimit.map((o) => o.platform).join(", ") })}
                 </p>
               )}
@@ -431,14 +433,14 @@ export function GoLiveComposer() {
                 onChange={(e) => setDescription(e.target.value)}
               />
               {descriptionOverLimit.length > 0 && (
-                <p className="text-[10px] text-down">
+                <p className="text-sm text-down">
                   {t("dash.descTooLong", {
                     platforms: descriptionOverLimit.map((t) => t.platform).join(", "),
                   })}
                 </p>
               )}
               {noDescription.length > 0 && (
-                <p className="text-micro text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {t("i18nSweep.noDescriptionField", {
                     platforms: noDescription.map((o) => o.platform).join(", "),
                   })}
@@ -455,7 +457,7 @@ export function GoLiveComposer() {
                 onChange={(e) => setCategory(e.target.value)}
               />
               {categoryHint && (
-                <p className="text-micro text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   {categoryHint} {t("i18nSweep.categoryTypeName")}
                 </p>
               )}
@@ -470,7 +472,7 @@ export function GoLiveComposer() {
                   placeholder={t("dash.tagsPlaceholder")}
                   onChange={(e) => setTags(e.target.value)}
                 />
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
                   {t("i18nSweep.tagsReplace", { platforms: tagTargets.map((o) => o.platform).join(", ") })}
                 </span>
               </div>
@@ -480,7 +482,7 @@ export function GoLiveComposer() {
               <div className="flex flex-col gap-2 rounded-md border border-border p-3">
                 <div className="flex items-center justify-between gap-2">
                   <Label>{t("dash.broadcastSettings")}</Label>
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("i18nSweep.platformsOnly", { platforms: broadcastAccounts.map((w) => w.platform).join(", ") })}
                   </span>
                 </div>
@@ -493,13 +495,13 @@ export function GoLiveComposer() {
                     value={scheduledStart}
                     onChange={(e) => setScheduledStart(e.target.value)}
                   />
-                  <span className="text-micro text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {t("i18nSweep.leaveEmptyKeep")}
                   </span>
                 </div>
 
                 {contentDetailsLocked && (
-                  <p className="text-micro text-warn">
+                  <p className="text-sm text-warn">
                     {lockedReason ||
                       t("dash.youtubeStopsAcceptingTheseOnce")}
                   </p>
@@ -530,7 +532,7 @@ export function GoLiveComposer() {
                     </div>
                   ))}
                 </div>
-                <span className="text-micro text-muted-foreground">
+                <span className="text-sm text-muted-foreground">
             {t("dash.leaveUnchangedNote")}
                 </span>
               </div>
@@ -540,7 +542,7 @@ export function GoLiveComposer() {
               <Button size="sm" onClick={push} disabled={empty || busy}>
                 <Megaphone /> {busy ? t("dash.pushing") : t("dash.pushToPlatforms")}
               </Button>
-              <span className="text-micro text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 {t("i18nSweep.appliesTo", {
                   who: accepts("title").length === 1 ? t("dash.theConnectedAccount") : t("dash.everyConnectedAccount"),
                 })}
@@ -548,7 +550,7 @@ export function GoLiveComposer() {
             </div>
 
             {withCompliance.length > 0 && (
-              <p className="text-micro text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 {t("i18nSweep.pushSendsCompliance", {
                   accounts: withCompliance.map((o) => o.accountName || o.platform).join(", "),
                 })}
@@ -569,7 +571,7 @@ export function GoLiveComposer() {
                   may not have reached the platform, and only the platform can
                   say which now. */}
               {jobLost && (
-                <p role="status" className="text-micro text-warn">
+                <p role="status" className="text-sm text-warn">
                   {t("dash.pushStatusLost")}
                 </p>
               )}
@@ -598,27 +600,27 @@ export function GoLiveComposer() {
                     </div>
 
                     {res.applied.length > 0 && (
-                      <p className="text-micro text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {t("i18nSweep.pushApplied", { fields: res.applied.join(", ") })}
                         {res.category && ` — ${t("i18nSweep.pushCategory", { category: res.category })}`}
                         {res.target && ` ${t("i18nSweep.pushOnTarget", { target: res.target })}`}
                       </p>
                     )}
                     {res.skipped && res.skipped.length > 0 && (
-                      <p className="text-micro text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                         {t("i18nSweep.pushNotSupported", { fields: res.skipped.join(", ") })}
                       </p>
                     )}
                     {res.message && (
                       <StatusReason
-                        className="text-micro text-down"
+                        className="text-sm text-down"
                         reason={res.message}
                         step={t("foundation.status.step.metaPush", { platform: res.platform })}
                         asOf={null}
                       />
                     )}
                     {res.warnings?.map((warn) => (
-                      <p key={warn} className="text-micro text-warn">
+                      <p key={warn} className="text-sm text-warn">
                         {warn}
                       </p>
                     ))}
@@ -840,7 +842,7 @@ function BulkDestinationControl({
                 {/* WHY, on every row that is not a clean stop. */}
                 {res.message && (
                   <StatusReason
-                    className={`text-micro ${
+                    className={`text-sm ${
                       res.outcome === "failed" ? "text-down" : "text-warn"
                     }`}
                     reason={res.message}
@@ -884,27 +886,70 @@ function BulkDestinationControl({
   );
 }
 
+/** A lane's heading (app-council A89): the programme's name, then what the
+ *  number counts in words ("9 destinations · 5 live"), and a cue that is not
+ *  colour. On air is a filled radio glyph, off air a hollow circle, and the
+ *  heading carries data-lane-state for anything reading it without eyes. The
+ *  bare "STUDIO A 9" it replaces said neither what was counted nor whether
+ *  the lane was live. */
+export function LaneHeading({ name, destinations }: { name: string; destinations: readonly DestStatus[] }) {
+  const t = useT();
+  const live = destinations.filter((d) => d.process?.state === "running").length;
+  const onAir = live > 0;
+  const Cue = onAir ? Radio : Circle;
+  return (
+    <h3
+      data-lane-state={onAir ? "live" : "idle"}
+      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-muted-foreground"
+    >
+      <Cue
+        aria-hidden="true"
+        data-lane-cue={onAir ? "on-air" : "off-air"}
+        className={cn("h-3.5 w-3.5 shrink-0", onAir ? "text-live" : "text-muted-foreground")}
+      />
+      <span data-lane-name className="truncate font-semibold uppercase tracking-wide text-foreground">
+        {name}
+      </span>
+      <span className="tnum">
+        {destinations.length === 1
+          ? t("dash.laneCountsOne", { live })
+          : t("dash.laneCounts", { count: destinations.length, live })}
+      </span>
+    </h3>
+  );
+}
+
 /** The failover exposure line. Renders nothing when there is nothing to say,
  *  which is the common case on a correctly configured install. */
-function FailoverExposure({ notice }: { notice: FailoverNotice }) {
+export function FailoverExposure({ notice }: { notice: FailoverNotice }) {
   const t = useT();
   if (notice.kind === "none") return null;
 
+  // app-council A85: one line, the lead and the link to the setting. The
+  // argument for failover (restart, a completed YouTube broadcast cannot return
+  // to live, the remux hop) sits behind a closed disclosure. As a two-line
+  // paragraph on every visit it pushed the destinations down and read as a
+  // fault on a page where nothing was wrong.
   return (
     <div
-      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-tiny"
+      className="mb-2 flex items-start gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-sm"
       // Not role="alert". Nothing has gone wrong yet, and announcing a standing
       // configuration fact as an alert on every page load is how a screen-reader
       // user learns to tune the region out.
     >
-      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
-      <p className="text-muted-foreground">
-        <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
-        {t("i18nSweep.noFailoverBody")}{" "}
-        <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
-          {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
-        </Link>
-      </p>
+      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" aria-hidden="true" />
+      <div className="min-w-0 text-muted-foreground">
+        <p>
+          <span className="text-foreground">{t("i18nSweep.noFailoverLead")}</span>{" "}
+          <Link to="/settings?tab=pipeline#failover" className="underline underline-offset-2">
+            {t("i18nSweep.noFailoverLink", { path: `${t("nav.settings")} → ${t("set.failover")}` })}
+          </Link>
+        </p>
+        <details className="mt-1">
+          <summary className="cursor-pointer hover:text-foreground">{t("dash.failoverWhy")}</summary>
+          <p className="mt-1">{t("i18nSweep.noFailoverBody")}</p>
+        </details>
+      </div>
     </div>
   );
 }
@@ -1763,7 +1808,7 @@ export function Dashboard() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {onBackup && failoverState?.primaryLive !== true && (
-                <p className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-micro leading-relaxed text-warn">
+                <p className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-sm leading-relaxed text-warn">
                   {t("dash.ingestPrimaryOffline")}
                 </p>
               )}
@@ -1806,7 +1851,7 @@ export function Dashboard() {
               </div>
 
               {source?.video && (
-                <div className="font-mono text-micro text-muted-foreground">
+                <div className="font-mono text-sm text-muted-foreground">
                   {source.video.codec} {source.video.width}×{source.video.height}
                   {source.video.frameRate > 0 && ` @ ${source.video.frameRate.toFixed(2)}fps`}
                 </div>
@@ -1817,7 +1862,7 @@ export function Dashboard() {
                 {urlCarriesCredential(system?.ingestUrl ?? "") ? (
                   <SecretCode value={system?.ingestUrl ?? ""} />
                 ) : (
-                  <code className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
+                  <code className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
                     {system?.ingestUrl ?? "…"}
                   </code>
                 )}
@@ -1830,7 +1875,7 @@ export function Dashboard() {
                   ingestProblem, the same rule the header chip uses, so a stale
                   lastError never sits beside a stream that has recovered. */}
               {ingestReason && (
-                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-micro text-down">
+                <div className="rounded border border-down/30 bg-down-dim px-2 py-1 text-sm text-down">
                   <StatusReason
                     reason={ingestReason}
                     step={t("foundation.status.step.ingest")}
@@ -1840,7 +1885,7 @@ export function Dashboard() {
               )}
 
               {system && !system.ffmpeg.hasLibsrt && (
-                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-micro text-warn">
+                <div className="rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
                   {t("dash.noLibsrt", { flag: "--enable-libsrt" })}
                 </div>
               )}
@@ -1888,7 +1933,7 @@ export function Dashboard() {
                       <StatusDot tone={tone} size="sm" />
                       <span className="text-tiny">{label}</span>
                     </div>
-                    <span className="font-mono text-micro text-muted-foreground">
+                    <span className="font-mono text-sm text-muted-foreground">
                       {proc ? stateLabel(proc.state) : absent}
                     </span>
                   </div>
@@ -1912,7 +1957,7 @@ export function Dashboard() {
               <div className="mt-1 flex flex-col gap-1 border-t border-border pt-1.5">
                 <span className="text-tiny text-muted-foreground">{t("dash.renditions")}</span>
                 {renditions.length === 0 ? (
-                  <span className="font-mono text-micro text-muted-foreground">
+                  <span className="font-mono text-sm text-muted-foreground">
                     {t("i18nSweep.noRenditions")}
                   </span>
                 ) : (
@@ -1925,7 +1970,7 @@ export function Dashboard() {
                         />
                         <span className="truncate text-tiny">{r.name}</span>
                       </div>
-                      <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
+                      <span className="tnum shrink-0 font-mono text-sm text-muted-foreground">
                         {r.consumers === 1 ? t("i18nSweep.destsOne") : t("i18nSweep.destsMany", { count: r.consumers })}
                       </span>
                     </div>
@@ -2018,22 +2063,19 @@ export function Dashboard() {
             }}
           />
         ) : destinations.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-              <p className="text-sm text-muted-foreground">
-            {t("dash.noDestinations")}
-              </p>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus /> {t("firstRun.addDestination")}
-              </Button>
-            </CardContent>
-          </Card>
+          // app-council A83: the kit's empty state.
+          <EmptyState
+            icon={Plus}
+            title={t("dash.noDestinationsTitle")}
+            body={t("dash.noDestinationsBody")}
+            action={{
+              label: t("firstRun.addDestination"),
+              onClick: () => {
+                setEditing(null);
+                setDialogOpen(true);
+              },
+            }}
+          />
         ) : (
           <div className="flex flex-col gap-5">
             {lanes.laned ? (
@@ -2053,13 +2095,7 @@ export function Dashboard() {
                  renders nothing while lanes are on. */
               lanes.lanes.map((lane) => (
                 <section key={lane.sourceId} className="flex flex-col gap-2">
-                  <h3 className="flex items-center gap-2 text-tiny font-medium uppercase tracking-wide text-muted-foreground">
-                    <RadioTower className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{lane.name}</span>
-                    <span className="font-mono normal-case tracking-normal">
-                      {lane.destinations.length}
-                    </span>
-                  </h3>
+                  <LaneHeading name={lane.name} destinations={lane.destinations} />
                   <div className="grid gap-3 lg:grid-cols-3">
                     <LazyBoundary
                       fallback={
@@ -2080,7 +2116,7 @@ export function Dashboard() {
                     </LazyBoundary>
                     <div className="grid gap-3 lg:col-span-2 xl:grid-cols-2">
                       {lane.destinations.length === 0 ? (
-                        <p className="text-tiny text-muted-foreground">{t("dash.destNoneHere")}</p>
+                        <EmptyState title={t("dash.destNoneHere")} className="xl:col-span-2" />
                       ) : (
                         lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
                       )}

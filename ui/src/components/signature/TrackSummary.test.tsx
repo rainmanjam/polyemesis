@@ -58,3 +58,20 @@ describe("TrackSummary", () => {
     expect(screen.getByTitle("Track 1 is excluded")).toBeTruthy();
   });
 });
+
+/* app-council A89: the routed and excluded chips differed by fill colour
+ * alone. An excluded chip is now an outline (dashed, no fill) and a routed one
+ * is filled, a difference of shape that survives greyscale and colour-blindness,
+ * and each chip says which it is in data-routed. */
+describe("TrackSummary: routed versus excluded is not colour alone", () => {
+  it("draws an excluded chip as a dashed outline and a routed chip filled", () => {
+    render(<TrackSummary tracks={[0]} count={2} />);
+    const on = screen.getByTitle("Track 1 is included");
+    const off = screen.getByTitle("Track 2 is excluded");
+    expect(on.getAttribute("data-routed")).toBe("true");
+    expect(off.getAttribute("data-routed")).toBe("false");
+    expect(off.className).toContain("border-dashed");
+    expect(off.className).toContain("bg-transparent");
+    expect(on.className).not.toContain("border-dashed");
+  });
+});

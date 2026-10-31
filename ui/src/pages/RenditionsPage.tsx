@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import {
   Cpu,
@@ -583,16 +584,13 @@ export function RenditionsPage() {
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
       ) : views.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-            <p className="max-w-lg text-[12px] text-muted-foreground">
-            {t("rend.empty")}
-            </p>
-            <Button size="sm" onClick={openCreate}>
-              <Plus /> {t("rend.newRendition")}
-            </Button>
-          </CardContent>
-        </Card>
+        // app-council A83: the kit's empty state, with the one step.
+        <EmptyState
+          icon={Plus}
+          title={t("rend.emptyTitle")}
+          body={t("rend.empty")}
+          action={{ label: t("rend.newRendition"), onClick: openCreate }}
+        />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {views.map((v) => (

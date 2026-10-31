@@ -463,6 +463,20 @@ its first tagged release.
   message, and the unreachable case retries by itself. While it loads, the dock
   shows "Connecting to polyemesis…" instead of a blank panel. The on-stream
   overlay still draws nothing in every one of these cases.
+- **Console polish: scoped counts, one empty state, readable warnings.** The
+  header's live badge counts the selected programme and names it ("Main: 3
+  live"), or says "All programmes: 5 live" when none is selected; the on-air
+  strip's healthy line says "All 5 running destinations healthy". Programme
+  lanes on the Dashboard read "9 destinations · 5 live" with an on-air glyph
+  that is not colour alone. The no-failover note is one line with a link to
+  Settings → Failover, its explanation behind "Why this matters". Every empty
+  list on the Dashboard, Jobs, Monitoring, Sources, Routing, Renditions and
+  Meters uses one empty state, with the next step as a button where there is
+  one. Warnings and hints on these pages are set at 12px instead of 10px.
+  Routing shows "Unsaved changes", "Saved" or a failure that keeps your edit
+  beside Save, and a read-only mix-matrix row says why in visible text.
+  Monitoring's memory line and ingest chart are translated.
+
 - **Dashboard: clearer on-air answer and one filled start action.** The on-air
   strip counts live, stopped and failing destinations against the whole install
   ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as

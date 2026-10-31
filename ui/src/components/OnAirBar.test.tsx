@@ -143,6 +143,24 @@ describe("OnAirBar verdict line", () => {
     ).toBeTruthy();
   });
 
+  it("names its scope: the running destinations, not the whole install (app-council A2)", () => {
+    // Two running, one switched off. "All 2 destinations healthy" beside a
+    // page of three cards read as the whole install; the sentence now says
+    // which destinations it is about. Literal English on purpose, so the test
+    // pins the words and not only the key.
+    const st = {
+      ingest: { state: "running", uptimeSec: 760 },
+      destinations: [
+        proc("running"),
+        proc("running", { id: did(2) }),
+        proc("stopped", { id: did(3), enabled: false }),
+      ],
+    } as unknown as Status;
+    render(<OnAirBar status={st} />);
+
+    expect(screen.getByTestId("health-verdict").textContent).toBe("All 2 running destinations healthy");
+  });
+
   it("offers a way to the first destination that needs attention", () => {
     render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
 
