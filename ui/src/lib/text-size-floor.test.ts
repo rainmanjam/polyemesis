@@ -48,9 +48,6 @@ function microUses(file: string): number {
 const ALLOWED: Record<string, number> = {
   "components/AccountLiveStats.tsx": 10,
   "components/AnchorGrid.tsx": 1,
-  "components/ChatMessageMenu.tsx": 3,
-  "components/ChatPanel.tsx": 9,
-  "components/ChatUserCard.tsx": 8,
   "components/DestinationCard.tsx": 13,
   "components/FacebookStreamHealth.tsx": 7,
   "components/McpAccessCard.tsx": 3,

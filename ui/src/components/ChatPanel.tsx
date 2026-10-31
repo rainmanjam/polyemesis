@@ -194,14 +194,14 @@ function MessageRow({
       <span className="mr-1.5 inline-flex items-center gap-1 align-baseline">
         <Icon className={cn("h-3 w-3 shrink-0", accent.text)} aria-label={accent.label} />
         {!compact && (
-          <span className="tnum font-mono text-[10px] text-muted-foreground" title={timestamp(m.at)}>
+          <span className="tnum font-mono text-sm text-muted-foreground" title={timestamp(m.at)}>
             {clockTime(m.at)}
           </span>
         )}
       </span>
 
       {m.replyTo && (
-        <span className="mr-1 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+        <span className="mr-1 inline-flex items-center gap-0.5 text-sm text-muted-foreground">
           <CornerUpLeft className="h-2.5 w-2.5" />
           {m.replyTo}
         </span>
@@ -400,7 +400,7 @@ export function PlatformFilter({
             onClick={() => onToggle(p)}
             aria-pressed={on}
             className={cn(
-              "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors",
+              "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-sm font-semibold uppercase tracking-wider transition-colors",
               on ? accent.chipOn : "border-border text-muted-foreground hover:text-muted-foreground",
             )}
           >
@@ -557,7 +557,7 @@ export function ChatComposer({
       {strictest > 0 && (
         <p
           className={cn(
-            "mt-1 text-[10px]",
+            "mt-1 text-sm",
             over ? "text-warn" : "text-muted-foreground",
           )}
         >
@@ -616,7 +616,7 @@ export function ChatStatusList({
                 {s.channel && (
                   <span className="truncate text-[11px] text-muted-foreground">{s.channel}</span>
                 )}
-                <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span className="ml-auto text-sm uppercase tracking-wider text-muted-foreground">
                   {CHAT_STATE_KEY[s.state] ? t(CHAT_STATE_KEY[s.state]) : s.state}
                 </span>
               </div>
@@ -624,7 +624,7 @@ export function ChatStatusList({
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{detail}</p>
               )}
               {quota && (
-                <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
                   {tn("chatpage.quotaUsed", {
                     n: (
                       <span className="tnum font-mono">
@@ -642,7 +642,7 @@ export function ChatStatusList({
                 </p>
               )}
               {!compact && (
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
+                <p className="mt-0.5 text-sm text-muted-foreground">
                   {tn("chatpage.receivedCount", {
                     n: <span className="tnum font-mono">{s.received.toLocaleString()}</span>,
                   })}
@@ -740,7 +740,7 @@ export function ChatSearchResults({
   const t = useT();
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-2 bg-card-raised px-2 py-1 text-sm text-muted-foreground">
         <span>
           {search.loading
             ? t("chatpage.searching")
@@ -780,7 +780,7 @@ export function ChatSearchResults({
       </div>
 
       {search.results.length > 0 && search.note && (
-        <p className="shrink-0 border-t border-border px-2 py-1 text-[10px] leading-snug text-muted-foreground">
+        <p className="shrink-0 border-t border-border px-2 py-1 text-sm leading-snug text-muted-foreground">
           {search.note}
         </p>
       )}

@@ -111,9 +111,9 @@ describe("ChatMessageMenu on a platform whose moderation column says yes", () =>
     expect(inert(/Time out 1 day/)).toBe(true);
   });
 
-  it("renders the permanent ban inert too", () => {
+  it("renders the ban entry inert too, since it opens a card that asks first", () => {
     draw(msg({ platform: "facebook" }));
-    expect(inert(/Ban permanently/)).toBe(true);
+    expect(inert(/Open card to ban/)).toBe(true);
   });
 
   it("says WHY, in a sentence naming what to do instead", () => {
