@@ -378,7 +378,7 @@ own rather than signing in to a shared polyemesis app: a shared client would put
 every install on one 10,000-unit pool.
 
 If a YouTube API Services audit grants you more, tell polyemesis in
-`Settings → Chat → YouTube daily API quota`. It paces on that number and has no
+`Settings → Pipeline → Chat history → YouTube daily API quota`. It paces on that number and has no
 way to discover it by itself.
 
 **There are two fields there, not one, and the 1,960 above is computed from

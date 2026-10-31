@@ -114,7 +114,7 @@ When the encoder returns, it goes back automatically.
 ## Why does my video-only stream get refused?
 
 Every major platform refuses video with no audio. Turn on the silence tier
-(**Settings → Synthetic audio**) and polyemesis synthesises a silent stereo track.
+(**Settings → Pipeline → Synthetic audio → Add silence when the source has no audio**) and polyemesis synthesises a silent stereo track.
 
 ## Is there a multi-user mode?
 

@@ -414,6 +414,26 @@ its first tagged release.
 
 ### Changed
 
+- **Settings is reorganised around tasks (settings council).** A new
+  **Overview** is the landing page on an install with no source: it shows
+  whether you are ready to stream, the same five-step setup checklist as the
+  Dashboard, and one tile per area (ingest, platforms, overlays, OBS, pipeline,
+  security), each saying "could not read" rather than "0" when a read fails.
+  The side menu is grouped into Stream in, Stream out, Processing, Access and
+  security, and Danger zone; every old `?tab=` link still opens the same panel.
+  One **Show advanced settings** switch hides expert cards (MQTT, preview,
+  audio meters, process logs, Enhanced Broadcasting hardware) until you want
+  them, but never hides a card whose value differs from the default, and a
+  search result opens the card it lands on. Pipeline is split into Routine and
+  Once per install. **Platforms** is one row per platform, connected first,
+  with one status and one button; the credentials, redirect URI, accounts and
+  setup guide open under the row, and the developer-app pair is an
+  "App credentials (advanced)" layer. The last credential check is stored and
+  shown after a reload. **Security** leads with the data directory and
+  secret.key backup. Ingest cards say whether they apply to the whole install
+  or to one programme, degraded-link thresholds are edited on Sources only, and
+  "Synthesise a silent track" now reads "Add silence when the source has no
+  audio".
 - **Dashboard: clearer on-air answer and one filled start action.** The on-air
   strip counts live, stopped and failing destinations against the whole install
   ("2 live · 3 stopped · 0 failing"), so a switched-off card is no longer read as
