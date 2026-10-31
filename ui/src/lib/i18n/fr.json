@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} en direct · {stopped} arrêtés · {failing} en échec",
   "shell.skipToContent": "Aller au contenu",
   "chatpage.notConnected": "Chat non connecté",
-  "health.verdictNoIngest": "L'entrée ne reçoit rien. Les destinations tournent sans signal."
+  "health.verdictNoIngest": "L'entrée ne reçoit rien. Les destinations tournent sans signal.",
+  "meters.clipAnnounce": "Écrêtage sur la piste {n}",
+  "rend.signalNotEncoding": "Pas d'encodage · démarre quand le premier flux passe en direct",
+  "set.degradedThresholds": "Seuils",
+  "set.degradedSummaryOn": "Activé : bascule si moins de {bitrate} kbps, plus de {rtt} ms ou plus de {loss} % de perte",
+  "set.degradedSummaryOff": "Désactivé. Si activé : moins de {bitrate} kbps, plus de {rtt} ms ou plus de {loss} % de perte",
+  "sources.acceptingLabel": "Accepte",
+  "sources.enabledConsequence": "Les encodeurs peuvent se connecter à cette source.",
+  "sources.disabledConsequence": "Les encodeurs qui se connectent ici sont refusés tant que ceci n'est pas activé.",
+  "route.nothingToSave": "Rien à enregistrer tant qu'un routage ne change pas."
 }

@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} en directo · {stopped} detenidos · {failing} con fallo",
   "shell.skipToContent": "Saltar al contenido",
   "chatpage.notConnected": "Chat no conectado",
-  "health.verdictNoIngest": "La entrada no recibe nada. Los destinos están activos sin señal."
+  "health.verdictNoIngest": "La entrada no recibe nada. Los destinos están activos sin señal.",
+  "meters.clipAnnounce": "Saturación en la pista {n}",
+  "rend.signalNotEncoding": "Sin codificar · se inicia cuando el primer feed salga en directo",
+  "set.degradedThresholds": "Umbrales",
+  "set.degradedSummaryOn": "Activado: cambia si baja de {bitrate} kbps, supera {rtt} ms o pierde más del {loss} %",
+  "set.degradedSummaryOff": "Desactivado. Si se activa: menos de {bitrate} kbps, más de {rtt} ms o más del {loss} % de pérdida",
+  "sources.acceptingLabel": "Acepta",
+  "sources.enabledConsequence": "Los codificadores pueden conectarse a esta fuente.",
+  "sources.disabledConsequence": "Los codificadores que se conecten aquí serán rechazados hasta que esto esté activado.",
+  "route.nothingToSave": "Nada que guardar hasta que cambie una ruta."
 }

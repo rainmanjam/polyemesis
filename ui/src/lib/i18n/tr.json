@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} yayında · {stopped} durdurulmuş · {failing} hatalı",
   "shell.skipToContent": "İçeriğe geç",
   "chatpage.notConnected": "Sohbet bağlı değil",
-  "health.verdictNoIngest": "Giriş bir şey almıyor. Hedefler açık ama sinyal yok."
+  "health.verdictNoIngest": "Giriş bir şey almıyor. Hedefler açık ama sinyal yok.",
+  "meters.clipAnnounce": "{n}. parçada kırpma var",
+  "rend.signalNotEncoding": "Kodlamıyor · ilk akış yayına geçtiğinde başlar",
+  "set.degradedThresholds": "Eşikler",
+  "set.degradedSummaryOn": "Açık: {bitrate} kbps altına, {rtt} ms üstüne veya %{loss} kaybın üstüne çıkınca geçer",
+  "set.degradedSummaryOff": "Kapalı. Açılırsa: {bitrate} kbps altı, {rtt} ms üstü veya %{loss} kayıp üstü",
+  "sources.acceptingLabel": "Kabul ediyor",
+  "sources.enabledConsequence": "Kodlayıcılar bu kaynağa bağlanabilir.",
+  "sources.disabledConsequence": "Buraya bağlanan kodlayıcılar, bu açılana kadar reddedilir.",
+  "route.nothingToSave": "Bir yönlendirme değişene kadar kaydedilecek bir şey yok."
 }

@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} na żywo · {stopped} zatrzymane · {failing} z błędem",
   "shell.skipToContent": "Przejdź do treści",
   "chatpage.notConnected": "Czat niepołączony",
-  "health.verdictNoIngest": "Wejście nic nie odbiera. Cele działają bez sygnału."
+  "health.verdictNoIngest": "Wejście nic nie odbiera. Cele działają bez sygnału.",
+  "meters.clipAnnounce": "Przesterowanie na ścieżce {n}",
+  "rend.signalNotEncoding": "Nie koduje · startuje, gdy pierwszy sygnał wejdzie na żywo",
+  "set.degradedThresholds": "Progi",
+  "set.degradedSummaryOn": "Włączone: przełącza, gdy poniżej {bitrate} kbps, powyżej {rtt} ms lub strata powyżej {loss}%",
+  "set.degradedSummaryOff": "Wyłączone. Po włączeniu: poniżej {bitrate} kbps, powyżej {rtt} ms lub strata powyżej {loss}%",
+  "sources.acceptingLabel": "Przyjmuje",
+  "sources.enabledConsequence": "Enkodery mogą połączyć się z tym źródłem.",
+  "sources.disabledConsequence": "Enkodery łączące się tutaj są odrzucane, dopóki to nie zostanie włączone.",
+  "route.nothingToSave": "Nic do zapisania, dopóki trasa się nie zmieni."
 }

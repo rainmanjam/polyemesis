@@ -31,3 +31,18 @@ export function urlCarriesCredential(url: string): boolean {
   const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url)?.[1] ?? "";
   return authority.includes("@");
 }
+
+/** The SRT address, split for display (A31): host:port, which the encoder needs
+ *  and which is shown in clear, and the query string, which carries the
+ *  passphrase and the stream ID and stays masked. Only SRT is split. Anything
+ *  with userinfo before the host is returned whole, so the host is never shown
+ *  next to a secret it could be read with. Null means: mask the whole string. */
+export function srtAddressParts(url: string): { address: string; query: string } | null {
+  if (!/^srt:\/\//i.test(url)) return null;
+  const q = url.indexOf("?");
+  if (q < 0) return null;
+  const address = url.slice(0, q);
+  if (address.includes("@")) return null;
+  return { address, query: url.slice(q) };
+}
+

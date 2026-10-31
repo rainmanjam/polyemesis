@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} в эфире · {stopped} остановлено · {failing} с ошибкой",
   "shell.skipToContent": "Перейти к содержимому",
   "chatpage.notConnected": "Чат не подключён",
-  "health.verdictNoIngest": "Вход ничего не получает. Назначения работают, но сигнала нет."
+  "health.verdictNoIngest": "Вход ничего не получает. Назначения работают, но сигнала нет.",
+  "meters.clipAnnounce": "Перегрузка на дорожке {n}",
+  "rend.signalNotEncoding": "Не кодирует · запустится, когда первый поток выйдет в эфир",
+  "set.degradedThresholds": "Пороги",
+  "set.degradedSummaryOn": "Вкл.: переключает, если ниже {bitrate} кбит/с, выше {rtt} мс или потери больше {loss}%",
+  "set.degradedSummaryOff": "Выкл. Если включить: ниже {bitrate} кбит/с, выше {rtt} мс или потери больше {loss}%",
+  "sources.acceptingLabel": "Принимает",
+  "sources.enabledConsequence": "Энкодеры могут подключаться к этому источнику.",
+  "sources.disabledConsequence": "Энкодеры, подключающиеся сюда, отклоняются, пока это не включено.",
+  "route.nothingToSave": "Нечего сохранять, пока маршрут не изменён."
 }

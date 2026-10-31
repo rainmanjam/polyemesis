@@ -544,3 +544,25 @@ describe("a matrix Save never moves a polarity to another cell", () => {
     expect(merged.filter((c) => c.invert)).toEqual([]);
   });
 });
+
+describe("RoutingPage: the Save reason and the destination list (A28, A29)", () => {
+  it("links the greyed header Save to the sentence that says why it is greyed", async () => {
+    // A28. Save is disabled until a route changes, and a title on a disabled
+    // button reaches nobody (button.tsx pointer-events-none). The reason is
+    // visible text the button points at.
+    await renderPage();
+    const save = (await screen.findAllByRole("button", { name: "Save" }))[0] as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    const reasonId = save.getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId as string)?.textContent).toContain("Nothing to save");
+  });
+
+  it("does not cut a destination's routing summary short", async () => {
+    // A29. "Tracks 1, 2, 3, 4 → stereo" was clipped to a few letters and the
+    // music status beside it was lost. The summary wraps now.
+    await renderPage();
+    const summary = await screen.findByText("Tracks 1, 2");
+    expect(summary.className).not.toMatch(/\btruncate\b/);
+  });
+});

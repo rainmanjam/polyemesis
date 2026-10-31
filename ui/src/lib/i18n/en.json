@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} live · {stopped} stopped · {failing} failing",
   "shell.skipToContent": "Skip to content",
   "chatpage.notConnected": "Chat not connected",
-  "health.verdictNoIngest": "Ingest is not receiving. Destinations are up with no feed behind them."
+  "health.verdictNoIngest": "Ingest is not receiving. Destinations are up with no feed behind them.",
+  "meters.clipAnnounce": "Clipping on track {n}",
+  "rend.signalNotEncoding": "Not encoding · starts when the first feed goes live",
+  "set.degradedThresholds": "Thresholds",
+  "set.degradedSummaryOn": "On: switches away when below {bitrate} kbps, above {rtt} ms, or over {loss}% loss",
+  "set.degradedSummaryOff": "Off. If switched on: below {bitrate} kbps, above {rtt} ms, or over {loss}% loss",
+  "sources.acceptingLabel": "Accepting",
+  "sources.enabledConsequence": "Encoders can connect to this source.",
+  "sources.disabledConsequence": "Encoders that connect here are refused until this is on.",
+  "route.nothingToSave": "Nothing to save until a route changes."
 }

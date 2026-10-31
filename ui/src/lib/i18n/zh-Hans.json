@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} 推流中 · {stopped} 已停止 · {failing} 失败",
   "shell.skipToContent": "跳到正文",
   "chatpage.notConnected": "聊天未连接",
-  "health.verdictNoIngest": "输入没有收到信号。目标已在推流，但没有画面输入。"
+  "health.verdictNoIngest": "输入没有收到信号。目标已在推流，但没有画面输入。",
+  "meters.clipAnnounce": "音轨 {n} 削波",
+  "rend.signalNotEncoding": "未编码 · 第一路信号上线后开始",
+  "set.degradedThresholds": "阈值",
+  "set.degradedSummaryOn": "开启：低于 {bitrate} kbps、高于 {rtt} ms 或丢包超过 {loss}% 时切换",
+  "set.degradedSummaryOff": "关闭。开启后：低于 {bitrate} kbps、高于 {rtt} ms 或丢包超过 {loss}%",
+  "sources.acceptingLabel": "接收中",
+  "sources.enabledConsequence": "编码器可以连接到此源。",
+  "sources.disabledConsequence": "在开启之前，连接到此处的编码器会被拒绝。",
+  "route.nothingToSave": "在路由更改之前没有可保存的内容。"
 }

@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} 송출 중 · {stopped} 중지 · {failing} 실패",
   "shell.skipToContent": "본문으로 건너뛰기",
   "chatpage.notConnected": "채팅 연결 안 됨",
-  "health.verdictNoIngest": "입력이 수신되지 않습니다. 대상은 켜져 있지만 들어오는 신호가 없습니다."
+  "health.verdictNoIngest": "입력이 수신되지 않습니다. 대상은 켜져 있지만 들어오는 신호가 없습니다.",
+  "meters.clipAnnounce": "트랙 {n} 클리핑 중",
+  "rend.signalNotEncoding": "인코딩 안 함 · 첫 피드가 라이브되면 시작합니다",
+  "set.degradedThresholds": "임곗값",
+  "set.degradedSummaryOn": "켜짐: {bitrate} kbps 미만, {rtt} ms 초과 또는 손실 {loss}% 초과 시 전환합니다",
+  "set.degradedSummaryOff": "꺼짐. 켜면: {bitrate} kbps 미만, {rtt} ms 초과 또는 손실 {loss}% 초과",
+  "sources.acceptingLabel": "수신 중",
+  "sources.enabledConsequence": "인코더가 이 소스에 연결할 수 있습니다.",
+  "sources.disabledConsequence": "여기에 연결하는 인코더는 이것을 켤 때까지 거부됩니다.",
+  "route.nothingToSave": "경로를 바꾸기 전까지 저장할 내용이 없습니다."
 }

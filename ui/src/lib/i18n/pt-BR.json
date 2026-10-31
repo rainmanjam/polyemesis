@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} no ar · {stopped} parados · {failing} com falha",
   "shell.skipToContent": "Pular para o conteúdo",
   "chatpage.notConnected": "Chat não conectado",
-  "health.verdictNoIngest": "A entrada não recebe nada. Os destinos estão no ar sem sinal."
+  "health.verdictNoIngest": "A entrada não recebe nada. Os destinos estão no ar sem sinal.",
+  "meters.clipAnnounce": "Clipagem na faixa {n}",
+  "rend.signalNotEncoding": "Não está codificando · inicia quando o primeiro feed entrar no ar",
+  "set.degradedThresholds": "Limites",
+  "set.degradedSummaryOn": "Ligado: troca quando abaixo de {bitrate} kbps, acima de {rtt} ms ou perda acima de {loss}%",
+  "set.degradedSummaryOff": "Desligado. Se ligado: abaixo de {bitrate} kbps, acima de {rtt} ms ou perda acima de {loss}%",
+  "sources.acceptingLabel": "Aceitando",
+  "sources.enabledConsequence": "Codificadores podem se conectar a esta fonte.",
+  "sources.disabledConsequence": "Codificadores que se conectam aqui são recusados até isto ser ligado.",
+  "route.nothingToSave": "Nada a salvar até que uma rota mude."
 }

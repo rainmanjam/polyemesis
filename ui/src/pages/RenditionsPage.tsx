@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Cpu,
@@ -43,6 +43,8 @@ import { PageHeader } from "@/components/AppLayout";
 import { Experimental } from "@/components/Experimental";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { Stat } from "@/components/signature/Stat";
+import { DisabledReason } from "@/components/DisabledReason";
+import { disabledDescribedBy } from "@/lib/disabledReason";
 import { useLiveData } from "@/hooks/useLiveData";
 import { api } from "@/lib/api";
 import { duration, kbps } from "@/lib/format";
@@ -386,7 +388,10 @@ function renditionSignal(
   }
   if (live?.error) return { tone: "down", label: t("rend.signalError") };
   if (enabledUsers === 0) return { tone: "idle", label: t("rend.signalIdle") };
-  return { tone: "warn", label: t("state.starting") };
+  // A10: a feed wants this rendition but no encode exists yet. Nothing is
+  // requested from the encoder until a feed goes live, so this is not a start
+  // in progress. "Starting" is reserved for a process that is reported.
+  return { tone: "idle", label: t("rend.signalNotEncoding") };
 }
 
 export function RenditionsPage() {
@@ -649,12 +654,14 @@ function DestChip({ dest }: { dest: DestStatus }) {
   const stateLabel = useStateLabel();
   const tone: SignalTone = dest.enabled ? toneForState(dest.process?.state) : "idle";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
-      title={dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
-    >
+    <span className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-1.5 py-0.5 text-sm">
       <StatusDot tone={tone} size="sm" />
       <span className="max-w-40 truncate">{dest.name}</span>
+      {/* A34: the state in words. A dot alone needed a legend nobody had, and
+          a hover title never reaches a touch screen. */}
+      <span className="text-muted-foreground">
+        {dest.enabled ? stateLabel(dest.process?.state) : t("state.disabled")}
+      </span>
     </span>
   );
 }
@@ -693,6 +700,8 @@ export function RenditionCard({
   const total = users ? users.length : view.destinations;
   const enabled = users ? users.filter((d) => d.enabled).length : view.enabledDestinations;
   const signal = renditionSignal(t, stateLabel, live, enabled);
+  const restartReasonId = useId();
+  const restartReason = live?.process ? null : t("rend.noProcessToRestart");
   const cost = encodeCost(t, r, encoder, source, cores, hardwareExists);
   const proc = live?.process;
   // A saved rendition goes stale: the card was swapped, the driver upgraded,
@@ -804,6 +813,7 @@ export function RenditionCard({
             size="sm"
             onClick={onRestart}
             disabled={busy || !proc}
+            aria-describedby={disabledDescribedBy(restartReasonId, restartReason)}
             title={proc ? t("rend.restartEncode") : t("rend.notRunning")}
           >
             {busy ? <Loader2 className="animate-spin" /> : <RotateCw />} {t("common.restart")}
@@ -815,19 +825,15 @@ export function RenditionCard({
               says "not reported" rather than "not running" deliberately: `proc`
               comes from the install-wide status socket, which on a
               multi-programme install describes whichever engine spoke last. */}
-          {!proc && (
-            <span className="text-sm text-muted-foreground" data-testid="restart-reason">
-              {t("rend.noProcessToRestart")}
-            </span>
-          )}
+          <DisabledReason id={restartReasonId} reason={restartReason} />
+          {/* A33: Delete is a labelled row action, not an icon beside Restart. */}
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="sm"
             className="ml-auto text-muted-foreground hover:text-down"
             onClick={onDelete}
-            aria-label={t("sources.deleteAria", { name: r.name })}
           >
-            <Trash2 />
+            <Trash2 /> {t("common.delete")}
           </Button>
         </div>
       </CardContent>

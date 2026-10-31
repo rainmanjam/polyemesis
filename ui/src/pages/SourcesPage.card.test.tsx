@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { SourceCard } from "./SourcesPage";
 import type { Settings, SourceView } from "@/lib/types";
@@ -118,3 +118,80 @@ describe("SourceCard, on a pull ingest", () => {
     expect(screen.queryByLabelText("Source URL")).toBeNull();
   });
 });
+
+describe("SourceCard: Add destination stays on this programme (A30)", () => {
+  it("calls back with the card's own source instead of linking to Dashboard", () => {
+    // A30. The receiving card's button used to be a link to "/", so the operator
+    // landed on Dashboard with the source they had been looking at forgotten.
+    // It is now a button that opens the dialog on this programme.
+    let asked = 0;
+    const source = {
+      id: 7,
+      name: "Studio B",
+      enabled: true,
+      ingest: { mode: "srt", srt: { passphrase: "", latencyMs: 200 }, rtmp: { app: "live", streamKey: "" } },
+      token: "EXAMPLE-TOKEN-0000000000",
+      position: 1,
+      createdAt: "",
+      updatedAt: "",
+      publishUrls: {},
+      isDefault: false,
+      tokenEnforced: true,
+      publishing: true,
+      running: true,
+      destinations: 0,
+      renditions: 0,
+    } as unknown as SourceView;
+    render(
+      <SourceCard
+        source={source}
+        busy={false}
+        onPatch={() => {}}
+        onRotate={() => {}}
+        onDelete={() => {}}
+        onAddDestination={() => {
+          asked += 1;
+        }}
+      />,
+    );
+    const add = screen.getByRole("button", { name: "Add destination" });
+    expect(add.tagName).toBe("BUTTON");
+    fireEvent.click(add);
+    expect(asked).toBe(1);
+  });
+});
+
+describe("SourceCard: the enable switch says what it does (A33)", () => {
+  // A33. The switch had only an aria-label, so a sighted operator saw a bare
+  // toggle with no word for its state and no line for its consequence.
+  const card = (enabled: boolean) =>
+    ({
+      id: 8,
+      name: "Main",
+      enabled,
+      ingest: { mode: "srt", srt: { passphrase: "", latencyMs: 200 }, rtmp: { app: "live", streamKey: "" } },
+      token: "EXAMPLE-TOKEN-0000000000",
+      position: 0,
+      createdAt: "",
+      updatedAt: "",
+      publishUrls: {},
+      isDefault: true,
+      tokenEnforced: true,
+      publishing: false,
+      running: true,
+      destinations: 0,
+      renditions: 0,
+    }) as unknown as SourceView;
+
+  it("states Accepting and what that means, while the source is on", () => {
+    render(<SourceCard source={card(true)} busy={false} onPatch={() => {}} onRotate={() => {}} onDelete={() => {}} />);
+    expect(screen.getByText("Accepting")).toBeTruthy();
+    expect(screen.getByText("Encoders can connect to this source.")).toBeTruthy();
+  });
+
+  it("says what a switched-off source does to an encoder, in words", () => {
+    render(<SourceCard source={card(false)} busy={false} onPatch={() => {}} onRotate={() => {}} onDelete={() => {}} />);
+    expect(screen.getByText("Encoders that connect here are refused until this is on.")).toBeTruthy();
+  });
+});
+

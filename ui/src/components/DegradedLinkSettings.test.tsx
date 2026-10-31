@@ -14,6 +14,25 @@ import type { DegradedSettings } from "@/lib/types";
 afterEach(cleanup);
 
 describe("DegradedLinkSettings", () => {
+  it("collapses the thresholds behind a disclosure on Sources, with the values in the summary", () => {
+    // A32. On the Sources page four numeric fields and two sentences sat open
+    // under every source, about 900px of inactive form on three sources. The
+    // thresholds stay one click away and the summary says what they are, so
+    // the reason to read them before switching on is still on the screen.
+    render(<DegradedLinkSettings collapsible value={{ enabled: false }} onChange={() => {}} />);
+    expect(screen.queryAllByRole("spinbutton")).toHaveLength(0);
+    const toggle = screen.getByRole("button", { name: /thresholds/i });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain("800");
+    fireEvent.click(toggle);
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(4);
+  });
+
+  it("opens the thresholds on its own when the switch is on, even collapsible", () => {
+    render(<DegradedLinkSettings collapsible value={{ enabled: true }} onChange={() => {}} />);
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(4);
+  });
+
   it("shows the thresholds while off too, so they can be read before switching on", () => {
     render(<DegradedLinkSettings value={{ enabled: false }} onChange={() => {}} />);
     expect((screen.getByRole("switch") as HTMLElement).getAttribute("aria-checked")).toBe("false");

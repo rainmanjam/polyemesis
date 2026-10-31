@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} 配信中 · {stopped} 停止 · {failing} 失敗",
   "shell.skipToContent": "本文へスキップ",
   "chatpage.notConnected": "チャットは未接続",
-  "health.verdictNoIngest": "入力が受信されていません。配信先は稼働中ですが、映像が届いていません。"
+  "health.verdictNoIngest": "入力が受信されていません。配信先は稼働中ですが、映像が届いていません。",
+  "meters.clipAnnounce": "トラック {n} でクリップしています",
+  "rend.signalNotEncoding": "エンコードしていません · 最初のフィードがライブになると開始します",
+  "set.degradedThresholds": "しきい値",
+  "set.degradedSummaryOn": "オン: {bitrate} kbps を下回る、{rtt} ms を超える、または損失 {loss}% を超えると切り替えます",
+  "set.degradedSummaryOff": "オフ。オンにした場合: {bitrate} kbps 未満、{rtt} ms 超、または損失 {loss}% 超",
+  "sources.acceptingLabel": "受付中",
+  "sources.enabledConsequence": "エンコーダーはこのソースに接続できます。",
+  "sources.disabledConsequence": "ここに接続するエンコーダーは、これをオンにするまで拒否されます。",
+  "route.nothingToSave": "ルートを変更するまで保存するものはありません。"
 }

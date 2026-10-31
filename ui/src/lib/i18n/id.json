@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} live · {stopped} berhenti · {failing} gagal",
   "shell.skipToContent": "Lewati ke konten",
   "chatpage.notConnected": "Chat belum terhubung",
-  "health.verdictNoIngest": "Masukan tidak menerima apa pun. Tujuan aktif tanpa sinyal."
+  "health.verdictNoIngest": "Masukan tidak menerima apa pun. Tujuan aktif tanpa sinyal.",
+  "meters.clipAnnounce": "Clipping di trek {n}",
+  "rend.signalNotEncoding": "Tidak mengenkode · mulai saat feed pertama tayang langsung",
+  "set.degradedThresholds": "Ambang batas",
+  "set.degradedSummaryOn": "Aktif: beralih jika di bawah {bitrate} kbps, di atas {rtt} md, atau kehilangan di atas {loss}%",
+  "set.degradedSummaryOff": "Nonaktif. Jika diaktifkan: di bawah {bitrate} kbps, di atas {rtt} md, atau kehilangan di atas {loss}%",
+  "sources.acceptingLabel": "Menerima",
+  "sources.enabledConsequence": "Encoder dapat terhubung ke sumber ini.",
+  "sources.disabledConsequence": "Encoder yang terhubung di sini ditolak sampai ini diaktifkan.",
+  "route.nothingToSave": "Tidak ada yang disimpan sampai rute berubah."
 }

@@ -107,6 +107,16 @@ describe("RouteOverview editing", () => {
     expect((cell as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("says why a matrix cell is read-only, through the cell's description", () => {
+    // A28. The reason used to be a title on a disabled button, which no pointer,
+    // keyboard or screen reader ever reaches. It is now the cell's description.
+    renderGrid();
+    const cell = screen.getByRole("button", { name: /Host mic to Archive/i });
+    const reasonId = cell.getAttribute("aria-describedby");
+    expect(reasonId).toBeTruthy();
+    expect(document.getElementById(reasonId as string)?.textContent).toContain("Mix matrix destination");
+  });
+
   it("offers the fix on the selected row's music hit, and calls it", () => {
     const props = renderGrid();
     fireEvent.click(screen.getByRole("button", { name: /Remove from YouTube — full mix/i }));

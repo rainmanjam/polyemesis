@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} live · {stopped} gestopt · {failing} mislukt",
   "shell.skipToContent": "Naar inhoud springen",
   "chatpage.notConnected": "Chat niet verbonden",
-  "health.verdictNoIngest": "Ingang ontvangt niets. Bestemmingen draaien zonder signaal."
+  "health.verdictNoIngest": "Ingang ontvangt niets. Bestemmingen draaien zonder signaal.",
+  "meters.clipAnnounce": "Clipping op spoor {n}",
+  "rend.signalNotEncoding": "Codeert niet · start zodra de eerste feed live gaat",
+  "set.degradedThresholds": "Drempelwaarden",
+  "set.degradedSummaryOn": "Aan: schakelt over bij minder dan {bitrate} kbps, meer dan {rtt} ms of meer dan {loss}% verlies",
+  "set.degradedSummaryOff": "Uit. Bij inschakelen: minder dan {bitrate} kbps, meer dan {rtt} ms of meer dan {loss}% verlies",
+  "sources.acceptingLabel": "Neemt aan",
+  "sources.enabledConsequence": "Encoders kunnen verbinding maken met deze bron.",
+  "sources.disabledConsequence": "Encoders die hier verbinding maken, worden geweigerd zolang dit uit staat.",
+  "route.nothingToSave": "Niets om op te slaan totdat een route verandert."
 }

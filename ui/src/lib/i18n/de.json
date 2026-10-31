@@ -3187,5 +3187,14 @@
   "onAir.counts": "{live} live · {stopped} gestoppt · {failing} mit Fehler",
   "shell.skipToContent": "Zum Inhalt springen",
   "chatpage.notConnected": "Chat nicht verbunden",
-  "health.verdictNoIngest": "Eingang empfängt nichts. Die Ziele laufen, haben aber kein Signal."
+  "health.verdictNoIngest": "Eingang empfängt nichts. Die Ziele laufen, haben aber kein Signal.",
+  "meters.clipAnnounce": "Übersteuerung auf Spur {n}",
+  "rend.signalNotEncoding": "Kodiert nicht · startet, sobald der erste Feed live geht",
+  "set.degradedThresholds": "Schwellenwerte",
+  "set.degradedSummaryOn": "Ein: wechselt weg, wenn unter {bitrate} kbps, über {rtt} ms oder über {loss} % Verlust",
+  "set.degradedSummaryOff": "Aus. Bei Einschaltung: unter {bitrate} kbps, über {rtt} ms oder über {loss} % Verlust",
+  "sources.acceptingLabel": "Nimmt an",
+  "sources.enabledConsequence": "Encoder können sich mit dieser Quelle verbinden.",
+  "sources.disabledConsequence": "Encoder, die sich hier verbinden, werden abgewiesen, bis dies eingeschaltet ist.",
+  "route.nothingToSave": "Nichts zu speichern, bis sich eine Route ändert."
 }
