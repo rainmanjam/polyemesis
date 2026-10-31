@@ -9,6 +9,25 @@ import (
 // ticksPerSecond is the MPEG-TS presentation clock, 90 kHz.
 const ticksPerSecond = 90000
 
+// slotTicks is one CEA-608 pair slot: 1/30 s of the presentation clock. The
+// field-1 channel carries about 30 pairs a second, so one slot per 33 ms is the
+// rate a 608 decoder expects, whatever the frame rate of the picture.
+const slotTicks = ticksPerSecond / 30
+
+// slotWindow is the reorder lookahead, in slots. A slot is final once a picture
+// at least this many slots later has claimed its own, because B-frame reordering
+// only looks back a few pictures. The lookahead is about a quarter of a second,
+// which the caption lag already dwarfs.
+const slotWindow = 8
+
+// slotOf maps a presentation time to its slot.
+func slotOf(pts int64) int64 {
+	if pts < 0 {
+		return 0
+	}
+	return pts / slotTicks
+}
+
 // Cue is one caption on the stream's presentation timeline. Times are 90 kHz
 // ticks, the same clock the picture timestamps use, so a cue lands on the
 // picture whose timestamp it matches and nowhere else.
@@ -24,20 +43,40 @@ type event struct {
 	pairs []Pair
 }
 
-// Schedule turns caption cues into one CEA-608 byte pair per picture.
+// Schedule turns caption cues into CEA-608 byte pairs, keyed on picture
+// timestamps.
 //
-// The 608 channel carries about one pair per field, so a pop-on script of forty
-// or fifty pairs takes a couple of seconds to go out. The schedule is therefore
-// a queue: cues add their script at their start time and their erase at their
-// end time, and each picture takes the next pair off the front. Pairs keep
-// their order, so a caption's erase never overtakes its own text.
+// The pair for a picture is a function of its presentation time, not of the
+// order pictures arrive in. That matters for B-frames: an encoder emits a
+// picture with a later timestamp before the one it precedes on screen, so a
+// schedule that counted arrivals would hand the captions to frames in decode
+// order and show them out of sequence. Keying on the clock gives every picture
+// the pair for its own slot, however the pictures are interleaved.
 //
-// A cue registered after its start time is not dropped. It goes out at the next
-// picture, late, which is the honest outcome when captioning lags the picture.
+// The queue behind the slots is ordered. Cues add their script at their start
+// and their erase at their end, and each slot takes the next pair off the front,
+// so a caption's erase never overtakes its own text. A cue registered after its
+// start goes out in the next free slot, late, and is not dropped.
 type Schedule struct {
 	resendEvery int64
 	events      []event
 	queue       []Pair
+
+	// claimed holds the slots a picture has been seen on. Only a claimed slot
+	// takes a pair from the queue, so a stretch of time with no pictures in it
+	// (before the first picture, or after a dropped frame) costs nothing.
+	claimed    map[int64]bool
+	maxClaimed int64
+	anyClaimed bool
+
+	// cursor is the next slot to finalise. slots holds the finalised pair for
+	// each slot below cursor, so a picture that arrives out of order still gets
+	// its own slot's answer.
+	cursor int64
+	slots  map[int64]Pair
+	// used records slots already given to a picture. A slot is one pair, so a
+	// second picture that maps to it gets the null pair and not a copy.
+	used map[int64]bool
 }
 
 // NewSchedule returns an empty schedule. A positive resendEvery re-sends each
@@ -45,7 +84,12 @@ type Schedule struct {
 // joins an HLS stream mid-caption sees it within one interval. Zero disables
 // the resend.
 func NewSchedule(resendEvery time.Duration) *Schedule {
-	return &Schedule{resendEvery: int64(resendEvery.Seconds() * ticksPerSecond)}
+	return &Schedule{
+		resendEvery: int64(resendEvery.Seconds() * ticksPerSecond),
+		claimed:     make(map[int64]bool),
+		slots:       make(map[int64]Pair),
+		used:        make(map[int64]bool),
+	}
 }
 
 // Add registers a cue. Blank text schedules nothing, so an empty line never
@@ -72,21 +116,68 @@ func (s *Schedule) insert(e event) {
 	s.events[i] = e
 }
 
-// NextPair returns the pair for the picture with presentation time pts. Call it
-// once per picture, in the order pictures are injected. Every event due at or
-// before pts moves into the queue first, then the front pair goes out, and the
-// null pair is sent when the queue is empty.
-func (s *Schedule) NextPair(pts int64) Pair {
-	n := 0
-	for n < len(s.events) && s.events[n].at <= pts {
-		s.queue = append(s.queue, s.events[n].pairs...)
-		n++
+// Claim records that a picture exists at pts. The injector claims every picture
+// when it first sees it, before any of them are emitted, so that reordering
+// within the lookahead is visible to the slots that depend on it.
+func (s *Schedule) Claim(pts int64) {
+	k := slotOf(pts)
+	s.claimed[k] = true
+	if !s.anyClaimed || k > s.maxClaimed {
+		s.maxClaimed = k
+		s.anyClaimed = true
 	}
-	s.events = s.events[n:]
-	if len(s.queue) == 0 {
+}
+
+// Final reports whether the pair for pts can no longer change: enough later
+// pictures have been claimed that no picture can still arrive on its slot.
+func (s *Schedule) Final(pts int64) bool {
+	return s.anyClaimed && slotOf(pts) <= s.maxClaimed-slotWindow
+}
+
+// PairAt returns the pair for the picture presented at pts. It claims the slot
+// and finalises every slot up to it, then answers for that slot. A picture
+// that arrives out of order after its slot is final still gets its own answer,
+// and a second picture on the same slot gets the null pair.
+func (s *Schedule) PairAt(pts int64) Pair {
+	s.Claim(pts)
+	k := slotOf(pts)
+	s.finalise(k)
+	p, ok := s.slots[k]
+	if !ok || p == nullPair || s.used[k] {
 		return nullPair
 	}
-	p := s.queue[0]
-	s.queue = s.queue[1:]
+	s.used[k] = true
 	return p
+}
+
+// finalise answers every slot up to and including last, in order. A claimed slot
+// takes the next pair from the queue, and an unclaimed one takes nothing.
+func (s *Schedule) finalise(last int64) {
+	if last < s.cursor {
+		return
+	}
+	// A long gap is not worth walking slot by slot. Jump to the window before the
+	// request; nothing in the skipped stretch can still be claimed in order.
+	if last-s.cursor > slotWindow {
+		s.cursor = last - slotWindow
+	}
+	for ; s.cursor <= last; s.cursor++ {
+		old := s.cursor - slotWindow
+		delete(s.slots, old)
+		delete(s.used, old)
+		delete(s.claimed, old)
+		now := s.cursor * slotTicks
+		n := 0
+		for n < len(s.events) && s.events[n].at <= now {
+			s.queue = append(s.queue, s.events[n].pairs...)
+			n++
+		}
+		s.events = s.events[n:]
+		p := nullPair
+		if s.claimed[s.cursor] && len(s.queue) > 0 {
+			p = s.queue[0]
+			s.queue = s.queue[1:]
+		}
+		s.slots[s.cursor] = p
+	}
 }

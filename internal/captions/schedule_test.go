@@ -10,12 +10,12 @@ import (
 // picture at a time, so these tests step pictures the way the injector does.
 const tick30 = 3003
 
-// drive feeds NextPair once per picture from start to end (exclusive) and
-// returns every pair it produced, in order.
+// drive asks for the pair of every picture from start to end (exclusive), in
+// presentation order, and returns the pairs in that order.
 func drive(s *Schedule, start, end, step int64) []Pair {
 	var out []Pair
 	for pts := start; pts < end; pts += step {
-		out = append(out, s.NextPair(pts))
+		out = append(out, s.PairAt(pts))
 	}
 	return out
 }
@@ -38,14 +38,14 @@ func TestNullPairFillsEveryPictureWhileNothingIsScheduled(t *testing.T) {
 func TestPopOnScriptWaitsForItsStartTimeBeforeAnyPairGoesOut(t *testing.T) {
 	s := NewSchedule(0)
 	s.Add(Cue{StartPTS: 9000, EndPTS: 90000, Text: "HELLO"})
-	if got := s.NextPair(0); got != nullPair {
+	if got := s.PairAt(0); got != nullPair {
 		t.Fatalf("pair before the start time = %v, want the null pair", got)
 	}
-	if got := s.NextPair(8999); got != nullPair {
+	if got := s.PairAt(8999); got != nullPair {
 		t.Fatalf("pair one tick early = %v, want the null pair", got)
 	}
 	want := PopOnScript("HELLO")[0]
-	if got := s.NextPair(9000); got != want {
+	if got := s.PairAt(9000); got != want {
 		t.Fatalf("first pair at start = %v, want RCL %v", got, want)
 	}
 }
@@ -109,11 +109,51 @@ func TestResendRepeatsThePopOnScriptWhileTheCueIsOnScreen(t *testing.T) {
 // that it is not lost.
 func TestLateCueIsSentAtTheNextPictureRatherThanDropped(t *testing.T) {
 	s := NewSchedule(0)
-	s.NextPair(9000)
+	s.PairAt(9000)
 	s.Add(Cue{StartPTS: 0, EndPTS: 90000, Text: "LATE"})
 	first := PopOnScript("LATE")[0]
-	if got := s.NextPair(12000); got != first {
+	if got := s.PairAt(12000); got != first {
 		t.Fatalf("late cue first pair = %v, want %v", got, first)
+	}
+}
+
+// TestPairsFollowPresentationTimeWhateverTheArrivalOrder is the B-frame case. An
+// encoder sends a picture with a later timestamp before the one it precedes, so
+// the pictures arrive as 0, 6, 2, 4 for a display order of 0, 2, 4, 6. The
+// caption pairs must land on the pictures by timestamp, so the sequence of
+// pairs read back in display order is the same as when the pictures arrive in
+// display order.
+func TestPairsFollowPresentationTimeWhateverTheArrivalOrder(t *testing.T) {
+	cue := Cue{StartPTS: 0, EndPTS: 2 * 90000, Text: "CAPTIONS KEEP THEIR ORDER"}
+	const frame = 3000 // 30 fps in 90 kHz ticks
+
+	// The injector claims each picture as it arrives, before any is emitted, so
+	// the reorder window is visible to the slots. The test does the same.
+	inOrder := NewSchedule(0)
+	inOrder.Add(cue)
+	display := make(map[int64]Pair)
+	for k := int64(0); k <= 6; k++ {
+		inOrder.Claim(k * frame)
+	}
+	for k := int64(0); k <= 6; k++ {
+		display[k*frame] = inOrder.PairAt(k * frame)
+	}
+
+	decode := NewSchedule(0)
+	decode.Add(cue)
+	// All seven pictures exist; they only differ in when they arrive.
+	for k := int64(0); k <= 6; k++ {
+		decode.Claim(k * frame)
+	}
+	arrival := []int64{0, 6, 2, 4}
+	got := make(map[int64]Pair)
+	for _, pts := range arrival {
+		got[pts*frame] = decode.PairAt(pts * frame)
+	}
+	for pts := range got {
+		if got[pts] != display[pts] {
+			t.Fatalf("picture at PTS %d got %v in decode order, %v in display order", pts, got[pts], display[pts])
+		}
 	}
 }
 
