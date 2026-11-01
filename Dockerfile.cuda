@@ -154,9 +154,13 @@ ARG FFMPEG_ASSET=ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
 ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates tzdata wget xz-utils \
+      ca-certificates tzdata wget curl xz-utils \
  && rm -rf /var/lib/apt/lists/* \
- && wget -q --https-only -O /tmp/ff.tar.xz \
+ # curl, not wget, for the download: --proto/--proto-redir pin every hop of the
+ # redirect chain to https (SonarCloud docker:S6506). wget stays for the
+ # HEALTHCHECK below.
+ && curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --retry-all-errors \
+      -o /tmp/ff.tar.xz \
       "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BTBN_TAG}/${FFMPEG_ASSET}" \
  && echo "${FFMPEG_SHA256}  /tmp/ff.tar.xz" | sha256sum -c - \
  && mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild \
