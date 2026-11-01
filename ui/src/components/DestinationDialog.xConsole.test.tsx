@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
@@ -45,6 +45,14 @@ const stored = (over: Record<string, unknown>) => ({
   ...over,
 });
 
+// Radix's Select needs these, which jsdom does not provide.
+beforeAll(() => {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.releasePointerCapture = () => {};
+  window.HTMLElement.prototype.setPointerCapture = () => {};
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+});
+
 function open(destination: unknown) {
   return render(
     <DestinationDialog open onOpenChange={() => {}} destination={destination as never} onSaved={() => {}} />,
@@ -69,9 +77,35 @@ describe("the X console in the destination editor", () => {
     expect(updates[0].goLiveTitle).toBe("Sunday practice");
   });
 
+  // The go-live announcement (should_not_tweet, PROVISIONAL). Absent means the
+  // default, the first go-live of a show only; the operator's choice is saved.
+  // MUTATION: xGoLiveTweet left out of the save body. Observed: FAIL, the
+  // body carried no xGoLiveTweet.
+  it("loads the default go-live announcement and saves the operator's choice", async () => {
+    open(stored({}));
+    const trigger = (await waitFor(() => document.getElementById("x-go-live-tweet"))) as HTMLElement;
+    expect(trigger.textContent).toContain(en["wave3.x.tweet.first"]);
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: en["wave3.x.tweet.never"] }));
+    // The picker hides the rest of the dialog while it is open; wait for it to close.
+    await waitFor(() => expect(trigger.textContent).toContain(en["wave3.x.tweet.never"]));
+    fireEvent.click(await screen.findByRole("button", { name: en["common.save"] }));
+    await waitFor(() => expect(updates.length).toBe(1));
+    expect(updates[0].xGoLiveTweet).toBe("never");
+  });
+
+  // MUTATION: the stored value not loaded into the dialog. Observed: FAIL, the
+  // picker showed the default.
+  it("shows a stored every-go-live choice", async () => {
+    open(stored({ xGoLiveTweet: "every" }));
+    const trigger = (await waitFor(() => document.getElementById("x-go-live-tweet"))) as HTMLElement;
+    expect(trigger.textContent).toContain(en["wave3.x.tweet.every"]);
+  });
+
   it("shows no X console for another platform", async () => {
     open(stored({ platform: "twitch", url: "rtmp://live.twitch.tv/app", goLiveTitle: undefined }));
     await waitFor(() => expect(screen.getByRole("button", { name: en["common.save"] })).toBeTruthy());
     expect(document.getElementById("x-go-live-title")).toBeNull();
+    expect(document.getElementById("x-go-live-tweet")).toBeNull();
   });
 });

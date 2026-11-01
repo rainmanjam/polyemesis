@@ -731,6 +731,15 @@ type XPublish struct {
 	// ChatOption is nil when unset, which leaves the field out so X applies its
 	// default. Otherwise it must be 0 to 6.
 	ChatOption *int
+	// ShouldNotTweet suppresses the announcement post X makes on PUBLISH by
+	// default. False leaves the field out, so X posts as it always has.
+	//
+	// PROVISIONAL: should_not_tweet is a boolean in the PUBLISH body of the
+	// user-scoped state route (docs-x, publish-or-end-broadcast: "Set true to
+	// suppress the automatic announcement post. Default false"). X is gated
+	// until the app is whitelisted, so no live PUBLISH has confirmed it. END
+	// rejects the field with a 400, so it is never sent there.
+	ShouldNotTweet bool
 }
 
 // XPublishResult is what PUBLISH answered.
@@ -859,6 +868,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 			return nil, fmt.Errorf("chat option must be 0 to %d, which X documents", xChatOptionMax)
 		}
 		body["chat_option"] = *p.ChatOption
+	}
+	if p.ShouldNotTweet {
+		body["should_not_tweet"] = true
 	}
 	u, err := x.me(ctx, accessToken)
 	if err != nil {

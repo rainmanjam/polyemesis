@@ -854,7 +854,19 @@ destination lets its buffered tail air before it stops, and the answer carries
 `drainingSeconds`. `POST /destinations/{id}/stop?now=true` cuts the tail
 instead. It also cuts a tail that is already airing from an earlier stop, and
 then the answer has `"cut": true`. `now` must be `true` or `false`; anything else is `400`.
-`stop-all` and `DELETE` always cut.
+`stop-all` and `DELETE` always cut. A YouTube destination whose `captionMode` is
+`youtube_post` must have a `delaySeconds` of 30 or 60, and YouTube applies it as
+the broadcast's delay: polyemesis does not hold that destination's output back,
+and there is no tail to drain ([CAPTIONS.md](CAPTIONS.md)).
+
+**X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
+default, also what an absent or empty value means), `every` or `never`. X posts
+an announcement when a broadcast is published. Under `first` it does so on the
+first go-live after the destination is switched on, and the broadcasts
+polyemesis opens again after X ends one are published with `should_not_tweet`.
+`lifecycle.renewed` is `true` on such a broadcast. Any other value is `400`. A
+destination that is not X has the field removed on save, with a warning.
+PROVISIONAL: X Livestream is gated until the app is whitelisted.
 
 **`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
 it — no body, an empty object, or `"confirm": false`. It ends live broadcasts

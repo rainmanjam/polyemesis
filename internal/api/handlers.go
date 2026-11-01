@@ -2555,6 +2555,14 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 				"published, and %s takes its title from the go-live composer.", row.Platform))
 	}
 
+	// The X go-live announcement setting, the same: only an X PUBLISH reads it.
+	if row.Platform != db.PlatformX && row.XGoLiveTweet != "" {
+		row.XGoLiveTweet = ""
+		warnings = append(warnings, fmt.Sprintf(
+			"The X go-live announcement setting was removed: it is read only when an "+
+				"X broadcast is published, and %s posts no announcement.", row.Platform))
+	}
+
 	// THE CONNECTED ACCOUNT, AND WHOSE API ITS TOKEN IS SENT TO.
 	//
 	// account_id and platform are two independent columns and nothing compared

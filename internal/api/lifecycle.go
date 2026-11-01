@@ -429,7 +429,8 @@ func (c *lifecycleCoordinator) tellChat(platform db.Platform, accountID *int64, 
 func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.BroadcastLifecycler,
 	acct *db.PlatformAccount, d *db.Destination, broadcastID string, to oauth.BroadcastPhase) (*oauth.TransitionResult, error) {
 	if pub, ok := prov.(xPublisher); ok && d.Platform == db.PlatformX && to == oauth.PhaseLive {
-		r, err := pub.PublishBroadcast(ctx, acct.AccessToken, broadcastID, oauth.XPublish{Title: c.titleFor(d)})
+		r, err := pub.PublishBroadcast(ctx, acct.AccessToken, broadcastID,
+			oauth.XPublish{Title: c.titleFor(d), ShouldNotTweet: xShouldNotTweet(d)})
 		if err != nil {
 			return nil, err
 		}
@@ -440,6 +441,22 @@ func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.Broadc
 		return &oauth.TransitionResult{BroadcastID: broadcastID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
 	}
 	return prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, to)
+}
+
+// xShouldNotTweet is whether d's X PUBLISH suppresses X's announcement post, from
+// the destination's XGoLiveTweet setting: never posts, every always does, and the
+// default (first) posts on a show's first go-live only, so a broadcast opened by
+// renew within the same show (BroadcastControl.Renewed) is published quietly.
+// PROVISIONAL with should_not_tweet itself: X is gated until whitelisting.
+func xShouldNotTweet(d *db.Destination) bool {
+	switch d.XGoLiveTweetMode() {
+	case db.XTweetNever:
+		return true
+	case db.XTweetEveryGoLive:
+		return false
+	default:
+		return d.Lifecycle.Renewed
+	}
 }
 
 // broadcastPhase is one confirmed transition, as the events stream reports it.
@@ -659,6 +676,17 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	// column for every pre-announcing platform including YouTube) is REWRITTEN
 	// whenever a schedule moves, so a phase recorded against the id it used to
 	// carry would be attributed to a broadcast that is not the one on air.
+	if !d.Enabled && d.Platform == db.PlatformX && d.Lifecycle.Renewed {
+		// SWITCHING THE DESTINATION OFF ENDS THE SHOW, so the renewal marker goes
+		// with it and the next show's first go-live posts its announcement.
+		// Cleared here, before any branch below can return: a renewal whose open
+		// failed has no broadcast and is only held, and one that never aired goes
+		// quiet after one read. Both keep the rest of their block across the
+		// switch-off. One write, only when the marker is set.
+		if d = c.recordControl(d, d.Lifecycle.BroadcastID, func(b *db.BroadcastControl) { b.Renewed = false }); d == nil {
+			return
+		}
+	}
 	broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
 	if broadcastID == "" && d.Platform != db.PlatformX {
 		// X never announces ahead, so its mirror is never written by a schedule.
@@ -997,7 +1025,9 @@ func (c *lifecycleCoordinator) openOrHold(ctx context.Context, d *db.Destination
 // phase all describe the broadcast that just ended, and must not be carried
 // into the new show.
 func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.BroadcastCreator, d *db.Destination) {
-	cur := c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+	// Renewed survives the reset on purpose: the next broadcast is the same show
+	// going on, and its PUBLISH reads it (xShouldNotTweet).
+	cur := c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{Renewed: true} })
 	if cur == nil {
 		return
 	}

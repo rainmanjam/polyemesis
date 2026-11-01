@@ -26,3 +26,50 @@ func (d *DB) MigrateWave3XTitle() error {
 // post limit is used. PROVISIONAL until a live PUBLISH on a whitelisted app
 // confirms or corrects it.
 const XGoLiveTitleMax = 280
+
+// MigrateWave3XTweet adds destinations.x_go_live_tweet, when an X destination
+// wants X's announcement post as its broadcast is published (see
+// Destination.XGoLiveTweet). The default is the empty string, read as "first",
+// the first go-live of a show only. Idempotent, like every slot.
+func (d *DB) MigrateWave3XTweet() error {
+	has, err := columnExists(d.sql, "destinations", "x_go_live_tweet")
+	if err != nil {
+		return fmt.Errorf("inspect destinations columns: %w", err)
+	}
+	if has {
+		return nil
+	}
+	if _, err := d.sql.Exec(`ALTER TABLE destinations ADD COLUMN x_go_live_tweet TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add destinations.x_go_live_tweet: %w", err)
+	}
+	return nil
+}
+
+// The three X go-live announcement choices (Destination.XGoLiveTweet).
+const (
+	// XTweetFirstGoLive posts on the first go-live of a show only. The empty
+	// value means the same, so an upgraded row gets it.
+	XTweetFirstGoLive = "first"
+	// XTweetEveryGoLive posts on every go-live, renewals included: what X does
+	// when it is not told otherwise.
+	XTweetEveryGoLive = "every"
+	// XTweetNever never posts.
+	XTweetNever = "never"
+)
+
+func validXGoLiveTweet(v string) bool {
+	switch v {
+	case "", XTweetFirstGoLive, XTweetEveryGoLive, XTweetNever:
+		return true
+	}
+	return false
+}
+
+// XGoLiveTweetMode is the destination's announcement choice with the empty
+// value read as XTweetFirstGoLive.
+func (d *Destination) XGoLiveTweetMode() string {
+	if d == nil || d.XGoLiveTweet == "" {
+		return XTweetFirstGoLive
+	}
+	return d.XGoLiveTweet
+}

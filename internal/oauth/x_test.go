@@ -679,6 +679,33 @@ func TestXPublishOmitsTitleAndChatOptionWhenUnset(t *testing.T) {
 	}
 }
 
+// TestXPublishSuppressesTheAnnouncementPostOnlyWhenAsked: should_not_tweet
+// travels in the PUBLISH body as a JSON boolean true when the announcement is to
+// be suppressed, and is left out otherwise (TestXPublishOmitsTitleAndChatOptionWhenUnset
+// pins the bare body), so X's default of posting is what an unset field means.
+//
+// MUTATION: the should_not_tweet line in PublishBroadcast removed. Observed:
+// FAIL, the body had no should_not_tweet.
+func TestXPublishSuppressesTheAnnouncementPostOnlyWhenAsked(t *testing.T) {
+	var writes []string
+	x, _ := xCreateStub(t, &writes)
+	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+		XPublish{Title: "Sunday practice", ShouldNotTweet: true}); err != nil {
+		t.Fatalf("PublishBroadcast: %v", err)
+	}
+	if len(writes) != 1 || !strings.Contains(writes[0], `"should_not_tweet":true`) {
+		t.Fatalf("publish body = %v, want should_not_tweet:true", writes)
+	}
+	writes = writes[:0]
+	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+		XPublish{Title: "Sunday practice"}); err != nil {
+		t.Fatalf("PublishBroadcast: %v", err)
+	}
+	if len(writes) != 1 || strings.Contains(writes[0], "should_not_tweet") {
+		t.Fatalf("publish body = %v, want no should_not_tweet when the post is wanted", writes)
+	}
+}
+
 // TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest: X answers 400
 // to anything outside 0 to 6, so the refusal is made locally and costs nothing.
 func TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest(t *testing.T) {

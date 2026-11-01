@@ -368,6 +368,14 @@ export interface Destination {
    *  runs, so the server refuses a change while the destination is live. At most
    *  280 characters (X's post limit; X gives no exact number). */
   goLiveTitle?: string;
+  /** X only: when X's announcement post is made as polyemesis publishes the
+   *  X broadcast. "first" (also what absent means) posts on the first go-live
+   *  of a show only, not on the broadcasts polyemesis opens again after X ends
+   *  one while the destination stays on; "every" posts each time; "never"
+   *  never does. Sent as X's should_not_tweet, which is PROVISIONAL until the
+   *  app is whitelisted. "" is the default too, and is what a save sends for
+   *  a destination that is not X. */
+  xGoLiveTweet?: XGoLiveTweet | "";
   /** Read-only. True when a YouTube caption ingestion URL is stored for this
    *  destination's current stream key, which "youtube_post" needs before the
    *  destination may start. The URL itself is a credential and never leaves
@@ -2902,6 +2910,9 @@ export interface FacebookSettings {
  *  Everything here is a RECORD OF WHAT THE PLATFORM SAID, never a belief about
  *  what polyemesis asked for — which is what makes it worth showing an operator
  *  whose broadcast will not start. */
+/** When an X destination posts X's go-live announcement (Destination.xGoLiveTweet). */
+export type XGoLiveTweet = "first" | "every" | "never";
+
 export interface BroadcastControl {
   /** Which broadcast the rest of this describes. */
   broadcastId?: string;
@@ -2912,6 +2923,10 @@ export interface BroadcastControl {
   phase?: string;
   /** How many consecutive sweeps have failed. */
   attempts?: number;
+  /** X only: true when this broadcast was opened again within the same show,
+   *  after X ended the previous one while the destination stayed on. Cleared
+   *  when the destination is switched off. */
+  renewed?: boolean;
   /** What went wrong, in the operator's words, or absent when nothing has.
    *
    *  A fault here NEVER means the stream stopped: the server does not stop a

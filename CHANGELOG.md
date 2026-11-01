@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Added
 
+- **X go-live announcement: once per show by default (#3, PROVISIONAL).** An X destination has a
+  **Go-live announcement** setting in the X console (`xGoLiveTweet`): *on the first go-live of a
+  show only* (the default), *on every go-live*, or *never*. A show lasts while the destination is
+  on. The broadcasts polyemesis opens again within it, after X ends or times out the previous one,
+  are published with `should_not_tweet`, so a show no longer posts a fresh announcement on every
+  renewal. Switching the destination off ends the show. `lifecycle.renewed` marks a renewed
+  broadcast. Any other value is refused, and a destination that is not X has the setting removed
+  on save, with a warning. PROVISIONAL: `should_not_tweet` is a boolean in the PUBLISH body per
+  X's documentation, and X Livestream stays gated until the app is whitelisted. In all 15
+  languages.
 - **X console: a go-live title, the broadcast's state, and the Livestream gate (#3).** An X
   destination's editor shows whether X Livestream access is switched on (`POLYEMESIS_X_LIVESTREAM`;
   "needs X Livestream access" while it is off), where its X broadcast stands, and a go-live title.

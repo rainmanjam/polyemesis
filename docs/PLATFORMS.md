@@ -175,10 +175,24 @@ refuses a change then (HTTP 409). Turning the destination off ends the
 broadcast. After a publish the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
-**Publishing posts an announcement.** X's publish step makes an announcement
-post on the account by default, and polyemesis does not change that default, so
-every show that goes live through polyemesis, including a second show on the same
-destination, posts one. There is no setting to turn it off yet.
+**The go-live announcement, once per show by default.** X's publish step makes
+an announcement post on the account unless the publish asks it not to
+(`should_not_tweet`, PROVISIONAL until the app is whitelisted). The X console has
+a **Go-live announcement** setting with three choices:
+
+- **On the first go-live of a show only** (the default). A show lasts while the
+  destination stays on. The broadcasts polyemesis opens again within it, after X
+  ends or times out the previous one, go live without a post. Switching the
+  destination off ends the show, so the next time it goes live it posts.
+- **On every go-live**, renewals included, which is what X does by default.
+- **Never.**
+
+Schedules start and stop shows the same way: a start schedule switches the
+destination on, and a stop schedule switches it off. With both, each occurrence
+is a show of its own and posts once. With a start schedule only, the destination
+stays on between occurrences, so a later occurrence that gets a new broadcast is
+a renewal and does not post under the default. Choose **On every go-live** for
+that.
 
 When a broadcast ends while the destination is still on (X timed it out, or it
 was ended in X's own tooling), polyemesis opens the next one only after the

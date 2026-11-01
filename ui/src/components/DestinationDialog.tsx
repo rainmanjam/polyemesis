@@ -84,6 +84,7 @@ import type {
   SourceView,
   RenditionConcern,
   CaptionMode,
+  XGoLiveTweet,
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
 
@@ -656,6 +657,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   const [captionMode, setCaptionMode] = useState<CaptionMode>("off");
   // X only: the title sent when the X broadcast is published (see XConsolePanel).
   const [goLiveTitle, setGoLiveTitle] = useState("");
+  const [xGoLiveTweet, setXGoLiveTweet] = useState<XGoLiveTweet>("first");
   const [accountId, setAccountId] = useState<string>("none");
   // READ STATES, NOT BARE ARRAYS. #719.
   //
@@ -829,6 +831,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setMultitrack(destination.multitrack ?? false);
       setCaptionMode(destination.captionMode ?? "off");
       setGoLiveTitle(destination.goLiveTitle ?? "");
+      // Absent or empty is the server's default, the first go-live of a show only.
+      setXGoLiveTweet(destination.xGoLiveTweet || "first");
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -1107,6 +1111,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         captionMode: captionModeToSend(kind, platform, captionMode),
         // Only X sends a go-live title; every other platform clears it, as the server would.
         goLiveTitle: platform === "x" ? goLiveTitle : "",
+        // Only X reads the announcement setting; any other platform clears it,
+        // as the server would.
+        xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -2112,6 +2119,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               lifecycle={destination?.lifecycle}
               title={goLiveTitle}
               onTitleChange={setGoLiveTitle}
+              tweet={xGoLiveTweet}
+              onTweetChange={setXGoLiveTweet}
             />
           )}
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (

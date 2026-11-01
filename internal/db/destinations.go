@@ -196,6 +196,14 @@ type Destination struct {
 	// Only X reads it, so Validate refuses it on every other platform, and the
 	// update handler refuses a change while the destination is live.
 	GoLiveTitle string `json:"goLiveTitle,omitempty"`
+	// XGoLiveTweet is when X's announcement post is wanted as an X broadcast is
+	// published: "first" (also the empty value every upgraded row carries) on
+	// the first go-live of a show only, "every" on every go-live, or "never".
+	// A show is the time the destination stays switched on. The broadcasts
+	// polyemesis opens again within it, after X ends one or times it out, are
+	// published with should_not_tweet under "first". Only X reads it, so
+	// Validate refuses a value on every other platform. See XGoLiveTweetMode.
+	XGoLiveTweet string `json:"xGoLiveTweet,omitempty"`
 	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
 	// for this destination's CURRENT stream key, which the "youtube_post" mode
 	// needs before the destination may start. It is set by scanDestination and
@@ -714,6 +722,15 @@ func (d Destination) Validate() error {
 		}
 	}
 
+	// The X go-live announcement: one of three choices, and only X acts on it.
+	if d.XGoLiveTweet != "" {
+		if !validXGoLiveTweet(d.XGoLiveTweet) {
+			add("unknown X go-live announcement setting %q: use first, every or never", d.XGoLiveTweet)
+		} else if d.Platform != PlatformX {
+			add("the go-live announcement setting is read only by X; %s posts no announcement", d.Platform)
+		}
+	}
+
 	// The X go-live title: only X sends it, and X bounds it by its post length.
 	if d.GoLiveTitle != "" {
 		if d.Platform != PlatformX {
@@ -1124,7 +1141,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &captionKeyHash,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -1231,7 +1248,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile, caption_mode, go_live_title,
+	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
 	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
@@ -1271,7 +1288,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?,
+		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1568,9 +1585,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile, caption_mode, go_live_title,
+		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1581,7 +1598,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1682,7 +1699,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.
