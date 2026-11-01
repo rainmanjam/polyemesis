@@ -147,8 +147,8 @@ func (f *rolloverFake) listBroadcasts(w http.ResponseWriter, id string) {
 			PrivacyStatus   string `json:"privacyStatus"`
 		} `json:"status"`
 		ContentDetails struct {
-			BoundStreamID   string `json:"boundStreamId,omitempty"`
-			EnableAutoStart bool   `json:"enableAutoStart"`
+			BoundStreamID      string `json:"boundStreamId,omitempty"`
+			EnableAutoStart    bool   `json:"enableAutoStart"`
 			ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
 			MonitorStream      struct {
 				EnableMonitorStream    bool `json:"enableMonitorStream"`
