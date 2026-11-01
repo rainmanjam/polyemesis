@@ -13,7 +13,7 @@ under *Live captions*. The choices depend on the platform:
 | Platform | Routes offered | Status |
 |---|---|---|
 | Twitch | In-stream CEA-608 (SEI) | Built. Twitch documents the route; display on your channel is checked live. |
-| YouTube | Caption ingestion (HTTP POST), or in-stream CEA-608 | The in-stream route is built. The POST route is provisional, and needs a 30 s or 60 s broadcast delay on that destination. |
+| YouTube | Caption ingestion (HTTP POST), or in-stream CEA-608 | Both are built. The POST route is provisional (YouTube does not publish its body format), needs a 30 s or 60 s delay, and needs one Refresh stream key to fetch its caption URL. See *Routes in detail*. |
 | Facebook | In-stream CEA-608 | Provisional. Off until the server is started with `POLYEMESIS_CAPTIONS_FACEBOOK=1`. |
 | Kick | None | Kick documents no caption support for live streams, so captions are not offered. |
 
@@ -33,9 +33,10 @@ start with the next picture of the restarted feed, and they follow the
 destination's broadcast delay. Twitch's display of the captions on your channel
 is checked live, not in this build.
 
-YouTube's POST route and Facebook's route are not sent to the stream yet. Saving
-them changes nothing on air. The console still says so beside the picker, and
-that wording is due to change with this route.
+A YouTube route on *caption ingestion (HTTP POST)* posts each caption to the
+caption ingestion URL of the destination's own YouTube stream. The video path is
+not touched, so saving or changing this route never restarts the destination.
+Facebook's route is not sent to the stream yet; saving it changes nothing on air.
 
 The save is refused, with a reason, in three cases:
 
@@ -51,10 +52,58 @@ so no separate upload is needed. Polyemesis writes the data into the copied
 video without re-encoding it.
 
 **YouTube caption ingestion (HTTP POST).** YouTube takes captions as text posted
-to a signed ingestion URL that belongs to each broadcast. YouTube documents that
-the broadcast needs a 30 s or 60 s delay for this route. The exact body format
-is not published, so this route is provisional until it is checked against a
-live ingest.
+to a signed caption ingestion URL that belongs to the destination's YouTube
+stream. This route is provisional: YouTube does not publish the body format, so
+it is checked against a live ingest before you rely on it. Setting it up takes
+four steps:
+
+1. Choose *YouTube caption ingestion* for the destination, set its delay to 30
+   or 60 seconds, and save.
+2. Press **Refresh stream key**. YouTube publishes the caption URL only when a
+   stream is created, so this creates the destination's own YouTube stream and
+   stores its URL. **The destination's stream key changes once.** If your
+   encoder publishes to YouTube directly, paste the new key into it. The console
+   says *A caption ingestion URL is stored* when this has worked.
+3. Schedule the show from polyemesis (a schedule with pre-announce, or a
+   recurring event). Polyemesis creates the broadcast for captions: caption type
+   *HTTP POST*, monitor stream on, and the destination's 30 s or 60 s delay.
+   YouTube allows these only before a broadcast goes to testing or live, so they
+   are set when the broadcast is created.
+4. Go live. Each caption is posted when its delay has passed, which is when the
+   matching video reaches YouTube.
+
+What polyemesis refuses, and why:
+
+- **Starting the destination with no caption URL.** A destination on this route
+  will not start until a URL is stored for its current stream key (the API
+  answers 409 and names Refresh stream key). A key typed over by hand belongs to
+  a different stream, so its old URL no longer counts. Turning the route off
+  deletes the stored URL.
+- **Going live on a broadcast that is not set for POST captions.** Before a
+  scheduled broadcast is moved to testing or live, polyemesis reads it. If its
+  caption type is not *HTTP POST*, its monitor stream is off, or its delay is not
+  30 or 60 seconds, the broadcast is left where it is and the destination card
+  shows the reason. The stream keeps going out. Schedule the show again from
+  polyemesis, or set captions to off or embedded.
+- **Ultra-low latency** does not apply. YouTube does not allow captions with
+  ultra-low latency, but polyemesis never sets a latency preference, so the
+  broadcasts it creates use YouTube's default.
+
+What polyemesis does not check: a show started without a scheduled broadcast
+(YouTube's default *Stream now* event, or a broadcast made in YouTube Studio)
+has no broadcast id for polyemesis to read. Captions are still posted, but they
+appear only if that broadcast is set for HTTP POST captions in YouTube Studio.
+
+The caption URL is a credential: anyone holding it can post captions to the
+broadcast. It is stored encrypted, apart from the destination, and it is never
+shown in the console, the API, logs or events. A refused post is logged at most
+once a minute per destination, without the URL. If the ingest is slow, each
+destination keeps its newest 16 captions and drops the oldest.
+
+The broadcast delay counts twice on this route: once in polyemesis (the
+destination's own delay, which keeps the captions with the picture) and once on
+YouTube (the broadcast delay YouTube needs for this route). Viewers can see the
+show up to about two minutes after it happens at a 60 s setting.
 
 **Facebook in-stream.** Facebook documents that CEA-608 can be added to a live
 stream, but not the carriage in the SEI. It stays off until a live check passes.
@@ -102,9 +151,9 @@ Each new caption replaces the one on screen. A caption that is still showing whe
 the next one starts is not erased or shown again later.
 
 **Current state:** the engine releases each caption to every captioned
-destination at its delay, but no output consumes those captions yet. The SEI
-injector and the YouTube caption POST are not connected, so nothing reaches a
-platform from this path. The custom vocabulary and the profanity filter exist
+destination at its delay. A Twitch destination carries it in the video as SEI,
+and a YouTube destination on the HTTP POST route posts it to its caption URL.
+The custom vocabulary and the profanity filter exist
 as a tested policy in code, but no operator setting stores them yet, so the
 policy is empty and captions are shown as recognised.
 

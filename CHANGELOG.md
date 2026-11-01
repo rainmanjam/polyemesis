@@ -10,6 +10,21 @@ its first tagged release.
 
 ### Added
 
+- **Live captions to YouTube by HTTP POST (#8, PROVISIONAL).** A YouTube destination on
+  *caption ingestion (HTTP POST)* now posts each caption, after its delay, to the caption
+  ingestion URL of its own YouTube stream, through a bounded per-destination queue that never
+  holds up the other outputs. Press **Refresh stream key** once after choosing the route: it
+  creates the destination's own stream and stores its caption URL, so **the stream key changes
+  once**. The pre-announce and recurring sweeps never do this; they only reuse a stored URL.
+  Broadcasts polyemesis schedules for such a destination are created with caption type HTTP
+  POST, the monitor stream on and the destination's 30 s or 60 s delay. The destination will
+  not start without a caption URL for its current key (409 naming the button), and a scheduled
+  broadcast that is not set for POST captions is not taken to testing or live (the card says
+  why; the stream keeps going out). The URL is stored encrypted, apart from the destination,
+  and is never in the console, the API, logs or events. PROVISIONAL: YouTube does not publish
+  the POST body format, so it is isolated in one function and needs a live check on a test
+  channel. Ultra-low latency is not checked because polyemesis never sets it.
+
 - **X go-live lifecycle (#3, coordinator slice).** With the X Livestream gate open,
   enabling an X destination opens its broadcast on the stream source, unpublished. The
   broadcast goes live once bytes arrive, and disabling the destination while it is on air
@@ -901,6 +916,11 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **A metadata push or reschedule no longer switches a YouTube broadcast's captions off.**
+  `liveBroadcasts.update` resets every field of a part it is sent without, and the update
+  sent `contentDetails` without `closedCaptionsType` and `latencyPreference`. Both are now
+  read back and carried through unchanged.
 
 - **A scheduled YouTube broadcast that fails to create or bind now names the ingest stream it
   made.** With a stream of its own and no held key, the stream was left on the channel

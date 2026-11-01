@@ -17,20 +17,25 @@ const MODE_KEY: Record<CaptionMode, TranslationKey> = {
 /** Where captions go for one destination (#8). The picker offers only the routes
  *  the platform takes, from the same table the server enforces.
  *
- *  Honest about what it does: the choice is SAVED, but the engine does not send
- *  captions yet, so the note says it changes nothing on air. Kick gets its
- *  sentence instead of a picker, because no route exists to choose. */
+ *  The YouTube HTTP POST route also says whether the destination holds its
+ *  caption ingestion URL, because without one it will not start, and the fix
+ *  (Refresh stream key) changes the stream key once. Kick gets its sentence
+ *  instead of a picker, because no route exists to choose. */
 export function CaptionModeControl({
   platform,
   value,
   onChange,
   delaySeconds,
+  ingestReady,
 }: Readonly<{
   platform: string;
   value: CaptionMode;
   onChange: (mode: CaptionMode) => void;
   /** The destination's broadcast delay, so the POST route can say whether it is met. */
   delaySeconds: number;
+  /** The SAVED destination's captionIngestReady. Undefined for a destination
+   *  not yet saved, which has no URL either. */
+  ingestReady?: boolean;
 }>) {
   const t = useT();
   const route = CAPTION_ROUTES[platform];
@@ -64,9 +69,22 @@ export function CaptionModeControl({
             <p className="text-xs text-warn">{t("wave3.captions.delayNote")}</p>
           )}
           {value === "facebook_sei" && <p className="text-xs text-warn">{t("wave3.captions.facebookSwitch")}</p>}
+          {value === "youtube_post" &&
+            (ingestReady ? (
+              <p className="text-xs text-muted-foreground" data-testid="caption-post-ready">
+                {t("wave3.captions.postReady")}
+              </p>
+            ) : (
+              <p className="text-xs text-warn" data-testid="caption-post-missing">
+                {t("wave3.captions.postMissing")}
+              </p>
+            ))}
+          {value === "youtube_post" && (
+            <p className="text-xs text-muted-foreground">{t("wave3.captions.postBroadcast")}</p>
+          )}
         </>
       )}
-      <p className="text-xs text-muted-foreground">{t("wave3.captions.storedOnly")}</p>
+      <p className="text-xs text-muted-foreground">{t("wave3.captions.onAir")}</p>
     </div>
   );
 }

@@ -8,8 +8,9 @@ import en from "@/lib/i18n/en.json";
 
 // The #8 caption picker in the destination dialog. Three promises the operator
 // relies on: Kick is told in words rather than offered a route that does not
-// exist, a platform shows only the routes the server accepts, and the picker
-// says plainly that the choice is saved but not yet sent.
+// exist, a platform shows only the routes the server accepts, and the YouTube
+// POST route says whether its caption ingestion URL is stored and what fetching
+// one costs (the stream key changes once).
 //
 // MUTATION: CaptionModeControl renders the Select for kick too (drop the
 // captionsOffered guard). Observed: FAIL, the Kick sentence is absent and a
@@ -24,10 +25,11 @@ describe("CaptionModeControl", () => {
     expect(document.getElementById("dest-caption-mode")).toBeNull();
   });
 
-  it("draws the picker for Twitch and names the saved-but-not-sent limit", () => {
+  it("draws the picker for Twitch and says captions go out with the stream", () => {
     render(<CaptionModeControl platform="twitch" value="sei" onChange={() => {}} delaySeconds={0} />);
     expect(document.getElementById("dest-caption-mode")).not.toBeNull();
-    expect(screen.getByText(en["wave3.captions.storedOnly"])).toBeTruthy();
+    expect(screen.getByText(en["wave3.captions.onAir"])).toBeTruthy();
+    expect(screen.queryByTestId("caption-post-missing")).toBeNull();
     expect(screen.queryByTestId("caption-kick-none")).toBeNull();
   });
 
@@ -39,5 +41,28 @@ describe("CaptionModeControl", () => {
   it("does not ask for a delay once the delay is 30 s or 60 s", () => {
     render(<CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={60} />);
     expect(screen.queryByText(en["wave3.captions.delayNote"])).toBeNull();
+  });
+
+  // MUTATION: the ingestReady branch inverted. Observed: FAIL, the missing-URL
+  // warning showed with a URL stored.
+  it("warns that a YouTube POST destination with no caption URL needs Refresh stream key, which moves the key once", () => {
+    render(<CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={30} />);
+    expect(screen.getByTestId("caption-post-missing").textContent).toBe(en["wave3.captions.postMissing"]);
+    expect(screen.queryByTestId("caption-post-ready")).toBeNull();
+    expect(screen.getByText(en["wave3.captions.postBroadcast"])).toBeTruthy();
+  });
+
+  it("says the caption URL is stored when the saved destination holds one", () => {
+    render(
+      <CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={30} ingestReady />,
+    );
+    expect(screen.getByTestId("caption-post-ready").textContent).toBe(en["wave3.captions.postReady"]);
+    expect(screen.queryByTestId("caption-post-missing")).toBeNull();
+  });
+
+  it("says nothing about a caption URL for the embedded route", () => {
+    render(<CaptionModeControl platform="youtube" value="sei" onChange={() => {}} delaySeconds={0} />);
+    expect(screen.queryByTestId("caption-post-missing")).toBeNull();
+    expect(screen.queryByTestId("caption-post-ready")).toBeNull();
   });
 });

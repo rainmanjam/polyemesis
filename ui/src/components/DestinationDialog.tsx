@@ -2253,6 +2253,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               value={captionMode}
               onChange={setCaptionMode}
               delaySeconds={delaySeconds}
+              ingestReady={destination?.captionIngestReady}
             />
           )}
           {platform === "twitch" && (
