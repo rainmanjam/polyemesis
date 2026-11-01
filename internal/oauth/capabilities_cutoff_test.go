@@ -34,9 +34,11 @@ func TestCutoffIsMeasuredFromTheLiveStartForAStatedLimit(t *testing.T) {
 // countdown running on a guess. Kick's limit is LimitUnverified with no number,
 // so there must be no cutoff whatever the start time.
 func TestKickNeverGetsACutoffBecauseItsLimitIsUnverified(t *testing.T) {
+	// A missing row is a failure, not a skip: the guard below is the rule, and a skipped rule protects nothing. The
+	// row is pinned in capabilities_limits.go, so this branch is only reached if someone deletes it.
 	lim, ok := RolloverLimitFor(db.PlatformKick)
 	if !ok {
-		t.Skip("Kick has no limit row at all, which is also a state with no countdown")
+		t.Fatal("Kick has no limit row, so the no-countdown-on-a-guess rule has nothing to check")
 	}
 	if _, ok := lim.CutoffFor(time.Now()); ok {
 		t.Errorf("Kick reported a cutoff from an unverified limit; no countdown may run on a guess")

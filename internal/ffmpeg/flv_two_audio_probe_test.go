@@ -2,9 +2,10 @@ package ffmpeg
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // The VOD track is a second audio track on an FLV (RTMP) publish. That only
@@ -71,16 +72,11 @@ func TestARecordedTwoAudioFLVFailureIsReadBackWithItsReason(t *testing.T) {
 
 // The real binary, end to end: the probe muxes two tones into a temp FLV and
 // reads it back. Skipped where no FFmpeg is installed so CI without one still
-// runs the verdict tests above.
+// runs the verdict tests above. The binary lookup goes through the sanctioned
+// gate, so a CI that has undertaken to install FFmpeg fails instead of skipping.
 func TestTheRealFFmpegPassesTheTwoAudioFLVProbe(t *testing.T) {
-	ff, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("no ffmpeg on PATH")
-	}
-	fp, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("no ffprobe on PATH")
-	}
+	ff := testenv.FFmpegBinary(t, "ffmpeg", "no ffmpeg on PATH")
+	fp := testenv.FFmpegBinary(t, "ffprobe", "no ffprobe on PATH")
 	tools := &Tools{FFmpeg: ff, FFprobe: fp}
 	res := tools.ProbeTwoAudioFLV(context.Background())
 	if !res.OK {
