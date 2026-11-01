@@ -46,6 +46,8 @@ type ytVerticalPairStub struct {
 	// createDelay holds liveStreams.insert open, so two pairing requests can overlap in the
 	// test. Zero for every other test.
 	createDelay time.Duration
+	// healthDelay holds the health read open, so concurrent status reads overlap.
+	healthDelay time.Duration
 }
 
 // verticalFakeKey is the key the fake hands back. It is built from a fixed fragment rather
@@ -69,6 +71,10 @@ func newYTVerticalPairStub(t *testing.T) *ytVerticalPairStub {
 				"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"`+verticalFakeKey+`",
 				"ingestionAddress":"rtmp://v.example/live2"}}}`)
 		case "GET /liveStreams":
+			p.mu.Lock()
+			delay := p.healthDelay
+			p.mu.Unlock()
+			time.Sleep(delay)
 			if p.streamsDown {
 				w.WriteHeader(http.StatusInternalServerError)
 				io.WriteString(w, `{"error":{"message":"backend unavailable"}}`)

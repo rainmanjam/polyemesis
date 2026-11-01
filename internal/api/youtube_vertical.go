@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -105,8 +104,8 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 	var req struct {
 		Tier string `json:"tier"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	// decodeJSON, like every other body here: a 1 MiB cap, and an unknown field is refused rather than ignored.
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	tier, ok := findYouTubeVerticalTier(req.Tier)
@@ -179,7 +178,11 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not record the vertical pair")
 		return
 	}
-	writeJSON(w, http.StatusOK, verticalPairView{
+	// A new destination and, often, a new rendition: the pipeline is reconciled as every other destination create
+	// does, so an enabled pair starts now rather than at whatever save comes next. The vertical row is removed through
+	// DELETE /destinations/{id}, which reconciles already.
+	rw := s.reconcileNow("the vertical half")
+	writeMutation(w, http.StatusOK, rw, verticalPairView{
 		HorizontalID: id, VerticalID: vdest.ID, VerticalStreamID: vs.ID,
 	})
 }
@@ -198,17 +201,26 @@ type verticalHealthRead struct {
 	err    string
 }
 
-// verticalHealthPacer holds the last read per horizontal destination. The zero value is ready.
-type verticalHealthPacer struct {
-	mu   sync.Mutex
-	last map[int64]verticalHealthRead
+// verticalHealthKey names one vertical stream of one pair. The stream id is part of it, so a pair re-made on a new
+// stream is never answered with the old stream's health.
+type verticalHealthKey struct {
+	horizontalID int64
+	streamID     string
 }
 
-// recent returns the last read for a destination when it is still inside the window.
-func (p *verticalHealthPacer) recent(id int64, now time.Time) (verticalHealthRead, bool) {
+// verticalHealthPacer holds the last read per vertical stream, and one lock per stream so concurrent requests make one
+// call between them. The zero value is ready.
+type verticalHealthPacer struct {
+	mu    sync.Mutex
+	last  map[verticalHealthKey]verticalHealthRead
+	locks map[verticalHealthKey]*sync.Mutex
+}
+
+// recent returns the last read for a stream when it is still inside the window.
+func (p *verticalHealthPacer) recent(k verticalHealthKey, now time.Time) (verticalHealthRead, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	r, ok := p.last[id]
+	r, ok := p.last[k]
 	if !ok || now.Sub(r.at) >= verticalHealthMinInterval {
 		return verticalHealthRead{}, false
 	}
@@ -216,13 +228,30 @@ func (p *verticalHealthPacer) recent(id int64, now time.Time) (verticalHealthRea
 }
 
 // remember stores a read so the next request inside the window can reuse it.
-func (p *verticalHealthPacer) remember(id int64, r verticalHealthRead) {
+func (p *verticalHealthPacer) remember(k verticalHealthKey, r verticalHealthRead) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.last == nil {
-		p.last = map[int64]verticalHealthRead{}
+		p.last = map[verticalHealthKey]verticalHealthRead{}
 	}
-	p.last[id] = r
+	p.last[k] = r
+}
+
+// flight returns the lock one stream's read is made under. The check against recent and the call that follows are
+// one step under it, so five requests arriving together make one YouTube call and four cached answers. The map grows
+// by one entry per vertical stream ever read, which is bounded by the pairs an operator makes.
+func (p *verticalHealthPacer) flight(k verticalHealthKey) *sync.Mutex {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.locks == nil {
+		p.locks = map[verticalHealthKey]*sync.Mutex{}
+	}
+	l, ok := p.locks[k]
+	if !ok {
+		l = &sync.Mutex{}
+		p.locks[k] = l
+	}
+	return l
 }
 
 // verticalClock is the status read's clock. A seam so the pacing test can move time forward
@@ -317,8 +346,12 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
+	key := verticalHealthKey{horizontalID: id, streamID: pair.VerticalStreamID}
+	flight := s.verticalHealth.flight(key)
+	flight.Lock()
+	defer flight.Unlock()
 	now := s.verticalClock()
-	if prev, ok := s.verticalHealth.recent(id, now); ok {
+	if prev, ok := s.verticalHealth.recent(key, now); ok {
 		applyVerticalRead(&view, prev)
 		writeJSON(w, http.StatusOK, view)
 		return
@@ -354,7 +387,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		read.err = alerts.Redact(err.Error())
 		read.health = nil
 	}
-	s.verticalHealth.remember(id, read)
+	s.verticalHealth.remember(key, read)
 	applyVerticalRead(&view, read)
 	writeJSON(w, http.StatusOK, view)
 }
@@ -422,8 +455,7 @@ func (s *Server) verticalRenditionFor(dest *db.Destination, tier db.RenditionPre
 	}
 	want := tier.Rendition
 	for _, r := range existing {
-		if r.Width == want.Width && r.Height == want.Height && r.FPS == want.FPS &&
-			r.AspectMode == want.AspectMode && r.Encoder == want.Encoder {
+		if sameVerticalEncode(*r, *want) {
 			return r.ID, nil
 		}
 	}
@@ -434,6 +466,19 @@ func (s *Server) verticalRenditionFor(dest *db.Destination, tier db.RenditionPre
 		return 0, err
 	}
 	return created.ID, nil
+}
+
+// sameVerticalEncode reports whether a stored rendition encodes exactly as the tier would, so reusing it changes
+// nothing for the destinations already on it. Shape alone is not enough: a portrait rendition the operator made at
+// another bitrate, preset or keyframe interval would otherwise be shared, and the vertical half would send what that
+// operator chose and not what the tier says. Overlay and text are compared too, so a branded tier is not borrowed.
+func sameVerticalEncode(r, want db.Rendition) bool {
+	return r.Width == want.Width && r.Height == want.Height && r.FPS == want.FPS &&
+		r.AspectMode == want.AspectMode && r.Encoder == want.Encoder &&
+		r.VideoBitrate == want.VideoBitrate && r.MaxrateKbps == want.MaxrateKbps &&
+		r.BufsizeKbps == want.BufsizeKbps && r.Preset == want.Preset && r.GOPSeconds == want.GOPSeconds &&
+		r.Deinterlace == want.Deinterlace && r.PadColor == want.PadColor &&
+		r.Overlay == want.Overlay && r.Text == want.Text
 }
 
 // isVerticalHalf reports whether a destination is already the vertical half of some pair.

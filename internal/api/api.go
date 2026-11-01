@@ -123,6 +123,9 @@ func (s *Server) engOrNil() *engine.Engine {
 // side; TestReconcileHasOneSpellingAndItsResultCannotBeDropped is what keeps
 // this from growing a second one.
 func (s *Server) reconcile() error {
+	if s.reconciled != nil {
+		s.reconciled()
+	}
 	if s.mgr == nil {
 		return nil
 	}
@@ -396,6 +399,9 @@ type Server struct {
 	verticalHalfLive    func(ids ...int64) bool
 	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
+	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
+	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
+	reconciled func()
 	// diag is the debug-mode recorder and diagLevel the runtime log level it
 	// moves with. Both nil on a build without debug mode, which the handlers
 	// report as recording:false rather than as a missing route.
