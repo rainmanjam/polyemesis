@@ -485,14 +485,18 @@ func (in *Injector) parsePMT(p []byte) {
 		return
 	}
 	info := int(s[10]&0x0F)<<8 | int(s[11])
+	// The first video stream in this program map wins. A later map replaces the PID it found before, because an
+	// encoder reconnect can move video to a new PID, and keeping the old one would leave the new video uncaptioned.
+	videoFound := false
 	for i := 12 + info; i+5 <= end; {
 		typ := s[i]
 		pid := uint16(s[i+1]&0x1F)<<8 | uint16(s[i+2])
 		esInfo := int(s[i+3]&0x0F)<<8 | int(s[i+4])
 		switch typ {
 		case streamTypeH264:
-			if in.videoPID == 0 {
+			if !videoFound {
 				in.videoPID = pid
+				videoFound = true
 			}
 		case streamTypeHEVC:
 			if in.hevcPID == 0 {

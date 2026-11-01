@@ -653,3 +653,20 @@ func TestInjectorResumesCaptionsInOrderAcrossABackwardClockJump(t *testing.T) {
 		t.Fatalf("captions did not resume on the new timeline after the clock jump")
 	}
 }
+
+// TestPMTUpdateReplacesTheDiscoveredVideoPID: after an encoder reconnect the program map can move video to a new PID.
+// The injector kept the first PID it saw, so the new video passed through without captions and the old PID was still
+// read as video. A PMT update must replace the video PID.
+//
+// MUTATION, internal/captions/tsinject.go in parsePMT: restore the `if in.videoPID == 0` guard. Observed: FAIL --
+// videoPID is 0x0100, want 0x0200.
+func TestPMTUpdateReplacesTheDiscoveredVideoPID(t *testing.T) {
+	inj := NewInjector(NewSchedule(0))
+	inj.parsePMT(psiPacket(testPMTPID, 0, pmtSection(streamTypeH264, 0x0F)))
+	moved := pmtSection(streamTypeH264, 0x0F)
+	moved[13] = 0xE2 // the video ES PID is in bytes 13-14; 0x02 in the high bits makes it 0x0200
+	inj.parsePMT(psiPacket(testPMTPID, 1, moved))
+	if inj.videoPID != 0x0200 {
+		t.Fatalf("videoPID = %#x, want 0x0200 after the PMT moved video", inj.videoPID)
+	}
+}

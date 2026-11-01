@@ -3,6 +3,7 @@ package captions
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // These tests pin the CEA-608 byte layer that the SEI injector carries. The
@@ -203,3 +204,42 @@ func TestClearScriptIsEraseDisplayedMemorySentTwice(t *testing.T) {
 // pair builds an odd-parity pair the way the wire carries it, so the tests can
 // name bytes by their 7-bit values.
 func pair(a, b byte) Pair { return Pair{oddParity(a), oddParity(b)} }
+
+// TestPopOnScriptErasesNonDisplayedMemoryBeforeWritingTheBackBuffer: the back buffer is what the next EOC puts on
+// screen. Without ENM (erase non-displayed memory, 0x14 0x2E), rows left over from an earlier, longer caption stay in
+// the back buffer, and a shorter caption flips on with the old rows still showing. ENM must follow RCL and come before
+// the first row address.
+//
+// MUTATION, internal/captions/cea608.go in PopOnScript: drop the ENM control. Observed: FAIL -- script[2] is a row
+// address, not ENM.
+func TestPopOnScriptErasesNonDisplayedMemoryBeforeWritingTheBackBuffer(t *testing.T) {
+	script := PopOnScript("HI")
+	if len(script) < 4 {
+		t.Fatalf("script too short: %d pairs", len(script))
+	}
+	if script[2] != pair(0x14, 0x2E) || script[3] != pair(0x14, 0x2E) {
+		t.Fatalf("after RCL the script must erase non-displayed memory (ENM, sent twice), got %v %v", script[2], script[3])
+	}
+}
+
+// TestWrapLinesCountsRunesNotBytes: a multi-byte character is one column and must never be cut in half. Wrapping by
+// bytes wrapped accented text early and split characters mid-rune, which rendered as '?' even though the 608 set can
+// show them.
+//
+// MUTATION, internal/captions/cea608.go in wrapLines: go back to len and w[:Columns]. Observed: FAIL -- rows that are
+// not valid UTF-8, or rows longer than Columns runes.
+func TestWrapLinesCountsRunesNotBytes(t *testing.T) {
+	word := strings.Repeat("\u20ac", 40) // 40 runes of three bytes each, no spaces: a byte cut at 32 lands mid-rune
+	rows := wrapLines(word)
+	for _, r := range rows {
+		if !utf8.ValidString(r) {
+			t.Fatalf("a row was cut mid-rune: %q", r)
+		}
+		if n := utf8.RuneCountInString(r); n > Columns {
+			t.Fatalf("a row holds %d columns, want at most %d", n, Columns)
+		}
+	}
+	if strings.Join(rows, "") != word {
+		t.Fatalf("the rows do not give the text back: %q", rows)
+	}
+}

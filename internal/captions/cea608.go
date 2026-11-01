@@ -10,7 +10,10 @@
 // its own, and the SEI shim (tssei.go) consumes what it produces.
 package captions
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Pair is one CEA-608 byte pair, odd parity already applied, as it goes on the
 // wire. Field 1 control pairs are sent twice, as the standard recommends, so a
@@ -32,6 +35,7 @@ const (
 	ctrlChannel1 = 0x14 // channel 1 control prefix
 	ctrlRCL      = 0x20 // resume caption loading: pop-on mode
 	ctrlEDM      = 0x2C // erase displayed memory
+	ctrlENM      = 0x2E // erase non-displayed memory: clears the back buffer before a pop-on caption is written
 	ctrlEOC      = 0x2F // end of caption: swap hidden memory onto the screen
 	ctrlSpecial  = 0x11 // special-character prefix, channel 1
 )
@@ -127,18 +131,22 @@ func wrapLines(text string) []string {
 		}
 		cur := ""
 		for _, w := range words {
-			for len(w) > Columns {
+			// Columns are runes, not bytes: a multi-byte character takes one column, and a cut must
+			// fall between characters.
+			wr := []rune(w)
+			for len(wr) > Columns {
 				if cur != "" {
 					rows = append(rows, cur)
 					cur = ""
 				}
-				rows = append(rows, w[:Columns])
-				w = w[Columns:]
+				rows = append(rows, string(wr[:Columns]))
+				wr = wr[Columns:]
 			}
+			w = string(wr)
 			switch {
 			case cur == "":
 				cur = w
-			case len(cur)+1+len(w) <= Columns:
+			case utf8.RuneCountInString(cur)+1+utf8.RuneCountInString(w) <= Columns:
 				cur += " " + w
 			default:
 				rows = append(rows, cur)
@@ -197,14 +205,17 @@ func charPairs(s string) []Pair {
 
 // PopOnScript builds the byte pairs for one pop-on caption. The text is wrapped
 // to 32 columns, the newest four rows are kept, and the last row lands on row
-// 15, the bottom of the screen. The sequence is RCL, then each row's address and
-// text, then EOC, which puts the caption on screen.
+// 15, the bottom of the screen. The sequence is RCL, then ENM to clear the back
+// buffer, then each row's address and text, then EOC, which puts the caption on
+// screen.
 //
 // Control pairs are sent twice. A caption that cannot be shown in full because
 // of the 608 character set still goes out, with '?' where a glyph is missing.
 func PopOnScript(text string) []Pair {
 	var out []Pair
 	out = append(out, control(ctrlChannel1, ctrlRCL)...)
+	// ENM clears the back buffer, so rows from an earlier, longer caption cannot show through a shorter one.
+	out = append(out, control(ctrlChannel1, ctrlENM)...)
 	rows := lastRows(wrapLines(text), MaxRows)
 	first := 15 - len(rows) + 1
 	for i, row := range rows {
