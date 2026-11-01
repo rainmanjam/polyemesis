@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -578,17 +579,195 @@ func (x *X) BroadcastByID(ctx context.Context, clientID, accessToken, id string)
 // BroadcastState reads the broadcast for the lifecycle. X publishes no
 // stream-liveness read, so StreamActive and MonitorStream stay nil, meaning
 // unknown, rather than false.
+//
+// StreamActive is read from the bound source's is_stream_active, which is the
+// only receive-side signal X exposes. It is nil when the source is not found,
+// so an unknown answer is never reported as "no bytes". MonitorStream has no X
+// equivalent and stays nil.
 func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string) (*BroadcastLifecycleState, error) {
 	b, err := x.BroadcastByID(ctx, "", accessToken, broadcastID)
 	if err != nil {
 		return nil, err
 	}
-	return &BroadcastLifecycleState{
+	st := &BroadcastLifecycleState{
 		BroadcastID:   broadcastID,
 		Title:         b.Title,
 		Status:        b.State,
 		BoundStreamID: b.SourceID,
-	}, nil
+	}
+	if b.SourceID != "" {
+		srcs, err := x.listSources(ctx, accessToken)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range srcs {
+			if s.key() == b.SourceID {
+				active := s.IsActive
+				st.StreamActive = &active
+				if active {
+					st.StreamStatus = "active"
+				} else {
+					st.StreamStatus = "inactive"
+				}
+				break
+			}
+		}
+	}
+	return st, nil
+}
+
+// --------------------------------------------------------- create and publish
+
+// X's six broadcast states, as its Broadcast schema and the overview page name
+// them. Passed through unmapped in Status; XStateKnown is the only gate on them.
+const (
+	XStateNotStarted   = "NOT_STARTED"
+	XStatePrePublished = "PRE_PUBLISHED"
+	XStateRunning      = "RUNNING"
+	XStateEnded        = "ENDED"
+	XStateTimedOut     = "TIMED_OUT"
+	XStateCanceled     = "CANCELED"
+)
+
+// XStateKnown reports whether s is one of X's six documented states, matched
+// exactly. An unrecognised word is unknown, and the coordinator treats unknown as
+// "do not act", never as live.
+func XStateKnown(s string) bool {
+	switch s {
+	case XStateNotStarted, XStatePrePublished, XStateRunning, XStateEnded, XStateTimedOut, XStateCanceled:
+		return true
+	}
+	return false
+}
+
+// xChatOptionMax is the largest chat_option X documents: 0 default through 6.
+const xChatOptionMax = 6
+
+// xSourceKeyPattern is the source_id shape the create spec requires. source_id
+// is the source's rtmp_stream_key, which is a secret, so a value that does not
+// match is refused without being echoed back.
+var xSourceKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9]{1,32}$`)
+
+// XPublish is what the PUBLISH transition carries besides the state.
+type XPublish struct {
+	// Title is the broadcast title. Empty means the title is left out and X keeps
+	// whatever it has. X documents no character limit, so none is enforced here.
+	Title string
+	// ChatOption is nil when unset, which leaves the field out so X applies its
+	// default. Otherwise it must be 0 to 6.
+	ChatOption *int
+}
+
+// XPublishResult is what PUBLISH answered.
+type XPublishResult struct {
+	ID    string
+	State string
+	// Warnings carries tweet_error, the reason the announcing Post failed. The
+	// broadcast is still live when this is set.
+	Warnings []string
+}
+
+// XBroadcastCreated is the broadcast X returned from the create call.
+type XBroadcastCreated struct {
+	ID       string
+	State    string
+	ShareURL string
+}
+
+// CreateBroadcast opens a broadcast on the source whose rtmp_stream_key is
+// sourceKey. The broadcast starts NOT_STARTED, which is not public until
+// PublishBroadcast. X returns a broadcast that is already running on that source
+// instead of making a second one, and the caller sees it as RUNNING. Gated.
+func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKey string) (*XBroadcastCreated, error) {
+	if !x.livestream {
+		return nil, ErrXLivestreamOff
+	}
+	if !xSourceKeyPattern.MatchString(sourceKey) {
+		// The message names the rule, not the value: the value is the stream key.
+		return nil, errors.New("the stream source's key does not have the shape X requires " +
+			"(1 to 32 letters or digits); re-fetch the stream key from polyemesis")
+	}
+	u, err := x.me(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Broadcast XBroadcast `json:"broadcast"`
+			ShareURL  string     `json:"share_url"`
+		} `json:"data"`
+		Errors []xProblem `json:"errors"`
+	}
+	endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts"
+	if err := xDo(ctx, http.MethodPost, endpoint, accessToken,
+		map[string]string{"source_id": sourceKey}, &out); err != nil {
+		return nil, fmt.Errorf("X would not create a broadcast on the stream source: %w", err)
+	}
+	if out.Data.Broadcast.ID == "" && out.Data.Broadcast.BroadcastID == "" {
+		if len(out.Errors) > 0 {
+			return nil, fmt.Errorf("X would not create a broadcast: %s", xProblems(out.Errors))
+		}
+		return nil, errors.New("X created no broadcast")
+	}
+	id := out.Data.Broadcast.ID
+	if id == "" {
+		id = out.Data.Broadcast.BroadcastID
+	}
+	return &XBroadcastCreated{ID: id, State: out.Data.Broadcast.State, ShareURL: out.Data.ShareURL}, nil
+}
+
+// PublishBroadcast takes a NOT_STARTED broadcast to RUNNING. It is the only
+// write that can carry a title or a chat option, and it goes to the user-scoped
+// route, because the newer /2/broadcasts/{id}/state route accepts END only.
+// Gated.
+//
+// PROVISIONAL: the chat_option value is validated locally, but no live PUBLISH
+// has run against an account, so the response shape is from the spec.
+func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID string, p XPublish) (*XPublishResult, error) {
+	if !x.livestream {
+		return nil, ErrXLivestreamOff
+	}
+	if strings.TrimSpace(broadcastID) == "" {
+		return nil, errors.New("no broadcast id given to publish")
+	}
+	body := map[string]any{"state": "PUBLISH"}
+	if title := strings.TrimSpace(p.Title); title != "" {
+		body["title"] = title
+	}
+	if p.ChatOption != nil {
+		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {
+			return nil, fmt.Errorf("chat option must be 0 to %d, which X documents", xChatOptionMax)
+		}
+		body["chat_option"] = *p.ChatOption
+	}
+	u, err := x.me(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data struct {
+			Broadcast struct {
+				ID    string `json:"id"`
+				State string `json:"state"`
+			} `json:"broadcast"`
+			TweetError string `json:"tweet_error"`
+		} `json:"data"`
+		Errors []xProblem `json:"errors"`
+	}
+	endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts/" +
+		url.PathEscape(broadcastID) + "/state"
+	if err := xDo(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
+		return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
+	}
+	res := &XPublishResult{ID: out.Data.Broadcast.ID, State: out.Data.Broadcast.State}
+	if res.ID == "" {
+		res.ID = broadcastID
+	}
+	if strings.TrimSpace(out.Data.TweetError) != "" {
+		res.Warnings = []string{"the broadcast is live, but X did not post its announcement: " +
+			out.Data.TweetError}
+	}
+	return res, nil
 }
 
 // --------------------------------------------------------------- lifecycle
@@ -621,16 +800,14 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		return nil, errors.New("X has no testing state: a broadcast goes from NOT_STARTED " +
 			"straight to RUNNING when it is published, so there is no testing step to take")
 	case PhaseLive:
-		u, err := x.me(ctx, accessToken)
+		// The generic transition carries no title or chat option. The coordinator
+		// uses PublishBroadcast directly when it has them.
+		pub, err := x.PublishBroadcast(ctx, accessToken, broadcastID, XPublish{})
 		if err != nil {
 			return nil, err
 		}
-		endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts/" +
-			url.PathEscape(broadcastID) + "/state"
-		if err := xDo(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "PUBLISH"}, &out); err != nil {
-			return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
-		}
-		res.Status = out.Data.Broadcast.State
+		res.Status = pub.State
+		res.Warnings = pub.Warnings
 	case PhaseComplete:
 		endpoint := x.apiEndpoint() + "/2/broadcasts/" + url.PathEscape(broadcastID) + "/state"
 		if err := xDo(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "END"}, &out); err != nil {

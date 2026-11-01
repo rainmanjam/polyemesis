@@ -159,6 +159,10 @@ type TransitionResult struct {
 	// than no retry at all -- it invites a caller to escalate, or to send a
 	// different transition, on a broadcast that is doing what was asked.
 	Redundant bool `json:"redundant,omitempty"`
+	// Warnings are the parts of a transition that succeeded but reported a
+	// side problem, such as X's announcing Post failing after the broadcast went
+	// live. They never make the transition a failure.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // BroadcastLifecycler is the optional capability for a platform whose broadcast
