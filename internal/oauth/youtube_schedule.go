@@ -297,14 +297,9 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 	// "id,contentDetails", which asks YouTube to compose a part of a body
 	// nobody reads.
 	//
-	// NOT EVIDENCED, AND SAYING SO IS THE POINT. The evidence file documents
-	// this endpoint, streamId's optionality, the cardinality rule and
-	// liveBroadcastBindingNotAllowed -- it does NOT record that bind takes a
-	// part parameter at all, nor any accepted value. "id" is used because it is
-	// the one part value the file does evidence for a sibling resource
-	// (part=id,snippet,status on liveBroadcasts.list) and because it is the
-	// smallest thing that could satisfy a required parameter.
-	// Resolve by: one live bind, with and without part, recording both answers.
+	// part IS REQUIRED. The discovery document and the bind reference (docs-youtube.md, B18)
+	// both name it, with values id, snippet, contentDetails and status. part=id is one of
+	// those values, and the response is discarded, so the smallest valid one is enough.
 	q.Set("part", "id")
 	// requestJSON with a nil payload sends no body and no Content-Type, which is
 	// what a method whose whole input is in the query string should send.

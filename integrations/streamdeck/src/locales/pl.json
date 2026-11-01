@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Na planszy",
   "streamdeck.issue.sourceDegraded": "Źródło pogorszone",
   "streamdeck.pi.issues": "Bieżące problemy",
-  "streamdeck.pi.noIssues": "Brak zgłoszeń dla tego miejsca docelowego."
+  "streamdeck.pi.noIssues": "Brak zgłoszeń dla tego miejsca docelowego.",
+  "streamdeck.issue.verticalHalfFailed": "Połowa pionowa błąd",
+  "streamdeck.issue.verticalHalfDown": "Połowa pionowa wyłączona"
 }

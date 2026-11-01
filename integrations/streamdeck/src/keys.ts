@@ -29,6 +29,8 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.warn.backupDown",
   "streamdeck.issue.restartStorm",
   "streamdeck.issue.droppingFrames",
+  "streamdeck.issue.verticalHalfFailed",
+  "streamdeck.issue.verticalHalfDown",
   "streamdeck.issue.platformPoor",
   "streamdeck.issue.reconnectAccount",
   "streamdeck.issue.accountExpiring",

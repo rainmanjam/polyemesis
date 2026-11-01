@@ -61,7 +61,11 @@ const (
 	// QuotaCostListBroadcasts is UNVERIFIED. See the note above before relying
 	// on it, and before changing the poll interval that multiplies it.
 	QuotaCostListBroadcasts = 1
-	QuotaCostSendMessage    = 50
+	// QuotaCostListLiveStreams is liveStreams.list. Correction 6 of the YouTube truth sheet
+	// (docs-youtube.md) says list operations cost one unit. Unlike the listBroadcasts guess
+	// above, this one is taken from that sheet, so it is cited rather than measured.
+	QuotaCostListLiveStreams = 1
+	QuotaCostSendMessage     = 50
 	// Moderation writes. Charged like any other write, but NEVER refused for
 	// want of budget -- see the reserve note below and the check in Delete.
 	// Declining to remove a message because arithmetic said the quota was low
@@ -323,6 +327,16 @@ func (b *budget) intervalFor(apiInterval time.Duration, idle float64) (time.Dura
 	}
 	b.interval = d
 	return d, true
+}
+
+// allowRead reports whether a read of this cost fits after the send reserve. It is
+// affordable(), which is what the chat poll paces against, so a read made from outside the
+// poll loop cannot spend the units held back for sending and moderation.
+func (b *budget) allowRead(cost int) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rollLocked()
+	return b.affordable(cost) >= 1
 }
 
 // allow reports whether a call of this cost still fits, ignoring the read

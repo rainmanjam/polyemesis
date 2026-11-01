@@ -388,6 +388,14 @@ type Server struct {
 	// verticalPairs holds the YouTube pairings under way, so two requests cannot both create a vertical stream.
 	// The zero value is ready; see youtube_vertical.go.
 	verticalPairs verticalPairsInFlight
+	// verticalHealth paces the vertical status read to one YouTube call a minute per pair (#7).
+	// The zero value is ready; see youtube_vertical.go.
+	verticalHealth verticalHealthPacer
+	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
+	// the engine answers liveness, the wall clock answers time, and the chat budget is charged.
+	verticalHalfLive    func(ids ...int64) bool
+	verticalNow         func() time.Time
+	verticalChargeQuota func(cost int) bool
 	// diag is the debug-mode recorder and diagLevel the runtime log level it
 	// moves with. Both nil on a build without debug mode, which the handlers
 	// report as recording:false rather than as a missing route.

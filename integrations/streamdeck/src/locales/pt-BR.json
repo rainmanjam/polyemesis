@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "No slate",
   "streamdeck.issue.sourceDegraded": "Fonte degradada",
   "streamdeck.pi.issues": "Problemas atuais",
-  "streamdeck.pi.noIssues": "Nada relatado para este destino."
+  "streamdeck.pi.noIssues": "Nada relatado para este destino.",
+  "streamdeck.issue.verticalHalfFailed": "Metade vertical com falha",
+  "streamdeck.issue.verticalHalfDown": "Metade vertical parada"
 }

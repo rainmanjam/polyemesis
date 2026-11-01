@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "На заставке",
   "streamdeck.issue.sourceDegraded": "Источник ухудшен",
   "streamdeck.pi.issues": "Текущие проблемы",
-  "streamdeck.pi.noIssues": "Для этого назначения ничего не сообщается."
+  "streamdeck.pi.noIssues": "Для этого назначения ничего не сообщается.",
+  "streamdeck.issue.verticalHalfFailed": "Вертикальная часть: сбой",
+  "streamdeck.issue.verticalHalfDown": "Вертикальная часть остановлена"
 }

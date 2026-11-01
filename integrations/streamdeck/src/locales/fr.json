@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Sur le carton",
   "streamdeck.issue.sourceDegraded": "Source dégradée",
   "streamdeck.pi.issues": "Problèmes en cours",
-  "streamdeck.pi.noIssues": "Rien à signaler pour cette destination."
+  "streamdeck.pi.noIssues": "Rien à signaler pour cette destination.",
+  "streamdeck.issue.verticalHalfFailed": "Moitié verticale en échec",
+  "streamdeck.issue.verticalHalfDown": "Moitié verticale arrêtée"
 }

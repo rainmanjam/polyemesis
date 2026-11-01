@@ -164,6 +164,9 @@ describe("precedence: held > failed/key changed > account > reconnecting/stalled
       "restartStorm",
       "droppingFrames",
       "platform",
+      // #7: a failing YouTube vertical half sits below the destination's own platform trouble and
+      // above the programme's source trouble, so the key shows the pair's half before the ingest.
+      "verticalHalf",
       "source",
       "uploadSlow",
     ]);
