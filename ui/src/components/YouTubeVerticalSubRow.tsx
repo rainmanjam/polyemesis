@@ -60,7 +60,10 @@ export function YouTubeVerticalSubRow({
               {t("common.stop")}
             </Button>
           ) : (
-            <Button size="sm" variant="outline" onClick={onStart} disabled={busy || !vertical.enabled}>
+            // Start stays pressable on a disabled half: the server's start enables the
+            // destination first, and this row is the only Start a vertical half has, so
+            // gating it on `enabled` would strand a pair created while it was disabled.
+            <Button size="sm" variant="outline" onClick={onStart} disabled={busy}>
               {t("common.start")}
             </Button>
           )}

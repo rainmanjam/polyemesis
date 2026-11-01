@@ -65,9 +65,13 @@ export function RecurringCalendar() {
   const reportRefusal = (err: unknown, retitle: boolean) => {
     const c = classifySkip(err);
     if (c.kind === "refused") {
-      toast.error(t("wave3.recurring.skipRefused", { reason: messageOf(err) }));
+      toast.error(
+        retitle
+          ? t("wave3.recurring.retitleRefused", { reason: messageOf(err) })
+          : t("wave3.recurring.skipRefused", { reason: messageOf(err) }),
+      );
     } else if (c.kind === "platform") {
-      toast.error(t("wave3.recurring.skipPlatform"));
+      toast.error(retitle ? t("wave3.recurring.retitlePlatform") : t("wave3.recurring.skipPlatform"));
     } else {
       toast.error(retitle ? t("wave3.recurring.retitleFailed", { reason: messageOf(err) }) : t("wave3.recurring.skipFailed"));
     }

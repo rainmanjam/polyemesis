@@ -902,6 +902,17 @@ its first tagged release.
 
 ### Fixed
 
+- **Console fixes for YouTube vertical, rollover and the recurring calendar.**
+  A vertical half that is switched off can now be started from its sub-row. Start
+  switches it on, and the sub-row is its only Start button. Before, a pair created
+  while the horizontal half was off could never be started. The YouTube vertical
+  section treats only a 404 as "no vertical half yet". Any other failed read shows
+  the error with a Retry button, and no longer offers an Add that the server
+  refuses. On the planned-rollover panel, "Roll over now" appears only on a
+  platform that rolls over automatically, and a failed read shows the error
+  instead of an empty card. A refused or platform-rejected title edit in the
+  recurring calendar now says the title was not changed. Before, it reused the
+  skip messages ("Not removed", "refused to delete the event").
 - **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
 - A manual planned rollover now answers 200 "rolled over" when it has finished,
   502 with the redacted reason when the platform refuses it, and never 202

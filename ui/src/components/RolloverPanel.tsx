@@ -101,7 +101,18 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
     return () => window.clearInterval(timer);
   }, [load]);
 
-  if (!view || !view.limit) return null;
+  // A failed read leaves no view, but the failure must still show: rendering nothing would make a
+  // broken read look the same as a platform with no cap.
+  if (!view) {
+    return notice ? (
+      <section className="grid gap-2 rounded border border-border p-2 text-sm" aria-label={t("wave3.rollover.countdownTitle")}>
+        <p role="status" className="text-xs text-down">
+          {notice.text}
+        </p>
+      </section>
+    ) : null;
+  }
+  if (!view.limit) return null;
 
   const countdown = countdownFor(view, now);
   const actionKey = view.action === "automatic" ? "wave3.rollover.actionAutomatic" : "wave3.rollover.actionCountdown";
@@ -196,7 +207,9 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
         <Button size="sm" variant="ghost" disabled={busy} onClick={() => setShowSettings((v) => !v)}>
           {t("wave3.rollover.settings")}
         </Button>
-        {view.delivering ? (
+        {/* Only an automatic platform can be rolled over by polyemesis. A countdown-only one is just
+            counted down, so offering the button there would only earn a refusal. */}
+        {view.action === "automatic" && view.delivering ? (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => setRunOpen(true)}>
             {t("wave3.rollover.runNow")}
           </Button>
