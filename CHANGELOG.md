@@ -77,10 +77,17 @@ its first tagged release.
   human action, recorded by `POST .../youtube-vertical/confirm`. The horizontal
   broadcast never binds to the vertical stream, and the vertical stream is kept out of
   the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
-  and a failed read stays on that half. The UI option, the sub-row and the Stream Deck
-  face are not built in this change. **Not built in this PR (deviation from #7):**
-  the UI option, the sub-row, the Stream Deck face and the guided pairing step in
-  the console. The API is the only surface.
+  and a failed read stays on that half. The status read is paced to one YouTube call a
+  minute per pair, and only while one of its halves is live (correction 6 of the YouTube
+  truth sheet). The pairing is charged to the chat quota budget.
+- **YouTube vertical in the console (#7; PROVISIONAL).** A YouTube destination offers a
+  "YouTube vertical" section in its dialog. It picks one of two 9:16 tiers, adds the
+  vertical half, and walks the one-time Live Control Room steps with a confirm button. The
+  pair shows as one dashboard card with a vertical sub-row. That sub-row has its own
+  start, stop and restart, and a failed half shows there without stopping the other. The
+  card and the go-live sheet keep a reminder until the step is confirmed. polyemesis records
+  the confirmation and does not verify it. The Stream Deck key for a pair covers both halves
+  (red "Vertical half failed", amber "Vertical half down").
 - **Planned rollover (preview).** A destination can be replaced before its
   platform's cap: a live YouTube broadcast is swapped for a new one on the same
   stream, and a Twitch destination is reconnected. Triggers are a safety margin

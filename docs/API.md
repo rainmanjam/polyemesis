@@ -147,7 +147,7 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against `readScopeDeniedPatterns`, and a row missing from one side tells the reader nothing about which side is right |
-| `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token |
+| `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token. Paced to one YouTube call a minute per pair, and made only while one of the two halves is live (`live` in the response says which); the call is charged to the chat quota budget |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -562,6 +562,8 @@ does not get to change what another operator's console shows them.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/status` | Everything the dashboard renders, in one object |
+
+A YouTube destination that has a vertical half (#7) carries `youtubeVertical: {verticalId, pairingConfirmed}`, and its vertical row carries `verticalHalfOf`. Both come from the local pair table, so `/status` makes no YouTube call to fill them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
