@@ -117,9 +117,10 @@ flowchart TD
 Two things about that gate are worth stating plainly, because they are the
 parts people get caught by:
 
-**Declining ends the install.** The installer only offers FFmpeg when
-polyemesis would not start against what you have — no FFmpeg, one below the 8.0
-floor, or one without libsrt — so saying no leaves nothing to install against.
+**Declining ends the install when polyemesis could not start.** With no FFmpeg,
+or one below the 8.0 floor, saying no leaves nothing to install against. An
+FFmpeg without libsrt is the one exception: polyemesis starts on it with RTMP
+only, so after you decline the installer asks whether to continue without SRT.
 There is no "works, but older" band any more: with the floor at 8.0, a host
 either clears it or does not.
 

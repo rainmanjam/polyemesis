@@ -39,8 +39,10 @@ import (
 //     latest 8.x and the latest 9.x and nothing older, so a 6.x or 7.x build
 //     was accepted on the strength of a test matrix that no longer covers it.
 //
-// The two-track FLV capability probe stays regardless: an odd build can clear
-// this floor and still lack it.
+// THIS FLOOR IS THE TWO-TRACK FLV CHECK. Nothing at startup asks a build
+// whether its flv muxer takes a second audio stream. The probes after the
+// version check (SRT, encoders, filters) are advisory and none of them covers
+// FLV, so the version number is what keeps a build that cannot do it out.
 const MinMajorVersion = 8
 
 // floorFix is the part of every refusal that tells the operator what to do. One

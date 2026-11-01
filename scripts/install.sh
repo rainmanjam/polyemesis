@@ -692,10 +692,12 @@ ffmpeg_static_sha256() {
 # at all, or the version could not be read) and installs the pinned static build
 # with consent.
 #
-# EVERY CALLER IS A HOST POLYEMESIS WILL NOT START ON: no FFmpeg, one below the
-# floor, one that failed the capability probe, or one with no libsrt. Declining
-# therefore ends the install, the default answer is "yes", and the return value
-# decides whether check_ffmpeg fails.
+# EVERY CALLER IS A HOST THAT CANNOT DO WHAT POLYEMESIS IS FOR: no FFmpeg, one
+# below the floor, or one that failed the capability probe -- all three of
+# which polyemesis will not start on -- or one with no libsrt, which it starts
+# on with a warning and RTMP only. So the default answer is "yes" and a failed
+# return is what the caller acts on: the first three end the install, and the
+# no-libsrt caller goes on to ask "Continue without SRT anyway?".
 #
 # There used to be a second, OPTIONAL mode for a 6.x or 7.x host -- above the
 # old 6.0 floor but behind the 8.x the image ships -- whose default was "no"
