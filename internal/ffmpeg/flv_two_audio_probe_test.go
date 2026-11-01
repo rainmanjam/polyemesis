@@ -2,8 +2,12 @@ package ffmpeg
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
@@ -85,5 +89,101 @@ func TestTheRealFFmpegPassesTheTwoAudioFLVProbe(t *testing.T) {
 	ok, probed, _ := tools.TwoAudioFLV()
 	if !probed || !ok {
 		t.Errorf("the probe ran but the Tools did not keep its answer: probed=%v ok=%v", probed, ok)
+	}
+}
+
+// flvProbeFakeFFmpeg puts a POSIX shell script where the probe will exec it, so
+// the probe's failure paths can be driven without a real binary. The body is
+// the script's behaviour after the shebang. Skipped on Windows, where the
+// script would not run.
+func flvProbeFakeFFmpeg(t *testing.T, body string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake FFmpeg is a POSIX shell script")
+	}
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("writing the fake FFmpeg: %v", err)
+	}
+	return path
+}
+
+// THE PROBE FAILS OPEN WHEN IT CANNOT RUN. A tempdir that does not exist, a
+// binary that will not start and a deadline that passes are all reasons the
+// question could not be asked, not answers to it. Each must keep the second
+// mix, because a broken probe must not silently withhold a VOD track that would
+// have worked. The verdict says it was inconclusive so the record is honest.
+//
+// MUTATION: in probeTwoAudioFLV, return OK false from the MkdirTemp error arm.
+// Observed: FAIL, "withheld the second mix when the tempdir was missing".
+func TestAFLVProbeFailsOpenWhenTheTemporaryDirectoryCannotBeCreated(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "no-such-dir"))
+	tools := &Tools{FFmpeg: "/bin/sh", FFprobe: "/bin/sh"}
+	got := tools.ProbeTwoAudioFLV(context.Background())
+	if !got.OK || !got.Inconclusive {
+		t.Fatalf("a missing tempdir was read as a refusal: %+v", got)
+	}
+	if !strings.Contains(got.Reason, "probe inconclusive") {
+		t.Errorf("the record does not say the probe was inconclusive: %q", got.Reason)
+	}
+}
+
+// MUTATION: in probeTwoAudioFLV, return OK false from the start-failure arm.
+// Observed: FAIL, "withheld the second mix when FFmpeg would not start".
+func TestAFLVProbeFailsOpenWhenFFmpegCannotBeStarted(t *testing.T) {
+	tools := &Tools{FFmpeg: filepath.Join(t.TempDir(), "no-such-ffmpeg"), FFprobe: "/bin/sh"}
+	got := tools.ProbeTwoAudioFLV(context.Background())
+	if !got.OK || !got.Inconclusive {
+		t.Fatalf("a binary that would not start was read as a refusal: %+v", got)
+	}
+}
+
+// A deadline that passes while FFmpeg is still running is a timeout, not a
+// refusal. The fake FFmpeg sleeps far longer than the caller allows; exec
+// replaces the shell so the kill reaches the sleep itself.
+//
+// MUTATION: in probeTwoAudioFLV, drop the ctx.Err() check before the exit-code
+// classification. Observed: FAIL, the killed child read as "FFmpeg refused".
+func TestAFLVProbeFailsOpenWhenTheDeadlinePassesBeforeFFmpegFinishes(t *testing.T) {
+	ff := flvProbeFakeFFmpeg(t, "exec sleep 30")
+	tools := &Tools{FFmpeg: ff, FFprobe: "/bin/sh"}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	got := tools.ProbeTwoAudioFLV(ctx)
+	if !got.OK || !got.Inconclusive {
+		t.Fatalf("a timed-out probe was read as a refusal: %+v", got)
+	}
+	if !strings.Contains(got.Reason, "timed out") {
+		t.Errorf("the reason does not say the probe timed out: %q", got.Reason)
+	}
+}
+
+// THE PROBE FAILS CLOSED ON A REAL REFUSAL. FFmpeg that ran to its own end and
+// exited with an error about its muxer is the failure the VOD track must not
+// walk into: the second stream would be silently lost. That still withholds the
+// second mix, and the reason is the exit, not a guess.
+//
+// MUTATION: in probeTwoAudioFLV, classify every mux failure as inconclusive.
+// Observed: FAIL, "a refusal passed the probe".
+func TestAFLVProbeFailsClosedWhenFFmpegRefusesToWriteTheFile(t *testing.T) {
+	ff := flvProbeFakeFFmpeg(t, "echo 'muxer refused a second audio stream' >&2; exit 1")
+	tools := &Tools{FFmpeg: ff, FFprobe: "/bin/sh"}
+	got := tools.ProbeTwoAudioFLV(context.Background())
+	if got.OK || got.Inconclusive {
+		t.Fatalf("a real refusal did not withhold the second mix: %+v", got)
+	}
+	if !strings.Contains(got.Reason, "could not write a two-track FLV") {
+		t.Errorf("the reason does not say FFmpeg refused: %q", got.Reason)
+	}
+}
+
+// An inconclusive verdict is what the engine reads back. It must not be a
+// refusal, or the planning gate would drop the mix the probe could not judge.
+func TestARecordedInconclusiveProbeIsNotARefusal(t *testing.T) {
+	var tools Tools
+	tools.RecordTwoAudioFLV(FLVTwoAudioResult{OK: true, Inconclusive: true, Reason: "probe inconclusive: timed out"})
+	ok, probed, _ := tools.TwoAudioFLV()
+	if !probed || !ok {
+		t.Fatalf("an inconclusive probe read back as a refusal: probed=%v ok=%v", probed, ok)
 	}
 }
