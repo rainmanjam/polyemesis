@@ -73,7 +73,17 @@ type Injector struct {
 
 	nextCC uint8
 	stats  InjectorStats
+
+	// lastPTS is the presentation time of the newest picture the injector has
+	// seen start. A live caption is keyed to it: the picture passing now is the
+	// one being spoken over.
+	lastPTS    int64
+	hasLastPTS bool
 }
+
+// PTSNow reports the presentation time of the newest picture seen. ok is false
+// until a picture with a timestamp has started.
+func (in *Injector) PTSNow() (pts int64, ok bool) { return in.lastPTS, in.hasLastPTS }
 
 // accessUnit is one video PES as it arrived: its packets, and the presentation
 // time read from its first packet, which is what keys the caption.
@@ -183,6 +193,9 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 		}
 		au := &accessUnit{pkts: [][]byte{append([]byte(nil), p...)}}
 		au.pts, au.hasPTS = pesPTSOf(p)
+		if au.hasPTS {
+			in.lastPTS, in.hasLastPTS = au.pts, true
+		}
 		var out []byte
 		if au.hasPTS && in.sched.Claim(au.pts) {
 			// The clock jumped. Units queued from before the jump belong to the old
