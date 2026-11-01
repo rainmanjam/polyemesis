@@ -328,6 +328,13 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 		_, tplOK := tplByID[o.ScheduleID]
 		if !schedOK || !tplOK {
 			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
+				if errors.Is(err, errDestinationDelivering) {
+					// The destination is live, so the event may be bound to its broadcast. The row is kept and the
+					// next pass tries again, which cancels the event once the destination stops.
+					s.log.Warn("recurring: an orphaned event's destination is live, so the event is kept and will be "+
+						"retried after the destination stops", "schedule", o.ScheduleID, "event", o.PlatformEventID)
+					continue
+				}
 				if errors.Is(err, oauth.ErrScheduledNotCancellable) {
 					// The platform will not delete this event: it is live, testing or aired. The row is
 					// dropped so the sweep does not come back to it, and the event is named for the operator.
@@ -369,7 +376,7 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64, now time.Time) er
 	case scheduler.OccurrencePending:
 		return fmt.Errorf("this show's event is still being created; try again in a moment")
 	}
-	if err := occurrenceCancelRefusal(*o, now, s.destinationDelivering(o.DestinationID)); err != nil {
+	if err := occurrenceCancelRefusal(*o, now, s.destinationLive(o.DestinationID)); err != nil {
 		return err
 	}
 	return s.cancelOccurrence(ctx, *o, false, now)
@@ -386,9 +393,21 @@ func occurrenceCancelRefusal(o scheduler.Occurrence, now time.Time, delivering b
 			o.At.UTC().Format(time.RFC3339))
 	}
 	if delivering {
-		return fmt.Errorf("%w: its destination is live", oauth.ErrScheduledNotCancellable)
+		return fmt.Errorf("%w: %w", oauth.ErrScheduledNotCancellable, errDestinationDelivering)
 	}
 	return nil
+}
+
+// errDestinationDelivering is the reason an event is refused while its destination is live. Unlike a passed
+// start, it is temporary: the event is kept, so the sweep cancels it once the destination stops.
+var errDestinationDelivering = errors.New("its destination is delivering, so the event may be bound to the live broadcast")
+
+// destinationLive is the delivering predicate the occurrence paths read. Tests replace it through deliveringFn.
+func (s *Server) destinationLive(destinationID int64) bool {
+	if s.deliveringFn != nil {
+		return s.deliveringFn(destinationID)
+	}
+	return s.destinationDelivering(destinationID)
 }
 
 // cancelOccurrence deletes one occurrence's platform event, clears the destination's mirror if it
@@ -401,7 +420,7 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 	// platform page is a record of it, and removing it is the operator's choice on the platform. Only the
 	// local row is changed by the sweep, and the skip is refused before it reaches here.
 	if o.PlatformEventID != "" {
-		if err := occurrenceCancelRefusal(o, now, s.destinationDelivering(o.DestinationID)); err != nil {
+		if err := occurrenceCancelRefusal(o, now, s.destinationLive(o.DestinationID)); err != nil {
 			return err
 		}
 		d, err := s.store.GetDestination(o.DestinationID)

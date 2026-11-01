@@ -494,3 +494,54 @@ func TestOccurrenceCancelRefusalAllowsDeletionOnlyForAFutureShowOnANonDelivering
 		}
 	}
 }
+
+// A live destination may hold the event's broadcast, so a skip of its upcoming show is refused, and no
+// cancel is sent. The row stays upcoming, and the calendar still shows the event that is there.
+func TestSkippingAnOccurrenceWhileItsDestinationIsDeliveringIsRefusedAndKeepsTheEvent(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	f.s.deliveringFn = func(int64) bool { return true }
+	at := time.Date(2026, 11, 10, 19, 0, 0, 0, time.UTC)
+	occ, err := f.store.OccurrenceFor(f.schedule, f.dest.ID, at)
+	if err != nil {
+		t.Fatalf("occurrence: %v", err)
+	}
+	err = f.s.skipOccurrence(context.Background(), occ.ID, f.now)
+	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
+		t.Fatalf("skip while delivering returned %v, want ErrScheduledNotCancellable", err)
+	}
+	if got := f.fake.cancelled(); len(got) != 0 {
+		t.Fatalf("an event on a live destination was cancelled: %v", got)
+	}
+	after, err := f.store.GetOccurrence(occ.ID)
+	if err != nil || after.State != scheduler.OccurrenceUpcoming {
+		t.Fatalf("after a refused skip the row is %+v (%v); it must stay upcoming", after, err)
+	}
+}
+
+// The sweep must not leak an upcoming event when its template is deleted during a live show. While the
+// destination is live the row is kept and no cancel is sent; once the destination stops, the next pass
+// cancels both upcoming events and drops their rows.
+func TestReconcileKeepsAnUpcomingEventWhileItsDestinationIsDeliveringAndCancelsItAfter(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	f.s.deliveringFn = func(int64) bool { return true }
+	if err := f.store.DeleteBroadcastTemplate(f.schedule); err != nil {
+		t.Fatalf("delete template: %v", err)
+	}
+	f.sweep(t)
+	if got := f.fake.cancelled(); len(got) != 0 {
+		t.Fatalf("a sweep cancelled %v while the destination was live", got)
+	}
+	open, err := f.store.ListOpenOccurrences()
+	if err != nil || len(open) != 2 {
+		t.Fatalf("open rows while delivering = %d (%v), want 2 kept for a retry", len(open), err)
+	}
+	f.s.deliveringFn = func(int64) bool { return false }
+	f.sweep(t)
+	if got := f.fake.cancelled(); len(got) != 2 {
+		t.Fatalf("after the destination stopped, cancelled %v, want both upcoming events", got)
+	}
+}

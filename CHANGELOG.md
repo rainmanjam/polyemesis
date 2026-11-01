@@ -8,10 +8,6 @@ its first tagged release.
 
 ## [Unreleased]
 
-### Fixed
-
-- Recurring events: a platform event is deleted only while its show is still upcoming, its destination is not delivering, and YouTube reports the broadcast as created or ready. A deleted template or schedule no longer deletes a show that has started, and a skip of a started or live show is refused with a 409.
-
 ### Added
 
 - **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in
@@ -100,7 +96,10 @@ its first tagged release.
   category and thumbnail. The next occurrences (default 2, up to 10) are created as
   upcoming YouTube events, and the go-live uses the first one that is not skipped.
   One occurrence can be skipped or retitled, and deleting the template cancels its
-  upcoming events. Facebook, Twitch, Kick and X are not given template events yet,
+  upcoming events, but never one whose start has passed, one on a destination that is
+  delivering (kept and retried after it stops), or one YouTube reports as no longer
+  upcoming; a skip of such a show is refused with a 409. Facebook, Twitch, Kick and X
+  are not given template events yet,
   and the calendar screen and any console UI are not built in this PR (deviation
   from #18); the API serves the data. See
   [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).

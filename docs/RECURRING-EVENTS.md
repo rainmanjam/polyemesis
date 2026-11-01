@@ -69,8 +69,11 @@ Only an event that is still upcoming is cancelled. Three things keep a platform 
 its start time has passed (the page is a record of the show), its destination is
 delivering (it may be bound to that event), or YouTube reports the broadcast as anything
 other than created or ready. A skip is refused with a 409 in each of those cases, and
-the event is left as it is. A template or schedule deletion drops the local row only and
-names the event in the log, so it can be removed in YouTube Studio if it is not wanted. A transient failure keeps the record, so the next pass
+the event is left as it is. A template or schedule deletion drops the local row only,
+and names the event in the log, when the start has passed or YouTube reports it as no
+longer upcoming, so it can be removed in YouTube Studio if it is not wanted. While the
+destination is delivering, the row is kept and the next pass tries again, so an upcoming
+event is cancelled once the destination stops. A transient failure keeps the record, so the next pass
 tries again. If the destination has been deleted too, the event cannot be reached from
 here, and the error names it so it can be removed in the platform's own studio.
 

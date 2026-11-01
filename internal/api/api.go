@@ -397,9 +397,11 @@ type Server struct {
 	store     *db.DB
 	box       *secrets.Box
 	mgr       *engine.Manager
-	bus       *events.Broker
-	sessions  *auth.Manager
-	logins    *auth.Throttle
+	// deliveringFn answers whether a destination is delivering. Nil means the live process table; tests set it.
+	deliveringFn func(destinationID int64) bool
+	bus          *events.Broker
+	sessions     *auth.Manager
+	logins       *auth.Throttle
 	// setups throttles POST /api/v1/setup per client address.
 	//
 	// SEPARATE FROM logins, not shared with it. They count different things
