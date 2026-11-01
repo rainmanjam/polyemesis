@@ -431,7 +431,9 @@ its first tagged release.
     - switch to the Docker image.
   - **The CUDA image** now carries the same pinned static FFmpeg 8.1.3 instead
     of Ubuntu 24.04's 6.1.1, so NVENC and Enhanced RTMP multitrack ingest work
-    together.
+    together. Its NVENC needs a host NVIDIA driver of **570.0 or newer** (NVENC
+    SDK 13.0); the old image's 6.1.1 needed 520–550, depending on SDK. See
+    docs/HARDWARE.md.
   - **The installer** no longer has a separate "older than recommended" answer
     for 6.x and 7.x hosts. A host's FFmpeg either clears the 8.0 floor or gets
     the install offer.
