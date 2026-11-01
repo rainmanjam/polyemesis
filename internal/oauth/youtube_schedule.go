@@ -203,8 +203,8 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		if !picked.created {
 			return cause
 		}
-		return fmt.Errorf("%w; the ingest stream %s was created for it and is now unused, so delete it in "+
-			"YouTube Studio once nothing streams to it", cause, stream.ID)
+		return fmt.Errorf("%w; the ingest stream %s was created for it and may now be unused; delete it in "+
+			"YouTube Studio after checking nothing streams to it", cause, stream.ID)
 	}
 	created, err := y.createScheduledBroadcast(ctx, accessToken, opts.ScheduledFor)
 	if err != nil {

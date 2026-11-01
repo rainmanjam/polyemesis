@@ -903,10 +903,10 @@ its first tagged release.
 ### Fixed
 
 - **A scheduled YouTube broadcast that fails to create or bind now names the ingest stream it
-  made (#31).** With a stream of its own and no held key, the stream was left on the channel
-  with no mention. The error now gives its id, so it can be removed in YouTube Studio.
-  polyemesis still never deletes a YouTube ingest stream, because a concurrent request may
-  already be using it.
+  made.** With a stream of its own and no held key, the stream was left on the channel
+  with no mention. The error now gives its id, so the stream can be removed in YouTube Studio
+  once nothing streams to it. polyemesis never deletes a YouTube ingest stream itself, because
+  a concurrent request may already be using it.
 
 - **Wave 3 review fixes (API).**
   - An X destination whose broadcast create is refused now stops retrying after the usual 20 attempts. It tries again after an UP edge, or after the operator switches the destination off and on.
