@@ -501,6 +501,18 @@ its first tagged release.
   hosted plans, dated to its evidence file; a GitHub star count and latest
   release read at build time, left out when the read fails; and a routing
   table for each use case, with sports and esports added.
+- **Recurring events and planned rollover: the console (wave 3, #18 and #19).**
+  The Automation page gets a broadcast template editor on each start schedule
+  (title pattern with `{date}`, description, privacy, category, upcoming events
+  to keep, thumbnail) and an upcoming-events list with skip and single-event
+  retitle. Each destination card whose platform has a cap shows the cap with
+  its source, a countdown to the cutoff, the rollover settings, and a "Roll over
+  now" button that reports the server's answer as it came back. A platform's
+  refusal of an upcoming-event create is kept on the template and shown there.
+  Skipping a show that has already started, or whose destination is live, is
+  refused with a 409, and reconciling an orphaned row for such a show removes
+  only the local row. The optional chat notice before a rollover is off by
+  default. The Twitch countdown starts from Helix `started_at` when it can be read.
 
 ### Changed
 

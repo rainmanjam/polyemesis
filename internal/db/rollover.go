@@ -27,6 +27,9 @@ type RolloverSettings struct {
 	QuietZone  string `json:"quietZone,omitempty"`
 	// OBSScene, when set, makes a switch to this OBS scene a rollover trigger.
 	OBSScene string `json:"obsScene,omitempty"`
+	// ChatNotice, when on, sends one line to the rolled-over platform's chat just before the rollover. Off by
+	// default: viewers should not see the operator's machinery unless the operator asked for it.
+	ChatNotice bool `json:"chatNotice"`
 	// SessionBroadcastID is the broadcast the session start belongs to. The start is only meaningful for that
 	// broadcast, so it is compared before it is used: a rollover changes the broadcast and resets the session.
 	SessionBroadcastID string `json:"sessionBroadcastId,omitempty"`
@@ -44,7 +47,7 @@ type RolloverSettings struct {
 const DefaultRolloverMarginMinutes = 30
 
 const rolloverColumns = `destination_id, enabled, margin_minutes, quiet_start, quiet_end, quiet_zone, obs_scene,
-	session_broadcast_id, session_started_at, last_rollover_at, last_trigger, last_result, updated_at`
+	session_broadcast_id, session_started_at, last_rollover_at, last_trigger, last_result, updated_at, chat_notice`
 
 // The reads are whole compile-time constants, for the reason the recurring reads record.
 const (
@@ -85,8 +88,8 @@ func (d *DB) ListEnabledRollovers() ([]RolloverSettings, error) {
 // the last result survive an operator changing a margin in the middle of a show.
 func (d *DB) SaveRolloverConfig(s RolloverSettings, now time.Time) error {
 	_, err := d.sql.Exec(`INSERT INTO destination_rollover
-		(destination_id, enabled, margin_minutes, quiet_start, quiet_end, quiet_zone, obs_scene, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(destination_id, enabled, margin_minutes, quiet_start, quiet_end, quiet_zone, obs_scene, updated_at, chat_notice)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (destination_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			margin_minutes = excluded.margin_minutes,
@@ -94,9 +97,10 @@ func (d *DB) SaveRolloverConfig(s RolloverSettings, now time.Time) error {
 			quiet_end = excluded.quiet_end,
 			quiet_zone = excluded.quiet_zone,
 			obs_scene = excluded.obs_scene,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at,
+			chat_notice = excluded.chat_notice`,
 		s.DestinationID, boolInt(s.Enabled), s.MarginMinutes, s.QuietStart, s.QuietEnd, s.QuietZone,
-		s.OBSScene, now.UTC().Unix())
+		s.OBSScene, now.UTC().Unix(), boolInt(s.ChatNotice))
 	return err
 }
 
@@ -134,14 +138,16 @@ func scanRollover(s interface{ Scan(...any) error }) (RolloverSettings, error) {
 		enabled               int
 		sessionAt, rolloverAt int64
 		updated               int64
+		chatNotice            int
 	)
 	err := s.Scan(&out.DestinationID, &enabled, &out.MarginMinutes, &out.QuietStart, &out.QuietEnd,
 		&out.QuietZone, &out.OBSScene, &out.SessionBroadcastID, &sessionAt, &rolloverAt,
-		&out.LastTrigger, &out.LastResult, &updated)
+		&out.LastTrigger, &out.LastResult, &updated, &chatNotice)
 	if err != nil {
 		return RolloverSettings{}, err
 	}
 	out.Enabled = enabled != 0
+	out.ChatNotice = chatNotice != 0
 	out.SessionStartedAt = timeOrZero(sessionAt)
 	out.LastRolloverAt = timeOrZero(rolloverAt)
 	out.UpdatedAt = timeOrZero(updated)

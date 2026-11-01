@@ -56,6 +56,9 @@ so for them the template has no effect today.
   deletes that occurrence's platform event and records it as skipped, so the
   look-ahead does not create it again. The schedule still starts the
   destinations at that time. To stop the show outright, switch the schedule off.
+  A skip is refused with a 409 when the show has already started, when its
+  destination is live, or while its event is still being created. The platform
+  is not called in those cases.
 - **Retitle one occurrence** (`POST /api/v1/recurring/occurrences/{id}/title`)
   changes the title of that event only. The template still applies to every
   other occurrence.
@@ -69,6 +72,20 @@ An event that cannot be cancelled keeps its record, so the next pass tries
 again. If its destination has been deleted too, the event cannot be reached
 from here, and the error names it so it can be removed in the platform's own
 studio.
+
+## The console
+
+The Automation page has two parts for recurring events:
+
+- **Broadcast template** sits in the schedule dialog for a start schedule. It
+  holds the title pattern, description, privacy, category, the number of
+  upcoming events to keep (1 to 10, default 2) and the thumbnail. A refusal from
+  the platform on the last look-ahead create is shown as a banner, with the time
+  it happened and the platform's own wording. The next successful create clears it.
+- **Upcoming events** lists the next two weeks of occurrences. A row with a
+  platform event can be retitled or skipped. Skip asks first. A refusal (409)
+  says why nothing was removed; a platform refusal (502) says the event was
+  left as it was.
 
 ## API
 

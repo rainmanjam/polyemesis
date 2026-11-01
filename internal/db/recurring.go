@@ -20,7 +20,8 @@ import (
 var ErrOccurrenceClaimed = errors.New("this occurrence is already claimed")
 
 const templateColumns = `schedule_id, title_pattern, description, privacy, category, lookahead,
-	(thumbnail IS NOT NULL AND length(thumbnail) > 0), thumbnail_mime, created_at, updated_at`
+	(thumbnail IS NOT NULL AND length(thumbnail) > 0), thumbnail_mime, last_error, last_error_at,
+	created_at, updated_at`
 
 const occurrenceColumns = `id, schedule_id, destination_id, occurrence_at, state,
 	platform_event_id, title, created_at, updated_at`
@@ -107,6 +108,29 @@ func (d *DB) ListBroadcastTemplates() ([]scheduler.BroadcastTemplate, error) {
 		out = append(out, *t)
 	}
 	return out, rows.Err()
+}
+
+// RecordBroadcastTemplateError keeps the redacted reason a look-ahead create was refused, on the template
+// row, so the screen can show it. A template that does not exist is ErrNotFound: the failure has no home
+// without its template, and the log still carries it.
+func (d *DB) RecordBroadcastTemplateError(scheduleID int64, message string, at time.Time) error {
+	res, err := d.sql.Exec(`UPDATE broadcast_templates SET last_error=?, last_error_at=? WHERE schedule_id=?`,
+		message, at.Unix(), scheduleID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearBroadcastTemplateError drops the recorded refusal after a create succeeds. Clearing a template
+// that has no refusal is not an error.
+func (d *DB) ClearBroadcastTemplateError(scheduleID int64) error {
+	_, err := d.sql.Exec(`UPDATE broadcast_templates SET last_error='', last_error_at=0 WHERE schedule_id=?
+		AND last_error <> ''`, scheduleID)
+	return err
 }
 
 // BroadcastThumbnail returns the stored picture bytes for a template, for the one write that sends
@@ -248,13 +272,17 @@ func scanTemplate(s interface{ Scan(...any) error }) (*scheduler.BroadcastTempla
 	var (
 		t            scheduler.BroadcastTemplate
 		hasThumb     bool
+		lastAt       int64
 		created, upd int64
 	)
 	if err := s.Scan(&t.ScheduleID, &t.TitlePattern, &t.Description, &t.Privacy, &t.Category,
-		&t.Lookahead, &hasThumb, &t.ThumbnailMIME, &created, &upd); err != nil {
+		&t.Lookahead, &hasThumb, &t.ThumbnailMIME, &t.LastError, &lastAt, &created, &upd); err != nil {
 		return nil, err
 	}
 	t.HasThumbnail = hasThumb
+	if lastAt != 0 {
+		t.LastErrorAt = time.Unix(lastAt, 0).UTC()
+	}
 	return &t, nil
 }
 

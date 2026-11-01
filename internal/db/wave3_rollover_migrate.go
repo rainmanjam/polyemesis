@@ -27,5 +27,14 @@ func (d *DB) MigrateWave3RolloverState() error {
 		last_result          TEXT    NOT NULL DEFAULT '',
 		updated_at           INTEGER NOT NULL DEFAULT 0
 	)`)
+	if err != nil {
+		return err
+	}
+	// The optional chat notice (#19), added to a table that may already exist from an earlier boot.
+	has, err := columnExists(d.sql, "destination_rollover", "chat_notice")
+	if err != nil || has {
+		return err
+	}
+	_, err = d.sql.Exec(`ALTER TABLE destination_rollover ADD COLUMN chat_notice INTEGER NOT NULL DEFAULT 0`)
 	return err
 }

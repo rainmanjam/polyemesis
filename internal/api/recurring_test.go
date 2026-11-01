@@ -36,6 +36,8 @@ type fakeYouTubeEditor struct {
 	cancels   []string
 	// editErr, when set, is the refusal every title write answers with.
 	editErr error
+	// ingestErr, when set, is the refusal every create answers with, as a platform's limit would.
+	ingestErr error
 }
 
 func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
@@ -43,6 +45,9 @@ func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oa
 	defer f.mu.Unlock()
 	f.nextID++
 	id := fmt.Sprintf("yt-occ-%d", f.nextID)
+	if f.ingestErr != nil {
+		return nil, f.ingestErr
+	}
 	f.creates = append(f.creates, opts)
 	return &oauth.Broadcast{ID: id, Target: "UCchannel",
 		Ingest: oauth.Ingest{URL: "rtmp://a.example/live2", Key: "key-" + id}}, nil

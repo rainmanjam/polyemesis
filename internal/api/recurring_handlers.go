@@ -223,6 +223,12 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 			writeStoreError(w, err)
 			return
 		}
+		// A refusal the operator can act on (the show started, is live, or is still being created) is a
+		// conflict with the current state, not a platform failure, so it is not reported as a 502.
+		if errors.Is(err, errOccurrenceRefused) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+err.Error())
 		return
 	}
