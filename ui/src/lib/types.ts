@@ -2716,6 +2716,53 @@ export interface ChatUserCard {
   truncated: boolean;
   /** Why the history is only this deep. Show it. */
   retentionNote: string;
+  /** The ban or timeout in force, as polyemesis recorded it (UX Council A48).
+   *  ABSENT means the server could not tell -- treat it as unknown, never as
+   *  "none". Only an explicit `action: "none"` may disable Lift ban. */
+  sanction?: ChatSanction;
+}
+
+/** A viewer's standing. `action` is the chat.moderation event's own word, or
+ *  "none". `until` is a timeout's end and absent on a permanent ban. A ban
+ *  placed from a platform's own dashboard is not recorded here. */
+export interface ChatSanction {
+  action: "ban" | "timeout" | "none";
+  account?: string;
+  until?: string;
+  since?: string;
+  by?: "operator" | "automod";
+  reason?: string;
+}
+
+/** One automod finding as GET /chat/flags returns it. The model's own prose is
+ *  never on the wire (#495); `reason` is the operator's words or a closed-set
+ *  category reason. */
+export interface ChatFlagFinding {
+  checker: AutomodChecker;
+  action: AutomodAction;
+  category?: string;
+  reason: string;
+  ruleId?: number;
+  confidence?: number;
+  decidedBy?: AutomodSlot;
+  provider?: string;
+}
+
+/** One message automod flagged, with every finding about it. */
+export interface ChatFlaggedMessage {
+  message: ChatMessage;
+  findings: ChatFlagFinding[];
+  /** The automod matrix permitted at least one action, so it was not only logged. */
+  acted: boolean;
+  at: string;
+}
+
+/** GET /chat/flags: automod's in-memory review list, newest first. */
+export interface ChatFlagsResult {
+  flags: ChatFlaggedMessage[];
+  truncated: boolean;
+  /** What the list covers. Render it beside an empty list. */
+  note: string;
 }
 
 /** A chat search result set.

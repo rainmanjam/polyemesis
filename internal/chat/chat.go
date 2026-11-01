@@ -370,6 +370,15 @@ type Purger interface {
 	PurgeChatMessages(cutoff time.Time, keep int) (int, error)
 }
 
+// Sanctioner is the optional half of Store that remembers who is under a ban
+// or timeout, so the user card can say so (UX Council A48). A Store without it
+// leaves the card unable to tell, which it reports as unknown rather than as
+// "none". *db.DB satisfies it.
+type Sanctioner interface {
+	RecordChatSanction(s db.ChatSanction) error
+	ClearChatSanction(p db.Platform, account, userID string) error
+}
+
 // ToDB converts a message for storage. Exported because the API layer replays
 // history out of the database and needs the round trip to be one obvious pair
 // of functions rather than two divergent ones.

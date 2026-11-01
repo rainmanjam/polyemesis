@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DisabledReason } from "@/components/DisabledReason";
+import { StatusPill } from "@/components/StatusPill";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,8 @@ import { api } from "@/lib/api";
 import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState } from "@/lib/readState";
 import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { chatActionSupport } from "@/lib/chatModeration";
+import { disabledDescribedBy } from "@/lib/disabledReason";
+import { chatSanctionStatus } from "@/lib/status";
 import { clockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
@@ -87,11 +91,11 @@ export function ChatUserCard({
     if (!authorId) return;
     setLoading(true);
     api
-      .chatUser({ platform, authorId, limit: 200 })
+      .chatUser({ platform, account, authorId, limit: 200 })
       .then((c) => setRead(okRead(c)))
       .catch(() => setRead(failedRead()))
       .finally(() => setLoading(false));
-  }, [platform, authorId]);
+  }, [platform, account, authorId]);
 
   useEffect(() => {
     if (open) {
@@ -115,6 +119,26 @@ export function ChatUserCard({
   // missing. See lib/chatModeration.ts.
   const ban = chatActionSupport(platform, "ban", t);
   const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
+
+  // UX Council A48: what is in force on this person. Lift ban used to be
+  // offered whatever the answer, so pressing it for someone who was never
+  // banned was a no-op reported as a success. It is disabled ONLY on an
+  // explicit "none" from the server: an absent sanction is a read that could
+  // not tell, and taking the button away on a guess would strand a moderator
+  // with a banned viewer and nothing to press. The platform's own reason, when
+  // it cannot ban at all, outranks this one.
+  const sanction = card?.sanction;
+  const liftReasonId = useId();
+  const liftBlocked = !ban.ok ? ban.reason : sanction?.action === "none" ? t("chatCard.liftBanNothing") : "";
+  const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
+  const sanctionDetail =
+    sanction?.action === "timeout" && sanction.until
+      ? t("chatCard.sanctionTimeoutDetail", { time: clockTime(sanction.until), by: byLabel })
+      : sanction?.action === "ban"
+        ? t("chatCard.sanctionBanDetail", { time: clockTime(sanction.since ?? ""), by: byLabel })
+        : card && !sanction
+          ? t("chatCard.sanctionUnknownDetail")
+          : "";
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -277,6 +301,14 @@ export function ChatUserCard({
           </p>
         )}
 
+        {/* ---- what is in force ---- */}
+        {card && (
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="chat-sanction">
+            <StatusPill reading={chatSanctionStatus(sanction)} />
+            {sanctionDetail && <span className="text-sm text-muted-foreground">{sanctionDetail}</span>}
+          </div>
+        )}
+
         {/* ---- what can be done ---- */}
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -426,8 +458,9 @@ export function ChatUserCard({
             <Button
               size="sm"
               variant="secondary"
-              disabled={!ban.ok || busy !== ""}
-              title={ban.reason || t("chatCard.liftBanTitle")}
+              disabled={liftBlocked !== "" || busy !== ""}
+              aria-describedby={disabledDescribedBy(liftReasonId, ban.ok ? liftBlocked : null)}
+              title={liftBlocked || t("chatCard.liftBanTitle")}
               onClick={() =>
                 run(t("chatCard.banLifted"), () =>
                   api.unbanChatUser({ platform, account, userId: authorId }),
@@ -482,6 +515,10 @@ export function ChatUserCard({
               </Button>
             )}
           </div>
+          {/* Why Lift ban is grey, where the eye already is. The platform's
+              own reason is printed once above the timeouts, so this one only
+              carries the "nothing to lift" case. */}
+          <DisabledReason id={liftReasonId} reason={ban.ok ? liftBlocked : null} />
         </div>
       </DialogContent>
     </Dialog>

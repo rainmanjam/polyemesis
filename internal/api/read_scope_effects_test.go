@@ -88,6 +88,8 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"iterating common words rebuilds the scrollback, as /library/search would a transcript"},
 		{http.MethodGet, "/api/v1/chat/users?platform=twitch&authorId=someone", nil,
 			"everything one viewer has said"},
+		{http.MethodGet, "/api/v1/chat/flags", nil,
+			"automod's review list carries each flagged message's text, under its author's name"},
 	}
 
 	// EVERY denied pattern must appear above. The deny list is subtractive, so

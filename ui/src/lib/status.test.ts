@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import en from "./i18n/en.json";
 import {
+  chatSanctionStatus,
   clipBufferStatus,
   delayStatus,
   destinationStatus,
@@ -162,5 +163,22 @@ describe("platformSetupStatus (settings-council R1, R10)", () => {
 
   it("reads a manual-key platform as such rather than as not set up", () => {
     expect(platformSetupStatus({ ...base, supported: false }).labelKey).toBe("settingsUx.pillManualKey");
+  });
+});
+
+describe("chatSanctionStatus (A48)", () => {
+  it("reads a ban and a timeout as in force, amber, never red", () => {
+    expect(chatSanctionStatus({ action: "ban" })).toEqual({ labelKey: "chatCard.sanctionBanned", tone: "warn", indicator: "dashed" });
+    expect(chatSanctionStatus({ action: "timeout", until: "2026-11-01T18:10:00Z" }).labelKey).toBe("chatCard.sanctionTimedOut");
+    expect(chatSanctionStatus({ action: "timeout" }).tone).toBe("warn");
+  });
+
+  it("keeps an unknown answer apart from an explicit none", () => {
+    expect(chatSanctionStatus({ action: "none" }).labelKey).toBe("chatCard.sanctionNone");
+    expect(chatSanctionStatus(undefined).labelKey).toBe("chatCard.sanctionUnknown");
+    expect(chatSanctionStatus(null).labelKey).not.toBe(chatSanctionStatus({ action: "none" }).labelKey);
+    for (const k of ["chatCard.sanctionBanned", "chatCard.sanctionTimedOut", "chatCard.sanctionNone", "chatCard.sanctionUnknown"]) {
+      expect((en as Record<string, string>)[k]).toBeTruthy();
+    }
   });
 });

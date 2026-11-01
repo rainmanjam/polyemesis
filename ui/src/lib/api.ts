@@ -36,6 +36,7 @@ import type {
   ChatSendResponse,
   ChatSettings,
   ChatUserCard,
+  ChatFlagsResult,
   CredentialCheck,
   Destination,
   DestinationId,
@@ -1388,10 +1389,22 @@ export const api = {
 
   /** One person's recent messages, from this server's own scrollback. No
    *  platform publishes a chat-history API; see ChatUserCard. */
-  chatUser: (m: { platform: ChatPlatform; authorId: string; limit?: number }) => {
+  chatUser: (m: { platform: ChatPlatform; account?: string; authorId: string; limit?: number }) => {
     const q = new URLSearchParams({ platform: m.platform, authorId: m.authorId });
+    // The account narrows the card's sanction to the channel it was opened
+    // from: a ban is per channel.
+    if (m.account) q.set("account", m.account);
     if (m.limit) q.set("limit", String(m.limit));
     return get<ChatUserCard>(`/chat/users?${q.toString()}`);
+  },
+
+  /** What automod flagged, newest first (UX Council A48). */
+  chatFlags: (m: { platform?: ChatPlatform; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (m.platform) q.set("platform", m.platform);
+    if (m.limit) q.set("limit", String(m.limit));
+    const qs = q.toString();
+    return get<ChatFlagsResult>(`/chat/flags${qs ? `?${qs}` : ""}`);
   },
 
   /** Channel-wide chat rules. Only Twitch publishes an API for these, and an

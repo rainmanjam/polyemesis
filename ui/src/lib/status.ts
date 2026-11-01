@@ -1,7 +1,7 @@
 import { stateLabelKey, type TranslationKey } from "./i18n";
 import type { OutputState } from "./outputStrip";
 import type { IngestPhase } from "./sourceIngest";
-import type { DelayStatus, ProcessState, ProcessStatus } from "./types";
+import type { ChatSanction, DelayStatus, ProcessState, ProcessStatus } from "./types";
 
 /* ONE VOCABULARY FOR EVERY "IS IT RUNNING" WORD ON THE CONSOLE.
  *
@@ -175,4 +175,22 @@ export function platformSetupStatus(input: {
   if (input.hasSecret && input.lastCheckState === "rejected") return reading("settingsUx.pillCredsRejected", "bad");
   if (input.hasSecret) return reading("settingsUx.pillCredsSaved", "warn");
   return reading("settingsUx.pillNotSetUp", "idle");
+}
+
+/** A viewer's standing on the chat user card (UX Council A48). A ban and a
+ *  timeout are both amber: each is a moderation decision in force that the
+ *  moderator may want to revisit, and neither is a failure, so neither is red.
+ *  An ABSENT sanction is the server saying it could not tell, which reads as
+ *  Unknown and is never drawn like "no active ban". */
+export function chatSanctionStatus(sanction?: ChatSanction | null): StatusReading {
+  switch (sanction?.action) {
+    case "ban":
+      return reading("chatCard.sanctionBanned", "warn");
+    case "timeout":
+      return reading("chatCard.sanctionTimedOut", "warn");
+    case "none":
+      return reading("chatCard.sanctionNone", "idle");
+    default:
+      return reading("chatCard.sanctionUnknown", "idle");
+  }
 }

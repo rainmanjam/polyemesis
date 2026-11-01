@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
+import { Flag, MessagesSquare, RefreshCw, WifiOff } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,14 +17,17 @@ import {
 } from "@/components/ChatPanel";
 import { accentFor, platformsIn } from "@/lib/chat";
 import { ChatUserCard } from "@/components/ChatUserCard";
+import { ChatFlaggedList } from "@/components/ChatFlaggedList";
 import { ChatMessageMenu, type MenuAnchor } from "@/components/ChatMessageMenu";
 import { ChatRules } from "@/components/ChatRules";
 import { PollPanel } from "@/components/PollPanel";
 import { ConfirmDeleteMessage } from "@/components/ConfirmDeleteMessage";
 import { useChatFeed } from "@/hooks/useChatFeed";
 import { useChatSearch } from "@/hooks/useChatSearch";
+import { useChatFlags } from "@/hooks/useChatFlags";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useT } from "@/lib/i18n";
+import { mayClaim, readFailed } from "@/lib/readState";
 import type { ChatMessage, ChatPlatform } from "@/lib/types";
 
 /** One pane for every platform at once.
@@ -58,6 +61,27 @@ export function ChatPage() {
   const [hidden, setHidden] = useState<Set<ChatPlatform>>(new Set());
   const [menu, setMenu] = useState<{ m: ChatMessage; at: MenuAnchor } | null>(null);
   const search = useChatSearch();
+
+  // UX Council A48: what automod flagged, behind a chip with its count. The
+  // list honours the same platform filter as the timeline, so a filtered-out
+  // platform's flags are not counted either.
+  const flagsRead = useChatFlags();
+  const [showFlags, setShowFlags] = useState(false);
+  const allFlags = useMemo(
+    () => (mayClaim(flagsRead.read) ? flagsRead.read.value.flags : []),
+    [flagsRead.read],
+  );
+  const flagsNote = mayClaim(flagsRead.read) ? flagsRead.read.value.note : undefined;
+  const flagsTruncated = mayClaim(flagsRead.read) && flagsRead.read.value.truncated;
+  const flags = useMemo(
+    () => allFlags.filter((f) => !hidden.has(f.message.platform)),
+    [allFlags, hidden],
+  );
+  const flagCount = mayClaim(flagsRead.read) ? `${flags.length}${flagsTruncated ? "+" : ""}` : "";
+  const toggleFlags = () => {
+    if (!showFlags) flagsRead.reload();
+    setShowFlags(!showFlags);
+  };
 
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
   const counts = useMemo(() => {
@@ -162,7 +186,15 @@ export function ChatPage() {
                 </span>
               </>
             )}
-            <Button variant="ghost" size="icon-sm" onClick={() => void reload()} aria-label={t("chatpage.reload")}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => {
+                void reload();
+                flagsRead.reload();
+              }}
+              aria-label={t("chatpage.reload")}
+            >
               <RefreshCw className={loading ? "animate-spin" : undefined} />
             </Button>
           </>
@@ -180,7 +212,21 @@ export function ChatPage() {
                 ? t("chatpage.shownOfTotal", { shown: visible.length, total: messages.length })
                 : visible.length}
             </span>
-            <div className="ml-auto">
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* A toggle, so aria-pressed says which list is on screen. The
+                  count rides in the accessible name too: a number beside an
+                  icon is otherwise announced as a bare digit. */}
+              <Button
+                size="sm"
+                variant={showFlags ? "secondary" : "outline"}
+                aria-pressed={showFlags}
+                aria-label={t("chatFlags.chipAria", { count: flagCount || "0" })}
+                onClick={toggleFlags}
+              >
+                <Flag aria-hidden="true" className="mr-1 h-3 w-3" />
+                {t("chatFlags.chip")}
+                {flagCount !== "" && <span className="tnum ml-1 font-mono">{flagCount}</span>}
+              </Button>
               <PlatformFilter
                 platforms={platforms}
                 hidden={hidden}
@@ -233,7 +279,15 @@ export function ChatPage() {
 
           <ChatSearchBox search={search} />
 
-          {search.active ? (
+          {showFlags ? (
+            <ChatFlaggedList
+              flags={flags}
+              failed={readFailed(flagsRead.read)}
+              filtered={flags.length === 0 && allFlags.length > 0}
+              note={flagsNote}
+              onOpenUser={setCard}
+            />
+          ) : search.active ? (
             <ChatSearchResults
               search={search}
               onDelete={confirmDelete.ask}

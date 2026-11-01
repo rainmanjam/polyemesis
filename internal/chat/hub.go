@@ -94,6 +94,9 @@ type Hub struct {
 	// rather than performed. The Hub acts; it never decides -- see automod.go.
 	automod    *automodState
 	automodGen uint64
+	// flags is automod's review list, oldest first and bounded by flagCap.
+	// See flags.go.
+	flags []FlaggedMessage
 
 	// display is the on-screen overlay's sink (see display.go), or nil.
 	display DisplaySink
@@ -844,8 +847,33 @@ func (h *Hub) Ban(ctx context.Context, p db.Platform, account, userID string, d 
 	if d > 0 {
 		m.Action, m.Seconds = ModTimeout, int(d/time.Second)
 	}
+	h.recordSanction(ctx, r, userID, m.Action, d, reason)
 	h.publishModeration(ctx, m)
 	return nil
+}
+
+// recordSanction remembers a ban that SUCCEEDED, under the runner's own
+// account so a later read by the message's account finds it. A store that
+// cannot is not an error, and neither is a write that fails: the ban happened,
+// and refusing to report it because a bookkeeping row did not land would be
+// the worse lie.
+func (h *Hub) recordSanction(ctx context.Context, r *runner, userID, action string, d time.Duration, reason string) {
+	sc, ok := h.store.(Sanctioner)
+	if !ok {
+		return
+	}
+	now := h.now()
+	s := db.ChatSanction{
+		Platform: r.platform, Account: r.account, UserID: userID,
+		Action: action, At: now, By: actorOf(ctx), Reason: reason,
+	}
+	if d > 0 {
+		s.Until = now.Add(d)
+	}
+	if err := sc.RecordChatSanction(s); err != nil {
+		h.log.Warn("chat sanction not recorded; the user card will not show it",
+			"platform", r.platform, "err", err)
+	}
 }
 
 // Unban lifts a ban or an unexpired timeout.
@@ -869,6 +897,12 @@ func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) 
 	defer cancel()
 	if err := b.Unban(ctx, userID); err != nil {
 		return err
+	}
+	if sc, ok := h.store.(Sanctioner); ok {
+		if err := sc.ClearChatSanction(r.platform, r.account, userID); err != nil {
+			h.log.Warn("lifted chat sanction not cleared; the user card may still show it",
+				"platform", r.platform, "err", err)
+		}
 	}
 	h.publishModeration(ctx, Moderation{Action: ModUnban, Platform: p, Account: account, UserID: userID})
 	return nil
