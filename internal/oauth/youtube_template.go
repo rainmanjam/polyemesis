@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,9 +89,36 @@ func (y *YouTube) SetScheduledThumbnail(ctx context.Context, accessToken, broadc
 		y.apiBase(ytUploadBase)+ytThumbnailsPath+"?"+q.Encode(), accessToken, mime, data)
 }
 
-// CancelScheduledBroadcast deletes one scheduled broadcast by id. deleteBroadcast already treats a
-// 404 as deleted, so a page removed by hand reads as cancelled.
+// ErrScheduledNotCancellable is returned by CancelScheduledBroadcast when YouTube reports the broadcast
+// as no longer upcoming. A broadcast that is testing, live or complete may hold a VOD or a live audience,
+// so the cancel refuses it without sending a DELETE, and the caller stops retrying.
+var ErrScheduledNotCancellable = errors.New("this broadcast is no longer upcoming, so it cannot be removed from here")
+
+// upcomingLifecycles are the lifecycle states in which a broadcast has not yet gone on air. Only these
+// may be deleted by a cancel.
+var upcomingLifecycles = map[string]bool{"created": true, "ready": true}
+
+// CancelScheduledBroadcast deletes one scheduled broadcast by id, and only while YouTube still reports
+// it as upcoming. A broadcast that is no longer listed, or that a 404 answers for, is already gone, and
+// that reads as cancelled. The DELETE itself is deleteBroadcast, which also treats a 404 as deleted.
 func (y *YouTube) CancelScheduledBroadcast(ctx context.Context, accessToken, broadcastID string) error {
+	if strings.TrimSpace(broadcastID) == "" {
+		return fmt.Errorf("no broadcast id to cancel")
+	}
+	b, err := y.broadcastByID(ctx, accessToken, broadcastID)
+	if errors.Is(err, errBroadcastNotListed) {
+		return nil
+	}
+	var se *statusError
+	if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !upcomingLifecycles[b.Status.LifeCycleStatus] {
+		return fmt.Errorf("%w: YouTube reports it as %q", ErrScheduledNotCancellable, b.Status.LifeCycleStatus)
+	}
 	return y.deleteBroadcast(ctx, accessToken, broadcastID)
 }
 

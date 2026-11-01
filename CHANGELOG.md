@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Recurring events: a platform event is deleted only while its show is still upcoming, its destination is not delivering, and YouTube reports the broadcast as created or ready. A deleted template or schedule no longer deletes a show that has started, and a skip of a started or live show is refused with a 409.
+
 ### Added
 
 - **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in

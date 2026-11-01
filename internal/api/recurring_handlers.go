@@ -218,9 +218,14 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.skipOccurrence(r.Context(), id); err != nil {
+	if err := s.skipOccurrence(r.Context(), id, time.Now()); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeStoreError(w, err)
+			return
+		}
+		if errors.Is(err, oauth.ErrScheduledNotCancellable) {
+			writeError(w, http.StatusConflict, "this show's event cannot be removed from here: it has started, "+
+				"its destination is live, or the platform will not delete it; the platform keeps it as it is")
 			return
 		}
 		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+err.Error())

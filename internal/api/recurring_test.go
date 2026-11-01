@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -36,6 +37,9 @@ type fakeYouTubeEditor struct {
 	cancels   []string
 	// editErr, when set, is the refusal every title write answers with.
 	editErr error
+	// cancelErr, when set, is the refusal every cancel answers with, as a platform that will not
+	// delete a broadcast that is already live or complete does.
+	cancelErr error
 }
 
 func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
@@ -67,7 +71,7 @@ func (f *fakeYouTubeEditor) CancelScheduledBroadcast(_ context.Context, _, broad
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, broadcastID)
-	return nil
+	return f.cancelErr
 }
 
 func (f *fakeYouTubeEditor) createCount() int {
@@ -263,7 +267,7 @@ func TestSkippingAnOccurrenceDeletesItsEventAndIsNotRecreated(t *testing.T) {
 	}
 	first := rows[0]
 
-	if err := f.s.skipOccurrence(context.Background(), first.ID); err != nil {
+	if err := f.s.skipOccurrence(context.Background(), first.ID, f.now); err != nil {
 		t.Fatalf("skipOccurrence: %v", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 1 || got[0] != first.PlatformEventID {
@@ -285,7 +289,7 @@ func TestSkippingTheNearestShowClearsTheGoLiveMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOpenOccurrences: %v", err)
 	}
-	if err := f.s.skipOccurrence(context.Background(), rows[0].ID); err != nil {
+	if err := f.s.skipOccurrence(context.Background(), rows[0].ID, f.now); err != nil {
 		t.Fatalf("skipOccurrence: %v", err)
 	}
 	got, err := f.store.GetDestination(f.dest.ID)
@@ -376,5 +380,117 @@ func TestADestinationWithoutAScheduledEditorGetsNoTemplateEvents(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("a Facebook destination with no scheduled editor got %d template rows", len(rows))
+	}
+}
+
+// A template deleted after one of its occurrences has gone on air must not reach that occurrence's
+// platform event. The show has aired, and a DELETE would take its replay with it. Only the event that
+// is still ahead is cancelled.
+func TestDeletingATemplateLeavesAnOccurrenceThatHasAlreadyAiredAlone(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	// Two days on, the Tuesday 3rd has aired and the Tuesday 10th is still ahead.
+	f.now = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	if err := f.store.DeleteBroadcastTemplate(f.schedule); err != nil {
+		t.Fatalf("delete template: %v", err)
+	}
+	f.sweep(t)
+
+	if got := f.fake.cancelled(); len(got) != 1 || got[0] != "yt-occ-2" {
+		t.Fatalf("cancelled %v, want only yt-occ-2, the event still ahead; the aired show must not be deleted", got)
+	}
+}
+
+// YouTube refuses to delete a broadcast that is testing, live or complete. The refusal drops the row
+// and the sweep does not come back to it, so it is not retried every five minutes for ever.
+func TestAPlatformRefusalToCancelIsNotRetriedOnEverySweep(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	f.fake.cancelErr = oauth.ErrScheduledNotCancellable
+	if err := f.store.DeleteBroadcastTemplate(f.schedule); err != nil {
+		t.Fatalf("delete template: %v", err)
+	}
+	f.sweep(t)
+	first := len(f.fake.cancelled())
+	f.sweep(t)
+	if got := len(f.fake.cancelled()); first != 2 || got != first {
+		t.Fatalf("cancel attempts: %d after the first sweep, %d after the second; want 2 and no retry", first, got)
+	}
+}
+
+// An operator's skip of an occurrence YouTube will not cancel is refused with the reason, and the
+// occurrence keeps its state, so the calendar still shows the event that is there.
+func TestSkippingAnOccurrenceYouTubeWillNotCancelIsRefusedAndKeepsItsRow(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	f.fake.cancelErr = oauth.ErrScheduledNotCancellable
+	at := time.Date(2026, 11, 3, 19, 0, 0, 0, time.UTC)
+	occ, err := f.store.OccurrenceFor(f.schedule, f.dest.ID, at)
+	if err != nil {
+		t.Fatalf("occurrence: %v", err)
+	}
+	err = f.s.skipOccurrence(context.Background(), occ.ID, f.now)
+	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
+		t.Fatalf("skip returned %v, want ErrScheduledNotCancellable", err)
+	}
+	after, err := f.store.GetOccurrence(occ.ID)
+	if err != nil || after.State != scheduler.OccurrenceUpcoming {
+		t.Fatalf("after a refused skip the row is %+v (%v); it must stay upcoming", after, err)
+	}
+}
+
+// A show whose start time has passed is the platform's record of the show. Skipping it is refused with
+// the reason, its event is left alone, and its row stays upcoming so the calendar tells the truth.
+func TestSkippingAnOccurrenceWhoseStartHasPassedIsRefusedAndLeavesTheEventAlone(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.sweep(t)
+	// The Tuesday 3rd began at 19:00; it is now an hour into the show.
+	f.now = time.Date(2026, 11, 3, 20, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 11, 3, 19, 0, 0, 0, time.UTC)
+	occ, err := f.store.OccurrenceFor(f.schedule, f.dest.ID, at)
+	if err != nil {
+		t.Fatalf("occurrence: %v", err)
+	}
+	err = f.s.skipOccurrence(context.Background(), occ.ID, f.now)
+	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
+		t.Fatalf("skip of a started show returned %v, want ErrScheduledNotCancellable", err)
+	}
+	if got := f.fake.cancelled(); len(got) != 0 {
+		t.Fatalf("a started show's event was cancelled: %v", got)
+	}
+	after, err := f.store.GetOccurrence(occ.ID)
+	if err != nil || after.State != scheduler.OccurrenceUpcoming {
+		t.Fatalf("after a refused skip the row is %+v (%v); it must stay upcoming", after, err)
+	}
+}
+
+// The refusal rule for deleting a platform event, stated once: the start must be in the future, and the
+// destination must not be delivering, because a delivering destination may be bound to that event.
+func TestOccurrenceCancelRefusalAllowsDeletionOnlyForAFutureShowOnANonDeliveringDestination(t *testing.T) {
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name       string
+		at         time.Time
+		delivering bool
+		refused    bool
+	}{
+		{"future show, destination idle", now.Add(time.Hour), false, false},
+		{"future show, destination delivering", now.Add(time.Hour), true, true},
+		{"show started a minute ago", now.Add(-time.Minute), false, true},
+		{"show starting this instant", now, false, true},
+		{"aired show, destination idle", now.Add(-24 * time.Hour), false, true},
+	}
+	for _, c := range cases {
+		err := occurrenceCancelRefusal(scheduler.Occurrence{At: c.at}, now, c.delivering)
+		if c.refused && !errors.Is(err, oauth.ErrScheduledNotCancellable) {
+			t.Fatalf("%s: refusal = %v, want ErrScheduledNotCancellable", c.name, err)
+		}
+		if !c.refused && err != nil {
+			t.Fatalf("%s: refused with %v, want deletion allowed", c.name, err)
+		}
 	}
 }

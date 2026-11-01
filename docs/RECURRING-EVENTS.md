@@ -65,10 +65,14 @@ so for them the template has no effect today.
 - **Delete the schedule** has the same effect: its upcoming events are
   cancelled at the next pass.
 
-An event that cannot be cancelled keeps its record, so the next pass tries
-again. If its destination has been deleted too, the event cannot be reached
-from here, and the error names it so it can be removed in the platform's own
-studio.
+Only an event that is still upcoming is cancelled. Three things keep a platform event:
+its start time has passed (the page is a record of the show), its destination is
+delivering (it may be bound to that event), or YouTube reports the broadcast as anything
+other than created or ready. A skip is refused with a 409 in each of those cases, and
+the event is left as it is. A template or schedule deletion drops the local row only and
+names the event in the log, so it can be removed in YouTube Studio if it is not wanted. A transient failure keeps the record, so the next pass
+tries again. If the destination has been deleted too, the event cannot be reached from
+here, and the error names it so it can be removed in the platform's own studio.
 
 ## API
 

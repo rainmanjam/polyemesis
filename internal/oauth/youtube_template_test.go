@@ -3,6 +3,7 @@ package oauth
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -202,5 +203,73 @@ func TestYouTubeCancelsAScheduledBroadcastByIdOnly(t *testing.T) {
 	del := findCapture(log, "DELETE", ytBroadcastsPath)
 	if del == nil || !strings.Contains(del.Query, "id=bcast-9") {
 		t.Fatalf("cancel did not delete bcast-9: %+v", del)
+	}
+}
+
+// ytCancelStub serves one broadcast in the given body and records every request. The body decides
+// the lifecycle the cancel reads, which is the only thing these tests vary.
+func ytCancelStub(t *testing.T, log *[]capture, body string) *YouTube {
+	t.Helper()
+	srv := httptest.NewServer(recordAll(t, log, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET " + ytBroadcastsPath:
+			io.WriteString(w, body)
+		case "DELETE " + ytBroadcastsPath:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return NewYouTube(WithBaseURL(srv.URL))
+}
+
+// ytBroadcastIn is the editor fixture's broadcast with its lifecycle state replaced.
+func ytBroadcastIn(lifecycle string) string {
+	return strings.Replace(ytEditorBroadcast, `"lifeCycleStatus":"created"`, `"lifeCycleStatus":"`+lifecycle+`"`, 1)
+}
+
+// A cancel deletes a broadcast only while YouTube still reports it as upcoming. Once it is testing,
+// live or complete, the broadcast may hold a VOD or a live audience, and a DELETE would take that
+// with it. The refusal is a typed error, so the sweep can stop retrying it.
+func TestYouTubeCancelDeletesOnlyABroadcastThatIsStillUpcoming(t *testing.T) {
+	for _, state := range []string{"created", "ready"} {
+		var log []capture
+		y := ytCancelStub(t, &log, ytBroadcastIn(state))
+		if err := y.CancelScheduledBroadcast(context.Background(), "tok", "bcast-9"); err != nil {
+			t.Fatalf("%s: CancelScheduledBroadcast: %v", state, err)
+		}
+		if del := findCapture(log, "DELETE", ytBroadcastsPath); del == nil {
+			t.Fatalf("%s: an upcoming broadcast was not deleted", state)
+		}
+	}
+}
+
+func TestYouTubeCancelRefusesAnyBroadcastThatIsNoLongerUpcomingWithoutDeletingIt(t *testing.T) {
+	for _, state := range []string{"testing", "live", "complete", "testStarting", "liveStarting"} {
+		var log []capture
+		y := ytCancelStub(t, &log, ytBroadcastIn(state))
+		err := y.CancelScheduledBroadcast(context.Background(), "tok", "bcast-9")
+		if !errors.Is(err, ErrScheduledNotCancellable) {
+			t.Fatalf("%s: cancel returned %v, want ErrScheduledNotCancellable", state, err)
+		}
+		if del := findCapture(log, "DELETE", ytBroadcastsPath); del != nil {
+			t.Fatalf("%s: a broadcast that is no longer upcoming was DELETED", state)
+		}
+	}
+}
+
+// A broadcast YouTube no longer lists was deleted in Studio, which is what a cancel wants, so it is
+// not an error and no DELETE is sent for it.
+func TestYouTubeCancelTreatsABroadcastNoLongerListedAsAlreadyCancelled(t *testing.T) {
+	var log []capture
+	y := ytCancelStub(t, &log, `{"items":[]}`)
+	if err := y.CancelScheduledBroadcast(context.Background(), "tok", "bcast-9"); err != nil {
+		t.Fatalf("a broadcast no longer listed should read as cancelled, got %v", err)
+	}
+	if del := findCapture(log, "DELETE", ytBroadcastsPath); del != nil {
+		t.Fatalf("a broadcast no longer listed was sent a DELETE")
 	}
 }

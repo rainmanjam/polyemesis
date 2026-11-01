@@ -327,7 +327,17 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 		_, schedOK := schedByID[o.ScheduleID]
 		_, tplOK := tplByID[o.ScheduleID]
 		if !schedOK || !tplOK {
-			if err := s.cancelOccurrence(ctx, o, true); err != nil {
+			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
+				if errors.Is(err, oauth.ErrScheduledNotCancellable) {
+					// The platform will not delete this event: it is live, testing or aired. The row is
+					// dropped so the sweep does not come back to it, and the event is named for the operator.
+					s.log.Warn("recurring: an orphaned event may not be deleted from here (its show has started, its "+
+						"destination is live, or the platform refused), so it was left on the platform; "+
+						"remove it in the platform's own studio if it is not wanted",
+						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+					_ = s.store.DeleteOccurrence(o.ID)
+					continue
+				}
 				s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
 					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
 			}
@@ -348,7 +358,7 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 
 // skipOccurrence is the operator's "skip this one". It is cancelOccurrence keeping the row, so the
 // occurrence is not created again.
-func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
+func (s *Server) skipOccurrence(ctx context.Context, id int64, now time.Time) error {
 	o, err := s.store.GetOccurrence(id)
 	if err != nil {
 		return err
@@ -359,7 +369,26 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
 	case scheduler.OccurrencePending:
 		return fmt.Errorf("this show's event is still being created; try again in a moment")
 	}
-	return s.cancelOccurrence(ctx, *o, false)
+	if err := occurrenceCancelRefusal(*o, now, s.destinationDelivering(o.DestinationID)); err != nil {
+		return err
+	}
+	return s.cancelOccurrence(ctx, *o, false, now)
+}
+
+// occurrenceCancelRefusal says why an occurrence's platform event must not be deleted, or returns nil when
+// it may be. The start must still be in the future: a show that has begun is the platform's record of it.
+// The destination must not be delivering: a live destination may be bound to that very event, and deleting
+// it would take the live broadcast down. Both refusals wrap oauth.ErrScheduledNotCancellable, so the sweep
+// drops the row and the skip answers 409.
+func occurrenceCancelRefusal(o scheduler.Occurrence, now time.Time, delivering bool) error {
+	if !o.At.After(now) {
+		return fmt.Errorf("%w: its start time %s has passed", oauth.ErrScheduledNotCancellable,
+			o.At.UTC().Format(time.RFC3339))
+	}
+	if delivering {
+		return fmt.Errorf("%w: its destination is live", oauth.ErrScheduledNotCancellable)
+	}
+	return nil
 }
 
 // cancelOccurrence deletes one occurrence's platform event, clears the destination's mirror if it
@@ -367,8 +396,14 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
 // longer exists cannot be reached for its account, so the event is named in the error and its row is
 // kept: the operator removes the event on the platform, and the row is the only thing that still knows
 // it exists.
-func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, removeRow bool) error {
+func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, removeRow bool, now time.Time) error {
+	// A show that has already started or aired, or whose destination is live, is not deleted from here: the
+	// platform page is a record of it, and removing it is the operator's choice on the platform. Only the
+	// local row is changed by the sweep, and the skip is refused before it reaches here.
 	if o.PlatformEventID != "" {
+		if err := occurrenceCancelRefusal(o, now, s.destinationDelivering(o.DestinationID)); err != nil {
+			return err
+		}
 		d, err := s.store.GetDestination(o.DestinationID)
 		if err != nil {
 			return fmt.Errorf("the destination for this show no longer exists, so its event %s cannot be "+
@@ -389,7 +424,7 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		cctx, cancel := context.WithTimeout(ctx, templateCallTimeout)
 		defer cancel()
 		if err := ed.CancelScheduledBroadcast(cctx, acct.AccessToken, o.PlatformEventID); err != nil {
-			return err
+			return fmt.Errorf("the event %s could not be cancelled: %w", o.PlatformEventID, err)
 		}
 		// The mirror named this event, so it must not keep pointing at it. Forget removes only the
 		// entry for this schedule and this broadcast, and leaves every other show alone.

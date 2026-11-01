@@ -404,6 +404,10 @@ func (y *YouTube) RescheduleBroadcast(ctx context.Context, accessToken, broadcas
 }
 
 // broadcastByID reads one broadcast, with every part a write has to carry back.
+// errBroadcastNotListed is what broadcastByID returns when the list has no match. Its text is the start of
+// that refusal, so a caller that tests for it reads the same words an operator would.
+var errBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
+
 func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID string) (*ytBroadcast, error) {
 	var list struct {
 		Items []ytBroadcast `json:"items"`
@@ -430,8 +434,8 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 	// Not an error to swallow. A broadcast id polyemesis stored and YouTube no
 	// longer lists is an event page that has been deleted from under the
 	// schedule, and the caller's retry-and-forget path is the right one for it.
-	return nil, fmt.Errorf("YouTube no longer lists broadcast %s on this channel; it may have "+
-		"been deleted in YouTube Studio, or the connected account may have changed", broadcastID)
+	return nil, fmt.Errorf("%w %s on this channel; it may have "+
+		"been deleted in YouTube Studio, or the connected account may have changed", errBroadcastNotListed, broadcastID)
 }
 
 // ytBroadcastCreateAdvice turns the create's documented refusals into something

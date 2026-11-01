@@ -1313,11 +1313,21 @@ answer later is refused then. See [HOOKS.md](HOOKS.md#private-and-lan-endpoints-
 | `GET` `POST` | `/schedules` |
 | `GET` | `/schedules/runs` |
 | `GET` `PUT` `DELETE` | `/schedules/{id}` |
+| `GET` `PUT` `DELETE` | `/schedules/{id}/template` |
+| `PUT` | `/schedules/{id}/template/thumbnail` |
+| `GET` | `/recurring/occurrences` |
+| `POST` | `/recurring/occurrences/{id}/skip`, `/recurring/occurrences/{id}/title` |
 
 A schedule create or update may also return `warnings`, on the same terms as a
 destination write. The one that exists today: a `once` schedule firing further
 ahead than Facebook accepts a scheduled broadcast gets no event page, and is
 told so. The schedule still saves and still runs.
+
+A start schedule may carry a recurring broadcast template (`/schedules/{id}/template`).
+The template is a title pattern, description, privacy, category and thumbnail; the
+look-ahead creates the next occurrences as upcoming YouTube events. The calendar
+(`/recurring/occurrences`, at most 90 days wide) lists them; skip cancels one occurrence's
+event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 
 ### Platforms, metadata, chat
 
