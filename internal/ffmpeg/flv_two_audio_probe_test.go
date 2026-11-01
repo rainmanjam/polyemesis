@@ -2,9 +2,7 @@ package ffmpeg
 
 import (
 	"context"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -92,22 +90,6 @@ func TestTheRealFFmpegPassesTheTwoAudioFLVProbe(t *testing.T) {
 	}
 }
 
-// flvProbeFakeFFmpeg puts a POSIX shell script where the probe will exec it, so
-// the probe's failure paths can be driven without a real binary. The body is
-// the script's behaviour after the shebang. Skipped on Windows, where the
-// script would not run.
-func flvProbeFakeFFmpeg(t *testing.T, body string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake FFmpeg is a POSIX shell script")
-	}
-	path := filepath.Join(t.TempDir(), "ffmpeg")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
-		t.Fatalf("writing the fake FFmpeg: %v", err)
-	}
-	return path
-}
-
 // THE PROBE FAILS OPEN WHEN IT CANNOT RUN. A tempdir that does not exist, a
 // binary that will not start and a deadline that passes are all reasons the
 // question could not be asked, not answers to it. Each must keep the second
@@ -145,7 +127,7 @@ func TestAFLVProbeFailsOpenWhenFFmpegCannotBeStarted(t *testing.T) {
 // MUTATION: in probeTwoAudioFLV, drop the ctx.Err() check before the exit-code
 // classification. Observed: FAIL, the killed child read as "FFmpeg refused".
 func TestAFLVProbeFailsOpenWhenTheDeadlinePassesBeforeFFmpegFinishes(t *testing.T) {
-	ff := flvProbeFakeFFmpeg(t, "exec sleep 30")
+	ff := fakeFFmpeg(t, `"") exec sleep 30 ;;`)
 	tools := &Tools{FFmpeg: ff, FFprobe: "/bin/sh"}
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -166,7 +148,7 @@ func TestAFLVProbeFailsOpenWhenTheDeadlinePassesBeforeFFmpegFinishes(t *testing.
 // MUTATION: in probeTwoAudioFLV, classify every mux failure as inconclusive.
 // Observed: FAIL, "a refusal passed the probe".
 func TestAFLVProbeFailsClosedWhenFFmpegRefusesToWriteTheFile(t *testing.T) {
-	ff := flvProbeFakeFFmpeg(t, "echo 'muxer refused a second audio stream' >&2; exit 1")
+	ff := fakeFFmpeg(t, `"") echo 'muxer refused a second audio stream' >&2; exit 1 ;;`)
 	tools := &Tools{FFmpeg: ff, FFprobe: "/bin/sh"}
 	got := tools.ProbeTwoAudioFLV(context.Background())
 	if got.OK || got.Inconclusive {

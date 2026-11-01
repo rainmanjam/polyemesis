@@ -97,7 +97,7 @@ func measureMix(t *testing.T, ffmpeg string, pair routing.Pair, vod bool) Frame 
 		"-map", "[a0]", "-map", "[a1]",
 		"-c:a", "aac", "-f", "mpegts", url+"?pkt_size=1316")
 	if out, err := source.CombinedOutput(); err != nil {
-		t.Skipf("could not produce a test stream (%v): %s", err, out)
+		t.Fatalf("could not produce the test stream the analyser measures (%v): %s", err, out)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -126,13 +126,7 @@ func measureMix(t *testing.T, ffmpeg string, pair routing.Pair, vod bool) Frame 
 // MUTATION: in Args, drop the Sink terminator. Observed: FAIL, "the analyser
 // printed no usable frame for the live mix" with FFmpeg's "unconnected" error.
 func TestBothMixesOfAPairedGraphAreMeasuredSeparatelyAndTheVODOneFollowsItsOwnTrack(t *testing.T) {
-	if testing.Short() {
-		t.Skip("streams in real time")
-	}
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg not installed")
-	}
+	ffmpeg := testenv.FFmpegBinary(t, "ffmpeg", "no ffmpeg on PATH")
 	pair, err := routing.CompilePair(pairedVODProfile(0), ptrTo(pairedVODProfile(1)), pairedVODSource())
 	if err != nil {
 		t.Fatalf("CompilePair: %v", err)
