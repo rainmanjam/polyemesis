@@ -59,6 +59,18 @@ var redactAllowlist = map[string]string{
 		"kept on the broadcast template row so the operator sees the limit. It runs on err.Error() before the " +
 		"store write, and nothing is clipped after it. A refused create carries no stream key, because a key only " +
 		"comes back on success; this is the outer net, not the boundary.",
+	"internal/api/lifecycle.go": "two residual passes. scrubSourceKey removes the destination's stream key as a " +
+		"LITERAL first, because X's problem detail can echo the source_id it was sent and the key has no credential " +
+		"shape; Redact then runs over what is left before the fault, log, escalation and timeline. X's PUBLISH " +
+		"warnings are platform text with the token in the Authorization header, never in the body, so the pass over " +
+		"them before the log line is the outer net, not the boundary.",
+	"internal/api/recurring_golive.go": "the same residual pass over a platform's warnings on a go-live metadata " +
+		"write (a title or category it did not take) before the log line. The write sends the token in a header and " +
+		"the warnings carry no stream key; this is the outer net, not the boundary.",
+	"internal/api/recurring_handlers.go": "the same residual pass over a platform's refusal of an occurrence's " +
+		"skip or retitle, and over a token refresh's error, written as the 502 body and the warnings list. None of " +
+		"those carries a stream key, because the calls only touch an existing event by id; this is the outer net, " +
+		"not the boundary.",
 	"internal/api/youtube_vertical.go": "the same residual pass over YouTube's error text (a refused liveStreams.insert for the vertical companion, a failed health read) shown as the 502 body and the health row. The stream key comes back only on a successful create, so a failed one carries none; this is the outer net, not the boundary.",
 	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
 		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +

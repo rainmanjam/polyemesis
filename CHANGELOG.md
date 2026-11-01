@@ -956,6 +956,10 @@ its first tagged release.
 
 ### Fixed
 
+- **An X go-live keeps every warning X sends.** When X published a broadcast but reported errors
+  and also failed to post the announcement, only the announcement warning reached the log; X's
+  own report was dropped. Both are kept now. (X stays gated off until the app is whitelisted.)
+
 - **An X destination saved from the editor is an X destination again.** The editor's X preset
   carried no platform, so a destination made from it was saved as a custom RTMP endpoint, and
   nothing X-specific (sign-in, the Livestream lifecycle, chat) reached it. It now saves as X, like

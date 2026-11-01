@@ -824,8 +824,9 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 		res.Warnings = append(res.Warnings, "X published the broadcast but reported: "+xProblems(out.Errors))
 	}
 	if strings.TrimSpace(out.Data.TweetError) != "" {
-		res.Warnings = []string{"the broadcast is live, but X did not post its announcement: " +
-			out.Data.TweetError}
+		// Appended, not assigned: X's own errors above are a separate report and must survive a failed announcement.
+		res.Warnings = append(res.Warnings, "the broadcast is live, but X did not post its announcement: "+
+			out.Data.TweetError)
 	}
 	return res, nil
 }
