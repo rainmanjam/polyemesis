@@ -50,8 +50,14 @@ type Source struct {
 	// a date from the first century.
 	PrevTokenUntil time.Time `json:"prevTokenUntil,omitzero"`
 	Position       int       `json:"position"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	// CaptionTrack is the audio track of this programme the live captioner
+	// transcribes. nil is the automatic choice, the one the captioner makes
+	// today, and it is stored as -1. A POINTER because track 0 is a real track
+	// and must not be confused with "not chosen". Storing it does not change
+	// what the captioner hears until the engine reads it.
+	CaptionTrack *int      `json:"captionTrack,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 const (
@@ -100,7 +106,24 @@ func validateSource(s *Source) error {
 	if probs := s.Ingest.problems(); len(probs) > 0 {
 		return fmt.Errorf("ingest settings: %s", strings.Join(probs, "; "))
 	}
+	if s.CaptionTrack != nil && (*s.CaptionTrack < 0 || *s.CaptionTrack > maxCaptionTrack) {
+		return fmt.Errorf("caption track must be between 0 and %d, or unset for automatic", maxCaptionTrack)
+	}
 	return nil
+}
+
+// maxCaptionTrack is a sanity ceiling on the caption track index. A programme
+// with more audio tracks than this is not a case the captioner is built for,
+// and a larger number is a typo or hostile input rather than a choice.
+const maxCaptionTrack = 15
+
+// captionTrackStored is the value written to sources.caption_track: -1 for the
+// automatic choice, the index otherwise.
+func captionTrackStored(t *int) int {
+	if t == nil {
+		return -1
+	}
+	return *t
 }
 
 func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
@@ -109,12 +132,17 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 		ingestJSON string
 		enabled    int
 		prevUntil  int64
+		captionTrk int
 		created    int64
 		updated    int64
 	)
 	if err := row.Scan(&s.ID, &s.Name, &enabled, &ingestJSON, &s.Token,
-		&s.PrevToken, &prevUntil, &s.Position, &created, &updated); err != nil {
+		&s.PrevToken, &prevUntil, &s.Position, &captionTrk, &created, &updated); err != nil {
 		return nil, err
+	}
+	if captionTrk >= 0 {
+		trk := captionTrk
+		s.CaptionTrack = &trk
 	}
 	if prevUntil > 0 {
 		s.PrevTokenUntil = time.Unix(prevUntil, 0)
@@ -132,7 +160,7 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 	return &s, nil
 }
 
-const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at`
+const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
 //
@@ -239,9 +267,9 @@ func createSource(x execQuerier, s *Source) error {
 
 	now := time.Now().Unix()
 	res, err := x.Exec(
-		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?)`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, now, now)
+		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)`,
+		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, captionTrackStored(s.CaptionTrack), now, now)
 	if err != nil {
 		// A caller-supplied token that another source already holds is refused
 		// here by sourceTokenUniqueIndex (#505). Named, because "UNIQUE
@@ -287,9 +315,9 @@ func (d *DB) UpdateSource(s *Source) error {
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(
-		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, position = ?, updated_at = ?
+		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, position = ?, caption_track = ?, updated_at = ?
 		 WHERE id = ?`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Position, now, s.ID)
+		s.Name, boolToInt(s.Enabled), string(blob), s.Position, captionTrackStored(s.CaptionTrack), now, s.ID)
 	if err != nil {
 		return err
 	}

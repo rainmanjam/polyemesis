@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "缩略图必须是 PNG 或 JPEG。",
   "wave3.recurring.thumbnailTooLarge": "该图片超过 2 MB。",
   "wave3.recurring.retitleSave": "保存标题",
-  "wave3.recurring.retitleFailed": "标题未更改：{reason}"
+  "wave3.recurring.retitleFailed": "标题未更改：{reason}",
+  "wave3.captions.title": "实时字幕",
+  "wave3.captions.intro": "字幕按输出逐个选择。选择此目标接受的通道，或保持关闭。",
+  "wave3.captions.modeLabel": "字幕通道",
+  "wave3.captions.off": "关闭",
+  "wave3.captions.sei": "在流内，CEA-608（Twitch）",
+  "wave3.captions.youtubePost": "YouTube 字幕接收（临时）",
+  "wave3.captions.facebookSei": "Facebook 流内（临时）",
+  "wave3.captions.kickNone": "Kick 未提供字幕支持文档，因此不为其提供字幕。",
+  "wave3.captions.provisional": "临时：此通道尚未在实际直播平台上确认。",
+  "wave3.captions.delayNote": "YouTube 字幕接收需要 30 秒或 60 秒的广播延迟。请为此目标设置延迟，或改用流内通道。",
+  "wave3.captions.facebookSwitch": "在服务器以 POLYEMESIS_CAPTIONS_FACEBOOK=1 启动之前，Facebook 字幕保持关闭。",
+  "wave3.captions.storedOnly": "此选择已保存，但引擎尚未发送字幕，因此在接入之前不会改变播出内容。",
+  "wave3.captions.trackLabel": "字幕音轨",
+  "wave3.captions.trackHint": "实时字幕所聆听的本节目音频轨道。",
+  "wave3.captions.trackAuto": "自动",
+  "wave3.captions.trackN": "音频轨 {n}"
 }

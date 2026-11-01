@@ -178,6 +178,8 @@ const DOCS_BY_SECTION = {
      * nothing here has measured YouTube, Kick, Facebook or Rumble accepting one.
      * The same rules exclude the tempting version of this sentence — describe the
      * mechanism, do not promise an outcome nobody here controls. */
+    ["CAPTIONS.md", "Live captions: the route per destination and the caption track per programme",
+      "Twitch in-stream, YouTube caption ingestion and Facebook (provisional). Kick documents no caption route for live streams."],
     ["AUDIO-ROUTING.md", "Audio routing: a different mix per destination",
       // 172 characters before this edit, against the ~155 Google truncates at.
       // The clause that went is the Twitch VOD track, which was doing least work

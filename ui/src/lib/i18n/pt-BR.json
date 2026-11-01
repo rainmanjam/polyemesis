@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "A miniatura deve ser um PNG ou JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Essa imagem é maior que 2 MB.",
   "wave3.recurring.retitleSave": "Salvar título",
-  "wave3.recurring.retitleFailed": "O título não foi alterado: {reason}"
+  "wave3.recurring.retitleFailed": "O título não foi alterado: {reason}",
+  "wave3.captions.title": "Legendas ao vivo",
+  "wave3.captions.intro": "As legendas são escolhidas por saída. Escolha a via que este destino aceita, ou deixe-as desligadas.",
+  "wave3.captions.modeLabel": "Via de legendas",
+  "wave3.captions.off": "Desligadas",
+  "wave3.captions.sei": "No stream, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Ingestão de legendas do YouTube (provisória)",
+  "wave3.captions.facebookSei": "Facebook no stream (provisória)",
+  "wave3.captions.kickNone": "A Kick não documenta suporte a legendas, então elas não são oferecidas para ela.",
+  "wave3.captions.provisional": "Provisória: esta via ainda não foi confirmada em uma plataforma ao vivo.",
+  "wave3.captions.delayNote": "A ingestão de legendas do YouTube exige atraso de transmissão de 30 s ou 60 s. Defina o atraso deste destino ou use a via no stream.",
+  "wave3.captions.facebookSwitch": "As legendas do Facebook ficam desligadas até o servidor iniciar com POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Esta escolha fica salva, mas o motor ainda não envia legendas, então nada muda no ar até que isso seja conectado.",
+  "wave3.captions.trackLabel": "Faixa de legendas",
+  "wave3.captions.trackHint": "A faixa de áudio deste programa que a legendagem ao vivo escuta.",
+  "wave3.captions.trackAuto": "Automática",
+  "wave3.captions.trackN": "Faixa de áudio {n}"
 }

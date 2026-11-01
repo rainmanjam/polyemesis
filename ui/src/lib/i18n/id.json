@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Thumbnail harus berupa PNG atau JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Gambar itu lebih besar dari 2 MB.",
   "wave3.recurring.retitleSave": "Simpan judul",
-  "wave3.recurring.retitleFailed": "Judul tidak diubah: {reason}"
+  "wave3.recurring.retitleFailed": "Judul tidak diubah: {reason}",
+  "wave3.captions.title": "Keterangan langsung",
+  "wave3.captions.intro": "Keterangan dipilih per keluaran. Pilih jalur yang diterima tujuan ini, atau biarkan mati.",
+  "wave3.captions.modeLabel": "Jalur keterangan",
+  "wave3.captions.off": "Mati",
+  "wave3.captions.sei": "Dalam stream, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Ingesti keterangan YouTube (sementara)",
+  "wave3.captions.facebookSei": "Facebook dalam stream (sementara)",
+  "wave3.captions.kickNone": "Kick tidak mendokumentasikan dukungan keterangan, jadi keterangan tidak ditawarkan untuknya.",
+  "wave3.captions.provisional": "Sementara: jalur ini belum dikonfirmasi pada platform langsung.",
+  "wave3.captions.delayNote": "Ingesti keterangan YouTube memerlukan tunda siaran 30 dtk atau 60 dtk. Atur tunda untuk tujuan ini, atau gunakan jalur dalam stream.",
+  "wave3.captions.facebookSwitch": "Keterangan Facebook tetap mati sampai server dijalankan dengan POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Pilihan ini disimpan, tetapi mesin belum mengirim keterangan, jadi belum mengubah apa pun di udara.",
+  "wave3.captions.trackLabel": "Trek keterangan",
+  "wave3.captions.trackHint": "Trek audio program ini yang didengarkan oleh pembuat keterangan langsung.",
+  "wave3.captions.trackAuto": "Otomatis",
+  "wave3.captions.trackN": "Trek audio {n}"
 }

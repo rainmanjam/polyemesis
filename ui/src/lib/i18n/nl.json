@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Een miniatuur moet een PNG of JPEG zijn.",
   "wave3.recurring.thumbnailTooLarge": "Die afbeelding is groter dan 2 MB.",
   "wave3.recurring.retitleSave": "Titel opslaan",
-  "wave3.recurring.retitleFailed": "De titel is niet gewijzigd: {reason}"
+  "wave3.recurring.retitleFailed": "De titel is niet gewijzigd: {reason}",
+  "wave3.captions.title": "Live ondertiteling",
+  "wave3.captions.intro": "Ondertiteling kies je per uitvoer. Kies de route die deze bestemming accepteert, of laat hem uit.",
+  "wave3.captions.modeLabel": "Ondertitelroute",
+  "wave3.captions.off": "Uit",
+  "wave3.captions.sei": "In de stream, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "YouTube-ondertitelingang (voorlopig)",
+  "wave3.captions.facebookSei": "Facebook in de stream (voorlopig)",
+  "wave3.captions.kickNone": "Kick documenteert geen ondertitelondersteuning, dus die wordt er niet aangeboden.",
+  "wave3.captions.provisional": "Voorlopig: deze route is nog niet bevestigd op een live platform.",
+  "wave3.captions.delayNote": "De YouTube-ondertitelingang heeft een uitzendvertraging van 30 s of 60 s nodig. Stel de vertraging van deze bestemming in, of gebruik de route in de stream.",
+  "wave3.captions.facebookSwitch": "Facebook-ondertiteling blijft uit tot de server start met POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Deze keuze wordt opgeslagen, maar de engine stuurt nog geen ondertitels, dus er verandert nog niets in de uitzending.",
+  "wave3.captions.trackLabel": "Ondertiteltrack",
+  "wave3.captions.trackHint": "De audiotrack van dit programma waar de live ondertiteling naar luistert.",
+  "wave3.captions.trackAuto": "Automatisch",
+  "wave3.captions.trackN": "Audiotrack {n}"
 }

@@ -59,15 +59,24 @@ its first tagged release.
   it is offered. Nothing calls it yet: no API route, no UI control, and no
   destination path runs the injector.
   **Not built in this PR (deviation from #8, which is agreed in full):** the
-  transcriber is not wired to a routed caption track; there is no per-destination
-  toggle in the API or the console; the player WebVTT track and the burn-in are
+  transcriber is not wired to a routed caption track; the per-destination mode is stored
+  but not read by the engine; the player WebVTT track and the burn-in are
   not wired into renditions; and the YouTube caption POST is not called. The
   pieces above are library code, not a delivered feature.
 - Caption text policy: vocabulary spellings and profanity masking, applied once
   at the emit boundary so every output shows the same words. Timing, track and
   speaker are unchanged.
+- Live captions settings (#8): a per-destination caption route, and a per-programme
+  caption track. The route is chosen on a destination (off, Twitch in-stream CEA-608,
+  YouTube caption ingestion, or Facebook in-stream, which is provisional and needs
+  `POLYEMESIS_CAPTIONS_FACEBOOK=1`). Kick offers no route. YouTube caption ingestion
+  needs a 30 s or 60 s broadcast delay, and a route cannot change while the destination
+  is live. The track is chosen on a programme, and "automatic" is the default. Both are
+  stored and shown, and the engine does not send captions from them yet. See
+  `docs/CAPTIONS.md`.
 - Per-destination caption mode (`destinations.caption_mode`, default `off`).
-  There is no control yet, so no operator can set it. Twitch SEI is marked go,
+  The console has a picker for it and the API stores it, but the engine does not
+  read it yet, so the choice changes nothing on air. Twitch SEI is marked go,
   and its on-stream display still needs a live check. YouTube's embedded
   CEA-608 route is go. YouTube's caption POST is provisional and needs a 30 s
   or 60 s broadcast delay. Facebook SEI stays off behind a flag. Kick is

@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Une miniature doit être un PNG ou un JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Cette image dépasse 2 Mo.",
   "wave3.recurring.retitleSave": "Enregistrer le titre",
-  "wave3.recurring.retitleFailed": "Le titre n'a pas été modifié : {reason}"
+  "wave3.recurring.retitleFailed": "Le titre n'a pas été modifié : {reason}",
+  "wave3.captions.title": "Sous-titres en direct",
+  "wave3.captions.intro": "Les sous-titres se choisissent par sortie. Choisissez la voie que cette destination accepte, ou laissez-les désactivés.",
+  "wave3.captions.modeLabel": "Voie des sous-titres",
+  "wave3.captions.off": "Désactivés",
+  "wave3.captions.sei": "Dans le flux, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Ingestion de sous-titres YouTube (provisoire)",
+  "wave3.captions.facebookSei": "Facebook dans le flux (provisoire)",
+  "wave3.captions.kickNone": "Kick ne documente aucune prise en charge des sous-titres, ils ne sont donc pas proposés pour cette plateforme.",
+  "wave3.captions.provisional": "Provisoire : cette voie n'est pas encore confirmée sur une plateforme en direct.",
+  "wave3.captions.delayNote": "L'ingestion de sous-titres YouTube nécessite un délai de diffusion de 30 s ou 60 s. Réglez le délai de cette destination ou utilisez la voie dans le flux.",
+  "wave3.captions.facebookSwitch": "Les sous-titres Facebook restent désactivés tant que le serveur n'est pas lancé avec POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Ce choix est enregistré, mais le moteur n'envoie pas encore de sous-titres : il ne change rien à l'antenne tant que ce n'est pas branché.",
+  "wave3.captions.trackLabel": "Piste de sous-titres",
+  "wave3.captions.trackHint": "La piste audio de ce programme que le sous-titrage en direct écoute.",
+  "wave3.captions.trackAuto": "Automatique",
+  "wave3.captions.trackN": "Piste audio {n}"
 }

@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "サムネイルは PNG か JPEG である必要があります。",
   "wave3.recurring.thumbnailTooLarge": "その画像は 2 MB を超えています。",
   "wave3.recurring.retitleSave": "タイトルを保存",
-  "wave3.recurring.retitleFailed": "タイトルは変更されませんでした: {reason}"
+  "wave3.recurring.retitleFailed": "タイトルは変更されませんでした: {reason}",
+  "wave3.captions.title": "ライブ字幕",
+  "wave3.captions.intro": "字幕は出力ごとに選びます。この宛先が受け付ける方式を選ぶか、オフのままにしてください。",
+  "wave3.captions.modeLabel": "字幕の方式",
+  "wave3.captions.off": "オフ",
+  "wave3.captions.sei": "ストリーム内 CEA-608（Twitch）",
+  "wave3.captions.youtubePost": "YouTube 字幕取り込み（暫定）",
+  "wave3.captions.facebookSei": "Facebook ストリーム内（暫定）",
+  "wave3.captions.kickNone": "Kick は字幕のサポートを文書化していないため、このプラットフォームでは提供しません。",
+  "wave3.captions.provisional": "暫定：この方式はまだ実際のライブ配信で確認されていません。",
+  "wave3.captions.delayNote": "YouTube の字幕取り込みには 30 秒または 60 秒の配信遅延が必要です。この宛先の遅延を設定するか、ストリーム内の方式を使ってください。",
+  "wave3.captions.facebookSwitch": "Facebook の字幕は、サーバーを POLYEMESIS_CAPTIONS_FACEBOOK=1 で起動するまでオフのままです。",
+  "wave3.captions.storedOnly": "この選択は保存されますが、エンジンはまだ字幕を送信しないため、接続されるまで放送上は何も変わりません。",
+  "wave3.captions.trackLabel": "字幕トラック",
+  "wave3.captions.trackHint": "ライブ字幕が聞き取る、このプログラムの音声トラックです。",
+  "wave3.captions.trackAuto": "自動",
+  "wave3.captions.trackN": "音声トラック {n}"
 }

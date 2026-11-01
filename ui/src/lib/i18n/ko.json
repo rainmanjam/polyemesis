@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "썸네일은 PNG 또는 JPEG여야 합니다.",
   "wave3.recurring.thumbnailTooLarge": "그 이미지는 2MB보다 큽니다.",
   "wave3.recurring.retitleSave": "제목 저장",
-  "wave3.recurring.retitleFailed": "제목이 바뀌지 않았습니다: {reason}"
+  "wave3.recurring.retitleFailed": "제목이 바뀌지 않았습니다: {reason}",
+  "wave3.captions.title": "실시간 자막",
+  "wave3.captions.intro": "자막은 출력마다 고릅니다. 이 대상이 받는 방식을 고르거나 끄세요.",
+  "wave3.captions.modeLabel": "자막 방식",
+  "wave3.captions.off": "끔",
+  "wave3.captions.sei": "스트림 내 CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "YouTube 자막 수집 (잠정)",
+  "wave3.captions.facebookSei": "Facebook 스트림 내 (잠정)",
+  "wave3.captions.kickNone": "Kick은 자막 지원을 문서화하지 않아 이 플랫폼에는 자막을 제공하지 않습니다.",
+  "wave3.captions.provisional": "잠정: 이 방식은 아직 실제 라이브 플랫폼에서 확인되지 않았습니다.",
+  "wave3.captions.delayNote": "YouTube 자막 수집에는 30초 또는 60초 방송 지연이 필요합니다. 이 대상의 지연을 설정하거나 스트림 내 방식을 쓰세요.",
+  "wave3.captions.facebookSwitch": "Facebook 자막은 서버를 POLYEMESIS_CAPTIONS_FACEBOOK=1로 시작하기 전까지 꺼져 있습니다.",
+  "wave3.captions.storedOnly": "이 선택은 저장되지만 엔진이 아직 자막을 보내지 않아 연결되기 전까지 방송에는 영향이 없습니다.",
+  "wave3.captions.trackLabel": "자막 트랙",
+  "wave3.captions.trackHint": "실시간 자막이 듣는 이 프로그램의 오디오 트랙입니다.",
+  "wave3.captions.trackAuto": "자동",
+  "wave3.captions.trackN": "오디오 트랙 {n}"
 }

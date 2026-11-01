@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "A thumbnail must be a PNG or a JPEG.",
   "wave3.recurring.thumbnailTooLarge": "That picture is larger than 2 MB.",
   "wave3.recurring.retitleSave": "Save title",
-  "wave3.recurring.retitleFailed": "The title was not changed: {reason}"
+  "wave3.recurring.retitleFailed": "The title was not changed: {reason}",
+  "wave3.captions.title": "Live captions",
+  "wave3.captions.intro": "Captions are chosen for each output. Choose the route this destination accepts, or leave them off.",
+  "wave3.captions.modeLabel": "Caption route",
+  "wave3.captions.off": "Off",
+  "wave3.captions.sei": "In-stream CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "YouTube caption ingestion (provisional)",
+  "wave3.captions.facebookSei": "Facebook in-stream (provisional)",
+  "wave3.captions.kickNone": "Kick documents no caption support, so captions are not offered for it.",
+  "wave3.captions.provisional": "Provisional: this route is not confirmed against a live platform yet.",
+  "wave3.captions.delayNote": "YouTube's caption ingestion needs a 30 s or 60 s broadcast delay. Set the delay on this destination, or use the in-stream route.",
+  "wave3.captions.facebookSwitch": "Facebook captions stay off until the server is started with POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "This choice is saved, but the engine does not send captions yet, so it changes nothing on air until that is wired.",
+  "wave3.captions.trackLabel": "Caption track",
+  "wave3.captions.trackHint": "The audio track of this programme that the live captioner listens to.",
+  "wave3.captions.trackAuto": "Automatic",
+  "wave3.captions.trackN": "Audio track {n}"
 }

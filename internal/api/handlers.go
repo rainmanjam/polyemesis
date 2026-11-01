@@ -25,6 +25,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
@@ -2676,6 +2677,12 @@ func (s *Server) handleCreateDestination(w http.ResponseWriter, r *http.Request)
 	if !s.requireNamedSource(w, row.SourceID) {
 		return
 	}
+	// Facebook captions stay behind their switch. The switch is checked here,
+	// on the save that turns the mode on, and never by Validate (see there).
+	if !captionModeAllowedNow(row.CaptionMode, "", captions.FacebookSEIEnabled()) {
+		writeError(w, http.StatusBadRequest, captionFacebookRefusal)
+		return
+	}
 	// Expert mode is reachable only through its own routes. See
 	// clearExpertArgs.
 	clearExpertArgs(&row)
@@ -2750,11 +2757,28 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// Decode over the existing row so a client sending only a routing profile
 	// does not wipe the URL.
 	saved := expertArgsOf(existing)
+	// The stored caption mode, read BEFORE the decode below writes over it, so
+	// a save that changes it can be told apart from one that leaves it alone.
+	storedCaptionMode := existing.CaptionMode
 	if err := decodeJSONInto(body, existing); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	existing.ID = id
+	// Captions are decided before a YouTube broadcast goes live: the delay and
+	// the caption route must be set while the broadcast is still in its first
+	// state. A change while the destination is delivering is refused, and a
+	// change to Facebook captions needs the switch open.
+	if existing.CaptionMode != storedCaptionMode {
+		if s.destinationLive(id) {
+			writeError(w, http.StatusConflict, "captions cannot change while this destination is live; stop it first")
+			return
+		}
+		if !captionModeAllowedNow(existing.CaptionMode, storedCaptionMode, captions.FacebookSEIEnabled()) {
+			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
+			return
+		}
+	}
 	// Whatever the body said about expert arguments, the stored ones win. Only
 	// the expert routes enforce the confirm step and the guard acknowledgement,
 	// and decodeJSON's DisallowUnknownFields means these fields are accepted
@@ -3595,4 +3619,24 @@ func checkSentAutomodFields(body []byte) error {
 		return badRequestError{"invalid request body: " + err.Error()}
 	}
 	return nil
+}
+
+// captionFacebookRefusal is what the operator reads when a Facebook caption mode
+// is asked for while its switch is closed. It names the switch, because "not
+// allowed" alone sends the operator looking in the wrong place.
+const captionFacebookRefusal = "Facebook captions are behind a provisional switch: set POLYEMESIS_CAPTIONS_FACEBOOK=1 on the server to turn them on"
+
+// captionModeAllowedNow reports whether a save may store the caption mode it
+// names. Only a save that turns Facebook captions ON (the mode is facebook_sei
+// and the stored mode was not) is refused while the switch is closed. A row that
+// already had it keeps saving, so closing the switch never strands an edit.
+//
+// The switch is passed as a parameter rather than read here, so the decision is
+// testable without the process environment; the handlers pass
+// captions.FacebookSEIEnabled().
+func captionModeAllowedNow(mode, stored string, switchOpen bool) bool {
+	if mode != "facebook_sei" || mode == stored {
+		return true
+	}
+	return switchOpen
 }

@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Una miniatura deve essere un PNG o un JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Quell'immagine supera i 2 MB.",
   "wave3.recurring.retitleSave": "Salva titolo",
-  "wave3.recurring.retitleFailed": "Il titolo non è stato cambiato: {reason}"
+  "wave3.recurring.retitleFailed": "Il titolo non è stato cambiato: {reason}",
+  "wave3.captions.title": "Sottotitoli in diretta",
+  "wave3.captions.intro": "I sottotitoli si scelgono per uscita. Scegli la via che questa destinazione accetta, oppure lasciali disattivati.",
+  "wave3.captions.modeLabel": "Via dei sottotitoli",
+  "wave3.captions.off": "Disattivati",
+  "wave3.captions.sei": "Nel flusso, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Ingestione sottotitoli YouTube (provvisoria)",
+  "wave3.captions.facebookSei": "Facebook nel flusso (provvisoria)",
+  "wave3.captions.kickNone": "Kick non documenta il supporto ai sottotitoli, quindi non vengono offerti per questa piattaforma.",
+  "wave3.captions.provisional": "Provvisoria: questa via non è ancora confermata su una piattaforma in diretta.",
+  "wave3.captions.delayNote": "L'ingestione sottotitoli YouTube richiede un ritardo di trasmissione di 30 s o 60 s. Imposta il ritardo per questa destinazione o usa la via nel flusso.",
+  "wave3.captions.facebookSwitch": "I sottotitoli Facebook restano disattivati finché il server non viene avviato con POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Questa scelta viene salvata, ma il motore non invia ancora sottotitoli, quindi non cambia nulla in onda finché non sarà collegato.",
+  "wave3.captions.trackLabel": "Traccia sottotitoli",
+  "wave3.captions.trackHint": "La traccia audio di questo programma che i sottotitoli in diretta ascoltano.",
+  "wave3.captions.trackAuto": "Automatica",
+  "wave3.captions.trackN": "Traccia audio {n}"
 }

@@ -1,6 +1,9 @@
 package captions
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // Mode is how captions reach one destination. It is the value stored in
 // destinations.caption_mode, and "off" is the default.
@@ -106,6 +109,28 @@ func YouTubePOSTDelayOK(delay time.Duration) bool {
 		if delay == d {
 			return true
 		}
+	}
+	return false
+}
+
+// FacebookSEIEnv is the switch for the facebook_sei path. It is read by the
+// server, never by Validate, so a row saved while the switch was on is not made
+// unsaveable when it goes off: the handler checks the switch only when a save
+// turns the mode on.
+const FacebookSEIEnv = "POLYEMESIS_CAPTIONS_FACEBOOK"
+
+// FacebookSEIEnabled reports whether the operator has opened the facebook_sei
+// path. Off unless the value is exactly "1", the same strictness the X switch uses.
+func FacebookSEIEnabled() bool {
+	return os.Getenv(FacebookSEIEnv) == "1"
+}
+
+// ValidMode reports whether a stored caption_mode string names a mode this build
+// knows. The empty string is the default and is treated as off by the caller.
+func ValidMode(mode string) bool {
+	switch Mode(mode) {
+	case ModeOff, ModeSEI, ModeYouTubePOST, ModeFacebookSEI:
+		return true
 	}
 	return false
 }

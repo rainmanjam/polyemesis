@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Küçük resim bir PNG veya JPEG olmalıdır.",
   "wave3.recurring.thumbnailTooLarge": "Bu resim 2 MB'tan büyük.",
   "wave3.recurring.retitleSave": "Başlığı kaydet",
-  "wave3.recurring.retitleFailed": "Başlık değiştirilmedi: {reason}"
+  "wave3.recurring.retitleFailed": "Başlık değiştirilmedi: {reason}",
+  "wave3.captions.title": "Canlı altyazı",
+  "wave3.captions.intro": "Altyazı çıkış başına seçilir. Bu hedefin kabul ettiği yolu seçin ya da kapalı bırakın.",
+  "wave3.captions.modeLabel": "Altyazı yolu",
+  "wave3.captions.off": "Kapalı",
+  "wave3.captions.sei": "Yayın içinde, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "YouTube altyazı alımı (geçici)",
+  "wave3.captions.facebookSei": "Facebook yayın içinde (geçici)",
+  "wave3.captions.kickNone": "Kick altyazı desteğini belgelemediği için bu platform için altyazı sunulmaz.",
+  "wave3.captions.provisional": "Geçici: bu yol henüz canlı bir platformda doğrulanmadı.",
+  "wave3.captions.delayNote": "YouTube altyazı alımı 30 sn veya 60 sn yayın gecikmesi gerektirir. Bu hedefin gecikmesini ayarlayın ya da yayın içi yolu kullanın.",
+  "wave3.captions.facebookSwitch": "Facebook altyazıları, sunucu POLYEMESIS_CAPTIONS_FACEBOOK=1 ile başlatılana kadar kapalı kalır.",
+  "wave3.captions.storedOnly": "Bu seçim kaydedilir, ancak motor henüz altyazı göndermediği için bağlanana kadar yayında bir değişiklik olmaz.",
+  "wave3.captions.trackLabel": "Altyazı parçası",
+  "wave3.captions.trackHint": "Canlı altyazının dinlediği bu programın ses parçası.",
+  "wave3.captions.trackAuto": "Otomatik",
+  "wave3.captions.trackN": "Ses parçası {n}"
 }

@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Мініатюра має бути PNG або JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Це зображення більше за 2 МБ.",
   "wave3.recurring.retitleSave": "Зберегти назву",
-  "wave3.recurring.retitleFailed": "Назву не змінено: {reason}"
+  "wave3.recurring.retitleFailed": "Назву не змінено: {reason}",
+  "wave3.captions.title": "Субтитри наживо",
+  "wave3.captions.intro": "Субтитри обираються для кожного виходу. Оберіть спосіб, який приймає це призначення, або залиште їх вимкненими.",
+  "wave3.captions.modeLabel": "Спосіб субтитрів",
+  "wave3.captions.off": "Вимкнено",
+  "wave3.captions.sei": "У потоці, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Приймання субтитрів YouTube (попередньо)",
+  "wave3.captions.facebookSei": "Facebook у потоці (попередньо)",
+  "wave3.captions.kickNone": "Kick не документує підтримку субтитрів, тому для нього їх не пропонуємо.",
+  "wave3.captions.provisional": "Попередньо: цей спосіб ще не підтверджено на чинній платформі.",
+  "wave3.captions.delayNote": "Приймання субтитрів YouTube потребує затримки трансляції 30 с або 60 с. Задайте затримку для цього призначення або скористайтеся способом у потоці.",
+  "wave3.captions.facebookSwitch": "Субтитри Facebook лишаються вимкненими, доки сервер не запущено з POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Цей вибір зберігається, але рушій ще не надсилає субтитри, тож в ефірі поки нічого не змінюється.",
+  "wave3.captions.trackLabel": "Доріжка субтитрів",
+  "wave3.captions.trackHint": "Аудіодоріжка цієї програми, яку слухають субтитри наживо.",
+  "wave3.captions.trackAuto": "Автоматично",
+  "wave3.captions.trackN": "Аудіодоріжка {n}"
 }

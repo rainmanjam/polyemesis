@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Миниатюра должна быть PNG или JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Это изображение больше 2 МБ.",
   "wave3.recurring.retitleSave": "Сохранить название",
-  "wave3.recurring.retitleFailed": "Название не изменено: {reason}"
+  "wave3.recurring.retitleFailed": "Название не изменено: {reason}",
+  "wave3.captions.title": "Субтитры в прямом эфире",
+  "wave3.captions.intro": "Субтитры выбираются для каждого выхода. Выберите способ, который принимает это назначение, или оставьте их выключенными.",
+  "wave3.captions.modeLabel": "Способ субтитров",
+  "wave3.captions.off": "Выключены",
+  "wave3.captions.sei": "В потоке, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Приём субтитров YouTube (предварительно)",
+  "wave3.captions.facebookSei": "Facebook в потоке (предварительно)",
+  "wave3.captions.kickNone": "Kick не документирует поддержку субтитров, поэтому для него они не предлагаются.",
+  "wave3.captions.provisional": "Предварительно: этот способ ещё не подтверждён на действующей платформе.",
+  "wave3.captions.delayNote": "Приёму субтитров YouTube нужна задержка трансляции 30 с или 60 с. Задайте задержку для этого назначения или используйте способ в потоке.",
+  "wave3.captions.facebookSwitch": "Субтитры Facebook остаются выключенными, пока сервер не запущен с POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Этот выбор сохраняется, но движок ещё не отправляет субтитры, поэтому в эфире пока ничего не меняется.",
+  "wave3.captions.trackLabel": "Дорожка субтитров",
+  "wave3.captions.trackHint": "Аудиодорожка этой программы, которую слушают субтитры в прямом эфире.",
+  "wave3.captions.trackAuto": "Автоматически",
+  "wave3.captions.trackN": "Аудиодорожка {n}"
 }

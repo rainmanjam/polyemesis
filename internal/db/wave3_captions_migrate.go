@@ -3,25 +3,37 @@ package db
 import "fmt"
 
 // MigrateWave3CaptionSettings is the reserved schema slot for #8 live captions.
-// It adds destinations.caption_mode, the per-output choice of how captions reach
-// that destination: 'off' (the default), 'sei' (CEA-608 in the video stream, for
-// Twitch and any destination that reads it), 'youtube_post' (the YouTube
-// caption ingestion URL) or 'facebook_sei' (behind a provisional flag).
+// It adds two columns, each the stored half of one operator choice:
 //
-// The default is 'off', because captions are an output-by-output choice and an
-// upgrade must never start sending text to a platform. The body is idempotent:
-// Open runs on every boot, and the column is added only when it is missing. It
+//   - destinations.caption_mode, how captions reach that destination: 'off' (the
+//     default), 'sei' (CEA-608 in the video stream, for Twitch and any destination
+//     that reads it), 'youtube_post' (the YouTube caption ingestion URL) or
+//     'facebook_sei' (behind a provisional flag).
+//   - sources.caption_track, which audio track of the programme the captioner
+//     transcribes. -1 is the automatic choice, the one the captioner makes today,
+//     and it is the default so an upgrade changes nothing.
+//
+// Both defaults are the safe state. Captions are an output-by-output choice and
+// an upgrade must never start sending text to a platform. The body is idempotent:
+// Open runs on every boot, and each column is added only when it is missing. It
 // is the same pattern MigrateScheduleAllDestinations follows.
 func (d *DB) MigrateWave3CaptionSettings() error {
-	has, err := columnExists(d.sql, "destinations", "caption_mode")
-	if err != nil {
-		return fmt.Errorf("inspect destinations columns: %w", err)
-	}
-	if has {
-		return nil
-	}
-	if _, err := d.sql.Exec(`ALTER TABLE destinations ADD COLUMN caption_mode TEXT NOT NULL DEFAULT 'off'`); err != nil {
-		return fmt.Errorf("add destinations.caption_mode: %w", err)
+	for _, add := range []struct {
+		table, column, ddl string
+	}{
+		{"destinations", "caption_mode", `ALTER TABLE destinations ADD COLUMN caption_mode TEXT NOT NULL DEFAULT 'off'`},
+		{"sources", "caption_track", `ALTER TABLE sources ADD COLUMN caption_track INTEGER NOT NULL DEFAULT -1`},
+	} {
+		has, err := columnExists(d.sql, add.table, add.column)
+		if err != nil {
+			return fmt.Errorf("inspect %s columns: %w", add.table, err)
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec(add.ddl); err != nil {
+			return fmt.Errorf("add %s.%s: %w", add.table, add.column, err)
+		}
 	}
 	return nil
 }

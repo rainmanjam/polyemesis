@@ -253,6 +253,9 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
+
+/** How captions reach one destination. Mirrors internal/captions Mode. */
+export type CaptionMode = "off" | "sei" | "youtube_post" | "facebook_sei";
 /*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
  *  its destination preset deliberately does not carry it, so no destination row
  *  ever arrives with it. "vimeo" IS here because its preset does carry it —
@@ -354,6 +357,12 @@ export interface Destination {
    *  so once. Opt-in only because a network round trip at go-live should be
    *  something the operator asked for. */
   multitrack?: boolean;
+  /** How live captions reach this destination. "off" is the default and the
+   *  value an upgrade leaves in place. The others are the routes the platform
+   *  takes; which one a platform accepts is decided by the server, and the
+   *  console mirrors that table in lib/captions.ts. Storing the mode does not
+   *  send captions yet: the engine does not read it. */
+  captionMode?: CaptionMode;
   /** The SECOND audio mix — the VOD track, separate from the live one. Same
    *  shape as `profile`, because it is the same kind of thing.
    *
@@ -1265,6 +1274,9 @@ export interface Source {
   id: SourceId;
   name: string;
   enabled: boolean;
+  /** The audio track of this programme the live captioner transcribes. null is
+   *  the automatic choice, the one the captioner makes today. */
+  captionTrack?: number | null;
   /** Same shape as Settings.ingest, deliberately: one form serves both. */
   ingest: Settings["ingest"];
   /** Publish secret. See SourceView.tokenEnforced before presenting this as

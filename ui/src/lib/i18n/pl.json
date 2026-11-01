@@ -3502,5 +3502,21 @@
   "wave3.recurring.thumbnailType": "Miniatura musi być plikiem PNG lub JPEG.",
   "wave3.recurring.thumbnailTooLarge": "Ten obraz jest większy niż 2 MB.",
   "wave3.recurring.retitleSave": "Zapisz tytuł",
-  "wave3.recurring.retitleFailed": "Tytuł nie został zmieniony: {reason}"
+  "wave3.recurring.retitleFailed": "Tytuł nie został zmieniony: {reason}",
+  "wave3.captions.title": "Napisy na żywo",
+  "wave3.captions.intro": "Napisy wybiera się dla każdego wyjścia. Wybierz tryb, który przyjmuje to miejsce docelowe, albo zostaw je wyłączone.",
+  "wave3.captions.modeLabel": "Tryb napisów",
+  "wave3.captions.off": "Wyłączone",
+  "wave3.captions.sei": "W strumieniu, CEA-608 (Twitch)",
+  "wave3.captions.youtubePost": "Przyjmowanie napisów YouTube (wstępne)",
+  "wave3.captions.facebookSei": "Facebook w strumieniu (wstępne)",
+  "wave3.captions.kickNone": "Kick nie dokumentuje obsługi napisów, dlatego nie są one dla niego oferowane.",
+  "wave3.captions.provisional": "Wstępne: ten tryb nie został jeszcze potwierdzony na żywej platformie.",
+  "wave3.captions.delayNote": "Przyjmowanie napisów YouTube wymaga opóźnienia emisji 30 s lub 60 s. Ustaw opóźnienie tego miejsca docelowego albo użyj trybu w strumieniu.",
+  "wave3.captions.facebookSwitch": "Napisy Facebooka pozostają wyłączone, dopóki serwer nie zostanie uruchomiony z POLYEMESIS_CAPTIONS_FACEBOOK=1.",
+  "wave3.captions.storedOnly": "Ten wybór jest zapisywany, ale silnik nie wysyła jeszcze napisów, więc na antenie nic się nie zmienia.",
+  "wave3.captions.trackLabel": "Ścieżka napisów",
+  "wave3.captions.trackHint": "Ścieżka audio tego programu, której słucha napisywanie na żywo.",
+  "wave3.captions.trackAuto": "Automatycznie",
+  "wave3.captions.trackN": "Ścieżka audio {n}"
 }

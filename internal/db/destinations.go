@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -182,6 +183,12 @@ type Destination struct {
 	// once. It is opt-in only because a network round trip at go-live should be
 	// something the operator asked for.
 	Multitrack bool `json:"multitrack,omitempty"`
+	// CaptionMode is how live captions reach this destination: "off" (the
+	// default and the empty value), "sei", "youtube_post" or "facebook_sei".
+	// Which of these a platform accepts is decided by captions.Allowed, and
+	// Validate refuses a mode the platform cannot carry. Storing the mode does
+	// not send captions: the engine does not read it yet.
+	CaptionMode string `json:"captionMode,omitempty"`
 	// VODProfile is the SECOND audio mix -- the VOD track, separate from the
 	// live one, which is the whole ask of #141.
 	//
@@ -655,6 +662,23 @@ func (d Destination) Validate() error {
 	var probs []string
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
+	// Captions: the mode must be one this build knows, the platform must accept
+	// it, and the YouTube HTTP POST path needs the 30 s or 60 s delay YouTube
+	// documents for it. "" and "off" need no check. facebook_sei is allowed
+	// here regardless of its switch: the handler checks that switch on a save
+	// that turns the mode on, so a row saved while the switch was open is not
+	// made unsaveable when it closes.
+	if d.CaptionMode != "" && !captions.ValidMode(d.CaptionMode) {
+		add("unknown caption mode %q", d.CaptionMode)
+	} else if mode := captions.Mode(d.CaptionMode); mode != captions.ModeOff && mode != "" {
+		if !captions.Allowed(string(d.Platform), mode, true) {
+			add("captions cannot be sent to %s as %s", d.Platform, mode)
+		}
+		if mode == captions.ModeYouTubePOST && !captions.YouTubePOSTDelayOK(time.Duration(d.DelaySeconds)*time.Second) {
+			add("YouTube caption POST needs a 30 s or 60 s broadcast delay, not %d s", d.DelaySeconds)
+		}
+	}
+
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
 	}
@@ -1053,7 +1077,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -1156,7 +1180,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile,
+	multitrack, vod_profile, caption_mode,
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -1195,7 +1219,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?,
+		multitrack=?, vod_profile=?, caption_mode=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1486,9 +1510,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile,
+		 multitrack, vod_profile, caption_mode,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1499,7 +1523,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode),
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1581,7 +1605,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode),
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.
@@ -2503,4 +2527,14 @@ func tableExists(sqldb *sql.DB, table string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// captionModeStored is the value written to destinations.caption_mode. The
+// column is NOT NULL and "off" is the default, so an unset mode is stored as off
+// rather than as an empty string the engine does not recognise.
+func captionModeStored(mode string) string {
+	if mode == "" {
+		return string(captions.ModeOff)
+	}
+	return mode
 }
