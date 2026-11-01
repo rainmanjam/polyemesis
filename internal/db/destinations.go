@@ -1433,7 +1433,8 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	// A new row has no caption URL yet (the URL is stored against its id), so a
 	// create that would start it with POST captions is the go-live refusal too.
 	if dst.Enabled && sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) {
-		return nil, fmt.Errorf("%w: %s", ErrCaptionIngestMissing, captionIngestMissingReason)
+		return nil, fmt.Errorf("%w: a new destination that sends captions to YouTube by HTTP POST has no caption "+
+			"ingestion URL yet; create it switched off, press Refresh stream key on it, then start it", ErrCaptionIngestMissing)
 	}
 	if dst.AudioBitrate == 0 {
 		dst.AudioBitrate = 160

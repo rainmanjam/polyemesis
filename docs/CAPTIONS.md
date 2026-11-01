@@ -83,8 +83,16 @@ What polyemesis refuses, and why:
   scheduled broadcast is moved to testing or live, polyemesis reads it. If its
   caption type is not *HTTP POST*, its monitor stream is off, or its delay is not
   30 or 60 seconds, the broadcast is left where it is and the destination card
-  shows the reason. The stream keeps going out. Schedule the show again from
-  polyemesis, or set captions to off or embedded.
+  shows the reason. The stream keeps going out. While the broadcast is still
+  upcoming, set those three on it in YouTube Studio, or set captions to off or
+  embedded. Rescheduling does not fix it: polyemesis keeps the broadcast's
+  caption settings as they are when it moves the start time.
+- **A show announced before the first Refresh stream key** stays bound to the
+  stream it was announced on, and the refresh moves the destination to a new
+  stream. Do the refresh before you schedule shows for this destination.
+- **Creating a destination already switched on with this route.** It has no URL
+  yet, so create it switched off, press Refresh stream key, then start it. The
+  console always creates destinations switched off.
 - **Ultra-low latency** does not apply. YouTube does not allow captions with
   ultra-low latency, but polyemesis never sets a latency preference, so the
   broadcasts it creates use YouTube's default.

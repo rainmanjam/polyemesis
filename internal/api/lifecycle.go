@@ -850,14 +850,19 @@ func captionGoLiveProblem(d *db.Destination, st *oauth.BroadcastLifecycleState) 
 	if !sendsCaptionPOST(d) {
 		return ""
 	}
-	const fix = " Captions stay off this broadcast until it is fixed; set captions to off or embedded to go live without them."
+	// The remedies named are the ones that work on THIS broadcast: its id is
+	// recorded, so a later announce does not replace it, and a reschedule carries
+	// its caption settings through unchanged.
+	const fix = " Set captions to off or embedded to go live without them."
 	if !d.CaptionIngestReady {
 		return "captions are set to YouTube HTTP POST, and no caption ingestion URL is stored for this " +
 			"destination's stream key; press Refresh stream key to create its own YouTube stream (the key " +
-			"changes once), then schedule the show again." + fix
+			"changes once). A broadcast announced before that is bound to the old stream." + fix
 	}
 	if why := st.CaptionPOSTProblem(); why != "" {
-		return why + "; schedule the show again from polyemesis so the broadcast is created for captions." + fix
+		return why + ". While the broadcast is still upcoming, set its captions to HTTP POST, with the monitor " +
+			"stream on and a 30 or 60 second delay, in YouTube Studio; YouTube does not allow the change once it " +
+			"is testing or live." + fix
 	}
 	return ""
 }
