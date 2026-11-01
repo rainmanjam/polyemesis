@@ -593,13 +593,20 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	// whenever a schedule moves, so a phase recorded against the id it used to
 	// carry would be attributed to a broadcast that is not the one on air.
 	broadcastID := strings.TrimSpace(d.Lifecycle.BroadcastID)
-	if broadcastID == "" {
+	if broadcastID == "" && d.Platform != db.PlatformX {
+		// X never announces ahead, so its mirror is never written by a schedule.
+		// Seeding from it would bring back an ended broadcast after a second show.
 		broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
 	}
 	if broadcastID == "" {
-		// No broadcast object, so nothing to command. Creating one is the
-		// announce path's job; see the header.
 		c.untrack(d.ID)
+		if creator, ok := prov.(oauth.BroadcastCreator); ok && d.Enabled && mode != sweepEndsOnly {
+			// X: an enabled destination with no broadcast opens one on its stream
+			// source. It is NOT_STARTED, so nothing is public until go-live.
+			c.open(ctx, d, creator)
+		}
+		// Every other platform: no broadcast object, so nothing to command.
+		// Creating one is the announce path's job; see the header.
 		return
 	}
 	if d.AccountID == nil {
@@ -774,6 +781,13 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	// read put there for a broadcast that has since moved.
 	c.noteLiveRead(d.ID, strings.EqualFold(strings.TrimSpace(plan.Phase), phaseLive))
 	switch {
+	case plan.Renew:
+		// Second show: the recorded broadcast is finished and the destination is
+		// still on air. Forget it and open the next one.
+		if creator, ok := prov.(oauth.BroadcastCreator); ok {
+			c.renew(ctx, creator, d)
+		}
+		return
 	case plan.Fault != "":
 		// Terminal: no number of retries changes it. Recorded at the give-up
 		// count so nothing calls again, and escalated so somebody is told.
@@ -810,6 +824,57 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	c.advance(cctx, prov, acct, d, broadcastID, plan)
 }
 
+// renew forgets a finished broadcast and opens the next one. It clears the whole
+// lifecycle block, not only the id: the fault, the attempts and the recorded
+// phase all describe the broadcast that just ended, and must not be carried
+// into the new show.
+func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.BroadcastCreator, d *db.Destination) {
+	cur := c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+	if cur == nil {
+		return
+	}
+	c.log.Info("broadcast lifecycle: the recorded broadcast has finished and the destination is still on air; opening the next one",
+		"destination", d.Name, "platform", d.Platform)
+	c.open(ctx, cur, creator)
+}
+
+// open opens a new broadcast for an enabled destination on its stream source and
+// records its id. It is gated on the platform's Livestream access before any
+// network call, so a closed gate is quiet and is not a fault. Any other failure
+// goes through noteFailure, which escalates after the usual number of attempts.
+func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, creator oauth.BroadcastCreator) {
+	if !creator.LivestreamAccess() {
+		return
+	}
+	if d.AccountID == nil {
+		// No account means no token. Not a fault: the remedy is the operator's.
+		return
+	}
+	if strings.TrimSpace(d.StreamKey) == "" {
+		c.noteFailure(d, "", "this destination has no stream source key to open a broadcast on; "+
+			"reconnect the account so polyemesis can mint one")
+		return
+	}
+	acct, err := c.tokenFor(ctx, *d.AccountID)
+	if err != nil {
+		c.noteFailure(d, "", fmt.Sprintf(
+			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err))
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
+	defer cancel()
+	id, err := creator.OpenBroadcast(cctx, acct.AccessToken, d.StreamKey)
+	if err != nil {
+		c.noteFailure(d, "", fmt.Sprintf("%s would not open a broadcast for this destination: %v", d.Platform, err))
+		return
+	}
+	c.recordControl(d, id, func(b *db.BroadcastControl) {
+		b.Phase, b.Attempts, b.Fault = phaseCreated, 0, ""
+	})
+	c.log.Info("broadcast lifecycle: opened a broadcast for this destination, unpublished until it goes live",
+		"destination", d.Name, "platform", d.Platform, "broadcast", id)
+}
+
 // advance sends a transition that can only ever START something: testing or
 // live. It is the branch every ENABLED destination takes, and it has no path to
 // oauth.PhaseComplete at all.
@@ -826,14 +891,14 @@ func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.Broadcast
 		// db.BroadcastControl.Phase, and oauth.TransitionResult, which leaves
 		// Status empty on the redundant path precisely so a caller cannot
 		// mistake "already there" for "reported as there".
-		b.Phase = firstNonBlank(res.Status, plan.Phase)
+		b.Phase = recordedPhase(res.Status, plan.Phase)
 		b.Attempts, b.Fault = 0, ""
 	})
 	c.log.Info("moved a broadcast on", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "to", plan.Send, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
-		BroadcastID: broadcastID, Phase: firstNonBlank(res.Status, plan.Phase), Redundant: res.Redundant,
+		BroadcastID: broadcastID, Phase: recordedPhase(res.Status, plan.Phase), Redundant: res.Redundant,
 	})
 }
 
@@ -910,14 +975,14 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 		return
 	}
 	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
-		b.Phase = firstNonBlank(res.Status, phaseComplete)
+		b.Phase = recordedPhase(res.Status, phaseComplete)
 		b.Attempts, b.Fault = 0, ""
 	})
 	c.log.Info("ended a broadcast", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
 		DestinationID: d.ID, SourceID: sourceIDOf(d), Destination: d.Name, Platform: string(d.Platform),
-		BroadcastID: broadcastID, Phase: firstNonBlank(res.Status, phaseComplete), Ended: true,
+		BroadcastID: broadcastID, Phase: recordedPhase(res.Status, phaseComplete), Ended: true,
 		Redundant: res.Redundant,
 	})
 }
@@ -1046,6 +1111,83 @@ type lifecyclePlan struct {
 	// Unknown means the platform used a phase this build does not recognise.
 	// Counted rather than ignored, so it escalates instead of stalling.
 	Unknown bool
+	// Renew means the recorded broadcast is finished while the destination is
+	// still wanted on air, so the coordinator opens a new one for the next show.
+	// Only X's planner sets it; a finished YouTube broadcast still faults.
+	Renew bool
+}
+
+// xLifecyclePhase maps X's six documented states onto the phase words the rest
+// of the coordinator already understands, so the recorded phase, the live-recheck
+// budget and isTerminalPhase all work unchanged for X. The raw X word is what
+// planXLifecycle decides on; this is only what gets recorded.
+func xLifecyclePhase(status string) string {
+	switch status {
+	case oauth.XStateNotStarted:
+		return phaseCreated
+	case oauth.XStatePrePublished:
+		return "prepublished"
+	case oauth.XStateRunning:
+		return phaseLive
+	case oauth.XStateEnded:
+		return phaseComplete
+	case oauth.XStateTimedOut, oauth.XStateCanceled:
+		return phaseRevoked
+	}
+	return ""
+}
+
+// recordedPhase is the phase a transition's answer is recorded under. X answers
+// in its own words, which are mapped here, so the stored phase is always the
+// coordinator's and isTerminalPhase sees an ended X broadcast as complete. Every
+// other platform's answer is recorded verbatim, as before.
+func recordedPhase(status, fallback string) string {
+	if oauth.XStateKnown(status) {
+		return xLifecyclePhase(status)
+	}
+	return firstNonBlank(status, fallback)
+}
+
+// planXLifecycle decides for an X broadcast. X has no testing phase: a
+// NOT_STARTED broadcast goes straight to RUNNING, and publishing it while no
+// bytes are arriving would make an empty show public, so it waits for ingest.
+// PRE_PUBLISHED is X's own transition and is left alone. Each of the six states
+// is handled explicitly; the caller only reaches here for a state
+// oauth.XStateKnown accepts, so an unrecognised word never gets this far.
+func planXLifecycle(enabled bool, st *oauth.BroadcastLifecycleState) lifecyclePlan {
+	plan := lifecyclePlan{Phase: xLifecyclePhase(st.Status)}
+	active := st.StreamActive != nil && *st.StreamActive
+	if !enabled {
+		switch st.Status {
+		case oauth.XStateRunning:
+			// The operator switched the destination off while it was on air, so
+			// the broadcast is ended here, as YouTube's is.
+			plan.Send = oauth.PhaseComplete
+		case oauth.XStateNotStarted, oauth.XStatePrePublished:
+			plan.Wait = "never aired"
+		default:
+			plan.Wait = "already finished"
+		}
+		return plan
+	}
+	switch st.Status {
+	case oauth.XStateNotStarted:
+		if active {
+			plan.Send = oauth.PhaseLive
+		} else {
+			plan.Wait = "no bytes are arriving at the X stream source yet"
+		}
+	case oauth.XStatePrePublished:
+		plan.Wait = "X is still moving the broadcast to published"
+	case oauth.XStateRunning:
+		plan.Wait = "already live"
+	default:
+		// ENDED, TIMED_OUT and CANCELED. A finished X broadcast cannot return to
+		// live, and the destination still wants to be on air, so the next show
+		// gets a new broadcast instead of a fault.
+		plan.Renew = true
+	}
+	return plan
 }
 
 // planLifecycle decides what to do about one broadcast, given the operator's
@@ -1060,6 +1202,11 @@ type lifecyclePlan struct {
 func planLifecycle(enabled bool, st *oauth.BroadcastLifecycleState) lifecyclePlan {
 	if st == nil {
 		return lifecyclePlan{Wait: "no state was read", Unknown: true}
+	}
+	// X's words are upper case and exact-matched, so they can never be mistaken
+	// for YouTube's lower-case phases below.
+	if oauth.XStateKnown(st.Status) {
+		return planXLifecycle(enabled, st)
 	}
 	phase := strings.ToLower(strings.TrimSpace(st.Status))
 	plan := lifecyclePlan{Phase: st.Status}

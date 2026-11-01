@@ -10,6 +10,14 @@ its first tagged release.
 
 ### Added
 
+- **X go-live lifecycle (#3, coordinator slice).** With the X Livestream gate open,
+  enabling an X destination opens its broadcast on the stream source, unpublished. The
+  broadcast goes live once bytes arrive, and disabling the destination while it is on air
+  ends it. A finished broadcast on a destination that is still enabled is replaced by a new
+  one for the next show, so a second show needs no manual step. The coordinator reads all six
+  X states explicitly. The gate closed means nothing is opened and nothing is faulted. The
+  stream source key stays out of faults and logs. PROVISIONAL: no live X account has run this
+  path yet.
 - **Live captions on Twitch as SEI, behind the broadcast delay (#8 step D).**
   A Twitch destination whose caption mode is SEI now reads through a caption
   stage between the stream and its FFmpeg. The stage adds one CEA-608 caption

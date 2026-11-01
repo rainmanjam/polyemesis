@@ -188,6 +188,25 @@ type BroadcastLifecycler interface {
 	TransitionBroadcast(ctx context.Context, accessToken, broadcastID string, to BroadcastPhase) (*TransitionResult, error)
 }
 
+// BroadcastCreator is the optional capability for a platform whose broadcast has
+// to be OPENED by polyemesis before it can be commanded. X is the first: its
+// broadcast is created on the stream source in NOT_STARTED, where nothing can see
+// it, and only PUBLISH makes it public. A platform whose broadcasts already exist
+// (YouTube, through the announce path) does not implement this.
+//
+// The coordinator opens one only for an enabled destination that has no recorded
+// broadcast, or whose recorded broadcast is finished. LivestreamAccess is checked
+// first, so a closed gate costs no network call and is not a fault.
+type BroadcastCreator interface {
+	Provider
+	// LivestreamAccess reports whether the platform's Livestream gate is open.
+	LivestreamAccess() bool
+	// OpenBroadcast opens an unpublished broadcast on the source whose stream key
+	// is sourceKey, and returns its id. The platform may return a broadcast that
+	// is already running on that source instead of making a second one.
+	OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error)
+}
+
 // LifecycleFor reports whether a platform's broadcast lifecycle can be
 // commanded.
 //

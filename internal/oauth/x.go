@@ -721,6 +721,17 @@ func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKe
 	return &XBroadcastCreated{ID: id, State: out.Data.Broadcast.State, ShareURL: out.Data.ShareURL}, nil
 }
 
+// OpenBroadcast implements BroadcastCreator. It opens the broadcast on the
+// source and returns its id. The broadcast is NOT_STARTED, so it is not public
+// until PublishBroadcast. Gated.
+func (x *X) OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error) {
+	created, err := x.CreateBroadcast(ctx, "", accessToken, sourceKey)
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
 // PublishBroadcast takes a NOT_STARTED broadcast to RUNNING. It is the only
 // write that can carry a title or a chat option, and it goes to the user-scoped
 // route, because the newer /2/broadcasts/{id}/state route accepts END only.
