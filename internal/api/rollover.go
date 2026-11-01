@@ -65,6 +65,15 @@ type rolloverStore interface {
 	UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error)
 	RolloverTemplateFor(destinationID int64, broadcastID string) (*scheduler.BroadcastTemplate, error)
 	GetSchedule(id int64) (*scheduler.Schedule, error)
+	BroadcastThumbnail(scheduleID int64) ([]byte, string, error)
+}
+
+// rolloverTemplateEditor is the part of a scheduled editor a rollover uses to give the replacement the template's
+// category and thumbnail. It is asserted on the rollover capability rather than required by it, so a fake without it
+// still rolls over and the real YouTube provider, which is a scheduled editor, gets them.
+type rolloverTemplateEditor interface {
+	EditScheduledBroadcast(ctx context.Context, accessToken, broadcastID string, e oauth.ScheduledEdit) ([]string, error)
+	SetScheduledThumbnail(ctx context.Context, accessToken, broadcastID string, data []byte, mime string) error
 }
 
 // youtubeRollover is the part of the YouTube provider the coordinator uses. It is declared here, rather than taken as
@@ -87,9 +96,10 @@ type rolloverHost struct {
 	delivering func(destinationID int64) bool
 	// announce carries a rollover event to the webhook and the events stream.
 	announce func(ev hooks.Event)
-	// chatNotice sends the optional line to one platform's chat. A nil value means no chat is wired, and the
-	// notice is skipped. An error never stops the rollover; it is logged.
-	chatNotice func(ctx context.Context, p db.Platform, text string) error
+	// chatNotice sends the optional line to the chat of one platform account: the destination's own, named by its
+	// AccountRef, and no other chat on the same platform. A nil value means no chat is wired, and the notice is
+	// skipped. An error never stops the rollover; it is logged.
+	chatNotice func(ctx context.Context, p db.Platform, account, text string) error
 	// twitchStart reads a Twitch stream's own start (Helix started_at) for the countdown. A zero time or an
 	// error means the start is unknown, and the first sighting is used instead.
 	twitchStart func(ctx context.Context, accessToken string) (time.Time, error)
@@ -115,10 +125,13 @@ type rolloverCoordinator struct {
 	sceneMu sync.Mutex
 	scenes  map[string]time.Time
 
-	// rollMu serialises every pass over a destination: the sweep and a manual run both go through considerOne, so
+	// rollSem serialises every pass over a destination: the sweep and a manual run both go through considerOne, so
 	// the two can never roll the same destination over at once. Each pass re-reads the settings under it, so a pass
 	// that waited sees the rollover the other one just recorded and does not repeat it.
-	rollMu sync.Mutex
+	//
+	// A one-slot channel rather than a mutex, so a pass waits only as long as its own context allows: a manual run
+	// that queues behind a slow platform call gives up at its timeout instead of blocking past it.
+	rollSem chan struct{}
 }
 
 func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rolloverHost) *rolloverCoordinator {
@@ -134,7 +147,8 @@ func newRolloverCoordinator(log *slog.Logger, store rolloverStore, host rollover
 			return br, true
 		}
 	}
-	return &rolloverCoordinator{log: log, store: store, host: host, now: time.Now, scenes: map[string]time.Time{}}
+	return &rolloverCoordinator{log: log, store: store, host: host, now: time.Now, scenes: map[string]time.Time{},
+		rollSem: make(chan struct{}, 1)}
 }
 
 // noteScene records a live OBS scene switch. Sync switches are a state read after (re)connecting, not a change OBS
@@ -194,8 +208,12 @@ func (c *rolloverCoordinator) sweepOnce(ctx context.Context) {
 // considerOne is one destination's pass. force is set by a manual run, which skips the planner and its debounce but
 // nothing else: the destination must still be delivering and must have an action.
 func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSettings, force bool) (acted bool, err error) {
-	c.rollMu.Lock()
-	defer c.rollMu.Unlock()
+	select {
+	case c.rollSem <- struct{}{}:
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+	defer func() { <-c.rollSem }()
 	// The settings the caller read may be older than a rollover that finished while this pass waited for the lock.
 	// The planner's debounce and a manual run both read LastRolloverAt, so the fresh row is the only one used.
 	fresh, err := c.store.GetRollover(cfg.DestinationID)
@@ -220,12 +238,20 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		}
 		return false, nil
 	}
+	bid := rolloverBroadcastID(d)
 	if !c.actsOn(d.Platform) {
-		// Countdown only. The planner is not consulted, because a due trigger would have nothing to do.
+		// Countdown only. The planner is not consulted, because a due trigger would have nothing to do. The session
+		// is still recorded, once per broadcast, because the countdown card counts from it: without it a Facebook
+		// destination, whose cap is documented, never showed one. Nothing here can read such a platform's own start,
+		// so the first sighting on air is used.
+		if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
+			if err := c.store.SetRolloverSession(d.ID, bid, now, now); err != nil {
+				c.log.Warn("planned rollover: could not record the session", "destination", d.Name, "err", err)
+			}
+		}
 		return false, nil
 	}
 
-	bid := rolloverBroadcastID(d)
 	if d.Platform == db.PlatformYouTube && bid == "" {
 		// Not announced, so there is no broadcast to replace and nothing to count from.
 		return false, nil
@@ -234,7 +260,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		return false, errRolloverTooSoon
 	}
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
-		start, err := c.sessionStart(ctx, d, bid, now)
+		start, err := c.sessionStart(ctx, d, bid, cfg.LastRolloverAt, now)
 		if err != nil {
 			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", alerts.Redact(err.Error()))
 			return false, err
@@ -267,7 +293,11 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 // sessionStart is the moment the countdown counts from. YouTube reports its own, and a zero answer means it has not
 // recorded one yet: the caller waits. Twitch has no such read, so the first moment polyemesis sees the destination on
 // air is used, and that moment is kept in the database.
-func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destination, bid string, now time.Time) (time.Time, error) {
+//
+// A Twitch start older than the last rollover means Twitch kept the session across the reconnect. The reconnect moment
+// is used then: counting from the unchanged start would make the margin due again the moment the debounce ends, and
+// restart the destination every ten minutes to no effect.
+func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destination, bid string, lastRollover, now time.Time) (time.Time, error) {
 	if d.Platform == db.PlatformTwitch && c.host.twitchStart != nil {
 		acct, err := c.account(ctx, d)
 		if err != nil {
@@ -276,6 +306,11 @@ func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destinatio
 		start, err := c.host.twitchStart(ctx, acct.AccessToken)
 		if err != nil || start.IsZero() {
 			return now, nil
+		}
+		if !lastRollover.IsZero() && start.Before(lastRollover) {
+			c.log.Warn("planned rollover: Twitch reports the same stream start after the reconnect, so the reconnect "+
+				"did not reset its count; counting from the reconnect instead", "destination", d.Name)
+			return lastRollover, nil
 		}
 		return start, nil
 	}
@@ -322,12 +357,7 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 		err            error
 	)
 	if cfg.ChatNotice && c.host.chatNotice != nil {
-		nctx, cancel := context.WithTimeout(ctx, rolloverChatNoticeTimeout)
-		if nerr := c.host.chatNotice(nctx, d.Platform, rolloverChatNoticeText); nerr != nil {
-			c.log.Warn("planned rollover: the chat notice was not sent; the rollover goes ahead",
-				"destination", d.Name, "platform", d.Platform, "err", alerts.Redact(nerr.Error()))
-		}
-		cancel()
+		c.sendChatNotice(ctx, d)
 	}
 	switch d.Platform {
 	case db.PlatformYouTube:
@@ -354,6 +384,24 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 	c.announceEvent(d, d.Platform, hooks.TriggerRolloverCompleted, string(trigger)+": "+reason)
 	c.log.Info("planned rollover done", "destination", d.Name, "platform", d.Platform, "trigger", trigger, "result", result)
 	return nil
+}
+
+// sendChatNotice posts the notice to the destination's own account's chat. The account is resolved first, because a
+// platform can have several chats connected and only this destination's viewers are about to see the switch.
+func (c *rolloverCoordinator) sendChatNotice(ctx context.Context, d *db.Destination) {
+	nctx, cancel := context.WithTimeout(ctx, rolloverChatNoticeTimeout)
+	defer cancel()
+	acct, err := c.account(nctx, d)
+	if err == nil && acct.AccountRef == "" {
+		err = errors.New("the account has no reference to address its chat by")
+	}
+	if err == nil {
+		err = c.host.chatNotice(nctx, d.Platform, acct.AccountRef, rolloverChatNoticeText)
+	}
+	if err != nil {
+		c.log.Warn("planned rollover: the chat notice was not sent; the rollover goes ahead",
+			"destination", d.Name, "platform", d.Platform, "err", alerts.Redact(err.Error()))
+	}
 }
 
 // rollYouTube replaces the broadcast. The template, when there is one, decides the title, description and privacy;
@@ -393,15 +441,21 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 
 	out, err := br.RollOverBroadcast(ctx, acct.AccessToken, req)
 	if err != nil {
-		return "", "", err
+		return "", "", c.adoptStrandedReplacement(d, err)
 	}
+	if terr == nil {
+		out.Warnings = append(out.Warnings, c.applyTemplateExtras(ctx, br, acct.AccessToken, out.NewBroadcastID, *tpl, req)...)
+	}
+	// Platform text, so it is redacted before it reaches the fault, the result, the webhook or the timeline, the same
+	// as a failure's reason is.
+	warnings := alerts.Redact(strings.Join(out.Warnings, "; "))
 	if _, err := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
 		cur.Lifecycle.BroadcastID = out.NewBroadcastID
 		cur.Lifecycle.Phase = phaseLive
 		cur.Lifecycle.Attempts = 0
 		cur.Lifecycle.Fault = ""
 		if len(out.Warnings) > 0 {
-			cur.Lifecycle.Fault = clipDetail(strings.Join(out.Warnings, "; "))
+			cur.Lifecycle.Fault = clipDetail(warnings)
 		}
 		return true
 	}); err != nil {
@@ -420,9 +474,59 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 		reason += "; the old broadcast ended before the replacement went live, so viewers saw a gap (provisional)"
 	}
 	if len(out.Warnings) > 0 {
-		reason += "; " + strings.Join(out.Warnings, "; ")
+		reason += "; " + warnings
 	}
 	return result, reason, nil
+}
+
+// adoptStrandedReplacement handles the one failure that leaves the record pointing at the wrong broadcast: the old
+// one was ended and the replacement exists but would not start. Left alone, every later sweep reads an ended
+// broadcast and the show stays dark. The record moves to the replacement in a non-live phase with a fresh budget, so
+// the lifecycle coordinator takes it live once the ingest is seen there. The error is still returned: the rollover
+// failed, and the operator is told so.
+func (c *rolloverCoordinator) adoptStrandedReplacement(d *db.Destination, err error) error {
+	var rerr *oauth.RolloverError
+	if !errors.As(err, &rerr) || rerr.OldStillLive || strings.TrimSpace(rerr.NewBroadcastID) == "" {
+		return err
+	}
+	newID := strings.TrimSpace(rerr.NewBroadcastID)
+	if _, uerr := c.store.UpdateLifecycle(d.ID, func(cur *db.Destination) bool {
+		cur.Lifecycle.BroadcastID = newID
+		cur.Lifecycle.Phase = phaseCreated
+		cur.Lifecycle.Attempts = 0
+		cur.Lifecycle.Fault = clipDetail("the old broadcast ended and the replacement " + newID +
+			" did not start; it is retried as this destination's broadcast")
+		return true
+	}); uerr != nil {
+		return fmt.Errorf("%w; the destination could not be pointed at the replacement %s either: %v", err, newID, uerr)
+	}
+	return fmt.Errorf("%w; the destination now points at the replacement %s, which is retried until it goes live", err, newID)
+}
+
+// applyTemplateExtras gives the replacement the template's category and thumbnail, best effort: the replacement is
+// already live, so a refusal of either is a warning and never a failure.
+func (c *rolloverCoordinator) applyTemplateExtras(ctx context.Context, br youtubeRollover, token, id string,
+	tpl scheduler.BroadcastTemplate, req oauth.RolloverRequest) []string {
+	ed, ok := br.(rolloverTemplateEditor)
+	if !ok || id == "" {
+		return nil
+	}
+	var warnings []string
+	if strings.TrimSpace(tpl.Category) != "" {
+		w, err := ed.EditScheduledBroadcast(ctx, token, id, oauth.ScheduledEdit{
+			Title: req.Title, Description: req.Description, Privacy: req.Privacy, Category: tpl.Category,
+		})
+		warnings = append(warnings, w...)
+		if err != nil {
+			warnings = append(warnings, "the template's category was not applied: "+err.Error())
+		}
+	}
+	if data, mime, err := c.store.BroadcastThumbnail(tpl.ScheduleID); err == nil && len(data) > 0 {
+		if err := ed.SetScheduledThumbnail(ctx, token, id, data, mime); err != nil {
+			warnings = append(warnings, "the template's thumbnail was not applied: "+err.Error())
+		}
+	}
+	return warnings
 }
 
 // reconnectTwitch restarts the destination. The countdown restarts with it, which is the unverified part: Twitch
@@ -435,7 +539,9 @@ func (c *rolloverCoordinator) reconnectTwitch(d *db.Destination, now time.Time) 
 	if err := c.host.restart(d.ID); err != nil {
 		return "", "", err
 	}
-	if err := c.store.SetRolloverSession(d.ID, "", now, now); err != nil {
+	// Cleared rather than set to now, so the next sweep re-reads Helix's started_at, which is what says whether Twitch
+	// reset its count. See sessionStart for an unchanged start.
+	if err := c.store.SetRolloverSession(d.ID, "", time.Time{}, now); err != nil {
 		c.log.Warn("planned rollover: could not reset the session", "destination", d.Name, "err", err)
 	}
 	return "reconnected", "reconnected; whether Twitch resets its 48-hour count on a reconnect is unverified (provisional)", nil
@@ -500,7 +606,7 @@ func (c *rolloverCoordinator) recordTimeline(d *db.Destination, trigger hooks.Tr
 func (c *rolloverCoordinator) RunNow(ctx context.Context, destinationID int64) error {
 	// The platform calls run on a context the browser cannot cancel. A disconnect between creating the new broadcast
 	// and binding it would otherwise leave a public broadcast with nothing bound to it. The timeout stops a stuck call
-	// from holding rollMu for ever.
+	// from holding rollSem for ever.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), manualRolloverTimeout)
 	defer cancel()
 	cfg, err := c.store.GetRollover(destinationID)

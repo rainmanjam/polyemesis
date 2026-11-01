@@ -31,6 +31,7 @@ type fakeRolloverStore struct {
 	templates map[string]*scheduler.BroadcastTemplate // "destID/broadcastID"
 	results   []string
 	timeline  []db.TimelineEvent
+	thumbs    map[int64][]byte // schedule id -> PNG bytes
 }
 
 func newFakeRolloverStore() *fakeRolloverStore {
@@ -129,6 +130,15 @@ func (f *fakeRolloverStore) timelineRows() []db.TimelineEvent {
 	return append([]db.TimelineEvent(nil), f.timeline...)
 }
 
+func (f *fakeRolloverStore) BroadcastThumbnail(scheduleID int64) ([]byte, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if b, ok := f.thumbs[scheduleID]; ok {
+		return b, "image/png", nil
+	}
+	return nil, "", nil
+}
+
 func (f *fakeRolloverStore) GetSchedule(id int64) (*scheduler.Schedule, error) {
 	return nil, db.ErrNotFound
 }
@@ -189,7 +199,7 @@ func newRolloverRig(t *testing.T) *rolloverRig {
 	}
 	host := rolloverHost{
 		tokenFor: func(context.Context, int64) (*db.PlatformAccount, error) {
-			return &db.PlatformAccount{AccessToken: "tok"}, nil
+			return &db.PlatformAccount{AccessToken: "tok", AccountRef: "rig-ref"}, nil
 		},
 		youtube: func() (youtubeRollover, bool) { return r.yt, true },
 		restart: func(id int64) error {

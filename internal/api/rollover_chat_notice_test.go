@@ -26,7 +26,7 @@ type chatRecorder struct {
 // withChatNotice wires a recording notice into the rig's coordinator. It is attached to the host after the
 // rig is built, because the host is a value on the coordinator.
 func withChatNotice(r *rolloverRig, rec *chatRecorder) {
-	r.c.host.chatNotice = func(_ context.Context, p db.Platform, text string) error {
+	r.c.host.chatNotice = func(_ context.Context, p db.Platform, _ string, text string) error {
 		rec.calls = append(rec.calls, string(p)+": "+text)
 		rec.order = append(rec.order, "chat")
 		return rec.err

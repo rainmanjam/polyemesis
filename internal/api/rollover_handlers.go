@@ -243,14 +243,15 @@ func (s *Server) restartDestinationForRollover(id int64) error {
 	return eng.RestartDestination(id)
 }
 
-// sendRolloverNotice posts the rollover notice to the chats of one platform only, and to none other. A
-// platform with no connected chat is an error, so the log says why no line appeared.
-func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, text string) error {
+// sendRolloverNotice posts the rollover notice to one chat: the given platform's, on the given account. Another
+// account's chat on the same platform is a different channel and its viewers are not being switched. A destination
+// with no connected chat is an error, so the log says why no line appeared.
+func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, account, text string) error {
 	if s.chat == nil {
 		return errors.New("no chat is running on this server")
 	}
-	results, err := s.chat.SendEach(ctx, func(pp db.Platform, _ string) string {
-		if pp == p {
+	results, err := s.chat.SendEach(ctx, func(pp db.Platform, acct string) string {
+		if pp == p && acct == account {
 			return text
 		}
 		return ""
@@ -259,7 +260,7 @@ func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, text str
 		return err
 	}
 	if len(results) == 0 {
-		return errors.New(string(p) + " has no connected chat to post the notice to")
+		return errors.New(string(p) + " has no connected chat for this destination's account to post the notice to")
 	}
 	for _, r := range results {
 		if !r.OK {
@@ -307,23 +308,46 @@ func (s *Server) RolloverLoop(ctx context.Context) {
 	if s.rollover == nil || s.stream == nil {
 		return
 	}
-	sub, _, _ := s.stream.Subscribe(eventstream.Filter{Topics: []eventstream.Topic{eventstream.TopicOBS}}, "")
-	defer sub.Close()
 	tick := time.NewTicker(rolloverSweepInterval)
 	defer tick.Stop()
+	runRolloverLoop(ctx, func() (<-chan eventstream.Envelope, func()) {
+		sub, _, _ := s.stream.Subscribe(eventstream.Filter{Topics: []eventstream.Topic{eventstream.TopicOBS}}, "")
+		return sub.C, sub.Close
+	}, tick.C, func(env eventstream.Envelope) {
+		if sd, isScene := env.Data.(obsbridge.SceneData); isScene && env.Type == eventstream.TypeOBSScene {
+			s.rollover.noteScene(sd.Scene, sd.Sync, env.At)
+		}
+	}, s.rollover.sweepOnce)
+}
+
+// runRolloverLoop is RolloverLoop's body, with the subscription, the clock and the two actions passed in so a test can
+// close the subscription under it.
+//
+// THE SUBSCRIPTION CAN CLOSE. The hub closes a subscriber that falls behind. That used to end the loop, and with it
+// every planned rollover until the daemon restarted. Now the sweep goes on, and the loop resubscribes on the next tick,
+// not at once, so a hub that keeps closing it costs one subscription per sweep and not a hot loop. Scene switches
+// missed in between are missed; the margin and quiet triggers do not depend on them.
+func runRolloverLoop(ctx context.Context, subscribe func() (<-chan eventstream.Envelope, func()),
+	tick <-chan time.Time, onEvent func(eventstream.Envelope), sweep func(context.Context)) {
+	events, closeSub := subscribe()
+	defer func() { closeSub() }()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case env, ok := <-sub.C:
+		case env, ok := <-events:
 			if !ok {
-				return
+				// A nil channel is never ready, so the select waits on the tick until the resubscribe below.
+				closeSub()
+				events, closeSub = nil, func() {}
+				continue
 			}
-			if sd, isScene := env.Data.(obsbridge.SceneData); isScene && env.Type == eventstream.TypeOBSScene {
-				s.rollover.noteScene(sd.Scene, sd.Sync, env.At)
+			onEvent(env)
+		case <-tick:
+			if events == nil {
+				events, closeSub = subscribe()
 			}
-		case <-tick.C:
-			s.rollover.sweepOnce(ctx)
+			sweep(ctx)
 		}
 	}
 }
