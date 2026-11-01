@@ -362,6 +362,11 @@ export interface Destination {
    *  takes; which one a platform accepts is decided by the server, and the
    *  console mirrors that table in lib/captions.ts. */
   captionMode?: CaptionMode;
+  /** X only: the title sent when polyemesis publishes the X broadcast. X takes
+   *  a title only at that publish step and cannot change it while the broadcast
+   *  runs, so the server refuses a change while the destination is live. At most
+   *  280 characters (X's post limit; X gives no exact number). */
+  goLiveTitle?: string;
   /** Read-only. True when a YouTube caption ingestion URL is stored for this
    *  destination's current stream key, which "youtube_post" needs before the
    *  destination may start. The URL itself is a credential and never leaves

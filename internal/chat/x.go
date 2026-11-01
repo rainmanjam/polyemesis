@@ -74,6 +74,37 @@ type XConfig struct {
 // XAdapter is the X chat connection.
 type XAdapter struct {
 	cfg XConfig
+
+	// told is the broadcast the lifecycle coordinator last said this account published, or "" when it said the
+	// broadcast ended or has said nothing. It is kept on the adapter, not on a Run, so a tell that arrives before
+	// Run starts or between two reconnects is not lost.
+	toldMu sync.Mutex
+	told   string
+}
+
+// SetBroadcast tells the adapter which broadcast this account is running now. The lifecycle coordinator calls it
+// after a PUBLISH, so the first chat lines of a new show are recognised at once instead of after the next poll,
+// and with "" after an END. The 15-second poll stays as the fallback for a broadcast published outside polyemesis.
+func (x *XAdapter) SetBroadcast(id string) {
+	x.toldMu.Lock()
+	x.told = strings.TrimSpace(id)
+	x.toldMu.Unlock()
+}
+
+// toldBroadcast is the id SetBroadcast last recorded.
+func (x *XAdapter) toldBroadcast() string {
+	x.toldMu.Lock()
+	defer x.toldMu.Unlock()
+	return x.told
+}
+
+// currentBroadcastID is the broadcast Send, Delete and the mutes address: the told one when there is one, which
+// saves a list read per call, and otherwise whatever X lists as RUNNING.
+func (x *XAdapter) currentBroadcastID(ctx context.Context) (string, error) {
+	if id := x.toldBroadcast(); id != "" {
+		return id, nil
+	}
+	return x.runningBroadcastID(ctx)
 }
 
 // NewX builds the adapter. The Token is required, because every call except the
@@ -168,7 +199,7 @@ func (x *XAdapter) Send(ctx context.Context, text string) (Message, error) {
 	if n := utf8.RuneCountInString(text); n > XMaxMessage {
 		return Message{}, fmt.Errorf("X chat messages stop at %d characters and this one is %d", XMaxMessage, n)
 	}
-	id, err := x.runningBroadcastID(ctx)
+	id, err := x.currentBroadcastID(ctx)
 	if err != nil {
 		return Message{}, err
 	}
@@ -208,7 +239,7 @@ func (x *XAdapter) Delete(ctx context.Context, messageID string) error {
 	if !xNumericID.MatchString(messageID) {
 		return fmt.Errorf("X message id %q is not digits, so it cannot be addressed", messageID)
 	}
-	id, err := x.runningBroadcastID(ctx)
+	id, err := x.currentBroadcastID(ctx)
 	if err != nil {
 		return err
 	}
@@ -241,7 +272,7 @@ func (x *XAdapter) Ban(ctx context.Context, userID string, d time.Duration, _ st
 	if !xNumericID.MatchString(userID) {
 		return fmt.Errorf("X user id %q is not digits, so this mute cannot be addressed", userID)
 	}
-	id, err := x.runningBroadcastID(ctx)
+	id, err := x.currentBroadcastID(ctx)
 	if err != nil {
 		return err
 	}
@@ -270,7 +301,7 @@ func (x *XAdapter) Unban(ctx context.Context, userID string) error {
 	if !xNumericID.MatchString(userID) {
 		return fmt.Errorf("X user id %q is not digits, so this unmute cannot be addressed", userID)
 	}
-	id, err := x.runningBroadcastID(ctx)
+	id, err := x.currentBroadcastID(ctx)
 	if err != nil {
 		return err
 	}
@@ -484,6 +515,11 @@ func (o *xBroadcastOwner) owns(ctx context.Context, broadcastID string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if broadcastID == o.running {
+		return true
+	}
+	if told := o.x.toldBroadcast(); told != "" && broadcastID == told {
+		// The coordinator published this broadcast for this account, so no read is needed to place it.
+		o.running = told
 		return true
 	}
 	now := o.x.cfg.Now()

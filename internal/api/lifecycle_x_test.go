@@ -42,6 +42,8 @@ type xcFake struct {
 	// published and ended count the writes that reached the wire.
 	published int
 	ended     int
+	// publishBodies records the raw body of every PUBLISH, so a test can read the title X was sent.
+	publishBodies []map[string]any
 	// createStatus, when non-zero, makes create fail with that HTTP status.
 	createStatus int
 	// createDetail, when set, is the problem detail a refused create carries.
@@ -106,10 +108,13 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			_, _ = io.WriteString(w, `{"data":{"id":"`+f.id+`","state":"`+f.state+`","source_id":"`+
 				xcFakeKey+`","title":""}}`)
 		case r.Method == http.MethodPut && path == "/2/users/42/broadcasts/"+f.id+"/state":
-			var body struct {
-				State string `json:"state"`
+			var raw map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&raw)
+			f.publishBodies = append(f.publishBodies, raw)
+			body := struct{ State string }{}
+			if st, ok := raw["state"].(string); ok {
+				body.State = st
 			}
-			_ = json.NewDecoder(r.Body).Decode(&body)
 			if body.State != "PUBLISH" || f.state != oauth.XStateNotStarted {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = io.WriteString(w, `{"errors":[{"title":"Bad Request","detail":"cannot publish"}]}`)
@@ -486,5 +491,111 @@ func TestXHeldCreateIsReleasedWhenTheOperatorDisablesTheDestination(t *testing.T
 	row := xcSweep(t, c, store)
 	if row.Lifecycle.Attempts != 0 || row.Lifecycle.Fault != "" {
 		t.Errorf("disabling left the hold in place: %+v", row.Lifecycle)
+	}
+}
+
+// ------------------------------------------------- THE GO-LIVE TITLE AND THE CHAT TELL
+
+// xcLiveReady is a destination whose broadcast is open and NOT_STARTED while bytes arrive, so the next sweep
+// publishes it.
+func xcLiveReady(t *testing.T, title string) (*lifecycleCoordinator, *fakeLifecycleStore, *xcFake) {
+	t.Helper()
+	fake := &xcFake{active: true, state: oauth.XStateNotStarted, id: "bc-1", seq: 1}
+	row := xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated})
+	row.GoLiveTitle = title
+	c, store, _ := xcFixture(t, fake, true, row)
+	return c, store, fake
+}
+
+// TestXPublishCarriesTheDestinationsGoLiveTitle: X takes a title only on PUBLISH, so the coordinator's PUBLISH is
+// the one chance to send it. It used to go through the generic transition, which always sent an empty publish and
+// left every X broadcast untitled.
+//
+// MUTATION: the title left out of the XPublish in advance. Observed: FAIL, the body carried no title.
+func TestXPublishCarriesTheDestinationsGoLiveTitle(t *testing.T) {
+	c, store, fake := xcLiveReady(t, "Sunday practice, live")
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.Phase != phaseLive {
+		t.Fatalf("phase after publish = %q, want live", row.Lifecycle.Phase)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.publishBodies) != 1 {
+		t.Fatalf("PUBLISH calls = %d, want 1", len(fake.publishBodies))
+	}
+	if got := fake.publishBodies[0]["title"]; got != "Sunday practice, live" {
+		t.Errorf("PUBLISH title = %v, want the destination's go-live title", got)
+	}
+}
+
+// TestXPublishWithNoTitleSendsNoTitleField: an empty title is left out, so X keeps whatever it has rather than being
+// sent an empty string it might take as "no title".
+func TestXPublishWithNoTitleSendsNoTitleField(t *testing.T) {
+	c, store, fake := xcLiveReady(t, "")
+	xcSweep(t, c, store)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.publishBodies) != 1 {
+		t.Fatalf("PUBLISH calls = %d, want 1", len(fake.publishBodies))
+	}
+	if _, ok := fake.publishBodies[0]["title"]; ok {
+		t.Errorf("PUBLISH body %v carries a title field for an untitled destination", fake.publishBodies[0])
+	}
+}
+
+// TestXPublishUsesTheTitleSourceWhenOneIsWired: the server wires a title source that prefers the title of a
+// recurring show starting now over the stored one. The coordinator sends whatever that source answers.
+func TestXPublishUsesTheTitleSourceWhenOneIsWired(t *testing.T) {
+	c, store, fake := xcLiveReady(t, "stored title")
+	c.goLiveTitle = func(d *db.Destination) string { return "Show 12: " + d.Name }
+	xcSweep(t, c, store)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if got := fake.publishBodies[0]["title"]; got != "Show 12: x main" {
+		t.Errorf("PUBLISH title = %v, want the wired source's answer", got)
+	}
+}
+
+// TestXPublishAndEndTellTheChatAdapterWhichBroadcastIsLive: the coordinator knows the new broadcast id the moment
+// X accepts the PUBLISH, so it tells the account's chat adapter instead of leaving it to the adapter's poll. The END
+// clears it, so chat sends stop addressing a broadcast that is over.
+//
+// MUTATION: the pointChat call after a publish removed. Observed: FAIL, no tell recorded.
+func TestXPublishAndEndTellTheChatAdapterWhichBroadcastIsLive(t *testing.T) {
+	c, store, fake := xcLiveReady(t, "")
+	type tell struct {
+		account int64
+		id      string
+	}
+	var tells []tell
+	c.pointChat = func(account int64, id string) { tells = append(tells, tell{account, id}) }
+
+	xcSweep(t, c, store)
+	if len(tells) != 1 || tells[0] != (tell{9, "bc-1"}) {
+		t.Fatalf("tells after publish = %v, want account 9 told bc-1", tells)
+	}
+
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	xcSweep(t, c, store)
+	if _, _, ended, _ := fake.snapshot(); ended != 1 {
+		t.Fatalf("disabling did not end the broadcast")
+	}
+	if len(tells) != 2 || tells[1] != (tell{9, ""}) {
+		t.Errorf("tells after end = %v, want account 9 cleared", tells)
+	}
+}
+
+// TestXRenewClearsTheChatTell: a broadcast X ended on its own (TIMED_OUT, or ended in X's tooling) is renewed rather
+// than ended by polyemesis, so the renewal is where the adapter learns the old id is over.
+func TestXRenewClearsTheChatTell(t *testing.T) {
+	fake := &xcFake{active: true, state: oauth.XStateTimedOut, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	var told []string
+	c.pointChat = func(_ int64, id string) { told = append(told, id) }
+	xcSweep(t, c, store)
+	if len(told) == 0 || told[0] != "" {
+		t.Errorf("tells on renewal = %q, want the old broadcast cleared first", told)
 	}
 }

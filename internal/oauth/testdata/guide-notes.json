@@ -55,7 +55,9 @@
       "Under the app's user authentication settings, add exactly the redirect URI shown below.",
       "Copy the Client ID and Client secret into the fields on this page and save.",
       "Go to a destination and click Connect account. X will ask you to grant access.",
-      "If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination."
+      "If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
+      "Once X has whitelisted the app, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, opens and publishes each broadcast with the destination's go-live title, ends it, and sends and moderates chat.",
+      "To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com. It is a secret: keep it out of shared files and screenshots."
     ]
   },
   {

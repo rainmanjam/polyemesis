@@ -423,7 +423,7 @@ var platformCapabilities = []PlatformCapability{
 	{
 		PresetID: "x", Name: "X (Twitter) Live", Platform: db.PlatformX, Tier: TierManual,
 		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
-		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
+		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off (the operator turns them on with POLYEMESIS_X_LIVESTREAM=1 once X has approved it) and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
 		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
 			// Sign-in is built (PKCE, the five scopes) but no live authorize
@@ -442,13 +442,14 @@ var platformCapabilities = []PlatformCapability{
 			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:         "OAuth 2.0 authorization code with PKCE at api.x.com/2/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; no live request has confirmed it yet.",
-			CapStreamKey:   "X's Livestream API can create a stream source and return its URL and key (POST /2/users/{id}/sources). That call needs X Livestream access (app must be whitelisted by X), so until then this is a paste from X's producer tooling.",
-			CapMetadata:    "X sets the title only at the publish step. Nothing can change the title of a broadcast that is already running, so polyemesis asks you to set it before you go live.",
-			CapChatRead:    "Live chat arrives on the Activity API's broadcast.chat event. That needs an app-only bearer token, which polyemesis does not have yet, so chat reading stays off until it does.",
-			CapChatSend:    "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Gated behind Livestream access.",
-			CapModeration:  "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
-			CapViewerStats: "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
+			CapSSO:                "OAuth 2.0 authorization code with PKCE at api.x.com/2/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; no live request has confirmed it yet.",
+			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/users/{id}/sources). That call needs X Livestream access (app must be whitelisted by X), so until then this is a paste from X's producer tooling.",
+			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
+			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, read from X's activity stream with the app's bearer token, which the operator supplies as POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works. Not yet checked against a whitelisted app.",
+			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Gated behind Livestream access.",
+			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
+			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
+			CapBroadcastLifecycle: "With Livestream access, polyemesis opens a broadcast on the stream source when the destination turns on, publishes it once bytes arrive (with the go-live title), and ends it when the destination turns off. Not yet checked against a whitelisted app.",
 		},
 	},
 	{

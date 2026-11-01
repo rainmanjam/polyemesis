@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -189,6 +190,12 @@ type Destination struct {
 	// Validate refuses a mode the platform cannot carry. The engine reads it to
 	// route each destination's captions (internal/engine/captions_*.go).
 	CaptionMode string `json:"captionMode,omitempty"`
+	// GoLiveTitle is the title sent when an X broadcast is published. X takes a
+	// title only on the PUBLISH transition and nothing changes it while the
+	// broadcast runs, so it is set here, before the show. Empty sends no title.
+	// Only X reads it, so Validate refuses it on every other platform, and the
+	// update handler refuses a change while the destination is live.
+	GoLiveTitle string `json:"goLiveTitle,omitempty"`
 	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
 	// for this destination's CURRENT stream key, which the "youtube_post" mode
 	// needs before the destination may start. It is set by scanDestination and
@@ -685,6 +692,15 @@ func (d Destination) Validate() error {
 		}
 	}
 
+	// The X go-live title: only X sends it, and X bounds it by its post length.
+	if d.GoLiveTitle != "" {
+		if d.Platform != PlatformX {
+			add("a go-live title is sent only to X; %s takes its title from the go-live composer", d.Platform)
+		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
+			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
+		}
+	}
+
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
 	}
@@ -1086,7 +1102,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &captionKeyHash,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -1193,7 +1209,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile, caption_mode,
+	multitrack, vod_profile, caption_mode, go_live_title,
 	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
@@ -1233,7 +1249,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?, caption_mode=?,
+		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1530,9 +1546,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile, caption_mode,
+		 multitrack, vod_profile, caption_mode, go_live_title,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1543,7 +1559,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode),
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1644,7 +1660,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode),
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle,
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.

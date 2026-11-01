@@ -144,6 +144,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.delaySeconds":                       sPublic,
 	"destination.captionIngestReady":                 sPublic, // a yes/no about the stored URL; the URL itself is in caption_ingest and on no type
 	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
+	"destination.goLiveTitle":                        sPublic, // the X broadcast title, published to viewers by design
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,

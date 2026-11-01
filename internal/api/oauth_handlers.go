@@ -31,8 +31,33 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			// than letting the platform reject it after the fact.
 			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
 		}
+		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
 	}
 	writeJSON(w, http.StatusOK, guides)
+}
+
+// livestreamGated is a provider whose live API the operator switches on, X's
+// Livestream family today.
+type livestreamGated interface {
+	LivestreamAccess() bool
+}
+
+// livestreamGate is "open" or "closed" for a gated platform and "" for the rest.
+// It reads the provider this server resolves through, so a test's set and
+// production agree.
+func (s *Server) livestreamGate(platform db.Platform) string {
+	p, err := s.providers.Get(platform)
+	if err != nil {
+		return ""
+	}
+	g, ok := p.(livestreamGated)
+	if !ok {
+		return ""
+	}
+	if g.LivestreamAccess() {
+		return "open"
+	}
+	return "closed"
 }
 
 // origin reconstructs the browser-visible base URL.

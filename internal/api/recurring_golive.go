@@ -26,6 +26,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -188,3 +189,63 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	s.log.Info("recurring: wrote the show's title and category at go-live",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "applied", len(res.Applied))
 }
+
+// xGoLiveTitle is the title an X PUBLISH carries, as of now. It is the lifecycle
+// coordinator's title source.
+func (s *Server) xGoLiveTitle(d *db.Destination) string {
+	return s.xGoLiveTitleAt(d, time.Now())
+}
+
+// xGoLiveTitleAt is the title an X PUBLISH at now carries. X takes a title only
+// on PUBLISH (it has no write before or during a show), so this is where a
+// recurring template reaches X: when a template-bearing start schedule that
+// names d fired within goLiveWindow, its rendered title is sent. Otherwise the
+// destination's stored go-live title is sent. A store that cannot be read is
+// the stored title too: a missed template title is a plainer show, not a show
+// that never goes public.
+func (s *Server) xGoLiveTitleAt(d *db.Destination, now time.Time) string {
+	if s.store == nil {
+		return d.GoLiveTitle
+	}
+	tpls, err := s.store.ListBroadcastTemplates()
+	if err != nil || len(tpls) == 0 {
+		return d.GoLiveTitle
+	}
+	scheds, err := s.store.ListSchedules()
+	if err != nil {
+		return d.GoLiveTitle
+	}
+	schedByID := make(map[int64]scheduler.Schedule, len(scheds))
+	for _, sc := range scheds {
+		schedByID[sc.ID] = sc
+	}
+	for _, tpl := range tpls {
+		sc, ok := schedByID[tpl.ScheduleID]
+		if !ok || !sc.Enabled || sc.Action != scheduler.ActionStart || !scheduleTargets(sc, d.ID) {
+			continue
+		}
+		at, ok := lastOccurrence(sc, now)
+		if !ok || now.Sub(at) >= goLiveWindow {
+			continue
+		}
+		loc, err := sc.Location()
+		if err != nil {
+			continue
+		}
+		title, err := scheduler.RenderTitle(tpl.TitlePattern, at, loc)
+		if err != nil || strings.TrimSpace(title) == "" {
+			continue
+		}
+		// No length check here: a template renders to at most 100 characters
+		// (scheduler.BroadcastTemplate.Validate), well inside X's 280.
+		return title
+	}
+	return d.GoLiveTitle
+}
+
+// xTitleLiveRefusal is the answer to a go-live title change while the X
+// broadcast runs. X documents no write that changes a running broadcast's title
+// (the PUBLISH transition is the only one that takes one), so the copy says the
+// change is not available, not that it is unverified.
+const xTitleLiveRefusal = "X cannot change the title of a broadcast that is live: the title is sent " +
+	"only when the broadcast is published. Save the new title after this show ends, and the next show uses it"

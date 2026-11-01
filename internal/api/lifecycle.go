@@ -375,6 +375,61 @@ type lifecycleCoordinator struct {
 	// (broadcast.live, broadcast.complete); set once in New, before any loop
 	// runs, and never changed. Must not block: it runs on the sweep.
 	announce func(broadcastPhase)
+
+	// goLiveTitle is the title an X PUBLISH carries. X takes a title only at that
+	// step, so this is the one chance to send it. Nil means the destination's own
+	// stored GoLiveTitle; the server wires one that prefers a recurring show's
+	// rendered title. Set once in New, before any loop runs.
+	goLiveTitle func(d *db.Destination) string
+
+	// pointChat tells the X chat adapter of one account which broadcast is live,
+	// or "" when it is over, so the adapter does not wait for its own poll to
+	// find out. Nil means nobody is listening. Must not block: it runs on the
+	// sweep.
+	pointChat func(accountID int64, broadcastID string)
+}
+
+// xPublisher is the X provider's PUBLISH with its title and chat option. The
+// generic TransitionBroadcast sends an empty publish, so the coordinator asks
+// for this one by name when it takes an X broadcast live.
+type xPublisher interface {
+	PublishBroadcast(ctx context.Context, accessToken, broadcastID string, p oauth.XPublish) (*oauth.XPublishResult, error)
+}
+
+// titleFor is the title the PUBLISH for d carries.
+func (c *lifecycleCoordinator) titleFor(d *db.Destination) string {
+	if c.goLiveTitle != nil {
+		return c.goLiveTitle(d)
+	}
+	return d.GoLiveTitle
+}
+
+// tellChat points d's X chat adapter at broadcastID ("" for none). Only X has a
+// chat adapter that needs it.
+func (c *lifecycleCoordinator) tellChat(platform db.Platform, accountID *int64, broadcastID string) {
+	if c.pointChat == nil || platform != db.PlatformX || accountID == nil {
+		return
+	}
+	c.pointChat(*accountID, broadcastID)
+}
+
+// transition sends one start transition. An X go-live goes through
+// PublishBroadcast so it carries the title; everything else is the generic
+// transition, unchanged.
+func (c *lifecycleCoordinator) transition(ctx context.Context, prov oauth.BroadcastLifecycler,
+	acct *db.PlatformAccount, d *db.Destination, broadcastID string, to oauth.BroadcastPhase) (*oauth.TransitionResult, error) {
+	if pub, ok := prov.(xPublisher); ok && d.Platform == db.PlatformX && to == oauth.PhaseLive {
+		r, err := pub.PublishBroadcast(ctx, acct.AccessToken, broadcastID, oauth.XPublish{Title: c.titleFor(d)})
+		if err != nil {
+			return nil, err
+		}
+		for _, w := range r.Warnings {
+			c.log.Warn("broadcast lifecycle: X published the broadcast with a warning",
+				"destination", d.Name, "broadcast", broadcastID, "detail", alerts.Redact(w))
+		}
+		return &oauth.TransitionResult{BroadcastID: broadcastID, Requested: to, Status: r.State, Warnings: r.Warnings}, nil
+	}
+	return prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, to)
 }
 
 // broadcastPhase is one confirmed transition, as the events stream reports it.
@@ -902,6 +957,8 @@ func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.Broadcas
 	if cur == nil {
 		return
 	}
+	// The finished broadcast is no longer where chat goes.
+	c.tellChat(d.Platform, d.AccountID, "")
 	c.log.Info("broadcast lifecycle: the recorded broadcast has finished and the destination is still on air; opening the next one",
 		"destination", d.Name, "platform", d.Platform)
 	c.open(ctx, cur, creator)
@@ -961,10 +1018,13 @@ func scrubSourceKey(detail, key string) string {
 // oauth.PhaseComplete at all.
 func (c *lifecycleCoordinator) advance(ctx context.Context, prov oauth.BroadcastLifecycler,
 	acct *db.PlatformAccount, d *db.Destination, broadcastID string, plan lifecyclePlan) {
-	res, err := prov.TransitionBroadcast(ctx, acct.AccessToken, broadcastID, plan.Send)
+	res, err := c.transition(ctx, prov, acct, d, broadcastID, plan.Send)
 	if err != nil {
 		c.handleRefusal(d, broadcastID, plan.Send, err)
 		return
+	}
+	if plan.Send == oauth.PhaseLive {
+		c.tellChat(d.Platform, d.AccountID, broadcastID)
 	}
 	c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
 		// The response's own lifeCycleStatus when it carried one; otherwise the
@@ -1059,6 +1119,7 @@ func (c *lifecycleCoordinator) end(ctx context.Context, prov oauth.BroadcastLife
 		b.Phase = recordedPhase(res.Status, phaseComplete)
 		b.Attempts, b.Fault = 0, ""
 	})
+	c.tellChat(d.Platform, d.AccountID, "")
 	c.log.Info("ended a broadcast", "destination", d.Name, "platform", d.Platform,
 		"broadcast", broadcastID, "redundant", res.Redundant)
 	c.tell(broadcastPhase{
@@ -1166,6 +1227,7 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		c.noteOrphanFailure(t, err)
 		return
 	}
+	c.tellChat(t.Platform, &t.AccountID, "")
 	c.log.Info("ended the broadcast of a deleted destination",
 		"destination", t.Name, "platform", t.Platform, "broadcast", t.BroadcastID)
 	c.untrack(t.destinationID)

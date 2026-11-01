@@ -847,6 +847,10 @@ func New(o Options) *Server {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
 		s.lifecycle.announce = s.announceBroadcastPhase
+		// X: the title its PUBLISH carries, and the chat adapter told the new
+		// broadcast at once rather than after its poll.
+		s.lifecycle.goLiveTitle = s.xGoLiveTitle
+		s.lifecycle.pointChat = s.setXBroadcast
 		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.

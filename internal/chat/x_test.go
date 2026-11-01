@@ -500,3 +500,79 @@ func TestXOwnerSeesItsOwnNewBroadcastWithoutWaitingOutTheRefreshWindow(t *testin
 		t.Errorf("broadcast reads = %d, want 2: one for the foreign id, one for the new own id", n)
 	}
 }
+
+// ------------------------------------------------------------ SetBroadcast
+
+// TestXSetBroadcastRecognisesTheNewShowsFirstLineWithoutARead: the lifecycle coordinator publishes the X broadcast,
+// so it knows the new id before any chat for it arrives. Told that id, the owner accepts the show's first chat line
+// at once. Without the tell, the line falls inside the one-second floor that a foreign id's check just started, and
+// it is dropped; the poll would only catch up on a later line.
+func TestXSetBroadcastRecognisesTheNewShowsFirstLineWithoutARead(t *testing.T) {
+	st := newXChatStub(t)
+	st.broadcasts = `{"data":[]}`
+	now := time.Unix(1761904800, 0)
+	a := st.adapter(t, now)
+	o := &xBroadcastOwner{x: a}
+	ctx := context.Background()
+
+	if o.owns(ctx, "B9other") {
+		t.Fatal("another account's broadcast was taken as this account's")
+	}
+	a.SetBroadcast("B2mine")
+	if !o.owns(ctx, "B2mine") {
+		t.Fatal("the first chat line of the broadcast the coordinator just published was dropped")
+	}
+	if n := st.countCalls("GET /2/broadcasts"); n != 1 {
+		t.Errorf("broadcast reads = %d, want 1: the told id needs no read", n)
+	}
+}
+
+// TestXSetBroadcastOnOneAccountNeverClaimsChatForAnother: the activity stream is shared by every connected X
+// account, so the told id belongs to the adapter it was told to. A second account's adapter that was not told keeps
+// dropping that broadcast's chat (VERDICTS, X lane security finding).
+func TestXSetBroadcastOnOneAccountNeverClaimsChatForAnother(t *testing.T) {
+	st := newXChatStub(t)
+	st.broadcasts = `{"data":[]}`
+	now := time.Unix(1761904800, 0)
+	a := st.adapter(t, now)
+	b, err := NewX(XConfig{
+		AccountRef: "999", Token: StaticToken("other-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewX: %v", err)
+	}
+	a.SetBroadcast("B2mine")
+	ob := &xBroadcastOwner{x: b}
+	if ob.owns(context.Background(), "B2mine") {
+		t.Fatal("an adapter that was not told took another account's broadcast as its own")
+	}
+}
+
+// TestXSendUsesTheToldBroadcastAndFallsBackToTheListWhenCleared: Send, Delete and the mutes address the broadcast
+// the coordinator named, which saves the list read on every call. Clearing the tell (the broadcast ended) goes back
+// to asking X which broadcast is running.
+func TestXSendUsesTheToldBroadcastAndFallsBackToTheListWhenCleared(t *testing.T) {
+	st := newXChatStub(t)
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	ctx := context.Background()
+
+	a.SetBroadcast("B7told")
+	if _, err := a.Send(ctx, "hello"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if n := st.countCalls("POST /2/broadcasts/B7told/chat"); n != 1 {
+		t.Errorf("sends to the told broadcast = %d, want 1; calls %v", n, st.recorded())
+	}
+	if n := st.countCalls("GET /2/broadcasts"); n != 0 {
+		t.Errorf("broadcast reads = %d, want 0 while a broadcast is told", n)
+	}
+
+	a.SetBroadcast("")
+	if _, err := a.Send(ctx, "again"); err != nil {
+		t.Fatalf("Send after clearing: %v", err)
+	}
+	if n := st.countCalls("POST /2/broadcasts/B1run/chat"); n != 1 {
+		t.Errorf("sends to the listed running broadcast = %d, want 1; calls %v", n, st.recorded())
+	}
+}

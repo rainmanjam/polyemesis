@@ -446,6 +446,29 @@ func (s *Server) setFacebookBroadcast(accountRef, liveVideoID string) {
 	}
 }
 
+// setXBroadcast is the lifecycle coordinator's pointChat: it points the running
+// X chat adapter of one account at the broadcast the coordinator just published,
+// or clears it with "" after an end. The adapter's own 15-second poll stays as
+// the fallback for a broadcast published outside polyemesis. Every miss -- chat
+// off, the account gone, no adapter because the Livestream gate is closed -- is
+// a quiet no-op, because it runs on the coordinator's sweep.
+func (s *Server) setXBroadcast(accountID int64, broadcastID string) {
+	if s.chat == nil || s.store == nil {
+		return
+	}
+	acct, err := s.store.GetPlatformAccount(s.box, accountID)
+	if err != nil || acct.Platform != db.PlatformX {
+		return
+	}
+	a, ok := s.chat.Adapter(db.PlatformX, acct.AccountRef)
+	if !ok {
+		return
+	}
+	if xa, ok := a.(*chat.XAdapter); ok {
+		xa.SetBroadcast(broadcastID)
+	}
+}
+
 // handleKickChatWebhook receives Kick's event deliveries.
 //
 // It is mounted outside the session middleware because Kick posts here

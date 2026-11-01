@@ -2760,6 +2760,10 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The stored caption mode, read BEFORE the decode below writes over it, so
 	// a save that changes it can be told apart from one that leaves it alone.
 	storedCaptionMode := existing.CaptionMode
+	// The stored go-live title and whether its X broadcast is on air, read
+	// before the decode for the same reason: the body could name a phase too.
+	storedGoLiveTitle := existing.GoLiveTitle
+	xBroadcastLive := existing.Platform == db.PlatformX && strings.EqualFold(existing.Lifecycle.Phase, phaseLive)
 	if err := decodeJSONInto(body, existing); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -2778,6 +2782,12 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, captionFacebookRefusal)
 			return
 		}
+	}
+	// X takes a title only when the broadcast is published, and has no write
+	// that changes a running one, so a change saved now would never reach X.
+	if xBroadcastLive && existing.GoLiveTitle != storedGoLiveTitle {
+		writeError(w, http.StatusConflict, xTitleLiveRefusal)
+		return
 	}
 	// Whatever the body said about expert arguments, the stored ones win. Only
 	// the expert routes enforce the confirm step and the guard acknowledgement,

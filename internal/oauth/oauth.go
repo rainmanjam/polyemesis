@@ -717,6 +717,11 @@ type SetupGuide struct {
 	// where the configuration and the inbound Host live. Empty here; filled in
 	// by handlePlatformGuides.
 	RedirectWarnings []string `json:"redirectWarnings,omitempty"`
+	// LivestreamGate is "open" or "closed" for a platform whose live API sits
+	// behind an operator switch (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM),
+	// and empty for every other platform. Filled in per request by the API
+	// layer from the provider it actually uses.
+	LivestreamGate string `json:"livestreamGate,omitempty"`
 }
 
 // Guides returns the setup instructions rendered on the credentials page.
@@ -861,6 +866,8 @@ func guides() []SetupGuide {
 				"Copy the Client ID and Client secret into the fields on this page and save.",
 				"Go to a destination and click Connect account. X will ask you to grant access.",
 				"If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
+				"Once X has whitelisted the app, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, opens and publishes each broadcast with the destination's go-live title, ends it, and sends and moderates chat.",
+				"To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com. It is a secret: keep it out of shared files and screenshots.",
 			},
 		},
 		{
