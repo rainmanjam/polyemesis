@@ -7,6 +7,7 @@ package api
 // lifecycle_test.go cover those words, so this file covers them.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
@@ -42,6 +44,10 @@ type xcFake struct {
 	ended     int
 	// createStatus, when non-zero, makes create fail with that HTTP status.
 	createStatus int
+	// createDetail, when set, is the problem detail a refused create carries.
+	createDetail string
+	// creates counts every create call, refused or not.
+	creates int
 	// seq numbers broadcasts so a second show gets a different id.
 	seq int
 }
@@ -64,10 +70,15 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"src-1","name":"polyemesis",`+
 				`"rtmp_stream_key":"`+xcFakeKey+`","is_stream_active":`+active+`}]}}`)
 		case r.Method == http.MethodPost && path == "/2/users/42/broadcasts":
+			f.creates++
 			if f.createStatus != 0 {
+				detail := "not permitted"
+				if f.createDetail != "" {
+					detail = f.createDetail
+				}
 				w.WriteHeader(f.createStatus)
-				_, _ = io.WriteString(w, `{"errors":[{"title":"Unauthorized","detail":"not permitted","status":`+
-					`401}]}`)
+				_, _ = io.WriteString(w, `{"errors":[{"title":"Unauthorized","detail":"`+detail+`","status":`+
+					`401}],"detail":"`+detail+`"}`)
 				return
 			}
 			var body struct {
@@ -116,6 +127,12 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}
+}
+
+func (f *xcFake) createCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.creates
 }
 
 func xcBroadcastJSON(id, state string) string {
@@ -398,5 +415,76 @@ func TestXRefusedCreateEscalatesWithoutLeakingTheSourceKey(t *testing.T) {
 	row := store.rows[5]
 	if strings.Contains(row.Lifecycle.Fault, xcFakeKey) {
 		t.Errorf("recorded fault leaks the source key: %q", row.Lifecycle.Fault)
+	}
+}
+
+// SEC-X1: X's problem detail can echo the source_id it was sent, and the source_id IS
+// the stream key. A create refused with the key in its detail must leave the key in no
+// fault, no recorded row and no log line. The fixture key has no credential shape, so
+// this is the exact-literal scrub doing the work, not the pattern matcher.
+func TestXRefusedCreateWhoseDetailEchoesTheKeyLeaksItNowhere(t *testing.T) {
+	fake := &xcFake{active: true, createStatus: http.StatusBadRequest, createDetail: "source " + xcFakeKey + " is not yours"}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
+	var logs bytes.Buffer
+	c.log = slog.New(slog.NewTextHandler(&logs, nil))
+
+	xcSweep(t, c, store)
+
+	if len(*faults) == 0 {
+		t.Fatal("the refused create raised nothing, so this test examined nothing")
+	}
+	for _, f := range *faults {
+		if strings.Contains(f.Detail, xcFakeKey) {
+			t.Errorf("the escalated fault carries the source key: %q", f.Detail)
+		}
+	}
+	if got := store.rows[5].Lifecycle.Fault; got == "" || strings.Contains(got, xcFakeKey) {
+		t.Errorf("recorded fault = %q; want a fault without the source key", got)
+	}
+	if strings.Contains(logs.String(), xcFakeKey) {
+		t.Errorf("the log carries the source key:\n%s", logs.String())
+	}
+}
+
+// SEC-X2: a refused create is held after lifecycleGiveUpAfter sweeps, like every other
+// fault this coordinator counts. Before, the no-broadcast branch called the platform on
+// every sweep for ever. The hold is released by an UP edge, which arrives through Observe
+// and must survive the untrack that branch does first.
+func TestXRefusedCreateIsHeldAfterTheBudgetAndReleasedByAnUpEdge(t *testing.T) {
+	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
+
+	for i := 0; i < lifecycleGiveUpAfter+5; i++ {
+		xcSweep(t, c, store)
+	}
+	if n := fake.createCalls(); n != lifecycleGiveUpAfter {
+		t.Fatalf("%d create calls after %d sweeps; want the hold to stop them at %d",
+			n, lifecycleGiveUpAfter+5, lifecycleGiveUpAfter)
+	}
+
+	c.Observe(hooks.Event{Trigger: hooks.TriggerDestinationUp, Destination: &hooks.DestinationRef{ID: 5}})
+	xcSweep(t, c, store)
+	if n := fake.createCalls(); n != lifecycleGiveUpAfter+1 {
+		t.Errorf("%d create calls after an UP edge; want one more attempt (%d)", n, lifecycleGiveUpAfter+1)
+	}
+}
+
+// The other release: an operator who switches the destination off and on again gets a
+// fresh budget. Without it a held X row nobody tracks could stay held for good, because
+// an untracked row opens no observe gate and so may never see an UP edge.
+func TestXHeldCreateIsReleasedWhenTheOperatorDisablesTheDestination(t *testing.T) {
+	fake := &xcFake{active: true, createStatus: http.StatusUnauthorized}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{Attempts: lifecycleGiveUpAfter, Fault: "refused"}))
+
+	xcSweep(t, c, store)
+	if n := fake.createCalls(); n != 0 {
+		t.Fatalf("a held row made %d create calls", n)
+	}
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	row := xcSweep(t, c, store)
+	if row.Lifecycle.Attempts != 0 || row.Lifecycle.Fault != "" {
+		t.Errorf("disabling left the hold in place: %+v", row.Lifecycle)
 	}
 }

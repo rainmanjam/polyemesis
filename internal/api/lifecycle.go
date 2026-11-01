@@ -89,6 +89,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -599,11 +600,12 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		broadcastID = strings.TrimSpace(d.Facebook.BroadcastID)
 	}
 	if broadcastID == "" {
+		// Taken BEFORE untrack, which clears it: an UP edge is the release of the
+		// open() hold below, and untrack would otherwise throw it away unread.
+		cleared := c.takeClearFault(d.ID)
 		c.untrack(d.ID)
-		if creator, ok := prov.(oauth.BroadcastCreator); ok && d.Enabled && mode != sweepEndsOnly {
-			// X: an enabled destination with no broadcast opens one on its stream
-			// source. It is NOT_STARTED, so nothing is public until go-live.
-			c.open(ctx, d, creator)
+		if creator, ok := prov.(oauth.BroadcastCreator); ok && mode != sweepEndsOnly {
+			c.openOrHold(ctx, d, creator, cleared)
 		}
 		// Every other platform: no broadcast object, so nothing to command.
 		// Creating one is the announce path's job; see the header.
@@ -824,6 +826,32 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	c.advance(cctx, prov, acct, d, broadcastID, plan)
 }
 
+// openOrHold is the no-broadcast branch for a platform that opens its own (X). It keeps
+// the same budget every other fault here keeps: after lifecycleGiveUpAfter consecutive
+// refusals the fault stands and nothing calls the platform again, which before this
+// retried a refused create every fifteen seconds for ever.
+//
+// TWO RELEASES. An UP edge (cleared), as everywhere else in this file. And the operator
+// switching the destination off: a row with no broadcast is untracked, so it holds the
+// observe gate open for nobody and may never see an UP edge, and a hold with no release
+// the operator can reach would be permanent. Disabling is that release, and it writes
+// once, only when there is something to clear.
+func (c *lifecycleCoordinator) openOrHold(ctx context.Context, d *db.Destination,
+	creator oauth.BroadcastCreator, cleared bool) {
+	if (cleared || !d.Enabled) && (d.Lifecycle.Attempts > 0 || d.Lifecycle.Fault != "") {
+		d = c.recordControl(d, "", func(b *db.BroadcastControl) { b.Attempts, b.Fault = 0, "" })
+		if d == nil {
+			return
+		}
+	}
+	if !d.Enabled || d.Lifecycle.Attempts >= lifecycleGiveUpAfter {
+		return
+	}
+	// An enabled destination with no broadcast opens one on its stream source. It is
+	// NOT_STARTED, so nothing is public until go-live.
+	c.open(ctx, d, creator)
+}
+
 // renew forgets a finished broadcast and opens the next one. It clears the whole
 // lifecycle block, not only the id: the fault, the attempts and the recorded
 // phase all describe the broadcast that just ended, and must not be carried
@@ -857,15 +885,16 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	}
 	acct, err := c.tokenFor(ctx, *d.AccountID)
 	if err != nil {
-		c.noteFailure(d, "", fmt.Sprintf(
-			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err))
+		c.noteFailure(d, "", scrubSourceKey(fmt.Sprintf(
+			"the connected %s account could not be used to open a broadcast: %v", d.Platform, err), d.StreamKey))
 		return
 	}
 	cctx, cancel := context.WithTimeout(ctx, lifecycleCallTimeout)
 	defer cancel()
 	id, err := creator.OpenBroadcast(cctx, acct.AccessToken, d.StreamKey)
 	if err != nil {
-		c.noteFailure(d, "", fmt.Sprintf("%s would not open a broadcast for this destination: %v", d.Platform, err))
+		c.noteFailure(d, "", scrubSourceKey(fmt.Sprintf(
+			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey))
 		return
 	}
 	c.recordControl(d, id, func(b *db.BroadcastControl) {
@@ -873,6 +902,17 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	})
 	c.log.Info("broadcast lifecycle: opened a broadcast for this destination, unpublished until it goes live",
 		"destination", d.Name, "platform", d.Platform, "broadcast", id)
+}
+
+// scrubSourceKey makes a platform error safe for the fault, the log, the escalation and
+// the timeline. X's problem detail can echo the source_id it was sent, and the source_id
+// IS the stream key, which has no credential shape alerts.Redact could recognise. So the
+// key is removed as a literal first, and the pattern pass runs over what is left.
+func scrubSourceKey(detail, key string) string {
+	if k := strings.TrimSpace(key); k != "" {
+		detail = strings.ReplaceAll(detail, k, "[redacted]")
+	}
+	return alerts.Redact(detail)
 }
 
 // advance sends a transition that can only ever START something: testing or
