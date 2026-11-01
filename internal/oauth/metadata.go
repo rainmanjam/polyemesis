@@ -369,7 +369,13 @@ type ytBroadcast struct {
 		EnableDvr       bool `json:"enableDvr"`
 		EnableAutoStart bool `json:"enableAutoStart"`
 		EnableAutoStop  bool `json:"enableAutoStop"`
-		MonitorStream   struct {
+		// ClosedCaptionsType and LatencyPreference are read for the same reason:
+		// an update that names contentDetails without them resets them, and a
+		// reset closedCaptionsType switches a captioned broadcast's captions off
+		// (#8). Empty when YouTube did not report them, and then not sent.
+		ClosedCaptionsType string `json:"closedCaptionsType"`
+		LatencyPreference  string `json:"latencyPreference"`
+		MonitorStream      struct {
 			EnableMonitorStream    bool `json:"enableMonitorStream"`
 			BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
 		} `json:"monitorStream"`

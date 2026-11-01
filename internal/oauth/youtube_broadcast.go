@@ -238,6 +238,15 @@ func (y *YouTube) writeBroadcastParts(ctx context.Context, accessToken string, b
 	cd["enableDvr"] = pickBool(s.EnableDvr, b.ContentDetails.EnableDvr)
 	cd["enableAutoStart"] = pickBool(s.EnableAutoStart, b.ContentDetails.EnableAutoStart)
 	cd["enableAutoStop"] = pickBool(s.EnableAutoStop, b.ContentDetails.EnableAutoStop)
+	// Carried, never chosen, and only when YouTube reported them: sending an
+	// empty value would be an invalid one. Without the carry, every metadata push
+	// and reschedule of a captioned broadcast reset it to captions off.
+	if v := b.ContentDetails.ClosedCaptionsType; v != "" {
+		cd["closedCaptionsType"] = v
+	}
+	if v := b.ContentDetails.LatencyPreference; v != "" {
+		cd["latencyPreference"] = v
+	}
 
 	if err := requestJSON(ctx, http.MethodPut,
 		y.apiEndpoint()+"/liveBroadcasts?part="+parts, accessToken, body, nil, nil); err != nil {

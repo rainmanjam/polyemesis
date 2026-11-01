@@ -67,6 +67,10 @@ type ytFake struct {
 	reads int
 	// stateErr makes the state read itself fail.
 	stateErr bool
+	// captionType and delayMs, when captionType is set, are reported on the
+	// broadcast's contentDetails (#8 caption go-live check).
+	captionType string
+	delayMs     int
 }
 
 func (f *ytFake) snapshot() (sent []string, reads int) {
@@ -102,11 +106,16 @@ func (f *ytFake) handler(t *testing.T) http.HandlerFunc {
 					monitor = "true"
 				}
 			}
+			captions := ""
+			if f.captionType != "" {
+				captions = fmt.Sprintf(`"closedCaptionsType":%q,`, f.captionType)
+				monitor += fmt.Sprintf(`,"broadcastStreamDelayMs":%d`, f.delayMs)
+			}
 			fmt.Fprintf(w, `{"items":[{"id":%q,"snippet":{"title":"show"},`+
 				`"status":{"lifeCycleStatus":%q},`+
-				`"contentDetails":{"boundStreamId":"stream-1",`+
+				`"contentDetails":{"boundStreamId":"stream-1",%s`+
 				`"monitorStream":{"enableMonitorStream":%s}}}]}`,
-				"bcast-1", f.status, monitor)
+				"bcast-1", f.status, captions, monitor)
 		case ytPathStreams:
 			fmt.Fprintf(w, `{"items":[{"status":{"streamStatus":%q}}]}`, f.streamStatus)
 		case ytPathTransition:

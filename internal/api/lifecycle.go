@@ -823,7 +823,43 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		c.end(cctx, prov, acct, d, broadcastID, plan)
 		return
 	}
+	if why := captionGoLiveProblem(d, st); why != "" {
+		// Not taken towards live: the caption settings freeze once the broadcast
+		// leaves created/ready, so a show started now could never carry captions.
+		// Held at the give-up count like any terminal fault, so it costs no more
+		// calls; the stream itself keeps going out. An UP edge re-reads it.
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) {
+			b.Phase, b.Attempts, b.Fault = plan.Phase, lifecycleGiveUpAfter, why
+		})
+		c.raise(d, broadcastID, why)
+		return
+	}
 	c.advance(cctx, prov, acct, d, broadcastID, plan)
+}
+
+// captionGoLiveProblem is why a destination that posts captions to YouTube by
+// HTTP POST may not be taken to testing or live (#8), or "" when it may. Two
+// things are checked: a caption ingestion URL is stored for its current stream
+// key, and the broadcast is set for POST captions with the monitor stream and a
+// 30 s or 60 s delay (oauth.BroadcastLifecycleState.CaptionPOSTProblem). Every
+// other destination answers "".
+//
+// A live-now show with no broadcast recorded never reaches this check: there is
+// no broadcast for polyemesis to read, and docs/CAPTIONS.md says so.
+func captionGoLiveProblem(d *db.Destination, st *oauth.BroadcastLifecycleState) string {
+	if !sendsCaptionPOST(d) {
+		return ""
+	}
+	const fix = " Captions stay off this broadcast until it is fixed; set captions to off or embedded to go live without them."
+	if !d.CaptionIngestReady {
+		return "captions are set to YouTube HTTP POST, and no caption ingestion URL is stored for this " +
+			"destination's stream key; press Refresh stream key to create its own YouTube stream (the key " +
+			"changes once), then schedule the show again." + fix
+	}
+	if why := st.CaptionPOSTProblem(); why != "" {
+		return why + "; schedule the show again from polyemesis so the broadcast is created for captions." + fix
+	}
+	return ""
 }
 
 // openOrHold is the no-broadcast branch for a platform that opens its own (X). It keeps

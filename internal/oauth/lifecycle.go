@@ -102,6 +102,44 @@ type BroadcastLifecycleState struct {
 	// call a broadcast ready on one.
 	StreamActive  *bool `json:"streamActive,omitempty"`
 	MonitorStream *bool `json:"monitorStream,omitempty"`
+	// ClosedCaptionsType is YouTube's contentDetails.closedCaptionsType verbatim
+	// (closedCaptionsDisabled, closedCaptionsHttpPost, closedCaptionsEmbedded), or
+	// "" when not reported. StreamDelayMs is monitorStream.broadcastStreamDelayMs,
+	// nil when not reported. Both are read for the caption go-live check (#8).
+	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+	StreamDelayMs      *int   `json:"streamDelayMs,omitempty"`
+}
+
+// ytClosedCaptionsHTTPPost is the closedCaptionsType of a broadcast that takes
+// captions by HTTP POST to its stream's caption ingestion URL.
+const ytClosedCaptionsHTTPPost = "closedCaptionsHttpPost"
+
+// CaptionPOSTProblem says why a broadcast cannot take HTTP POST captions, or ""
+// when it can: closedCaptionsHttpPost, the monitor stream on, and a 30 s or 60 s
+// delay (docs-youtube C3, C5, C7). An unreported value is a problem, not a pass,
+// because the broadcast cannot be shown to be ready.
+//
+// Ultra-low latency is not checked. YouTube refuses captions with it (B9), but
+// polyemesis never sets latencyPreference, so a broadcast it created has the
+// default, and the check would guard a state this build cannot reach.
+func (s *BroadcastLifecycleState) CaptionPOSTProblem() string {
+	if s == nil {
+		return "the broadcast's state is unknown"
+	}
+	if s.ClosedCaptionsType != ytClosedCaptionsHTTPPost {
+		got := s.ClosedCaptionsType
+		if got == "" {
+			got = "not reported"
+		}
+		return fmt.Sprintf("the broadcast is not set to take captions by HTTP POST (closedCaptionsType is %s)", got)
+	}
+	if s.MonitorStream == nil || !*s.MonitorStream {
+		return "the broadcast's monitor stream is off, and YouTube needs it on for the caption delay"
+	}
+	if s.StreamDelayMs == nil || (*s.StreamDelayMs != 30000 && *s.StreamDelayMs != 60000) {
+		return "the broadcast's delay is not 30 or 60 seconds, which YouTube needs for captions by HTTP POST"
+	}
+	return ""
 }
 
 // ReadyForTesting reports whether both documented preconditions for the

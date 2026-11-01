@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/captions"
 )
 
 // YouTube's scheduled broadcasts: create one before the show, and move it when
@@ -164,6 +166,15 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 // which is a behaviour change to go-live wearing the clothes of a scheduling
 // change.
 func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error) {
+	// A caption broadcast needs a delay YouTube takes for the HTTP POST path, and
+	// it is checked before any call, so a refusal leaves no stream or broadcast
+	// behind. db.Destination.Validate already refuses other delays for this mode;
+	// this is the same rule at the one place a broadcast is made with it.
+	if opts.CaptionPOST && !opts.ScheduledFor.IsZero() && !captions.YouTubePOSTDelayOK(opts.CaptionDelay) {
+		return nil, fmt.Errorf("a YouTube broadcast that receives captions by HTTP POST needs a 30 s or 60 s "+
+			"broadcast delay, and this destination's delay is %s; set the destination's delay to 30 or 60 seconds",
+			opts.CaptionDelay)
+	}
 	acct, err := y.AccountFor(ctx, clientID, accessToken, targetRef)
 	if err != nil {
 		return nil, err
@@ -206,7 +217,7 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		return fmt.Errorf("%w; the ingest stream %s was created for it and may now be unused; delete it in "+
 			"YouTube Studio after checking nothing streams to it", cause, stream.ID)
 	}
-	created, err := y.createScheduledBroadcast(ctx, accessToken, opts.ScheduledFor)
+	created, err := y.createScheduledBroadcast(ctx, accessToken, opts)
 	if err != nil {
 		return nil, dropCreatedStream(err)
 	}
@@ -259,7 +270,20 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 // youtube_broadcast.go -- so a part named without its fields supplied is a part
 // reset to defaults. Naming contentDetails here would ask YouTube to default
 // every toggle on a broadcast that has none yet.
-func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken string, at time.Time) (*ytBroadcast, error) {
+//
+// THE ONE EXCEPTION IS A CAPTION DESTINATION (#8), and it names contentDetails on
+// purpose. closedCaptionsType can be set only while the broadcast is created or
+// ready (docs-youtube B13), and the HTTP POST path needs the monitor stream on
+// with a 30 s or 60 s delay (C5, C7), so the broadcast is born with all three
+// rather than patched later. On an insert there are no current values for a
+// named part to reset: every field left out takes the default it would have had
+// anyway. enableClosedCaptions is never sent: it is deprecated and may not be sent
+// with closedCaptionsType (B11). PROVISIONAL: the insert reference lists neither
+// closedCaptionsType nor the monitor stream among the properties it accepts,
+// although its error table implies both are read (B12); a live check on a test
+// channel settles it.
+func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken string, opts IngestOptions) (*ytBroadcast, error) {
+	at := opts.ScheduledFor
 	var created ytBroadcast
 	// RFC 3339 in UTC. The resource types scheduledStartTime as a datetime and
 	// the errors page lists invalidValue/invalidScheduledStartTime for a value
@@ -272,6 +296,17 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 		},
 		"status": map[string]any{"privacyStatus": ytScheduledPrivacy},
 	}
+	parts := "snippet,status"
+	if opts.CaptionPOST {
+		payload["contentDetails"] = map[string]any{
+			"closedCaptionsType": ytClosedCaptionsHTTPPost,
+			"monitorStream": map[string]any{
+				"enableMonitorStream":    true,
+				"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
+			},
+		}
+		parts += ",contentDetails"
+	}
 	// requestJSON, NOT postJSON, AND THE ADVICE BELOW DEPENDS ON IT. postJSON
 	// returns a plain fmt.Errorf carrying snippet(body) -- the 300-character
 	// DISPLAY cut. ytBroadcastCreateAdvice matches through adviceBody, which
@@ -282,7 +317,7 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 	// for live streaming got the raw truncated body instead of the sentence
 	// telling them which button to press.
 	err := requestJSON(ctx, http.MethodPost,
-		y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status",
+		y.apiEndpoint()+ytBroadcastsPath+"?part="+parts,
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, ytBroadcastCreateAdvice(err)

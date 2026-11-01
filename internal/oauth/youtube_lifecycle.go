@@ -77,13 +77,16 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 				LifeCycleStatus string `json:"lifeCycleStatus"`
 			} `json:"status"`
 			ContentDetails struct {
-				BoundStreamID string `json:"boundStreamId"`
-				MonitorStream struct {
+				BoundStreamID      string `json:"boundStreamId"`
+				ClosedCaptionsType string `json:"closedCaptionsType"`
+				MonitorStream      struct {
 					// A POINTER, so an absent key stays absent. See
 					// BroadcastLifecycleState for why a precondition read as
 					// false when it was never reported is worse here than
 					// anywhere else in this package.
 					EnableMonitorStream *bool `json:"enableMonitorStream"`
+					// A pointer for the same reason: an unreported delay is not 0.
+					BroadcastStreamDelayMs *int `json:"broadcastStreamDelayMs"`
 				} `json:"monitorStream"`
 			} `json:"contentDetails"`
 		} `json:"items"`
@@ -111,6 +114,10 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 		Status:        b.Status.LifeCycleStatus,
 		BoundStreamID: b.ContentDetails.BoundStreamID,
 		MonitorStream: b.ContentDetails.MonitorStream.EnableMonitorStream,
+		// The caption settings the go-live check reads (#8). Same response, no
+		// extra call.
+		ClosedCaptionsType: b.ContentDetails.ClosedCaptionsType,
+		StreamDelayMs:      b.ContentDetails.MonitorStream.BroadcastStreamDelayMs,
 	}
 	if state.BoundStreamID == "" {
 		// Nothing to ask about. StreamActive stays nil, which reads as
