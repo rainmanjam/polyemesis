@@ -48,7 +48,7 @@ describe("a YouTube pair on one card", () => {
   it("draws the vertical half as a sub-row of its horizontal card", () => {
     draw(
       base({ youtubeVertical: { verticalId: 2 as DestStatus["id"], pairingConfirmed: true } }),
-      base({ id: 2, name: "YouTube main (vertical)", verticalHalfOf: 1 as DestStatus["id"] }),
+      base({ id: 2 as DestStatus["id"], name: "YouTube main (vertical)", verticalHalfOf: 1 as DestStatus["id"] }),
     );
     expect(screen.getByTestId("youtube-vertical-subrow")).toBeTruthy();
   });

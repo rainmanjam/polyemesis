@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { YouTubeVerticalSubRow } from "./YouTubeVerticalSubRow";
-import type { DestStatus, YouTubeVerticalView } from "@/lib/types";
+import type { DestStatus, DestinationId, YouTubeVerticalView } from "@/lib/types";
 
 // The sub-row is where a failed vertical half shows up (#7). Its own state, its own
 // controls and its own health line: a failure here must read as this half's failure, and
@@ -70,7 +70,7 @@ describe("the vertical sub-row", () => {
 
   it("shows YouTube's health reading and a quota pause on the sub-row", async () => {
     status.view = {
-      horizontalId: 1, verticalId: 2, verticalStreamId: "s", pairingConfirmed: true, live: true,
+      horizontalId: 1 as DestinationId, verticalId: 2 as DestinationId, verticalStreamId: "s", pairingConfirmed: true, live: true,
       healthError: "the YouTube quota is nearly spent; the vertical status is paused until it resets",
     };
     render(
