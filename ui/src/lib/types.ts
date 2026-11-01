@@ -443,6 +443,9 @@ export interface Rendition {
    *  overlay. Always present in the payload and empty when there is none, for
    *  the same reason `overlay` is. */
   text: RenditionText;
+  /** Where the programme's live captions are burned into this tier's picture
+   *  (#8); empty draws none. Needs both a width and a height. */
+  captionBurn?: "" | "bottom" | "top";
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -1268,6 +1271,10 @@ export interface PullSettings {
   rtspTransport: string;
 }
 
+/** The caption export formats and sources (#8). */
+export type CaptionExportFormat = "srt" | "vtt" | "json";
+export type CaptionExportSource = "recording" | "live";
+
 /** A programme's caption text policy, applied where captions leave the
  *  captioner, so every output and export shows the same words. */
 export interface CaptionPolicy {
@@ -1907,6 +1914,9 @@ export interface Recording {
   bytes: number;
   durationMs: number;
   tracks: number;
+  /** The programme it was recorded from; absent on an older recording or one
+   *  whose programme was deleted. Its live captions are kept per programme. */
+  sourceId?: number | null;
 }
 
 export interface DiskUsage {

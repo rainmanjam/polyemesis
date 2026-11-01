@@ -122,3 +122,26 @@ func captionPolicyFromStored(s string) CaptionPolicy {
 	}
 	return p
 }
+
+// CaptionBurn is where a rendition draws the live captions into its picture.
+type CaptionBurn string
+
+const (
+	// CaptionBurnOff draws nothing. It is the zero value.
+	CaptionBurnOff CaptionBurn = ""
+	// CaptionBurnBottom draws them at the foot of the picture, where viewers
+	// look for captions.
+	CaptionBurnBottom CaptionBurn = "bottom"
+	// CaptionBurnTop draws them at the top, for a picture whose lower third is
+	// already taken.
+	CaptionBurnTop CaptionBurn = "top"
+)
+
+// valid reports whether b is one of the three positions.
+func (b CaptionBurn) valid() bool {
+	switch b {
+	case CaptionBurnOff, CaptionBurnBottom, CaptionBurnTop:
+		return true
+	}
+	return false
+}

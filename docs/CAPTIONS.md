@@ -23,6 +23,30 @@ Every destination starts with captions **off**. An upgrade never turns them on.
 *Caption track*. The captioner listens to that audio track. *Automatic* is the
 choice the captioner makes today, and it is the default.
 
+**Per programme: caption words.** Under *Caption words* on the programme, list
+words one per line (or comma-separated) and press *Save caption words*:
+
+- *Spell these words my way.* A recognised word that matches one, ignoring
+  case, is written in your spelling (`polyemesis` becomes `Polyemesis`). It
+  fixes case and accents only; it cannot make the recogniser hear a word it
+  missed.
+- *Mask these words.* A masked word keeps its first letter and the rest become
+  asterisks (`darn` shows as `d***`).
+
+Both lists hold single words: letters, digits and apostrophes inside a word.
+A phrase, a hyphenated term, more than 200 entries or an entry over 48
+characters is refused with the reason, because the captioner matches word by
+word and such an entry could never match. The words are applied once, where
+captions leave the captioner, so the dashboard, the player track, SEI, YouTube
+POST, burned-in captions and the exports all show the same text. A save reaches
+captions that are already running from the next caption, without restarting
+speech recognition.
+
+**Per rendition: burned-in captions.** A rendition (*Renditions*, edit a tier)
+can draw the programme's live captions into its picture, *At the bottom* or *At
+the top*, for a platform or player that shows no caption track. See
+*Burned-in captions* below.
+
 ## Which routes reach the stream
 
 The route and the track are stored, and the console and the API show them.
@@ -36,13 +60,50 @@ is checked live, not in this build.
 A YouTube route on *caption ingestion (HTTP POST)* posts each caption to the
 caption ingestion URL of the destination's own YouTube stream. The video path is
 not touched, so saving or changing this route never restarts the destination.
-Facebook's route is not sent to the stream yet; saving it changes nothing on air.
+Facebook's in-stream route goes through the same SEI stage as Twitch's, but only while the
+server runs with `POLYEMESIS_CAPTIONS_FACEBOOK=1`; without it the route cannot be saved.
 
 The save is refused, with a reason, in three cases:
 
 - the platform does not take that route (for example, any route on Kick);
 - YouTube's caption POST is chosen at a delay other than 30 s or 60 s;
 - a route changes while the destination is live. Stop the destination first.
+
+A route change on an enabled destination that is not live yet restarts its
+output. The picker says both.
+
+## The player and the recordings
+
+**Public player, live.** The captioner writes `captions.vtt` beside the HLS
+window, and the public player (`/watch`) adds it as a *Captions* track that is
+on by default (the viewer turns it off in the player's controls). The file
+names its epoch in a header line, `X-POLYEMESIS-EPOCH-MS`, and places each
+caption at the moment its words were spoken. The player maps that onto the
+picture through the playlist's `EXT-X-PROGRAM-DATE-TIME`, so the captions line
+up live and after a seek back through the DVR window. The player fetches the
+file every 4 seconds, and every 15 seconds while it is missing. It is not an
+HLS subtitle rendition: a player other than polyemesis's own sees the captions
+only if it reads the file itself.
+
+**Recordings.** Every live caption is also kept in the programme's cue log,
+`<data>/captions/cues-source-<id>.jsonl`, with the wall-clock time it was
+spoken. The log is private to the server's user and rolls over once past
+32 MiB, so at most 64 MiB is on disk per programme. In the *Library*, a
+recording's player shows a *Captions* track: the stored transcript when there
+is one, otherwise the live captions lined up with the recording's own timeline.
+
+**Exports.** Beside the transcript, *Export captions* offers SRT, VTT and JSON:
+
+- *Transcript*: the transcript made from the recording, with the programme's
+  caption words applied;
+- *As shown live*: the captions viewers saw during the broadcast, lined up with
+  this recording. A caption that straddles the start or the end is clipped to
+  the recording.
+
+Every file names the speaker on each cue. The API is
+`GET /api/v1/library/recordings/{id}/transcript/export?format=srt|vtt|json`,
+with `&source=live` for the live captions. A read-only token is refused, as for
+the transcript itself.
 
 ## Routes in detail
 
@@ -121,10 +182,41 @@ stream, but not the carriage in the SEI. It stays off until a live check passes.
 - Captions are timed to picture, so they lag speech by about two to five
   seconds. A broadcast delay (see [Broadcast delay](BROADCAST-DELAY.md)) keeps
   them aligned with the picture.
-- A viewer who joins an HLS stream mid-caption can miss the caption that was
-  already on screen. Re-sending the caption periodically reduces that gap.
-- Burn-in (captions drawn into the picture of a rendition) needs an FFmpeg build
-  with `libass`. It is not wired yet.
+- A viewer who joins a platform's HLS stream after a caption began would miss
+  it, because a CEA-608 pop-on caption is shown at its End Of Caption. The SEI
+  route re-sends the caption on screen every 2 seconds (one Twitch segment), up
+  to 32 times per caption, so a joiner sees it within a segment.
+- Burned-in captions lag speech by the same two to five seconds as every other
+  route.
+
+## Burned-in captions
+
+A rendition set to burn captions in draws the programme's live captions into its
+picture with FFmpeg's `drawtext`, in the built-in Inter font on a translucent
+box, two lines at most, the newest words last. Each caption stays for as long
+as its words took (at least 2 seconds) and is then cleared.
+
+How it works: the captioner keeps the programme's burn file,
+`<data>/captions/burn-source-<id>.txt`, holding the caption on screen, and
+replaces it whole on every caption. The rendition's `drawtext` reads it with
+`reload=1`, which re-reads it on every frame. FFmpeg's `subtitles` filter cannot
+do this: it reads its whole file once, when it starts. Measured against the
+shipped image's FFmpeg 8.1.3, a caption added to a WebVTT file after the encode
+began was never drawn, while `drawtext` drew a burn file replaced mid-encode.
+The shipped image has no system fonts, so the burn-in uses the font polyemesis
+writes to `<data>/fonts`.
+
+Rules:
+
+- A rendition always re-encodes, so burn-in costs no extra encode. Changing the
+  setting restarts the tier.
+- The tier needs both a width and a height, because the captions are sized
+  against the output picture. The console disables the setting otherwise, and
+  the API refuses it.
+- The rendition sits before any destination's broadcast delay, so the burned
+  caption is delayed with its picture and stays in step with it.
+- An FFmpeg without `drawtext` runs the tier without captions and logs why.
+
 
 ## How the captioner is driven
 
@@ -161,9 +253,9 @@ the next one starts is not erased or shown again later.
 **Current state:** the engine releases each caption to every captioned
 destination at its delay. A Twitch destination carries it in the video as SEI,
 and a YouTube destination on the HTTP POST route posts it to its caption URL.
-The custom vocabulary and the profanity filter exist
-as a tested policy in code, but no operator setting stores them yet, so the
-policy is empty and captions are shown as recognised.
+Every caption also goes, undelayed, to the player's `captions.vtt`, the
+programme's cue log and its burn file, after the programme's caption words are
+applied.
 
 ## Verifying a route on your channel
 

@@ -45,3 +45,13 @@ export function captionModeToSend(kind: string, platform: string, mode: CaptionM
   if (kind !== "rtmp") return "off";
   return captionModesFor(platform).includes(mode) ? mode : "off";
 }
+
+/** Splits a list the operator typed, one word per line or comma-separated, into
+ *  its entries. The server trims, de-duplicates and refuses anything that is not
+ *  one word, so this only splits. */
+export function captionWords(text: string): string[] {
+  return text
+    .split(/[\n,]/)
+    .map((w) => w.trim())
+    .filter((w) => w !== "");
+}

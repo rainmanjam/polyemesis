@@ -154,6 +154,11 @@ type RenditionSpec struct {
 	// neither may be active.
 	Text *TextSpec
 
+	// Captions burns the live captions into this tier (#8): a TextSpec whose
+	// TextFile the captioner rewrites. Drawn after Text, so a caption sits on
+	// top. nil, the default, leaves argv as it was.
+	Captions *TextSpec
+
 	// FPS is the output frame rate; 0 keeps the source rate.
 	FPS float64
 	// SourceFPS is the probed ingest rate. Only used for the GOP arithmetic
@@ -720,6 +725,9 @@ func videoFilterChain(s RenditionSpec, prof encoderProfile, includeText bool) st
 	// GPU surfaces that hwupload produces.
 	if includeText {
 		if dt := drawtextFilter(s.Text, s.outputSize()); dt != "" {
+			chain = append(chain, dt)
+		}
+		if dt := drawtextFilter(s.Captions, s.outputSize()); dt != "" {
 			chain = append(chain, dt)
 		}
 	}

@@ -101,3 +101,28 @@ func firstOf(p CaptionPolicy) string {
 	}
 	return ""
 }
+
+// TestARenditionsCaptionBurnInIsAPositionAndNeedsAFixedFrame keeps the stored
+// burn-in setting to the positions the engine draws, and refuses it on a tier
+// whose frame size is left free: the captions are sized against the output
+// picture, and with an axis free the drawtext filter is never added, so the
+// setting would look on and draw nothing.
+//
+// MUTATION: the size rule removed. Observed: FAIL, a height-only tier accepted.
+func TestARenditionsCaptionBurnInIsAPositionAndNeedsAFixedFrame(t *testing.T) {
+	base := func(b CaptionBurn, w, h int) *Rendition {
+		r := validRendition()
+		r.Width, r.Height, r.CaptionBurn = w, h, b
+		return r
+	}
+	for _, ok := range []*Rendition{base(CaptionBurnOff, 0, 720), base(CaptionBurnBottom, 1280, 720), base(CaptionBurnTop, 1280, 720)} {
+		if err := ok.Validate(); err != nil {
+			t.Errorf("caption burn %q at %dx%d refused: %v", ok.CaptionBurn, ok.Width, ok.Height, err)
+		}
+	}
+	for _, bad := range []*Rendition{base("middle", 1280, 720), base(CaptionBurnBottom, 0, 720)} {
+		if err := bad.Validate(); err == nil {
+			t.Errorf("caption burn %q at %dx%d accepted, want refusal", bad.CaptionBurn, bad.Width, bad.Height)
+		}
+	}
+}

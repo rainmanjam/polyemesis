@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "字幕音轨",
   "wave3.captions.trackHint": "实时字幕所聆听的本节目音频轨道。",
   "wave3.captions.trackAuto": "自动",
-  "wave3.captions.trackN": "音频轨 {n}"
+  "wave3.captions.trackN": "音频轨 {n}",
+  "wave3.captions.playerTrack": "字幕",
+  "wave3.captions.exportTitle": "导出字幕",
+  "wave3.captions.exportTranscript": "转录稿",
+  "wave3.captions.exportLive": "直播时显示的版本",
+  "wave3.captions.exportHint": "直播字幕是观众在直播中看到的字幕，已与此录像对齐。每个文件都会在每条字幕中注明说话人。",
+  "wave3.captions.policyTitle": "字幕词语",
+  "wave3.captions.vocabLabel": "按我的写法拼写这些词",
+  "wave3.captions.vocabHint": "每行一个词。忽略大小写后匹配的识别词会按你的写法显示。它能纠正大小写和重音，但无法让识别器听到它漏掉的词。",
+  "wave3.captions.blockLabel": "屏蔽这些词",
+  "wave3.captions.blockHint": "每行一个词。被屏蔽的词保留首字母，因此“darn”在所有输出和导出中都显示为“d***”。",
+  "wave3.captions.policySave": "保存字幕词语",
+  "wave3.captions.burnLabel": "烧录实时字幕",
+  "wave3.captions.burnOff": "不烧录",
+  "wave3.captions.burnBottom": "底部",
+  "wave3.captions.burnTop": "顶部",
+  "wave3.captions.burnHint": "为不显示字幕轨的平台或播放器，把节目的实时字幕绘制到此档位的画面中。字幕在任何直播延迟之前绘制，因此与画面同步。保存会重启此档位。"
 }

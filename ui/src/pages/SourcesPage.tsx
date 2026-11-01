@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { CaptionPolicyEditor } from "@/components/CaptionPolicyEditor";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -517,7 +518,7 @@ export function SourceCard({
 
       <CardContent className="flex flex-col gap-3">
         {/* Which audio track of this programme the live captioner listens to
-            (#8). Saved on change; the captioner reads it once the engine is wired. */}
+            (#8). Saved on change; the captioner follows it on the next reconcile. */}
         <div className="flex flex-col gap-1">
           <Label htmlFor={`src-caption-track-${source.id}`}>{t("wave3.captions.trackLabel")}</Label>
           <Select
@@ -539,6 +540,15 @@ export function SourceCard({
           </Select>
           <p className="text-xs text-muted-foreground">{t("wave3.captions.trackHint")}</p>
         </div>
+        {/* The programme's caption words (#8). The key remounts the editor
+            when the stored policy changes, so a reload shows what was saved. */}
+        <CaptionPolicyEditor
+          key={JSON.stringify(source.captionPolicy ?? {})}
+          sourceId={source.id}
+          policy={source.captionPolicy}
+          busy={busy}
+          onSave={(captionPolicy) => onPatch({ captionPolicy })}
+        />
         {!source.running && (
           <p className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />

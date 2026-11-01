@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -272,9 +273,10 @@ func TestAProgrammesCaptionPolicyReachesCaptionsAlreadyRunningWithoutARestart(t 
 
 // TestACaptionGoesToTheProgrammesCueLogAndToThePlayerSidecar checks the one
 // sidecar path every live caption takes: the WebVTT file beside the HLS window
-// (the public player's live track) and the programme's cue log under the data
-// directory (the VOD track and the exports of what viewers saw). Both get the
-// caption as it went out.
+// (the public player's live track), the programme's cue log under the data
+// directory (the VOD track and the exports of what viewers saw) and the
+// programme's burn file (what a tier burning captions in draws). All three get
+// the caption as it went out.
 //
 // MUTATION: the sidecar writes the WebVTT file only. Observed: FAIL, the cue log
 // was empty.
@@ -290,7 +292,11 @@ func TestACaptionGoesToTheProgrammesCueLogAndToThePlayerSidecar(t *testing.T) {
 	if cueLog == nil {
 		t.Fatal("no cue log opened for a programme with a data directory")
 	}
-	sidecar := e.captionSidecar(vtt, cueLog)
+	burn := e.openBurnWriter()
+	if burn == nil {
+		t.Fatal("no burn writer for a programme with a data directory")
+	}
+	sidecar := e.captionSidecar(vtt, cueLog, burn)
 	spoken := time.Now().Add(-5 * time.Second)
 	c := transcribe.LiveCaption{Segment: transcribe.Segment{EndMS: 1000, Text: "on air"}, At: spoken.Add(time.Second)}
 	if err := sidecar(c); err != nil {
@@ -307,4 +313,10 @@ func TestACaptionGoesToTheProgrammesCueLogAndToThePlayerSidecar(t *testing.T) {
 	if len(got) != 1 || got[0].Text != "on air" {
 		t.Fatalf("cue log = %+v, want the one caption", got)
 	}
+	// And the burn file, which a rendition burning captions in draws.
+	b, err := os.ReadFile(captions.BurnPath(e.cfg.DataDir, e.sourceID))
+	if err != nil || string(b) != "on air" {
+		t.Fatalf("burn file = %q (%v), want the caption on screen", b, err)
+	}
+	_ = burn.Close()
 }

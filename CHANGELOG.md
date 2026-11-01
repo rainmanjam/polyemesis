@@ -23,6 +23,15 @@ its first tagged release.
   timeline. The stored-transcript export now applies the programme's policy too. The player
   sidecar `captions.vtt` names its epoch (`X-POLYEMESIS-EPOCH-MS`) and places each cue when it
   was spoken, so a player can line it up through HLS program date-time.
+- **Live captions on the public player, in the Library, as downloads and burned in (#8 step E).**
+  The public player shows the live captions as a *Captions* track, placed on the picture through
+  HLS program date-time, live and after a DVR seek. A recording's player in the Library shows its
+  transcript, or else the captions viewers saw live, and *Export captions* downloads either as SRT,
+  VTT or JSON. A programme's *Caption words* (spellings and masked words) are edited under
+  *Sources*. A rendition can burn the live captions into its picture, at the bottom or the top:
+  FFmpeg's `subtitles` filter reads its file only once (measured on the shipped FFmpeg 8.1.3), so
+  the burn-in is `drawtext` re-reading a burn file the captioner replaces on every caption, in the
+  built-in font. It needs a fixed width and height, and a change restarts the tier.
 - **SEI captions are re-sent every 2 s while on screen (#8).** A viewer who joins a Twitch
   stream after a caption's End Of Caption now sees that caption within one segment instead of
   waiting for the next one.
@@ -933,6 +942,10 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **The caption picker no longer says a route changes nothing on air (#8).** It says captions go
+  out only for a route that is on, that a live destination must be stopped to change its route,
+  and that a save restarts an enabled one. In all 15 languages.
 
 - **A metadata push or reschedule no longer switches a YouTube broadcast's captions off.**
   `liveBroadcasts.update` resets every field of a part it is sent without, and the update

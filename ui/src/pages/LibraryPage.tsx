@@ -50,6 +50,7 @@ import { PageHeader } from "@/components/AppLayout";
 import { api, ApiError } from "@/lib/api";
 import { MediaUploads } from "@/components/MediaUploads";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
+import { CaptionExportLinks } from "@/components/CaptionExportLinks";
 import { cn } from "@/lib/utils";
 import type {
   LibraryRecording,
@@ -1237,7 +1238,14 @@ export function PlayerDialog({
                     if (atMs > 0) e.currentTarget.currentTime = atMs / 1000;
                   }}
                 >
-                  <track kind="captions" />
+                  {/* The stored transcript when there is one, else the captions
+                      viewers saw live, lined up with this recording (#8). A
+                      recording with neither answers 404 and shows no track. */}
+                  <track
+                    kind="captions"
+                    label={t("wave3.captions.playerTrack")}
+                    src={api.captionExportUrl(rec.id, "vtt", rec.hasTranscript ? "recording" : "live")}
+                  />
                 </video>
               ) : (
                 <div className="flex flex-col items-center gap-2 rounded border border-dashed border-border-strong px-3 py-8 text-center">
@@ -1279,6 +1287,13 @@ export function PlayerDialog({
 
             {/* --- the transcript, which is the reason to open this at all --- */}
             <div className="flex flex-col gap-2">
+              {rec && (
+                <CaptionExportLinks
+                  recordingId={rec.id}
+                  hasTranscript={rec.hasTranscript}
+                  fromProgramme={rec.sourceId != null}
+                />
+              )}
               {/* #785: per-track speaker naming and deletion, and a way to
                   re-run. Before this, a track transcribed against the wrong
                   mic had no fix from here at all -- deleteTranscript and

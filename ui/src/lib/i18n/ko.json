@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "자막 트랙",
   "wave3.captions.trackHint": "실시간 자막이 듣는 이 프로그램의 오디오 트랙입니다.",
   "wave3.captions.trackAuto": "자동",
-  "wave3.captions.trackN": "오디오 트랙 {n}"
+  "wave3.captions.trackN": "오디오 트랙 {n}",
+  "wave3.captions.playerTrack": "자막",
+  "wave3.captions.exportTitle": "자막 내보내기",
+  "wave3.captions.exportTranscript": "녹취록",
+  "wave3.captions.exportLive": "라이브에 표시된 그대로",
+  "wave3.captions.exportHint": "라이브 자막은 방송 중 시청자가 본 자막으로, 이 녹화에 맞춰 정렬됩니다. 모든 파일의 각 자막에 화자가 표시됩니다.",
+  "wave3.captions.policyTitle": "자막 단어",
+  "wave3.captions.vocabLabel": "이 단어를 내 표기대로",
+  "wave3.captions.vocabHint": "한 줄에 한 단어. 대소문자와 관계없이 일치하는 인식 단어는 입력한 표기로 쓰입니다. 대소문자와 악센트는 고치지만, 인식기가 놓친 단어를 들리게 할 수는 없습니다.",
+  "wave3.captions.blockLabel": "이 단어 가리기",
+  "wave3.captions.blockHint": "한 줄에 한 단어. 가린 단어는 첫 글자를 남기므로 \"darn\"은 모든 출력과 내보내기에서 \"d***\"로 표시됩니다.",
+  "wave3.captions.policySave": "자막 단어 저장",
+  "wave3.captions.burnLabel": "번인 실시간 자막",
+  "wave3.captions.burnOff": "번인하지 않음",
+  "wave3.captions.burnBottom": "아래쪽",
+  "wave3.captions.burnTop": "위쪽",
+  "wave3.captions.burnHint": "자막 트랙을 보여 주지 않는 플랫폼이나 플레이어를 위해 프로그램의 실시간 자막을 이 단계의 화면에 그립니다. 방송 지연 전에 그려지므로 화면과 어긋나지 않습니다. 저장하면 이 단계가 다시 시작됩니다."
 }

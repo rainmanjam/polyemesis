@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Pista de subtítulos",
   "wave3.captions.trackHint": "La pista de audio de este programa que escucha el subtitulado en directo.",
   "wave3.captions.trackAuto": "Automática",
-  "wave3.captions.trackN": "Pista de audio {n}"
+  "wave3.captions.trackN": "Pista de audio {n}",
+  "wave3.captions.playerTrack": "Subtítulos",
+  "wave3.captions.exportTitle": "Exportar subtítulos",
+  "wave3.captions.exportTranscript": "Transcripción",
+  "wave3.captions.exportLive": "Tal como se mostraron en directo",
+  "wave3.captions.exportHint": "Los subtítulos en directo son los que vio el público durante la emisión, alineados con esta grabación. Cada archivo indica quién habla en cada entrada.",
+  "wave3.captions.policyTitle": "Palabras de los subtítulos",
+  "wave3.captions.vocabLabel": "Escribir estas palabras a mi manera",
+  "wave3.captions.vocabHint": "Una palabra por línea. Una palabra reconocida que coincida, sin distinguir mayúsculas, se escribe como la escribiste. Corrige mayúsculas y acentos; no puede hacer que el reconocedor oiga una palabra que no captó.",
+  "wave3.captions.blockLabel": "Ocultar estas palabras",
+  "wave3.captions.blockHint": "Una palabra por línea. Una palabra oculta conserva su primera letra, así que «darn» aparece como «d***» en cada salida y en las exportaciones.",
+  "wave3.captions.policySave": "Guardar palabras de los subtítulos",
+  "wave3.captions.burnLabel": "Subtítulos en directo incrustados",
+  "wave3.captions.burnOff": "Sin incrustar",
+  "wave3.captions.burnBottom": "Abajo",
+  "wave3.captions.burnTop": "Arriba",
+  "wave3.captions.burnHint": "Dibuja los subtítulos en directo del programa en la imagen de este nivel, para una plataforma o reproductor sin pista de subtítulos. Se dibujan antes de cualquier retardo de emisión, así que acompañan a la imagen. Guardar reinicia este nivel."
 }

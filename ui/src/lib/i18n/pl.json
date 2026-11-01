@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Ścieżka napisów",
   "wave3.captions.trackHint": "Ścieżka audio tego programu, której słucha napisywanie na żywo.",
   "wave3.captions.trackAuto": "Automatycznie",
-  "wave3.captions.trackN": "Ścieżka audio {n}"
+  "wave3.captions.trackN": "Ścieżka audio {n}",
+  "wave3.captions.playerTrack": "Napisy",
+  "wave3.captions.exportTitle": "Eksportuj napisy",
+  "wave3.captions.exportTranscript": "Transkrypcja",
+  "wave3.captions.exportLive": "Jak pokazano na żywo",
+  "wave3.captions.exportHint": "Napisy na żywo to te, które widzowie widzieli podczas transmisji, dopasowane do tego nagrania. Każdy plik podaje mówcę przy każdej kwestii.",
+  "wave3.captions.policyTitle": "Słowa w napisach",
+  "wave3.captions.vocabLabel": "Pisz te słowa po mojemu",
+  "wave3.captions.vocabHint": "Jedno słowo w wierszu. Rozpoznane słowo, które pasuje bez względu na wielkość liter, jest pisane po Twojemu. Poprawia wielkość liter i akcenty; nie sprawi, że rozpoznawanie usłyszy pominięte słowo.",
+  "wave3.captions.blockLabel": "Maskuj te słowa",
+  "wave3.captions.blockHint": "Jedno słowo w wierszu. Zamaskowane słowo zachowuje pierwszą literę, więc „darn” pojawia się jako „d***” na każdym wyjściu i w eksportach.",
+  "wave3.captions.policySave": "Zapisz słowa w napisach",
+  "wave3.captions.burnLabel": "Wtopione napisy na żywo",
+  "wave3.captions.burnOff": "Bez wtapiania",
+  "wave3.captions.burnBottom": "Na dole",
+  "wave3.captions.burnTop": "Na górze",
+  "wave3.captions.burnHint": "Rysuje napisy na żywo programu w obrazie tego poziomu, dla platformy lub odtwarzacza bez ścieżki napisów. Są rysowane przed opóźnieniem transmisji, więc zostają z obrazem. Zapisanie uruchamia ponownie ten poziom."
 }

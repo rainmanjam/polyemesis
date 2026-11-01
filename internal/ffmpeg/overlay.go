@@ -150,6 +150,9 @@ func overlayGraph(s RenditionSpec, prof encoderProfile, out frameSize) string {
 	if dt := drawtextFilter(s.Text, out); dt != "" {
 		b.WriteString("," + dt)
 	}
+	if dt := drawtextFilter(s.Captions, out); dt != "" {
+		b.WriteString("," + dt)
+	}
 	b.WriteString(",format=yuv420p")
 	if prof.vaapi {
 		b.WriteString(",format=nv12,hwupload")

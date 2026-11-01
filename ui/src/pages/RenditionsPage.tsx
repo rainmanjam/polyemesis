@@ -859,6 +859,7 @@ function emptyForm(defaultEncoder: string) {
     aspectMode: "stretch" as AspectKey,
     padColor: "",
     deinterlace: "off" as DeinterlaceKey,
+    captionBurn: "off" as CaptionBurnKey,
     overlayImage: "",
     overlayAnchor: "bottom-right" as OverlayAnchor,
     // Percentages are held as whole numbers in the form and divided at the
@@ -889,6 +890,15 @@ function emptyForm(defaultEncoder: string) {
 // rejects.
 type AspectKey = "stretch" | "crop" | "pad" | "blurpad";
 type DeinterlaceKey = "off" | "auto" | "all";
+
+/** Where burned-in live captions sit (#8). "off" stands for the stored empty
+ *  string, because a Select item cannot carry an empty value. */
+type CaptionBurnKey = "off" | "bottom" | "top";
+const CAPTION_BURN_OPTIONS: { key: CaptionBurnKey; label: TranslationKey }[] = [
+  { key: "off", label: "wave3.captions.burnOff" },
+  { key: "bottom", label: "wave3.captions.burnBottom" },
+  { key: "top", label: "wave3.captions.burnTop" },
+];
 
 const ASPECT_MODES: { key: AspectKey; label: TranslationKey; hint: TranslationKey }[] = [
   { key: "stretch", label: "rend.aspectStretch", hint: "rend.aspectStretchHint" },
@@ -1005,6 +1015,7 @@ export function RenditionDialog({
         aspectMode: toAspectKey(rendition.aspectMode),
         padColor: rendition.padColor ?? "",
         deinterlace: toDeinterlaceKey(rendition.deinterlace),
+        captionBurn: (rendition.captionBurn || "off") as CaptionBurnKey,
         textContent: rendition.text?.content ?? "",
         textFont: rendition.text?.font ?? "",
         textAnchor: rendition.text?.anchor ?? "bottom-left",
@@ -1057,6 +1068,8 @@ export function RenditionDialog({
       aspectMode: toAspectKey(t.aspectMode),
       padColor: t.padColor ?? "",
       deinterlace: toDeinterlaceKey(t.deinterlace),
+      // A template never burns captions in: that is a choice per programme.
+      captionBurn: "off" as CaptionBurnKey,
       textContent: t.text?.content ?? "",
       textFont: t.text?.font ?? "",
       textAnchor: t.text?.anchor ?? "bottom-left",
@@ -1157,6 +1170,9 @@ export function RenditionDialog({
         aspectMode: aspectApplies ? fromAspectKey(form.aspectMode) : "",
         padColor: aspectApplies && form.aspectMode === "pad" ? form.padColor.trim() : "",
         deinterlace: fromDeinterlaceKey(form.deinterlace),
+        // Cleared on a free axis, for the reason overlay is: the server
+        // refuses burned-in captions it could not size.
+        captionBurn: aspectApplies && form.captionBurn !== "off" ? form.captionBurn : "",
         // The server refuses an overlay on a rendition with a free axis,
         // because the image is sized as a percentage of the output and that has
         // to resolve to a number. Cleared here rather than sent and rejected,
@@ -1450,6 +1466,31 @@ export function RenditionDialog({
                 })()}
               </span>
             </div>
+          </div>
+
+          {/* Live captions burned into this tier's picture (#8), for a
+              platform or player that shows no caption track. */}
+          <div className="flex flex-col gap-1" data-testid="rend-caption-burn">
+            <Label htmlFor="rend-caption-burn">{t("wave3.captions.burnLabel")}</Label>
+            <Select
+              value={aspectApplies ? form.captionBurn : "off"}
+              onValueChange={(v) => set("captionBurn", v as CaptionBurnKey)}
+              disabled={!aspectApplies}
+            >
+              <SelectTrigger id="rend-caption-burn">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CAPTION_BURN_OPTIONS.map((o) => (
+                  <SelectItem key={o.key} value={o.key}>
+                    {t(o.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-sm text-muted-foreground">
+              {aspectApplies ? t("wave3.captions.burnHint") : t("rend.needsBothAWidthAnd")}
+            </span>
           </div>
 
           {aspectApplies && form.aspectMode === "pad" && (

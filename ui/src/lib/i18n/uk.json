@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Доріжка субтитрів",
   "wave3.captions.trackHint": "Аудіодоріжка цієї програми, яку слухають субтитри наживо.",
   "wave3.captions.trackAuto": "Автоматично",
-  "wave3.captions.trackN": "Аудіодоріжка {n}"
+  "wave3.captions.trackN": "Аудіодоріжка {n}",
+  "wave3.captions.playerTrack": "Субтитри",
+  "wave3.captions.exportTitle": "Експорт субтитрів",
+  "wave3.captions.exportTranscript": "Розшифровка",
+  "wave3.captions.exportLive": "Як показано в ефірі",
+  "wave3.captions.exportHint": "Субтитри ефіру — це те, що глядачі бачили під час трансляції, вирівняне за цим записом. У кожному файлі в кожної репліки вказано мовця.",
+  "wave3.captions.policyTitle": "Слова субтитрів",
+  "wave3.captions.vocabLabel": "Писати ці слова так",
+  "wave3.captions.vocabHint": "Одне слово в рядку. Розпізнане слово, що збігається без урахування регістру, пишеться у вашому написанні. Це виправляє регістр і діакритику, але не змусить розпізнавання почути пропущене слово.",
+  "wave3.captions.blockLabel": "Приховувати ці слова",
+  "wave3.captions.blockHint": "Одне слово в рядку. Приховане слово зберігає першу літеру, тож «darn» виводиться як «d***» на всіх виходах і в експорті.",
+  "wave3.captions.policySave": "Зберегти слова субтитрів",
+  "wave3.captions.burnLabel": "Вшиті живі субтитри",
+  "wave3.captions.burnOff": "Не вшивати",
+  "wave3.captions.burnBottom": "Унизу",
+  "wave3.captions.burnTop": "Угорі",
+  "wave3.captions.burnHint": "Малює живі субтитри програми в кадрі цього рівня — для платформи чи плеєра без доріжки субтитрів. Вони малюються до будь-якої затримки ефіру й лишаються синхронні з картинкою. Збереження перезапускає цей рівень."
 }

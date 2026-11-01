@@ -410,6 +410,8 @@ type Engine struct {
 	captPolicy atomic.Pointer[captions.TextPolicy]
 	// captLog is the running captioner's live cue log, closed with it.
 	captLog *captions.CueLog
+	// captBurn writes the running captioner's burn file; closing it blanks it.
+	captBurn *captions.BurnWriter
 	// captWarn is why captioning stopped, kept after the captioner is gone so
 	// the operator finds out. A caption stream that vanishes silently is the
 	// failure mode this whole feature is designed against.
@@ -3096,6 +3098,8 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string
 		// graph: a different anchor, width or opacity is a different encode.
 		overlaySig(r.Overlay, dataDir),
 		textSig(r.Text, dataDir),
+		// Burned-in captions add a drawtext to the graph (#8).
+		"captionBurn=" + string(r.CaptionBurn),
 		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
 		// tier started against the raw ingest of a video-only stream produces a
 		// video-only hub; it has to be restarted onto the silence tier when one
@@ -3223,6 +3227,37 @@ func textSpecOf(t db.RenditionText, dataDir string) *ffmpeg.TextSpec {
 	}
 }
 
+// captionBurnSpecOf is the burn-in of the programme's live captions for a tier
+// set to draw them (#8): the programme's burn file (captions.BurnPath), which
+// the captioner rewrites and drawtext re-reads every frame, in the built-in
+// font on a translucent box. nil when the tier draws no captions, has no
+// programme, or the font will not resolve, for the reason textSpecOf gives: a
+// missing caption is a disappointment, a missing stream is an outage.
+func captionBurnSpecOf(r *db.Rendition, dataDir string) *ffmpeg.TextSpec {
+	if r.CaptionBurn == db.CaptionBurnOff || r.SourceID == nil || dataDir == "" {
+		return nil
+	}
+	font, err := textFontPath(ffmpeg.DefaultFont, dataDir)
+	if err != nil {
+		return nil
+	}
+	anchor := ffmpeg.AnchorBottomCenter
+	if r.CaptionBurn == db.CaptionBurnTop {
+		anchor = ffmpeg.AnchorTopCenter
+	}
+	return &ffmpeg.TextSpec{
+		TextFile:   captions.BurnPath(dataDir, *r.SourceID),
+		FontFile:   font,
+		Anchor:     anchor,
+		SizePct:    0.05,
+		Color:      "white",
+		MarginYPct: 0.06,
+		Box:        true,
+		BoxColor:   "black",
+		BoxOpacity: 0.6,
+	}
+}
+
 // overlaySpecOf resolves the stored relative path against the data directory.
 //
 // Joined to an absolute path only here, at process-build time, exactly as the
@@ -3261,6 +3296,7 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 	return ffmpeg.RenditionSpec{
 		Overlay:     overlaySpecOf(r.Overlay, dataDir),
 		Text:        textSpecOf(r.Text, dataDir),
+		Captions:    captionBurnSpecOf(r, dataDir),
 		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
 		// Only meaningful for the VAAPI encoders, and empty everywhere else.
 		// Until this was threaded through, every VAAPI rendition fell back to
@@ -3414,6 +3450,21 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	// Dropping the text keeps the picture up. The same choice the unresolvable
 	// font makes below, and for the same reason: a missing caption is a
 	// disappointment, a missing stream is an outage.
+	if rspec.Captions != nil && !e.tools.HasFilter("drawtext") {
+		rspec.Captions = nil
+		e.log.Warn("this FFmpeg has no drawtext filter, so live captions are not burned in; "+
+			"the rendition runs without them rather than failing to start",
+			"rendition", row.ID)
+	}
+	// drawtext refuses to start on a missing textfile, so the burn file is
+	// created (empty, which draws nothing) before the encode is.
+	if rspec.Captions != nil {
+		if err := captions.EnsureBurnFile(rspec.Captions.TextFile); err != nil {
+			e.log.Warn("live captions cannot be burned in: no burn file",
+				"rendition", row.ID, "err", err)
+			rspec.Captions = nil
+		}
+	}
 	if rspec.Text != nil && !e.tools.HasFilter("drawtext") {
 		rspec.Text = nil
 		e.log.Warn("this FFmpeg has no drawtext filter, so no text is drawn; "+
@@ -5157,17 +5208,19 @@ func (e *Engine) reconcileCaptions() {
 	// The cue log lives as long as this captioner, like the route: it is
 	// handed to e.captLog with it, and closed on every path that does not.
 	cueLog := e.openCueLog()
+	burn := e.openBurnWriter()
 	logHeld := false
 	defer func() {
 		if !logHeld {
 			_ = cueLog.Close()
+			_ = burn.Close()
 		}
 	}()
 	fan := e.captionFanout(
 		func(c transcribe.LiveCaption) {
 			e.bus.Publish(events.TypeCaption, CaptionEvent{Line: &c})
 		},
-		e.captionSidecar(vtt, cueLog),
+		e.captionSidecar(vtt, cueLog, burn),
 		route,
 	)
 
@@ -5212,7 +5265,7 @@ func (e *Engine) reconcileCaptions() {
 	}
 	e.captRoute = route
 	routeHeld = true
-	e.captLog = cueLog
+	e.captLog, e.captBurn = cueLog, burn
 	logHeld = true
 	e.mu.Unlock()
 	if !capt.Running() {
@@ -5303,13 +5356,15 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	// The route goes first: no delayed caption may be delivered for a captioner
 	// that is already stopping.
 	e.mu.Lock()
-	route, cueLog := e.captRoute, e.captLog
-	e.captRoute, e.captLog = nil, nil
+	route, cueLog, burn := e.captRoute, e.captLog, e.captBurn
+	e.captRoute, e.captLog, e.captBurn = nil, nil, nil
 	e.mu.Unlock()
 	if route != nil {
 		route.Close()
 	}
-	defer func() { _ = cueLog.Close() }()
+	// The burn file is left empty, not removed: a tier burning captions in
+	// keeps reading it, and drawtext stops on a missing file.
+	defer func() { _ = cueLog.Close(); _ = burn.Close() }()
 	if c == nil {
 		_ = vtt.Close()
 		return

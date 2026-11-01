@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Untertitel-Spur",
   "wave3.captions.trackHint": "Die Audiospur dieses Programms, die die Live-Untertitelung verwendet.",
   "wave3.captions.trackAuto": "Automatisch",
-  "wave3.captions.trackN": "Audiospur {n}"
+  "wave3.captions.trackN": "Audiospur {n}",
+  "wave3.captions.playerTrack": "Untertitel",
+  "wave3.captions.exportTitle": "Untertitel exportieren",
+  "wave3.captions.exportTranscript": "Transkript",
+  "wave3.captions.exportLive": "Wie live gezeigt",
+  "wave3.captions.exportHint": "Live-Untertitel sind die, die das Publikum während der Sendung gesehen hat, ausgerichtet auf diese Aufnahme. Jede Datei nennt bei jedem Eintrag die sprechende Person.",
+  "wave3.captions.policyTitle": "Untertitelwörter",
+  "wave3.captions.vocabLabel": "Diese Wörter so schreiben",
+  "wave3.captions.vocabHint": "Ein Wort pro Zeile. Ein erkanntes Wort, das ohne Rücksicht auf Groß- und Kleinschreibung passt, wird in Ihrer Schreibweise gesetzt. Das korrigiert Großschreibung und Akzente; ein überhörtes Wort kann es nicht ergänzen.",
+  "wave3.captions.blockLabel": "Diese Wörter maskieren",
+  "wave3.captions.blockHint": "Ein Wort pro Zeile. Ein maskiertes Wort behält seinen ersten Buchstaben, sodass „darn“ auf jeder Ausgabe und in den Exporten als „d***“ erscheint.",
+  "wave3.captions.policySave": "Untertitelwörter speichern",
+  "wave3.captions.burnLabel": "Eingebrannte Live-Untertitel",
+  "wave3.captions.burnOff": "Nicht eingebrannt",
+  "wave3.captions.burnBottom": "Unten",
+  "wave3.captions.burnTop": "Oben",
+  "wave3.captions.burnHint": "Zeichnet die Live-Untertitel des Programms in das Bild dieser Stufe, für eine Plattform oder einen Player ohne Untertitelspur. Sie werden vor jeder Sendeverzögerung gezeichnet und bleiben so beim Bild. Speichern startet diese Stufe neu."
 }

@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Piste de sous-titres",
   "wave3.captions.trackHint": "La piste audio de ce programme que le sous-titrage en direct écoute.",
   "wave3.captions.trackAuto": "Automatique",
-  "wave3.captions.trackN": "Piste audio {n}"
+  "wave3.captions.trackN": "Piste audio {n}",
+  "wave3.captions.playerTrack": "Sous-titres",
+  "wave3.captions.exportTitle": "Exporter les sous-titres",
+  "wave3.captions.exportTranscript": "Transcription",
+  "wave3.captions.exportLive": "Tels qu'affichés en direct",
+  "wave3.captions.exportHint": "Les sous-titres en direct sont ceux que le public a vus pendant la diffusion, alignés sur cet enregistrement. Chaque fichier nomme la personne qui parle à chaque réplique.",
+  "wave3.captions.policyTitle": "Mots des sous-titres",
+  "wave3.captions.vocabLabel": "Écrire ces mots à ma façon",
+  "wave3.captions.vocabHint": "Un mot par ligne. Un mot reconnu qui correspond, sans tenir compte de la casse, est écrit à votre façon. Cela corrige la casse et les accents ; cela ne peut pas faire entendre un mot que la reconnaissance a manqué.",
+  "wave3.captions.blockLabel": "Masquer ces mots",
+  "wave3.captions.blockHint": "Un mot par ligne. Un mot masqué garde sa première lettre : « darn » s'affiche « d*** » sur chaque sortie et dans les exports.",
+  "wave3.captions.policySave": "Enregistrer les mots des sous-titres",
+  "wave3.captions.burnLabel": "Sous-titres en direct incrustés",
+  "wave3.captions.burnOff": "Non incrustés",
+  "wave3.captions.burnBottom": "En bas",
+  "wave3.captions.burnTop": "En haut",
+  "wave3.captions.burnHint": "Dessine les sous-titres en direct du programme dans l'image de ce palier, pour une plateforme ou un lecteur sans piste de sous-titres. Ils sont dessinés avant tout délai de diffusion et restent donc avec l'image. Enregistrer redémarre ce palier."
 }

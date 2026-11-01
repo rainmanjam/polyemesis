@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Faixa de legendas",
   "wave3.captions.trackHint": "A faixa de áudio deste programa que a legendagem ao vivo escuta.",
   "wave3.captions.trackAuto": "Automática",
-  "wave3.captions.trackN": "Faixa de áudio {n}"
+  "wave3.captions.trackN": "Faixa de áudio {n}",
+  "wave3.captions.playerTrack": "Legendas",
+  "wave3.captions.exportTitle": "Exportar legendas",
+  "wave3.captions.exportTranscript": "Transcrição",
+  "wave3.captions.exportLive": "Como exibidas ao vivo",
+  "wave3.captions.exportHint": "As legendas ao vivo são as que o público viu durante a transmissão, alinhadas a esta gravação. Todo arquivo indica quem fala em cada trecho.",
+  "wave3.captions.policyTitle": "Palavras das legendas",
+  "wave3.captions.vocabLabel": "Escrever estas palavras do meu jeito",
+  "wave3.captions.vocabHint": "Uma palavra por linha. Uma palavra reconhecida que corresponda, sem diferenciar maiúsculas, é escrita do seu jeito. Corrige maiúsculas e acentos; não faz o reconhecedor ouvir uma palavra que ele perdeu.",
+  "wave3.captions.blockLabel": "Mascarar estas palavras",
+  "wave3.captions.blockHint": "Uma palavra por linha. Uma palavra mascarada mantém a primeira letra, então \"darn\" aparece como \"d***\" em todas as saídas e nas exportações.",
+  "wave3.captions.policySave": "Salvar palavras das legendas",
+  "wave3.captions.burnLabel": "Legendas ao vivo embutidas",
+  "wave3.captions.burnOff": "Não embutidas",
+  "wave3.captions.burnBottom": "Embaixo",
+  "wave3.captions.burnTop": "Em cima",
+  "wave3.captions.burnHint": "Desenha as legendas ao vivo do programa na imagem deste nível, para uma plataforma ou player sem faixa de legendas. São desenhadas antes de qualquer atraso de transmissão, então acompanham a imagem. Salvar reinicia este nível."
 }

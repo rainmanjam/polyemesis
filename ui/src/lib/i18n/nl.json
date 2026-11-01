@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Ondertiteltrack",
   "wave3.captions.trackHint": "De audiotrack van dit programma waar de live ondertiteling naar luistert.",
   "wave3.captions.trackAuto": "Automatisch",
-  "wave3.captions.trackN": "Audiotrack {n}"
+  "wave3.captions.trackN": "Audiotrack {n}",
+  "wave3.captions.playerTrack": "Ondertitels",
+  "wave3.captions.exportTitle": "Ondertitels exporteren",
+  "wave3.captions.exportTranscript": "Transcriptie",
+  "wave3.captions.exportLive": "Zoals live getoond",
+  "wave3.captions.exportHint": "Live-ondertitels zijn de ondertitels die kijkers tijdens de uitzending zagen, uitgelijnd op deze opname. Elk bestand noemt bij elke regel de spreker.",
+  "wave3.captions.policyTitle": "Ondertitelwoorden",
+  "wave3.captions.vocabLabel": "Deze woorden op mijn manier spellen",
+  "wave3.captions.vocabHint": "Eén woord per regel. Een herkend woord dat overeenkomt, ongeacht hoofdletters, wordt in jouw spelling geschreven. Het herstelt hoofdletters en accenten; het kan de herkenning geen woord laten horen dat ze miste.",
+  "wave3.captions.blockLabel": "Deze woorden maskeren",
+  "wave3.captions.blockHint": "Eén woord per regel. Een gemaskeerd woord houdt zijn eerste letter, dus \"darn\" verschijnt als \"d***\" op elke uitvoer en in de exports.",
+  "wave3.captions.policySave": "Ondertitelwoorden opslaan",
+  "wave3.captions.burnLabel": "Ingebrande live-ondertitels",
+  "wave3.captions.burnOff": "Niet ingebrand",
+  "wave3.captions.burnBottom": "Onderaan",
+  "wave3.captions.burnTop": "Bovenaan",
+  "wave3.captions.burnHint": "Tekent de live-ondertitels van het programma in het beeld van deze laag, voor een platform of speler zonder ondertitelspoor. Ze worden vóór elke uitzendvertraging getekend en blijven dus bij het beeld. Opslaan herstart deze laag."
 }

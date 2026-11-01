@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "字幕トラック",
   "wave3.captions.trackHint": "ライブ字幕が聞き取る、このプログラムの音声トラックです。",
   "wave3.captions.trackAuto": "自動",
-  "wave3.captions.trackN": "音声トラック {n}"
+  "wave3.captions.trackN": "音声トラック {n}",
+  "wave3.captions.playerTrack": "字幕",
+  "wave3.captions.exportTitle": "字幕を書き出す",
+  "wave3.captions.exportTranscript": "文字起こし",
+  "wave3.captions.exportLive": "ライブで表示されたもの",
+  "wave3.captions.exportHint": "ライブ字幕は配信中に視聴者が見た字幕で、この録画に合わせて配置されます。どのファイルも各キューに話者名が入ります。",
+  "wave3.captions.policyTitle": "字幕の語句",
+  "wave3.captions.vocabLabel": "この表記で書く語句",
+  "wave3.captions.vocabHint": "1 行に 1 語。大文字小文字を区別せずに一致した認識語は、ここでの表記で書かれます。大文字小文字やアクセントは直せますが、聞き取れなかった語を補うことはできません。",
+  "wave3.captions.blockLabel": "伏せ字にする語句",
+  "wave3.captions.blockHint": "1 行に 1 語。伏せ字は先頭の文字を残すため、「darn」はすべての出力と書き出しで「d***」と表示されます。",
+  "wave3.captions.policySave": "字幕の語句を保存",
+  "wave3.captions.burnLabel": "焼き込みライブ字幕",
+  "wave3.captions.burnOff": "焼き込まない",
+  "wave3.captions.burnBottom": "下部",
+  "wave3.captions.burnTop": "上部",
+  "wave3.captions.burnHint": "字幕トラックを表示しないプラットフォームやプレーヤー向けに、番組のライブ字幕をこの段の映像に描き込みます。配信遅延より前に描かれるので映像とずれません。保存するとこの段が再起動します。"
 }

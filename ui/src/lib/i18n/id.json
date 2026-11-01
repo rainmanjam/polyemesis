@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Trek keterangan",
   "wave3.captions.trackHint": "Trek audio program ini yang didengarkan oleh pembuat keterangan langsung.",
   "wave3.captions.trackAuto": "Otomatis",
-  "wave3.captions.trackN": "Trek audio {n}"
+  "wave3.captions.trackN": "Trek audio {n}",
+  "wave3.captions.playerTrack": "Teks takarir",
+  "wave3.captions.exportTitle": "Ekspor teks takarir",
+  "wave3.captions.exportTranscript": "Transkrip",
+  "wave3.captions.exportLive": "Seperti tampil saat live",
+  "wave3.captions.exportHint": "Teks takarir live adalah yang dilihat penonton selama siaran, diselaraskan dengan rekaman ini. Setiap berkas menyebut pembicara di setiap baris.",
+  "wave3.captions.policyTitle": "Kata teks takarir",
+  "wave3.captions.vocabLabel": "Eja kata-kata ini sesuai keinginan saya",
+  "wave3.captions.vocabHint": "Satu kata per baris. Kata yang dikenali dan cocok, tanpa memperhatikan huruf besar-kecil, ditulis sesuai ejaan Anda. Ini memperbaiki huruf besar dan aksen; ini tidak bisa membuat pengenal mendengar kata yang terlewat.",
+  "wave3.captions.blockLabel": "Samarkan kata-kata ini",
+  "wave3.captions.blockHint": "Satu kata per baris. Kata yang disamarkan mempertahankan huruf pertamanya, jadi \"darn\" tampil sebagai \"d***\" di setiap keluaran dan ekspor.",
+  "wave3.captions.policySave": "Simpan kata teks takarir",
+  "wave3.captions.burnLabel": "Teks takarir live yang ditanam",
+  "wave3.captions.burnOff": "Tidak ditanam",
+  "wave3.captions.burnBottom": "Di bawah",
+  "wave3.captions.burnTop": "Di atas",
+  "wave3.captions.burnHint": "Menggambar teks takarir live program ke gambar tingkat ini, untuk platform atau pemutar tanpa trek teks takarir. Teks digambar sebelum jeda siaran apa pun, jadi tetap selaras dengan gambar. Menyimpan memulai ulang tingkat ini."
 }

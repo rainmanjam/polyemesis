@@ -151,8 +151,9 @@ func fullyPopulatedRendition(source *int64) *Rendition {
 			BoxColor:   "0x112233",
 			BoxOpacity: 0.5,
 		},
-		Note:     "the tier every field of this test is measured on",
-		SourceID: source,
+		CaptionBurn: CaptionBurnTop,
+		Note:        "the tier every field of this test is measured on",
+		SourceID:    source,
 	}
 }
 
@@ -201,8 +202,9 @@ func differentlyPopulatedRendition(source *int64) *Rendition {
 			BoxColor:   "0x223344",
 			BoxOpacity: 0.25,
 		},
-		Note:     "the tier the update has to actually reach",
-		SourceID: source,
+		CaptionBurn: CaptionBurnBottom,
+		Note:        "the tier the update has to actually reach",
+		SourceID:    source,
 	}
 }
 

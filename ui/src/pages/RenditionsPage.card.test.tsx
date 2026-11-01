@@ -5,6 +5,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 
 import { RenditionCard, RenditionDialog } from "./RenditionsPage";
 import type { Rendition, RenditionBounds, RenditionView } from "@/lib/types";
+import en from "@/lib/i18n/en.json";
 
 /* Two explanations this page computed correctly and then put somewhere the
  * operator could not reach. */
@@ -184,5 +185,38 @@ describe("RenditionDialog", () => {
       screen.getByText(/Right for the progressive sources almost everyone has\./),
     ).toBeTruthy();
     expect(screen.queryByText("rend.deintOffHint")).toBeNull();
+  });
+
+  // #8 burn-in. MUTATION: the form ignores the stored captionBurn. Observed:
+  // FAIL, the select read "Not burned in" for a tier that burns at the bottom.
+  it("shows where a tier burns live captions in, and why a tier with a free axis cannot", () => {
+    const dialog = (r: Rendition) => (
+      <RenditionDialog
+        open
+        onOpenChange={noop}
+        rendition={r}
+        caps={null}
+        redetecting={false}
+        onRedetect={noop}
+        presets={[]}
+        fonts={null}
+        disclaimer=""
+        bounds={bounds}
+        source={null}
+        users={[]}
+        counts={{ destinations: 0, enabledDestinations: 0 }}
+        onSaved={noop}
+      />
+    );
+    const { unmount } = render(dialog(rendition({ captionBurn: "bottom" })));
+    const burn = screen.getByTestId("rend-caption-burn");
+    expect(burn.textContent).toContain(en["wave3.captions.burnLabel"]);
+    expect(burn.textContent).toContain(en["wave3.captions.burnBottom"]);
+    expect(burn.textContent).toContain(en["wave3.captions.burnHint"]);
+    unmount();
+    render(dialog(rendition({ width: 0, captionBurn: "" })));
+    const free = screen.getByTestId("rend-caption-burn");
+    expect(free.textContent).toContain(en["wave3.captions.burnOff"]);
+    expect(free.querySelector("button")?.hasAttribute("disabled")).toBe(true);
   });
 });

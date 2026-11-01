@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Caption track",
   "wave3.captions.trackHint": "The audio track of this programme that the live captioner listens to.",
   "wave3.captions.trackAuto": "Automatic",
-  "wave3.captions.trackN": "Audio track {n}"
+  "wave3.captions.trackN": "Audio track {n}",
+  "wave3.captions.playerTrack": "Captions",
+  "wave3.captions.exportTitle": "Export captions",
+  "wave3.captions.exportTranscript": "Transcript",
+  "wave3.captions.exportLive": "As shown live",
+  "wave3.captions.exportHint": "Live captions are the ones viewers saw during the broadcast, lined up with this recording. Every file names the speaker on each cue.",
+  "wave3.captions.policyTitle": "Caption words",
+  "wave3.captions.vocabLabel": "Spell these words my way",
+  "wave3.captions.vocabHint": "One word per line. A recognised word that matches one, ignoring case, is written in your spelling. It fixes case and accents; it cannot make the recogniser hear a word it missed.",
+  "wave3.captions.blockLabel": "Mask these words",
+  "wave3.captions.blockHint": "One word per line. A masked word keeps its first letter, so \"darn\" shows as \"d***\" on every output and in the exports.",
+  "wave3.captions.policySave": "Save caption words",
+  "wave3.captions.burnLabel": "Burned-in live captions",
+  "wave3.captions.burnOff": "Not burned in",
+  "wave3.captions.burnBottom": "At the bottom",
+  "wave3.captions.burnTop": "At the top",
+  "wave3.captions.burnHint": "Draws the programme's live captions into this tier's picture, for a platform or player that shows no caption track. They are drawn before any broadcast delay, so they stay with the picture. Saving restarts this tier."
 }

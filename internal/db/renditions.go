@@ -160,6 +160,12 @@ type Rendition struct {
 	// Empty Content is no text, so every rendition that predates this keeps
 	// producing exactly the frame it always did.
 	Text RenditionText `json:"text"`
+	// CaptionBurn draws the programme's live captions into this tier's
+	// picture (#8), for a platform or a player that shows no caption track:
+	// "bottom" or "top" is where they sit, and empty, the default, draws
+	// nothing. A rendition always re-encodes, so it costs no extra encode; a
+	// change restarts the tier, like any other change to its picture.
+	CaptionBurn CaptionBurn `json:"captionBurn"`
 	// Note is the "what is this tier for" line. Preset-derived renditions
 	// arrive with one already filled in; the user can rewrite it.
 	Note string `json:"note"`
@@ -658,6 +664,15 @@ func (r Rendition) Validate() error {
 	for _, p := range r.Text.problems(r.Width, r.Height) {
 		add("%s", p)
 	}
+	// Burned-in captions are sized and placed against the output frame, so
+	// the frame has to be a number when the arguments are built, for the same
+	// reason the text needs it: with a free axis drawtext is never added.
+	if !r.CaptionBurn.valid() {
+		add("caption burn-in must be bottom, top or off, not %q", r.CaptionBurn)
+	} else if r.CaptionBurn != CaptionBurnOff && (r.Width <= 0 || r.Height <= 0) {
+		add("burned-in captions need both a width and a height on this rendition, " +
+			"because the captions are sized against the output picture")
+	}
 
 	if len(probs) > 0 {
 		return fmt.Errorf("invalid rendition: %s", strings.Join(probs, "; "))
@@ -742,7 +757,7 @@ func scanRendition(s interface{ Scan(...any) error }) (*Rendition, error) {
 		&r.Overlay.MarginXPct, &r.Overlay.MarginYPct, &r.Overlay.Opacity,
 		&r.Text.Content, &r.Text.Font, &r.Text.Anchor, &r.Text.SizePct, &r.Text.Color,
 		&r.Text.MarginXPct, &r.Text.MarginYPct, &r.Text.Box, &r.Text.BoxColor,
-		&r.Text.BoxOpacity,
+		&r.Text.BoxOpacity, &r.CaptionBurn,
 		&r.Note, &source, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -794,7 +809,7 @@ const renditionValueColumns = `name, width, height, fps, video_bitrate,
 	overlay_margin_y_pct, overlay_opacity,
 	text_content, text_font, text_anchor, text_size_pct, text_color,
 	text_margin_x_pct, text_margin_y_pct, text_box, text_box_color,
-	text_box_opacity,
+	text_box_opacity, caption_burn,
 	note, source_id`
 
 const renditionColumns = `id, ` + renditionValueColumns + `, created_at, updated_at`
@@ -871,7 +886,7 @@ func renditionValues(r *Rendition) []any {
 		r.Overlay.MarginXPct, r.Overlay.MarginYPct, r.Overlay.Opacity,
 		r.Text.Content, r.Text.Font, r.Text.Anchor, r.Text.SizePct, r.Text.Color,
 		r.Text.MarginXPct, r.Text.MarginYPct, r.Text.Box, r.Text.BoxColor,
-		r.Text.BoxOpacity,
+		r.Text.BoxOpacity, r.CaptionBurn,
 		r.Note, r.SourceID,
 	}
 }

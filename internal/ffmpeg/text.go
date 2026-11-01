@@ -26,6 +26,11 @@ type TextSpec struct {
 	// Text is the literal string to draw. It is NEVER interpreted -- see
 	// drawtextFilter for why expansion is switched off explicitly.
 	Text string
+	// TextFile, when set, is drawn instead of Text: a file drawtext re-reads
+	// on every frame (reload=1), which is how live captions are burned in
+	// (#8). Its writer replaces it atomically, so a frame never reads half a
+	// caption. Like Text it is never interpreted.
+	TextFile string
 	// FontFile is an absolute path, resolved from the fonts directory by the
 	// caller via FontPath. Empty means the built-in default, which the caller
 	// is expected to have resolved too; a spec that reaches the graph with no
@@ -53,7 +58,7 @@ type TextSpec struct {
 
 // Active reports whether this text should be compiled into the graph.
 func (t *TextSpec) Active() bool {
-	return t != nil && strings.TrimSpace(t.Text) != "" && t.SizePct > 0 && t.FontFile != ""
+	return t != nil && (strings.TrimSpace(t.Text) != "" || t.TextFile != "") && t.SizePct > 0 && t.FontFile != ""
 }
 
 // Defaults applied when the operator left a field empty. Kept here so the
@@ -105,8 +110,14 @@ func drawtextFilter(t *TextSpec, out frameSize) string {
 	var b strings.Builder
 	b.WriteString("drawtext=fontfile=")
 	b.WriteString(filterPath(t.FontFile))
-	b.WriteString(":text=")
-	b.WriteString(escapeLavfiArg(t.Text))
+	if t.TextFile != "" {
+		b.WriteString(":textfile=")
+		b.WriteString(filterPath(t.TextFile))
+		b.WriteString(":reload=1")
+	} else {
+		b.WriteString(":text=")
+		b.WriteString(escapeLavfiArg(t.Text))
+	}
 	fmt.Fprintf(&b, ":fontsize=%d:fontcolor=%s:x=%s:y=%s",
 		size, escapeLavfiArg(textColorOr(t.Color, DefaultTextColor)), x, y)
 

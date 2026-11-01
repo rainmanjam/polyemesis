@@ -8,6 +8,8 @@ import type {
   MetaTarget,
 } from "@/lib/metadataPush";
 import type {
+  CaptionExportFormat,
+  CaptionExportSource,
   RenditionConcern,
   AccountStats,
   AcmePreflight,
@@ -1247,6 +1249,13 @@ export const api = {
 
   transcript: (id: number) =>
     get<TranscriptView>(`/library/recordings/${id}/transcript`),
+  /** A caption file for one recording (#8): the stored transcript, or with
+   *  source "live" the captions viewers saw during the broadcast, lined up with
+   *  the recording. A plain URL, because it is a download and a <track> src:
+   *  the session cookie authorises it like downloadUrl. */
+  captionExportUrl: (id: number, format: CaptionExportFormat, source: CaptionExportSource = "recording") =>
+    `${BASE}/library/recordings/${id}/transcript/export?format=${format}` +
+    (source === "live" ? "&source=live" : ""),
   deleteTranscript: (id: number, track?: number) =>
     del<{ status: string }>(
       `/library/recordings/${id}/transcript` +

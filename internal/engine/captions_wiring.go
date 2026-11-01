@@ -199,11 +199,22 @@ func (e *Engine) openCueLog() *captions.CueLog {
 	return l
 }
 
+// openBurnWriter returns the writer for this programme's burn file, the file a
+// rendition burning captions in draws, or nil without a data directory.
+func (e *Engine) openBurnWriter() *captions.BurnWriter {
+	if e.cfg.DataDir == "" {
+		return nil
+	}
+	return captions.NewBurnWriter(captions.BurnPath(e.cfg.DataDir, e.sourceID), nil)
+}
+
 // captionSidecar is the fanout's undelayed file path: the WebVTT file beside the
-// HLS window (the public player's live track) and the programme's cue log (the
-// VOD track and the exports). A write failure is logged and reported, and
-// neither file can stop the other.
-func (e *Engine) captionSidecar(vtt *transcribe.LiveVTT, cueLog *captions.CueLog) func(transcribe.LiveCaption) error {
+// HLS window (the public player's live track), the programme's cue log (the VOD
+// track and the exports) and its burn file (burned-in tiers). Undelayed is right
+// for the burn file too: a rendition sits before any destination's delay, so
+// the burned caption is delayed with its picture. A write failure is logged and
+// reported, and no file can stop another.
+func (e *Engine) captionSidecar(vtt *transcribe.LiveVTT, cueLog *captions.CueLog, burn *captions.BurnWriter) func(transcribe.LiveCaption) error {
 	return func(c transcribe.LiveCaption) error {
 		err := vtt.Append(c)
 		if err != nil {
@@ -213,6 +224,12 @@ func (e *Engine) captionSidecar(vtt *transcribe.LiveVTT, cueLog *captions.CueLog
 			e.log.Warn("live captions: cue log write failed", "err", lerr)
 			if err == nil {
 				err = lerr
+			}
+		}
+		if berr := burn.Show(c); berr != nil {
+			e.log.Warn("live captions: burn file write failed", "err", berr)
+			if err == nil {
+				err = berr
 			}
 		}
 		return err

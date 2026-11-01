@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Traccia sottotitoli",
   "wave3.captions.trackHint": "La traccia audio di questo programma che i sottotitoli in diretta ascoltano.",
   "wave3.captions.trackAuto": "Automatica",
-  "wave3.captions.trackN": "Traccia audio {n}"
+  "wave3.captions.trackN": "Traccia audio {n}",
+  "wave3.captions.playerTrack": "Sottotitoli",
+  "wave3.captions.exportTitle": "Esporta sottotitoli",
+  "wave3.captions.exportTranscript": "Trascrizione",
+  "wave3.captions.exportLive": "Come mostrati in diretta",
+  "wave3.captions.exportHint": "I sottotitoli dal vivo sono quelli che il pubblico ha visto durante la trasmissione, allineati a questa registrazione. Ogni file indica chi parla in ogni battuta.",
+  "wave3.captions.policyTitle": "Parole dei sottotitoli",
+  "wave3.captions.vocabLabel": "Scrivi queste parole a modo mio",
+  "wave3.captions.vocabHint": "Una parola per riga. Una parola riconosciuta che corrisponde, senza badare a maiuscole e minuscole, viene scritta come la scrivi tu. Corregge maiuscole e accenti; non può far sentire al riconoscitore una parola che ha perso.",
+  "wave3.captions.blockLabel": "Maschera queste parole",
+  "wave3.captions.blockHint": "Una parola per riga. Una parola mascherata conserva la prima lettera, quindi «darn» appare come «d***» su ogni uscita e nelle esportazioni.",
+  "wave3.captions.policySave": "Salva le parole dei sottotitoli",
+  "wave3.captions.burnLabel": "Sottotitoli dal vivo impressi",
+  "wave3.captions.burnOff": "Non impressi",
+  "wave3.captions.burnBottom": "In basso",
+  "wave3.captions.burnTop": "In alto",
+  "wave3.captions.burnHint": "Disegna i sottotitoli dal vivo del programma nell'immagine di questo livello, per una piattaforma o un lettore senza traccia di sottotitoli. Sono disegnati prima di qualsiasi ritardo di trasmissione, quindi restano con l'immagine. Salvare riavvia questo livello."
 }

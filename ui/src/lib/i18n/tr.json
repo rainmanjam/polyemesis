@@ -3525,5 +3525,21 @@
   "wave3.captions.trackLabel": "Altyazı parçası",
   "wave3.captions.trackHint": "Canlı altyazının dinlediği bu programın ses parçası.",
   "wave3.captions.trackAuto": "Otomatik",
-  "wave3.captions.trackN": "Ses parçası {n}"
+  "wave3.captions.trackN": "Ses parçası {n}",
+  "wave3.captions.playerTrack": "Altyazılar",
+  "wave3.captions.exportTitle": "Altyazıları dışa aktar",
+  "wave3.captions.exportTranscript": "Döküm",
+  "wave3.captions.exportLive": "Canlıda gösterildiği gibi",
+  "wave3.captions.exportHint": "Canlı altyazılar, izleyicilerin yayın sırasında gördükleridir ve bu kayda göre hizalanır. Her dosya her satırda konuşanı belirtir.",
+  "wave3.captions.policyTitle": "Altyazı sözcükleri",
+  "wave3.captions.vocabLabel": "Bu sözcükleri benim yazdığım gibi yaz",
+  "wave3.captions.vocabHint": "Her satıra bir sözcük. Büyük-küçük harf gözetmeksizin eşleşen tanınmış bir sözcük sizin yazdığınız gibi yazılır. Büyük harfi ve aksanları düzeltir; tanıyıcının kaçırdığı bir sözcüğü duymasını sağlayamaz.",
+  "wave3.captions.blockLabel": "Bu sözcükleri maskele",
+  "wave3.captions.blockHint": "Her satıra bir sözcük. Maskelenen sözcük ilk harfini korur; \"darn\" her çıkışta ve dışa aktarımlarda \"d***\" olarak görünür.",
+  "wave3.captions.policySave": "Altyazı sözcüklerini kaydet",
+  "wave3.captions.burnLabel": "Görüntüye gömülü canlı altyazılar",
+  "wave3.captions.burnOff": "Gömülmez",
+  "wave3.captions.burnBottom": "Altta",
+  "wave3.captions.burnTop": "Üstte",
+  "wave3.captions.burnHint": "Altyazı izi göstermeyen bir platform veya oynatıcı için programın canlı altyazılarını bu katmanın görüntüsüne çizer. Her yayın gecikmesinden önce çizildikleri için görüntüyle birlikte kalırlar. Kaydetmek bu katmanı yeniden başlatır."
 }
