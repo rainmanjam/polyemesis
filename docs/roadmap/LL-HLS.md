@@ -205,8 +205,8 @@ Measure, do not assert:
    video.** Halving the GOP raises its cost slightly on a box that is already
    running everything else.
 2. **Version-keyed behaviour.** The measurements above are FFmpeg 8.1.2. The
-   project floor is 6.0, where rounding and `force_key_frames` behaviour should
-   be re-measured rather than assumed.
+   project floor is 8.0, and the latest 9.x is also supported; rounding and
+   `force_key_frames` behaviour there should be re-measured rather than assumed.
 3. **The migration touches a stored default.** `SegmentSeconds` lives in the
    settings blob; changing the default must not silently rewrite an operator's
    deliberate 2.

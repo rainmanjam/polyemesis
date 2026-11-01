@@ -333,9 +333,9 @@ These need a decision or a measurement before this is built.
    needs a rule for "all" when one destination is disabled.
 
 3. **Is `speed` reliable on every FFmpeg build in the support range?** The floor
-   is 6.0. The `-progress` fields the supervisor parses are documented as
-   reliable from 6.x, but `speed` specifically has not been checked against 6.1
-   and 8.1 side by side. One measurement settles it.
+   is 8.0. The `-progress` fields the supervisor parses are documented as
+   reliable, but `speed` specifically has not been checked against 8.1 and 9.0
+   side by side. One measurement settles it.
 
 4. **Should `DropFrames` get its own event?** Argued against above — it fires on
    the same incidents — but a destination dropping frames at a steady 1% while

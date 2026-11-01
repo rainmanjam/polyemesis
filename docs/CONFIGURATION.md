@@ -200,10 +200,9 @@ cannot validate is an excellent way to lock yourself out of your own tool.
 ### `enhancedRtmp` was removed
 
 It is no longer a key, and it does not need reinstating. Enhanced RTMP /
-multitrack FLV ingest (OBS 30.2+) turns out to work on **FFmpeg 7.1+** —
-verified end to end — and not on FFmpeg 6.1.1, which is Ubuntu 24.04's stock
-build. Either way there is nothing for a flag to switch: where it works, it
-works by default, because the tracks arrive through the existing ingest command
+multitrack FLV ingest (OBS 30.2+) works on every supported FFmpeg (8.0 or
+later) — verified end to end. There is nothing for a flag to switch: it works
+by default, because the tracks arrive through the existing ingest command
 unchanged. It confirms rather than undermines the removal — the key was declared
 as a placeholder and kept on the belief that config files already carrying it
 would otherwise fail to parse.
@@ -552,18 +551,18 @@ Both are read at startup by `internal/api/chat_wiring.go`. See
 
 | Variable | What it does |
 |---|---|
-| `POLYEMESIS_FFMPEG_ASSUME_MAJOR` | States the major version of an FFmpeg build whose own `-version` output does not carry a readable one — a master nightly reporting `N-113518-gd6a4b1e` being the honest case. Set it to the leading number: `POLYEMESIS_FFMPEG_ASSUME_MAJOR=7` |
+| `POLYEMESIS_FFMPEG_ASSUME_MAJOR` | States the major version of an FFmpeg build whose own `-version` output does not carry a readable one — a master nightly reporting `N-113518-gd6a4b1e` being the honest case. Set it to the leading number: `POLYEMESIS_FFMPEG_ASSUME_MAJOR=8` |
 | `POLYEMESIS_FFMPEG_LOGLEVEL` | The `-loglevel` every FFmpeg child gets. Default `warning`; takes any value FFmpeg's own `-loglevel` takes |
 
 `POLYEMESIS_FFMPEG_ASSUME_MAJOR` is the answer to a server that refuses to
-start because it cannot read a version number. polyemesis requires FFmpeg 6.0
-or newer — that floor is where stable multi-track MPEG-TS mapping, the modern
-channel-layout API and parseable `-progress` output all become reliable — and
-a nightly's version string satisfies nothing it can check.
+start because it cannot read a version number. polyemesis requires FFmpeg 8.0
+or later — Enhanced RTMP multitrack and two-track FLV need it, and 8.x and 9.x
+are what polyemesis is tested on — and a nightly's version string satisfies
+nothing it can check.
 
-It is a claim, not an override. A value below 6 is refused rather than
-honoured (`POLYEMESIS_FFMPEG_ASSUME_MAJOR says this build is FFmpeg 5, but
-polyemesis requires 6.0 or newer`), so it cannot be used to run a build the
+It is a claim, not an override. A value below 8 is refused rather than
+honoured (`POLYEMESIS_FFMPEG_ASSUME_MAJOR says this build is FFmpeg 7, but
+polyemesis requires 8.0 or newer`), so it cannot be used to run a build the
 floor exists to keep out, and a value that is not a number is an error rather
 than a silent fall back to "unset" — a typo that read as unset would put you
 back at the same refusal with no idea why your answer was ignored. It is an

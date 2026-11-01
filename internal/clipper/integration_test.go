@@ -4,7 +4,6 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -115,7 +114,7 @@ func TestARealFastCutStartsWhereThePlanSaidAndDecodes(t *testing.T) {
 	if res.Plan.InDrift != -400*time.Millisecond {
 		t.Errorf("reported drift %s, want -400ms", res.Plan.InDrift)
 	}
-	assertDurationWithin(t, ffprobe, out, 4400*time.Millisecond, tailSlack(t, ffmpeg))
+	assertDuration(t, ffprobe, out, 4400*time.Millisecond)
 	assertAudioTracks(t, ffprobe, out, 2)
 	assertFirstFrameDecodes(t, ffmpeg, out)
 }
@@ -154,7 +153,7 @@ func TestARealPreciseCutHitsTheRequestedInPointAndDecodes(t *testing.T) {
 	if got := res.Plan.LosslessFraction(); got < 0.8 {
 		t.Errorf("lossless fraction = %v, want most of the clip copied", got)
 	}
-	assertDurationWithin(t, ffprobe, out, 4*time.Second, tailSlack(t, ffmpeg))
+	assertDuration(t, ffprobe, out, 4*time.Second)
 	assertFirstFrameDecodes(t, ffmpeg, out)
 	assertDecodesThroughout(t, ffmpeg, out)
 }
@@ -257,59 +256,19 @@ func TestARealCutCanKeepOneTrackOutOfSeveral(t *testing.T) {
 	assertFirstFrameDecodes(t, ffmpeg, out)
 }
 
-// ffmpegMajor is the major version of the ffmpeg on PATH, or 0 if unreadable.
-func ffmpegMajor(t *testing.T, ffmpeg string) int {
-	t.Helper()
-	out, err := exec.Command(ffmpeg, "-version").Output()
-	if err != nil {
-		return 0
-	}
-	m := regexp.MustCompile(`ffmpeg version n?(\d+)\.`).FindSubmatch(out)
-	if m == nil {
-		return 0
-	}
-	n, _ := strconv.Atoi(string(m[1]))
-	return n
-}
-
-// tailSlack is how much longer than requested a stream-copied clip may run.
+// assertDuration holds a clip to the length asked for, a frame and a half
+// either way: a container rounds, and an audio track can run a packet past the
+// last video frame.
 //
-// FFmpeg CHANGED THIS between the versions this project supports, and the
-// difference is a whole GOP rather than rounding. Measured on the fixture these
-// tests build (one-second GOP), asking for 4.4s of copy:
-//
-//	ffmpeg 6.1.2  ->  5.402s     one GOP long
-//	ffmpeg 8.1.2  ->  4.423s     as asked
-//
-// 6.x keeps the packets through the end of the GOP containing the out point;
-// 8.x stops at the out point. Neither is wrong — a stream copy can only cut on
-// packet boundaries, and which side of the boundary to land on is a choice —
-// but it is user-visible: on FFmpeg 6.x a copied clip can run up to one GOP
-// longer than the operator asked for, in BOTH fast and precise mode, because
-// precise only re-encodes the head and copies the tail.
-//
-// The floor is 6.0, so this cannot simply be asserted away. It is allowed for
-// explicitly, keyed to the version, so the assertion stays tight on 8.x rather
-// than being loosened everywhere to accommodate the oldest supported build.
-func tailSlack(t *testing.T, ffmpeg string) time.Duration {
-	t.Helper()
-	if ffmpegMajor(t, ffmpeg) < 8 {
-		// One GOP of the fixture, plus the ordinary rounding slack.
-		return 1120 * time.Millisecond
-	}
-	return 120 * time.Millisecond
-}
-
+// ONE TOLERANCE FOR EVERY BUILD. A stream copy used to be allowed a whole extra
+// GOP of overshoot on FFmpeg 6.x, which kept the packets through the end of the
+// GOP containing the out point (measured on this fixture, 4.4s asked: 6.1.2
+// gave 5.402s, 8.1.2 gave 4.423s). The floor is 8.0 now, every build
+// polyemesis starts against stops at the out point, and an overshoot of a GOP
+// is a regression to report rather than one to absorb.
 func assertDuration(t *testing.T, ffprobe, path string, want time.Duration) {
 	t.Helper()
-	assertDurationWithin(t, ffprobe, path, want, 120*time.Millisecond)
-}
-
-// assertDurationWithin allows an explicit overshoot. Undershoot is always held
-// to a frame and a half: a clip that is SHORT has lost content, and no FFmpeg
-// version does that legitimately.
-func assertDurationWithin(t *testing.T, ffprobe, path string, want, over time.Duration) {
-	t.Helper()
+	const slack = 120 * time.Millisecond
 	out, err := exec.Command(ffprobe, "-v", "error",
 		"-show_entries", "format=duration", "-of", "csv=p=0", path).Output()
 	if err != nil {
@@ -320,10 +279,8 @@ func assertDurationWithin(t *testing.T, ffprobe, path string, want, over time.Du
 		t.Fatalf("unreadable duration %q: %v", out, err)
 	}
 	got := time.Duration(secs * float64(time.Second))
-	// A frame and a half of slack under: a container rounds, and an audio track
-	// can run a packet past the last video frame.
-	if diff := got - want; diff > over || diff < -120*time.Millisecond {
-		t.Fatalf("the clip runs %s, want about %s (allowed +%s/-120ms)", got, want, over)
+	if diff := got - want; diff > slack || diff < -slack {
+		t.Fatalf("the clip runs %s, want about %s (allowed +/-%s)", got, want, slack)
 	}
 }
 

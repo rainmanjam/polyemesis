@@ -53,7 +53,7 @@ const fields = [
 const steps = [
   {
     name: "Check that your FFmpeg speaks SRT",
-    text: "Run ffmpeg -version and ffmpeg -protocols to confirm FFmpeg 6.0 or newer with the srt protocol. Without SRT you are limited to single-track RTMP. Docker bundles a known-good build and skips the check.",
+    text: "Run ffmpeg -version and ffmpeg -protocols to confirm FFmpeg 8.0 or later with the srt protocol. Without SRT you are limited to single-track RTMP. Docker bundles a known-good build and skips the check.",
   },
   {
     name: "Run the server and set an admin password",
@@ -240,7 +240,7 @@ const steps = [
       </p>
       <CodeBlock
         label="check ffmpeg"
-        code={`ffmpeg -version | head -1                       # 6.0 or newer
+        code={`ffmpeg -version | head -1                       # 8.0 or later
 ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
       />
 
@@ -297,7 +297,7 @@ ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
         totalTime: "PT10M",
         tool: [
           { "@type": "HowToTool", name: "OBS Studio" },
-          { "@type": "HowToTool", name: "FFmpeg 6.0 or newer, built with libsrt" },
+          { "@type": "HowToTool", name: "FFmpeg 8.0 or later, built with libsrt" },
         ],
         supply: [{ "@type": "HowToSupply", name: "A machine to run polyemesis on" }],
         step: steps.map((s) => ({
@@ -346,10 +346,9 @@ ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
       </dl>
       <p class="mt-6 text-sm leading-relaxed text-subtle">
         One more, for completeness: OBS 30.2 and newer can carry several audio
-        tracks over Enhanced RTMP, and FFmpeg has demuxed that since 7.1 — but a
-        run with OBS itself as the publisher is still unconfirmed here, and
-        Ubuntu 24.04’s stock 6.1.1 drops the extra tracks with no error at either
-        end. SRT is the path that is operated and tested. Use it.
+        tracks over Enhanced RTMP, and every FFmpeg polyemesis supports demuxes
+        it — but a run with OBS itself as the publisher is still unconfirmed
+        here. SRT is the path that is operated and tested. Use it.
       </p>
     </div>
   </section>

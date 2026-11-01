@@ -155,7 +155,7 @@ const DOCS_BY_SECTION = {
      * mentions of SRT in this file and not one "SRT server" — which is how a
      * page ends up invisible for the thing it does. */
     ["INSTALL.md", "Install polyemesis — an SRT server on your own box",
-      "One binary and FFmpeg 6.0 or newer, built with SRT. Docker, the systemd unit, the macOS and Windows paths, and how to verify the install really works."],
+      "One binary and FFmpeg 8.0 or later, built with SRT. Docker, the systemd unit, the macOS and Windows paths, and how to verify the install really works."],
     /* The detail in the description is the one that costs people an evening:
      * multitrack SRT out of OBS is configured on the RECORDING tab as a Custom
      * Output (FFmpeg), not on the Stream tab where everyone looks first. It is

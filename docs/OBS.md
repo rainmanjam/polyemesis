@@ -7,8 +7,7 @@ single track over RTMP. OBS is what most people use, so it gets its own page.
 > the Enhanced RTMP multitrack format. FFmpeg gained multitrack FLV demuxing in
 > late 2024, so a new enough build carries those tracks through polyemesis's
 > existing ingest command unchanged — verified up to six tracks on FFmpeg 8.1.
-> Ubuntu 24.04's stock FFmpeg 6.1.1 cannot: it refuses with *"at most one audio
-> stream is supported in flv"*.
+> Every FFmpeg polyemesis supports (8.0 or later) does this.
 >
 > **OBS cannot either, and that is now measured rather than open.** OBS 30.2.3
 > was run headless against a real polyemesis with three tracks configured,
@@ -28,8 +27,8 @@ choosing one is deliberate rather than accidental.
   exists for
 - [Standard RTMP](#standard-rtmp-single-track) — one stereo pair, for encoders
   that cannot do SRT
-- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-works-on-ffmpeg-71-not-from-obs)
-  — works on FFmpeg 7.1+, and OBS does not send it
+- [Enhanced RTMP multitrack](#enhanced-rtmp-multitrack-works-on-every-supported-ffmpeg-not-from-obs)
+  — works on every supported FFmpeg, and OBS does not send it
 
 ---
 
@@ -163,24 +162,18 @@ SRT, use SRT.
 
 ---
 
-## Enhanced RTMP multitrack (works on FFmpeg 7.1+, not from OBS)
+## Enhanced RTMP multitrack (works on every supported FFmpeg, not from OBS)
 
 OBS 30.2+ can send multiple audio tracks over Enhanced RTMP/FLV.
 
-It works on a new enough FFmpeg. Multitrack FLV demuxing landed in FFmpeg 7.1,
-and from there the tracks arrive through polyemesis's existing ingest command
-unchanged — verified end to end: a destination configured for tracks 1 and 3
-received exactly those two and neither of the others. It does **not** work on
-FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
-one audio stream is supported in flv"*, and the extra tracks are lost with no
-error at either end.
+It works on every FFmpeg polyemesis supports (8.0 or later): the tracks arrive
+through polyemesis's existing ingest command unchanged — verified end to end: a
+destination configured for tracks 1 and 3 received exactly those two and
+neither of the others.
 
-**That build is what one of the images we ship runs.** `Dockerfile.cuda` is
-based on `nvidia/cuda:12.6.3-base-ubuntu24.04` and pins `7:6.1.1-3ubuntu5`
-(`Dockerfile.cuda:132`), so this section does not apply to the CUDA image at
-all — it is below the 7.1 floor. The default Alpine image (FFmpeg 8.1.2) and
-`Dockerfile.vaapi` (8.0.1) are above it. If you need NVENC *and* multitrack
-RTMP ingest, you cannot get both from the images in this repository today.
+Every image in this repository carries it: the default Alpine image (FFmpeg
+8.1.3), `Dockerfile.vaapi` (8.0.1) and `Dockerfile.cuda` (a pinned static 8.1.3
+build), so NVENC and multitrack RTMP ingest now come together.
 
 What has not been done is a run with OBS itself as the publisher — the testing
 used FFmpeg. OBS writes the same `MULTITRACKTYPE_ONE_TRACK` format (read from

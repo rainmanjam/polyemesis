@@ -137,13 +137,12 @@ host at `docker run` time or it does not arrive.
 | `Dockerfile.cuda` | `nvidia/cuda:*-base-ubuntu24.04` | NVIDIA / NVENC |
 | `Dockerfile.vaapi` | `ubuntu:26.04` | Intel and AMD / VA-API and QSV |
 
-> **`Dockerfile.cuda` cannot do Enhanced RTMP multitrack ingest.** It pins its
-> base's stock FFmpeg, `7:6.1.1-3ubuntu5` (`Dockerfile.cuda:132`), and multitrack
-> FLV demuxing landed in FFmpeg **7.1** — see
-> [OBS.md](OBS.md#enhanced-rtmp-multitrack-works-on-ffmpeg-71-not-from-obs). The
-> default Alpine image (8.1.3) and `Dockerfile.vaapi` (8.0.1) are both above that
-> floor; this one is the exception, and choosing it for NVENC is choosing to give
-> up that ingest path.
+> **All three images carry FFmpeg 8 and Enhanced RTMP multitrack ingest.**
+> `Dockerfile.cuda` used to install its Ubuntu 24.04 base's stock FFmpeg 6.1.1,
+> which is below polyemesis's 8.0 floor; it now installs a pinned, sha256-checked
+> static FFmpeg 8.1.3 (BtbN, the build `scripts/install.sh` uses) and asserts
+> NVENC and libsrt at build time. See
+> [OBS.md](OBS.md#enhanced-rtmp-multitrack-works-on-every-supported-ffmpeg-not-from-obs).
 
 `docker-compose.yml` carries all three as one file: the default service is
 active, the two GPU variants are commented out just below it. Uncomment one,
@@ -357,9 +356,18 @@ prints.
 
 ### `Driver does not support the required nvenc API version. Required: X.Y Found: A.B`
 
-Both verbatim from FFmpeg 6.1.1. The host driver is older than the NVENC API
-this FFmpeg was built against. FFmpeg prints the exact version it wants — take
-that number rather than any table, and update the **host** driver. Nothing
+Both verbatim from FFmpeg 6.1.1, and both still present in the 8.1.3 build the
+CUDA image ships (read out of its `bin/ffmpeg`). The host driver is older than
+the NVENC API this FFmpeg was built against. FFmpeg prints the exact version it
+wants — take that number rather than any table, and update the **host** driver.
+
+**The CUDA image's driver floor for NVENC is 570.0 (Linux).** Its FFmpeg is
+BtbN's static 8.1.3, built against NVENC SDK 13.0 (nv-codec-headers `sdk/13.0`,
+BtbN `scripts.d/50-ffnvcodec.sh`), and FFmpeg n8.1.3's `libavcodec/nvenc.c`
+maps SDK 13.0 to a minimum driver of `570.0`. Before the 8.0 floor the image
+carried Ubuntu 24.04's 6.1.1, built against an SDK 12.x header set, whose
+minimums are 520.56–550.54 — so a host driver that encoded with the old image
+but is older than 570 gets the message above with the new one. Nothing
 inside the container can fix this: the encode library comes from the host, so a
 newer image is not the answer.
 

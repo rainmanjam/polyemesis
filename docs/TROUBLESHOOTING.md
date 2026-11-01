@@ -9,7 +9,7 @@ Two commands answer a surprising share of problems:
 
 ```sh
 polyemesis -log debug          # logs every child's full command line as it spawns
-ffmpeg -version | head -1      # 6.0+ required
+ffmpeg -version | head -1      # 8.0 or later required
 ```
 
 And one page: **Monitoring** shows each running process with its own FFmpeg
@@ -721,27 +721,6 @@ the exact evidence gap the label exists to mark.
 ---
 
 ## Recordings and jobs
-
-### A clip is up to a second longer than I asked for
-
-Check your FFmpeg major version. This changed between the versions polyemesis
-supports, and the difference is a whole GOP rather than rounding — measured on a
-one-second-GOP source, asking for a 4.4s clip:
-
-| FFmpeg | Result |
-|---|---|
-| 6.1.2 | **5.402s** — keeps the packets through the end of the GOP containing the out point |
-| 8.1.2 | 4.423s — stops at the out point |
-
-Neither is wrong: a stream copy can only cut on packet boundaries, and which
-side of the boundary to land on is a choice. But on **FFmpeg 6.x a copied clip
-can run up to one GOP long**, and that applies to precise mode too — precise
-re-encodes only the *head* and copies the tail.
-
-It only shows up when the out point falls mid-GOP. An out point that lands on a
-keyframe is exact on both.
-
-If you need exact out-points, use FFmpeg 8.x.
 
 ### Recording stopped on its own
 

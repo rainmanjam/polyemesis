@@ -186,7 +186,7 @@ func serverUnderTest(t *testing.T, h http.Handler) *Server {
 func fakeTools(encoders ...string) *ffmpeg.Tools {
 	return &ffmpeg.Tools{
 		FFmpeg: filepath.Join("/nonexistent", "ffmpeg"), FFprobe: filepath.Join("/nonexistent", "ffprobe"),
-		Version: "6.1", Major: 6, Minor: 1,
+		Version: "8.1", Major: 8, Minor: 1,
 		VideoEncoders: encoders,
 	}
 }

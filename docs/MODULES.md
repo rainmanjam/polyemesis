@@ -154,7 +154,7 @@ architectural choice, not an omission: see
 
 | Tool | Requirement | Licence | Why |
 |---|---|---|---|
-| **FFmpeg** | 6.0+ required, 8.1.3 or 9.0.2 recommended (never 9.0.0/9.0.1), **libsrt needed for multitrack** | LGPL-2.1+/GPL-2+ by build | Every ingest, route, encode and recording |
+| **FFmpeg** | 8.0 or later required; CI tests the latest 8.x (8.1.3) and 9.x (9.0.2) (never 9.0.0/9.0.1), **libsrt needed for multitrack** | LGPL-2.1+/GPL-2+ by build | Every ingest, route, encode and recording |
 | **ffprobe** | ships with FFmpeg | same | Stream probing, keyframe indexes, verification |
 | **whisper.cpp** | optional (`whisper`, `whisper-cli`, `whisper-cpp`) | MIT | Transcription. Absent means the feature is off, not broken |
 
@@ -173,20 +173,17 @@ do not reach polyemesis's own MIT-licensed code.
 | Image | Base | FFmpeg | Platforms |
 |---|---|---|---|
 | `Dockerfile` (default) | `alpine:3.24` | pinned `8.1.3-r0` | linux/amd64, linux/arm64 |
-| `Dockerfile.cuda` | `nvidia/cuda:12.6.3-base-ubuntu24.04` | pinned `7:6.1.1-3ubuntu5` | linux/amd64 |
+| `Dockerfile.cuda` | `nvidia/cuda:12.6.3-base-ubuntu24.04` | pinned static BtbN `n8.1.3-9-g29e619e767`, by sha256 | linux/amd64 |
 | `Dockerfile.vaapi` | `ubuntu:26.04` | pinned `7:8.0.1-3ubuntu2` | linux/amd64 |
 | build stages | `golang:1.27-alpine`, `node:24-alpine` | — | cross-compiled from `$BUILDPLATFORM` |
 
-> **The CUDA image is the one below the Enhanced RTMP floor.** Its base is
-> Ubuntu 24.04, whose stock FFmpeg is 6.1.1, and multitrack FLV demuxing landed
-> in FFmpeg **7.1** — so Enhanced RTMP multitrack ingest, which
-> [OBS.md](OBS.md), [FAQ.md](FAQ.md), [CONFIGURATION.md](CONFIGURATION.md) and
-> the README all describe as working on 7.1+, does **not** work in this image.
-> The default Alpine image (8.1.3) and the VA-API image (8.0.1) are both above
-> the floor. NVENC is what `Dockerfile.cuda` is for; if you also need multitrack
-> RTMP ingest, do not use it.
+> **The CUDA image's FFmpeg does not come from its base.** Ubuntu 24.04's stock
+> FFmpeg is 6.1.1, below polyemesis's 8.0 floor, and the only `nvidia/cuda`
+> `-base` tags on Ubuntu 26.04 are CUDA 13, whose `NVIDIA_REQUIRE_CUDA` check
+> would turn away older drivers. So the image keeps the 12.6.3 base and installs
+> the same dated, sha256-pinned static FFmpeg 8.1.3 build the installer uses.
 
-Runtime packages: `ffmpeg` (pinned exactly), `ca-certificates`, `tzdata`; plus
+Runtime packages: `ffmpeg` (pinned exactly; the CUDA image's is the static build above), `ca-certificates`, `tzdata`; plus
 `intel-media-va-driver`, `i965-va-driver` and `mesa-va-drivers` in the VA-API
 image.
 

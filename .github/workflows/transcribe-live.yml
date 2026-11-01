@@ -132,19 +132,45 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Cache FFmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+
       - name: Install FFmpeg
         timeout-minutes: 6
         run: |
           set -euo pipefail
-          # RETRIED, because a mirror that is slow rather than down turns one
-          # unlucky fetch into a red run and a rerun. Three attempts with a
-          # widening pause; the ceiling above still bounds the whole job.
-          for attempt in 1 2 3; do
-            sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg && break
-            echo "apt attempt $attempt failed"
-            [ "$attempt" = 3 ] && exit 1
-            sleep $(( attempt * 5 ))
-          done
+          # THE PINNED STATIC 8.1 BUILD, not apt. Ubuntu's package is 6.1.1,
+          # below the 8.0 floor polyemesis enforces, so it would refuse to start.
+          # The same dated BtbN asset and sha256 ci.yml, ffmpeg-compat.yml and
+          # scripts/install.sh pin; the hash comes from this file, not the release.
+          # RETRIED: a release CDN that is slow rather than down turns one
+          # unlucky fetch into a red run and a rerun.
+          FFCACHE=/tmp/ffcache
+          if [ -x "$FFCACHE/ffmpeg" ] && [ -x "$FFCACHE/ffprobe" ]; then
+            echo "ffmpeg restored from cache"
+          else
+            for attempt in 1 2 3; do
+              if curl -fsSL --proto '=https' --proto-redir '=https' \
+                   --retry 3 --retry-all-errors --retry-delay 5 \
+                   --connect-timeout 20 --max-time 90 \
+                   -o /tmp/ff.tar.xz \
+                   "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz"; then
+                break
+              fi
+              echo "ffmpeg download attempt $attempt failed"
+              [ "$attempt" = 3 ] && exit 1
+              sleep 5
+            done
+            echo "97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79  /tmp/ff.tar.xz" | sha256sum -c -
+            mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild
+            mkdir -p "$FFCACHE"
+            cp /tmp/ffbuild/bin/ffmpeg /tmp/ffbuild/bin/ffprobe "$FFCACHE/"
+          fi
+          sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
+          sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
           # THE THREE THINGS THIS SUITE ACTUALLY NEEDS, asserted rather than
           # assumed. A `ffmpeg -version` that prints is not a build that can
           # write the fixture: without libx264 there is no video stream, and
