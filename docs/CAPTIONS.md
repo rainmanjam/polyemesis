@@ -61,6 +61,30 @@ stream, but not the carriage in the SEI. It stays off until a live check passes.
 - Burn-in (captions drawn into the picture of a rendition) needs an FFmpeg build
   with `libass`. It is not wired yet.
 
+## How the captioner is driven
+
+The captioner runs for a programme when at least one of its enabled destinations
+has a caption mode that its platform accepts. It transcribes the track the
+programme chose (automatic when none is chosen). Turning every captioned
+destination off stops it. A destination's broadcast delay decides when its
+captions are released, so a destination set to 30 seconds receives each caption
+30 seconds after it was spoken, which keeps the words with the picture.
+
+Two safety rules apply:
+
+- If the stream health guard stops captioning to protect the broadcast, it stays
+  stopped through later reconciles. It starts again only after you save a
+  caption-relevant setting (a mode, a delay or the track).
+- Stopping the captioner cancels every caption still waiting for a destination's
+  delay. Nothing is sent after the stop.
+
+**Current state:** the engine releases each caption to every captioned
+destination at its delay, but no output consumes those captions yet. The SEI
+injector and the YouTube caption POST are not connected, so nothing reaches a
+platform from this path. The custom vocabulary and the profanity filter exist
+as a tested policy in code, but no operator setting stores them yet, so the
+policy is empty and captions are shown as recognised.
+
 ## Verifying a route on your channel
 
 Each route marked provisional or live-check needs one test on a real channel

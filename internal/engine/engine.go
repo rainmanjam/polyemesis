@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -377,6 +378,17 @@ type Engine struct {
 	captPort int
 	captHub  *relay.Hub
 	captVTT  *transcribe.LiveVTT
+	// captRoute fans the captioner's cues out to the captioned destinations, each
+	// behind its own broadcast delay (#11). It lives and dies with the captioner.
+	captRoute *captions.CueRouter
+	// captDesired is the signature of the last configuration the destinations
+	// asked for. The captioner's switch follows the destinations only when this
+	// changes, so a degrade that switched it off stays off until the operator
+	// saves something (the health guard is not overridden by a reconcile).
+	captDesired string
+	// captTargets are the captioned destinations and their delays, as the last
+	// reconcile decided them. A route started later begins with this set.
+	captTargets []captions.CueTarget
 	// captWarn is why captioning stopped, kept after the captioner is gone so
 	// the operator finds out. A caption stream that vanishes silently is the
 	// failure mode this whole feature is designed against.
@@ -4840,6 +4852,11 @@ func (e *Engine) SetTranscriber(w *transcribe.Tools, modelsDir string, nice func
 
 // SetLiveCaptions turns realtime captioning on or off.
 //
+// It must not be called from the reconcile path: it ends in Reconcile, which
+// takes reconcileMu and is not reentrant. The destinations drive the switch from
+// inside Reconcile (see captionIntentNow), so this stays the operator's override
+// for callers outside a reconcile.
+//
 // Off is the default and an upgrade never turns it on: this is the one job that
 // takes CPU away from a live broadcast, and nobody should discover that by
 // noticing dropped frames.
@@ -4856,14 +4873,11 @@ func (e *Engine) SetLiveCaptions(cfg transcribe.LiveConfig) error {
 		return fmt.Errorf("%s", w.Unavailable())
 	}
 
-	e.mu.Lock()
-	e.captCfg, e.captOn = cfg, cfg.Enabled
-	if cfg.Enabled {
-		// A fresh opt-in clears the last refusal. The operator has seen it and
-		// chosen to try again, possibly with a smaller model.
-		e.captWarn = ""
+	// A fresh opt-in clears the last refusal inside setCaptionConfig. The operator
+	// has seen it and chosen to try again, possibly with a smaller model.
+	if err := e.setCaptionConfig(cfg); err != nil {
+		return err
 	}
-	e.mu.Unlock()
 	return e.Reconcile()
 }
 
@@ -4909,6 +4923,17 @@ func (e *Engine) LiveCaptions() CaptionStatus {
 // can read and nothing more — a destination must never be held back because
 // speech recognition could not start.
 func (e *Engine) reconcileCaptions() {
+	// The destinations decide whether captions are wanted and which track they
+	// use. They are read first so the snapshot below sees the decision. A failed
+	// read keeps whatever the captioner was doing: a database hiccup must not
+	// stop a running captioner.
+	if in, err := e.captionIntentNow(); err != nil {
+		e.log.Warn("live captions: could not read the destinations; keeping the current captioner", "err", err)
+	} else {
+		e.applyCaptionIntent(in)
+		e.syncCaptionRoute(in.targets)
+	}
+
 	e.mu.RLock()
 	on, cfg, cur, sig, stopped := e.captOn, e.captCfg, e.capt, e.captSig, e.stopped
 	whisper, modelsDir, nice := e.whisper, e.whisperDir, e.whisperNice
@@ -4986,14 +5011,34 @@ func (e *Engine) reconcileCaptions() {
 		vtt = nil
 	}
 
-	capt, err := transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
-		transcribe.WithLiveNice(nice),
-		transcribe.WithLiveEmit(func(c transcribe.LiveCaption) {
-			if err := vtt.Append(c); err != nil {
+	// One route per captioner. It is closed on every path that does not hand it
+	// to e.captRoute, so a run that never starts leaves no timer behind.
+	route := captions.NewCueRouter(captionSinkInert{}, nil, nil)
+	route.SetTargets(e.captionTargets())
+	routeHeld := false
+	defer func() {
+		if !routeHeld {
+			route.Close()
+		}
+	}()
+	fan := &captions.Fanout{
+		Policy: e.captionPolicy(),
+		Sidecar: func(c transcribe.LiveCaption) error {
+			err := vtt.Append(c)
+			if err != nil {
 				e.log.Warn("live captions: sidecar write failed", "err", err)
 			}
+			return err
+		},
+		Publish: func(c transcribe.LiveCaption) {
 			e.bus.Publish(events.TypeCaption, CaptionEvent{Line: &c})
-		}),
+		},
+		Route: route,
+	}
+
+	capt, err := transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
+		transcribe.WithLiveNice(nice),
+		transcribe.WithLiveEmit(fan.Emit),
 		transcribe.WithLiveDegrade(e.onCaptionsDegraded),
 	)
 	if err != nil {
@@ -5024,6 +5069,8 @@ func (e *Engine) reconcileCaptions() {
 	}
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = capt, port, hub, vtt, want
 	e.captCfg = capt.Config()
+	e.captRoute = route
+	routeHeld = true
 	e.mu.Unlock()
 
 	// Warn, not Info. This is the one thing in the pipeline that takes CPU away
@@ -5079,6 +5126,15 @@ func (e *Engine) publishCaptionStatus() {
 }
 
 func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *relay.Hub, vtt *transcribe.LiveVTT) {
+	// The route goes first: no delayed caption may be delivered for a captioner
+	// that is already stopping.
+	e.mu.Lock()
+	route := e.captRoute
+	e.captRoute = nil
+	e.mu.Unlock()
+	if route != nil {
+		route.Close()
+	}
 	if c == nil {
 		_ = vtt.Close()
 		return

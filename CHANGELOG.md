@@ -10,6 +10,15 @@ its first tagged release.
 
 ### Added
 
+- **Live captions: engine wiring (#8 step B).** The captioner now runs for a
+  programme when one of its enabled destinations has a caption mode its platform
+  accepts, on the track the programme chose. Each captioned destination receives
+  its captions at its broadcast delay (#11), and stopping the captioner cancels
+  every caption still waiting. The health guard's switch-off stays latched until
+  an operator saves a caption setting. Captions pass one text policy at the emit
+  boundary. No output consumes the delayed captions yet (the SEI injector and the
+  YouTube caption POST are later steps), and no operator setting stores the
+  custom vocabulary or profanity filter yet, so the policy is empty.
 - **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in
   (OAuth 2.0 with PKCE, `broadcast.read`, `broadcast.write`, `offline.access`,
   `users.read`, `tweet.read`), stream-source minting, publish and end of an existing broadcast, chat read
