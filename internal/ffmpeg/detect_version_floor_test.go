@@ -35,7 +35,7 @@ func fakeVersionOnlyFFmpeg(t *testing.T, banner string) string {
 
 // TestAnUnreadableVersionIsRefusedAndNamed is the finding. The floor read
 // "if t.Major > 0 && t.Major < MinMajorVersion" and then, for Major == 0,
-// appended "(unrecognised version string; assuming >= 6.0)" to the version and
+// appended "(unrecognised version string; assuming >= 6.0)" -- the floor then -- to the version and
 // carried on. So the check only refused versions it could already parse: a
 // binary whose version string it could not read was admitted on a guess, and
 // the guess is wrong exactly when it matters -- a hand-built 4.x or 5.x, which
@@ -58,6 +58,9 @@ func TestAnUnreadableVersionIsRefusedAndNamed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), AssumeMajorEnv) {
 		t.Errorf("the refusal does not name the way out: %v", err)
+	}
+	if strings.Contains(err.Error(), "apt install ffmpeg") {
+		t.Errorf("the refusal recommends apt, which is where 6.1.1 and 7.1.5 come from: %v", err)
 	}
 }
 
@@ -95,42 +98,104 @@ func TestTheOperatorCanStateTheVersionThemselves(t *testing.T) {
 }
 
 // It is a claim, not an override: it cannot be used to get under the floor.
+//
+// AT THE BOUNDARY, not far below it. The case used to be "4", which a floor of
+// 6 refused and a floor of 7 or 8 refuses too -- so it could not tell which
+// floor was in force. 7 is the newest major the floor exists to keep out, and
+// it is the one an operator on Debian 13's 7.1.5 would reach for.
 func TestTheEscapeHatchCannotBeUsedToRunAnOldBuild(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "4")
+	t.Setenv(AssumeMajorEnv, "7")
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
-	if _, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe")); err == nil {
-		t.Fatal("POLYEMESIS_FFMPEG_ASSUME_MAJOR=4 got past a floor of 6")
+	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	if err == nil {
+		t.Fatal("POLYEMESIS_FFMPEG_ASSUME_MAJOR=7 got past a floor of 8")
+	}
+	// The refusal has to say what to do, not only that the answer was wrong.
+	if !strings.Contains(err.Error(), "8.0 or newer") {
+		t.Errorf("the refusal does not name the floor: %v", err)
+	}
+}
+
+// And the floor itself is admitted through the same hatch: 8 is a claim the
+// operator is allowed to make.
+func TestTheEscapeHatchAdmitsAClaimOfExactlyTheFloor(t *testing.T) {
+	t.Setenv(AssumeMajorEnv, "8")
+	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
+	tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+	if err != nil {
+		t.Fatalf("POLYEMESIS_FFMPEG_ASSUME_MAJOR=8 was refused: %v", err)
+	}
+	if tools.Major != MinMajorVersion {
+		t.Errorf("Major = %d, want %d", tools.Major, MinMajorVersion)
 	}
 }
 
 // A typo must not read as "unset" and drop the operator back at the original
 // refusal with no idea why their answer was ignored.
 func TestATypoInTheEscapeHatchSaysSo(t *testing.T) {
-	t.Setenv(AssumeMajorEnv, "7.1")
+	t.Setenv(AssumeMajorEnv, "8.1")
 	bin := fakeVersionOnlyFFmpeg(t, "ffmpeg version SOMEVENDOR-BUILD")
 	_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
 	if err == nil {
 		t.Fatal("a malformed value was accepted")
 	}
-	if !strings.Contains(err.Error(), "7.1") {
+	if !strings.Contains(err.Error(), "8.1") {
 		t.Errorf("the error does not quote what was set: %v", err)
 	}
 }
 
-// The parseable cases are unchanged, and pinned so the fail-closed branch
-// cannot quietly grow to cover them.
+// The parseable cases decide on their own number, and are pinned AT THE
+// BOUNDARY so the fail-closed branch cannot quietly grow to cover them and the
+// floor cannot drift without a test noticing.
+//
+// The refused builds are the ones operators really have: Ubuntu 24.04's stock
+// 6.1.1 and Debian 13's 7.1.5. Both cleared the old 6.0 floor and neither can
+// carry Enhanced RTMP multitrack (two-track FLV), which is why the floor is 8.
 func TestAReadableVersionStillDecidesOnItsOwnNumber(t *testing.T) {
 	t.Setenv(AssumeMajorEnv, "")
-	old := fakeVersionOnlyFFmpeg(t, "ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021")
-	if _, err := Detect(context.Background(), old, filepath.Join(filepath.Dir(old), "ffprobe")); err == nil {
-		t.Error("FFmpeg 4.4 was admitted")
+	for _, banner := range []string{
+		"ffmpeg version 4.4.2-0ubuntu0.22.04.1 Copyright (c) 2000-2021",
+		"ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023",
+		"ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2025",
+		"ffmpeg version n7.1.3 Copyright (c) 2000-2025",
+	} {
+		bin := fakeVersionOnlyFFmpeg(t, banner)
+		_, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+		if err == nil {
+			t.Errorf("%q was admitted below the 8.0 floor", banner)
+			continue
+		}
+		// THE REFUSAL IS THE OPERATOR'S ONLY INSTRUCTIONS. It has to name the
+		// floor and every way past it, because this is read at a terminal by
+		// someone whose distribution just handed them the build being refused.
+		for _, want := range []string{"8.0 or newer", "install.sh", "Docker"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q: the refusal does not mention %q: %v", banner, want, err)
+			}
+		}
+		// And it must not send them back to the package manager that gave them
+		// the old build in the first place.
+		if strings.Contains(err.Error(), "apt install ffmpeg") {
+			t.Errorf("%q: the refusal recommends apt, which is where 6.1.1 and 7.1.5 come from: %v", banner, err)
+		}
 	}
-	ok := fakeVersionOnlyFFmpeg(t, "ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023")
-	tools, err := Detect(context.Background(), ok, filepath.Join(filepath.Dir(ok), "ffprobe"))
-	if err != nil {
-		t.Fatalf("FFmpeg 6.1.1 was refused: %v", err)
-	}
-	if tools.Major != 6 || tools.Minor != 1 {
-		t.Errorf("version = %d.%d, want 6.1", tools.Major, tools.Minor)
+
+	for _, c := range []struct {
+		banner       string
+		major, minor int
+	}{
+		{"ffmpeg version 8.0.1-3ubuntu2 Copyright (c) 2000-2025", 8, 0},
+		{"ffmpeg version n8.1.3-9-g29e619e767-20260930 Copyright (c) 2000-2026", 8, 1},
+		{"ffmpeg version 9.0.2 Copyright (c) 2000-2026", 9, 0},
+	} {
+		bin := fakeVersionOnlyFFmpeg(t, c.banner)
+		tools, err := Detect(context.Background(), bin, filepath.Join(filepath.Dir(bin), "ffprobe"))
+		if err != nil {
+			t.Errorf("%q was refused: %v", c.banner, err)
+			continue
+		}
+		if tools.Major != c.major || tools.Minor != c.minor {
+			t.Errorf("%q: version = %d.%d, want %d.%d", c.banner, tools.Major, tools.Minor, c.major, c.minor)
+		}
 	}
 }

@@ -115,7 +115,7 @@ roadmap.
 
 | | |
 |---|---|
-| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on FFmpeg 7.1+ — verified end to end — but not on FFmpeg 6.1.1, and not yet confirmed with OBS publishing. SRT is what is operated. See `docs/evidence/enhanced-rtmp-multitrack.md`. |
+| **RTMP multitrack is not the operated path.** | Classic RTMP carries one stereo pair. Enhanced RTMP (OBS 30.2+) carries more and works on every supported FFmpeg (8.0 or later) — verified end to end — but is not yet confirmed with OBS publishing. SRT is what is operated. See `docs/evidence/enhanced-rtmp-multitrack.md`. |
 | **No per-source ports.** | Every push source is addressed by its token on one SRT port, or its stream key on one RTMP port. Giving one programme its own port for firewall, NIC or QoS purposes is not something polyemesis does. [Why](docs/DESIGN-ONE-PORT-ONLY.md#what-it-costs) |
 | **One user, no roles.** | No multi-user model, no per-destination permissions. Access to the UI is full control of the server's streaming — and, through file destinations and expert mode, meaningful control of the machine. |
 | **Instagram Live cannot work.** | There is no Live broadcast API, and Live Producer's RTMP path was removed for most accounts. It is listed and marked unsupported rather than shipped as a preset that quietly never connects. |
@@ -202,8 +202,8 @@ stream. Per-platform installation, service files and the GPU images are in
 
 ### Requirements
 
-**FFmpeg 6.0 or newer, with libsrt.** Two separate things, and they fail
-differently: polyemesis **refuses to start** on FFmpeg older than 6.0, and
+**FFmpeg 8.0 or later, with libsrt.** Two separate things, and they fail
+differently: polyemesis **refuses to start** on FFmpeg older than 8.0, and
 starts-with-a-warning on a build that has no SRT — leaving you RTMP, which is
 one stereo pair and therefore nothing to route.
 
@@ -215,9 +215,11 @@ ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 Use the exact match. `grep srt` also matches `srtp`, a different protocol that
 every build lists, so the loose check passes everywhere and tells you nothing.
 
-Several current server distributions ship an FFmpeg that is too old — Ubuntu
-22.04 and Debian 12 both fail the floor — so `apt install ffmpeg` is not a
-universal answer, and Homebrew's macOS build has no SRT at all.
+Ubuntu 26.04 packages FFmpeg 8.0. Several other current server distributions
+ship one that is too old — Ubuntu 24.04 (6.1.1), Debian 13 (7.1.5) and older all
+fail the floor — so `apt install ffmpeg` is not a universal answer, and
+Homebrew's macOS build has no SRT at all. The installer fetches a pinned static
+FFmpeg 8 build for you (`--ffmpeg force`), and the Docker image bundles one.
 [docs/INSTALL.md](docs/INSTALL.md#the-ffmpeg-requirement) has the
 per-distribution table and the ways out.
 

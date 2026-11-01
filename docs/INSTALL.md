@@ -2,7 +2,7 @@
 
 One binary, one dependency. The binary is self-contained — the React UI is
 embedded, SQLite is pure Go, there is no cgo and no runtime library to install.
-The dependency is **FFmpeg 6.0 or newer**, and it is where essentially every
+The dependency is **FFmpeg 8.0 or later**, and it is where essentially every
 installation problem comes from. Read the FFmpeg part of your platform's
 section even if you skip the rest.
 
@@ -34,7 +34,7 @@ sudo bash install.sh
 
 It offers two modes. **Docker** bundles a known-good FFmpeg with libsrt, so
 nothing on the host matters. **Binary** installs the static binary plus a
-systemd unit, and will not proceed against an FFmpeg below 6.0 — naming your
+systemd unit, and will not proceed against an FFmpeg below 8.0 — naming your
 distribution's actual version when it recognises it — rather than installing a
 service that cannot start. It offers to install a current FFmpeg for you at
 that point; declining is what stops the install, not the old version itself.
@@ -99,20 +99,16 @@ flowchart TD
     parse -- no --> unknown["warns and continues —<br/>unknown is not the same as too old"]
     parse -- yes --> major{"major version"}
 
-    major -- "below 6" --> tooold["names your distro's actual version,<br/><b>then offers to install 8.1</b><br/><i>required</i>"]
-    major -- "6 or 7" --> old["<b>offers to install 8.1</b><br/><i>optional — you only lose<br/>multitrack FLV by declining</i>"]
-    major -- "8 or newer" --> fine["matches what the container ships"]
+    major -- "below 8" --> tooold["names your distro's actual version,<br/><b>then offers to install 8.1</b><br/><i>required</i>"]
+    major -- "8 or newer" --> fine["clears the 8.0 floor"]
 
     none --> offer
     tooold --> offer
-    old --> offer
 
     offer["offer_ffmpeg_upgrade<br/>static 8.1 build →  /usr/local/bin<br/><b>libsrt verified before anything<br/>is displaced</b>; distro copy untouched"]
     offer --> took{"installed?"}
     took -- yes --> okpath["floor cleared"]
-    took -- "no (declined,<br/>skipped, or unattended)" --> verdict{"was it required?"}
-    verdict -- yes --> stop["<b>install stops here</b>"]
-    verdict -- no --> okpath
+    took -- "no (declined,<br/>skipped, or unattended)" --> stop["<b>install stops here</b>"]
 
     stop:::halt
     classDef halt fill:#4a1d22,stroke:#c0524f,color:#ffdfe0
@@ -121,10 +117,12 @@ flowchart TD
 Two things about that gate are worth stating plainly, because they are the
 parts people get caught by:
 
-**Declining is only fatal when it was required.** At 6.x or 7.x you are simply
-choosing to stay put, and everything except multitrack FLV behaves identically.
-Below the floor — or with no FFmpeg at all — declining ends the install, because
-polyemesis will not start against what you have.
+**Declining ends the install when polyemesis could not start.** With no FFmpeg,
+or one below the 8.0 floor, saying no leaves nothing to install against. An
+FFmpeg without libsrt is the one exception: polyemesis starts on it with RTMP
+only, so after you decline the installer asks whether to continue without SRT.
+There is no "works, but older" band any more: with the floor at 8.0, a host
+either clears it or does not.
 
 **`--check` never installs anything, including with `--ffmpeg force`.** That
 combination reads as two reasonable flags, and a preflight that replaced a
@@ -160,7 +158,7 @@ in a way nobody would connect back to this installer.
 
 ### The libsrt check, which is separate from the version
 
-Clearing 6.0 and having SRT are two different questions, and an FFmpeg can pass
+Clearing 8.0 and having SRT are two different questions, and an FFmpeg can pass
 the first and fail the second — Homebrew's does, and so do several distribution
 builds. That matters more than it sounds: RTMP carries **one stereo pair**, so
 per-destination audio routing has nothing to route from, which is the main
@@ -446,11 +444,13 @@ If you are choosing where to run this, run it on Linux.
 
 Two separate checks, and they fail differently:
 
-**Version — 6.0 or newer, enforced.** polyemesis probes `ffmpeg -version` before
+**Version — 8.0 or later, enforced.** polyemesis probes `ffmpeg -version` before
 it opens the database and **refuses to start** on anything older, with a message
-naming the binary and the version it found. The floor is 6.0 because multi-track
-MPEG-TS mapping, the channel-layout API behind the audio mix matrix, and the
-`-progress` fields the supervisor parses are only reliable from 6.x onwards.
+naming the binary, the version it found, and the three ways past it: FFmpeg 8
+from your platform, the installer's pinned static build, or the Docker image.
+The floor is 8.0 because Enhanced RTMP multitrack and two-track FLV need a
+recent FFmpeg, and because 8.x and 9.x are what polyemesis ships and tests —
+CI runs the latest release of each line.
 
 **SRT — the reliable path to multitrack ingest, not enforced.** A build without
 libsrt starts fine and warns. You can reach the UI and switch ingest to RTMP,
@@ -459,8 +459,8 @@ has nothing to route from.
 
 Enhanced RTMP is the exception, and it is a real one: it carries multiple audio
 tracks and polyemesis ingests them. It is not an equal substitute, though —
-that path is verified with FFmpeg 7.1+ as the publisher, does not work on 6.1.1,
-and has **not** been confirmed with OBS publishing. Since OBS is what most
+that path is verified with an FFmpeg publisher on every supported version, and
+has **not** been confirmed with OBS publishing. Since OBS is what most
 readers here are using, treat E-RTMP as a route worth trying rather than a
 replacement for SRT.
 
@@ -502,7 +502,7 @@ which bundles one and asserts it at build time.
 A fourth exists if your encoder speaks **Enhanced RTMP**, which does carry
 multiple audio tracks: polyemesis ingests those and the routing works normally,
 with no libsrt anywhere. The caveat is what keeps it fourth rather than first —
-verified with FFmpeg 7.1+ publishing, broken on 6.1.1, and unconfirmed with OBS.
+verified with FFmpeg publishing, and unconfirmed with OBS.
 If your encoder is OBS, fix the FFmpeg build instead.
 
 **Hardware encoders — nothing to install, nothing to configure.** Do *not* go
@@ -594,41 +594,42 @@ Docker daemon's own startup handles boot.
 
 ### Read this table first
 
-polyemesis needs FFmpeg 6.0+. Several current server distributions ship less
-than that, and `apt install ffmpeg` on them produces a binary polyemesis will
-refuse to start against.
+polyemesis needs FFmpeg 8.0 or later. Ubuntu 26.04 ships it; several other
+current server distributions ship less, and `apt install ffmpeg` on them
+produces a binary polyemesis will refuse to start against. The installer's
+pinned static build (below) is the quick way past that on any of them.
 
 | Distribution | Stock FFmpeg | polyemesis |
 |---|---|---|
 | Ubuntu 22.04 LTS (jammy) | **4.4.2** | **refuses to start** |
 | Debian 12 (bookworm) | **5.1.9** | **refuses to start** |
-| Ubuntu 24.04 LTS (noble) | 6.1.1 | works |
-| Debian 13 (trixie) | 7.1.5 | works |
-| Alpine 3.20 / 3.21 / 3.22 | 6.1.1 / 6.1.2 / 6.1.2 | works |
-| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.3 | works — 8.1.3 is what the shipped image pins; CI runs the 8.1 line |
-| Alpine edge, Debian sid, Arch, Homebrew | 9.0.2 | works — tested on 9.0.2; avoid 9.0.0 and 9.0.1 (below) |
+| Ubuntu 24.04 LTS (noble) | **6.1.1** | **refuses to start** |
+| Debian 13 (trixie) | **7.1.5** | **refuses to start** |
+| Alpine 3.20 / 3.21 / 3.22 | **6.1.1 / 6.1.2 / 6.1.2** | **refuses to start** |
+| Ubuntu 26.04 LTS | 8.0.1 | works |
+| Alpine 3.23 / 3.24 | 8.0.1 / 8.1.3 | works — 8.1.3 is what the shipped image pins; CI runs the latest 8.x |
+| Alpine edge, Debian sid, Arch, Homebrew | 9.0.2 | works — CI runs the latest 9.x; avoid 9.0.0 and 9.0.1 (below) |
 | RHEL / Rocky / AlmaLinux | not in the base repositories at all | see below |
 | Fedora, Arch, openSUSE | not checked | verify for your release |
 
 Checked against the distro package indexes on 2026-07-26 (`packages.ubuntu.com`,
-`packages.debian.org`, `pkgs.alpinelinux.org`). Versions move; if your release
+`packages.debian.org`, `pkgs.alpinelinux.org`); the Ubuntu 26.04 row with
+`apt-cache policy ffmpeg` in `ubuntu:26.04` on 2026-10-31. Versions move; if your release
 is not in this table, or you are reading this much later, run
 `apt-cache policy ffmpeg` (or your equivalent) and check the number yourself
 rather than trusting the row.
 
-**8.x is the exercised version, not an unknown.** The `Dockerfile` pins
-`FFMPEG_VERSION=8.1.3-r0`, the version Alpine 3.24 serves on linux/amd64 and
-linux/arm64, and the host test suites pin BtbN's `n8.1-latest-…-gpl-8.1` build
-on Linux and Windows. The
-suites moved off 6.1.1 deliberately: running a version nobody deploys meant a
-defect fatal on one and survivable on the other could stay invisible here for
-months. 6.1.1 and 7.x still clear the floor and still work — they are simply not
-what the container ships.
+**8.x and 9.x are the tested versions, and the only supported ones.** The
+`Dockerfile` pins `FFMPEG_VERSION=8.1.3-r0`, the version Alpine 3.24 serves on
+linux/amd64 and linux/arm64, and the host test suites pin BtbN's dated n8.1.3
+build, by sha256, on Linux and Windows. The `ffmpeg-compat` workflow runs the
+FFmpeg-using packages against the latest 8.x and the latest 9.x release. Nothing
+older is tested, which is why nothing older is accepted.
 
 **9.0.2 works; 9.0.0 and 9.0.1 do not belong in production.** Every package
 that runs FFmpeg passes on 9.0.2 (measured 2026-10-29, Linux and macOS), and the
-`ffmpeg-compat` workflow re-checks it, and the 6.1 floor, on every change to
-those packages. 9.0 and 9.0.1 shipped a scheduler change that can misorder
+`ffmpeg-compat` workflow re-checks it, beside the latest 8.x, on every change
+to those packages. 9.0 and 9.0.1 shipped a scheduler change that can misorder
 output, end streams early and use extreme memory. FFmpeg reverted it in 9.0.2
 ([9d4ca2122](https://github.com/FFmpeg/FFmpeg/commit/9d4ca2122)), and
 polyemesis prints a startup warning when it finds either release. The Docker
@@ -641,8 +642,8 @@ on it.
 
 ### If your distro is too old, pick one of three
 
-**1. A newer distro.** Ubuntu 24.04 LTS or Debian 13 both clear the floor from
-the stock repositories, with libsrt included. This is the least ongoing work.
+**1. A newer distro.** Ubuntu 26.04 LTS clears the floor from the stock
+repositories, with libsrt included. This is the least ongoing work.
 
 **2. A static FFmpeg build.** Does not touch your system packages and does not
 need a distro upgrade. [BtbN's builds](https://github.com/BtbN/FFmpeg-Builds/releases)
@@ -860,8 +861,8 @@ source. Apple Silicon and Intel both fine.
 
 ### FFmpeg on macOS: the version is fine, SRT is not
 
-`brew install ffmpeg` gives you a current FFmpeg — 8.1.2 as of 2026-07-26, well
-past the 6.0 floor. But the Homebrew bottle is **built without libsrt**. Its
+`brew install ffmpeg` gives you a current FFmpeg — 9.0 as of 2026-10-31, past
+the 8.0 floor. But the Homebrew bottle is **built without libsrt**. Its
 formula lists `dav1d, lame, libvmaf, libvpx, openssl@3, opus, sdl2-compat,
 svt-av1, x264, x265` as dependencies; `srt` is not among them, and the protocol
 check above prints nothing on a stock Homebrew install. (Verified against a live

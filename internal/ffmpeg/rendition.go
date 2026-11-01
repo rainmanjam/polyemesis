@@ -846,7 +846,7 @@ func blurredPadFilter(out frameSize) string {
 // force_divisible_by=2 is not decoration: the derived side of a
 // force_original_aspect_ratio scale lands wherever the arithmetic puts it, and
 // an odd width reaches the encoder as "width not divisible by 2" — a start
-// failure, not a warning. It needs FFmpeg 4.4, comfortably below the 6.0 the
+// failure, not a warning. It needs FFmpeg 4.4, comfortably below the 8.0 the
 // startup check already demands.
 func fitInsideFilter(out frameSize) string {
 	return "scale=" + out.wh() + ":force_original_aspect_ratio=decrease:force_divisible_by=2"

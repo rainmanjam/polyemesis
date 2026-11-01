@@ -32,7 +32,7 @@ const SecondaryPrefix = "vod_"
 // is that a shared tap needs an explicit asplit, the way duckGraph splits a
 // trigger that also has to reach the mix. It does not: an INPUT STREAM is not a
 // filter pad, and FFmpeg inserts the split itself. Measured on FFmpeg 6.0.1
-// (Alpine 3.18 -- the 6.0 floor internal/ffmpeg/detect.go enforces) and on 8.1.2
+// (Alpine 3.18 -- the floor internal/ffmpeg/detect.go enforced then) and on 8.1.2
 // (Homebrew), both of which built the two-tap graph and produced two mixes whose
 // tone content differed. An asplit here would have been dead weight carried on a
 // guess; see TestAPairedGraphReachesFFmpegAsTwoDistinctMixes, which builds the

@@ -38,7 +38,7 @@ upstream bandwidth is the real constraint.
 
 You can use RTMP, but **classic RTMP carries one stereo pair**. Enhanced RTMP
 does carry multiple audio tracks and polyemesis ingests them, though that path
-is verified with FFmpeg 7.1+ as the publisher and has not been confirmed with
+is verified with FFmpeg as the publisher and has not been confirmed with
 OBS. If you only have one
 audio track there is nothing to route, and the main reason to use polyemesis
 disappears.
@@ -58,13 +58,10 @@ Homebrew's FFmpeg on macOS has no SRT. Use Docker.
 
 ## What about Enhanced RTMP / multitrack FLV from OBS 30.2+?
 
-It works on a new enough FFmpeg. Multitrack FLV demuxing landed in FFmpeg 7.1,
-and from there the tracks arrive through polyemesis's existing ingest command
-unchanged — verified end to end: a destination configured for tracks 1 and 3
-received exactly those two and neither of the others. It does **not** work on
-FFmpeg 6.1.1, which is Ubuntu 24.04's stock build: that refuses with *"at most
-one audio stream is supported in flv"*, and the extra tracks are lost with no
-error at either end.
+It works on every FFmpeg polyemesis supports (8.0 or later): the tracks arrive
+through polyemesis's existing ingest command unchanged — verified end to end: a
+destination configured for tracks 1 and 3 received exactly those two and
+neither of the others. Multitrack FLV is one of the reasons the floor is 8.0.
 
 **OBS does not currently send it.** That run has now been done —
 `scripts/acceptance-obs-multitrack.sh`, with OBS headless in Docker — and the
@@ -81,8 +78,8 @@ for every service, custom RTMP included.
 The earlier claim here was read from OBS's `flv-mux.c`, which does implement the
 format correctly. What was not checked is whether anything reaches that code.
 
-So: polyemesis accepts multitrack from a publisher that sends it (FFmpeg ≥ 7.1
-does), and OBS's connect, handshake and stream are accepted and probed
+So: polyemesis accepts multitrack from a publisher that sends it (FFmpeg 8 and
+later do), and OBS's connect, handshake and stream are accepted and probed
 correctly — but if you need multiple audio tracks out of OBS today, use SRT.
 SRT remains the operated path.
 
@@ -232,7 +229,7 @@ locking an intruder out, and leaving that intruder signed in would defeat it.
 ## Can I use my own FFmpeg build?
 
 Yes: `ffmpeg.binary` and `ffmpeg.probe` in the config, or `-ffmpeg` / `-ffprobe`
-flags. It must be 6.0+, and needs SRT for multitrack ingest.
+flags. It must be FFmpeg 8.0 or later, and needs SRT for multitrack ingest.
 
 ## What does "polyemesis" mean?
 

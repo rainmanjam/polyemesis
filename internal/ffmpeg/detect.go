@@ -22,11 +22,37 @@ import (
 	"time"
 )
 
-// MinMajorVersion is the oldest FFmpeg we accept. 6.0 is the floor because
-// polyemesis relies on behaviour that is only reliable from 6.x onwards:
-// stable multi-track MPEG-TS mapping, the modern channel-layout API used by
-// pan/amerge, and `-progress` output that includes the fields we parse.
-const MinMajorVersion = 6
+// MinMajorVersion is the oldest FFmpeg we accept, and it is 8.0.
+//
+// It was 6.0, chosen for what polyemesis needed of every build: stable
+// multi-track MPEG-TS mapping, the modern channel-layout API used by
+// pan/amerge, and `-progress` output carrying the fields we parse. Those still
+// hold. What moved the floor is what the product now ships and tests:
+//
+//   - Enhanced RTMP multitrack. A publisher's several audio tracks arrive as
+//     multitrack FLV, and FFmpeg only demuxes that from 7.1. Below it they
+//     arrive as ONE track with no error on either end. The same goes for the
+//     two-track FLV a second VOD mix on an RTMP destination writes: 6.1 refuses
+//     it outright ("at most one audio stream is supported in flv").
+//   - What we ship. The Docker image pins Alpine's FFmpeg 8.1, the GPU images
+//     carry 8.x, and the installer's pinned static build is 8.1. CI tests the
+//     latest 8.x and the latest 9.x and nothing older, so a 6.x or 7.x build
+//     was accepted on the strength of a test matrix that no longer covers it.
+//
+// THIS FLOOR IS THE TWO-TRACK FLV CHECK. Nothing at startup asks a build
+// whether its flv muxer takes a second audio stream. The probes after the
+// version check (SRT, encoders, filters) are advisory and none of them covers
+// FLV, so the version number is what keeps a build that cannot do it out.
+const MinMajorVersion = 8
+
+// floorFix is the part of every refusal that tells the operator what to do. One
+// string, so the three refusals cannot drift into giving three different
+// answers -- and none of them says "apt install ffmpeg" unqualified, because
+// Ubuntu 24.04's apt hands out 6.1.1 and Debian 13's 7.1.5, both below it.
+const floorFix = "Install FFmpeg 8.0 or newer (macOS: brew install ffmpeg; Ubuntu 26.04 and later " +
+	"package 8.0 themselves), let the installer fetch its pinned static FFmpeg 8 build " +
+	"(scripts/install.sh --ffmpeg force), or run the Docker image, which bundles one. " +
+	"Then point ffmpeg.binary in config.yaml at it if it is not first on PATH"
 
 // AssumeMajorEnv lets an operator state the major version of a build whose own
 // -version output does not carry a readable one -- the FFmpeg master nightlies
@@ -56,12 +82,12 @@ func assumedMajor() (int, error) {
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
 		return 0, fmt.Errorf("%s is %q, which is not a major version number. Set it to the "+
-			"leading number of this FFmpeg's version, e.g. %s=7", AssumeMajorEnv, raw, AssumeMajorEnv)
+			"leading number of this FFmpeg's version, e.g. %s=8", AssumeMajorEnv, raw, AssumeMajorEnv)
 	}
 	if n < MinMajorVersion {
 		return 0, fmt.Errorf("%s says this build is FFmpeg %d, but polyemesis requires %d.0 or "+
-			"newer. Multi-track MPEG-TS routing is not reliable on older builds",
-			AssumeMajorEnv, n, MinMajorVersion)
+			"newer, so the claim cannot admit it. %s",
+			AssumeMajorEnv, n, MinMajorVersion, floorFix)
 	}
 	return n, nil
 }
@@ -146,10 +172,8 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 
 	binFFmpeg, err := exec.LookPath(ffmpegPath)
 	if err != nil {
-		return nil, fmt.Errorf("%w: could not find %q on PATH. Install FFmpeg %d.0 or newer "+
-			"(macOS: brew install ffmpeg; Debian/Ubuntu: apt install ffmpeg), "+
-			"or set ffmpeg.binary in config.yaml to its full path",
-			ErrNotFound, ffmpegPath, MinMajorVersion)
+		return nil, fmt.Errorf("%w: could not find %q on PATH. %s",
+			ErrNotFound, ffmpegPath, floorFix)
 	}
 	binFFprobe, err := exec.LookPath(ffprobePath)
 	if err != nil {
@@ -181,8 +205,8 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 		reported, _, _ = strings.Cut(strings.TrimSpace(text), "\n")
 		reported = strings.TrimSpace(reported)
 	}
-	// Distro builds report things like "6.1.1-3ubuntu5" and git builds report
-	// "N-113518-gd6a4b1e" or "n7.0". Only the leading numeric pair matters,
+	// Distro builds report things like "8.0.1-3ubuntu2" and git builds report
+	// "N-113518-gd6a4b1e" or "n8.1.3-9-g29e619e767". Only the leading numeric pair matters,
 	// and a build we cannot parse is not automatically a build we should
 	// refuse — see below.
 	if m := numRe.FindStringSubmatch(t.Version); m != nil {
@@ -195,16 +219,17 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 
 	if t.Major > 0 && t.Major < MinMajorVersion {
 		return nil, fmt.Errorf(
-			"%s is FFmpeg %s, but polyemesis requires %d.0 or newer. "+
-				"Multi-track MPEG-TS routing is not reliable on older builds. "+
-				"Upgrade FFmpeg, or point ffmpeg.binary in config.yaml at a newer build",
-			binFFmpeg, t.Version, MinMajorVersion)
+			"%s is FFmpeg %s, but polyemesis requires %d.0 or newer: Enhanced RTMP "+
+				"multitrack and two-track FLV need it, and 8.x and 9.x are what polyemesis "+
+				"is tested on. %s",
+			binFFmpeg, t.Version, MinMajorVersion, floorFix)
 	}
 	if t.Major == 0 {
 		// FAILS CLOSED NOW, AND NAMES THE STRING IT COULD NOT READ.
 		//
 		// This branch used to say "an unrecognised version string is almost
-		// always a git/nightly build, which is newer than 6.0" and let the
+		// always a git/nightly build, which is newer than 6.0" (the floor then)
+		// and let the
 		// binary through on that guess. The guess is not checkable and the
 		// failure it admits is not cheap: an old build accepts every command
 		// line this package writes -- the arguments are all long-standing
@@ -235,11 +260,9 @@ func Detect(ctx context.Context, ffmpegPath, ffprobePath string) (*Tools, error)
 				"%s reports its version as %q, which polyemesis cannot read as a version number, "+
 					"so it cannot confirm this build is FFmpeg %d.0 or newer. Refusing to start: an "+
 					"older build accepts these command lines and then fails on air, on multi-track "+
-					"MPEG-TS mapping, hours later. Install a build that reports a numeric version "+
-					"(macOS: brew install ffmpeg; Debian/Ubuntu: apt install ffmpeg), point "+
-					"ffmpeg.binary in config.yaml at one, or set %s to this build's major version "+
-					"if you know what it is",
-				binFFmpeg, reported, MinMajorVersion, AssumeMajorEnv)
+					"MPEG-TS mapping, hours later. %s. Or, if you know this build's major version, "+
+					"set %s to it",
+				binFFmpeg, reported, MinMajorVersion, floorFix, AssumeMajorEnv)
 		}
 		t.Major = assumed
 		t.Version = fmt.Sprintf("%s (unreadable version string; %s=%d)", reported, AssumeMajorEnv, assumed)
@@ -309,7 +332,7 @@ var revertedSchedulerRe = regexp.MustCompile(`^(?:\d+:)?n?9\.0(?:\.([01]))?(?:$|
 // because it misorders the output interleave, ends streams early and runs
 // memory up. A destination is one input, several audio decoders and one
 // filtergraph, which is the shape that goes through that code. Both releases
-// clear the 6.0 floor, so without this the first sign would be a destination
+// clear the 8.0 floor, so without this the first sign would be a destination
 // that drops out on air.
 //
 // A warning, not a refusal, for the same reason as SRTWarning: the regression

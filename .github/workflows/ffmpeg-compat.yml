@@ -1,22 +1,25 @@
-name: ffmpeg compat (9.0 and the 6.1 floor)
+name: ffmpeg compat (latest 8.x and 9.x)
 
-# THE FFMPEG-USING PACKAGES AGAINST THE VERSIONS THE IMAGE DOES NOT SHIP.
+# THE FFMPEG-USING PACKAGES AGAINST THE TWO RELEASE LINES POLYEMESIS SUPPORTS.
 #
-# ci.yml pins its Linux and Windows lanes to the 8.1 line on purpose: that is
-# what the Docker image ships (Dockerfile, FFMPEG_VERSION=8.1.3-r0), and a CI
-# FFmpeg that differs from the image tests a product nobody runs. That leaves
-# two versions operators really do run with no automated check at all:
+# The floor is 8.0 (internal/ffmpeg MinMajorVersion). This tests exactly two
+# builds, and nothing older: the newest 8.x and the newest 9.x release.
 #
-#   - 9.0, what Homebrew, Arch, Debian sid and BtbN's n9.0 builds hand to a
+#   - 8.x is what the Docker image ships (Dockerfile, FFMPEG_VERSION=8.1.3-r0)
+#     and what the installer's pinned static build is;
+#   - 9.x is what Homebrew, Arch, Debian sid and BtbN's n9.0 builds hand to a
 #     binary-mode install today, and what the image moves to once a stable
-#     Alpine packages it;
-#   - the 6.x floor polyemesis still accepts (internal/ffmpeg MinMajorVersion),
-#     which is Ubuntu 24.04's stock 6.1.1 and the CUDA image's FFmpeg.
+#     Alpine packages it.
 #
-# NOT A REQUIRED CHECK, deliberately. The required set is the 8.1 lanes, which
-# decide whether a change works on what ships. This reports drift on the other
-# two before an operator does, and a red leg here is a finding to read, not a
-# merge block.
+# The 6.1 floor leg this file used to run is gone with the 6.0 floor, and so
+# are its by-name skips (multitrack FLV, two audio streams in one flv, and a
+# quiet-feed stop): every one of them was a 6.x limitation, and each now has to
+# pass on both legs.
+#
+# NOT A REQUIRED CHECK, deliberately. The required set is ci.yml's 8.1 lanes,
+# which decide whether a change works on what ships. This reports drift on the
+# newest releases before an operator does, and a red leg here is a finding to
+# read, not a merge block.
 #
 # Cost, measured 2026-10-29 in a linux container on the same package list:
 # the slowest package (engine) takes 95-107 s and the packages run in parallel,
@@ -75,28 +78,26 @@ jobs:
           # are the ones BtbN keeps (scripts/install.sh says why; a daily is gone
           # in two weeks). Never a 9.0.0 or 9.0.1 build -- both carry the
           # scheduler change 9.0.2 reverted (FFmpeg 9d4ca2122).
+          #
+          # THE LATEST RELEASE OF EACH LINE, checked 2026-10-31:
+          #   - releases: FFmpeg's own tags (gh api repos/FFmpeg/FFmpeg/tags) --
+          #     n8.1.3 is the newest 8.x and n9.0.2 the newest 9.x;
+          #   - builds and hashes: the asset `digest` fields of BtbN's
+          #     autobuild-2026-09-30-13-08 (gh api
+          #     repos/BtbN/FFmpeg-Builds/releases/tags/<tag>), the newest
+          #     month-end release, which carries both. The 8.x asset and hash are
+          #     the ones scripts/install.sh and ci.yml pin.
+          #
+          # TO BUMP: a newer month-end tag, or a new 8.x/9.x release. Replace a
+          # leg's tag, asset and sha256 together; the cache key is the asset.
+          - line: "8.1"
+            tag: autobuild-2026-09-30-13-08
+            asset: ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+            sha256: 97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
           - line: "9.0"
             tag: autobuild-2026-09-30-13-08
             asset: ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
             sha256: 68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269
-            skip: ""
-          - line: "6.1 (floor)"
-            tag: autobuild-2025-08-31-13-00
-            asset: ffmpeg-n6.1.3-linux64-gpl-6.1.tar.xz
-            sha256: 400f9ca9d8ea3f812660cf7a00b9bfed944175cd9d6bd0c9b6257cf99376a75c
-            # What 6.1 CANNOT do, measured rather than assumed (2026-10-29,
-            # n6.1.3), skipped by name so everything else on the floor still has
-            # to pass:
-            #   - multitrack FLV, and two audio streams in one flv (the second
-            #     VOD mix on an RTMP destination): the flv muxer refuses both
-            #     before 7.1, "at most one audio stream is supported in flv".
-            #     Documented in docs/FAQ.md and docs/AUDIO-ROUTING.md.
-            #   - a recorder or file destination stopped on a QUIET feed: 6.1
-            #     does not act on the wake the supervisor sends, so the stop
-            #     waits out the 8 s grace and is killed. The file still had a
-            #     duration in the measured run. Not yet documented; reported
-            #     with the 9.0 work rather than hidden here.
-            skip: "TestEnhancedRTMPMultitrackSurvivesTheSharedListenerInOrder|TestTwoDistinctMixesReachAnRTMPFarEnd|TestARecorderStoppedOnAQuietFeedFinalisesItsFileInsteadOfBeingKilled|TestAFileDestinationStoppedOnAQuietFeedFinalisesItsFile"
     env:
       # A missing ffmpeg/ffprobe is a failure here, never a skip.
       POLYEMESIS_REQUIRE_FFMPEG: "1"
@@ -152,13 +153,9 @@ jobs:
           ffprobe -hide_banner -version | head -1
 
       - name: FFmpeg-using packages
-        env:
-          SKIP: ${{ matrix.ffmpeg.skip }}
         run: |
           set -euo pipefail
-          args=(-count=1 -timeout 20m)
-          if [ -n "$SKIP" ]; then args+=(-skip "^(${SKIP})$"); fi
-          go test "${args[@]}" \
+          go test -count=1 -timeout 20m \
             ./internal/ffmpeg/ ./internal/supervisor/ ./internal/engine/ \
             ./internal/media/ ./internal/meters/ ./internal/clipper/ \
             ./internal/clips/ ./internal/playlistmedia/ ./internal/transcribe/ \

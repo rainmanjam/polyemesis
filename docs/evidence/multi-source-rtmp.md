@@ -1,5 +1,10 @@
 # Multi-source RTMP: the design record
 
+> **Note, 2026-10-31: polyemesis now requires FFmpeg 8.0 or later**, so every
+> supported build carries Enhanced RTMP multitrack. The 6.1.1 and 7.1 figures
+> below are kept as the measurements this record rests on, not as a statement
+> of what is supported.
+
 > **Built, 2026-08-06.** This started as a note asking what multi-source RTMP
 > would take. It is kept as the record of the decision because it holds the
 > measurements the choice rested on and the options that were rejected —

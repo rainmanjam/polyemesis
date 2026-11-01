@@ -27,9 +27,8 @@ const (
 	// options are not interchangeable and the difference is not recoverable by
 	// guessing. Both are now one port for any number of sources, addressed by
 	// the same publish token, so the count is no longer what separates them —
-	// TRACKS are: RTMP delivers a single audio track on any FFmpeg below 7.1,
-	// which includes the stock build on Ubuntu 24.04, while SRT carries all of
-	// them. Defaulting to either one silently hands a share of installs the
+	// TRACKS are: classic RTMP delivers a single audio track (only an Enhanced
+	// RTMP publisher sends more), while SRT carries all of them. Defaulting to either one silently hands a share of installs the
 	// wrong thing, and the RTMP failure is invisible: the stream works, and one
 	// of the six tracks arrives.
 	//

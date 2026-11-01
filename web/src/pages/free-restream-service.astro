@@ -71,7 +71,7 @@ const costs = [
   },
   {
     title: "An FFmpeg with the right things in it",
-    body: "FFmpeg 6.0 or newer, and it needs libsrt for the multitrack SRT ingest that makes per-destination audio possible at all. Homebrew’s macOS build ships without SRT. Ubuntu 24.04’s stock 6.1.1 carries SRT but predates multitrack FLV. The container bundles a known-good build and sidesteps the question entirely.",
+    body: "FFmpeg 8.0 or later, and it needs libsrt for the multitrack SRT ingest that makes per-destination audio possible at all. Homebrew’s macOS build ships without SRT; Ubuntu 26.04’s carries it. The installer can fetch a pinned FFmpeg 8 build for you, and the container bundles one and sidesteps the question entirely.",
   },
   {
     title: "Your own time, and your own pager",

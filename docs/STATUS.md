@@ -221,8 +221,9 @@ entries cannot be audited either.
   matrix in three places.
 - `docs/DEPENDENCIES.md` states an `@types/node` invariant the lockfile does
   not hold.
-- The CUDA image pins FFmpeg 6.1.1, below the 7.1 four documents say Enhanced
-  RTMP needs; nothing connects the two facts.
+- ~~The CUDA image pins FFmpeg 6.1.1, below the 7.1 four documents say Enhanced
+  RTMP needs; nothing connects the two facts.~~ Resolved: the floor is 8.0 and
+  the CUDA image now carries a pinned static FFmpeg 8.1.3.
 - `docs/SITE-DEPLOY.md:3–5` omits `docs/**` from the Pages path filter.
 
 Six undocumented, tested behaviours and five unverified leads are listed in

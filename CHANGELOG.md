@@ -662,6 +662,32 @@ its first tagged release.
   no longer restarts its output; switching a delayed YouTube destination to or from this route
   does, because the delay moves, and the editor says so. The card still shows the delay. Stop
   airs no delayed tail from polyemesis on this route. In all 15 languages.
+- **BREAKING for native installs: polyemesis requires FFmpeg 8.0 or later.**
+  It was 6.0. polyemesis now refuses to start on an older FFmpeg, and the
+  refusal names the binary, the version it found and the fix. Enhanced RTMP
+  multitrack and two-track FLV need 8.x. CI now tests exactly the latest 8.x
+  (8.1.3) and the latest 9.x (9.0.2).
+  - **Docker users:** nothing changes. The image bundles FFmpeg 8.1.
+  - **Affected:** a binary-mode install that uses a distribution FFmpeg older
+    than 8, such as Ubuntu 24.04's apt 6.1.1 or Debian 13's 7.1.5.
+  - **Fix:** do any one of these:
+    - re-run `scripts/install.sh --ffmpeg force`, which installs a pinned,
+      sha256-checked static FFmpeg 8.1 to `/usr/local/bin` and pins it in the
+      config;
+    - install FFmpeg 8 or later yourself (Ubuntu 26.04 ships 8.0; Homebrew
+      ships 9.x);
+    - switch to the Docker image.
+  - **The CUDA image** now carries the same pinned static FFmpeg 8.1.3 instead
+    of Ubuntu 24.04's 6.1.1, so NVENC and Enhanced RTMP multitrack ingest work
+    together. Its NVENC needs a host NVIDIA driver of **570.0 or newer** (NVENC
+    SDK 13.0); the old image's 6.1.1 needed 520–550, depending on SDK. See
+    docs/HARDWARE.md.
+  - **The installer** no longer has a separate "older than recommended" answer
+    for 6.x and 7.x hosts. A host's FFmpeg either clears the 8.0 floor or gets
+    the install offer.
+  - **`POLYEMESIS_FFMPEG_ASSUME_MAJOR`** still refuses any value below the
+    floor, which is now 8.
+  - See [docs/UPGRADING.md](docs/UPGRADING.md).
 - **Routing has one save model (app-council A26, A27).** Every edit, mute and
   gain included, now waits for Save changes in a single bottom bar with
   Discard; mute and gain no longer apply the moment they move, and the header

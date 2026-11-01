@@ -16,7 +16,7 @@
 #   docker  — the image bundles a known-good FFmpeg with libsrt, so nothing on
 #             the host matters except Docker. Recommended.
 #   binary  — one static binary plus a systemd unit. No Docker, but YOUR FFmpeg
-#             has to clear 6.0 and carry libsrt, and on several current LTS
+#             has to clear 8.0 and carry libsrt, and on several current LTS
 #             distributions it does not.
 #
 # This script never asks for, stores, or writes an admin password. polyemesis
@@ -39,15 +39,19 @@ CONFIG_DIR="/etc/polyemesis"
 BIN_PATH="/usr/local/bin/polyemesis"
 RUN_USER="polyemesis"
 
-# The floor polyemesis enforces at startup. Below this it refuses to start
-# rather than failing later in a way that looks like a bug.
-FFMPEG_MIN_MAJOR=6
+# The floor polyemesis enforces at startup (internal/ffmpeg MinMajorVersion).
+# Below this it refuses to start rather than failing later in a way that looks
+# like a bug.
+#
+# It was 6, with 8 as a separate "recommended" line and a softer verdict for the
+# builds between them. The floor is 8 now -- Enhanced RTMP multitrack and
+# two-track FLV need it, and 8.x and 9.x are all CI tests -- so there is no
+# "works, but" band left to report: a host clears the floor or it does not.
+FFMPEG_MIN_MAJOR=8
 
-# What the Docker image ships, and what CI now tests against. Between the floor
-# and this the software runs correctly but not identically, so clearing the
-# floor is reported differently from being current -- an operator on 6.1.1 has
-# a working install that quietly cannot do things a 8.x install can, and the
-# old check told them only that they had passed.
+# The line the static build below belongs to, and the one the Docker image
+# ships. Named separately from the floor because it is what the offer INSTALLS,
+# which is free to move ahead of what polyemesis REQUIRES.
 FFMPEG_RECOMMENDED_MAJOR=8
 
 HTTP_PORT=8080
@@ -145,7 +149,7 @@ ROLLBACK_DONE=false
 # install -m 0755, to be run by a root service, so that is a code-execution path
 # and not a privacy question. All three branches below pin the scheme.
 #
-# Used only for this optional FFmpeg upgrade. The polyemesis binary and its
+# Used only for the FFmpeg install offered below. The polyemesis binary and its
 # checksums keep their inline curl, for the reason given at the top of this file:
 # on the fetch that matters most, the reader piping this into a shell should see
 # the flags on the line doing the download.
@@ -589,7 +593,8 @@ require_systemd() {
 # offer_ffmpeg_upgrade installs a current static FFmpeg, with consent.
 #
 # The distro package is a dead end on the systems where this matters -- Ubuntu
-# 24.04 pins 6.1.1 and `apt upgrade` never moves off it -- so the only way
+# 24.04 pins 6.1.1 and Debian 13 7.1.5, both below the 8.0 floor, and `apt
+# upgrade` never moves off either -- so the only way
 # forward is a static build. That makes this a system-wide change to a binary
 # the operator may be using for other things, which is why it asks, states what
 # either answer costs, and never acts on its own under --yes.
@@ -684,42 +689,30 @@ ffmpeg_static_sha256() {
 }
 
 # offer_ffmpeg_upgrade takes the major you have (empty when there is no FFmpeg
-# at all) and NEED, which is "optional" or "required".
+# at all, or the version could not be read) and installs the pinned static build
+# with consent.
 #
-# THE TWO CALLERS WANT OPPOSITE THINGS AND THE DIFFERENCE IS NOT COSMETIC.
+# EVERY CALLER IS A HOST THAT CANNOT DO WHAT POLYEMESIS IS FOR: no FFmpeg, one
+# below the floor, or one that failed the capability probe -- all three of
+# which polyemesis will not start on -- or one with no libsrt, which it starts
+# on with a warning and RTMP only. So the default answer is "yes" and a failed
+# return is what the caller acts on: the first three end the install, and the
+# no-libsrt caller goes on to ask "Continue without SRT anyway?".
 #
-#   optional -- you have 6.x or 7.x. Everything works; what 8.x adds is
-#               multitrack FLV. Declining costs you one feature, so the default
-#               is "no" and the return value is ignored.
+# There used to be a second, OPTIONAL mode for a 6.x or 7.x host -- above the
+# old 6.0 floor but behind the 8.x the image ships -- whose default was "no"
+# and whose return value was ignored. With the floor at 8 no host is in that
+# band any more, so the mode and its wording are gone.
 #
-#   required -- you have nothing, or something below the floor. polyemesis
-#               REFUSES TO START against it, so declining ends the install. The
-#               default is "yes", the wording says what is actually at stake,
-#               and the return value decides whether check_ffmpeg fails.
-#
-# Returns 0 only when a usable FFmpeg is on PATH afterwards. That is stricter
-# than "the files were written": /usr/local/bin is ahead of /usr/bin on a
-# DEFAULT path and not on every host, and an install that put a good binary
-# somewhere PATH does not reach is a failure that used to report success.
 offer_ffmpeg_upgrade() {
-  local have="$1" need="${2:-optional}" asset want answer tmp label default_answer
+  local have="$1" asset want answer tmp label
   asset="$(ffmpeg_static_asset)"
-  # "6.x" reads wrong when there is no FFmpeg at all.
+  # "7.x" reads wrong when there is no FFmpeg at all.
   if [ -n "$have" ]; then label="$have.x"; else label="no FFmpeg"; fi
 
-  if [ "$need" = "required" ]; then
-    echo "     polyemesis shells out to FFmpeg for everything and will not start"
-    echo "     against ${label}. A current static build fixes that without touching"
-    echo "     your distribution's package."
-  else
-    echo "     What you have keeps working: SRT carries every audio track on any"
-    echo "     version above the floor, and nothing about routing, recording or"
-    echo "     destinations depends on this."
-    echo "     What ${FFMPEG_RECOMMENDED_MAJOR}.x adds is multitrack FLV. Below 7.1 an Enhanced RTMP"
-    echo "     publisher sending several audio tracks arrives as ONE track, with no"
-    echo "     error on either end -- which is the part worth knowing, because it"
-    echo "     looks like the tracks were never sent."
-  fi
+  echo "     polyemesis shells out to FFmpeg for everything and will not start"
+  echo "     against ${label}. A current static build fixes that without touching"
+  echo "     your distribution's package."
 
   # --check INSTALLS NOTHING, AND THAT PROMISE OUTRANKS THIS OFFER.
   #
@@ -749,36 +742,24 @@ offer_ffmpeg_upgrade() {
     *)
       if ! interactive; then
         # Unattended. Installing a system binary nobody asked for is not a
-        # default worth taking silently -- and that holds even when it is
-        # required, because the honest outcome there is a refusal that names
+        # default worth taking silently -- and that holds even though polyemesis
+        # cannot start without it, because the honest outcome is a refusal that names
         # the flag, not a system binary replaced by a script nobody watched.
         warn "unattended: leaving ${label}. Re-run with --ffmpeg force to install ${FFMPEG_RECOMMENDED_MAJOR}.x."
         return 1
       fi
-      # Default "n" when the upgrade is OPTIONAL. ask() returns the default
-      # whenever nothing can answer -- and interactive() can still be true on a
-      # host where /dev/tty is readable but no one is reading it, so a "y"
-      # default would replace a system binary on the strength of a question
-      # nobody saw. Someone who wants this either types y or passes
-      # --ffmpeg force.
-      #
-      # Default "y" when it is REQUIRED, and the same reasoning is what permits
-      # it: the alternative to installing is not "keep what you have", it is
-      # "this install stops here". A question nobody saw then defaults to the
-      # outcome the operator was asking for by running the installer at all.
-      if [ "$need" = "required" ]; then default_answer=y; else default_answer=n; fi
-      ask_yn "Install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin now?" "$default_answer" answer ;;
+      # Default "y". ask() returns the default whenever nothing can answer --
+      # interactive() can be true on a host where /dev/tty is readable but no
+      # one is reading it -- and that is acceptable only because the
+      # alternative to installing is not "keep what you have", it is "this
+      # install stops here". A question nobody saw then defaults to the outcome
+      # the operator was asking for by running the installer at all.
+      ask_yn "Install FFmpeg ${FFMPEG_RECOMMENDED_MAJOR}.x to /usr/local/bin now?" "y" answer ;;
   esac
 
   if [ "$answer" != "yes" ]; then
-    if [ "$need" = "required" ]; then
-      echo "     Declined. Nothing was changed, and this install cannot continue"
-      echo "     against ${label} — see the options above."
-      return 1
-    fi
-    echo "     Left at ${label}. Enhanced RTMP multitrack will arrive as a single"
-    echo "     track; everything else behaves the same. Re-run with --ffmpeg force"
-    echo "     to change this later."
+    echo "     Declined. Nothing was changed, and this install cannot continue"
+    echo "     against ${label} — see the options above."
     return 1
   fi
 
@@ -842,7 +823,7 @@ offer_ffmpeg_upgrade() {
   # difference bites. /usr/local/bin is ahead of /usr/bin on a DEFAULT PATH and
   # not on every host -- a trimmed root PATH, or a distro that orders them the
   # other way, leaves the old binary winning. That was already warned about;
-  # what is new is that the REQUIRED caller cannot treat a warning as success,
+  # what is new is that a caller cannot treat a warning as success,
   # because it is about to report a floor as cleared while polyemesis would
   # still shell out to the binary that does not clear it.
   if [ "$(command -v ffmpeg)" != "/usr/local/bin/ffmpeg" ]; then
@@ -855,7 +836,7 @@ offer_ffmpeg_upgrade() {
     echo "     generated config, so PATH order does not decide this."
     # Still fatal for the DOCKER-mode preflight and for --check, where no config
     # of ours is written and PATH is genuinely what decides.
-    [ "$need" = "required" ] && [ "${MODE:-}" != "binary" ] && return 1
+    [ "${MODE:-}" != "binary" ] && return 1
   fi
   return 0
 }
@@ -864,14 +845,14 @@ offer_ffmpeg_upgrade() {
 # name badge.
 #
 # Everything else in this file decides on a version STRING parsed out of a
-# banner, and internal/ffmpeg/detect.go:155 records where that ends up: an
-# unrecognised string becomes "assuming >= 6.0", which is a guess written down.
-# It is a REASONABLE guess -- an unparseable banner is nearly always a git build,
-# which is newer than 6.0 rather than older -- but it is still the installer
-# deciding a capability question by reading prose.
+# banner. For a banner with no readable version (a git build), guessing "newer
+# than the floor" is REASONABLE -- an unparseable banner is nearly always a git
+# build -- but it is still the installer deciding a capability question by
+# reading prose. (polyemesis itself refuses such a build unless the operator
+# vouches for it with POLYEMESIS_FFMPEG_ASSUME_MAJOR; see internal/ffmpeg.)
 #
-# So this measures instead. It exercises two of the three things
-# MinMajorVersion's comment names as the reason 6.0 is the floor:
+# So this measures instead. It exercises two of the things every build
+# polyemesis runs against has to do, which MinMajorVersion's comment names:
 #
 #   * the modern channel-layout API used by pan/amerge -- the `pan` filter
 #     below is exactly the shape internal/routing compiles for a downmix
@@ -898,10 +879,10 @@ check_ffmpeg() {
     echo "     polyemesis shells out to FFmpeg for everything. Install ${FFMPEG_MIN_MAJOR}.0 or newer,"
     echo "     or re-run and choose the docker mode, which bundles one."
     case "${DISTRO}" in
-      # Fedora has no `ffmpeg` package. ffmpeg-free is 7.1.5 and DOES carry
-      # libsrt -- checked, because recommending a build without it would be
-      # worse than saying nothing.
-      fedora)  echo "     On Fedora the package is \`ffmpeg-free\`: dnf install -y ffmpeg-free" ;;
+      # Fedora has no `ffmpeg` package, and its ffmpeg-free is 7.1.5 -- below
+      # the 8.0 floor, so it is no longer worth recommending.
+      fedora)  echo "     Fedora's ffmpeg-free is 7.1.x, below the floor. Use RPM Fusion, a static build, or docker." ;;
+      ubuntu)  echo "     Ubuntu 26.04 packages 8.0 (apt install ffmpeg); 24.04 ships 6.1.1, below the floor." ;;
       rocky|almalinux|rhel|centos)
                echo "     On this family the default repos have neither. EPEL's ffmpeg-free is"
                echo "     5.1.x, below the floor. Use RPM Fusion, a static build, or docker." ;;
@@ -914,7 +895,7 @@ check_ffmpeg() {
     # way round: it handed a working answer to the operator whose install was
     # going to succeed anyway, and a list of homework to the one whose install
     # was about to stop.
-    offer_ffmpeg_upgrade "" required || return 1
+    offer_ffmpeg_upgrade "" || return 1
     return 0
   }
 
@@ -940,7 +921,7 @@ check_ffmpeg() {
       err "and it cannot do what polyemesis needs."
       echo "     The channel-layout filtering and -progress output that per-destination"
       echo "     audio routing depends on did not work on this build."
-      offer_ffmpeg_upgrade "" required || return 1
+      offer_ffmpeg_upgrade "" || return 1
     fi
   else
     major="$raw"
@@ -948,7 +929,10 @@ check_ffmpeg() {
       err "FFmpeg $major.x is below the ${FFMPEG_MIN_MAJOR}.0 floor — polyemesis refuses to start against it."
       case "${DISTRO}:${DISTRO_VERSION}" in
         ubuntu:22.04) echo "     Ubuntu 22.04 ships 4.4. \`apt install ffmpeg\` will not fix this." ;;
+        ubuntu:24.04) echo "     Ubuntu 24.04 ships 6.1.1. \`apt install ffmpeg\` will not fix this; 26.04 ships 8.0." ;;
         debian:12)    echo "     Debian 12 ships 5.1. \`apt install ffmpeg\` will not fix this." ;;
+        debian:13)    echo "     Debian 13 ships 7.1. \`apt install ffmpeg\` will not fix this." ;;
+        fedora:*)     echo "     Fedora's ffmpeg-free is 7.1.x. Use RPM Fusion, a static build, or docker." ;;
         # Measured, not assumed: EPEL on Rocky 9 carries ffmpeg-free 5.1.9, and
         # there is no `ffmpeg` package at all. Both miss the floor.
         rocky:*|almalinux:*|rhel:*|centos:*)
@@ -959,18 +943,14 @@ check_ffmpeg() {
       echo "     (https://github.com/BtbN/FFmpeg-Builds/releases), or the docker mode."
       # The second of those three is something this script can just do, and the
       # static build it fetches is the same one the sentence above recommends.
-      offer_ffmpeg_upgrade "$major" required || return 1
+      offer_ffmpeg_upgrade "$major" || return 1
       return 0
     fi
-    if [ "$major" -lt "$FFMPEG_RECOMMENDED_MAJOR" ]; then
-      ok "ffmpeg $major.x clears the ${FFMPEG_MIN_MAJOR}.0 floor"
-      warn "ffmpeg $major.x is older than the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships."
-      # Optional: the return value is deliberately ignored. Declining here costs
-      # one feature, not the install.
-      offer_ffmpeg_upgrade "$major" optional || true
-    else
-      ok "ffmpeg $major.x matches the ${FFMPEG_RECOMMENDED_MAJOR}.x the container ships"
-    fi
+    # ONE VERDICT ABOVE THE FLOOR. There used to be a second, softer one for
+    # 6.x and 7.x ("clears the floor, but older than the container's"), which
+    # the 8.0 floor has emptied. The wording says "clears" rather than
+    # "matches the container" because a 9.x host clears it too.
+    ok "ffmpeg $major.x clears the ${FFMPEG_MIN_MAJOR}.0 floor"
   fi
 
   # -x, not a bare grep. Every build lists `srtp` — Secure RTP, an unrelated
@@ -994,14 +974,14 @@ check_ffmpeg() {
     # already in the script's hand, tested.
     #
     # This is not a rare path and it is not the version gate: an FFmpeg can
-    # clear the 6.0 floor and carry no SRT. Homebrew's does, which
+    # clear the 8.0 floor and carry no SRT. Homebrew's does, which
     # docs/INSTALL.md states in three places, and several distro builds do too.
     #
-    # `required`, because SRT is the reason to run polyemesis at all -- and
-    # because a successful return from that function already means the build
+    # Fatal if declined, because SRT is the reason to run polyemesis at all --
+    # and because a successful return from that function already means the build
     # carries srt AND that PATH resolves to it, which is exactly the condition
     # this branch is testing for.
-    if offer_ffmpeg_upgrade "${major:-}" required; then
+    if offer_ffmpeg_upgrade "${major:-}"; then
       ok "installed an FFmpeg with libsrt — multitrack ingest available"
       return 0
     fi
@@ -3342,8 +3322,8 @@ Options:
                          where no local check can settle it. Off by default:
                          it tells a third party this install exists.
   --ffmpeg MODE          ask (default), skip, or force installing FFmpeg 8.x to
-                         /usr/local/bin when the host's is older than the
-                         container's, below the 6.0 floor, or missing entirely.
+                         /usr/local/bin when the host's is below the 8.0
+                         floor, has no libsrt, or is missing entirely.
                          Never installs under --check.
   --allow-unverified     install a release binary even when the release has no
                          published SHA256SUMS to check it against

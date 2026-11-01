@@ -103,7 +103,8 @@ touching anything above it.
 ### Why a Go RTMP server (`internal/rtmpserver`), not `ffmpeg -listen 1`
 
 RTMP is the *fallback* ingest (one audio track on classic RTMP — see
-`evidence/enhanced-rtmp-multitrack.md` for what changes on FFmpeg 7.1+), and for a
+`evidence/enhanced-rtmp-multitrack.md` for Enhanced RTMP multitrack, which every
+supported FFmpeg demuxes), and for a
 long time the bar was "robust and cheap": `ffmpeg -listen 1` demuxed FLV and
 emitted MPEG-TS with `-c copy`, which was the exact same code path as SRT
 ingest, and the supervisor's respawn-with-backoff made "wait for the next
@@ -636,7 +637,7 @@ internal/
   config/      config.yaml load/defaults/validation, path resolution (read-only:
                config.yaml is owned by the deployer, never rewritten by the app)
   db/          modernc.org/sqlite, migrations, stores
-  ffmpeg/      detect.go (>=6.0 gate + encoder probe), probe.go, and the
+  ffmpeg/      detect.go (>=8.0 gate + encoder probe), probe.go, and the
                command BUILDERS: ingest.go · destination.go · rendition.go ·
                recorder.go · preview.go · meters.go
   routing/     profile.go (model+validation) · filtergraph.go · presets.go
