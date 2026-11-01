@@ -122,4 +122,31 @@ describe("useLiveCaptionTrack", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     unmount();
   });
+
+  // A long show's sidecar grows to megabytes. After the first read each poll asks only for the bytes appended since,
+  // so viewers do not refetch and re-parse the whole file every four seconds.
+  // MUTATION: drop the Range header. Observed: FAIL, the second request carried no Range.
+  it("asks only for the appended bytes after the first read, and places what they add", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("VTTCue", FakeCue);
+    const appended = "4\n00:02:00.000 --> 00:02:01.000\nthird\n\n";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const range = (init?.headers as Record<string, string> | undefined)?.Range;
+      if (range) return { ok: true, status: 206, text: async () => appended, headers: new Headers() };
+      return { ok: true, status: 200, text: async () => sidecar, headers: new Headers() };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const cues: FakeCue[] = [];
+    const track = { mode: "hidden", addCue: (c: FakeCue) => cues.push(c) };
+    const video = { addTextTrack: () => track } as unknown as HTMLVideoElement;
+    const anchor = () => ({ wallMs: 1_800_000_000_000, mediaTime: 50 });
+
+    const { unmount } = renderHook(() => useLiveCaptionTrack(video, "/playout/captions.vtt", "Captions", anchor));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(4000);
+    const second = fetchMock.mock.calls[1][1]?.headers as Record<string, string>;
+    expect(second.Range).toBe(`bytes=${new TextEncoder().encode(sidecar).length}-`);
+    expect(cues.map((c) => c.text)).toEqual(["Ana: hello &amp; welcome", "second", "third"]);
+    unmount();
+  });
 });

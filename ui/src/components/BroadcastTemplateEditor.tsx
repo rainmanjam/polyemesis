@@ -62,6 +62,11 @@ export function BroadcastTemplateEditor({ scheduleId }: { scheduleId: number }) 
   const [form, setForm] = useState<TemplateForm>(formFrom(null));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // loadError is a failed read of the stored template. While it stands the form is NOT shown: its fields would be
+  // the defaults (public, look-ahead 2, no category), and saving them would overwrite a private or unlisted
+  // template with values the operator was never shown.
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [removeOpen, setRemoveOpen] = useState(false);
 
   useEffect(() => {
@@ -69,16 +74,17 @@ export function BroadcastTemplateEditor({ scheduleId }: { scheduleId: number }) 
     getTemplate(scheduleId)
       .then((v) => {
         if (!live) return;
+        setLoadError("");
         setTpl(v);
         setForm(formFrom(v));
       })
       .catch((err: unknown) => {
-        if (live) setError(messageOf(err));
+        if (live) setLoadError(messageOf(err));
       });
     return () => {
       live = false;
     };
-  }, [scheduleId]);
+  }, [scheduleId, loadAttempt]);
 
   const reload = async () => {
     const v = await getTemplate(scheduleId);
@@ -136,7 +142,22 @@ export function BroadcastTemplateEditor({ scheduleId }: { scheduleId: number }) 
     }
   };
 
-  if (tpl === undefined && !error) {
+  if (tpl === undefined && loadError) {
+    return (
+      <section className="mt-4 grid gap-2 rounded border border-border p-3" aria-label={t("wave3.recurring.templateTitle")}>
+        <h3 className="text-sm font-medium">{t("wave3.recurring.templateTitle")}</h3>
+        <p role="alert" className="text-sm text-down">
+          {loadError}
+        </p>
+        <div>
+          <Button size="sm" variant="outline" onClick={() => setLoadAttempt((n) => n + 1)}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  if (tpl === undefined) {
     return null;
   }
 

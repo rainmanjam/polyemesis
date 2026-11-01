@@ -193,4 +193,22 @@ describe("BroadcastTemplateEditor", () => {
     await screen.findByText("No template yet. Upcoming events need one.");
     expect(titleInput().value).toBe("");
   });
+
+  // A failed read must not leave an editable form of defaults behind: saving it would overwrite a private or
+  // unlisted template with "public", look-ahead 2 and no category, values the operator was never shown.
+  // MUTATION: render the form when the load failed. Observed: FAIL, the Save button was present.
+  it("shows no editable form when the stored template could not be read, and retries on request", async () => {
+    mocks.getTemplate.mockRejectedValueOnce(new Error("server unavailable"));
+    mocks.getTemplate.mockResolvedValueOnce(stored);
+    render(<BroadcastTemplateEditor scheduleId={4} />);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("server unavailable");
+    expect(screen.queryByRole("button", { name: "Save template" })).toBeNull();
+    expect(screen.queryByLabelText("Title pattern")).toBeNull();
+    expect(mocks.saveTemplate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(titleInput().value).toBe("Tuesday live {date}"));
+    expect((screen.getByLabelText("Privacy") as HTMLSelectElement).value).toBe("unlisted");
+  });
 });

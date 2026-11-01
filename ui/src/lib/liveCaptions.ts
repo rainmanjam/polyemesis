@@ -75,12 +75,47 @@ export function mediaTimeOf(wallMs: number, anchor: ClockAnchor): number {
 const POLL_MS = 4000;
 const POLL_MISSING_MS = 15000;
 
+/** Every this many polls the whole file is read again rather than only what was
+ *  appended, so a sidecar that was started again (a new epoch) is picked up even
+ *  if it has already grown past the old one's length. */
+const FULL_READ_EVERY = 15;
+
+/** What a poll has read of the sidecar so far: its header block (the epoch), how
+ *  many bytes of it, and any text after the last complete cue. */
+interface ReadState {
+  header: string;
+  bytes: number;
+  tail: string;
+}
+
+const byteLength = (s: string) => new TextEncoder().encode(s).length;
+
+/** Splits text at its last cue boundary into complete cues and the rest. */
+function splitComplete(text: string): [string, string] {
+  const at = text.lastIndexOf("\n\n");
+  return at < 0 ? ["", text] : [text.slice(0, at + 2), text.slice(at + 2)];
+}
+
+/** Reads a whole file into a fresh state. */
+function stateOf(body: string): ReadState {
+  const norm = body.replace(/\r\n?/g, "\n");
+  const end = norm.indexOf("\n\n");
+  const header = end < 0 ? norm : norm.slice(0, end);
+  const [, tail] = splitComplete(norm);
+  return { header, bytes: byteLength(body), tail };
+}
+
 /** Polls `url` and keeps a captions TextTrack on the video in step with it.
  *
  *  `anchor` is asked for the clock on every poll; until it has one (no
  *  fragment with a program date-time yet) nothing is placed. Each cue is added
- *  once, keyed by its wall-clock start and text, so a poll that re-reads the
- *  whole growing file adds only what is new. */
+ *  once, keyed by its wall-clock start and text.
+ *
+ *  After the first read, a poll asks only for the bytes appended since
+ *  (HTTP Range, which the playout handler serves), so a twelve-hour show is not
+ *  refetched and re-parsed in full by every viewer every four seconds. A 200 is
+ *  the whole file again, and a 416 whose size is below what was read means the
+ *  file was started again; both start over. */
 export function useLiveCaptionTrack(
   video: HTMLVideoElement | null,
   url: string,
@@ -94,22 +129,44 @@ export function useLiveCaptionTrack(
     const seen = new Set<string>();
     let timer: number | undefined;
     let stopped = false;
+    let read: ReadState | null = null;
+    let polls = 0;
+
+    const place = (cues: WallCue[], clock: ClockAnchor) => {
+      for (const c of cues) {
+        const key = `${c.startMs}|${c.text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        track.addCue(new VTTCue(mediaTimeOf(c.startMs, clock), mediaTimeOf(c.endMs, clock), c.text));
+      }
+    };
 
     const poll = async () => {
       let next = POLL_MS;
       try {
-        const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
-        if (res.ok) {
-          const clock = anchor();
+        const clock = anchor();
+        polls++;
+        const partial = clock !== null && read !== null && polls % FULL_READ_EVERY !== 0;
+        const headers: Record<string, string> = partial && read ? { Range: `bytes=${read.bytes}-` } : {};
+        const res = await fetch(url, { cache: "no-store", credentials: "same-origin", headers });
+        if (res.status === 206 && read && clock) {
+          const chunk = (await res.text()).replace(/\r\n?/g, "\n");
+          read.bytes += byteLength(chunk);
+          const [complete, tail] = splitComplete(read.tail + chunk);
+          read.tail = tail;
+          place(parseLiveVTT(read.header + "\n\n" + complete), clock);
+        } else if (res.status === 416) {
+          // Nothing appended, or the file is shorter than what was read, which is a new file.
+          const total = Number((res.headers?.get?.("Content-Range") ?? "").split("/")[1]);
+          if (!read || !Number.isFinite(total) || total < read.bytes) read = null;
+        } else if (res.ok) {
+          const body = await res.text();
           if (clock) {
-            for (const c of parseLiveVTT(await res.text())) {
-              const key = `${c.startMs}|${c.text}`;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              track.addCue(new VTTCue(mediaTimeOf(c.startMs, clock), mediaTimeOf(c.endMs, clock), c.text));
-            }
+            read = stateOf(body);
+            place(parseLiveVTT(body), clock);
           }
         } else {
+          read = null;
           next = POLL_MISSING_MS;
         }
       } catch {
