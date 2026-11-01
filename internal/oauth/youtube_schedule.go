@@ -194,16 +194,17 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 	}
 
 	// From here an error means the caller never receives this stream's key. A stream this call created is then an
-	// orphan on the channel, so it is removed; a stream found on the channel is never touched (review #31).
+	// orphan on the channel, so the error names it (review #31). It is NOT deleted: IngestFor is not serialised per
+	// account, and pickStream's shared path adopts "the first RTMP stream on the channel", so a concurrent call may
+	// already have handed this stream's key to another destination. internal/api's
+	// TestNothingSendsADeleteToTheLiveStreamsEndpoint holds that line until the owner settles it. A stream found on
+	// the channel is never mentioned: it is in use.
 	dropCreatedStream := func(cause error) error {
 		if !picked.created {
 			return cause
 		}
-		if delErr := y.deleteStream(ctx, accessToken, stream.ID); delErr != nil {
-			return fmt.Errorf("%w; the ingest stream %s created for it could not be removed either, so delete it in "+
-				"YouTube Studio: %v", cause, stream.ID, delErr)
-		}
-		return cause
+		return fmt.Errorf("%w; the ingest stream %s was created for it and is now unused, so delete it in "+
+			"YouTube Studio once nothing streams to it", cause, stream.ID)
 	}
 	created, err := y.createScheduledBroadcast(ctx, accessToken, opts.ScheduledFor)
 	if err != nil {
@@ -489,27 +490,6 @@ func ytBroadcastCreateAdvice(err error) error {
 		return fmt.Errorf("%w — this channel already has YouTube's maximum number of concurrent "+
 			"broadcasts. YouTube does not publish what that number is; end or delete a broadcast "+
 			"on the channel and schedule this show again", err)
-	}
-	return err
-}
-
-// deleteStream removes a liveStream that IngestFor created seconds earlier and could not hand to its caller. The
-// same rule as deleteBroadcast holds: it is only ever called on a stream made in the same call, never on one found
-// on the channel, and a 404 is success. liveStreams.delete costs 1 unit (docs-youtube Q4).
-func (y *YouTube) deleteStream(ctx context.Context, accessToken, streamID string) error {
-	if strings.TrimSpace(streamID) == "" {
-		return fmt.Errorf("no stream id to delete")
-	}
-	q := url.Values{}
-	q.Set("id", streamID)
-	err := requestJSON(ctx, http.MethodDelete,
-		y.apiEndpoint()+ytStreamsPath+"?"+q.Encode(), accessToken, nil, nil, nil)
-	if err == nil {
-		return nil
-	}
-	var se *statusError
-	if errors.As(err, &se) && se.Status == http.StatusNotFound {
-		return nil
 	}
 	return err
 }

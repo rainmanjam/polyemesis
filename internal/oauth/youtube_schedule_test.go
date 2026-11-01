@@ -677,10 +677,18 @@ func TestYouTubeIngestForRefusesAMismatchedChannelBeforeCreatingAnything(t *test
 const ytCreatedStreamFixture = `{"id":"stream-made-here","snippet":{"title":"polyemesis - Show"},
 	"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"key-made-here","ingestionAddress":"rtmp://a.example/live2"}}}`
 
-// TestYouTubeDeletesTheStreamItCreatedWhenTheScheduledBroadcastFails (review #31): with DedicatedIngest and no held
-// key, IngestFor creates a stream before it creates the broadcast. When the insert or the bind then fails, the error
-// means the caller never receives that stream's key, so the stream is an orphan on the channel. It is removed, by id.
-func TestYouTubeDeletesTheStreamItCreatedWhenTheScheduledBroadcastFails(t *testing.T) {
+// TestYouTubeNamesTheStreamItCreatedWhenTheScheduledBroadcastFailsAndNeverDeletesIt (review #31): with
+// DedicatedIngest and no held key, IngestFor creates a stream before it creates the broadcast. When the insert or the
+// bind then fails, the caller never receives that stream's key, so the stream would be a silent orphan on the channel.
+//
+// IT IS NAMED, NOT DELETED. The first fix deleted it by id, and internal/api's
+// TestNothingSendsADeleteToTheLiveStreamsEndpoint caught that on the merge. The guard's fear is concrete here, too.
+// IngestFor is not serialised per account (preannounce, recurring and a manual refresh all call it), and pickStream's
+// shared path adopts "the first RTMP stream on the channel". A concurrent call can therefore adopt the stream this
+// call just made and hand its key to a destination, and a delete would then cut that destination off. The owner has
+// to settle that guard before anything sends liveStreams.delete. Until then the error carries the stream id, so the
+// operator can find the stream in Studio.
+func TestYouTubeNamesTheStreamItCreatedWhenTheScheduledBroadcastFailsAndNeverDeletesIt(t *testing.T) {
 	for _, failing := range []string{"POST " + ytBroadcastsPath, "POST " + ytBindPath} {
 		t.Run(failing, func(t *testing.T) {
 			var log []capture
@@ -698,12 +706,14 @@ func TestYouTubeDeletesTheStreamItCreatedWhenTheScheduledBroadcastFails(t *testi
 			if err == nil {
 				t.Fatal("IngestFor succeeded although the scheduled broadcast failed")
 			}
-			c := find(log, http.MethodDelete, ytStreamsPath)
-			if c == nil {
-				t.Fatal("the stream this call created was left on the channel; its key never reached anyone")
+			if c := find(log, http.MethodDelete, ytStreamsPath); c != nil {
+				t.Errorf("a liveStreams.delete was sent (%+v); a concurrent IngestFor may already have adopted that stream", c)
 			}
-			if q := mustQuery(t, c); q.Get("id") != "stream-made-here" {
-				t.Errorf("deleted stream id = %q, want the one this call created", q.Get("id"))
+			if !strings.Contains(err.Error(), "stream-made-here") {
+				t.Errorf("error %q does not name the stream this call created, so the orphan is silent", err)
+			}
+			if strings.Contains(err.Error(), "key-made-here") {
+				t.Errorf("error %q carries the created stream's key", err)
 			}
 		})
 	}
