@@ -60,7 +60,7 @@ const (
 type Injector struct {
 	sched *Schedule
 
-	pmtPID   uint16
+	pmtPID uint16
 	// pmtBuf is a program map section that did not fit in its first packet,
 	// collected until it is whole. Nil when no section is being collected.
 	pmtBuf   []byte

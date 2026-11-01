@@ -179,7 +179,7 @@ func TestAProgramMapThatSpansTwoPacketsStillNamesTheVideoPID(t *testing.T) {
 	body = append(body, desc...)
 	body = append(body, streamTypeH264, 0xE0|0x01, 0x00, 0xF0, 0x00) // video ES on 0x0100
 	body = append(body, 0x0F, 0xE0|0x01, 0x01, 0xF0, 0x00)           // audio ES
-	body = append(body, 0, 0, 0, 0)                                   // CRC, not checked
+	body = append(body, 0, 0, 0, 0)                                  // CRC, not checked
 	n := len(body)
 	section := append([]byte{0x02, 0xB0 | byte(n>>8), byte(n)}, body...)
 	payload := append([]byte{0x00}, section...) // pointer field
