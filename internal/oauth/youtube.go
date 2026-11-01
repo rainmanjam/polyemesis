@@ -151,6 +151,12 @@ type ytLiveStream struct {
 			BackupIngestionAddr string `json:"backupIngestionAddress"`
 		} `json:"ingestionInfo"`
 	} `json:"cdn"`
+	// ContentDetails is only present in a response that asked for the
+	// contentDetails part, which is liveStreams.insert on the caption path. The
+	// list call never asks for it, so a listed stream decodes with this empty.
+	ContentDetails struct {
+		ClosedCaptionsIngestionURL string `json:"closedCaptionsIngestionUrl"`
+	} `json:"contentDetails"`
 }
 
 // Ingest returns the channel's reusable RTMP ingest, creating one if the
@@ -230,6 +236,33 @@ func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLi
 // invented number. The refusal is handled where it arrives -- see
 // ytBroadcastCreateAdvice and RefusalSharedIngestionFull.
 func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts IngestOptions) (*ytLiveStream, error) {
+	// A CAPTION-ENABLED DESTINATION IS THE ONE CASE THAT NEVER SHARES, AND ITS
+	// KEY CAN MOVE ONCE.
+	//
+	// Its caption ingest URL is documented only on the insert response, so a
+	// stream it adopts from the list has a URL polyemesis cannot know. The rule:
+	//   - a stored URL plus the held key reuses that stream (the URL comes back
+	//     from the store, see IngestFor);
+	//   - anything else creates a stream, and the new key is the rotation the
+	//     operator is told about. A stored URL with no held key to match is not
+	//     enough to reuse a stream, so the destination rotates too.
+	// No shared or sibling stream is ever adopted on this path: its URL would be
+	// unknown, and a sibling's stream would give two destinations one source.
+	if opts.CaptionPOST {
+		if opts.HeldKey != "" && opts.CaptionIngestURL != "" && !(opts.RotateKey && opts.DedicatedIngest) {
+			streams, err := y.listStreams(ctx, accessToken)
+			if err != nil {
+				return nil, err
+			}
+			for i := range streams {
+				if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
+					return &streams[i], nil
+				}
+			}
+		}
+		return y.createStream(ctx, accessToken, opts.IngestLabel, true)
+	}
+
 	streams, err := y.listStreams(ctx, accessToken)
 	if err != nil {
 		return nil, err
@@ -283,7 +316,7 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 		}
 	}
 
-	return y.createStream(ctx, accessToken, opts.IngestLabel)
+	return y.createStream(ctx, accessToken, opts.IngestLabel, false)
 }
 
 // listStreams reads the channel's liveStreams.
@@ -371,7 +404,7 @@ func ytStreamTitle(label string) string {
 // Every caller has to have decided it wants one. Called where a destination
 // already has a working key, this is a rotation an operator did not ask for --
 // which is why streamFor tries opts.HeldKey before it gets here.
-func (y *YouTube) createStream(ctx context.Context, accessToken, label string) (*ytLiveStream, error) {
+func (y *YouTube) createStream(ctx context.Context, accessToken, label string, withCaptions bool) (*ytLiveStream, error) {
 	// Create a reusable variable-resolution stream. variable/variable
 	// is what lets polyemesis pass through whatever OBS is sending without
 	// YouTube rejecting a resolution mismatch.
@@ -384,8 +417,15 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string) (
 			"frameRate":     "variable",
 		},
 	}
+	// The contentDetails part is requested ONLY when the caller needs the caption
+	// ingest URL. It is documented on this response and not on list, so it is
+	// asked for here and nowhere it would not be returned.
+	part := "id,snippet,cdn"
+	if withCaptions {
+		part += ",contentDetails"
+	}
 	err := postJSON(ctx,
-		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
+		y.apiEndpoint()+ytStreamsPath+"?part="+part,
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, fmt.Errorf("could not create a YouTube ingest stream: %w", err)

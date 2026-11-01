@@ -179,6 +179,15 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 			Key: stream.CDN.IngestionInfo.StreamName,
 		},
 	}
+	if opts.CaptionPOST {
+		// A stream created on the caption path carries its URL from the insert. A
+		// reused stream came from the list, which has none, so the URL the caller
+		// stored with the held key is the one that still applies.
+		b.CaptionIngestURL = stream.ContentDetails.ClosedCaptionsIngestionURL
+		if b.CaptionIngestURL == "" {
+			b.CaptionIngestURL = opts.CaptionIngestURL
+		}
+	}
 	if opts.ScheduledFor.IsZero() {
 		return b, nil
 	}

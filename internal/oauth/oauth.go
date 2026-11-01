@@ -265,6 +265,11 @@ type Broadcast struct {
 	// arrive in the same response and re-fetching them means creating a second
 	// broadcast.
 	Backups []Ingest `json:"-"`
+	// CaptionIngestURL is the YouTube caption ingest URL for a caption-enabled
+	// destination. It is a credential: it is never serialised (json:"-"), never
+	// logged, and only the caller that stores it sees it. Empty for every other
+	// platform and for a YouTube destination with captions off.
+	CaptionIngestURL string `json:"-"`
 }
 
 // IngestOptions carries what a platform needs when the broadcast is CREATED,
@@ -283,9 +288,18 @@ type Broadcast struct {
 // two platforms accept at create time -- not a question a file move gets to
 // answer in passing.
 type IngestOptions struct {
-	Privacy         db.FacebookPrivacy
-	Crosspost       []db.CrosspostTarget
-	DonateCharityID string
+	// CaptionPOST marks a YouTube destination that receives captions by HTTP POST
+	// (closedCaptionsHttpPost). Such a destination must hold a stream whose caption
+	// ingest URL polyemesis knows, because the URL is only documented on the
+	// liveStreams.insert response. See streamFor for the rule that follows.
+	CaptionPOST bool
+	// CaptionIngestURL is the caption ingest URL already stored for this
+	// destination, passed back in so a reused stream keeps its URL. It is a
+	// credential and is never logged or placed in an error.
+	CaptionIngestURL string
+	Privacy          db.FacebookPrivacy
+	Crosspost        []db.CrosspostTarget
+	DonateCharityID  string
 	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
 	// a redundant feed can be published alongside the primary.
 	//
