@@ -28,6 +28,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -78,7 +79,7 @@ func lastOccurrence(sc scheduler.Schedule, now time.Time) (time.Time, bool) {
 func (s *Server) goLiveTemplatesOnce(ctx context.Context, now time.Time) {
 	tpls, err := s.store.ListBroadcastTemplates()
 	if err != nil {
-		s.log.Warn("recurring: cannot read templates for go-live", "err", err)
+		s.log.Warn("recurring: cannot read templates for go-live", "err", redactErr(err))
 		return
 	}
 	if len(tpls) == 0 {
@@ -86,12 +87,12 @@ func (s *Server) goLiveTemplatesOnce(ctx context.Context, now time.Time) {
 	}
 	scheds, err := s.store.ListSchedules()
 	if err != nil {
-		s.log.Warn("recurring: cannot read schedules for go-live", "err", err)
+		s.log.Warn("recurring: cannot read schedules for go-live", "err", redactErr(err))
 		return
 	}
 	dests, err := s.store.ListDestinations()
 	if err != nil {
-		s.log.Warn("recurring: cannot read destinations for go-live", "err", err)
+		s.log.Warn("recurring: cannot read destinations for go-live", "err", redactErr(err))
 		return
 	}
 	schedByID := make(map[int64]scheduler.Schedule, len(scheds))
@@ -125,7 +126,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	}
 	title, err := scheduler.RenderTitle(tpl.TitlePattern, at, loc)
 	if err != nil {
-		s.log.Warn("recurring: the title pattern cannot be rendered for go-live", "schedule", sc.Name, "err", err)
+		s.log.Warn("recurring: the title pattern cannot be rendered for go-live", "schedule", sc.Name, "err", redactErr(err))
 		return
 	}
 	mp, ok := s.providers.MetadataFor(d.Platform)
@@ -134,7 +135,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	}
 	acct, err := s.tokenFor(ctx, *d.AccountID)
 	if err != nil {
-		s.log.Warn("recurring: no usable token for the go-live title", "destination", d.Name, "err", err)
+		s.log.Warn("recurring: no usable token for the go-live title", "destination", d.Name, "err", redactErr(err))
 		return
 	}
 	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
@@ -146,7 +147,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	// does not use up the show's one attempt.
 	claimed, err := s.store.ClaimGoLive(d.ID, sc.ID, at)
 	if err != nil {
-		s.log.Warn("recurring: cannot record the go-live title for a show", "destination", d.Name, "err", err)
+		s.log.Warn("recurring: cannot record the go-live title for a show", "destination", d.Name, "err", redactErr(err))
 		return
 	}
 	if !claimed {
@@ -174,7 +175,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	})
 	if err != nil {
 		s.log.Warn("recurring: the go-live title was refused; it is not retried for this show",
-			"destination", d.Name, "schedule", sc.Name, "err", err)
+			"destination", d.Name, "schedule", sc.Name, "err", redactErr(err))
 		return
 	}
 	if res == nil {
@@ -182,7 +183,7 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	}
 	for _, w := range res.Warnings {
 		s.log.Warn("recurring: the platform did not take part of the go-live metadata",
-			"destination", d.Name, "schedule", sc.Name, "detail", w)
+			"destination", d.Name, "schedule", sc.Name, "detail", alerts.Redact(w))
 	}
 	s.log.Info("recurring: wrote the show's title and category at go-live",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "applied", len(res.Applied))

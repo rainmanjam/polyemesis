@@ -186,7 +186,8 @@ func TestEditingOneOccurrenceTitleWritesThatEventOnly(t *testing.T) {
 	f := newRecurringHTTP(t)
 	base := "/api/v1/schedules/" + strconv.FormatInt(f.schedule, 10)
 	send(t, f.h, f.sign, http.MethodPut, base+"/template", templateBody(), http.StatusOK)
-	at := time.Date(2026, 11, 3, 19, 0, 0, 0, time.UTC)
+	// From the real clock: the handler refuses a show whose start has passed.
+	at := time.Now().Add(72 * time.Hour).Truncate(time.Hour)
 	id, err := f.store.ClaimOccurrence(scheduler.Occurrence{ScheduleID: f.schedule, DestinationID: f.dest.ID,
 		At: at, State: scheduler.OccurrencePending})
 	if err != nil {

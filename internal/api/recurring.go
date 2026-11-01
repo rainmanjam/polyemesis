@@ -38,6 +38,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -91,17 +92,17 @@ func (s *Server) RecurringLoop(ctx context.Context) {
 func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 	tpls, err := s.store.ListBroadcastTemplates()
 	if err != nil {
-		s.log.Warn("recurring: cannot read templates", "err", err)
+		s.log.Warn("recurring: cannot read templates", "err", redactErr(err))
 		return
 	}
 	scheds, err := s.store.ListSchedules()
 	if err != nil {
-		s.log.Warn("recurring: cannot read schedules", "err", err)
+		s.log.Warn("recurring: cannot read schedules", "err", redactErr(err))
 		return
 	}
 	dests, err := s.store.ListDestinations()
 	if err != nil {
-		s.log.Warn("recurring: cannot read destinations", "err", err)
+		s.log.Warn("recurring: cannot read destinations", "err", redactErr(err))
 		return
 	}
 	schedByID := make(map[int64]scheduler.Schedule, len(scheds))
@@ -183,11 +184,20 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			// It holds its slot and nothing is mirrored for it.
 			continue
 		case !errors.Is(err, db.ErrNotFound):
-			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", err)
+			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", redactErr(err))
 			return
 		}
 
 		b, ok := s.createTemplateEvent(ctx, ed, tpl, sc, d, at, now)
+		if ok && strings.TrimSpace(d.StreamKey) == "" && b.Ingest.Key != "" {
+			// The first create in this walk minted the destination's stream. The next one must be handed the same
+			// key as HeldKey, or a destination with an ingest of its own gets a SECOND stream for occurrence two,
+			// and the mirror later moves to an event whose key the destination does not hold. A copy, so the
+			// caller's row is not changed under it.
+			cp := *d
+			cp.StreamKey = b.Ingest.Key
+			d = &cp
+		}
 		if !ok {
 			// The failure is logged where it happened, and the claim is released or the event is
 			// cancelled, so the next sweep is free to try. Each occurrence stands alone, so one that
@@ -216,7 +226,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		return nil, false
 	}
 	if err != nil {
-		s.log.Warn("recurring: cannot claim an occurrence", "destination", d.Name, "err", err)
+		s.log.Warn("recurring: cannot claim an occurrence", "destination", d.Name, "err", redactErr(err))
 		return nil, false
 	}
 	release := func() { _ = s.store.DeleteOccurrence(claimID) }
@@ -229,14 +239,14 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 	title, err := scheduler.RenderTitle(tpl.TitlePattern, at, loc)
 	if err != nil {
 		release()
-		s.log.Warn("recurring: the title pattern cannot be rendered", "schedule", sc.Name, "err", err)
+		s.log.Warn("recurring: the title pattern cannot be rendered", "schedule", sc.Name, "err", redactErr(err))
 		return nil, false
 	}
 
 	acct, err := s.tokenFor(ctx, *d.AccountID)
 	if err != nil {
 		release()
-		s.log.Warn("recurring: no usable token", "destination", d.Name, "err", err)
+		s.log.Warn("recurring: no usable token", "destination", d.Name, "err", redactErr(err))
 		return nil, false
 	}
 	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
@@ -257,7 +267,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
 			s.log.Warn("recurring: could not create the event for an occurrence; further identical "+
 				"failures for this show will not be logged until one succeeds",
-				"destination", d.Name, "schedule", sc.Name, "err", err)
+				"destination", d.Name, "schedule", sc.Name, "err", redactErr(err))
 		}
 		return nil, false
 	}
@@ -265,7 +275,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 	warnings, err := ed.EditScheduledBroadcast(cctx, acct.AccessToken, b.ID, oauth.ScheduledEdit{
 		Title:       title,
 		Description: tpl.Description,
-		Privacy:     tpl.Privacy,
+		Privacy:     templatePrivacy(tpl, d),
 		Category:    tpl.Category,
 	})
 	if err != nil {
@@ -273,10 +283,10 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		// choose and refused to give it the template's. Cancelling it is the only way that does not put
 		// a public page with the wrong title in front of viewers. If the cancel also fails, the event is
 		// recorded so its id is not lost, and it is named in the log for the operator to remove.
-		if cerr := ed.CancelScheduledBroadcast(cctx, acct.AccessToken, b.ID); cerr == nil {
+		if cerr := s.cancelCreatedEvent(ctx, ed, acct.AccessToken, b.ID); cerr == nil {
 			release()
 			s.log.Warn("recurring: the platform refused the event's title, so the event was cancelled",
-				"destination", d.Name, "schedule", sc.Name, "err", err)
+				"destination", d.Name, "schedule", sc.Name, "err", redactErr(err))
 			return nil, false
 		}
 		// NOT ResolveOccurrence: that would record an upcoming show with an empty title. The row is
@@ -285,30 +295,44 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		if serr := s.store.StrandOccurrence(claimID, b.ID); serr != nil {
 			s.log.Error("recurring: the event could not be cancelled and its record could not be "+
 				"stranded; delete it in the platform's own studio",
-				"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", serr)
+				"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", redactErr(serr))
 		}
 		s.log.Error("recurring: the platform refused the event's title and the event could not be "+
 			"cancelled; the cancel is retried every sweep until it succeeds",
-			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", err)
+			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", redactErr(err))
 		return nil, false
 	}
 	for _, w := range warnings {
 		s.log.Warn("recurring: the platform did not apply part of the event's metadata",
-			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "detail", w)
+			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "detail", alerts.Redact(w))
 	}
 
 	if data, mime, terr := s.store.BroadcastThumbnail(sc.ID); terr == nil && len(data) > 0 {
 		if err := ed.SetScheduledThumbnail(cctx, acct.AccessToken, b.ID, data, mime); err != nil {
 			// A thumbnail is not worth cancelling a show over. Logged, and the event stands.
 			s.log.Warn("recurring: the event was created but its thumbnail was refused",
-				"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", err)
+				"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", redactErr(err))
 		}
 	}
 
 	if err := s.store.ResolveOccurrence(claimID, b.ID, title); err != nil {
-		s.log.Error("recurring: the event was created but its record could not be written; the next "+
-			"sweep will create another event for this occurrence unless it is removed",
-			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", err)
+		// A pending claim left here ages out after claimAbandonAfter and the occurrence is created AGAIN, a
+		// duplicate public event. So the row is stranded with the event id instead, which the sweep cancels. If
+		// even that write fails, the row is gone, and the event is cancelled now so it is not left unnamed.
+		if serr := s.store.StrandOccurrence(claimID, b.ID); serr == nil {
+			s.log.Error("recurring: the event was created but its record could not be written; it is "+
+				"recorded as stranded and will be cancelled", "destination", d.Name, "schedule", sc.Name,
+				"event", b.ID, "err", redactErr(err))
+			return nil, false
+		}
+		if cerr := s.cancelCreatedEvent(ctx, ed, acct.AccessToken, b.ID); cerr != nil {
+			s.log.Error("recurring: the event was created, its record could not be written and it could not be "+
+				"cancelled; delete it in the platform's own studio", "destination", d.Name, "schedule", sc.Name,
+				"event", b.ID, "err", redactErr(cerr))
+			return nil, false
+		}
+		s.log.Error("recurring: the event was created but its record could not be written, so it was cancelled",
+			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", redactErr(err))
 		return nil, false
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
@@ -316,6 +340,42 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 	s.log.Info("recurring: created an event for an upcoming occurrence",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "event", b.ID)
 	return b, true
+}
+
+// templatePrivacy is the privacy an occurrence's event is written with: the STRICTER of the template's and the
+// destination's own compliance privacy (private, then unlisted, then public).
+//
+// Why not the template's alone. A template saved without a privacy is stored as "public" (scheduler.BroadcastTemplate
+// normalises it), so "the operator did not choose" and "the operator chose public" look the same here. A destination
+// whose compliance says private or unlisted is a deliberate setting about who may see that channel's shows, and a
+// template that merely did not mention privacy must not open its look-ahead events to everyone for days. To publish
+// such a destination's shows, change the destination's privacy. A compliance privacy of "unchanged" says nothing,
+// and the template's stands.
+func templatePrivacy(tpl scheduler.BroadcastTemplate, d *db.Destination) string {
+	rank := map[string]int{"public": 1, "unlisted": 2, "private": 3}
+	t := strings.ToLower(strings.TrimSpace(tpl.Privacy))
+	c := strings.ToLower(strings.TrimSpace(string(d.Compliance.Privacy)))
+	if rank[c] > rank[t] {
+		return c
+	}
+	return t
+}
+
+// cancelCreatedEvent removes an event this sweep just created, on a context of its own. The create's context may be
+// the one that ran out, and reusing it would make the rollback fail for the reason the create did.
+func (s *Server) cancelCreatedEvent(ctx context.Context, ed oauth.ScheduledEditor, token, id string) error {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), templateCallTimeout)
+	defer cancel()
+	return ed.CancelScheduledBroadcast(cctx, token, id)
+}
+
+// redactErr is the form every error takes on its way into a log line here. Platform errors carry response bodies,
+// and a body can carry a stream URL with its key.
+func redactErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return alerts.Redact(err.Error())
 }
 
 // pointGoLiveAt sets the destination's announcement mirror to one occurrence. When b is non-nil the
@@ -351,7 +411,7 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	schedByID map[int64]scheduler.Schedule, tplByID map[int64]scheduler.BroadcastTemplate) {
 	open, err := s.store.ListOpenOccurrences()
 	if err != nil {
-		s.log.Warn("recurring: cannot read occurrences", "err", err)
+		s.log.Warn("recurring: cannot read occurrences", "err", redactErr(err))
 		return
 	}
 	for _, o := range open {
@@ -386,12 +446,12 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 					s.log.Warn("recurring: an orphaned event may not be deleted from here (its show has started, its "+
 						"destination is live, or the platform refused), so it was left on the platform; "+
 						"remove it in the platform's own studio if it is not wanted",
-						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
 					_ = s.store.DeleteOccurrence(o.ID)
 					continue
 				}
 				s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
-					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
 			}
 			continue
 		}
@@ -408,55 +468,38 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	}
 	// The go-live claims of Twitch and Kick shows age out on the same clock, so the table stays bounded.
 	if err := s.store.PruneGoLiveBefore(cutoff); err != nil {
-		s.log.Warn("recurring: cannot prune go-live records", "err", err)
+		s.log.Warn("recurring: cannot prune go-live records", "err", redactErr(err))
 	}
 }
 
-// releaseOpenOccurrence takes one open occurrence out of the record when its schedule or template has
-// gone, or retries a stranded cancel. A platform event is deleted only when its show has not started and
-// its destination is not delivering: an event whose show has started may be the live broadcast, or the
-// page of a show that aired, and deleting it is the operator's decision. For those the local row goes and
-// the platform event stays. A stranded event never went live, so its cancel is retried whenever its
-// destination is off air.
+// releaseOpenOccurrence retries a stranded cancel. A stranded event never went live, so its cancel is retried
+// whenever its destination is off air, and dropped once its show has passed. Only stranded rows reach it: an
+// orphaned upcoming row (its schedule or template gone) is reconcileOccurrences' own branch, which owns the
+// started-show and live-destination rules for those.
 func (s *Server) releaseOpenOccurrence(ctx context.Context, o scheduler.Occurrence, now time.Time) {
-	live := false
-	if d, err := s.store.GetDestination(o.DestinationID); err == nil {
-		live = d.Enabled
+	if d, err := s.store.GetDestination(o.DestinationID); err == nil && d.Enabled {
+		return
 	}
-	switch {
-	case o.State == scheduler.OccurrenceStranded:
-		if live {
-			return
-		}
-		if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
-			// The retry is bounded by the show's own time. Until the show passes, a refused cancel is
-			// retried (a transient failure clears, and a show the operator started is refused every pass).
-			// Once it has passed, the record is dropped and the event is named for removal in the
-			// platform's studio: a refusal that never clears must not hold the row for ever.
-			if !o.At.After(now) {
-				if derr := s.store.DeleteOccurrence(o.ID); derr != nil {
-					s.log.Warn("recurring: cannot drop a stranded record whose show has passed",
-						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", derr)
-				}
-				s.log.Error("recurring: a stranded event's show has passed and its cancel is still refused; "+
-					"its record is dropped, and the event must be removed in the platform's own studio",
-					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
-				return
-			}
-			s.log.Warn("recurring: a stranded event could not be cancelled; it will be retried",
-				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
-		}
-	case live || !o.At.After(now):
-		// The show has started, or its destination is delivering. Only the local row goes.
-		if err := s.store.DeleteOccurrence(o.ID); err != nil {
-			s.log.Warn("recurring: cannot drop the record of a started show", "schedule", o.ScheduleID, "err", err)
-		}
-	default:
-		if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
-			s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
-				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
-		}
+	err := s.cancelOccurrence(ctx, o, true, now)
+	if err == nil {
+		return
 	}
+	// The retry is bounded by the show's own time. Until the show passes, a refused cancel is retried (a
+	// transient failure clears, and a show the operator started is refused every pass). Once it has passed,
+	// the record is dropped and the event is named for removal in the platform's studio: a refusal that never
+	// clears must not hold the row for ever.
+	if !o.At.After(now) {
+		if derr := s.store.DeleteOccurrence(o.ID); derr != nil {
+			s.log.Warn("recurring: cannot drop a stranded record whose show has passed",
+				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(derr))
+		}
+		s.log.Error("recurring: a stranded event's show has passed and its cancel is still refused; "+
+			"its record is dropped, and the event must be removed in the platform's own studio",
+			"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
+		return
+	}
+	s.log.Warn("recurring: a stranded event could not be cancelled; it will be retried",
+		"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
 }
 
 // skipOccurrence is the operator's "skip this one". It is cancelOccurrence keeping the row, so the

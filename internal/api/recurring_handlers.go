@@ -2,12 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -132,9 +134,17 @@ func (s *Server) handleSetBroadcastThumbnail(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "a thumbnail must be a PNG or a JPEG")
 		return
 	}
+	// The reader allows one byte past the limit, so a body of exactly the limit is read whole and a larger one is
+	// seen as larger here rather than reaching the store, which refuses it with a 500.
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, scheduler.MaxThumbnailBytes+1))
-	if err != nil {
+	var tooBig *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooBig) || (err == nil && len(data) > scheduler.MaxThumbnailBytes):
 		writeError(w, http.StatusRequestEntityTooLarge, "the thumbnail is larger than 2 MB")
+		return
+	case err != nil:
+		// A body that broke off is not a picture that was too big.
+		writeError(w, http.StatusBadRequest, "the thumbnail could not be read")
 		return
 	}
 	if !matchesImageSignature(data, mime) {
@@ -234,7 +244,7 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 				"its destination is live, or the platform will not delete it; the platform keeps it as it is")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+err.Error())
+		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+alerts.Redact(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "state": scheduler.OccurrenceSkipped})
@@ -276,6 +286,13 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "only an upcoming occurrence has an event to retitle")
 		return
 	}
+	// The same refusals skip makes. A show that has started is the platform's record of it, and a destination on
+	// air may be bound to this very event: a retitle there is an edit of the live broadcast, which is the go-live
+	// composer's job, and re-sending the template's privacy could undo a change made at go-live.
+	if !occ.At.After(time.Now()) {
+		writeError(w, http.StatusConflict, "this show has already started, so its event is past retitling from here")
+		return
+	}
 	tpl, err := s.store.GetBroadcastTemplate(occ.ScheduleID)
 	if err != nil {
 		writeError(w, http.StatusConflict, "this occurrence's template was deleted, so its event is an orphan")
@@ -296,20 +313,31 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this destination cannot retitle a scheduled event")
 		return
 	}
-	acct, err := s.tokenFor(r.Context(), *d.AccountID)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "the connected account could not be used: "+err.Error())
+	if d.Enabled || s.destinationLive(d.ID) {
+		writeError(w, http.StatusConflict, "the destination is live, so its event may be on air; retitle it from the go-live composer")
 		return
 	}
-	warnings, err := ed.EditScheduledBroadcast(r.Context(), acct.AccessToken, occ.PlatformEventID, oauth.ScheduledEdit{
+	// Bounded, and not tied to the browser: a disconnect mid-write must not leave the title half-applied, and a
+	// stuck platform call must not hold the request for ever.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), templateCallTimeout)
+	defer cancel()
+	acct, err := s.tokenFor(ctx, *d.AccountID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "the connected account could not be used: "+alerts.Redact(err.Error()))
+		return
+	}
+	warnings, err := ed.EditScheduledBroadcast(ctx, acct.AccessToken, occ.PlatformEventID, oauth.ScheduledEdit{
 		Title:       title,
 		Description: tpl.Description,
-		Privacy:     tpl.Privacy,
+		Privacy:     templatePrivacy(*tpl, d),
 		Category:    tpl.Category,
 	})
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "the platform refused the new title: "+err.Error())
+		writeError(w, http.StatusBadGateway, "the platform refused the new title: "+alerts.Redact(err.Error()))
 		return
+	}
+	for i := range warnings {
+		warnings[i] = alerts.Redact(warnings[i])
 	}
 	if err := s.store.SetOccurrenceTitle(id, title); err != nil {
 		writeStoreError(w, err)

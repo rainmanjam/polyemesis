@@ -42,6 +42,13 @@ type fakeYouTubeEditor struct {
 	// cancelErr, when set, is the refusal every cancel answers with, as a platform that will not
 	// delete a broadcast that is already live or complete does.
 	cancelErr error
+	// onThumb, when set, runs inside the thumbnail write, which is the last platform call before
+	// the occurrence is recorded.
+	onThumb func()
+	// cancelCtxErr is the context error each cancel call saw, in order.
+	cancelCtxErr []error
+	// onEdit, when set, runs inside each title write.
+	onEdit func()
 }
 
 func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
@@ -62,6 +69,9 @@ func (f *fakeYouTubeEditor) EditScheduledBroadcast(_ context.Context, _, broadca
 	defer f.mu.Unlock()
 	f.edits = append(f.edits, e)
 	f.editedIDs = append(f.editedIDs, broadcastID)
+	if f.onEdit != nil {
+		f.onEdit()
+	}
 	return nil, f.editErr
 }
 
@@ -69,13 +79,17 @@ func (f *fakeYouTubeEditor) SetScheduledThumbnail(_ context.Context, _, broadcas
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.thumbs = append(f.thumbs, broadcastID)
+	if f.onThumb != nil {
+		f.onThumb()
+	}
 	return nil
 }
 
-func (f *fakeYouTubeEditor) CancelScheduledBroadcast(_ context.Context, _, broadcastID string) error {
+func (f *fakeYouTubeEditor) CancelScheduledBroadcast(ctx context.Context, _, broadcastID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, broadcastID)
+	f.cancelCtxErr = append(f.cancelCtxErr, ctx.Err())
 	return f.cancelErr
 }
 
