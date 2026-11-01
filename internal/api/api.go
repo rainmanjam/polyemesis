@@ -1327,6 +1327,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/library/recordings/{id}", s.handleGetLibraryRecording)
 			r.Put("/library/recordings/{id}", s.handleUpdateLibraryRecording)
 			r.Get("/library/recordings/{id}/transcript", s.handleGetTranscript)
+			r.Get("/library/recordings/{id}/transcript/export", s.handleExportTranscriptCaptions)
 			r.Delete("/library/recordings/{id}/transcript", s.handleDeleteTranscript)
 			r.Put("/library/recordings/{id}/speaker", s.handleSetTranscriptSpeaker)
 			// Submitting the work the library page offers. One route per
@@ -2111,7 +2112,9 @@ var readScopeDeniedPatterns = map[string]bool{
 	// #154: content, not metadata. The words.
 	"/api/v1/clipper/recordings/{id}/transcript": true,
 	"/api/v1/library/recordings/{id}/transcript": true,
-	"/api/v1/library/search":                     true,
+	// #8 caption export: the same words in a caption file, so the same denial.
+	"/api/v1/library/recordings/{id}/transcript/export": true,
+	"/api/v1/library/search":                            true,
 	// Staging-readiness row 32: content, not metadata. What viewers wrote. The
 	// overview is here too because it carries the recent messages alongside
 	// the connection states; the live copy on /ws is withheld by wsEventPolicy.

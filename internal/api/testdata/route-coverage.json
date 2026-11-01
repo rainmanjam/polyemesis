@@ -12,10 +12,10 @@
   "guardedFloor": 29,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 277,
+    "methodPatternPairs": 278,
     "swept": 75,
     "excused": 60,
-    "denied": 142,
+    "denied": 143,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -709,6 +709,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/transcript",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/recordings/{id}/transcript/export",
       "coverage": "denied",
       "zeroSource": "unguarded"
     },
@@ -2394,6 +2400,16 @@
     },
     {
       "route": "GET /api/v1/library/recordings/{id}/transcript",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/library/recordings/{id}/transcript/export",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
       "want": {

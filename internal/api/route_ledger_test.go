@@ -737,13 +737,16 @@ var excusedRoutes = map[string]coverageExcus{
 	// What is left here is not "a row nobody wrote yet". Each of the two
 	// survivors needs something a store INSERT cannot produce, and each says
 	// which thing.
-	"GET /api/v1/recordings/{id}/download":             denied(),
-	"GET /api/v1/recordings/stems/{name}/download":     denied(),
-	"GET /api/v1/clips/{name}/download":                denied(),
-	"GET /api/v1/clipper/recordings/{id}/transcript":   denied(),
-	"GET /api/v1/clipper/jobs/{id}/download":           denied(),
-	"GET /api/v1/library/recordings/{id}/transcript":   denied(),
-	"GET /api/v1/library/recordings/{id}/media/{file}": denied(),
+	"GET /api/v1/recordings/{id}/download":           denied(),
+	"GET /api/v1/recordings/stems/{name}/download":   denied(),
+	"GET /api/v1/clips/{name}/download":              denied(),
+	"GET /api/v1/clipper/recordings/{id}/transcript": denied(),
+	"GET /api/v1/clipper/jobs/{id}/download":         denied(),
+	"GET /api/v1/library/recordings/{id}/transcript": denied(),
+	// #8 caption export: the transcript's words in a caption file. A read token
+	// must not get them through a second route, so it is denied like its parent.
+	"GET /api/v1/library/recordings/{id}/transcript/export": denied(),
+	"GET /api/v1/library/recordings/{id}/media/{file}":      denied(),
 	"GET /api/v1/metadata/push/{id}": {
 		Why: "reached only with a LIVE metadata push, which is an entry in the " +
 			"in-process metadataRegistry rather than a row in any table: it is created " +

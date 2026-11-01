@@ -304,6 +304,12 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 		"text/csv": {Shape: "file-download",
 			Why: "the chat poll export (#14), GET /polls/export: an attachment with a " +
 				"Content-Disposition, counts only."},
+		"application/x-subrip": {Shape: "file-download",
+			Why: "the SRT caption export, GET /library/recordings/{id}/transcript/export: " +
+				"an attachment with a Content-Disposition, built from the recording id and format."},
+		"text/vtt": {Shape: "file-download",
+			Why: "the WebVTT caption export, the same route and the same attachment shape as " +
+				"the SRT one. The live sidecar is served by the playout handler, not this site."},
 		"application/x-pem-file": {Shape: "file-download",
 			Why: "the CA certificate download; the fourth of the four Content-Disposition " +
 				"sites the header family already names."},
