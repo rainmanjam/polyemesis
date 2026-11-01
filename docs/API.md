@@ -859,6 +859,11 @@ then the answer has `"cut": true`. `now` must be `true` or `false`; anything els
 the broadcast's delay: polyemesis does not hold that destination's output back,
 and there is no tail to drain ([CAPTIONS.md](CAPTIONS.md)).
 
+**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
+it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
+(below), and a dialog in the console is a confirmation a script or a replayed
+request never sees. `start-all` takes no body.
+
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts
 an announcement when a broadcast is published. Under `first` it does so on the
@@ -867,11 +872,6 @@ polyemesis opens again after X ends one are published with `should_not_tweet`.
 `lifecycle.renewed` is `true` on such a broadcast. Any other value is `400`. A
 destination that is not X has the field removed on save, with a warning.
 PROVISIONAL: X Livestream is gated until the app is whitelisted.
-
-**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
-it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
-(below), and a dialog in the console is a confirmation a script or a replayed
-request never sees. `start-all` takes no body.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and
