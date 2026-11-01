@@ -402,6 +402,9 @@ type Engine struct {
 	// dies right after every start is switched off rather than respawned on
 	// every reconcile. See captionRestartBudget.
 	captBudget captionRestartBudget
+	// captAutoModel is the model the installed captioner picked for a blank
+	// operator model, or "". See resolveCaptionConfig.
+	captAutoModel string
 	// captWake asks for a reconcile after the captioner's loop ends on its own.
 	// Nil is the production behaviour, a Reconcile on its own goroutine; a test
 	// on a partly built engine replaces it.
@@ -4968,10 +4971,18 @@ func captionerIsCurrent(cur *transcribe.LiveCaptioner, sig, want string) bool {
 // track the source offers (with its speaker and denoise annotations), the
 // track's language, the live default model and the thread count. The result is
 // what the captioner will run, and what its signature is taken from.
-func resolveCaptionConfig(cfg transcribe.LiveConfig, choice transcribe.TrackChoice, hint transcribe.HardwareHint) transcribe.LiveConfig {
+//
+// pinned is the model the installed captioner chose for a blank model, or "".
+// The default comes from the hardware hint, which a re-probe of the encoders can
+// change mid-show; without the pin, that would restart a running captioner on a
+// different model, or switch captions off when that model is not downloaded.
+func resolveCaptionConfig(cfg transcribe.LiveConfig, choice transcribe.TrackChoice, hint transcribe.HardwareHint, pinned string) transcribe.LiveConfig {
 	cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
 	if cfg.Language == "" {
 		cfg.Language = choice.Language
+	}
+	if cfg.Model == "" {
+		cfg.Model = pinned
 	}
 	if cfg.Model == "" {
 		cfg.Model = transcribe.LiveDefaultModel(hint).Name
@@ -5021,6 +5032,10 @@ func (e *Engine) reconcileCaptions() {
 
 	e.mu.RLock()
 	on, cfg, cur, sig, stopped := e.captOn, e.captCfg, e.capt, e.captSig, e.stopped
+	pinned := ""
+	if cur != nil {
+		pinned = e.captAutoModel
+	}
 	whisper, modelsDir, nice := e.whisper, e.whisperDir, e.whisperNice
 	e.mu.RUnlock()
 
@@ -5030,8 +5045,9 @@ func (e *Engine) reconcileCaptions() {
 	// captioner runs from here on. e.captCfg keeps the operator's: an automatic
 	// track must stay automatic, so a later source change can pick another one.
 	want := ""
+	autoModel := cfg.Model == ""
 	if on && !stopped && whisper.Available() && haveTrack {
-		cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools))
+		cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools), pinned)
 		want = captionSig(cfg, e.sourceLabel())
 	}
 	if captionerIsCurrent(cur, sig, want) {
@@ -5170,6 +5186,10 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = capt, port, hub, vtt, want
+	e.captAutoModel = ""
+	if autoModel {
+		e.captAutoModel = cfg.Model
+	}
 	e.captRoute = route
 	routeHeld = true
 	e.mu.Unlock()

@@ -327,3 +327,48 @@ func TestSwitchingCaptionsOffPublishesAStatusThatSaysTheyStopped(t *testing.T) {
 		}
 	}
 }
+
+// TestABlankModelStaysOnTheModelItStartedWithWhenTheDefaultWouldChange. The live
+// default model comes from the hardware hint, and the hint can change while a
+// show is running: RefreshEncoderCapabilities re-probes the GPU encoders without
+// a restart. With the signature taken from the resolved config, a blank-model
+// install whose default moved from tiny to base would restart its captioner in
+// the middle of a show, and switch captions off if the new model is not
+// downloaded. While a captioner is installed, a blank model resolves to the model
+// that captioner picked; an operator's explicit model is unaffected.
+//
+// MUTATION, internal/engine/engine.go in resolveCaptionConfig: ignore pinned.
+// Observed: FAIL -- the blank model resolved to the new default.
+func TestABlankModelStaysOnTheModelItStartedWithWhenTheDefaultWouldChange(t *testing.T) {
+	small := transcribe.HardwareHint{CPUCores: 2}
+	def := transcribe.LiveDefaultModel(small).Name
+	pinned := "base"
+	if def == pinned {
+		t.Fatalf("setup: the two-core default is %q, want a model other than %q", def, pinned)
+	}
+	cfg := transcribe.DefaultLiveConfig()
+	if got := resolveCaptionConfig(cfg, transcribe.TrackChoice{}, small, pinned).Model; got != pinned {
+		t.Fatalf("blank model with a running captioner on %q resolved to %q", pinned, got)
+	}
+	if got := resolveCaptionConfig(cfg, transcribe.TrackChoice{}, small, "").Model; got != def {
+		t.Fatalf("blank model with nothing running resolved to %q, want the default %q", got, def)
+	}
+	cfg.Model = "small"
+	if got := resolveCaptionConfig(cfg, transcribe.TrackChoice{}, small, pinned).Model; got != "small" {
+		t.Fatalf("the operator's explicit model resolved to %q", got)
+	}
+
+	// And the engine pins what it started with.
+	e, _ := captionEngine(t, "hold")
+	e.reconcileCaptions()
+	c := currentCaptioner(e)
+	if c == nil {
+		t.Fatalf("no captioner started; warning %q", e.LiveCaptions().Warning)
+	}
+	e.mu.RLock()
+	got := e.captAutoModel
+	e.mu.RUnlock()
+	if got != c.Config().Model {
+		t.Fatalf("captAutoModel = %q, want the started captioner's %q", got, c.Config().Model)
+	}
+}
