@@ -1282,24 +1282,51 @@ describe("every settings leaf an operator is meant to change", () => {
     ).toEqual([]);
   });
 
-  it("every control it can drive keeps what it is given", async () => {
-    const driven: string[] = [];
-    const reverted: string[] = [];
-    for (const screen of SCREENS) {
+  /* ONE WRITE PASS PER SCREEN, not one test walking all four.
+   *
+   * The four passes used to run inside a single test, so the test's budget was
+   * the sum of every screen's controls. Each merge that added settings made it
+   * longer, until under coverage instrumentation on a loaded runner it ran past
+   * vitest's 5s default -- and a failed test is a report vitest does not write,
+   * so the whole UI half of SonarCloud's coverage went to zero with it. A
+   * screen's pass is independent of the others (writePass renders it, drives
+   * it and cleans up), so each is its own test with its own budget, and the
+   * verdicts below read what all four collected. Tests in a file run in order,
+   * which is what lets the aggregate come last.
+   *
+   * THE BUDGET IS STATED, like the walk's above, because this is a fixed
+   * amount of rendering and not a wait on anything that could hang: the
+   * pipeline tab alone is about three quarters of the work (1.4s of 1.9s
+   * locally under coverage, and CI ran the whole pass at roughly 2.7x that),
+   * so splitting by screen leaves it close to the 5s default by itself. A
+   * genuinely stuck pass is still a failure; a slow runner is not. */
+  const writeDriven = new Map<string, string[]>();
+  const writeReverted: string[] = [];
+
+  it.each(SCREENS.map((s) => [s.name, s] as const))(
+    "drives every control on %s",
+    async (_name, screen) => {
       const pass = await writePass(screen, document_(leaves, new Set()));
-      driven.push(...pass.driven);
-      reverted.push(...pass.reverted);
-    }
+      writeDriven.set(screen.name, pass.driven);
+      writeReverted.push(...pass.reverted);
+    },
+    30_000,
+  );
+
+  it("every control it can drive keeps what it is given", () => {
+    // Every screen's pass ran. A pass that failed or was skipped contributes
+    // nothing, which would read as "nothing reverted" below.
+    expect([...writeDriven.keys()]).toEqual(SCREENS.map((s) => s.name));
 
     // POSITIVE CONTROL. A pass that drove nothing reports no reverts, which
     // looks exactly like a pass where everything is wired correctly.
+    const driven = [...writeDriven.values()].flat();
     expect(
       driven.length,
       "the write pass drove no controls at all, so it is provably not checking anything",
     ).toBeGreaterThan(20);
 
-    // TEMP PROBE
-    const unexplained = reverted.filter((k) => !(reformatKey(k) in REFORMATS));
+    const unexplained = writeReverted.filter((k) => !(reformatKey(k) in REFORMATS));
     expect(
       unexplained,
       `these controls did not keep what was typed into them. A CONTROLLED input that ` +

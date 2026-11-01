@@ -1098,11 +1098,44 @@ jobs:
           # step knew and threw away.
           #
           # A trap covers more than the old inline kill did (any early exit, not
-          # just the one path), and best-effort is sufficient: nothing later in
-          # this job binds 8123, polyemesis-smoke is built once and never
-          # rebuilt so there is no Windows sharing violation to fear, and the
-          # runner VM is destroyed at the end of the job.
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          # just the one path).
+          #
+          # BEST-EFFORT WAS NOT SUFFICIENT, AND THE OLD REASON WAS INCOMPLETE.
+          # Nothing later binds 8123, true -- but a fresh server also opens the
+          # one-port ingest listeners, RTMP :1935 and SRT :6000, and the next
+          # step's server needs both. When Git-Bash's `kill` did not land on the
+          # native .exe (0a731e0e's windows-latest), this server lived on, the
+          # broadcast step's server logged "rtmp listen :1935 ... Only one usage
+          # of each socket address" from its first second, and the E-RTMP and SRT
+          # phases failed against a listener that was not theirs. So on Windows
+          # the stop goes through taskkill on the process's Windows pid, read
+          # now while /proc still has it, and the trap then waits -- BOUNDED, for
+          # the reason above -- until /health stops answering, which is when the
+          # listeners are released. If it still answers, the next step is going
+          # to fail, and this says why before it does.
+          winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || true)
+          stop_server() {
+            if [ "${RUNNER_OS:-}" = Windows ]; then
+              if [ -n "$winpid" ]; then
+                taskkill //F //T //PID "$winpid" >/dev/null 2>&1 || true
+              else
+                # No pid to aim at. Nothing else runs this image yet: the
+                # broadcast step starts its own server after this one.
+                taskkill //F //T //IM polyemesis-smoke.exe >/dev/null 2>&1 || true
+              fi
+            fi
+            kill "$pid" 2>/dev/null || true
+            # Gone means BOTH: the shell's pid has exited, and nothing answers
+            # on the port -- on Windows the first can be true of a shim while
+            # the .exe behind it still holds every socket.
+            for _ in $(seq 1 40); do
+              if ! kill -0 "$pid" 2>/dev/null && ! curl -fsS -m 1 http://127.0.0.1:8123/api/v1/health >/dev/null 2>&1; then return 0; fi
+              sleep 0.25
+            done
+            echo "::warning::the /health server was still answering 10s after it was stopped;" \
+              "it holds the ingest ports :1935 and :6000 the broadcast step needs"
+          }
+          trap stop_server EXIT
           ok=no
           for _ in $(seq 1 40); do
             sleep 0.5
