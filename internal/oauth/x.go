@@ -640,6 +640,11 @@ func XStateKnown(s string) bool {
 	return false
 }
 
+// xPublishTitleField is the PUBLISH body key for the title. PROVISIONAL: the
+// OpenAPI spec names it "title" while the prose docs name it "status"; the spec
+// is followed (VERDICTS X#8) and this one constant is the only place to change.
+const xPublishTitleField = "title"
+
 // xChatOptionMax is the largest chat_option X documents: 0 default through 6.
 const xChatOptionMax = 6
 
@@ -732,7 +737,7 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	}
 	body := map[string]any{"state": "PUBLISH"}
 	if title := strings.TrimSpace(p.Title); title != "" {
-		body["title"] = title
+		body[xPublishTitleField] = title
 	}
 	if p.ChatOption != nil {
 		if *p.ChatOption < 0 || *p.ChatOption > xChatOptionMax {
