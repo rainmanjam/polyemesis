@@ -210,3 +210,29 @@ func TestAnSEIStageSaysOnceWhenTheVideoIsHEVC(t *testing.T) {
 		t.Fatalf("told %d times about one HEVC stream, want once", n)
 	}
 }
+
+// A section whose length field claims more than a program map can hold is not
+// collected at all, and a collection that grows past the limit is dropped, so a
+// corrupt map cannot grow the injector's memory.
+func TestAProgramMapLongerThanTheLimitIsNotCollected(t *testing.T) {
+	inj := NewInjector(NewSchedule(0))
+	_ = inj.Write(psiPacket(0, 0, patSection(testPMTPID)))
+	// section_length 0x3FF (1023): 1026 bytes in all, over maxPMTSection.
+	head := append([]byte{0x00, 0x02, 0xB3, 0xFF}, make([]byte, 180)...)
+	_ = inj.Write(tsPkt(testPMTPID, true, 0, nil, head))
+	if inj.pmtBuf != nil {
+		t.Fatal("an over-long map was collected")
+	}
+	// A map within the limit is collected, and one that keeps going past it is dropped.
+	ok := append([]byte{0x00, 0x02, 0xB3, 0xF0}, make([]byte, 180)...) // 1011 bytes
+	_ = inj.Write(tsPkt(testPMTPID, true, 1, nil, ok))
+	if inj.pmtBuf == nil {
+		t.Fatal("a map within the limit was not collected")
+	}
+	inj.pmtBuf = append(inj.pmtBuf, make([]byte, maxPMTSection)...)
+	inj.pmtBuf[1], inj.pmtBuf[2] = 0xB3, 0xFF // claim more than has arrived, so it keeps waiting
+	_ = inj.Write(tsPkt(testPMTPID, false, 2, nil, make([]byte, 184)))
+	if inj.pmtBuf != nil {
+		t.Fatal("a collection past the limit was kept")
+	}
+}

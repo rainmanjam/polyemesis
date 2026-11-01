@@ -41,6 +41,9 @@ type rolloverFake struct {
 	refuseInsert string
 	// refuseDelete makes DELETE fail, so a test can reach the "could not remove either" path.
 	refuseDelete bool
+	// stallTesting makes an accepted testing transition stop at testStarting, as a channel that is slow to start
+	// its monitor stream would.
+	stallTesting bool
 
 	// liveThen500 maps "broadcastID/target" to a transition that takes effect and then answers 500, the way a
 	// transition that YouTube carried out can still fail on the wire. fail500 answers 500 and changes nothing.
@@ -284,6 +287,9 @@ func (f *rolloverFake) transition(w http.ResponseWriter, id, target string) {
 			return
 		}
 		b.status = "testing"
+		if f.stallTesting {
+			b.status = "testStarting"
+		}
 	case "live":
 		if b.monitor && b.status != "testing" {
 			// An enabled monitor stream forces testing before live (B14).
@@ -786,3 +792,58 @@ func TestACaptionedBroadcastRollsOverToACaptionedReplacementThroughTesting(t *te
 		t.Fatalf("writes = %v, want %v", f.writes, want)
 	}
 }
+
+// A captioned replacement that never reaches testing is removed, and the old broadcast stays on air with its
+// captions. Live is never tried on a broadcast YouTube still holds before testing.
+func TestACaptionedReplacementThatNeverReachesTestingIsRemovedAndTheOldStaysOnAir(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	old := f.broadcasts["old-1"]
+	old.monitor, old.captions, old.delayMs = true, ytClosedCaptionsHTTPPost, 45000 // not a delay YouTube takes
+	f.refuse["new-1/testing"] = "invalidTransition"
+	y := f.client()
+	y.testingWait = []time.Duration{0}
+
+	_, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	var rerr *RolloverError
+	if !errors.As(err, &rerr) || rerr.Stage != "testing" || !rerr.OldStillLive {
+		t.Fatalf("err = %v, want a testing-stage failure with the old broadcast still live", err)
+	}
+	if _, ok := f.broadcasts["new-1"]; ok {
+		t.Fatal("the replacement that never reached testing was kept")
+	}
+	if f.broadcasts["old-1"].status != "live" || f.wrote("POST /liveBroadcasts/transition live") != 0 {
+		t.Fatalf("old = %+v, writes = %v: want the old broadcast untouched and no live transition", f.broadcasts["old-1"], f.writes)
+	}
+}
+
+// A replacement that answers the testing transition but stays in testStarting is given up on after the waits.
+func TestACaptionedReplacementStuckBeforeTestingIsGivenUpOnAfterTheWaits(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	old := f.broadcasts["old-1"]
+	old.monitor, old.captions, old.delayMs = true, ytClosedCaptionsHTTPPost, 30000
+	f.stallTesting = true
+	y := f.client()
+	y.testingWait = []time.Duration{0, 0}
+	_, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	if err == nil || !strings.Contains(err.Error(), "did not reach testing") {
+		t.Fatalf("err = %v, want the replacement named as not reaching testing", err)
+	}
+	if f.broadcasts["new-1"] != nil {
+		t.Fatal("the stalled replacement was kept")
+	}
+}
+
+func TestACaptionDelayYouTubeWouldRefuseBecomesThirtySeconds(t *testing.T) {
+	for _, tc := range []struct {
+		in   *int
+		want int
+	}{{nil, 30000}, {intPtr(45000), 30000}, {intPtr(60000), 60000}, {intPtr(30000), 30000}} {
+		if got := rolloverCaptionDelay(tc.in); got != tc.want {
+			t.Errorf("rolloverCaptionDelay(%v) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+func intPtr(n int) *int { return &n }

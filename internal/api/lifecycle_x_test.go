@@ -57,6 +57,8 @@ type xcFake struct {
 	// limited makes every call answer 429 with a reset a minute ahead; requests counts every call that reached X.
 	limited  bool
 	requests int
+	// sourceGone makes a broadcast read carry no source_id, so whether the encoder is sending is unknown.
+	sourceGone bool
 }
 
 func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
@@ -117,8 +119,12 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 				_, _ = io.WriteString(w, `{"errors":[{"title":"Not Found","detail":"no such broadcast"}]}`)
 				return
 			}
+			src := xcFakeKey
+			if f.sourceGone {
+				src = ""
+			}
 			_, _ = io.WriteString(w, `{"data":{"id":"`+f.id+`","state":"`+f.state+`","source_id":"`+
-				xcFakeKey+`","title":""}}`)
+				src+`","title":""}}`)
 		case r.Method == http.MethodPut && path == "/2/users/42/broadcasts/"+f.id+"/state":
 			var raw map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&raw)
@@ -684,14 +690,29 @@ func TestXCanceledBroadcastIsAFaultReleasedBySwitchingTheDestinationOffAndOn(t *
 func TestADisabledXDestinationWhoseBroadcastNeverAiredIsNotReadEverySweep(t *testing.T) {
 	fake := &xcFake{state: oauth.XStateNotStarted, id: "bc-1", seq: 1}
 	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+	xcSweep(t, c, store) // the one read after the switch-off
+	fake.mu.Lock()
+	first := fake.requests
+	fake.mu.Unlock()
 	for range 5 {
 		xcSweep(t, c, store)
 	}
 	fake.mu.Lock()
 	n := fake.requests
 	fake.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("X was asked %d times about a never-aired broadcast on a disabled destination, want 0", n)
+	if n != first {
+		t.Fatalf("X was asked %d more times about a never-aired broadcast on a disabled destination, want 0", n-first)
+	}
+}
+
+// The one read after the switch-off is what catches a publish whose record was
+// lost: the row says "created", X says RUNNING, and the broadcast is ended.
+func TestADisabledXRowRecordedAsCreatedButRunningIsStillEnded(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateRunning, id: "bc-1", seq: 1, active: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+	xcSweep(t, c, store)
+	if _, _, ended, _ := fake.snapshot(); ended != 1 {
+		t.Fatalf("ended %d, want the running broadcast ended", ended)
 	}
 }
 
@@ -716,5 +737,24 @@ func TestAnXRateLimitIsNotCountedAgainstTheGiveUpBudget(t *testing.T) {
 	fake.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("X was asked %d times during the hold, want 1", n)
+	}
+}
+
+// An ended broadcast whose answer cannot say whether the encoder is sending (no
+// source on the read) waits, as one with bytes still arriving does, and an UP
+// edge releases it: the ingest stopped and came back, which is the next show.
+func TestXEndedBroadcastWithAnUnknownEncoderWaitsUntilAnUpEdge(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateEnded, id: "bc-1", seq: 1, sourceGone: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if opened, _, _, _ := fake.snapshot(); len(opened) != 0 {
+		t.Fatalf("opened %v with the encoder's state unknown, want a wait", opened)
+	}
+	c.Observe(hooks.Event{Trigger: hooks.TriggerDestinationUp, Destination: &hooks.DestinationRef{ID: 5}})
+	xcSweep(t, c, store)
+	if opened, _, _, _ := fake.snapshot(); len(opened) != 1 {
+		t.Fatalf("after an UP edge opened %v, want the next show's broadcast", opened)
 	}
 }

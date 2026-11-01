@@ -263,7 +263,7 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 		return err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if until, limited := x.calls.rateHoldFrom(resp); limited {
 		x.calls.hold(fp, until)
@@ -273,6 +273,11 @@ func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payloa
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw)}
+	}
+	if readErr != nil {
+		// A body cut off mid-read is not an answer: a truncated body that happens to parse, or a write whose
+		// answer is discarded, would otherwise read as a success.
+		return fmt.Errorf("X's answer was cut off: %w", readErr)
 	}
 	if out == nil {
 		return nil
@@ -921,6 +926,10 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 	}
 	if !to.Valid() {
 		return nil, fmt.Errorf("%q is not a phase polyemesis knows how to ask X for", to)
+	}
+	if strings.TrimSpace(broadcastID) == "" {
+		// Refused before any call: an empty id would address /2/broadcasts//state.
+		return nil, errors.New("no broadcast id given to move")
 	}
 	res := &TransitionResult{BroadcastID: broadcastID, Requested: to}
 	var out struct {

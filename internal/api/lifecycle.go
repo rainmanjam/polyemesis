@@ -368,6 +368,11 @@ type lifecycleCoordinator struct {
 	// absent means due now, which is the safe direction and the one a restart
 	// lands in.
 	liveSkips map[int64]int
+	// quietX is the broadcast each switched-off X destination was last read as
+	// never aired on. One read after the switch-off is what proves a recorded
+	// "created" broadcast was not in fact published (a publish whose record was
+	// lost); after it, the row is not read again until something changes.
+	quietX map[int64]string
 
 	// announce is told every transition the platform CONFIRMED -- a broadcast
 	// moved on air or into testing, or ended -- after it is recorded. Nil means
@@ -477,6 +482,7 @@ func newLifecycleCoordinator(log *slog.Logger, store lifecycleStore, providers o
 		orphanAttempts: map[int64]int{},
 		clearFaults:    map[int64]bool{},
 		liveSkips:      map[int64]int{},
+		quietX:         map[int64]string{},
 	}
 }
 
@@ -722,6 +728,10 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		}
 	}
 
+	if d.Enabled && d.Platform == db.PlatformX {
+		// Switched on again: the next switch-off earns its own read.
+		c.noteQuietX(d.ID, "")
+	}
 	switch {
 	case !d.Enabled && d.Lifecycle.Phase == "":
 		// A DISABLED DESTINATION THAT NEVER WENT THROUGH THE COORDINATOR IS NOT
@@ -730,11 +740,15 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// phase has never been confirmed on air by this process, so there is
 		// nothing here that could justify sending `complete` to it.
 		return
-	case !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated):
-		// AN X BROADCAST THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF. open()
-		// records one for every enabled X destination before any bytes arrive,
-		// and only this coordinator's PUBLISH can take it to RUNNING, so with the
-		// destination off there is nothing it can become that needs an answer.
+	case !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated) &&
+		c.quietXAt(d.ID) == broadcastID:
+		// AN X BROADCAST THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF, AND
+		// ALREADY READ ONCE SINCE. open() records one for every enabled X
+		// destination before any bytes arrive, and only this coordinator's
+		// PUBLISH can take it to RUNNING, so with the destination off there is
+		// nothing it can become that needs an answer. The one read after the
+		// switch-off is kept: a publish whose record was lost leaves "created"
+		// on a RUNNING broadcast, and that read is what ends it.
 		// Reading it anyway cost a broadcast read, a source list and the user
 		// lookup against X, which publishes no rate limits, every fifteen
 		// seconds for the life of the daemon. Re-enabling reads it again.
@@ -851,6 +865,12 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 	}
 
 	plan := planLifecycle(d.Enabled, st)
+	if !d.Enabled && d.Platform == db.PlatformX && plan.Send == "" {
+		c.noteQuietX(d.ID, broadcastID)
+	}
+	if cleared && plan.Wait == xEndedWhileSending {
+		plan.Wait, plan.Renew = "", true
+	}
 	// The platform has just answered, so the skip budget restarts from what IT
 	// said rather than from what the row says. Armed only on `live`, and cleared
 	// on everything else, so the map can never hold a budget that some earlier
@@ -1357,14 +1377,20 @@ func planXLifecycle(enabled bool, st *oauth.BroadcastLifecycleState) lifecyclePl
 		// publish a new public broadcast, with a new announcement, within a
 		// sweep. Unknown counts as still arriving.
 		if st.StreamActive == nil || *st.StreamActive {
-			plan.Wait = "the broadcast ended while the encoder is still sending; a new one opens " +
-				"once the stream stops and starts again"
+			plan.Wait = xEndedWhileSending
 			return plan
 		}
 		plan.Renew = true
 	}
 	return plan
 }
+
+// xEndedWhileSending is the wait an ended X broadcast holds while bytes may still
+// be arriving. considerRow releases it on an UP edge: the ingest stopped and came
+// back, which is the next show, and is the only release when X's answer cannot
+// say whether the encoder is sending (no source, or one that no longer matches).
+const xEndedWhileSending = "the broadcast ended while the encoder is still sending; a new one opens " +
+	"once the stream stops and starts again"
 
 // planLifecycle decides what to do about one broadcast, given the operator's
 // stored intent and the platform's answer.
@@ -1566,6 +1592,19 @@ func (c *lifecycleCoordinator) noteFailure(d *db.Destination, broadcastID, detai
 			"destination", d.Name, "broadcast", broadcastID,
 			"consecutiveSweeps", n, "fault", detail)
 	}
+}
+
+// quietXAt and noteQuietX keep quietX; see its comment.
+func (c *lifecycleCoordinator) quietXAt(id int64) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.quietX[id]
+}
+
+func (c *lifecycleCoordinator) noteQuietX(id int64, broadcastID string) {
+	c.mu.Lock()
+	c.quietX[id] = broadcastID
+	c.mu.Unlock()
 }
 
 // noteFailureUnlessPaused is noteFailure, except for a platform asking for a

@@ -177,3 +177,46 @@ func TestAConfidentialXClientAuthenticatesTheTokenCallsWithBasicNotTheBody(t *te
 		}
 	}
 }
+
+// The hold's edges: Retry-After when X names no reset, the default when it names neither, the 15-minute cap on a
+// reset far ahead, and the one-second floor on a reset already past.
+func TestTheXRateHoldReadsRetryAfterAndClampsTheReset(t *testing.T) {
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	s := &xCallState{now: func() time.Time { return now }}
+	resp := func(status int, hdr map[string]string) *http.Response {
+		h := http.Header{}
+		for k, v := range hdr {
+			h.Set(k, v)
+		}
+		return &http.Response{StatusCode: status, Header: h}
+	}
+	for _, tc := range []struct {
+		name string
+		r    *http.Response
+		want time.Time
+		ok   bool
+	}{
+		{"retry-after", resp(429, map[string]string{"Retry-After": "30"}), now.Add(30 * time.Second), true},
+		{"no headers", resp(429, nil), now.Add(xRateHoldDefault), true},
+		{"reset far ahead", resp(429, map[string]string{"x-rate-limit-reset": strconv.FormatInt(now.Add(5*time.Hour).Unix(), 10)}), now.Add(xRateHoldMax), true},
+		{"reset already past", resp(429, map[string]string{"x-rate-limit-reset": strconv.FormatInt(now.Add(-time.Hour).Unix(), 10)}), now.Add(time.Second), true},
+		{"calls remaining", resp(200, map[string]string{"x-rate-limit-remaining": "4"}), time.Time{}, false},
+	} {
+		got, ok := s.rateHoldFrom(tc.r)
+		if ok != tc.ok || !got.Equal(tc.want) {
+			t.Errorf("%s: hold = %v %v, want %v %v", tc.name, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// A body cut off mid-read is not an answer, and an end with no broadcast id is refused before any call.
+func TestAnXCallRefusesAnEmptyBroadcastIDBeforeAnyRequest(t *testing.T) {
+	var hits atomic.Int32
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) { hits.Add(1) })
+	if _, err := x.TransitionBroadcast(context.Background(), "tok", " ", PhaseComplete); err == nil {
+		t.Fatal("an end with no broadcast id was sent")
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("%d requests for an empty id, want none", hits.Load())
+	}
+}

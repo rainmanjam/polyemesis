@@ -149,4 +149,35 @@ describe("useLiveCaptionTrack", () => {
     expect(cues.map((c) => c.text)).toEqual(["Ana: hello &amp; welcome", "second", "third"]);
     unmount();
   });
+
+  // A 416 with the file at least as long as what was read is "nothing new"; one shorter than that is a new file,
+  // which is read whole on the next poll.
+  it("reads the whole file again after a 416 says it is shorter than what was read", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("VTTCue", FakeCue);
+    const size = new TextEncoder().encode(sidecar).length;
+    const answers = [
+      { ok: true, status: 200, text: async () => sidecar, headers: new Headers() },
+      { ok: false, status: 416, text: async () => "", headers: new Headers({ "Content-Range": `bytes */${size}` }) },
+      { ok: false, status: 416, text: async () => "", headers: new Headers({ "Content-Range": "bytes */10" }) },
+      { ok: true, status: 200, text: async () => sidecar, headers: new Headers() },
+    ];
+    const fetchMock = vi.fn(async () => answers.shift());
+    vi.stubGlobal("fetch", fetchMock);
+    const track = { mode: "hidden", addCue: () => {} };
+    const video = { addTextTrack: () => track } as unknown as HTMLVideoElement;
+    const anchor = () => ({ wallMs: 1_800_000_000_000, mediaTime: 50 });
+    const rangeOf = (i: number) =>
+      (fetchMock.mock.calls[i] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+
+    const { unmount } = renderHook(() => useLiveCaptionTrack(video, "/playout/captions.vtt", "Captions", anchor));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(4000); // 416, same size: nothing new, keep the offset
+    await vi.advanceTimersByTimeAsync(4000); // 416, shorter: a new file
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(rangeOf(1).Range).toBe(`bytes=${size}-`);
+    expect(rangeOf(2).Range).toBe(`bytes=${size}-`);
+    expect(rangeOf(3).Range).toBeUndefined();
+    unmount();
+  });
 });
