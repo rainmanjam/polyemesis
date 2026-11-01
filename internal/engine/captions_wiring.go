@@ -24,6 +24,10 @@ type captionIntent struct {
 	// posts maps each captioned youtube_post destination to its caption
 	// ingestion URL. It is a credential and is deliberately NOT part of sig.
 	posts map[int64]string
+	// policy is the programme's caption text policy. It is NOT part of sig
+	// either: the running fanout reads it on every cue, so a change needs no
+	// restart, and a save of it must not re-arm a degraded captioner.
+	policy captions.TextPolicy
 }
 
 // captionIntentNow reads the programme's destinations and track. Without a store
@@ -41,6 +45,12 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 	}
 	if src != nil && src.CaptionTrack != nil {
 		in.track = *src.CaptionTrack
+	}
+	if src != nil {
+		in.policy = captions.TextPolicy{
+			Vocabulary: src.CaptionPolicy.Vocabulary,
+			Blocklist:  src.CaptionPolicy.Blocklist,
+		}
 	}
 	dests, err := e.store.ListDestinationsBySource(e.sourceID)
 	if err != nil {
@@ -158,9 +168,66 @@ func (e *Engine) captionTargets() []captions.CueTarget {
 	return e.captTargets
 }
 
-// captionPolicy is the operator's text policy for live captions. No policy is
-// stored yet, so it is the empty policy and text passes through unchanged. The
-// emit boundary is already in place, so storing the policy changes one function.
+// captionPolicy is the programme's caption text policy as the last reconcile
+// read it: its custom vocabulary and its masked words. Before any reconcile it
+// is the empty policy, and text passes through unchanged.
 func (e *Engine) captionPolicy() captions.TextPolicy {
+	if p := e.captPolicy.Load(); p != nil {
+		return *p
+	}
 	return captions.TextPolicy{}
+}
+
+// useCaptionPolicy makes p the policy the fanout applies from the next cue on.
+func (e *Engine) useCaptionPolicy(p captions.TextPolicy) {
+	e.captPolicy.Store(&p)
+}
+
+// openCueLog opens this programme's live cue log (captions.CueLogPath), or
+// returns nil when there is nowhere to keep it. Not fatal: the log feeds the VOD
+// track and the exports, and losing it must not cost the broadcast its captions.
+func (e *Engine) openCueLog() *captions.CueLog {
+	if e.cfg.DataDir == "" {
+		return nil
+	}
+	path := captions.CueLogPath(e.cfg.DataDir, e.sourceID)
+	l, err := captions.OpenCueLog(path, captions.DefaultCueLogBytes)
+	if err != nil {
+		e.log.Warn("live captions: no cue log", "path", path, "err", err)
+		return nil
+	}
+	return l
+}
+
+// captionSidecar is the fanout's undelayed file path: the WebVTT file beside the
+// HLS window (the public player's live track) and the programme's cue log (the
+// VOD track and the exports). A write failure is logged and reported, and
+// neither file can stop the other.
+func (e *Engine) captionSidecar(vtt *transcribe.LiveVTT, cueLog *captions.CueLog) func(transcribe.LiveCaption) error {
+	return func(c transcribe.LiveCaption) error {
+		err := vtt.Append(c)
+		if err != nil {
+			e.log.Warn("live captions: sidecar write failed", "err", err)
+		}
+		if lerr := cueLog.Append(c); lerr != nil {
+			e.log.Warn("live captions: cue log write failed", "err", lerr)
+			if err == nil {
+				err = lerr
+			}
+		}
+		return err
+	}
+}
+
+// captionFanout builds the emit boundary for one captioner. The policy is read
+// per cue through captionPolicy, never captured here, so a save reaches a
+// captioner that is already running.
+func (e *Engine) captionFanout(publish func(transcribe.LiveCaption), sidecar func(transcribe.LiveCaption) error,
+	route *captions.CueRouter) *captions.Fanout {
+	return &captions.Fanout{
+		PolicyNow: e.captionPolicy,
+		Sidecar:   sidecar,
+		Publish:   publish,
+		Route:     route,
+	}
 }

@@ -211,3 +211,57 @@ func TestSEIStagePumpCarriesCaptionsOverLoopbackUDPAsTheRelayDoes(t *testing.T) 
 		t.Fatalf("caption pairs over UDP = %d, want at least %d", len(got), len(want))
 	}
 }
+
+// TestSEIStageResendsTheOnScreenCaptionSoAViewerWhoJoinsMidCueStillSeesIt is the
+// HLS-joiner promise. A platform turns the stream into HLS segments, and a
+// viewer who joins in a segment after the pop-on script's End Of Caption has
+// nothing to display until the next caption. The stage re-sends the script of
+// the caption on screen every seiResendEvery, so such a viewer sees it within
+// one interval.
+//
+// MUTATION: NewSEIStage built with NewSchedule(0). Observed: FAIL, the script
+// went out once in five seconds of stream.
+func TestSEIStageResendsTheOnScreenCaptionSoAViewerWhoJoinsMidCueStillSeesIt(t *testing.T) {
+	// Five seconds at 30 pictures a second: more than two resend intervals.
+	decode := make([]int, 150)
+	for i := range decode {
+		decode[i] = i
+	}
+	s := NewSEIStage()
+	queued := false
+	out := feedInChunks(s, streamOf(decode), func(fed int) {
+		if fed == 2 && !queued {
+			queued = true
+			s.Cue("HI", 30*time.Second)
+		}
+	})
+
+	var got []Pair
+	for _, u := range videoUnits(t, parsePackets(t, out), testVideoPID) {
+		for _, nal := range splitAnnexB(u.es) {
+			if p, ok := ccPairOf(nal); ok && p != nullPair {
+				got = append(got, p)
+			}
+		}
+	}
+	want := PopOnScript("HI")
+	scripts := 0
+	for i := 0; i+len(want) <= len(got); {
+		match := true
+		for j := range want {
+			if got[i+j] != want[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			scripts++
+			i += len(want)
+			continue
+		}
+		i++
+	}
+	if scripts < 2 {
+		t.Fatalf("the pop-on script went out %d time(s) in five seconds of a 30 s caption, want it re-sent at least once", scripts)
+	}
+}

@@ -3518,6 +3518,7 @@
   "wave3.captions.delayNote": "YouTube の字幕取り込みには 30 秒または 60 秒の配信遅延が必要です。この宛先の遅延を設定するか、ストリーム内の方式を使ってください。",
   "wave3.captions.facebookSwitch": "Facebook の字幕は、サーバーを POLYEMESIS_CAPTIONS_FACEBOOK=1 で起動するまでオフのままです。",
   "wave3.captions.onAir": "ライブ字幕が動作している間、字幕はこの配信先のストリームと一緒に送られます。",
+  "wave3.captions.changeNeedsStop": "ライブ中の配信先の字幕経路を変更するには、先に停止してください。新しい経路を保存すると、有効な配信先の出力が再起動します。",
   "wave3.captions.postReady": "このストリームキー用の字幕取り込み URL が保存されているため、配信先がライブの間は字幕が YouTube に送信されます。",
   "wave3.captions.postMissing": "字幕取り込み URL はまだありません。保存してから「ストリームキーを更新」を押してください。この配信先専用の YouTube ストリームが作成されるため、ストリームキーが一度変わります。それまで配信先は開始しません。",
   "wave3.captions.postBroadcast": "字幕は、HTTP POST で受け取るよう設定されたブロードキャストにのみ表示されます。polyemesis が予約する番組はそのように作成されます。YouTube Studio で作成したブロードキャストはそちらで設定してください。",

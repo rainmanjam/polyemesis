@@ -10,6 +10,23 @@ its first tagged release.
 
 ### Added
 
+- **Live captions: custom vocabulary, masked words, a live cue log and VOD alignment (#8 step E).**
+  Each programme can hold a caption policy: words spelled the way you want (a recognised word
+  that matches one, ignoring case, is written in your spelling) and words masked on screen
+  (`d***`). It is applied once, where captions leave the captioner, so the dashboard, the player
+  track, SEI, YouTube POST and the exports all show the same words, and a save reaches captions
+  that are already running without restarting speech recognition. Entries are single words
+  (letters, digits, inner apostrophes), at most 200 per list and 48 characters each. Every live
+  caption is also kept in the programme's cue log (`<data>/captions/cues-source-<id>.jsonl`, at
+  most 64 MiB on disk) with the wall-clock moment it was spoken, and the caption export takes
+  `source=live` to serve what viewers saw during a recording, lined up with the recording's own
+  timeline. The stored-transcript export now applies the programme's policy too. The player
+  sidecar `captions.vtt` names its epoch (`X-POLYEMESIS-EPOCH-MS`) and places each cue when it
+  was spoken, so a player can line it up through HLS program date-time.
+- **SEI captions are re-sent every 2 s while on screen (#8).** A viewer who joins a Twitch
+  stream after a caption's End Of Caption now sees that caption within one segment instead of
+  waiting for the next one.
+
 - **Live captions to YouTube by HTTP POST (#8, PROVISIONAL).** A YouTube destination on
   *caption ingestion (HTTP POST)* now posts each caption, after its delay, to the caption
   ingestion URL of its own YouTube stream, through a bounded per-destination queue that never

@@ -386,6 +386,15 @@ type LiveCaption struct {
 	LagMS int64     `json:"lagMs"`
 }
 
+// SpokenAt is the wall-clock moment the caption's words began: it was produced
+// at At, LagMS behind the live edge, and the words ran for EndMS-StartMS before
+// that. It is the clock every output lines captions up on, because the
+// captioner's own StartMS starts with the captioner and matches nothing else.
+func (c LiveCaption) SpokenAt() time.Time {
+	length := time.Duration(c.EndMS-c.StartMS) * time.Millisecond
+	return c.At.Add(-time.Duration(c.LagMS)*time.Millisecond - length)
+}
+
 // LiveWindow is the rolling PCM buffer between the audio and whisper.
 //
 // It is an io.Writer that never blocks and never grows: once full, the oldest
@@ -1296,15 +1305,33 @@ func (c *LiveCaptioner) Stop() {
 // producing that correctly for a live window is a playout-workstream problem,
 // not a transcription one. Writing this file is cheap and useful; claiming it
 // is HLS subtitles would not be.
+//
+// Timing. The file names its epoch, in Unix milliseconds, in a header line
+// (X-POLYEMESIS-EPOCH-MS), and every cue is placed at the moment its words were
+// spoken (LiveCaption.SpokenAt) measured from that epoch. A WebVTT parser
+// ignores the header line; a player that knows the wall-clock time of its
+// playhead (HLS EXT-X-PROGRAM-DATE-TIME) reads it to place each cue on the
+// picture. A caption with no At (a test, a replay) keeps the captioner's own
+// StartMS and EndMS.
 type LiveVTT struct {
-	mu   sync.Mutex
-	f    *os.File
-	path string
-	n    int
+	mu    sync.Mutex
+	f     *os.File
+	path  string
+	n     int
+	epoch time.Time
 }
 
-// OpenLiveVTT creates or truncates the sidecar and writes its header.
+// LiveVTTEpochHeader names the header line that carries the sidecar's epoch.
+const LiveVTTEpochHeader = "X-POLYEMESIS-EPOCH-MS"
+
+// OpenLiveVTT creates or truncates the sidecar and writes its header, with now
+// as its epoch.
 func OpenLiveVTT(path string) (*LiveVTT, error) {
+	return OpenLiveVTTAt(path, time.Now())
+}
+
+// OpenLiveVTTAt is OpenLiveVTT with the epoch given, for tests.
+func OpenLiveVTTAt(path string, epoch time.Time) (*LiveVTT, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -1312,11 +1339,11 @@ func OpenLiveVTT(path string) (*LiveVTT, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := f.WriteString("WEBVTT\n\n"); err != nil {
+	if _, err := fmt.Fprintf(f, "WEBVTT\n%s: %d\n\n", LiveVTTEpochHeader, epoch.UnixMilli()); err != nil {
 		f.Close()
 		return nil, err
 	}
-	return &LiveVTT{f: f, path: path}, nil
+	return &LiveVTT{f: f, path: path, epoch: epoch}, nil
 }
 
 // Path is where the file lives.
@@ -1349,8 +1376,15 @@ func (v *LiveVTT) Append(c LiveCaption) error {
 	// standalone file and wrong for one that is appended to: a second WEBVTT
 	// line mid-file makes the whole thing unparseable.
 	body := cueBody(c.Segment, SubtitleOptions{Speakers: c.Speaker != ""}, true)
+	start, end := c.StartMS, c.EndMS
+	if !c.At.IsZero() {
+		// On the epoch's clock. A cue spoken before the epoch (the captioner's
+		// first window) is clamped to it rather than written negative.
+		start = max(c.SpokenAt().Sub(v.epoch).Milliseconds(), 0)
+		end = start + max(c.EndMS-c.StartMS, 0)
+	}
 	cue := fmt.Sprintf("%d\n%s --> %s\n%s\n\n",
-		v.n, FormatVTTTime(c.StartMS), FormatVTTTime(c.EndMS), body)
+		v.n, FormatVTTTime(start), FormatVTTTime(end), body)
 	_, err := v.f.WriteString(cue)
 	return err
 }

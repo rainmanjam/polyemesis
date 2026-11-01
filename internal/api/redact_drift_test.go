@@ -390,6 +390,8 @@ var leafSensitivity = map[string]sensitivity{
 	"source.enabled":                               sPublic,
 	"source.id":                                    sPublic,
 	"source.captionTrack":                          sPublic, // which routed track feeds the live captions
+	"source.captionPolicy.vocabulary":              sPublic, // operator's spellings of their own terms, shown on screen
+	"source.captionPolicy.blocklist":               sPublic, // words masked in captions; a word list, not a credential
 	"source.ingest.annotations.denoise":            sPublic,
 	"source.ingest.annotations.label":              sPublic,
 	"source.ingest.annotations.language":           sPublic,

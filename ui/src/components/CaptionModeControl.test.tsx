@@ -33,6 +33,21 @@ describe("CaptionModeControl", () => {
     expect(screen.queryByTestId("caption-kick-none")).toBeNull();
   });
 
+  // MUTATION: the onAir line drawn whatever the route. Observed: FAIL, a
+  // destination with captions off was told they go out with its stream.
+  it("does not say captions go out with the stream when the route is off", () => {
+    render(<CaptionModeControl platform="twitch" value="off" onChange={() => {}} delaySeconds={0} />);
+    expect(screen.queryByText(en["wave3.captions.onAir"])).toBeNull();
+  });
+
+  // The server refuses a caption-route change on a live destination (409) and
+  // restarts an enabled one that is not yet delivering, so the picker says both
+  // before the operator presses Save.
+  it("says a live destination must be stopped to change its route, and that a save restarts an enabled one", () => {
+    render(<CaptionModeControl platform="twitch" value="sei" onChange={() => {}} delaySeconds={0} />);
+    expect(screen.getByTestId("caption-change-needs-stop").textContent).toBe(en["wave3.captions.changeNeedsStop"]);
+  });
+
   it("asks for the 30 s or 60 s delay when YouTube's caption POST is chosen at another delay", () => {
     render(<CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={0} />);
     expect(screen.getByText(en["wave3.captions.delayNote"])).toBeTruthy();

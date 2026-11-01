@@ -404,6 +404,12 @@ type Engine struct {
 	// captTargets are the captioned destinations and their delays, as the last
 	// reconcile decided them. A route started later begins with this set.
 	captTargets []captions.CueTarget
+	// captPolicy is the programme's caption text policy, read on every cue by
+	// the running fanout. Atomic because the captioner's goroutine reads it
+	// while a reconcile writes it.
+	captPolicy atomic.Pointer[captions.TextPolicy]
+	// captLog is the running captioner's live cue log, closed with it.
+	captLog *captions.CueLog
 	// captWarn is why captioning stopped, kept after the captioner is gone so
 	// the operator finds out. A caption stream that vanishes silently is the
 	// failure mode this whole feature is designed against.
@@ -5038,6 +5044,7 @@ func (e *Engine) reconcileCaptions() {
 		e.log.Warn("live captions: could not read the destinations; keeping the current captioner", "err", err)
 	} else {
 		e.applyCaptionIntent(in)
+		e.useCaptionPolicy(in.policy)
 		e.syncCaptionRoute(in.targets)
 		e.syncCaptionPosters(in.posts)
 	}
@@ -5122,10 +5129,9 @@ func (e *Engine) reconcileCaptions() {
 
 	// The sidecar lands in the playout directory by default so it sits beside
 	// the HLS window it describes. It is a growing WebVTT file, not a
-	// conformant HLS subtitle rendition — see transcribe.LiveVTT — and the
-	// playout handler serves a closed list of extensions that does not yet
-	// include .vtt, so today this is for anything that reads the directory
-	// directly.
+	// conformant HLS subtitle rendition — see transcribe.LiveVTT. The playout
+	// handler serves it, and the public player polls it and places each cue on
+	// the picture through the epoch the file names.
 	vttPath := cfg.VTTPath
 	if vttPath == "" {
 		vttPath = filepath.Join(e.play.Dir(), transcribe.LiveVTTName)
@@ -5148,20 +5154,22 @@ func (e *Engine) reconcileCaptions() {
 			route.Close()
 		}
 	}()
-	fan := &captions.Fanout{
-		Policy: e.captionPolicy(),
-		Sidecar: func(c transcribe.LiveCaption) error {
-			err := vtt.Append(c)
-			if err != nil {
-				e.log.Warn("live captions: sidecar write failed", "err", err)
-			}
-			return err
-		},
-		Publish: func(c transcribe.LiveCaption) {
+	// The cue log lives as long as this captioner, like the route: it is
+	// handed to e.captLog with it, and closed on every path that does not.
+	cueLog := e.openCueLog()
+	logHeld := false
+	defer func() {
+		if !logHeld {
+			_ = cueLog.Close()
+		}
+	}()
+	fan := e.captionFanout(
+		func(c transcribe.LiveCaption) {
 			e.bus.Publish(events.TypeCaption, CaptionEvent{Line: &c})
 		},
-		Route: route,
-	}
+		e.captionSidecar(vtt, cueLog),
+		route,
+	)
 
 	var capt *transcribe.LiveCaptioner
 	capt, err = transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
@@ -5204,6 +5212,8 @@ func (e *Engine) reconcileCaptions() {
 	}
 	e.captRoute = route
 	routeHeld = true
+	e.captLog = cueLog
+	logHeld = true
 	e.mu.Unlock()
 	if !capt.Running() {
 		// The loop ended before the captioner was installed, so the exit hook
@@ -5293,12 +5303,13 @@ func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *re
 	// The route goes first: no delayed caption may be delivered for a captioner
 	// that is already stopping.
 	e.mu.Lock()
-	route := e.captRoute
-	e.captRoute = nil
+	route, cueLog := e.captRoute, e.captLog
+	e.captRoute, e.captLog = nil, nil
 	e.mu.Unlock()
 	if route != nil {
 		route.Close()
 	}
+	defer func() { _ = cueLog.Close() }()
 	if c == nil {
 		_ = vtt.Close()
 		return

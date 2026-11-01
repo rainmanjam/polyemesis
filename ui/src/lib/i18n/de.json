@@ -3518,6 +3518,7 @@
   "wave3.captions.delayNote": "Der YouTube-Untertitel-Eingang braucht eine Sendeverzögerung von 30 s oder 60 s. Stellen Sie die Verzögerung für dieses Ziel ein oder nutzen Sie den Weg im Stream.",
   "wave3.captions.facebookSwitch": "Facebook-Untertitel bleiben aus, bis der Server mit POLYEMESIS_CAPTIONS_FACEBOOK=1 gestartet wird.",
   "wave3.captions.onAir": "Untertitel werden mit dem Stream dieses Ziels gesendet, solange die Live-Untertitelung läuft.",
+  "wave3.captions.changeNeedsStop": "Um den Untertitelweg eines Ziels zu ändern, das live ist, stoppen Sie es zuerst. Das Speichern eines neuen Wegs startet die Ausgabe eines aktivierten Ziels neu.",
   "wave3.captions.postReady": "Für diesen Streamschlüssel ist eine Untertitel-Ingest-URL gespeichert, daher werden Untertitel an YouTube gesendet, solange das Ziel live ist.",
   "wave3.captions.postMissing": "Noch keine Untertitel-Ingest-URL. Speichern und dann „Streamschlüssel aktualisieren“ drücken: Dadurch wird ein eigener YouTube-Stream für dieses Ziel erstellt, und sein Streamschlüssel ändert sich einmal. Bis dahin startet das Ziel nicht.",
   "wave3.captions.postBroadcast": "Untertitel erscheinen nur bei einer Übertragung, die sie per HTTP POST annimmt. Von polyemesis geplante Sendungen werden so erstellt; eine in YouTube Studio angelegte Übertragung muss dort eingestellt werden.",

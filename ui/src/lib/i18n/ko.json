@@ -3518,6 +3518,7 @@
   "wave3.captions.delayNote": "YouTube 자막 수집에는 30초 또는 60초 방송 지연이 필요합니다. 이 대상의 지연을 설정하거나 스트림 내 방식을 쓰세요.",
   "wave3.captions.facebookSwitch": "Facebook 자막은 서버를 POLYEMESIS_CAPTIONS_FACEBOOK=1로 시작하기 전까지 꺼져 있습니다.",
   "wave3.captions.onAir": "실시간 자막 생성기가 실행되는 동안 자막이 이 대상의 스트림과 함께 전송됩니다.",
+  "wave3.captions.changeNeedsStop": "라이브 중인 대상의 자막 경로를 바꾸려면 먼저 중지하세요. 새 경로를 저장하면 활성화된 대상의 출력이 다시 시작됩니다.",
   "wave3.captions.postReady": "이 스트림 키에 대한 자막 수집 URL이 저장되어 있어, 대상이 라이브인 동안 자막이 YouTube로 전송됩니다.",
   "wave3.captions.postMissing": "아직 자막 수집 URL이 없습니다. 저장한 뒤 '스트림 키 새로고침'을 누르세요. 이 대상 전용 YouTube 스트림이 만들어지므로 스트림 키가 한 번 바뀝니다. 그 전까지는 대상이 시작되지 않습니다.",
   "wave3.captions.postBroadcast": "자막은 HTTP POST로 받도록 설정된 방송에만 표시됩니다. polyemesis가 예약하는 방송은 그렇게 만들어지며, YouTube Studio에서 만든 방송은 그곳에서 설정해야 합니다.",

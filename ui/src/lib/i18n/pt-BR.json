@@ -3518,6 +3518,7 @@
   "wave3.captions.delayNote": "A ingestão de legendas do YouTube exige atraso de transmissão de 30 s ou 60 s. Defina o atraso deste destino ou use a via no stream.",
   "wave3.captions.facebookSwitch": "As legendas do Facebook ficam desligadas até o servidor iniciar com POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "As legendas saem com a transmissão deste destino enquanto o legendador ao vivo estiver em execução.",
+  "wave3.captions.changeNeedsStop": "Para mudar a rota de legendas de um destino ao vivo, pare-o primeiro. Salvar uma rota nova reinicia a saída de um destino ativado.",
   "wave3.captions.postReady": "Há uma URL de ingestão de legendas salva para esta chave de transmissão, então as legendas são enviadas ao YouTube enquanto o destino estiver ao vivo.",
   "wave3.captions.postMissing": "Ainda não há URL de ingestão de legendas. Salve e pressione “Atualizar chave de transmissão”: isso cria uma transmissão própria do YouTube para este destino, então a chave muda uma vez. O destino não inicia até lá.",
   "wave3.captions.postBroadcast": "As legendas só aparecem em uma transmissão configurada para recebê-las por HTTP POST. Os programas que o polyemesis agenda são criados assim; uma transmissão criada no YouTube Studio precisa ser configurada lá.",

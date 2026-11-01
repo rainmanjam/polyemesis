@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -212,5 +213,98 @@ func TestCaptionIntentWithNoStoreIsOffAndDoesNotPanic(t *testing.T) {
 	}
 	if in.on || len(in.targets) != 0 || in.sig == "" {
 		t.Fatalf("intent = %+v, want off with no targets and a signature", in)
+	}
+}
+
+// TestAProgrammesCaptionPolicyReachesCaptionsAlreadyRunningWithoutARestart is the
+// #8 custom-vocabulary and masked-words promise at the engine. The policy saved
+// on the programme is read on the next reconcile and applied by the fanout of
+// the captioner that is ALREADY running: the fanout asks for the policy on each
+// cue rather than keeping the one it started with, so a save mid-show changes
+// the next caption without restarting speech recognition. The policy is not
+// part of the intent's signature, so it cannot re-arm a degraded captioner.
+//
+// MUTATION: the fanout built with the policy captured at start (Policy:
+// e.captionPolicy()). Observed: FAIL, the cue after the save was unmasked.
+func TestAProgrammesCaptionPolicyReachesCaptionsAlreadyRunningWithoutARestart(t *testing.T) {
+	e := failoverEngine(t)
+	dest, err := e.store.CreateDestination(&db.Destination{
+		Name: "cc", Kind: db.DestRTMP, Platform: db.PlatformTwitch,
+		URL: "rtmp://127.0.0.1:1/rtmp", StreamKey: "key", Enabled: true,
+		AudioBitrate: 128, Profile: routing.DefaultProfile(), CaptionMode: "sei",
+	})
+	if err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	e.sourceID = *dest.SourceID
+
+	var shown []string
+	fan := e.captionFanout(func(c transcribe.LiveCaption) { shown = append(shown, c.Text) }, nil, nil)
+	fan.Emit(transcribe.LiveCaption{Segment: transcribe.Segment{Text: "darn polyemesis"}})
+
+	before, err := e.captionIntentNow()
+	if err != nil {
+		t.Fatalf("captionIntentNow: %v", err)
+	}
+	src, err := e.store.GetSource(e.sourceID)
+	if err != nil {
+		t.Fatalf("GetSource: %v", err)
+	}
+	src.CaptionPolicy = db.CaptionPolicy{Vocabulary: []string{"Polyemesis"}, Blocklist: []string{"darn"}}
+	if err := e.store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	after, err := e.captionIntentNow()
+	if err != nil {
+		t.Fatalf("captionIntentNow after the save: %v", err)
+	}
+	if after.sig != before.sig {
+		t.Fatalf("a policy save changed the intent signature (%q -> %q); it would re-arm a degraded captioner", before.sig, after.sig)
+	}
+	e.useCaptionPolicy(after.policy)
+	fan.Emit(transcribe.LiveCaption{Segment: transcribe.Segment{Text: "darn polyemesis"}})
+
+	want := []string{"darn polyemesis", "d*** Polyemesis"}
+	if len(shown) != 2 || shown[0] != want[0] || shown[1] != want[1] {
+		t.Fatalf("captions shown = %q, want %q", shown, want)
+	}
+}
+
+// TestACaptionGoesToTheProgrammesCueLogAndToThePlayerSidecar checks the one
+// sidecar path every live caption takes: the WebVTT file beside the HLS window
+// (the public player's live track) and the programme's cue log under the data
+// directory (the VOD track and the exports of what viewers saw). Both get the
+// caption as it went out.
+//
+// MUTATION: the sidecar writes the WebVTT file only. Observed: FAIL, the cue log
+// was empty.
+func TestACaptionGoesToTheProgrammesCueLogAndToThePlayerSidecar(t *testing.T) {
+	e := failoverEngine(t)
+	e.cfg.DataDir = t.TempDir()
+	vtt, err := transcribe.OpenLiveVTT(filepath.Join(t.TempDir(), transcribe.LiveVTTName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vtt.Close()
+	cueLog := e.openCueLog()
+	if cueLog == nil {
+		t.Fatal("no cue log opened for a programme with a data directory")
+	}
+	sidecar := e.captionSidecar(vtt, cueLog)
+	spoken := time.Now().Add(-5 * time.Second)
+	c := transcribe.LiveCaption{Segment: transcribe.Segment{EndMS: 1000, Text: "on air"}, At: spoken.Add(time.Second)}
+	if err := sidecar(c); err != nil {
+		t.Fatalf("sidecar: %v", err)
+	}
+	_ = cueLog.Close()
+	if vtt.Cues() != 1 {
+		t.Fatalf("WebVTT sidecar holds %d cues, want 1", vtt.Cues())
+	}
+	got, err := captions.ReadCueLog(captions.CueLogPath(e.cfg.DataDir, e.sourceID), spoken.Add(-time.Second), spoken.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ReadCueLog: %v", err)
+	}
+	if len(got) != 1 || got[0].Text != "on air" {
+		t.Fatalf("cue log = %+v, want the one caption", got)
 	}
 }

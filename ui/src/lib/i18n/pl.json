@@ -3518,6 +3518,7 @@
   "wave3.captions.delayNote": "Przyjmowanie napisów YouTube wymaga opóźnienia emisji 30 s lub 60 s. Ustaw opóźnienie tego miejsca docelowego albo użyj trybu w strumieniu.",
   "wave3.captions.facebookSwitch": "Napisy Facebooka pozostają wyłączone, dopóki serwer nie zostanie uruchomiony z POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "Napisy są wysyłane razem ze strumieniem tego celu, dopóki działa generator napisów na żywo.",
+  "wave3.captions.changeNeedsStop": "Aby zmienić drogę napisów celu nadającego na żywo, najpierw go zatrzymaj. Zapisanie nowej drogi uruchamia ponownie wyjście włączonego celu.",
   "wave3.captions.postReady": "Dla tego klucza strumienia zapisano adres URL przyjmowania napisów, więc napisy trafiają do YouTube, gdy cel nadaje na żywo.",
   "wave3.captions.postMissing": "Brak adresu URL przyjmowania napisów. Zapisz, a potem naciśnij „Odśwież klucz strumienia”: utworzy to osobny strumień YouTube dla tego celu, więc jego klucz zmieni się jeden raz. Do tego czasu cel się nie uruchomi.",
   "wave3.captions.postBroadcast": "Napisy pojawiają się tylko w transmisji ustawionej na przyjmowanie ich przez HTTP POST. Programy planowane przez polyemesis są tworzone w ten sposób; transmisję utworzoną w YouTube Studio trzeba ustawić tam.",

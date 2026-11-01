@@ -34,9 +34,7 @@ type AfterFunc func(d time.Duration, f func()) (stop func() bool)
 // delay later. Measuring from At alone would release every caption 2 to 5
 // seconds late, which is the lag the delay is meant to cancel.
 func ReleaseAt(c transcribe.LiveCaption, delay time.Duration) time.Time {
-	length := time.Duration(c.EndMS-c.StartMS) * time.Millisecond
-	spoken := c.At.Add(-time.Duration(c.LagMS)*time.Millisecond - length)
-	return spoken.Add(delay)
+	return c.SpokenAt().Add(delay)
 }
 
 // CueRouter fans captions out to destinations behind their own broadcast delay
@@ -206,16 +204,25 @@ func (r *CueRouter) Pending() int {
 // once, here, so the WebSocket, the sidecar file and every destination show the
 // same words. The sidecar and the bus are undelayed; only the router holds cues
 // back for a destination's delay.
+//
+// PolicyNow, when set, is asked for the policy on every cue and wins over
+// Policy. It is how a policy saved while the captioner runs reaches the next
+// caption without a restart of speech recognition.
 type Fanout struct {
-	Policy  TextPolicy
-	Sidecar func(transcribe.LiveCaption) error
-	Publish func(transcribe.LiveCaption)
-	Route   *CueRouter
+	Policy    TextPolicy
+	PolicyNow func() TextPolicy
+	Sidecar   func(transcribe.LiveCaption) error
+	Publish   func(transcribe.LiveCaption)
+	Route     *CueRouter
 }
 
 // Emit applies the policy to one cue and sends it on every path.
 func (f *Fanout) Emit(c transcribe.LiveCaption) {
-	c.Text = f.Policy.Apply(c.Text)
+	pol := f.Policy
+	if f.PolicyNow != nil {
+		pol = f.PolicyNow()
+	}
+	c.Text = pol.Apply(c.Text)
 	if f.Sidecar != nil {
 		_ = f.Sidecar(c)
 	}

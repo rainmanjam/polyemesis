@@ -1268,6 +1268,13 @@ export interface PullSettings {
   rtspTransport: string;
 }
 
+/** A programme's caption text policy, applied where captions leave the
+ *  captioner, so every output and export shows the same words. */
+export interface CaptionPolicy {
+  vocabulary?: string[];
+  blocklist?: string[];
+}
+
 /** One ingested programme.
  *
  *  Multi-source exists because a horizontal and a vertical feed out of OBS's
@@ -1281,6 +1288,11 @@ export interface Source {
   /** The audio track of this programme the live captioner transcribes. null is
    *  the automatic choice, the one the captioner makes today. */
   captionTrack?: number | null;
+  /** This programme's caption text policy (#8): words spelled the operator's
+   *  way, and words masked on screen. Absent when none is set. Each entry is
+   *  one word; the server refuses a phrase, a hyphen, more than 200 entries or
+   *  an entry over 48 characters. */
+  captionPolicy?: CaptionPolicy;
   /** Same shape as Settings.ingest, deliberately: one form serves both. */
   ingest: Settings["ingest"];
   /** Publish secret. See SourceView.tokenEnforced before presenting this as

@@ -44,13 +44,20 @@ const (
 	seiCueQueue = 32
 	// seiWaitingMax bounds captions held back until the first picture arrives.
 	seiWaitingMax = 8
+	// seiResendEvery is how often the caption on screen is sent again. A
+	// platform repackages the stream as HLS, and a viewer whose first segment
+	// starts after a caption's End Of Caption sees nothing until the next one.
+	// Two seconds is one Twitch segment, so a joiner sees the current caption
+	// within a segment. The schedule caps the resends per cue (maxResendsPerCue).
+	seiResendEvery = 2 * time.Second
 )
 
 // NewSEIStage returns a stage with no captions queued. A caption-free stage
 // passes video through with no SEI added, so it is safe to build before any
-// caption exists.
+// caption exists. Each caption is re-sent every seiResendEvery while it is on
+// screen, for viewers who join mid-caption.
 func NewSEIStage() *SEIStage {
-	sched := NewSchedule(0)
+	sched := NewSchedule(seiResendEvery)
 	return &SEIStage{
 		inj:   NewInjector(sched),
 		sched: sched,

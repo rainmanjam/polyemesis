@@ -82,9 +82,15 @@ export function CaptionModeControl({
           {value === "youtube_post" && (
             <p className="text-xs text-muted-foreground">{t("wave3.captions.postBroadcast")}</p>
           )}
+          {value !== "off" && <p className="text-xs text-muted-foreground">{t("wave3.captions.onAir")}</p>}
+          {/* The server answers 409 to a route change on a live destination,
+              and a change on an enabled one that is not delivering yet changes
+              its output spec, which restarts it. */}
+          <p className="text-xs text-muted-foreground" data-testid="caption-change-needs-stop">
+            {t("wave3.captions.changeNeedsStop")}
+          </p>
         </>
       )}
-      <p className="text-xs text-muted-foreground">{t("wave3.captions.onAir")}</p>
     </div>
   );
 }

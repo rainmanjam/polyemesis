@@ -55,9 +55,12 @@ type Source struct {
 	// today, and it is stored as -1. A POINTER because track 0 is a real track
 	// and must not be confused with "not chosen". Storing it does not change
 	// what the captioner hears until the engine reads it.
-	CaptionTrack *int      `json:"captionTrack,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	CaptionTrack *int `json:"captionTrack,omitempty"`
+	// CaptionPolicy is this programme's custom vocabulary and masked words for
+	// its live captions. The zero value is no policy, and the key is left out.
+	CaptionPolicy CaptionPolicy `json:"captionPolicy,omitzero"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
 }
 
 const (
@@ -109,6 +112,11 @@ func validateSource(s *Source) error {
 	if s.CaptionTrack != nil && (*s.CaptionTrack < 0 || *s.CaptionTrack > maxCaptionTrack) {
 		return fmt.Errorf("caption track must be between 0 and %d, or unset for automatic", maxCaptionTrack)
 	}
+	pol, err := s.CaptionPolicy.normalized()
+	if err != nil {
+		return err
+	}
+	s.CaptionPolicy = pol
 	return nil
 }
 
@@ -133,17 +141,19 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 		enabled    int
 		prevUntil  int64
 		captionTrk int
+		captionPol string
 		created    int64
 		updated    int64
 	)
 	if err := row.Scan(&s.ID, &s.Name, &enabled, &ingestJSON, &s.Token,
-		&s.PrevToken, &prevUntil, &s.Position, &captionTrk, &created, &updated); err != nil {
+		&s.PrevToken, &prevUntil, &s.Position, &captionTrk, &captionPol, &created, &updated); err != nil {
 		return nil, err
 	}
 	if captionTrk >= 0 {
 		trk := captionTrk
 		s.CaptionTrack = &trk
 	}
+	s.CaptionPolicy = captionPolicyFromStored(captionPol)
 	if prevUntil > 0 {
 		s.PrevTokenUntil = time.Unix(prevUntil, 0)
 	}
@@ -160,7 +170,7 @@ func scanSource(row interface{ Scan(...any) error }) (*Source, error) {
 	return &s, nil
 }
 
-const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, created_at, updated_at`
+const sourceColumns = `id, name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, caption_policy, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
 //
@@ -256,6 +266,10 @@ func createSource(x execQuerier, s *Source) error {
 	if err != nil {
 		return err
 	}
+	policy, err := captionPolicyStored(s.CaptionPolicy)
+	if err != nil {
+		return err
+	}
 
 	// Append by default so a new source does not jump ahead of the programmes
 	// already on screen.
@@ -267,9 +281,9 @@ func createSource(x execQuerier, s *Source) error {
 
 	now := time.Now().Unix()
 	res, err := x.Exec(
-		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?)`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, captionTrackStored(s.CaptionTrack), now, now)
+		`INSERT INTO sources (name, enabled, ingest, token, prev_token, prev_token_until, position, caption_track, caption_policy, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?)`,
+		s.Name, boolToInt(s.Enabled), string(blob), s.Token, s.Position, captionTrackStored(s.CaptionTrack), policy, now, now)
 	if err != nil {
 		// A caller-supplied token that another source already holds is refused
 		// here by sourceTokenUniqueIndex (#505). Named, because "UNIQUE
@@ -313,11 +327,15 @@ func (d *DB) UpdateSource(s *Source) error {
 	if err != nil {
 		return err
 	}
+	policy, err := captionPolicyStored(s.CaptionPolicy)
+	if err != nil {
+		return err
+	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(
-		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, position = ?, caption_track = ?, updated_at = ?
+		`UPDATE sources SET name = ?, enabled = ?, ingest = ?, position = ?, caption_track = ?, caption_policy = ?, updated_at = ?
 		 WHERE id = ?`,
-		s.Name, boolToInt(s.Enabled), string(blob), s.Position, captionTrackStored(s.CaptionTrack), now, s.ID)
+		s.Name, boolToInt(s.Enabled), string(blob), s.Position, captionTrackStored(s.CaptionTrack), policy, now, s.ID)
 	if err != nil {
 		return err
 	}
