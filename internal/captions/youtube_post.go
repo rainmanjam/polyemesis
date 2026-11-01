@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // YouTubePoster sends caption text to a YouTube caption ingestion URL, the HTTP
@@ -21,6 +22,10 @@ import (
 // until a live check passes.
 type YouTubePoster struct {
 	client *http.Client
+	// allowHost decides whether the ingest host may receive the signed request.
+	// Production leaves it at ingestHostAllowed. Tests replace it to reach a
+	// loopback server.
+	allowHost func(host string) bool
 	// ingest is the signed URL. It is a credential: it is never placed in an
 	// error, a log line or an event, only used to make the request.
 	ingest string
@@ -32,7 +37,12 @@ func NewYouTubePoster(client *http.Client, ingestionURL string) *YouTubePoster {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &YouTubePoster{client: client, ingest: ingestionURL}
+	// The shallow copy keeps the caller's transport and timeouts. Only the
+	// redirect policy changes, so a 3xx never carries the signed query onward.
+	copied := *client
+	copied.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client = &copied
+	return &YouTubePoster{client: client, ingest: ingestionURL, allowHost: ingestHostAllowed}
 }
 
 // Post sends one batch of caption text with its sequence number. The sequence
@@ -43,6 +53,9 @@ func (p *YouTubePoster) Post(ctx context.Context, seq int, text string) error {
 		// Deliberately no detail: the only useful fact is the scheme, and the
 		// URL itself stays out of the message.
 		return fmt.Errorf("caption ingestion URL must be https")
+	}
+	if p.allowHost == nil || !p.allowHost(u.Hostname()) {
+		return fmt.Errorf("caption ingestion host is not a YouTube ingest host")
 	}
 	q := u.Query()
 	q.Set("seq", strconv.Itoa(seq))
@@ -74,4 +87,15 @@ func transportMessage(err error) string {
 		return ue.Err.Error()
 	}
 	return "request failed"
+}
+
+// ingestHostAllowed reports whether a host may receive a signed caption request.
+// The allowlist is the YouTube ingest hosts: upload.youtube.com and its
+// subdomains. Any other host, including one that merely ends in youtube.com
+// inside a longer name, is refused. PROVISIONAL: the documented host is taken
+// from the YouTube caption guide, and the live check on a test channel confirms
+// the ingestion URL's host before relying on it.
+func ingestHostAllowed(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "upload.youtube.com" || strings.HasSuffix(host, ".upload.youtube.com")
 }
