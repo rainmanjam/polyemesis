@@ -2468,6 +2468,11 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	// Without this case it fell through to 500, which reads as a server fault.
 	case errors.Is(err, db.ErrPlatformRetired):
 		writeError(w, http.StatusConflict, err.Error())
+	// A START REFUSED BECAUSE CAPTIONS GO TO YOUTUBE BY HTTP POST AND NO CAPTION
+	// INGESTION URL IS STORED FOR THE CURRENT KEY (#8). Same shape: the request is
+	// fine, the world is not ready, and the sentence names the button.
+	case errors.Is(err, db.ErrCaptionIngestMissing):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrStateConflict):
 		// The sentence is passed through rather than replaced, because unlike
 		// the two cases above this one is per-request: WHICH state blocked the

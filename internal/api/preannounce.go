@@ -385,6 +385,12 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		return
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
+	// Stored now, bound to the key the create returned: if the key write below
+	// is refused, the URL reads as absent for the key the row keeps.
+	if err := s.keepCaptionIngest(d, b); err != nil {
+		s.log.Warn("pre-announce: the caption ingestion URL could not be stored",
+			"destination", d.Name, "err", redactErr(err))
+	}
 
 	if backupURL, _ := firstBackup(b); d.BackupIngestWanted && backupURL == "" {
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",

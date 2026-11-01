@@ -186,9 +186,15 @@ type Destination struct {
 	// CaptionMode is how live captions reach this destination: "off" (the
 	// default and the empty value), "sei", "youtube_post" or "facebook_sei".
 	// Which of these a platform accepts is decided by captions.Allowed, and
-	// Validate refuses a mode the platform cannot carry. Storing the mode does
-	// not send captions: the engine does not read it yet.
+	// Validate refuses a mode the platform cannot carry. The engine reads it to
+	// route each destination's captions (internal/engine/captions_*.go).
 	CaptionMode string `json:"captionMode,omitempty"`
+	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
+	// for this destination's CURRENT stream key, which the "youtube_post" mode
+	// needs before the destination may start. It is set by scanDestination and
+	// never by a column, like KeyUnreadable. The URL itself is a credential and is
+	// never on this type: see caption_ingest.go.
+	CaptionIngestReady bool `json:"captionIngestReady,omitempty"`
 	// VODProfile is the SECOND audio mix -- the VOD track, separate from the
 	// live one, which is the whole ask of #141.
 	//
@@ -1063,8 +1069,11 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// column existed decodes to a nil VODProfile rather than to a profile
 		// that fails Validate.
 		vodProfileRaw = ""
-		created       int64
-		updated       int64
+		// The fingerprint of the key the stored caption URL was issued with, NULL
+		// when no URL is stored. Never the URL itself: see caption_ingest.go.
+		captionKeyHash sql.NullString
+		created        int64
+		updated        int64
 	)
 	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
 		&dst.StreamKey, &streamEnc,
@@ -1077,7 +1086,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -1104,6 +1113,10 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 	default:
 		dst.StreamKey, dst.BackupStreamKey = primary, backup
 	}
+	// Ready only for the key the URL was issued with, the rule CaptionIngestURL
+	// applies, so the card and the engine cannot disagree.
+	dst.CaptionIngestReady = captionKeyHash.Valid && sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) &&
+		captionKeyHash.String != "" && captionKeyHash.String == streamKeyHash(dst.StreamKey)
 	// The other fail-closed point, for the same reason it is here: every read
 	// passes through. A row on a platform that has shut down is reported off
 	// whatever its column says, so nothing that reads it -- the engine's
@@ -1181,6 +1194,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
 	multitrack, vod_profile, caption_mode,
+	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -1563,6 +1577,25 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 			return nil, retiredError(dst.Platform, "a destination can no longer be switched to it")
 		}
 	}
+	// The caption go-live refusal (#8), on the off-to-on edge only: a save of a
+	// destination that is already running never stops it, and turning captions
+	// on while live is allowed (the URL is fetched by Refresh stream key, which
+	// needs the mode saved first).
+	if dst.Enabled && dst.Platform == PlatformYouTube {
+		var was bool
+		err := d.sql.QueryRow(`SELECT enabled FROM destinations WHERE id=?`, dst.ID).Scan(&was)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !was {
+			if rerr := d.captionIngestRefusal(dst.ID, dst.Platform, dst.CaptionMode, dst.StreamKey); rerr != nil {
+				return nil, rerr
+			}
+		}
+	}
 	// The programme the rendition is held against, or nil for a pairing this
 	// write is not touching. See destinationKeepsItsRendition for why an
 	// inherited mismatch must not make the whole row unsaveable.
@@ -1646,6 +1679,13 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
+	}
+	// A destination that no longer posts captions to YouTube has no use for a
+	// signed caption URL, and a credential nothing uses is one to forget.
+	if !sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) {
+		if err := d.DeleteCaptionIngestURL(dst.ID); err != nil {
+			return nil, err
+		}
 	}
 	return d.GetDestination(dst.ID)
 }
@@ -1839,6 +1879,21 @@ func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
 		}
 		if p.RetiredReason() != "" {
 			return retiredError(p, "this destination can no longer be started")
+		}
+		// Captions by YouTube HTTP POST need the URL YouTube issued with this
+		// destination's stream (#8). Refused at the same one write, for the same
+		// reason: every way of starting a destination arrives here. A destination
+		// already on is left alone, so a repeated start never stops a running show.
+		if p == PlatformYouTube {
+			row, gerr := d.GetDestination(id)
+			if gerr != nil {
+				return gerr
+			}
+			if !row.Enabled {
+				if rerr := d.captionIngestRefusal(id, row.Platform, row.CaptionMode, row.StreamKey); rerr != nil {
+					return rerr
+				}
+			}
 		}
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET enabled=?, updated_at=? WHERE id=?`,

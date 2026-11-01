@@ -360,9 +360,13 @@ export interface Destination {
   /** How live captions reach this destination. "off" is the default and the
    *  value an upgrade leaves in place. The others are the routes the platform
    *  takes; which one a platform accepts is decided by the server, and the
-   *  console mirrors that table in lib/captions.ts. Storing the mode does not
-   *  send captions yet: the engine does not read it. */
+   *  console mirrors that table in lib/captions.ts. */
   captionMode?: CaptionMode;
+  /** Read-only. True when a YouTube caption ingestion URL is stored for this
+   *  destination's current stream key, which "youtube_post" needs before the
+   *  destination may start. The URL itself is a credential and never leaves
+   *  the server; Refresh stream key is what fetches it. */
+  captionIngestReady?: boolean;
   /** The SECOND audio mix — the VOD track, separate from the live one. Same
    *  shape as `profile`, because it is the same kind of thing.
    *

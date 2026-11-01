@@ -272,6 +272,12 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		return nil, false
 	}
 
+	// Bound to the key the create returned, so it is harmless if that key is never applied.
+	if err := s.keepCaptionIngest(d, b); err != nil {
+		s.log.Warn("recurring: the caption ingestion URL could not be stored",
+			"destination", d.Name, "err", redactErr(err))
+	}
+
 	warnings, err := ed.EditScheduledBroadcast(cctx, acct.AccessToken, b.ID, oauth.ScheduledEdit{
 		Title:       title,
 		Description: tpl.Description,

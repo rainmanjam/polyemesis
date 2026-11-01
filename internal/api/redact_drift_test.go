@@ -142,6 +142,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.profile.tracks.track":               sPublic,
 	"destination.renditionId":                        sPublic,
 	"destination.delaySeconds":                       sPublic,
+	"destination.captionIngestReady":                 sPublic, // a yes/no about the stored URL; the URL itself is in caption_ingest and on no type
 	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,

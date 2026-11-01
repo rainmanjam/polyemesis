@@ -297,9 +297,15 @@ type IngestOptions struct {
 	// destination, passed back in so a reused stream keeps its URL. It is a
 	// credential and is never logged or placed in an error.
 	CaptionIngestURL string
-	Privacy          db.FacebookPrivacy
-	Crosspost        []db.CrosspostTarget
-	DonateCharityID  string
+	// CaptionDelay is the broadcast delay a caption-enabled YouTube broadcast is
+	// created with (contentDetails.monitorStream.broadcastStreamDelayMs). YouTube
+	// requires 30 s or 60 s for the HTTP POST path; the caller passes the
+	// destination's own delay, which db.Destination.Validate already holds to
+	// those two values for this mode. Read only when CaptionPOST is set.
+	CaptionDelay    time.Duration
+	Privacy         db.FacebookPrivacy
+	Crosspost       []db.CrosspostTarget
+	DonateCharityID string
 	// BackupIngest asks Facebook to provision a secondary ingest endpoint, so
 	// a redundant feed can be published alongside the primary.
 	//
