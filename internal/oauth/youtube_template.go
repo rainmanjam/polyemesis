@@ -88,10 +88,37 @@ func (y *YouTube) SetScheduledThumbnail(ctx context.Context, accessToken, broadc
 		y.apiBase(ytUploadBase)+ytThumbnailsPath+"?"+q.Encode(), accessToken, mime, data)
 }
 
-// CancelScheduledBroadcast deletes one scheduled broadcast by id. deleteBroadcast already treats a
-// 404 as deleted, so a page removed by hand reads as cancelled.
+// CancelScheduledBroadcast deletes one UPCOMING (never-live) template-created broadcast by id. It is the
+// separate, explicit delete the YouTube docs correction asks for, and it does not loosen deleteBroadcast's
+// own guard: before deleting it reads the platform's lifecycle status and refuses anything that is not
+// created or ready, so a page that is testing, live or complete is never removed from here. The states in
+// which YouTube allows a delete are undocumented, so a refusal from the platform is returned as the error
+// for the caller to report; nothing here retries. A broadcast that is already gone (an empty list, or a
+// 404 on the delete) reads as cancelled.
 func (y *YouTube) CancelScheduledBroadcast(ctx context.Context, accessToken, broadcastID string) error {
-	return y.deleteBroadcast(ctx, accessToken, broadcastID)
+	id := strings.TrimSpace(broadcastID)
+	if id == "" {
+		return fmt.Errorf("no broadcast id to delete")
+	}
+	var list struct {
+		Items []struct {
+			Status struct {
+				LifeCycleStatus string `json:"lifeCycleStatus"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?part=id,status&id="+url.QueryEscape(id),
+		accessToken, nil, &list); err != nil {
+		return err
+	}
+	if len(list.Items) == 0 {
+		return nil
+	}
+	if st := list.Items[0].Status.LifeCycleStatus; st != "created" && st != "ready" {
+		return fmt.Errorf("YouTube broadcast %s is %q, not an upcoming event, so it is not deleted from here; "+
+			"remove it in YouTube Studio if you mean to", id, st)
+	}
+	return y.deleteBroadcast(ctx, accessToken, id)
 }
 
 // requestRaw sends a non-JSON body. It mirrors requestJSON for auth, status handling and the error

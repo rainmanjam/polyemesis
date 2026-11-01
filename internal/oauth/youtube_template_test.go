@@ -204,3 +204,24 @@ func TestYouTubeCancelsAScheduledBroadcastByIdOnly(t *testing.T) {
 		t.Fatalf("cancel did not delete bcast-9: %+v", del)
 	}
 }
+
+// A broadcast that has left the upcoming states is never deleted by a cancel: it may be airing or aired.
+// The refusal comes from the lifecycle read, before any DELETE is sent.
+func TestYouTubeCancelRefusesABroadcastThatIsNotUpcomingAndSendsNoDelete(t *testing.T) {
+	for _, status := range []string{"testing", "live", "complete", "liveStarting"} {
+		var log []capture
+		srv := httptest.NewServer(recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"items":[{"id":"bcast-9","status":{"lifeCycleStatus":"`+status+`"}}]}`)
+		}))
+		y := NewYouTube(WithBaseURL(srv.URL))
+		err := y.CancelScheduledBroadcast(context.Background(), "tok", "bcast-9")
+		srv.Close()
+		if err == nil {
+			t.Fatalf("status %s: cancel succeeded, want a refusal", status)
+		}
+		if findCapture(log, "DELETE", ytBroadcastsPath) != nil {
+			t.Fatalf("status %s: a DELETE was sent for a broadcast that is not upcoming", status)
+		}
+	}
+}
