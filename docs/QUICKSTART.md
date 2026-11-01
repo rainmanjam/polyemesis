@@ -12,7 +12,7 @@ Do this before anything else — it is the single most common reason a first run
 goes wrong.
 
 ```sh
-ffmpeg -version | head -1                          # must be 6.0 or newer
+ffmpeg -version | head -1                          # must be 8.0 or later
 ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 ```
 

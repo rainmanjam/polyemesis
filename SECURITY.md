@@ -258,7 +258,7 @@ admin UI, this field is not your biggest problem.
   TLS.** `tls.mode: auto` is the one-line fix. Binding to `127.0.0.1` and
   reaching it over an SSH tunnel is the zero-configuration alternative, and is
   now what an unconfigured install does on its own.
-- **Install an FFmpeg that reports a version number.** The 6.0 floor refuses a
+- **Install an FFmpeg that reports a version number.** The 8.0 floor refuses a
   build whose `-version` output it cannot parse, naming the string it could not
   read, rather than assuming the build is new. If you run a master nightly
   (`N-113518-gd6a4b1e`), set `POLYEMESIS_FFMPEG_ASSUME_MAJOR` to its major

@@ -9,7 +9,7 @@ import (
 // outputs" (03dfac5630), and 9.0.2 reverted it (9d4ca2122) because it misorders
 // output, ends streams early and runs memory up. polyemesis's destination is
 // exactly the shape that hits a scheduler: one input, several audio decoders,
-// one filtergraph. Both releases clear the 6.0 floor, so without this nothing
+// one filtergraph. Both releases clear the 8.0 floor, so without this nothing
 // tells an operator on one of them why a destination drops out.
 //
 // A warning and not a refusal: a refusal takes down an install that may be

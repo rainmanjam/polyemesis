@@ -22,7 +22,7 @@ distinguishable by ear, and a narrow bandpass can measure each independently.
 ## 0. Prerequisites
 
 ```bash
-ffmpeg -version          # must be 6.0 or newer
+ffmpeg -version          # must be 8.0 or later
 ffmpeg -protocols | tr ' ' '\n' | grep -x srt   # must print exactly: srt
 ```
 

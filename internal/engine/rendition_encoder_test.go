@@ -19,7 +19,7 @@ func TestRenditionEncoderProblem(t *testing.T) {
 
 	tools := func(video []string, caps ...ffmpeg.EncoderCapability) *ffmpeg.Tools {
 		return &ffmpeg.Tools{
-			FFmpeg: "/nonexistent/ffmpeg", Version: "7.1", Major: 7, Minor: 1,
+			FFmpeg: "/nonexistent/ffmpeg", Version: "8.1", Major: 8, Minor: 1,
 			VideoEncoders: video, EncoderCaps: caps,
 		}
 	}

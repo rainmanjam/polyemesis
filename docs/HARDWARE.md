@@ -137,13 +137,12 @@ host at `docker run` time or it does not arrive.
 | `Dockerfile.cuda` | `nvidia/cuda:*-base-ubuntu24.04` | NVIDIA / NVENC |
 | `Dockerfile.vaapi` | `ubuntu:26.04` | Intel and AMD / VA-API and QSV |
 
-> **`Dockerfile.cuda` cannot do Enhanced RTMP multitrack ingest.** It pins its
-> base's stock FFmpeg, `7:6.1.1-3ubuntu5` (`Dockerfile.cuda:132`), and multitrack
-> FLV demuxing landed in FFmpeg **7.1** — see
-> [OBS.md](OBS.md#enhanced-rtmp-multitrack-works-on-ffmpeg-71-not-from-obs). The
-> default Alpine image (8.1.3) and `Dockerfile.vaapi` (8.0.1) are both above that
-> floor; this one is the exception, and choosing it for NVENC is choosing to give
-> up that ingest path.
+> **All three images carry FFmpeg 8 and Enhanced RTMP multitrack ingest.**
+> `Dockerfile.cuda` used to install its Ubuntu 24.04 base's stock FFmpeg 6.1.1,
+> which is below polyemesis's 8.0 floor; it now installs a pinned, sha256-checked
+> static FFmpeg 8.1.3 (BtbN, the build `scripts/install.sh` uses) and asserts
+> NVENC and libsrt at build time. See
+> [OBS.md](OBS.md#enhanced-rtmp-multitrack-works-on-every-supported-ffmpeg-not-from-obs).
 
 `docker-compose.yml` carries all three as one file: the default service is
 active, the two GPU variants are commented out just below it. Uncomment one,

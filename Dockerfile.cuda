@@ -78,7 +78,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # NVIDIA_REQUIRE_CUDA check is what refuses to start on a host whose driver is
 # behind, and a lower floor turns away fewer working machines. If you bump it,
 # bump for the Ubuntu release underneath (which decides the FFmpeg version),
-# not for CUDA features.
+# not for CUDA features. (FFmpeg no longer comes from that Ubuntu release; see
+# the FFmpeg step below.)
 FROM nvidia/cuda:12.6.3-base-ubuntu24.04@sha256:c87e78933f4c16e3272123bf2f75537306596d0fbaa395a29696a22786e5ee0e
 
 ARG VERSION=dev
@@ -120,27 +121,45 @@ ENV NVIDIA_VISIBLE_DEVICES=all
 # succeeds onto an image with no hardware encoder. The tag is `:0.10.0-cuda`.
 ENV POLYEMESIS_IMAGE_VARIANT=cuda
 
-# Ubuntu 24.04's FFmpeg is 6.1.1, which keeps this image on the same 6.1.x
-# series as the Alpine one — the series this project is actually exercised
-# against — and it is built with NVENC (verified: `ffmpeg -encoders` in
-# ubuntu:24.04 lists h264_nvenc and hevc_nvenc). FFmpeg dlopen()s the encode
-# library at runtime rather than linking it, which is exactly why a build with
-# NVENC compiled in tells you nothing about whether NVENC works.
+# FFMPEG IS THE PINNED STATIC 8.1 BUILD, NOT UBUNTU'S PACKAGE.
+#
+# This image used to install Ubuntu 24.04's own FFmpeg, 6.1.1. polyemesis's
+# floor is 8.0 now (internal/ffmpeg MinMajorVersion), so that build would be
+# refused at startup. Ubuntu 26.04 packages 8.0.1, but the only nvidia/cuda
+# -base tags on 26.04 are CUDA 13.x, and the tag's NVIDIA_REQUIRE_CUDA check
+# would then turn away every host whose driver predates CUDA 13 -- for a
+# workload that links no CUDA at all (see the FROM above). So the base stays,
+# and FFmpeg comes from the same dated BtbN build scripts/install.sh, ci.yml
+# and ffmpeg-compat.yml pin, checked against a sha256 written HERE rather than
+# one served beside the tarball.
+#
+# BtbN's gpl builds carry NVENC (via nv-codec-headers) and libsrt; both are
+# asserted below. FFmpeg dlopen()s the encode library at runtime rather than
+# linking it, which is exactly why a build with NVENC compiled in tells you
+# nothing about whether NVENC works.
+#
+# linux/amd64 only, like the release build of this image (release.yml).
 #
 # Pinned rather than floating, for the same reason the Alpine image pins: an
 # unpinned transcoder makes a rebuild six months from now a different product
-# under the same tag, and the difference shows up as a broken stream rather
-# than a build error. A pinned version FAILS LOUDLY once Ubuntu supersedes it,
-# which is the prompt to bump on purpose. To bump:
-#
-#   docker run --rm ubuntu:24.04 sh -c 'apt-get update -qq && apt-cache policy ffmpeg'
-#
-# 7:6.1.1-3ubuntu5 verified present on 2026-07-26 (linux/amd64).
-ARG FFMPEG_VERSION=7:6.1.1-3ubuntu5
+# under the same tag. To bump, follow "TO BUMP" above FFMPEG_BTBN_TAG in
+# scripts/install.sh and change all three ARGs together.
+ARG FFMPEG_BTBN_TAG=autobuild-2026-09-30-13-08
+ARG FFMPEG_ASSET=ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata wget \
+      ca-certificates tzdata wget xz-utils \
  && rm -rf /var/lib/apt/lists/* \
+ && wget -q --https-only -O /tmp/ff.tar.xz \
+      "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BTBN_TAG}/${FFMPEG_ASSET}" \
+ && echo "${FFMPEG_SHA256}  /tmp/ff.tar.xz" | sha256sum -c - \
+ && mkdir -p /tmp/ffbuild && tar xf /tmp/ff.tar.xz --strip-components=1 -C /tmp/ffbuild \
+ && install -m 0755 /tmp/ffbuild/bin/ffmpeg /tmp/ffbuild/bin/ffprobe /usr/local/bin/ \
+ && rm -rf /tmp/ff.tar.xz /tmp/ffbuild \
+ # The floor, asserted at build time, so a bump to a build below it fails here
+ # rather than at the first container start.
+ && ffmpeg -hide_banner -version | head -1 | grep -Eq '^ffmpeg version n?(8|9|[1-9][0-9])\.' \
  # SRT is what multitrack ingest rides on, and `grep srt` would pass on every
  # build because `srtp` is always listed. -x makes it a real check.
  && ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt \

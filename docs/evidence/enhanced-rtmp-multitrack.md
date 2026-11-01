@@ -1,5 +1,10 @@
 # Accepting Enhanced RTMP multitrack from OBS
 
+> **Note, 2026-10-31: polyemesis now requires FFmpeg 8.0 or later**, so every
+> supported build carries Enhanced RTMP multitrack. The 6.1.1 and 7.1 figures
+> below are kept as the measurements this record rests on, not as a statement
+> of what is supported.
+
 **Status: the documented blocker is stale, but only on a new enough FFmpeg.**
 Every doc in this repo says RTMP ingest is single-track "by protocol". The
 protocol part is no longer true — FFmpeg merged multitrack FLV demuxing (Timo

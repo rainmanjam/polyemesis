@@ -25,7 +25,7 @@ func slateTools(t *testing.T, works bool) *ffmpeg.Tools {
 		cap.Reason = "no NVENC capable devices found"
 	}
 	return &ffmpeg.Tools{
-		FFmpeg: "polyemesis-no-such-binary", Version: "7.1", Major: 7, Minor: 1,
+		FFmpeg: "polyemesis-no-such-binary", Version: "8.1", Major: 8, Minor: 1,
 		VideoEncoders: []string{string(db.EncoderX264), string(db.EncoderNVENCH264)},
 		EncoderCaps: []ffmpeg.EncoderCapability{
 			{Name: string(db.EncoderX264), Vendor: ffmpeg.EncoderVendorOf(string(db.EncoderX264)), Works: true},

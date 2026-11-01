@@ -204,8 +204,10 @@ there is much easier to deal with before you start streaming on it.
   The compose files set `stop_grace_period: 45s` and the systemd unit sets
   `TimeoutStopSec=45`. Do not lower either. A compose file written before the
   release after 0.10.0 says `30s`: raise it to `45s`.
-- **Check the FFmpeg floor.** It is 6.0 today. If a future release raises it,
-  the server refuses to start rather than failing later in a confusing way.
+- **Check the FFmpeg floor.** It is 8.0 today (it was 6.0 up to and including
+  0.11.0 — see below). If a release raises it, the server refuses to start
+  rather than failing later in a confusing way, and the refusal says how to get
+  past it.
 
 ## What migrations do
 
@@ -806,10 +808,23 @@ The old boolean still works, so an existing config keeps its behaviour:
 An explicit `tls.mode` always wins, so you can migrate without deleting the old
 key. New installs starting from `config.example.yaml` get `mode: auto`.
 
-### FFmpeg 6.x → 8.x
+### FFmpeg 6.x or 7.x → 8.x (required)
 
-Supported and recommended; the project is developed against 8.1.2. No
-configuration changes.
+**Breaking for native installs.** polyemesis now requires FFmpeg 8.0 or later
+and refuses to start on anything older, naming the binary and version it found.
+Docker users are unaffected: the image bundles 8.1. A binary-mode install that
+relies on a distribution's FFmpeg is affected if that FFmpeg is below 8 —
+Ubuntu 24.04's apt package is 6.1.1 and Debian 13's is 7.1.5. Any one of these
+fixes it, and none needs a configuration change:
+
+- re-run `scripts/install.sh --ffmpeg force`, which installs a pinned, sha256-
+  checked static FFmpeg 8.1 to `/usr/local/bin` and points `ffmpeg.binary` at
+  it, leaving the distribution's copy untouched;
+- install FFmpeg 8 or later yourself (Ubuntu 26.04 ships 8.0; Homebrew ships
+  9.x) and, if it is not first on `PATH`, set `ffmpeg.binary` and `ffmpeg.probe`;
+- switch to the Docker image.
+
+8.x and 9.x are the supported lines; CI tests the latest release of each.
 
 One thing to know if you are comparing behaviour across versions: `-itsoffset`
 does **not** produce a per-stream delay — measured against 8.1.2 it moved audio
