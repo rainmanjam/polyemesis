@@ -550,3 +550,200 @@ func TestXRejectsAnEmptyBroadcastID(t *testing.T) {
 		t.Error("an empty id still reached X")
 	}
 }
+
+// ------------------------------------------- broadcast creation and PUBLISH
+
+// xCreateStub answers the calls a create-then-publish makes and records each
+// write, so a test can read the exact bodies X would have received.
+func xCreateStub(t *testing.T, writes *[]string) (*X, *httptest.Server) {
+	t.Helper()
+	return xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case r.URL.Path == "/2/users/1234567890/sources" && r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"k3y0ne","name":"polyemesis","is_stream_active":true}]}}`)
+		case r.URL.Path == "/2/users/1234567890/broadcasts" && r.Method == http.MethodPost:
+			body, _ := io.ReadAll(r.Body)
+			*writes = append(*writes, r.Method+" "+r.URL.Path+" "+string(body))
+			_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"k3y0ne"},"share_url":"https://x.com/i/broadcasts/1ynJOZVeajOJR","video_access":{}}}`)
+		case strings.HasPrefix(r.URL.Path, "/2/users/1234567890/broadcasts/1ynJOZVeajOJR/state"):
+			body, _ := io.ReadAll(r.Body)
+			*writes = append(*writes, r.Method+" "+r.URL.Path+" "+string(body))
+			_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"RUNNING"},"tweet_error":"post was rate limited"}}`)
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusTeapot)
+		}
+	})
+}
+
+// TestXCreateBroadcastOpensANotStartedBroadcastOnThePolyemesisSource pins the
+// create call the go-live path needs when no broadcast exists yet. The body's
+// source_id is the source's rtmp_stream_key, per the spec, and the broadcast
+// comes back NOT_STARTED, which is invisible until PUBLISH.
+func TestXCreateBroadcastOpensANotStartedBroadcastOnThePolyemesisSource(t *testing.T) {
+	var writes []string
+	x, _ := xCreateStub(t, &writes)
+	b, err := x.CreateBroadcast(context.Background(), "client", "tok", "k3y0ne")
+	if err != nil {
+		t.Fatalf("CreateBroadcast: %v", err)
+	}
+	if b.ID != "1ynJOZVeajOJR" || b.State != XStateNotStarted {
+		t.Errorf("CreateBroadcast = id %q state %q, want 1ynJOZVeajOJR NOT_STARTED", b.ID, b.State)
+	}
+	if len(writes) != 1 || !strings.Contains(writes[0], `"source_id":"k3y0ne"`) {
+		t.Errorf("create body = %v, want one POST carrying source_id k3y0ne", writes)
+	}
+}
+
+// TestXCreateBroadcastRefusesAMalformedSourceKeyWithoutAnyRequest: the spec pins
+// source_id to ^[a-zA-Z0-9]{1,32}$. A key outside that shape is refused before
+// any byte leaves the process, and the refusal never echoes the key.
+func TestXCreateBroadcastRefusesAMalformedSourceKeyWithoutAnyRequest(t *testing.T) {
+	var hits int32
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "should not be reached", http.StatusTeapot)
+	})
+	for _, bad := range []string{"", "has space", "way-too-long-" + strings.Repeat("a", 40), "k3y/../x"} {
+		if _, err := x.CreateBroadcast(context.Background(), "client", "tok", bad); err == nil {
+			t.Errorf("CreateBroadcast(%q) succeeded, want refusal", bad)
+		}
+	}
+	if hits != 0 {
+		t.Errorf("malformed keys caused %d requests, want none", hits)
+	}
+}
+
+// TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed: the switched-off
+// Livestream family refuses creation and PUBLISH without a request, like every
+// other Livestream operation.
+func TestXCreateAndPublishMakeNoRequestWhileTheGateIsClosed(t *testing.T) {
+	x, hits := xCountingStub(t)
+	ctx := context.Background()
+	if _, err := x.CreateBroadcast(ctx, "client", "tok", "k3y0ne"); !errors.Is(err, ErrXLivestreamOff) {
+		t.Errorf("CreateBroadcast with the gate closed = %v, want ErrXLivestreamOff", err)
+	}
+	if _, err := x.PublishBroadcast(ctx, "tok", "1ynJOZVeajOJR", XPublish{Title: "Sunday"}); !errors.Is(err, ErrXLivestreamOff) {
+		t.Errorf("PublishBroadcast with the gate closed = %v, want ErrXLivestreamOff", err)
+	}
+	if *hits != 0 {
+		t.Errorf("closed gate made %d requests, want none", *hits)
+	}
+}
+
+// TestXPublishSendsTheTitleAndChatOptionOnPublish: the title and chat option
+// travel in the PUBLISH body on the user-scoped route. That route is the only
+// one that accepts PUBLISH (the newer route is END only).
+func TestXPublishSendsTheTitleAndChatOptionOnPublish(t *testing.T) {
+	var writes []string
+	x, _ := xCreateStub(t, &writes)
+	two := 2
+	res, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR",
+		XPublish{Title: "  Sunday practice  ", ChatOption: &two})
+	if err != nil {
+		t.Fatalf("PublishBroadcast: %v", err)
+	}
+	if len(writes) != 1 {
+		t.Fatalf("saw %d writes, want 1", len(writes))
+	}
+	if !strings.HasPrefix(writes[0], "PUT /2/users/1234567890/broadcasts/1ynJOZVeajOJR/state") {
+		t.Errorf("publish = %q, want the user-scoped state route", writes[0])
+	}
+	for _, want := range []string{`"state":"PUBLISH"`, `"title":"Sunday practice"`, `"chat_option":2`} {
+		if !strings.Contains(writes[0], want) {
+			t.Errorf("publish body %q is missing %s", writes[0], want)
+		}
+	}
+	if res.State != "RUNNING" {
+		t.Errorf("PublishBroadcast state = %q, want RUNNING", res.State)
+	}
+}
+
+// TestXPublishOmitsTitleAndChatOptionWhenUnset: an unset chat option is left out
+// of the body so X keeps its own default, and an empty title is not sent as a
+// blank title that would overwrite nothing useful.
+func TestXPublishOmitsTitleAndChatOptionWhenUnset(t *testing.T) {
+	var writes []string
+	x, _ := xCreateStub(t, &writes)
+	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{}); err != nil {
+		t.Fatalf("PublishBroadcast: %v", err)
+	}
+	if len(writes) != 1 || !strings.Contains(writes[0], `{"state":"PUBLISH"}`) {
+		t.Errorf("publish body = %v, want exactly {\"state\":\"PUBLISH\"}", writes)
+	}
+}
+
+// TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest: X answers 400
+// to anything outside 0 to 6, so the refusal is made locally and costs nothing.
+func TestXPublishRefusesAChatOptionOutsideZeroToSixWithoutARequest(t *testing.T) {
+	var hits int32
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		http.Error(w, "should not be reached", http.StatusTeapot)
+	})
+	for _, bad := range []int{-1, 7, 99} {
+		v := bad
+		if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{ChatOption: &v}); err == nil {
+			t.Errorf("chat option %d accepted, want refusal", bad)
+		}
+	}
+	if hits != 0 {
+		t.Errorf("out-of-range chat options caused %d requests", hits)
+	}
+}
+
+// TestXPublishReportsAFailedAnnouncementAsAWarning: the broadcast is live even
+// when the announcing Post fails. X reports that as tweet_error, which must come
+// back as a warning, never as a failed go-live.
+func TestXPublishReportsAFailedAnnouncementAsAWarning(t *testing.T) {
+	var writes []string
+	x, _ := xCreateStub(t, &writes)
+	res, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{Title: "Sunday"})
+	if err != nil {
+		t.Fatalf("a failed announcement failed the go-live: %v", err)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "rate limited") {
+		t.Errorf("Warnings = %v, want the tweet_error surfaced once", res.Warnings)
+	}
+}
+
+// TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot: X documents six states.
+// An unrecognised word must not be treated as live, because a wrong "live"
+// would stop the coordinator from ever publishing.
+func TestXSixBroadcastStatesAreKnownAndAnythingElseIsNot(t *testing.T) {
+	for _, s := range []string{XStateNotStarted, XStatePrePublished, XStateRunning, XStateEnded, XStateTimedOut, XStateCanceled} {
+		if !XStateKnown(s) {
+			t.Errorf("XStateKnown(%q) = false, want true: X documents it", s)
+		}
+	}
+	for _, s := range []string{"", "live", "RUNNING ", "running", "STARTED", "PUBLISHED"} {
+		if XStateKnown(s) {
+			t.Errorf("XStateKnown(%q) = true, want false: only X's exact six words are known", s)
+		}
+	}
+}
+
+// TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes: X has no
+// stream-liveness read on the broadcast, but its source carries
+// is_stream_active. Publishing before bytes arrive would announce a blank
+// broadcast, so the source's answer fills the precondition.
+func TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case "/2/users/1234567890/sources":
+			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"k3y0ne","name":"polyemesis","is_stream_active":true}]}}`)
+		default:
+			_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"k3y0ne"}}`)
+		}
+	})
+	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.StreamActive == nil || !*st.StreamActive {
+		t.Errorf("StreamActive = %v, want true from the source's is_stream_active", st.StreamActive)
+	}
+}
