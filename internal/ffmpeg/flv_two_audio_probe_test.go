@@ -76,17 +76,42 @@ func TestARecordedTwoAudioFLVFailureIsReadBackWithItsReason(t *testing.T) {
 // reads it back. Skipped where no FFmpeg is installed so CI without one still
 // runs the verdict tests above. The binary lookup goes through the sanctioned
 // gate, so a CI that has undertaken to install FFmpeg fails instead of skipping.
-func TestTheRealFFmpegPassesTheTwoAudioFLVProbe(t *testing.T) {
+//
+// THE ANSWER DEPENDS ON THE BINARY, AND BOTH ANSWERS ARE TESTED. Multitrack audio
+// in FLV arrived with Enhanced RTMP support: 7.1 and later write it, 6.1 refuses
+// with "at most one audio stream is supported in flv" (docs/evidence/
+// enhanced-rtmp-multitrack.md). The supported floor is 6, and CI runs it, so on
+// that leg the probe must REFUSE, with the reason, and the Tools must keep that
+// refusal — which is what withholds the VOD mix there. Asserting a pass on every
+// binary failed the 6.1 floor job, which was the probe working.
+func TestTheRealFFmpegAnswersTheTwoAudioFLVProbeForItsVersion(t *testing.T) {
 	ff := testenv.FFmpegBinary(t, "ffmpeg", "no ffmpeg on PATH")
 	fp := testenv.FFmpegBinary(t, "ffprobe", "no ffprobe on PATH")
+	det, err := Detect(context.Background(), ff, fp)
+	if err != nil {
+		t.Fatalf("detecting the installed FFmpeg: %v", err)
+	}
+	// An unparsed version (a nightly) is treated as new: those are built from master.
+	canWrite := det.Major == 0 || det.Major > 7 || (det.Major == 7 && det.Minor >= 1)
+
 	tools := &Tools{FFmpeg: ff, FFprobe: fp}
 	res := tools.ProbeTwoAudioFLV(context.Background())
-	if !res.OK {
-		t.Fatalf("the installed FFmpeg cannot write two audio tracks to FLV: %s", res.Reason)
+	ok, probed, reason := tools.TwoAudioFLV()
+	if !probed {
+		t.Fatalf("the probe ran but the Tools did not keep its answer (FFmpeg %s)", det.Version)
 	}
-	ok, probed, _ := tools.TwoAudioFLV()
-	if !probed || !ok {
-		t.Errorf("the probe ran but the Tools did not keep its answer: probed=%v ok=%v", probed, ok)
+	if canWrite {
+		if !res.OK || !ok {
+			t.Fatalf("FFmpeg %s should write two audio tracks to FLV, but the probe refused: %s", det.Version, res.Reason)
+		}
+		return
+	}
+	if res.OK || ok {
+		t.Fatalf("FFmpeg %s cannot write two audio tracks to FLV, but the probe passed it; the VOD mix would be "+
+			"published to a muxer that drops it", det.Version)
+	}
+	if strings.TrimSpace(reason) == "" {
+		t.Errorf("FFmpeg %s refused with no reason recorded; the operator would see the VOD mix vanish unexplained", det.Version)
 	}
 }
 
