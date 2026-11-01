@@ -32,6 +32,7 @@ import { StatusReason } from "@/components/signature/StatusReason";
 import { DelayPanel } from "@/components/DelayPanel";
 import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { YouTubeVerticalSubRow } from "@/components/YouTubeVerticalSubRow";
 import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
 import { useFacebookStreamHealth } from "@/hooks/useFacebookStreamHealth";
@@ -101,8 +102,20 @@ export function DestinationCard({
   domId,
   trackLabels,
   trackCount,
+  vertical,
+  verticalBusy,
+  onVerticalStart,
+  onVerticalStop,
+  onVerticalRestart,
 }: {
   dest: DestStatus;
+  /** The YouTube vertical half of this destination, when it has one (#7). Drawn
+   *  as a sub-row with its own controls. Absent for every other row. */
+  vertical?: DestStatus;
+  verticalBusy?: boolean;
+  onVerticalStart?: () => void;
+  onVerticalStop?: () => void;
+  onVerticalRestart?: () => void;
   onStart: () => void;
   onStop: () => void;
   /** The broadcast delay's "Stop now" (#11): stop and discard the buffered
@@ -783,6 +796,21 @@ export function DestinationCard({
             anyway. A platform where ending destroys the artefact, or where
             only the API can do it, is a different decision and should get one.
             ================================================================= */}
+        {vertical && (
+          <YouTubeVerticalSubRow
+            horizontal={dest}
+            vertical={vertical}
+            busy={verticalBusy}
+            onStart={() => onVerticalStart?.()}
+            onStop={() => onVerticalStop?.()}
+            onRestart={() => onVerticalRestart?.()}
+          />
+        )}
+        {dest.youtubeVertical != null && !dest.youtubeVertical.pairingConfirmed && (
+          <p className="mt-2 text-xs text-warn" data-testid="youtube-vertical-reminder">
+            {t("wave3.vertical.reminder")}
+          </p>
+        )}
         {canEndBroadcast && (
           <ConfirmDestructive
             open={endOpen}

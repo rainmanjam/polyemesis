@@ -878,6 +878,12 @@ export interface DestStatus {
    *  destination on the install in one grid, so without this two destinations
    *  called "Twitch" on different programmes are indistinguishable. */
   sourceId?: SourceId | null;
+  /** The YouTube vertical half this horizontal destination is paired with (#7),
+   *  absent when it has none. The vertical half is its own row, drawn as this
+   *  card's sub-row. `pairingConfirmed` is the one-time Live Control Room step. */
+  youtubeVertical?: YouTubeVerticalLink | null;
+  /** Set on a vertical row: the horizontal destination it belongs to (#7). */
+  verticalHalfOf?: DestinationId | null;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
   /** The file a recording is actually being written to, when that is not the
@@ -932,6 +938,26 @@ export interface DestStatus {
   /** The platform's own verdict on the stream, present only while it is poor.
    *  YouTube only. */
   platformHealth?: { platform: string; status: string; issues?: string[] };
+}
+
+/** A horizontal YouTube destination's vertical half, as /status reports it (#7). */
+export interface YouTubeVerticalLink {
+  verticalId: DestinationId;
+  pairingConfirmed: boolean;
+}
+
+/** The vertical half as GET /destinations/{id}/youtube-vertical serves it (#7).
+ *  It carries no stream key. `live` is false when neither half is running, and
+ *  then no health is read. `healthError` is the reason on the sub-row. */
+export interface YouTubeVerticalView {
+  horizontalId: DestinationId;
+  verticalId: DestinationId;
+  verticalStreamId: string;
+  pairingConfirmed: boolean;
+  live: boolean;
+  streamStatus?: string;
+  healthStatus?: string;
+  healthError?: string;
 }
 
 /** One advisory note about a negotiated Enhanced Broadcasting configuration. */

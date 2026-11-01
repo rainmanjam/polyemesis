@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { planStarts, runPacedStarts, type GoLiveRow } from "@/lib/goLive";
+import { unconfirmedVerticalPairs } from "@/lib/youtubeVertical";
 import { TrackSummary } from "@/components/signature/TrackRows";
 import { StatusReason } from "@/components/signature/StatusReason";
 import type { DestStatus, DestinationId } from "@/lib/types";
@@ -89,6 +90,13 @@ export function GoLiveSheet({
 
   const liveOf = (id: number) => live.find((d) => (d.id as unknown as number) === id);
 
+  // The one-time Live Control Room step for the YouTube pairs being started (#7).
+  // Dual stream cannot be added once a stream has started, so the reminder stays
+  // on this sheet until the step is confirmed on the card.
+  const pendingPairs = unconfirmedVerticalPairs(
+    live.filter((d) => rows.some((r) => r.id === d.id)),
+  );
+
   const progressOf = (row: GoLiveRow): Progress => {
     const id = row.id as unknown as number;
     if (!row.ready) return "blocked";
@@ -162,6 +170,15 @@ export function GoLiveSheet({
           <DialogTitle>{t("golive.title")}</DialogTitle>
           <DialogDescription>{t("golive.intro")}</DialogDescription>
         </DialogHeader>
+
+        {pendingPairs > 0 && (
+          <p
+            className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn"
+            data-testid="golive-vertical-reminder"
+          >
+            {t("wave3.vertical.goLiveReminder", { count: pendingPairs })}
+          </p>
+        )}
 
         {youtubeAtRisk > 0 && (
           <p className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn">

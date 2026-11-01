@@ -1,3 +1,4 @@
+import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -2083,6 +2084,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           </StepPanel>
 
           <StepPanel n={4} step={step}>
+          {platform === "youtube" && editing && destination && (
+            <YouTubeVerticalPanel destinationId={destination.id} />
+          )}
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>

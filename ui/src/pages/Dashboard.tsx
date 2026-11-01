@@ -46,6 +46,7 @@ import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLiv
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
+import { primaryDestinations, verticalHalfOf } from "@/lib/youtubeVertical";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
@@ -1506,9 +1507,13 @@ export function Dashboard() {
   // which is the shape this page had before per-source anything.
   // The whole dashboard, divided by programme. Composed from the two layout
   // functions rather than restating their rules -- see sourceLanes.ts.
+  // A vertical half is drawn inside its horizontal card (#7), so the cards, the
+  // lanes and the move arrows work from the primary rows only. The full list is
+  // still what the reorder is saved from, so a vertical row keeps its place.
+  const primaryDests = useMemo(() => primaryDestinations(destinations), [destinations]);
   const lanes = useMemo(
-    () => laneLayout(tiles, destinations, sources),
-    [tiles, destinations, sources],
+    () => laneLayout(tiles, primaryDests, sources),
+    [tiles, primaryDests, sources],
   );
 
   /* The top row's shape, from one call so its two halves cannot disagree.
@@ -1555,8 +1560,22 @@ export function Dashboard() {
                  * (no invented chips) until that programme has reported. */
                 trackCount={trackCount(sourceOf(d.sourceId), d.sourceId)}
                 busy={busyId === d.id}
+                vertical={verticalHalfOf(d, destinations)}
+                verticalBusy={busyId === verticalHalfOf(d, destinations)?.id}
+                onVerticalStart={() => {
+                  const v = verticalHalfOf(d, destinations);
+                  if (v) void act(v.id, () => api.startDestination(v.id), "start the vertical half");
+                }}
+                onVerticalStop={() => {
+                  const v = verticalHalfOf(d, destinations);
+                  if (v) void act(v.id, () => api.stopDestination(v.id), "stop the vertical half");
+                }}
+                onVerticalRestart={() => {
+                  const v = verticalHalfOf(d, destinations);
+                  if (v) void act(v.id, () => api.restartDestination(v.id), "restart the vertical half");
+                }}
                 canMoveEarlier={i > 0}
-                canMoveLater={i < destinations.length - 1}
+                canMoveLater={i < primaryDests.length - 1}
                 onMoveEarlier={() => move(d.id, -1)}
                 onMoveLater={() => move(d.id, 1)}
                 onStart={() => act(d.id, () => api.startDestination(d.id), "start the destination")}
@@ -1639,14 +1658,21 @@ export function Dashboard() {
   }, [live, pending]);
 
   const move = async (id: DestinationId, delta: -1 | 1) => {
+    // Swaps with the neighbouring CARD, stepping over any vertical half between
+    // them, so an arrow never does nothing. The saved order keeps every row.
     const ids = destinations.map((d) => d.id);
-    const from = ids.indexOf(id);
+    const cards = primaryDestinations(destinations).map((d) => d.id);
+    const from = cards.indexOf(id);
     const to = from + delta;
-    if (from < 0 || to < 0 || to >= ids.length) return;
-    [ids[from], ids[to]] = [ids[to], ids[from]];
+    if (from < 0 || to < 0 || to >= cards.length) return;
+    const a = ids.indexOf(cards[from]);
+    const b = ids.indexOf(cards[to]);
+    [ids[a], ids[b]] = [ids[b], ids[a]];
 
     setPending(ids);
-    setMoveNote(`${destinations[from].name} moved to position ${to + 1} of ${ids.length}.`);
+    setMoveNote(
+      `${destinations[a].name} moved to position ${to + 1} of ${cards.length}.`,
+    );
     try {
       await api.reorderDestinations(ids);
     } catch (err) {
@@ -2189,7 +2215,7 @@ export function Dashboard() {
                           }}
                         />
                       ) : (
-                        lane.destinations.map((d) => renderDestination(d, destinations.indexOf(d)))
+                        lane.destinations.map((d) => renderDestination(d, primaryDests.indexOf(d)))
                       )}
                     </div>
                   </div>
@@ -2197,7 +2223,7 @@ export function Dashboard() {
               ))
             ) : (
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {destinations.map((d, i) => renderDestination(d, i))}
+                {primaryDests.map((d, i) => renderDestination(d, i))}
               </div>
             )}
 
@@ -2208,7 +2234,7 @@ export function Dashboard() {
               <section className="flex flex-col gap-2">
                 <p className="text-tiny text-warn">{t("dash.destOrphaned")}</p>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {lanes.orphans.map((d) => renderDestination(d, destinations.indexOf(d)))}
+                  {lanes.orphans.map((d) => renderDestination(d, primaryDests.indexOf(d)))}
                 </div>
               </section>
             )}
