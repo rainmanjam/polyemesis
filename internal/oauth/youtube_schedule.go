@@ -168,10 +168,11 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 	if err != nil {
 		return nil, err
 	}
-	stream, err := y.streamFor(ctx, accessToken, opts)
+	picked, err := y.pickStream(ctx, accessToken, opts)
 	if err != nil {
 		return nil, err
 	}
+	stream := picked.ytLiveStream
 	b := &Broadcast{
 		Target: acct.Ref,
 		Ingest: Ingest{
@@ -192,9 +193,21 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		return b, nil
 	}
 
+	// From here an error means the caller never receives this stream's key. A stream this call created is then an
+	// orphan on the channel, so it is removed; a stream found on the channel is never touched (review #31).
+	dropCreatedStream := func(cause error) error {
+		if !picked.created {
+			return cause
+		}
+		if delErr := y.deleteStream(ctx, accessToken, stream.ID); delErr != nil {
+			return fmt.Errorf("%w; the ingest stream %s created for it could not be removed either, so delete it in "+
+				"YouTube Studio: %v", cause, stream.ID, delErr)
+		}
+		return cause
+	}
 	created, err := y.createScheduledBroadcast(ctx, accessToken, opts.ScheduledFor)
 	if err != nil {
-		return nil, err
+		return nil, dropCreatedStream(err)
 	}
 	if err := y.bindBroadcast(ctx, accessToken, created.ID, stream.ID); err != nil {
 		// THE BROADCAST IS DELETED, NOT NAMED IN A MESSAGE, AND THE DIFFERENCE
@@ -221,17 +234,17 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		// instruction to follow. Best case beats worst case here because the
 		// worst case is exactly what we already had.
 		if delErr := y.deleteBroadcast(ctx, accessToken, created.ID); delErr == nil {
-			return nil, fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
+			return nil, dropCreatedStream(fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
 				"channel's stream, so it was deleted rather than left as an event page for a "+
-				"show that publishes elsewhere: %w", created.ID, err)
+				"show that publishes elsewhere: %w", created.ID, err))
 		}
 		// The delete failed too. NOW the id belongs in the message, because it
 		// is the only remaining way anyone learns the page is there.
-		return nil, fmt.Errorf("YouTube created scheduled broadcast %s, would not bind it to "+
+		return nil, dropCreatedStream(fmt.Errorf("YouTube created scheduled broadcast %s, would not bind it to "+
 			"the channel's stream, and would not delete it either. Delete broadcast %s in "+
 			"YouTube Studio: it is a public event page for a show that goes out elsewhere, "+
 			"and the next attempt will create another: %w",
-			created.ID, created.ID, err)
+			created.ID, created.ID, err))
 	}
 	b.ID = created.ID
 	return b, nil
@@ -407,11 +420,11 @@ func (y *YouTube) RescheduleBroadcast(ctx context.Context, accessToken, broadcas
 		BroadcastSettings{ScheduledStart: &start}, &MetadataResult{})
 }
 
-// broadcastByID reads one broadcast, with every part a write has to carry back.
 // errBroadcastNotListed is what broadcastByID returns when the list has no match. Its text is the start of
 // that refusal, so a caller that tests for it reads the same words an operator would.
 var errBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
 
+// broadcastByID reads one broadcast, with every part a write has to carry back.
 func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID string) (*ytBroadcast, error) {
 	var list struct {
 		Items []ytBroadcast `json:"items"`
@@ -476,6 +489,27 @@ func ytBroadcastCreateAdvice(err error) error {
 		return fmt.Errorf("%w — this channel already has YouTube's maximum number of concurrent "+
 			"broadcasts. YouTube does not publish what that number is; end or delete a broadcast "+
 			"on the channel and schedule this show again", err)
+	}
+	return err
+}
+
+// deleteStream removes a liveStream that IngestFor created seconds earlier and could not hand to its caller. The
+// same rule as deleteBroadcast holds: it is only ever called on a stream made in the same call, never on one found
+// on the channel, and a 404 is success. liveStreams.delete costs 1 unit (docs-youtube Q4).
+func (y *YouTube) deleteStream(ctx context.Context, accessToken, streamID string) error {
+	if strings.TrimSpace(streamID) == "" {
+		return fmt.Errorf("no stream id to delete")
+	}
+	q := url.Values{}
+	q.Set("id", streamID)
+	err := requestJSON(ctx, http.MethodDelete,
+		y.apiEndpoint()+ytStreamsPath+"?"+q.Encode(), accessToken, nil, nil, nil)
+	if err == nil {
+		return nil
+	}
+	var se *statusError
+	if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		return nil
 	}
 	return err
 }

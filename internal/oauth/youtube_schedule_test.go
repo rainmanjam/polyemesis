@@ -672,3 +672,66 @@ func TestYouTubeIngestForRefusesAMismatchedChannelBeforeCreatingAnything(t *test
 		t.Errorf("a broadcast was created anyway: %+v", c)
 	}
 }
+
+// ytCreatedStreamFixture is what liveStreams.insert answers when IngestFor has to make a stream of its own.
+const ytCreatedStreamFixture = `{"id":"stream-made-here","snippet":{"title":"polyemesis - Show"},
+	"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"key-made-here","ingestionAddress":"rtmp://a.example/live2"}}}`
+
+// TestYouTubeDeletesTheStreamItCreatedWhenTheScheduledBroadcastFails (review #31): with DedicatedIngest and no held
+// key, IngestFor creates a stream before it creates the broadcast. When the insert or the bind then fails, the error
+// means the caller never receives that stream's key, so the stream is an orphan on the channel. It is removed, by id.
+func TestYouTubeDeletesTheStreamItCreatedWhenTheScheduledBroadcastFails(t *testing.T) {
+	for _, failing := range []string{"POST " + ytBroadcastsPath, "POST " + ytBindPath} {
+		t.Run(failing, func(t *testing.T) {
+			var log []capture
+			y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+				"POST " + ytStreamsPath: func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, ytCreatedStreamFixture) },
+				failing: func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusForbidden)
+					io.WriteString(w, `{"error":{"errors":[{"reason":"insufficientPermissions"}]}}`)
+				},
+				"DELETE " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+				"DELETE " + ytStreamsPath:    func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+			})
+			_, err := y.IngestFor(context.Background(), "cid", "tok", "",
+				IngestOptions{ScheduledFor: time.Unix(1893456000, 0), DedicatedIngest: true, IngestLabel: "Show"})
+			if err == nil {
+				t.Fatal("IngestFor succeeded although the scheduled broadcast failed")
+			}
+			c := find(log, http.MethodDelete, ytStreamsPath)
+			if c == nil {
+				t.Fatal("the stream this call created was left on the channel; its key never reached anyone")
+			}
+			if q := mustQuery(t, c); q.Get("id") != "stream-made-here" {
+				t.Errorf("deleted stream id = %q, want the one this call created", q.Get("id"))
+			}
+		})
+	}
+}
+
+// TestYouTubeNeverDeletesAReusedStreamWhenTheScheduledBroadcastFails is the guard on #31's fix: a stream IngestFor
+// found on the channel (the shared one, or the held key's) feeds other destinations and other broadcasts. Deleting
+// it would cut every one of them, so only a stream made in this call may be removed.
+func TestYouTubeNeverDeletesAReusedStreamWhenTheScheduledBroadcastFails(t *testing.T) {
+	for name, opts := range map[string]IngestOptions{
+		"shared":   {ScheduledFor: time.Unix(1893456000, 0)},
+		"held key": {ScheduledFor: time.Unix(1893456000, 0), DedicatedIngest: true, HeldKey: "key-abc"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var log []capture
+			y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+				"POST " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusForbidden)
+					io.WriteString(w, `{"error":{"errors":[{"reason":"insufficientPermissions"}]}}`)
+				},
+				"DELETE " + ytStreamsPath: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+			})
+			if _, err := y.IngestFor(context.Background(), "cid", "tok", "", opts); err == nil {
+				t.Fatal("IngestFor succeeded although the insert failed")
+			}
+			if find(log, http.MethodDelete, ytStreamsPath) != nil {
+				t.Error("a reused stream was deleted; it feeds other destinations")
+			}
+		})
+	}
+}

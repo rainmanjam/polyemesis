@@ -220,3 +220,23 @@ func TestVerticalHealthReadsStreamStatusAndHealthByID(t *testing.T) {
 		t.Fatal("the health read did not look the vertical stream up by its id")
 	}
 }
+
+// TestCreateVerticalStreamRefusesAStreamWithNoID (review #29): a vertical stream with a key and no id cannot be
+// read for health, excluded from the fallback by id, or found again. Accepting it would store a pair the sub-row can
+// never read. The refusal must not echo the key it just received.
+func TestCreateVerticalStreamRefusesAStreamWithNoID(t *testing.T) {
+	var log []capture
+	y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"POST " + ytStreamsPath: func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{"snippet":{"title":"polyemesis - Show (vertical)"},
+				"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"key-noid-vert","ingestionAddress":"rtmp://v2.example/live2"}}}`)
+		},
+	})
+	v, err := y.CreateVerticalStream(context.Background(), "tok", "Show")
+	if err == nil {
+		t.Fatalf("CreateVerticalStream accepted a stream with no id: %+v", v)
+	}
+	if strings.Contains(err.Error(), "key-noid-vert") {
+		t.Errorf("the refusal echoed the stream key: %v", err)
+	}
+}

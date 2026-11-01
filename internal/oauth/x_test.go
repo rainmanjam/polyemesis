@@ -747,3 +747,115 @@ func TestXBroadcastStateReportsWhetherTheSourceIsReceivingBytes(t *testing.T) {
 		t.Errorf("StreamActive = %v, want true from the source's is_stream_active", st.StreamActive)
 	}
 }
+
+// TestXCreateBroadcastScrubsTheStreamKeyFromEveryError(SEC-X1, review #45): source_id IS the source's
+// rtmp_stream_key, and X's problem objects can echo the request back in detail, title or type. The lifecycle
+// coordinator puts this error into a fault, a log line, an event and the timeline, so the key must be gone from the
+// text before the error leaves this package, on a refused create (4xx) and on a 2xx that answers with errors and no
+// broadcast. The typed status error must still unwrap, because callers branch on the status.
+func TestXCreateBroadcastScrubsTheStreamKeyFromEveryError(t *testing.T) {
+	key := xSecret("srcK", "ey", "Canary7")
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		typed  bool
+	}{
+		{"refused", http.StatusBadRequest, `{"title":"Invalid source ` + key + `","detail":"source_id ` + key + ` is not yours","type":"about:` + key + `","errors":[{"detail":"unknown source ` + key + `"}]}`, true},
+		{"2xx with errors", http.StatusOK, `{"errors":[{"title":"Not found","detail":"no source with id ` + key + `"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/2/users/me" {
+					_, _ = io.WriteString(w, xMeFixture)
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			for name, call := range map[string]func() error{
+				"CreateBroadcast": func() error { _, err := x.CreateBroadcast(context.Background(), "client", "tok", key); return err },
+				"OpenBroadcast":   func() error { _, err := x.OpenBroadcast(context.Background(), "tok", key); return err },
+			} {
+				err := call()
+				if err == nil {
+					t.Fatalf("%s returned no error", name)
+				}
+				if strings.Contains(err.Error(), key) {
+					t.Errorf("%s: the stream key appeared in the error: %v", name, err)
+				}
+				for e := errors.Unwrap(err); e != nil; e = errors.Unwrap(e) {
+					if strings.Contains(e.Error(), key) {
+						t.Errorf("%s: the stream key appeared in a wrapped error: %v", name, e)
+					}
+				}
+				var se *xStatusError
+				if tc.typed && (!errors.As(err, &se) || se.Status != tc.status) {
+					t.Errorf("%s: error %v no longer unwraps to the X status error", name, err)
+				}
+				if !strings.Contains(err.Error(), "is not yours") && tc.typed {
+					t.Errorf("%s: scrubbing removed X's own words, not just the key: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+// TestXPublishReturnsXsErrorsOnASuccessfulStatusWithNoState (review #28): X answers some failures 200 with an
+// errors array and no broadcast. Reading only the state would report a publish that did nothing as done, with an
+// empty state. PROVISIONAL, X is gated: the shape is from the spec's partial-error convention.
+func TestXPublishReturnsXsErrorsOnASuccessfulStatusWithNoState(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/2/users/me" {
+			_, _ = io.WriteString(w, xMeFixture)
+			return
+		}
+		_, _ = io.WriteString(w, `{"errors":[{"title":"Forbidden","detail":"broadcast is not NOT_STARTED"}]}`)
+	})
+	if _, err := x.PublishBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", XPublish{}); err == nil ||
+		!strings.Contains(err.Error(), "not NOT_STARTED") {
+		t.Errorf("PublishBroadcast on a 200 with errors and no state = %v, want X's error", err)
+	}
+	if _, err := x.TransitionBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", PhaseComplete); err == nil ||
+		!strings.Contains(err.Error(), "not NOT_STARTED") {
+		t.Errorf("end on a 200 with errors and no state = %v, want X's error", err)
+	}
+}
+
+// TestXEndReadsTheStateFromTheBroadcastObjectToo (review #28): the END answer may carry the state at data.state or
+// under data.broadcast.state. Reading only the first reported an end that worked with an empty status.
+func TestXEndReadsTheStateFromTheBroadcastObjectToo(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":{"broadcast":{"id":"1ynJOZVeajOJR","state":"ENDED"}}}`)
+	})
+	res, err := x.TransitionBroadcast(context.Background(), "tok", "1ynJOZVeajOJR", PhaseComplete)
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if res.Status != XStateEnded {
+		t.Errorf("end status = %q, want ENDED from data.broadcast.state", res.Status)
+	}
+}
+
+// TestXBroadcastStateFindsASourceBoundByItsIDWhenTheKeyDiffers (review #60): X documents the source id as the key
+// too, but a source can carry both, and they can differ. A broadcast whose source_id is the source's id must still
+// find it, or StreamActive stays unknown and the coordinator never publishes.
+func TestXBroadcastStateFindsASourceBoundByItsIDWhenTheKeyDiffers(t *testing.T) {
+	x, _ := xStubLive(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/2/users/me":
+			_, _ = io.WriteString(w, xMeFixture)
+		case "/2/users/1234567890/sources":
+			_, _ = io.WriteString(w, `{"data":{"sources":[{"id":"S1src","rtmp_stream_key":"otherK3y","name":"polyemesis","is_stream_active":true}]}}`)
+		default:
+			_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"NOT_STARTED","source_id":"S1src"}}`)
+		}
+	})
+	st, err := x.BroadcastState(context.Background(), "tok", "1ynJOZVeajOJR")
+	if err != nil {
+		t.Fatalf("BroadcastState: %v", err)
+	}
+	if st.StreamActive == nil || !*st.StreamActive {
+		t.Errorf("StreamActive = %v, want true: the source is bound by its id", st.StreamActive)
+	}
+}

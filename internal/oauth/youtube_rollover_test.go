@@ -42,6 +42,15 @@ type rolloverFake struct {
 	// refuseDelete makes DELETE fail, so a test can reach the "could not remove either" path.
 	refuseDelete bool
 
+	// liveThen500 maps "broadcastID/target" to a transition that takes effect and then answers 500, the way a
+	// transition that YouTube carried out can still fail on the wire. fail500 answers 500 and changes nothing.
+	liveThen500 map[string]bool
+	fail500     map[string]bool
+	// readsBeforeFail, when set for an id, lets that many liveBroadcasts reads of it succeed and fails every one
+	// after, so a test can make the re-read after a failed transition fail.
+	readsBeforeFail map[string]int
+	reads           map[string]int
+
 	writes []string // "METHOD path" for every write, in order
 }
 
@@ -53,11 +62,15 @@ type fakeBroadcast struct {
 
 func newRolloverFake(t *testing.T) *rolloverFake {
 	return &rolloverFake{
-		t:           t,
-		broadcasts:  map[string]*fakeBroadcast{},
-		streams:     map[string]string{},
-		refuse:      map[string]string{},
-		refuseQueue: map[string][]string{},
+		t:               t,
+		broadcasts:      map[string]*fakeBroadcast{},
+		streams:         map[string]string{},
+		refuse:          map[string]string{},
+		refuseQueue:     map[string][]string{},
+		liveThen500:     map[string]bool{},
+		fail500:         map[string]bool{},
+		readsBeforeFail: map[string]int{},
+		reads:           map[string]int{},
 	}
 }
 
@@ -85,7 +98,13 @@ func (f *rolloverFake) serve(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == ytBroadcastsPath:
-		f.listBroadcasts(w, q.Get("id"))
+		id := q.Get("id")
+		f.reads[id]++
+		if n, ok := f.readsBeforeFail[id]; ok && f.reads[id] > n {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		f.listBroadcasts(w, id)
 	case r.Method == http.MethodPost && r.URL.Path == ytBroadcastsPath:
 		f.writes = append(f.writes, "POST /liveBroadcasts")
 		f.insert(w, r)
@@ -224,6 +243,15 @@ func (f *rolloverFake) transition(w http.ResponseWriter, id, target string) {
 		return
 	}
 	key := id + "/" + target
+	if f.fail500[key] {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if f.liveThen500[key] {
+		b.status = target
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	reason, bad := f.refuse[key]
 	if q := f.refuseQueue[key]; len(q) > 0 {
 		reason, bad = q[0], true
@@ -617,5 +645,81 @@ func TestAReplacementWhoseSourcePrivacyIsUnknownStaysPrivate(t *testing.T) {
 	}
 	if got := f.broadcasts[out.NewBroadcastID].privacy; got != "private" {
 		t.Errorf("privacy = %q, want private: an unreadable source privacy must not widen to public", got)
+	}
+}
+
+// TestAReplacementThatWentLiveDespiteAFailedTransitionIsNotDeleted (review #48): a transition YouTube carried out can
+// still answer 500. Deleting the replacement on that answer would delete a broadcast that is on air, which is the
+// one thing this file must never do. The state is re-read first, and a replacement that is live is kept and the
+// rollover carries on to end the old one.
+func TestAReplacementThatWentLiveDespiteAFailedTransitionIsNotDeleted(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	f.liveThen500["new-1/live"] = true
+	y := f.client()
+	out, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	if err != nil {
+		t.Fatalf("RollOverBroadcast: %v; the replacement is live, so the rollover counts", err)
+	}
+	if f.wrote("DELETE /liveBroadcasts") != 0 {
+		t.Errorf("the live replacement was deleted after a 500 that YouTube had in fact carried out")
+	}
+	if out.NewBroadcastID != "new-1" || !out.OldEnded {
+		t.Errorf("outcome = %+v, want new-1 live and the old broadcast ended", out)
+	}
+}
+
+// TestAReplacementThatDidNotGoLiveAfterAFailedTransitionIsStillRemoved is the other side of #48: when the re-read
+// says the replacement is not on air, it is the unwatched event page it always was, and it is removed.
+func TestAReplacementThatDidNotGoLiveAfterAFailedTransitionIsStillRemoved(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	f.fail500["new-1/live"] = true
+	y := f.client()
+	_, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	var re *RolloverError
+	if !errors.As(err, &re) || re.Stage != "start" || !re.OldStillLive {
+		t.Fatalf("err = %#v, want a start-stage failure with the old broadcast still live", err)
+	}
+	if f.wrote("DELETE /liveBroadcasts") != 1 {
+		t.Errorf("deletes = %d, want the replacement removed once", f.wrote("DELETE /liveBroadcasts"))
+	}
+}
+
+// TestAReplacementWhoseStateCannotBeReReadIsKeptAndNamed (#48): if the re-read fails too, nothing here knows whether
+// the replacement is on air, so it is not deleted. The error names it, so a person can check it.
+func TestAReplacementWhoseStateCannotBeReReadIsKeptAndNamed(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	f.fail500["new-1/live"] = true
+	f.readsBeforeFail["new-1"] = 1 // the pre-transition read succeeds, the re-read fails
+	y := f.client()
+	_, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	var re *RolloverError
+	if !errors.As(err, &re) || re.Stage != "start" || re.NewBroadcastID != "new-1" || !re.OldStillLive {
+		t.Fatalf("err = %#v, want a start-stage failure naming new-1 with the old broadcast still live", err)
+	}
+	if f.wrote("DELETE /liveBroadcasts") != 0 {
+		t.Errorf("a replacement whose state is unknown was deleted; it may be on air")
+	}
+}
+
+// TestTheReplacementIsScheduledSlightlyAheadOfNow (review #61): YouTube's insert wants a scheduledStartTime in the
+// future (docs-youtube B3), and req.Now is already in the past by the time the request lands. The replacement is
+// scheduled ytRolloverStartLead ahead. PROVISIONAL: the size of the lead is a choice, not a documented number.
+func TestTheReplacementIsScheduledSlightlyAheadOfNow(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	y := f.client()
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	if _, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(now)); err != nil {
+		t.Fatalf("RollOverBroadcast: %v", err)
+	}
+	got, err := time.Parse(time.RFC3339, f.broadcasts["new-1"].scheduledStart)
+	if err != nil {
+		t.Fatalf("scheduledStartTime %q: %v", f.broadcasts["new-1"].scheduledStart, err)
+	}
+	if !got.Equal(now.Add(ytRolloverStartLead)) || !got.After(now) {
+		t.Errorf("scheduledStartTime = %v, want %v (now plus the lead)", got, now.Add(ytRolloverStartLead))
 	}
 }

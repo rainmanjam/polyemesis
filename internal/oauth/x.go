@@ -601,7 +601,9 @@ func (x *X) BroadcastState(ctx context.Context, accessToken, broadcastID string)
 			return nil, err
 		}
 		for _, s := range srcs {
-			if s.key() == b.SourceID {
+			// X documents the source id as the stream key, but a source can carry both and they can differ, so
+			// either one names the bound source.
+			if s.RTMPStreamKey == b.SourceID || s.ID == b.SourceID {
 				active := s.IsActive
 				st.StreamActive = &active
 				if active {
@@ -706,11 +708,18 @@ func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKe
 	endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts"
 	if err := xDo(ctx, http.MethodPost, endpoint, accessToken,
 		map[string]string{"source_id": sourceKey}, &out); err != nil {
-		return nil, fmt.Errorf("X would not create a broadcast on the stream source: %w", err)
+		// source_id is the stream key, and X's problem text can echo it. The status error is scrubbed in place
+		// BEFORE the wrap, because fmt.Errorf builds its message now and a later scrub would not reach it.
+		var se *xStatusError
+		if errors.As(err, &se) {
+			se.Problems = xScrubKey(se.Problems, sourceKey)
+		}
+		return nil, fmt.Errorf("X would not create a broadcast on the stream source: %w",
+			xWrapScrubbed(err, sourceKey))
 	}
 	if out.Data.Broadcast.ID == "" && out.Data.Broadcast.BroadcastID == "" {
 		if len(out.Errors) > 0 {
-			return nil, fmt.Errorf("X would not create a broadcast: %s", xProblems(out.Errors))
+			return nil, fmt.Errorf("X would not create a broadcast: %s", xScrubKey(xProblems(out.Errors), sourceKey))
 		}
 		return nil, errors.New("X created no broadcast")
 	}
@@ -719,6 +728,33 @@ func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKe
 		id = out.Data.Broadcast.BroadcastID
 	}
 	return &XBroadcastCreated{ID: id, State: out.Data.Broadcast.State, ShareURL: out.Data.ShareURL}, nil
+}
+
+// xRedactedKey replaces a stream key in text an operator or a log will read.
+const xRedactedKey = "[stream key]"
+
+// xScrubKey removes every occurrence of key from s. An empty key leaves s alone: ReplaceAll with an empty old string
+// would insert the marker between every character.
+func xScrubKey(s, key string) string {
+	if key == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, key, xRedactedKey)
+}
+
+// xScrubbedError keeps a wrapped error reachable for errors.Is and errors.As while its text carries no key. The
+// inner error's own text is scrubbed too, where it is an xStatusError, by the caller.
+type xScrubbedError struct {
+	err error
+	msg string
+}
+
+func (e *xScrubbedError) Error() string { return e.msg }
+func (e *xScrubbedError) Unwrap() error { return e.err }
+
+// xWrapScrubbed returns err with key removed from its text, still unwrapping to err.
+func xWrapScrubbed(err error, key string) error {
+	return &xScrubbedError{err: err, msg: xScrubKey(err.Error(), key)}
 }
 
 // OpenBroadcast implements BroadcastCreator. It opens the broadcast on the
@@ -775,9 +811,17 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 	if err := xDo(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
 		return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
 	}
+	// A 2xx can still carry X's errors. With no state the publish did nothing, so it is a failure in X's words;
+	// with a state the broadcast moved, and the errors are warnings the operator reads. PROVISIONAL, X is gated.
+	if out.Data.Broadcast.State == "" && len(out.Errors) > 0 {
+		return nil, fmt.Errorf("X would not publish broadcast %s: %s", broadcastID, xProblems(out.Errors))
+	}
 	res := &XPublishResult{ID: out.Data.Broadcast.ID, State: out.Data.Broadcast.State}
 	if res.ID == "" {
 		res.ID = broadcastID
+	}
+	if len(out.Errors) > 0 {
+		res.Warnings = append(res.Warnings, "X published the broadcast but reported: "+xProblems(out.Errors))
 	}
 	if strings.TrimSpace(out.Data.TweetError) != "" {
 		res.Warnings = []string{"the broadcast is live, but X did not post its announcement: " +
@@ -829,7 +873,18 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		if err := xDo(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "END"}, &out); err != nil {
 			return nil, fmt.Errorf("X would not end broadcast %s: %w", broadcastID, err)
 		}
+		// The END answer may carry the state at data.state or under data.broadcast.state, so both are read. A
+		// 2xx with errors and no state is a failed end. PROVISIONAL, X is gated.
 		res.Status = out.Data.State
+		if res.Status == "" {
+			res.Status = out.Data.Broadcast.State
+		}
+		if len(out.Errors) > 0 {
+			if res.Status == "" {
+				return nil, fmt.Errorf("X would not end broadcast %s: %s", broadcastID, xProblems(out.Errors))
+			}
+			res.Warnings = append(res.Warnings, "X ended the broadcast but reported: "+xProblems(out.Errors))
+		}
 	}
 	return res, nil
 }

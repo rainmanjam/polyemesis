@@ -44,7 +44,13 @@ within ten minutes of the last one, so the three triggers cannot fire together.
 A failed rollover leaves the old broadcast on air. The failure is recorded and
 `rollover.failed` is sent. No ingest is stopped, ever. A YouTube replacement
 that will not start is removed, and if it cannot be removed the error names it
-so it can be deleted in YouTube Studio.
+so it can be deleted in YouTube Studio. When the start answers with an error
+that is not a refusal, the replacement's state is read again first: one that
+went live anyway is kept and the rollover carries on, and one whose state
+cannot be read is kept and named rather than deleted.
+
+The replacement is scheduled two minutes after the rollover starts, because
+YouTube wants a start time in the future. PROVISIONAL.
 
 If the channel will not carry two live broadcasts at once, the old one ends
 first and the replacement goes live after it. That creates a gap, which is
