@@ -136,6 +136,23 @@ never replaced by a public broadcast. The replacement also gets the template's
 category and thumbnail. These are applied best effort: if the platform refuses either one,
 the rollover still succeeds and the refusal is recorded as a warning.
 
+## A broadcast with captions by HTTP POST
+
+A YouTube broadcast that takes captions by HTTP POST
+([CAPTIONS.md](CAPTIONS.md)) hands them to its replacement. YouTube lets a
+broadcast's caption type change only while it is created or ready, so the
+replacement is created with captions by HTTP POST, the monitor stream on and the
+old broadcast's delay (30 or 60 seconds). That monitor stream makes YouTube run
+a testing stage before live, so the rollover takes the replacement to testing,
+waits for YouTube to report it there (up to about half a minute), then takes it
+live and ends the old one. If it does not reach testing, the replacement is
+removed and the old broadcast stays on air. PROVISIONAL: YouTube does not say
+how long testing takes to start.
+
+A recurring show keeps its template across every rollover: the occurrence moves
+to each replacement, so a show longer than two caps still gets the template's
+title, category and thumbnail the second time.
+
 ## Not in this build
 
 - Twitch replacement by a second session, and Facebook or Kick rollover.

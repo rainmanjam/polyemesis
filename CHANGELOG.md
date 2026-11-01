@@ -956,6 +956,37 @@ its first tagged release.
 
 ### Fixed
 
+- **Wave 3 review fixes: captions, rollover, X and the recurring look-ahead.**
+  Two captioned programmes no longer share live-caption scratch files: each
+  captioner run writes its audio windows in a directory of its own, so one
+  programme can no longer air another's speech as captions. A planned YouTube
+  rollover of a broadcast taking captions by HTTP POST now creates the replacement
+  with them, the monitor stream and the old delay, and takes it through testing
+  before live; before, the replacement went live with captions off. In the SEI
+  route, a picture that goes out without a caption (a PCR inside it, for example)
+  no longer spends the caption pair it was due, so scripts are no longer garbled
+  or left on screen; a program map that spans packets is read; a caption that
+  arrives at a clock jump is kept; a short backward jump restarts captions within
+  two seconds; and an HEVC source is named in the log. The cue log reopens after
+  a failed roll, the YouTube caption `seq` no longer restarts at 1 after a
+  restart, and the player's caption track fetches only what was appended.
+  X: rate limits are read from X's headers and every call waits for the reset
+  after a 429, without counting toward the give-up budget; the account id is
+  asked for once per token; X's `{error_type, message}` refusals are shown in
+  X's words; an empty answer to a publish, an end or a read is a failure; token
+  requests use HTTP Basic for a confidential app. A broadcast ended in X while the
+  encoder is still sending is not replaced until the encoder stops, a canceled
+  one is a fault released by switching the destination off and on, and a
+  switched-off X destination is no longer read every 15 seconds. Publishing an X
+  broadcast posts X's default announcement, which is now documented. Recurring:
+  a refused event create backs off (five minutes, doubling to six hours, and six
+  hours at once for YouTube's upcoming-broadcast cap) instead of retrying every
+  five minutes; switching a schedule off, removing a target or lowering the
+  look-ahead cancels the events nothing will air; the go-live mirror never moves
+  to a later week's event; and a second rollover still uses the template. The
+  template editor no longer shows an editable form of defaults when the stored
+  template could not be read.
+
 - **An X go-live keeps every warning X sends.** When X published a broadcast but reported errors
   and also failed to post the announcement, only the announcement warning reached the log; X's
   own report was dropped. Both are kept now. (X stays gated off until the app is whitelisted.)

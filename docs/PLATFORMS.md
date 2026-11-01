@@ -175,6 +175,28 @@ refuses a change then (HTTP 409). Turning the destination off ends the
 broadcast. After a publish the X chat adapter is told the new broadcast at once,
 and its own 15-second check stays as the fallback.
 
+**Publishing posts an announcement.** X's publish step makes an announcement
+post on the account by default, and polyemesis does not change that default, so
+every show that goes live through polyemesis, including a second show on the same
+destination, posts one. There is no setting to turn it off yet.
+
+When a broadcast ends while the destination is still on (X timed it out, or it
+was ended in X's own tooling), polyemesis opens the next one only after the
+encoder has been seen to stop, so ending a broadcast in the X app while the
+encoder keeps sending is an emergency stop that holds. A broadcast X **canceled**
+is not replaced by itself: it is shown as a fault, and switching the destination
+off and on again starts a new one.
+
+X publishes no rate limits for the Livestream endpoints. polyemesis reads X's
+`x-rate-limit-*` headers: after a 429, or an answer that says no calls remain,
+it makes no X calls for that account until the reset time X gave (at most 15
+minutes), and the wait is not counted as a failure. The account id
+(`GET /2/users/me`) is asked for once per token and kept for ten minutes. A
+confidential app authenticates its token requests with HTTP Basic, as X
+documents. The consent page is X's spec address `api.x.com/2/oauth2/authorize`;
+X's guide shows `x.com/i/oauth2/authorize` instead, and the two are one constant
+apart in `internal/oauth/x.go` (PROVISIONAL).
+
 Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
 token from console.x.com, which X's activity stream requires. It is a secret.
 Without it the chat pane stays empty and sending still works. The X console and

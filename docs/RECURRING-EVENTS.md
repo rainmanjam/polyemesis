@@ -99,6 +99,19 @@ show starts instead:
   at the next look-ahead pass.
 - **Delete the schedule** has the same effect: its upcoming events are
   cancelled at the next pass.
+- **Switch the schedule off**, make it a stop schedule, or take a destination
+  out of its targets, and that destination's upcoming events are cancelled at the
+  next pass too. **Lower the look-ahead**, and the events beyond the new number
+  are cancelled. The same refusals apply as below.
+
+If the platform refuses to create an event, the look-ahead waits before trying
+again for that destination and schedule: five minutes after the first refusal,
+then doubling, up to six hours. When YouTube says the channel has as many live
+and scheduled broadcasts as it allows (`userBroadcastsExceedLimit`, a cap
+YouTube does not publish), it waits the full six hours, and the template's
+error says to end or delete some broadcasts or lower the look-ahead. The go-live
+mirror always names the first occurrence that is not skipped; if that one's
+event does not exist yet, the mirror is not moved to a later show's event.
 
 Only an event that is still upcoming is cancelled. Three things keep a platform event:
 its start time has passed (the page is a record of the show), its destination is

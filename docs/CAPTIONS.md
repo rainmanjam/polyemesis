@@ -192,6 +192,15 @@ stream, but not the carriage in the SEI. It stays off until a live check passes.
   to 32 times per caption, so a joiner sees it within a segment.
 - Burned-in captions lag speech by the same two to five seconds as every other
   route.
+- The SEI route captions H.264 only. An HEVC source passes through unchanged,
+  without captions, and the server log says so for that destination.
+- A YouTube broadcast taking captions by HTTP POST keeps them through a planned
+  rollover: see [ROLLOVER.md](ROLLOVER.md).
+- The HTTP POST sequence number (`seq`) starts from the clock rather than from 1,
+  so captions posted after a restart mid-broadcast never reuse a number already
+  sent (PROVISIONAL: YouTube does not document the parameter).
+- The player's caption track reads only what was added to `captions.vtt` since
+  its last poll (an HTTP range request), and the whole file once a minute.
 
 ## Burned-in captions
 
