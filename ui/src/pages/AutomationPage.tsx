@@ -4,6 +4,8 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { DisabledReason } from "@/components/DisabledReason";
 import { EmptyState } from "@/components/EmptyState";
 import { HooksCard } from "@/components/HooksCard";
+import { BroadcastTemplateEditor } from "@/components/BroadcastTemplateEditor";
+import { RecurringCalendar } from "@/components/RecurringCalendar";
 import { McpAccessCard } from "@/components/McpAccessCard";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
@@ -1165,6 +1167,7 @@ function Schedules({
           </p>
         </CardContent>
       </Card>
+      <RecurringCalendar />
       <ConfirmDestructive
         open={confirmDelete.open}
         onOpenChange={confirmDelete.onOpenChange}
@@ -1440,6 +1443,7 @@ function ScheduleDialog({
           </div>
         </div>
 
+        {editing && form.action === "start" ? <BroadcastTemplateEditor scheduleId={form.id} /> : null}
         <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           {/* The reason BESIDE the button, not in a title attribute on it:
               button.tsx sets `disabled:pointer-events-none`, so a title on a

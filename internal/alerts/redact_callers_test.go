@@ -55,6 +55,10 @@ var redactAllowlist = map[string]string{
 		"and written to the timeline, the result row, the webhook and the 502 body. Redacting first, then " +
 		"clipping, stops a clip from splitting a credential the pattern would have caught; this is the outer " +
 		"net, not the boundary.",
+	"internal/api/recurring.go": "the same residual pass over a platform's refusal of a scheduled-event create, " +
+		"kept on the broadcast template row so the operator sees the limit. It runs on err.Error() before the " +
+		"store write, and nothing is clipped after it. A refused create carries no stream key, because a key only " +
+		"comes back on success; this is the outer net, not the boundary.",
 	"internal/api/youtube_vertical.go": "the same residual pass over YouTube's error text (a refused liveStreams.insert for the vertical companion, a failed health read) shown as the 502 body and the health row. The stream key comes back only on a successful create, so a failed one carries none; this is the outer net, not the boundary.",
 	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
 		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +

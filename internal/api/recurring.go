@@ -40,10 +40,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
+
+// errOccurrenceRefused is the operator's removal being refused for a reason the operator can act on: the
+// show is still being created, has already started, or its destination is on air. The calendar answers
+// it with 409, and the platform is not called.
+var errOccurrenceRefused = errors.New("this occurrence cannot be removed")
 
 const (
 	// recurringTick is how often the look-ahead is re-checked. Five minutes, the same as the legacy
@@ -245,6 +251,9 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 	b, err := s.ingestFor(cctx, ed, creds.ClientID, acct, s.ingestOptions(d, at))
 	if err != nil {
 		release()
+		// The platform's reason is kept on the template, redacted, so the operator sees a limit in the
+		// screen and not only in the log. The log line below is still written once per run of failures.
+		_ = s.store.RecordBroadcastTemplateError(sc.ID, alerts.Redact(err.Error()), time.Now())
 		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
 			s.log.Warn("recurring: could not create the event for an occurrence; further identical "+
 				"failures for this show will not be logged until one succeeds",
@@ -303,6 +312,7 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		return nil, false
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
+	_ = s.store.ClearBroadcastTemplateError(sc.ID)
 	s.log.Info("recurring: created an event for an upcoming occurrence",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "event", b.ID)
 	return b, true
@@ -450,7 +460,9 @@ func (s *Server) releaseOpenOccurrence(ctx context.Context, o scheduler.Occurren
 }
 
 // skipOccurrence is the operator's "skip this one". It is cancelOccurrence keeping the row, so the
-// occurrence is not created again.
+// occurrence is not created again. Every refusal wraps errOccurrenceRefused, which the calendar answers
+// as 409, and nothing is cancelled: a started show is the platform's record of it, and a destination that
+// is on air (delivering, or enabled and starting) may already be bound to the event.
 func (s *Server) skipOccurrence(ctx context.Context, id int64, now time.Time) error {
 	o, err := s.store.GetOccurrence(id)
 	if err != nil {
@@ -460,16 +472,18 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64, now time.Time) er
 	case scheduler.OccurrenceSkipped:
 		return nil
 	case scheduler.OccurrencePending:
-		return fmt.Errorf("this show's event is still being created; try again in a moment")
+		return fmt.Errorf("%w: this show's event is still being created; try again in a moment", errOccurrenceRefused)
 	}
-	// An enabled destination is on air or starting, and its event may already be bound to the live broadcast,
-	// so a skip is refused for it even before the delivering process table shows it running.
+	if !o.At.After(now) {
+		return fmt.Errorf("%w: this show started at %s, so its event is past", errOccurrenceRefused,
+			o.At.Format(time.RFC3339))
+	}
 	delivering := s.destinationLive(o.DestinationID)
 	if d, derr := s.store.GetDestination(o.DestinationID); derr == nil && d.Enabled {
 		delivering = true
 	}
-	if err := occurrenceCancelRefusal(*o, now, delivering); err != nil {
-		return err
+	if delivering {
+		return fmt.Errorf("%w: the destination is live, so its event is on air", errOccurrenceRefused)
 	}
 	return s.cancelOccurrence(ctx, *o, false, now)
 }

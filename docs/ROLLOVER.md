@@ -71,10 +71,38 @@ A countdown for a YouTube destination counts from the start YouTube records for
 the broadcast. Until YouTube records one, no countdown runs and no rollover is
 planned, so a late look at the stream never shortens the margin.
 
+## The console
+
+Each destination whose platform has a cap shows a planned-rollover panel on its
+card. It shows the cap in hours with its source link. A cap that is reported
+rather than documented is labelled as reported. Unverified caps show no
+countdown at all. While the destination is delivering and the cutoff is known,
+the panel counts down to it, refreshing about once a minute.
+
+- **Settings** are the margin, the quiet window (start, end and time zone), the
+  OBS scene trigger and the chat notice.
+- **Roll over now** asks first. The result is reported as it came back: done
+  (200), refused because the destination is not in a state to roll over (409),
+  refused by the platform (502), or a plain failure.
+
+## Chat notice
+
+The chat notice is off by default. When on, one fixed line goes to the chat of
+the rolled-over destination's platform, just before the platform call. It is
+sent to every connected chat account on that platform, so a second account on
+the same platform also receives it. A notice that fails is logged and the
+rollover goes ahead.
+
+## Twitch countdown start
+
+The Twitch countdown counts from the stream's own start, read from Helix
+`GET /helix/streams` (`started_at`). If that read fails, the first moment
+polyemesis sees the destination on air is used instead, which was the behaviour
+before. That fallback means a restart mid-stream can reset the count when the
+read is unavailable.
+
 ## Not in this build
 
-- **Deviation from #19, not built in this PR:** the countdown card and the
-  settings control in the console. The API above serves the same data.
-- The chat notice before a rollover. A send path exists (`chat.Hub.Send`), but
-  no notice is built in this release.
 - Twitch replacement by a second session, and Facebook or Kick rollover.
+- The YouTube ordering correction (create and bind the new broadcast before
+  ending the old one) is not yet in this build; the rollover still ends first.

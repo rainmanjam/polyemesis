@@ -30,6 +30,7 @@ import {
 import { StatusDot } from "@/components/signature/StatusDot";
 import { StatusReason } from "@/components/signature/StatusReason";
 import { DelayPanel } from "@/components/DelayPanel";
+import { RolloverPanel } from "@/components/RolloverPanel";
 import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { YouTubeVerticalSubRow } from "@/components/YouTubeVerticalSubRow";
@@ -506,6 +507,7 @@ export function DestinationCard({
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
         <DelayPanel dest={dest} onCutNow={onStopNow} busy={busy} />
+        <RolloverPanel dest={dest} />
         {dest.stopWarning && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />

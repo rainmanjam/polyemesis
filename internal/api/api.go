@@ -848,10 +848,12 @@ func New(o Options) *Server {
 	}
 	if o.DB != nil {
 		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
-			tokenFor:   s.tokenFor,
-			restart:    s.restartDestinationForRollover,
-			delivering: s.destinationDelivering,
-			announce:   s.publishRollover,
+			tokenFor:    s.tokenFor,
+			restart:     s.restartDestinationForRollover,
+			delivering:  s.destinationDelivering,
+			announce:    s.publishRollover,
+			chatNotice:  s.sendRolloverNotice,
+			twitchStart: s.twitchStreamStart,
 		})
 	}
 	if s.obs != nil {

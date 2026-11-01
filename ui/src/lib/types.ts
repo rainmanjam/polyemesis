@@ -3778,3 +3778,79 @@ export interface ObsResponse {
   config: ObsConfig;
   status: ObsStatus;
 }
+
+/* ---------------------------------------------------------- recurring (#18) */
+
+/** A recurring broadcast template, attached to one start schedule (#18). The
+ *  thumbnail's bytes never travel in JSON: hasThumbnail says whether one is stored. */
+export interface BroadcastTemplate {
+  scheduleId: number;
+  titlePattern: string;
+  description: string;
+  privacy: string;
+  category: string;
+  lookahead: number;
+  hasThumbnail: boolean;
+  /** The platform's refusal of the most recent look-ahead create, redacted. Empty when none. */
+  lastError?: string;
+  /** When lastError was recorded. Absent when lastError is empty. */
+  lastErrorAt?: string;
+}
+
+/** One calendar cell: a planned show's event on one destination (#18). */
+export interface OccurrenceView {
+  id: number;
+  scheduleId: number;
+  destinationId: number;
+  at: string;
+  state: "pending" | "upcoming" | "skipped";
+  title: string;
+  eventId: string;
+}
+
+/* ----------------------------------------------------- planned rollover (#19) */
+
+/** The planned-rollover settings one destination carries (#19). */
+export interface RolloverSettings {
+  destinationId: number;
+  enabled: boolean;
+  marginMinutes: number;
+  quietStart?: string;
+  quietEnd?: string;
+  quietZone?: string;
+  obsScene?: string;
+  /** Optional line to the rolled-over platform's chat before a rollover. Off by default. */
+  chatNotice: boolean;
+  sessionStartedAt?: string;
+  lastRolloverAt?: string;
+  lastTrigger?: string;
+  lastResult?: string;
+}
+
+/** A platform's broadcast cap, with the source it is read from (#19). */
+export interface RolloverLimit {
+  presetId: string;
+  kind: string;
+  hours: number;
+  /** "documented" was read on the platform's page; "reported" comes from a secondary source;
+   *  "unverified" means no source is confirmed and no countdown may be shown. */
+  status: "documented" | "reported" | "unverified";
+  source?: string;
+  note?: string;
+}
+
+/** What one destination's rollover card shows (#19). `action` says whether polyemesis acts on
+ *  its own ("automatic") or only shows the cap ("countdown"). */
+export interface RolloverView {
+  settings: RolloverSettings;
+  platform: string;
+  action: "automatic" | "countdown";
+  limit?: RolloverLimit;
+  cutoffAt?: string;
+  delivering: boolean;
+  due: boolean;
+  dueTrigger?: string;
+  nextAt?: string;
+  planReason?: string;
+  reasonIfNone?: string;
+}

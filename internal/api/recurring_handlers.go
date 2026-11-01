@@ -223,6 +223,12 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 			writeStoreError(w, err)
 			return
 		}
+		// A refusal the operator can act on (the show started, is live, or is still being created) is a
+		// conflict with the current state, not a platform failure.
+		if errors.Is(err, errOccurrenceRefused) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if errors.Is(err, oauth.ErrScheduledNotCancellable) {
 			writeError(w, http.StatusConflict, "this show's event cannot be removed from here: it has started, "+
 				"its destination is live, or the platform will not delete it; the platform keeps it as it is")

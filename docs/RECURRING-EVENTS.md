@@ -86,7 +86,7 @@ show starts instead:
   schedule still starts the destinations at that time. To stop the show outright,
   switch the schedule off.
   A skip is **refused with 409** for a show whose start has passed, and for a
-  destination that is on air now. Nothing is cancelled in that case. A show that
+  destination that is on air now, and while the event is still being created. Nothing is cancelled in that case. A show that
   has started may be the live broadcast, or the page of a show that aired.
 - **Retitle one occurrence** (`POST /api/v1/recurring/occurrences/{id}/title`)
   changes the title of that event only. The template still applies to every
@@ -122,6 +122,20 @@ that aired, and removing it is the operator's decision.
 
 On YouTube, a template event is deleted only while YouTube reports it as
 `created` or `ready`. A broadcast that has gone live is refused and kept.
+
+## The console
+
+The Automation page has two parts for recurring events:
+
+- **Broadcast template** sits in the schedule dialog for a start schedule. It
+  holds the title pattern, description, privacy, category, the number of
+  upcoming events to keep (1 to 10, default 2) and the thumbnail. A refusal from
+  the platform on the last look-ahead create is shown as a banner, with the time
+  it happened and the platform's own wording. The next successful create clears it.
+- **Upcoming events** lists the next two weeks of occurrences. A row with a
+  platform event can be retitled or skipped. Skip asks first. A refusal (409)
+  says why nothing was removed; a platform refusal (502) says the event was
+  left as it was.
 
 ## API
 

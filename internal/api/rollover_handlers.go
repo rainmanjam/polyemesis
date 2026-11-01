@@ -131,6 +131,7 @@ type rolloverSettingsBody struct {
 	QuietEnd      string `json:"quietEnd"`
 	QuietZone     string `json:"quietZone"`
 	OBSScene      string `json:"obsScene"`
+	ChatNotice    bool   `json:"chatNotice"`
 }
 
 // handleSaveRollover writes one destination's settings. It writes only the configuration; the session and the last
@@ -160,6 +161,7 @@ func (s *Server) handleSaveRollover(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SaveRolloverConfig(db.RolloverSettings{
 		DestinationID: id, Enabled: body.Enabled, MarginMinutes: body.MarginMinutes,
 		QuietStart: body.QuietStart, QuietEnd: body.QuietEnd, QuietZone: body.QuietZone, OBSScene: body.OBSScene,
+		ChatNotice: body.ChatNotice,
 	}, time.Now()); err != nil {
 		writeStoreError(w, err)
 		return
@@ -239,6 +241,53 @@ func (s *Server) restartDestinationForRollover(id int64) error {
 		return errors.New("the programme this destination carries is not running")
 	}
 	return eng.RestartDestination(id)
+}
+
+// sendRolloverNotice posts the rollover notice to the chats of one platform only, and to none other. A
+// platform with no connected chat is an error, so the log says why no line appeared.
+func (s *Server) sendRolloverNotice(ctx context.Context, p db.Platform, text string) error {
+	if s.chat == nil {
+		return errors.New("no chat is running on this server")
+	}
+	results, err := s.chat.SendEach(ctx, func(pp db.Platform, _ string) string {
+		if pp == p {
+			return text
+		}
+		return ""
+	})
+	if err != nil {
+		return err
+	}
+	if len(results) == 0 {
+		return errors.New(string(p) + " has no connected chat to post the notice to")
+	}
+	for _, r := range results {
+		if !r.OK {
+			return errors.New(alerts.Redact(r.Detail))
+		}
+	}
+	return nil
+}
+
+// twitchStreamStart reads when the channel's live stream began, from Helix GET /helix/streams via the same
+// Stats call the viewer-count read uses. An unreadable or missing start is an error, and the caller falls back.
+func (s *Server) twitchStreamStart(ctx context.Context, accessToken string) (time.Time, error) {
+	st, ok := s.providers.StatsFor(db.PlatformTwitch)
+	if !ok {
+		return time.Time{}, errors.New("twitch has no stats read")
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, db.PlatformTwitch)
+	if err != nil {
+		return time.Time{}, err
+	}
+	stats, err := st.Stats(ctx, creds.ClientID, accessToken)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if stats == nil || stats.StartedAt == nil {
+		return time.Time{}, errors.New("helix did not report a start time")
+	}
+	return *stats.StartedAt, nil
 }
 
 // publishRollover sends one rollover event to the webhook and the events stream, the same two channels a broadcast

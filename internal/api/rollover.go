@@ -87,7 +87,20 @@ type rolloverHost struct {
 	delivering func(destinationID int64) bool
 	// announce carries a rollover event to the webhook and the events stream.
 	announce func(ev hooks.Event)
+	// chatNotice sends the optional line to one platform's chat. A nil value means no chat is wired, and the
+	// notice is skipped. An error never stops the rollover; it is logged.
+	chatNotice func(ctx context.Context, p db.Platform, text string) error
+	// twitchStart reads a Twitch stream's own start (Helix started_at) for the countdown. A zero time or an
+	// error means the start is unknown, and the first sighting is used instead.
+	twitchStart func(ctx context.Context, accessToken string) (time.Time, error)
 }
+
+// rolloverChatNoticeText is the one line a viewer sees before a rollover. It is fixed on purpose: it names no
+// broadcast, account or credential, so there is nothing in it to leak.
+const rolloverChatNoticeText = "We are switching to a fresh broadcast for a moment. Stay with us."
+
+// rolloverChatNoticeTimeout bounds the notice, so a slow chat cannot hold the rollover back.
+const rolloverChatNoticeTimeout = 5 * time.Second
 
 // rolloverCoordinator runs the planned-rollover sweep.
 type rolloverCoordinator struct {
@@ -255,6 +268,17 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 // recorded one yet: the caller waits. Twitch has no such read, so the first moment polyemesis sees the destination on
 // air is used, and that moment is kept in the database.
 func (c *rolloverCoordinator) sessionStart(ctx context.Context, d *db.Destination, bid string, now time.Time) (time.Time, error) {
+	if d.Platform == db.PlatformTwitch && c.host.twitchStart != nil {
+		acct, err := c.account(ctx, d)
+		if err != nil {
+			return now, nil
+		}
+		start, err := c.host.twitchStart(ctx, acct.AccessToken)
+		if err != nil || start.IsZero() {
+			return now, nil
+		}
+		return start, nil
+	}
 	if d.Platform != db.PlatformYouTube {
 		return now, nil
 	}
@@ -297,6 +321,14 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 		result, reason string
 		err            error
 	)
+	if cfg.ChatNotice && c.host.chatNotice != nil {
+		nctx, cancel := context.WithTimeout(ctx, rolloverChatNoticeTimeout)
+		if nerr := c.host.chatNotice(nctx, d.Platform, rolloverChatNoticeText); nerr != nil {
+			c.log.Warn("planned rollover: the chat notice was not sent; the rollover goes ahead",
+				"destination", d.Name, "platform", d.Platform, "err", alerts.Redact(nerr.Error()))
+		}
+		cancel()
+	}
 	switch d.Platform {
 	case db.PlatformYouTube:
 		result, reason, err = c.rollYouTube(ctx, d, bid, now)

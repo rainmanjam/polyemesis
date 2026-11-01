@@ -57,5 +57,26 @@ func (d *DB) MigrateWave3RecurringTemplates() error {
 		created_at     INTEGER NOT NULL,
 		PRIMARY KEY (destination_id, schedule_id, occurrence_at)
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	// The last look-ahead refusal, so the template screen can show a platform limit. Added to a table
+	// that may already exist from an earlier boot, so the column is checked first, as the schedule
+	// migration does.
+	for _, col := range []struct{ name, decl string }{
+		{"last_error", "TEXT NOT NULL DEFAULT ''"},
+		{"last_error_at", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		has, err := columnExists(d.sql, "broadcast_templates", col.name)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := d.sql.Exec("ALTER TABLE broadcast_templates ADD COLUMN " + col.name + " " + col.decl); err != nil {
+			return err
+		}
+	}
+	return nil
 }

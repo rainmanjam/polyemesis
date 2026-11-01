@@ -343,7 +343,7 @@ func TestSkippingAShowOnAnAirDestinationIsRefused(t *testing.T) {
 	}
 
 	err = f.s.skipOccurrence(context.Background(), rows[0].ID, f.now)
-	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
+	if !errors.Is(err, errOccurrenceRefused) {
 		t.Fatalf("skip on an on-air destination = %v, want the not-skippable refusal", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 0 {

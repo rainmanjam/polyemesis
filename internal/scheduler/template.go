@@ -70,6 +70,12 @@ type BroadcastTemplate struct {
 	// Lookahead is how many upcoming occurrences are kept created. Zero means
 	// DefaultLookahead.
 	Lookahead int `json:"lookahead"`
+	// LastError is the platform's refusal of the most recent look-ahead create for this schedule, already
+	// redacted. It is cleared by the next create that succeeds, so an operator sees a limit that is still
+	// biting and not one that cleared an hour ago. Empty when there is none.
+	LastError string `json:"lastError,omitempty"`
+	// LastErrorAt is when LastError was recorded. Zero when LastError is empty.
+	LastErrorAt time.Time `json:"lastErrorAt,omitempty"`
 	// HasThumbnail reports whether a thumbnail is stored. The bytes themselves
 	// are not part of the JSON shape, because a 2 MB field on every read is
 	// not what a settings screen needs.

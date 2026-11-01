@@ -35,6 +35,8 @@ type fakeYouTubeEditor struct {
 	editedIDs []string
 	thumbs    []string
 	cancels   []string
+	// ingestErr, when set, is the refusal every create answers with, as a channel at its upcoming cap does.
+	ingestErr error
 	// editErr, when set, is the refusal every title write answers with.
 	editErr error
 	// cancelErr, when set, is the refusal every cancel answers with, as a platform that will not
@@ -47,6 +49,9 @@ func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oa
 	defer f.mu.Unlock()
 	f.nextID++
 	id := fmt.Sprintf("yt-occ-%d", f.nextID)
+	if f.ingestErr != nil {
+		return nil, f.ingestErr
+	}
 	f.creates = append(f.creates, opts)
 	return &oauth.Broadcast{ID: id, Target: "UCchannel",
 		Ingest: oauth.Ingest{URL: "rtmp://a.example/live2", Key: "key-" + id}}, nil
@@ -462,8 +467,8 @@ func TestSkippingAnOccurrenceWhoseStartHasPassedIsRefusedAndLeavesTheEventAlone(
 		t.Fatalf("occurrence: %v", err)
 	}
 	err = f.s.skipOccurrence(context.Background(), occ.ID, f.now)
-	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
-		t.Fatalf("skip of a started show returned %v, want ErrScheduledNotCancellable", err)
+	if !errors.Is(err, errOccurrenceRefused) {
+		t.Fatalf("skip of a started show returned %v, want errOccurrenceRefused", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 0 {
 		t.Fatalf("a started show's event was cancelled: %v", got)
@@ -514,8 +519,8 @@ func TestSkippingAnOccurrenceWhileItsDestinationIsDeliveringIsRefusedAndKeepsThe
 		t.Fatalf("occurrence: %v", err)
 	}
 	err = f.s.skipOccurrence(context.Background(), occ.ID, f.now)
-	if !errors.Is(err, oauth.ErrScheduledNotCancellable) {
-		t.Fatalf("skip while delivering returned %v, want ErrScheduledNotCancellable", err)
+	if !errors.Is(err, errOccurrenceRefused) {
+		t.Fatalf("skip while delivering returned %v, want errOccurrenceRefused", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 0 {
 		t.Fatalf("an event on a live destination was cancelled: %v", got)
