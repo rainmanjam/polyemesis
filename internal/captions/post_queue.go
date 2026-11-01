@@ -117,9 +117,30 @@ func (q *PostQueue) Close() {
 	<-q.done
 }
 
+// postSeqEpoch and postSeqSeed start a queue's sequence at the tenths of a second
+// since 2026-01-01, not at 1.
+//
+// A queue is rebuilt for the same ingestion URL mid-broadcast: polyemesis
+// restarts, or the destination's caption settings are saved again. Starting at 1
+// each time would send numbers the ingest has already seen, and an ingest that
+// drops those would show nothing until seq passed the earlier high-water mark.
+// Seeded from the clock, a new queue starts above any number an earlier queue
+// can have reached, as long as fewer than ten cues a second were posted, which a
+// caption stream never comes near. PROVISIONAL like the rest of the POST format
+// (docs-youtube C8): YouTube documents neither the parameter nor its range.
+var postSeqEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+var postSeqSeed = func() int {
+	return int(time.Since(postSeqEpoch) / (100 * time.Millisecond))
+}
+
+// postSeqHigh is the highest sequence number any queue in this process has sent. A queue rebuilt in the same
+// process (a saved setting) starts above it even inside the clock's tenth of a second.
+var postSeqHigh atomic.Int64
+
 func (q *PostQueue) run(ctx context.Context) {
 	defer close(q.done)
-	seq := 0
+	seq := max(postSeqSeed(), int(postSeqHigh.Load()), 0)
 	for {
 		select {
 		case <-ctx.Done():
@@ -128,6 +149,12 @@ func (q *PostQueue) run(ctx context.Context) {
 			// The sequence rises once per POST sent, whatever the answer, so the
 			// ingest never sees a number twice.
 			seq++
+			for {
+				high := postSeqHigh.Load()
+				if int64(seq) <= high || postSeqHigh.CompareAndSwap(high, int64(seq)) {
+					break
+				}
+			}
 			pctx, cancel := context.WithTimeout(ctx, q.timeout)
 			err := q.poster.Post(pctx, seq, YouTubeCaptionBody(c.at, c.text))
 			cancel()

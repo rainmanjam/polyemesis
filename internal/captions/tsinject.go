@@ -61,6 +61,9 @@ type Injector struct {
 	sched *Schedule
 
 	pmtPID   uint16
+	// pmtBuf is a program map section that did not fit in its first packet,
+	// collected until it is whole. Nil when no section is being collected.
+	pmtBuf   []byte
 	videoPID uint16
 	hevcPID  uint16
 	pending  []byte
@@ -149,6 +152,9 @@ func (in *Injector) packet(p []byte) []byte {
 		// Units released by a PID move were sent before this PMT, so they go out
 		// ahead of it.
 		return append(in.parsePMT(p), p...)
+	case in.pmtPID != 0 && pid == in.pmtPID && in.pmtBuf != nil:
+		// The rest of a program map longer than one packet.
+		return append(in.continuePMT(p), p...)
 	case in.videoPID != 0 && pid == in.videoPID:
 		if !validAdaptation(p) {
 			// The packet cannot be read, so it is dropped rather than passed through
@@ -189,20 +195,23 @@ func (in *Injector) bufferedBytes() int {
 // window sees every picture before any of them is emitted.
 func (in *Injector) video(p []byte, pusi bool) []byte {
 	if pusi {
-		if in.held != nil {
-			in.ready = append(in.ready, in.held)
-		}
+		in.releaseHeld()
 		au := &accessUnit{pkts: [][]byte{append([]byte(nil), p...)}}
 		au.pts, au.hasPTS = pesPTSOf(p)
-		if au.hasPTS {
-			in.lastPTS, in.hasLastPTS = au.pts, true
-		}
 		var out []byte
 		if au.hasPTS && in.sched.Claim(au.pts) {
 			// The clock jumped. Units queued from before the jump belong to the old
 			// timeline, so they go out unchanged rather than waiting on slots that
 			// the new timeline will never finalise.
 			out = in.releaseReady()
+			in.hasLastPTS = false
+		}
+		// lastPTS is the newest presentation time, not the last one decoded: a
+		// B-frame decoded after its P-frame is earlier on screen, and keying a
+		// caption to it would stamp it before the caption before it, which then
+		// overwrites it. Across a clock jump the running maximum starts again.
+		if au.hasPTS && (!in.hasLastPTS || au.pts > in.lastPTS) {
+			in.lastPTS, in.hasLastPTS = au.pts, true
 		}
 		in.held = au
 		return append(out, in.drain(false)...)
@@ -219,8 +228,14 @@ func (in *Injector) video(p []byte, pusi bool) []byte {
 		// Those packets then pass through unchanged, as continuations with no start
 		// do above. Sending the queue here keeps the picture's head from being
 		// overtaken by its own tail.
-		in.ready = append(in.ready, in.held)
-		in.held = nil
+		in.releaseHeld()
+		// Same timeline, so the claims these units hold are given back: their
+		// pairs wait for the pictures after them instead of being spent here.
+		for _, au := range in.ready {
+			if !au.unchanged && au.hasPTS {
+				in.sched.Unclaim(au.pts)
+			}
+		}
 		return in.releaseReady()
 	}
 	return nil
@@ -253,20 +268,59 @@ func (in *Injector) drain(all bool) []byte {
 		in.ready = in.ready[1:]
 		if overCap && !au.unchanged {
 			// The slot never became final, and waiting longer would grow the queue.
-			// Send the unit as it is so the queue shrinks back under its cap.
+			// Send the unit as it is so the queue shrinks back under its cap, and
+			// give its claim back so its pair is not spent on a picture without it.
 			au.unchanged = true
+			if au.hasPTS {
+				in.sched.Unclaim(au.pts)
+			}
 		}
 		out = append(out, in.emitAccessUnit(au)...)
 	}
 	return out
 }
 
-// releaseHeld moves the access unit being collected onto the queue.
+// releaseHeld moves the access unit being collected onto the queue. Its packets
+// are complete now, so this is where it is judged: a unit that will go out
+// without a caption gives its slot's claim back (see Schedule.Unclaim), so the
+// pair that slot would have taken waits for the next picture instead of being
+// lost.
 func (in *Injector) releaseHeld() {
-	if in.held != nil {
-		in.ready = append(in.ready, in.held)
-		in.held = nil
+	if in.held == nil {
+		return
 	}
+	au := in.held
+	in.held = nil
+	if !au.unchanged && !in.carriesCaption(au) {
+		au.unchanged = true
+		if au.hasPTS {
+			in.sched.Unclaim(au.pts)
+		}
+	}
+	in.ready = append(in.ready, au)
+}
+
+// carriesCaption reports whether emitAccessUnit can rebuild this unit with an
+// SEI, and counts the pictures it finds. It is decided once, when the unit is
+// complete, so the schedule learns before the slot is final.
+func (in *Injector) carriesCaption(au *accessUnit) bool {
+	if !au.hasPTS {
+		return false
+	}
+	pes, _, ok := reassemble(au.pkts)
+	if !ok {
+		return false
+	}
+	hl := 9 + int(pes[8])
+	if hl > len(pes) || !hasPictureStart(pes[hl:]) {
+		return false
+	}
+	in.stats.Pictures++
+	if midPCR(au.pkts) {
+		in.stats.PCRInMiddle++
+		return false
+	}
+	return true
 }
 
 // emitAccessUnit rebuilds one video PES with its caption SEI, or passes the
@@ -287,14 +341,7 @@ func (in *Injector) emitAccessUnit(au *accessUnit) []byte {
 		return in.renumber(pkts)
 	}
 	es := pes[hl:]
-	if !hasPictureStart(es) {
-		return in.renumber(pkts)
-	}
-	in.stats.Pictures++
-	if midPCR(pkts) {
-		in.stats.PCRInMiddle++
-		return in.renumber(pkts)
-	}
+	// carriesCaption has already judged the unit (releaseHeld), and counted it.
 
 	pair := in.sched.answer(au.pts)
 	newES := insertCCSEI(es, pair)
@@ -488,8 +535,56 @@ func parsePATPMTPID(p []byte) uint16 {
 // the change would otherwise go out on the new PID, or on PID 0, the PAT, after a
 // move to HEVC.
 func (in *Injector) parsePMT(p []byte) []byte {
+	in.pmtBuf = nil
 	s := sectionOf(p)
-	if len(s) < 12 || s[0] != 0x02 {
+	if len(s) < 3 || s[0] != 0x02 {
+		return nil
+	}
+	if need := 3 + (int(s[1]&0x0F)<<8 | int(s[2])); need > len(s) {
+		// A map with many streams or descriptors spans packets. Before this it
+		// was dropped, the H.264 PID was never learned, and no caption was ever
+		// injected. It is collected here until it is whole.
+		if need <= maxPMTSection {
+			in.pmtBuf = append([]byte(nil), s...)
+		}
+		return nil
+	}
+	return in.readPMT(s)
+}
+
+// maxPMTSection is the longest section a program map may have: a 10-bit
+// section_length (at most 1021) and its three-byte header.
+const maxPMTSection = 1024
+
+// continuePMT adds one continuation packet to a program map being collected,
+// and reads the map once it is whole.
+func (in *Injector) continuePMT(p []byte) []byte {
+	if !validAdaptation(p) || p[3]&0x10 == 0 {
+		return nil
+	}
+	at := 4
+	if (p[3]>>4)&0x2 != 0 {
+		at += 1 + int(p[4])
+	}
+	if at >= len(p) {
+		return nil
+	}
+	in.pmtBuf = append(in.pmtBuf, p[at:]...)
+	s := in.pmtBuf
+	need := 3 + (int(s[1]&0x0F)<<8 | int(s[2]))
+	if need > len(s) {
+		if len(s) > maxPMTSection {
+			in.pmtBuf = nil
+		}
+		return nil
+	}
+	in.pmtBuf = nil
+	return in.readPMT(s)
+}
+
+// readPMT reads one whole program map section.
+func (in *Injector) readPMT(s []byte) []byte {
+	if len(s) < 12 {
 		return nil
 	}
 	end := 3 + (int(s[1]&0x0F)<<8 | int(s[2])) - 4

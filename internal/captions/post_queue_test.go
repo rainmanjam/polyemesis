@@ -63,6 +63,7 @@ func TestTheYouTubeCaptionBodyIsATimestampLineThenTheText(t *testing.T) {
 
 // TestAPostQueueSendsEachCueOnceInOrderWithARisingSequence.
 func TestAPostQueueSendsEachCueOnceInOrderWithARisingSequence(t *testing.T) {
+	withPostSeqSeed(t, 0)
 	p := &recordingPoster{}
 	q := NewPostQueue(p, 8, time.Second, nil)
 	defer q.Close()
@@ -141,6 +142,7 @@ func TestClosingAPostQueueCancelsTheInFlightPostAndStopsTheWorker(t *testing.T) 
 // TestAFailedPostIsReportedWithoutTheURLAndTheNextCueStillGoes, end to end over
 // TLS with the real poster.
 func TestAFailedPostIsReportedWithoutTheURLAndTheNextCueStillGoes(t *testing.T) {
+	withPostSeqSeed(t, 0)
 	fake := &fakeIngest{status: http.StatusForbidden}
 	srv := httptest.NewTLSServer(fake)
 	defer srv.Close()
@@ -164,5 +166,48 @@ func TestAFailedPostIsReportedWithoutTheURLAndTheNextCueStillGoes(t *testing.T) 
 	defer fake.mu.Unlock()
 	if fake.seqs[0] != "1" || fake.seqs[1] != "2" {
 		t.Fatalf("seqs = %v", fake.seqs)
+	}
+}
+
+// withPostSeqSeed pins where a queue's sequence starts, for a test that reads the numbers.
+func withPostSeqSeed(t *testing.T, seed int) {
+	t.Helper()
+	old := postSeqSeed
+	postSeqSeed = func() int { return seed }
+	oldHigh := postSeqHigh.Swap(0)
+	t.Cleanup(func() { postSeqSeed = old; postSeqHigh.Store(oldHigh) })
+}
+
+// A queue rebuilt for the same ingestion URL mid-broadcast (a restart, a saved setting) must not send sequence
+// numbers the first one already sent. The sequence starts from the clock, so the second queue starts above
+// everything the first one reached.
+func TestARebuiltPostQueueStartsAboveTheSequenceTheLastOneReached(t *testing.T) {
+	first := &recordingPoster{}
+	q := NewPostQueue(first, 8, time.Second, nil)
+	for i := range 3 {
+		q.Enqueue(time.Now(), "line "+string(rune('a'+i)))
+	}
+	waitFor(t, func() bool { s, _ := first.snapshot(); return len(s) == 3 })
+	q.Close()
+
+	second := &recordingPoster{}
+	q2 := NewPostQueue(second, 8, time.Second, nil)
+	defer q2.Close()
+	q2.Enqueue(time.Now(), "after the restart")
+	waitFor(t, func() bool { s, _ := second.snapshot(); return len(s) == 1 })
+	a, _ := first.snapshot()
+	b, _ := second.snapshot()
+	if b[0] <= a[len(a)-1] {
+		t.Fatalf("the rebuilt queue sent seq %d, not above the %d the last queue reached", b[0], a[len(a)-1])
+	}
+}
+
+// After a restart nothing in the process remembers the last number, so the clock is what puts the new queue above
+// it: the seed rises ten a second, faster than captions are posted.
+func TestThePostSequenceSeedRisesWithTheClock(t *testing.T) {
+	a := postSeqSeed()
+	time.Sleep(250 * time.Millisecond)
+	if b := postSeqSeed(); b < a+2 {
+		t.Fatalf("seed went from %d to %d in 250 ms, want it to rise with the clock", a, b)
 	}
 }

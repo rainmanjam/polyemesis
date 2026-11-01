@@ -26,6 +26,28 @@ type SEIStage struct {
 	// have no timeline to key on yet. Owned by Feed's goroutine.
 	waiting []pendingText
 	dropped atomic.Uint64
+	// onUnsupported is told when the stream's video turns out not to be H.264
+	// (HEVC), which this path cannot caption; seenUnsupported is how many such
+	// streams it has already been told about. Both owned by Feed's goroutine.
+	onUnsupported   func()
+	seenUnsupported int
+}
+
+// OnUnsupported sets f to be called each time the stream's program map names
+// video this stage cannot caption (HEVC: the A/53 SEI is an H.264 construct).
+// The stream still passes through, unchanged, so without this an HEVC source
+// showed captions as running while no cue ever reached the picture. Set it
+// before Pump starts.
+func (s *SEIStage) OnUnsupported(f func()) { s.onUnsupported = f }
+
+// noticeUnsupported calls onUnsupported once per newly found unsupported stream.
+func (s *SEIStage) noticeUnsupported() {
+	if n := s.inj.Stats().Unsupported; n > s.seenUnsupported {
+		s.seenUnsupported = n
+		if s.onUnsupported != nil {
+			s.onUnsupported()
+		}
+	}
 }
 
 // pendingText is one caption queued for the stream.
@@ -87,9 +109,16 @@ func (s *SEIStage) Dropped() uint64 { return s.dropped.Load() }
 // Feed takes one datagram of the upstream stream and returns the rewritten
 // stream, ready to send, as datagrams of at most datagramBytes. Call it from one
 // goroutine only; it is the goroutine that owns the injector.
+//
+// The datagram goes through the injector BEFORE queued captions are placed. A
+// caption is keyed on the newest picture, and if this datagram carries a clock
+// discontinuity, placing the caption first would stamp it on the old timeline,
+// and the restart the jump triggers would then purge it.
 func (s *SEIStage) Feed(dgram []byte) [][]byte {
+	out := s.inj.Write(dgram)
+	s.noticeUnsupported()
 	s.drainCues()
-	return chunk(s.inj.Write(dgram))
+	return chunk(out)
 }
 
 // Flush releases what the injector still holds. Call it when the stream ends,

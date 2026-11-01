@@ -81,10 +81,11 @@ type Schedule struct {
 	events      []event
 	queue       []Pair
 
-	// claimed holds the slots a picture has been seen on. Only a claimed slot
-	// takes a pair from the queue, so a stretch of time with no pictures in it
-	// (before the first picture, or after a dropped frame) costs nothing.
-	claimed    map[int64]bool
+	// claimed counts the pictures seen on each slot. Only a claimed slot takes a
+	// pair from the queue, so a stretch of time with no pictures in it (before
+	// the first picture, or after a dropped frame) costs nothing. A count, not a
+	// flag, so Unclaim of one picture leaves a second one on the same slot.
+	claimed    map[int64]int
 	maxClaimed int64
 	anyClaimed bool
 
@@ -105,7 +106,7 @@ type Schedule struct {
 func NewSchedule(resendEvery time.Duration) *Schedule {
 	return &Schedule{
 		resendEvery: int64(resendEvery.Seconds() * ticksPerSecond),
-		claimed:     make(map[int64]bool),
+		claimed:     make(map[int64]int),
 		slots:       make(map[int64]Pair),
 		used:        make(map[int64]bool),
 	}
@@ -171,6 +172,12 @@ func (s *Schedule) insert(e event) {
 // group, and well inside the 26-hour span of the 33-bit timestamp.
 const resetSlots = 10 * 30
 
+// resetBackSlots is the same bound for a picture BEHIND the newest one. Two
+// seconds is still several times the longest B-frame group, and keeps an encoder
+// that reconnects with its clock restarting near zero from waiting up to ten
+// seconds, every picture below the cursor and ignored, before captions resume.
+const resetBackSlots = 2 * 30
+
 // Claim records that a picture exists at pts. The injector claims every picture
 // when it first sees it, before any of them are emitted, so that reordering
 // within the lookahead is visible to the slots that depend on it.
@@ -186,19 +193,38 @@ const resetSlots = 10 * 30
 // could change its answer, and recording it would add state nothing removes.
 func (s *Schedule) Claim(pts int64) (reset bool) {
 	k := slotOf(pts)
-	if s.anyClaimed && (k < s.maxClaimed-resetSlots || k > s.maxClaimed+resetSlots) {
+	if s.anyClaimed && (k < s.maxClaimed-resetBackSlots || k > s.maxClaimed+resetSlots) {
 		s.restart(k)
 		reset = true
 	}
 	if k < s.cursor {
 		return reset
 	}
-	s.claimed[k] = true
+	s.claimed[k]++
 	if !s.anyClaimed || k > s.maxClaimed {
 		s.maxClaimed = k
 		s.anyClaimed = true
 	}
 	return reset
+}
+
+// Unclaim withdraws one picture's claim on its slot, for a picture that will go
+// out without a caption SEI after all (a PCR inside it, no picture start, a PES
+// that will not reassemble). A claimed slot takes the next pair from the queue,
+// and a picture that never asks for it would lose that pair for good: an RCL, an
+// EOC or an erase missing from the middle of a script garbles the caption or
+// leaves it on screen. Unclaimed, the slot takes nothing and the pair waits for
+// the next picture that will carry it. A slot already final is past changing.
+func (s *Schedule) Unclaim(pts int64) {
+	k := slotOf(pts)
+	if k < s.cursor {
+		return
+	}
+	if s.claimed[k] > 1 {
+		s.claimed[k]--
+		return
+	}
+	delete(s.claimed, k)
 }
 
 // Final reports whether the pair for pts can no longer change: enough later
@@ -256,7 +282,7 @@ func (s *Schedule) finalise(last int64) {
 		}
 		s.events = s.events[n:]
 		p := nullPair
-		if s.claimed[s.cursor] && len(s.queue) > 0 {
+		if s.claimed[s.cursor] > 0 && len(s.queue) > 0 {
 			p = s.queue[0]
 			s.queue = s.queue[1:]
 		}
@@ -307,7 +333,7 @@ func (s *Schedule) restart(k int64) {
 	}
 	s.events = kept
 	s.queue = ClearScript()
-	s.claimed = make(map[int64]bool)
+	s.claimed = make(map[int64]int)
 	s.slots = make(map[int64]Pair)
 	s.used = make(map[int64]bool)
 	s.cursor = k

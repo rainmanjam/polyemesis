@@ -102,6 +102,12 @@ func (e *Engine) startCaptionStage(row *db.Destination, upstream *relay.Hub) (*d
 		_ = outHub.Close()
 		return nil, err
 	}
+	name := row.Name
+	capt.stage.OnUnsupported(func() {
+		e.log.Warn("captions: this source's video is HEVC, and SEI captions are carried only on H.264, so this "+
+			"destination's stream goes out without captions; send H.264 or choose another caption mode",
+			"destination", name)
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	capt.cancel = cancel
 	go func() {

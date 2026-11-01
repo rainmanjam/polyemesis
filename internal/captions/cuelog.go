@@ -58,6 +58,9 @@ type CueLog struct {
 	path string
 	size int64
 	max  int64
+	// closed is set by Close. A nil f with closed unset is a roll that failed,
+	// and the next Append opens the file again rather than logging nothing.
+	closed bool
 }
 
 // OpenCueLog opens the log for appending, creating it (and its directory) when
@@ -115,8 +118,15 @@ func (l *CueLog) Append(c transcribe.LiveCaption) error {
 	line = append(line, '\n')
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.f == nil {
+	if l.closed {
 		return nil
+	}
+	if l.f == nil {
+		// An earlier roll could not reopen the file. Every Append tries again, so
+		// one transient error does not silence the log for the rest of the show.
+		if err := l.open(); err != nil {
+			return err
+		}
 	}
 	if l.size > 0 && l.size+int64(len(line)) > l.max {
 		if err := l.roll(); err != nil {
@@ -134,9 +144,10 @@ func (l *CueLog) roll() error {
 		return err
 	}
 	l.f = nil
-	if err := os.Rename(l.path, l.path+".1"); err != nil {
-		return err
-	}
+	// A rename that fails leaves the full file where it is. The log goes on in it,
+	// over budget, and the next Append tries the roll again; returning here
+	// instead left the log closed and every later caption unlogged, silently.
+	_ = os.Rename(l.path, l.path+".1")
 	return l.open()
 }
 
@@ -147,6 +158,7 @@ func (l *CueLog) Close() error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.closed = true
 	if l.f == nil {
 		return nil
 	}
