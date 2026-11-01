@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -117,5 +119,57 @@ func TestALiveChangeDoesNotAddATrackTheVODMixDoesNotSelect(t *testing.T) {
 	}
 	if len(row.VODProfile.Tracks) != 1 || row.VODProfile.Tracks[0].Track != 0 {
 		t.Errorf("the VOD mix changed shape to %+v; a track it does not select must stay out", row.VODProfile.Tracks)
+	}
+}
+
+// A live fader gain does not reach a MATRIX VOD mix. Its gain is per cell, and a
+// fader cannot set cells, so the fader's change stays on the live mix and the
+// VOD mix keeps the cells it was given. The response used to say "applied live"
+// with nothing about the VOD mix at all, which read as a change that had reached
+// the archive. It now says what happened, in the response's warnings.
+//
+// MUTATION: in handleSetTrackGain, drop the matrix warning. Observed: FAIL, "the
+// response did not say the VOD matrix was left unchanged".
+func TestALiveGainOnAMatrixVODMixIsSaidNotSilentlyDropped(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	id := makeDest(t, h, sign, "vod-matrix-fader")
+	row, err := store.GetDestination(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.VODProfile = &routing.Profile{
+		Mode:       routing.ModeMatrix,
+		Matrix:     []routing.Cell{{Track: 0, Channel: 0, Out: routing.OutL, Gain: 1}},
+		Normalize:  routing.NormOff,
+		SampleRate: 48000,
+	}
+	if _, err := store.UpdateDestination(row); err != nil {
+		t.Fatalf("storing the VOD matrix: %v", err)
+	}
+
+	raw := send(t, h, sign, http.MethodPost, trackGainPath(id, 0),
+		map[string]any{"gain": 0.5}, http.StatusOK)
+	var got struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decoding the response: %v", err)
+	}
+	found := false
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "matrix") && strings.Contains(w, "VOD") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the response does not say the VOD matrix was left unchanged; warnings=%v", got.Warnings)
+	}
+
+	row, err = store.GetDestination(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.VODProfile.Matrix[0].Gain != 1 {
+		t.Errorf("the VOD matrix cell moved to %v from a fader, want it untouched at 1", row.VODProfile.Matrix[0].Gain)
 	}
 }

@@ -920,8 +920,8 @@ func (e *Engine) Processes() []*supervisor.Process {
 	}
 	// Sorted, because a map of analysers would otherwise reshuffle the
 	// monitoring page on every poll.
-	for _, id := range slices.Sorted(maps.Keys(e.loud)) {
-		if m := e.loud[id]; m != nil && m.proc != nil {
+	for _, k := range loudKeysSorted(e.loud) {
+		if m := e.loud[k]; m != nil && m.proc != nil {
 			out = append(out, m.proc)
 		}
 	}

@@ -109,6 +109,12 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, updateErr.Error())
 		return
 	}
+	// A matrix VOD mix is left out of a fader change, and the response must
+	// say so: its gain is per cell, so the change is not applied to the archive
+	// and the reply must not imply it was. See matrixVODNote.
+	if body.Gain != nil && vodMatrixSelects(row.VODProfile, track) {
+		lw.warnings = append(lw.warnings, matrixVODNote)
+	}
 	applied, reason, updated, warnings, rw := lw.applied, lw.reason, lw.updated, lw.warnings, lw.reconcileWarn
 	resp := map[string]any{"applied": applied, "destination": updated}
 	if reason != "" {
@@ -121,6 +127,32 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// is reported the way every other mutation reports it (#709), not as a 500
 	// that would read as "nothing happened".
 	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// matrixVODNote is what a fader gain change is told when the VOD mix is a
+// matrix. The fader cannot set matrix cells, so the archive keeps its cells, and
+// changing them is a structural edit that restarts the destination. The copy
+// names the mix and the restart, because "applied" alone reads as if the archive
+// had moved too.
+const matrixVODNote = "the VOD mix is a matrix, so this gain did not change its cell gains and the archive keeps the cells it has; change them in the VOD mix's matrix, which restarts the destination"
+
+// vodMatrixSelects reports whether vod is a matrix mix that selects track, which
+// is the one case where a fader's gain reaches the archive by no path at all.
+func vodMatrixSelects(vod *routing.Profile, track int) bool {
+	if vod == nil || vod.Mode != routing.ModeMatrix {
+		return false
+	}
+	for _, sel := range vod.Tracks {
+		if sel.Track == track {
+			return true
+		}
+	}
+	for _, c := range vod.Matrix {
+		if c.Track == track {
+			return true
+		}
+	}
+	return false
 }
 
 // mirrorTrackLevel applies a live mute and gain to the VOD mix's copy of track,
