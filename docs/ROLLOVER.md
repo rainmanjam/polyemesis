@@ -121,8 +121,10 @@ budget, and the broadcast lifecycle takes it live once the ingest arrives there.
 The rollover is still recorded as failed. While the old broadcast is still live,
 a failed rollover leaves the destination on the old broadcast, as before.
 
-With a recurring template, the replacement also gets the template's category and
-thumbnail. These are applied best effort: if the platform refuses either one,
+With a recurring template, the replacement's privacy is the stricter of the
+template's and the destination's own compliance privacy, so a private show is
+never replaced by a public broadcast. The replacement also gets the template's
+category and thumbnail. These are applied best effort: if the platform refuses either one,
 the rollover still succeeds and the refusal is recorded as a warning.
 
 ## Not in this build

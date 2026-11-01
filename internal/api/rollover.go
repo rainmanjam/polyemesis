@@ -433,7 +433,7 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 		if rerr != nil {
 			return "", "", fmt.Errorf("the recurring template's title does not render: %w", rerr)
 		}
-		req.Title, req.Description, req.Privacy = title, tpl.Description, tpl.Privacy
+		req.Title, req.Description, req.Privacy = title, tpl.Description, templatePrivacy(*tpl, d)
 		source = "the recurring template"
 	case !errors.Is(terr, db.ErrNotFound):
 		return "", "", terr

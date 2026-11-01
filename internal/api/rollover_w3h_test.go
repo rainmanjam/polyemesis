@@ -236,3 +236,15 @@ func (e *fakeRolloverEditor) SetScheduledThumbnail(_ context.Context, _, id stri
 	e.thumbID = id
 	return nil
 }
+
+// The rule #7 set for look-ahead events holds for a rollover replacement too: a template stored
+// as public never makes a private destination's replacement broadcast public.
+func TestARolloverReplacementNeverWidensTheDestinationsCompliancePrivacy(t *testing.T) {
+	r := dueYouTubeRig(t)
+	r.store.dests[1].Compliance.Privacy = db.PrivacyPrivate
+	r.store.templates["1/live-1"] = &scheduler.BroadcastTemplate{ScheduleID: 5, TitlePattern: "Show", Privacy: "public"}
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 || r.yt.rolls[0].Privacy != "private" {
+		t.Errorf("rollover requests = %+v, want one with privacy private", r.yt.rolls)
+	}
+}
