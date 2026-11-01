@@ -107,6 +107,12 @@ func (x *X) LivestreamAccess() bool { return x.livestream }
 func (x *X) authEndpoint() string { return x.authBase(xAPIBase) }
 func (x *X) apiEndpoint() string  { return x.apiBase(xAPIBase) }
 
+// userPath is the address of one user's Livestream resources, /2/users/{id}, which the source list, the
+// broadcast create and the PUBLISH all hang off.
+func (x *X) userPath(userID string) string {
+	return x.apiEndpoint() + "/2/users/" + url.PathEscape(userID)
+}
+
 func (x *X) Platform() db.Platform { return db.PlatformX }
 
 // Scopes is the list the consent screen shows. See the file header for why each
@@ -394,7 +400,7 @@ func (s xSource) ingestURL() string {
 }
 
 func (x *X) sourcesEndpoint(userID string) string {
-	return x.apiEndpoint() + "/2/users/" + url.PathEscape(userID) + "/sources"
+	return x.userPath(userID) + "/sources"
 }
 
 // StreamKeys lists every source key on the account, read-only. It backs the
@@ -705,7 +711,7 @@ func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKe
 		} `json:"data"`
 		Errors []xProblem `json:"errors"`
 	}
-	endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts"
+	endpoint := x.userPath(u.ID) + "/broadcasts"
 	if err := xDo(ctx, http.MethodPost, endpoint, accessToken,
 		map[string]string{"source_id": sourceKey}, &out); err != nil {
 		// source_id is the stream key, and X's problem text can echo it. The status error is scrubbed in place
@@ -806,7 +812,7 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 		} `json:"data"`
 		Errors []xProblem `json:"errors"`
 	}
-	endpoint := x.apiEndpoint() + "/2/users/" + url.PathEscape(u.ID) + "/broadcasts/" +
+	endpoint := x.userPath(u.ID) + "/broadcasts/" +
 		url.PathEscape(broadcastID) + "/state"
 	if err := xDo(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
 		return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
