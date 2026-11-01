@@ -102,7 +102,20 @@ its first tagged release.
   are not given template events yet,
   and the calendar screen and any console UI are not built in this PR (deviation
   from #18); the API serves the data. See
+  upcoming events. Facebook and X are not given template events yet; Twitch and Kick
+  take the title and category at go-live (see the entry below). The calendar screen
+  and any console UI are not built in this PR (deviation from #18); the API serves
+  the data. See
   [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).
+- **Recurring events: Twitch and Kick go-live, skip backfill, safer cancels (#18).**
+  Twitch and Kick take the template's title and category when the show starts,
+  once per show, through the go-live metadata write. A skipped occurrence no longer
+  uses up a look-ahead slot: the next occurrence fills it. A skip is refused with
+  409 for a show that has started or a destination that is on air. A template event
+  whose title and cancel both fail is kept as stranded and its cancel is retried,
+  rather than shown as an upcoming show with no title. YouTube template events are
+  deleted only while `created` or `ready`. A started show's platform event is never
+  removed by an orphan sweep.
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,

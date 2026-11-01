@@ -781,6 +781,11 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `GET` `PUT` `DELETE` | `/schedules/{id}/template` |
 | `PUT` | `/schedules/{id}/template/thumbnail` |
 
+`POST .../recurring/occurrences/{id}/skip` is refused with a `409` for a show whose
+start has passed, and for a destination that is on air. Nothing is cancelled in
+that case. A skip frees its look-ahead slot, so the next occurrence is created in
+its place. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
+
 The planned-rollover routes (#19) read and set one destination's rollover
 settings and its countdown, and run a rollover now. `GET /rollover/limits` is
 the table of platform caps, each with its source and how well it is established.
