@@ -23,11 +23,19 @@ Every destination starts with captions **off**. An upgrade never turns them on.
 *Caption track*. The captioner listens to that audio track. *Automatic* is the
 choice the captioner makes today, and it is the default.
 
-## Settings are saved; the stream is not yet changed
+## Which routes reach the stream
 
-The route and the track are stored, and the console and the API show them. The
-engine does not send captions yet, so choosing a route changes nothing on air at
-this stage. The console says so beside the picker.
+The route and the track are stored, and the console and the API show them.
+
+A Twitch route on *In-stream CEA-608 (SEI)* reaches the stream. Saving that
+route restarts the destination, the same as a delay change, so the captions
+start with the next picture of the restarted feed, and they follow the
+destination's broadcast delay. Twitch's display of the captions on your channel
+is checked live, not in this build.
+
+YouTube's POST route and Facebook's route are not sent to the stream yet. Saving
+them changes nothing on air. The console still says so beside the picker, and
+that wording is due to change with this route.
 
 The save is refused, with a reason, in three cases:
 

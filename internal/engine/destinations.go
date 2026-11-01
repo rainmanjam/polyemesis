@@ -584,6 +584,11 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// sits on, restart that destination and no other.
 		source, upstream,
 	}
+	if wantsSEIStage(row) {
+		// Adding or removing the SEI stage changes what the FFmpeg reads, so an
+		// operator save of the caption mode restarts the destination (#8).
+		parts = append(parts, "sei=stage")
+	}
 	if row.DelaySeconds > 0 {
 		// The broadcast delay restarts the destination when it changes (#11):
 		// the buffer is sized and filled for one delay, and a running line
@@ -1076,9 +1081,20 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 		readHub = dd.hub
 	}
+	// An SEI stage (#8) sits after the delay and before this FFmpeg. Its output
+	// hub is what the FFmpeg reads from here on.
+	capt, cerr := e.startCaptionStage(row, readHub)
+	if cerr != nil {
+		e.closeDelay(dd)
+		return cerr
+	}
+	if capt != nil {
+		readHub = capt.hub
+	}
 
 	port, err := e.allocPort()
 	if err != nil {
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return err
 	}
@@ -1089,6 +1105,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// taking it would leave that one running, correct-looking and receiving
 		// nothing. Same release-and-bail shape as the port refusal above.
 		e.releasePort(port)
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return err
 	}
@@ -1118,6 +1135,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			// into whatever now owns that socket.
 			readHub.Unsubscribe(subName)
 			e.releasePort(port)
+			e.closeCaptionStage(capt)
 			e.closeDelay(dd)
 			return err
 		}
@@ -1252,13 +1270,14 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		e.mu.Unlock()
 		readHub.Unsubscribe(subName)
 		e.releasePort(port)
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return nil
 	}
 	published := &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
 		compiled: compiled, graph: graph, hub: hub, spec: spec,
-		multitrack: mt, vodDropped: vodDropped, delay: dd,
+		multitrack: mt, vodDropped: vodDropped, delay: dd, capt: capt,
 	}
 	e.dests[row.ID] = published
 	e.mu.Unlock()
@@ -1356,6 +1375,9 @@ func (e *Engine) teardownDest(d *destination) {
 		e.releasePort(d.port)
 	}
 	e.stopBackup(d)
+	// The SEI stage reads the upstream hub and feeds the output hub the backup
+	// and the FFmpeg read, so it closes after both have let go of it.
+	e.closeCaptionStage(d.capt)
 	// Last: the backup above reads the private hub this closes.
 	e.closeDelay(d.delay)
 }

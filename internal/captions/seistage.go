@@ -71,6 +71,9 @@ func (s *SEIStage) Cue(text string, dur time.Duration) bool {
 	}
 }
 
+// Queued reports how many captions are waiting to be placed on the stream.
+func (s *SEIStage) Queued() int { return len(s.cues) }
+
 // Dropped reports how many captions were refused because the queue was full.
 func (s *SEIStage) Dropped() uint64 { return s.dropped.Load() }
 

@@ -146,11 +146,3 @@ func (e *Engine) captionTargets() []captions.CueTarget {
 func (e *Engine) captionPolicy() captions.TextPolicy {
 	return captions.TextPolicy{}
 }
-
-// captionSinkInert is the production sink until a per-output consumer lands (the
-// SEI injector or the YouTube caption POST). Delayed cues are released into it
-// and dropped, so no caption reaches an output before that consumer exists.
-type captionSinkInert struct{}
-
-// Deliver discards the cue. See the type comment.
-func (captionSinkInert) Deliver(int64, transcribe.LiveCaption) {}

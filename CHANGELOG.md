@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Added
 
+- **Live captions on Twitch as SEI, behind the broadcast delay (#8 step D).**
+  A Twitch destination whose caption mode is SEI now reads through a caption
+  stage between the stream and its FFmpeg. The stage adds one CEA-608 caption
+  SEI per picture on the copied H.264, so Twitch receives the captions inside
+  the video, and video is still copied. Captions are placed on the pictures live
+  at delivery time, so a delayed destination's captions follow its delay (#11).
+  Turning SEI captions on or off for a running destination restarts that
+  destination, as a delay change does. Kick is still off, and Facebook SEI stays
+  behind its provisional flag. Twitch has not been checked against a live
+  channel yet. The RTMP `onCaptionInfo` fallback is not built.
 - **Live captions: engine wiring (#8 step B).** The captioner now runs for a
   programme when one of its enabled destinations has a caption mode its platform
   accepts, on the track the programme chose. Each captioned destination receives

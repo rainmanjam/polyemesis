@@ -308,6 +308,11 @@ func (e *Engine) closeDelay(dd *destDelay) {
 // readHub is the hub a destination's FFmpeg reads: the private one when it is
 // delayed, its upstream otherwise.
 func (d *destination) readHub(fallback *relay.Hub) *relay.Hub {
+	if d.capt != nil {
+		// A captioned destination reads its SEI stage's output, which is the
+		// stream with the captions in it. See captions_sei.go.
+		return d.capt.hub
+	}
 	if d.delay != nil {
 		return d.delay.hub
 	}

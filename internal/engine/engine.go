@@ -123,6 +123,10 @@ var stopTimeout = 12 * time.Second
 // by construction -- Hub.Publish takes nothing else and calls nothing back --
 // so holding mu across it orders nothing.
 type Engine struct {
+	// seiStages maps a destination id to its running SEI stage (captions_sei.go).
+	// The caption sink looks stages up here from the CueRouter's timers.
+	seiStages sync.Map
+
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
 	// rendition map are all per-instance already, so running N of them is what
@@ -659,7 +663,10 @@ type Engine struct {
 
 // destination is one running output.
 type destination struct {
-	row      *db.Destination
+	row *db.Destination
+	// capt is the destination's SEI stage, when its row asks for one. Its hub is
+	// what the FFmpeg reads; see destination.readHub.
+	capt     *destCaption
 	proc     *supervisor.Process
 	port     int
 	subName  string
@@ -5013,7 +5020,7 @@ func (e *Engine) reconcileCaptions() {
 
 	// One route per captioner. It is closed on every path that does not hand it
 	// to e.captRoute, so a run that never starts leaves no timer behind.
-	route := captions.NewCueRouter(captionSinkInert{}, nil, nil)
+	route := captions.NewCueRouter(captionSink{e: e}, nil, nil)
 	route.SetTargets(e.captionTargets())
 	routeHeld := false
 	defer func() {

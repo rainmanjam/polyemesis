@@ -179,8 +179,18 @@ func TestSEIStagePumpCarriesCaptionsOverLoopbackUDPAsTheRelayDoes(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	// Let the loopback socket drain before cancelling.
-	time.Sleep(200 * time.Millisecond)
+	// Wait, bounded, for the output to carry most of the stream back. A fixed
+	// sleep flakes on a loaded machine, where loopback UDP can drop a burst.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(out)
+		mu.Unlock()
+		if n >= len(stream)*9/10 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("Pump returned %v, want nil on cancel", err)
