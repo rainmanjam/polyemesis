@@ -948,6 +948,17 @@ its first tagged release.
 - The burn-in subtitles filter (not wired yet) escapes its path at both FFmpeg
   levels, the filter option and the filtergraph, so paths with quotes, colons or
   commas open correctly.
+- **Console fixes for YouTube vertical, rollover and the recurring calendar.**
+  A vertical half that is switched off can now be started from its sub-row. Start
+  switches it on, and the sub-row is its only Start button. Before, a pair created
+  while the horizontal half was off could never be started. The YouTube vertical
+  section treats only a 404 as "no vertical half yet". Any other failed read shows
+  the error with a Retry button, and no longer offers an Add that the server
+  refuses. On the planned-rollover panel, "Roll over now" appears only on a
+  platform that rolls over automatically, and a failed read shows the error
+  instead of an empty card. A refused or platform-rejected title edit in the
+  recurring calendar now says the title was not changed. Before, it reused the
+  skip messages ("Not removed", "refused to delete the event").
 - **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
 - **X broadcast errors no longer carry the stream key.** X's create call sends the stream key as `source_id`, and X's error text can echo it back. Polyemesis now removes the key from that text, on a refused create and on a successful answer that carries errors, before the error reaches a fault, a log line or the timeline.
 - **X go-live and end report X's errors.** A publish or end that X answers with errors and no state is now a failure, instead of a success with an empty state. The end also reads the state from the broadcast object. A broadcast's stream is now found by the source's id as well as its key. PROVISIONAL: X is still switched off until the app is whitelisted.

@@ -87,9 +87,12 @@ the panel counts down to it, refreshing about once a minute.
 
 - **Settings** are the margin, the quiet window (start, end and time zone), the
   OBS scene trigger and the chat notice.
-- **Roll over now** asks first. The result is reported as it came back: done
+- **Roll over now** appears only on a platform polyemesis rolls over
+  automatically, and only while the destination is delivering. A countdown-only
+  platform shows the countdown without the button. The button asks first. The result is reported as it came back: done
   (200), refused because the destination is not in a state to roll over (409),
   refused by the platform (502), or a plain failure.
+- If the panel's read fails, the panel shows the error instead of disappearing.
 
 ## Chat notice
 

@@ -68,6 +68,27 @@ describe("the vertical sub-row", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
+  // A pair created while the horizontal is disabled has a disabled vertical half, and the
+  // vertical's own card is never drawn, so this row is the only Start it has. Start is the
+  // enable path on the server (handleStartDestination enables before it starts), so it must
+  // stay pressable on a disabled half; a disabled Start here would strand the half forever.
+  it("lets a disabled vertical half be started from its row, because Start is how it is enabled", () => {
+    const onStart = vi.fn();
+    render(
+      <YouTubeVerticalSubRow
+        horizontal={horizontal({ enabled: false, process: { state: "stopped" } as DestStatus["process"] })}
+        vertical={vertical({ enabled: false })}
+        onStart={onStart}
+        onStop={() => {}}
+        onRestart={() => {}}
+      />,
+    );
+    const start = screen.getByRole("button", { name: "Start" }) as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    fireEvent.click(start);
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
   it("shows YouTube's health reading and a quota pause on the sub-row", async () => {
     status.view = {
       horizontalId: 1 as DestinationId, verticalId: 2 as DestinationId, verticalStreamId: "s", pairingConfirmed: true, live: true,

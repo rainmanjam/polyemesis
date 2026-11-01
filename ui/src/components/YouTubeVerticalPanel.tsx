@@ -9,8 +9,13 @@ import { YOUTUBE_VERTICAL_TIERS, type YouTubeVerticalTier } from "@/lib/youtubeV
 import type { DestinationId, YouTubeVerticalView } from "@/lib/types";
 
 /** Where the pairing stands, as the dialog reads it. `none` is a real answer
- *  (no vertical half yet), not a failure: the server says 404 for it. */
-type PairState = { kind: "loading" } | { kind: "none" } | { kind: "paired"; view: YouTubeVerticalView };
+ *  (no vertical half yet), not a failure: the server says 404 for it. `error` is
+ *  every other failed read. The pair may exist then, so it must not offer "Add". */
+type PairState =
+  | { kind: "loading" }
+  | { kind: "none" }
+  | { kind: "error"; message: string }
+  | { kind: "paired"; view: YouTubeVerticalView };
 
 /** The YouTube vertical half, in the destination dialog (#7).
  *
@@ -37,8 +42,7 @@ export function YouTubeVerticalPanel({ destinationId }: Readonly<{ destinationId
       if (err instanceof ApiError && err.status === 404) {
         setPair({ kind: "none" });
       } else {
-        setPair({ kind: "none" });
-        setError(err instanceof Error ? err.message : "");
+        setPair({ kind: "error", message: err instanceof Error ? err.message : "" });
       }
     }
   }, [destinationId]);
@@ -46,6 +50,15 @@ export function YouTubeVerticalPanel({ destinationId }: Readonly<{ destinationId
   useEffect(() => {
     void load();
   }, [load]);
+
+  const retry = async () => {
+    setBusy(true);
+    try {
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const add = async () => {
     setBusy(true);
@@ -83,6 +96,17 @@ export function YouTubeVerticalPanel({ destinationId }: Readonly<{ destinationId
     >
       <h3 className="text-sm font-medium">{t("wave3.vertical.title")}</h3>
       <p className="text-xs text-muted-foreground">{t("wave3.vertical.intro")}</p>
+
+      {pair.kind === "error" && (
+        <div className="flex flex-col items-start gap-2">
+          <p role="alert" className="text-xs text-destructive">
+            {t("wave3.vertical.loadFailed", { reason: pair.message })}
+          </p>
+          <Button size="sm" variant="outline" onClick={() => void retry()} disabled={busy}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
 
       {pair.kind === "none" && (
         <div className="flex flex-wrap items-end gap-2">

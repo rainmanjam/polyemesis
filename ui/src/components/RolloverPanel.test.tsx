@@ -3,6 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
+import { ApiError } from "@/lib/api";
+
 import { RolloverPanel } from "./RolloverPanel";
 import type { DestStatus, RolloverView } from "@/lib/types";
 
@@ -91,6 +93,46 @@ describe("RolloverPanel countdown", () => {
     render(<RolloverPanel dest={dest} />);
 
     await waitFor(() => expect(screen.getByText(/not delivering right now/)).toBeTruthy());
+  });
+
+  // A countdown-only platform (Twitch, Facebook) cannot be rolled over by polyemesis: the
+  // server only counts the time down. Offering "Roll over now" there invites a refusal.
+  it("offers Roll over now only on a platform polyemesis can roll over automatically", async () => {
+    mocks.getDestinationSourceId.mockResolvedValue(3);
+    mocks.getRollover.mockResolvedValue(view({ action: "countdown" }));
+
+    render(<RolloverPanel dest={dest} />);
+
+    await waitFor(() => expect(screen.getByText(/Settings|Rollover settings/)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Roll over now" })).toBeNull();
+  });
+
+  it("offers Roll over now on an automatic platform while it is delivering", async () => {
+    mocks.getDestinationSourceId.mockResolvedValue(3);
+    mocks.getRollover.mockResolvedValue(view({ action: "automatic", platform: "youtube" }));
+
+    render(<RolloverPanel dest={dest} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Roll over now" })).toBeTruthy());
+  });
+
+  // A read that fails leaves no view to draw, but the failure itself must still be shown:
+  // returning nothing would make a broken read look like a platform with no cap.
+  it("shows a failed read as a notice rather than rendering nothing", async () => {
+    mocks.getDestinationSourceId.mockResolvedValue(3);
+    mocks.getRollover.mockRejectedValue(new ApiError(500, "the rollover store could not be read"));
+
+    render(<RolloverPanel dest={dest} />);
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("rollover store could not be read"));
+  });
+
+  it("shows a failed programme lookup as a notice rather than rendering nothing", async () => {
+    mocks.getDestinationSourceId.mockRejectedValue(new Error("the destination could not be read"));
+
+    render(<RolloverPanel dest={dest} />);
+
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("destination could not be read"));
   });
 
   it("renders nothing for a platform with no cap", async () => {
