@@ -146,8 +146,9 @@ func (in *Injector) packet(p []byte) []byte {
 		}
 		return p
 	case in.pmtPID != 0 && pid == in.pmtPID && pusi:
-		in.parsePMT(p)
-		return p
+		// Units released by a PID move were sent before this PMT, so they go out
+		// ahead of it.
+		return append(in.parsePMT(p), p...)
 	case in.videoPID != 0 && pid == in.videoPID:
 		if !validAdaptation(p) {
 			// The packet cannot be read, so it is dropped rather than passed through
@@ -472,45 +473,71 @@ func parsePATPMTPID(p []byte) uint16 {
 	return 0
 }
 
-// parsePMT finds the first video elementary stream in a program map and records
-// its PID. An H.264 stream is rewritten; anything else video is counted and left
-// alone.
-func (in *Injector) parsePMT(p []byte) {
+// parsePMT reads a program map and records its video PIDs. An H.264 stream is
+// rewritten; an HEVC one is counted and left alone.
+//
+// Every map is authoritative for both PIDs, because an encoder reconnect can move
+// video to a new PID or change its codec, and keeping the old PID would leave the
+// new video uncaptioned or keep rewriting a PID that is no longer H.264. The first
+// stream of each codec in the map wins. HEVC is counted once per change, not once
+// per repeated map (a muxer sends one about ten times a second).
+//
+// When the H.264 PID changes, every unit still held is released first, unchanged,
+// on the PID it arrived on, and returned for the caller to send ahead of the map.
+// The rebuilt packets are stamped with the current video PID, so a unit held over
+// the change would otherwise go out on the new PID, or on PID 0, the PAT, after a
+// move to HEVC.
+func (in *Injector) parsePMT(p []byte) []byte {
 	s := sectionOf(p)
 	if len(s) < 12 || s[0] != 0x02 {
-		return
+		return nil
 	}
 	end := 3 + (int(s[1]&0x0F)<<8 | int(s[2])) - 4
 	if end > len(s) {
-		return
+		return nil
 	}
 	info := int(s[10]&0x0F)<<8 | int(s[11])
-	// The first video stream in this program map wins. A later map replaces the PID it found before, because an
-	// encoder reconnect can move video to a new PID, and keeping the old one would leave the new video uncaptioned.
-	videoFound := false
+	var h264, hevc uint16
 	for i := 12 + info; i+5 <= end; {
 		typ := s[i]
 		pid := uint16(s[i+1]&0x1F)<<8 | uint16(s[i+2])
 		esInfo := int(s[i+3]&0x0F)<<8 | int(s[i+4])
 		switch typ {
 		case streamTypeH264:
-			if !videoFound {
-				in.videoPID = pid
-				videoFound = true
+			if h264 == 0 {
+				h264 = pid
 			}
 		case streamTypeHEVC:
-			if in.hevcPID == 0 {
-				in.hevcPID = pid
-				in.stats.Unsupported++
+			if hevc == 0 {
+				hevc = pid
 			}
 		}
 		i += 5 + esInfo
 	}
+	var out []byte
+	if h264 != in.videoPID {
+		in.releaseHeld()
+		out = in.releaseReady()
+		in.videoPID = h264
+	}
+	if hevc != in.hevcPID {
+		in.hevcPID = hevc
+		if hevc != 0 {
+			in.stats.Unsupported++
+		}
+	}
+	return out
 }
 
 // sectionOf returns the PSI section of a packet that starts a section, past any
-// adaptation field and the pointer field.
+// adaptation field and the pointer field. A packet that does not start a section
+// (no payload_unit_start, so no pointer field), carries no payload (an
+// adaptation-only packet, whose bytes after the field are not PSI) or has an
+// adaptation field longer than itself has no section, and returns nil.
 func sectionOf(p []byte) []byte {
+	if len(p) < tsPacketSize || p[1]&0x40 == 0 || p[3]&0x10 == 0 || !validAdaptation(p) {
+		return nil
+	}
 	at := 4
 	if (p[3]>>4)&0x2 != 0 {
 		at += 1 + int(p[4])

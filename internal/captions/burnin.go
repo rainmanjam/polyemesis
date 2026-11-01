@@ -8,14 +8,32 @@ import "strings"
 //
 // Burn-in needs a re-encode of the rendition it is applied to, so it cannot be
 // done on a copied stream. Wiring it into a rendition is a separate step, and
-// this only builds the filter argument, with the path escaped for the filtergraph
-// syntax.
+// this only builds the filter argument, with the path escaped as filterOptionValue
+// describes.
 func SubtitlesFilter(path string) string {
+	return "subtitles=filename=" + filterOptionValue(path)
+}
+
+// filterOptionValue escapes a value for use as a filter option inside a
+// filtergraph. FFmpeg parses it twice, so it is escaped twice, innermost first:
+//
+//  1. for the filter's option parser, which splits key=value pairs on ':' and
+//     treats '\' and '\” as escape and quote characters;
+//  2. for the filtergraph parser, which runs first and splits the graph on '[',
+//     ']', ',' and ';', consuming one level of '\' and '\” as it goes.
+//
+// This is the order the FFmpeg filters documentation gives under "Notes on
+// filtergraph escaping". The result is meant for an argv element, so no shell
+// level is added.
+func filterOptionValue(v string) string {
+	return escapeWith(escapeWith(v, `\':`), `\'[],;`)
+}
+
+// escapeWith puts a backslash in front of every rune of v that is in special.
+func escapeWith(v, special string) string {
 	var b strings.Builder
-	b.WriteString("subtitles=filename=")
-	for _, r := range path {
-		switch r {
-		case '\\', ':', '\'', ',', ';', '[', ']', ' ':
+	for _, r := range v {
+		if strings.ContainsRune(special, r) {
 			b.WriteByte('\\')
 		}
 		b.WriteRune(r)

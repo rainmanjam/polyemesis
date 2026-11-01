@@ -67,15 +67,31 @@ func (p TextPolicy) Segments(segs []transcribe.Segment) []transcribe.Segment {
 // rewriteWords calls fn on every maximal run of letters and digits, and leaves
 // everything between those runs (spaces, punctuation) exactly as it was. Working
 // on whole runs is what stops "class" from matching "ass" and "polyemesistic"
-// from matching "polyemesis".
+// from matching "polyemesis". A run's leading and trailing apostrophes are kept
+// out of the match, so a word in single quotes is still found.
 func rewriteWords(text string, fn func(string) string) string {
 	var b strings.Builder
 	var run []rune
 	flush := func() {
-		if len(run) > 0 {
-			b.WriteString(fn(string(run)))
-			run = run[:0]
+		if len(run) == 0 {
+			return
 		}
+		// An apostrophe inside a run belongs to the word ("don't"), but one at
+		// either end is a quote mark or a plural possessive. Only the core is
+		// matched, and the marks are written back around it unchanged.
+		lo, hi := 0, len(run)
+		for lo < hi && run[lo] == '\'' {
+			lo++
+		}
+		for hi > lo && run[hi-1] == '\'' {
+			hi--
+		}
+		b.WriteString(string(run[:lo]))
+		if lo < hi {
+			b.WriteString(fn(string(run[lo:hi])))
+		}
+		b.WriteString(string(run[hi:]))
+		run = run[:0]
 	}
 	for _, r := range text {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' {

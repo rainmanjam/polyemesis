@@ -516,6 +516,7 @@ type liveOptions struct {
 	onDegrade func(reason string)
 	onStats   func(LiveStats)
 	nice      func(name string, args []string) (string, []string)
+	onExit    func()
 }
 
 // WithLiveClock replaces time.Now, for tests.
@@ -543,6 +544,14 @@ func WithLiveDegrade(fn func(reason string)) LiveOption {
 // WithLiveStats registers a callback fired after every completed inference.
 func WithLiveStats(fn func(LiveStats)) LiveOption {
 	return func(o *liveOptions) { o.onStats = fn }
+}
+
+// WithLiveExit registers a callback fired once the captioner's loop has ended
+// and its children are reaped, whatever ended it: a Stop, the health guard, or
+// the tap or the relay going away on its own. It runs on the captioner's
+// goroutine after Running reports false, and MUST NOT block or call Stop.
+func WithLiveExit(fn func()) LiveOption {
+	return func(o *liveOptions) { o.onExit = fn }
 }
 
 // WithLiveNice hands over the governor's command wrapper, so the whisper child
@@ -1103,6 +1112,9 @@ type LiveCaptioner struct {
 	done    chan struct{}
 	last    LiveStats
 	running bool
+	// startedAt and exitedAt bracket the last run, on the option clock, so the
+	// engine can tell a tap that died at once from one that ran for an hour.
+	startedAt, exitedAt time.Time
 }
 
 // NewLiveCaptioner validates what can be validated up front and builds the
@@ -1141,6 +1153,17 @@ func (c *LiveCaptioner) Stats() LiveStats {
 		return sess.Stats()
 	}
 	return last
+}
+
+// RanFor reports how long the last run lasted, from Start to the end of its
+// loop, and whether that run has ended. A run still going reports false.
+func (c *LiveCaptioner) RanFor() (time.Duration, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running || c.startedAt.IsZero() {
+		return 0, false
+	}
+	return c.exitedAt.Sub(c.startedAt), true
 }
 
 // Running reports whether the loop is up.
@@ -1205,6 +1228,7 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 	done := make(chan struct{})
 	c.mu.Lock()
 	c.sess, c.cancel, c.done, c.running = sess, cancel, done, true
+	c.startedAt, c.exitedAt = c.opt.now(), time.Time{}
 	c.mu.Unlock()
 
 	go func() {
@@ -1216,6 +1240,11 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 	}()
 
 	go func() {
+		// Deferred first so it runs last: after done is closed, so a Stop waiting
+		// on it has returned, and after the state below says the loop is over.
+		if exit := c.opt.onExit; exit != nil {
+			defer exit()
+		}
 		defer close(done)
 		defer cancel()
 		if err := sess.Run(ctx, stdout); err != nil && ctx.Err() == nil {
@@ -1231,6 +1260,7 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 		c.last = sess.Stats()
 		c.last.Running = false
 		c.sess, c.running = nil, false
+		c.exitedAt = c.opt.now()
 		c.mu.Unlock()
 	}()
 

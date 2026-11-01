@@ -78,13 +78,28 @@ destination off stops it. A destination's broadcast delay decides when its
 captions are released, so a destination set to 30 seconds receives each caption
 30 seconds after it was spoken, which keeps the words with the picture.
 
-Two safety rules apply:
+Three safety rules apply:
 
 - If the stream health guard stops captioning to protect the broadcast, it stays
   stopped through later reconciles. It starts again only after you save a
   caption-relevant setting (a mode, a delay or the track).
+- If the captioner stops on its own (the audio tap or the relay goes away, or
+  speech recognition crashes), the dashboard shows it stopped straight away and
+  it is started again. If it stops within 30 seconds of starting three times in
+  a row, captions are switched off with a warning instead of being restarted
+  over and over. A run that lasts longer than 30 seconds resets the count, and
+  so does turning captions on again.
 - Stopping the captioner cancels every caption still waiting for a destination's
   delay. Nothing is sent after the stop.
+
+An automatic track stays automatic while captions run, so a source that changes
+its audio layout gets the track the new layout offers. The status shows the
+track, speaker and model the captioner is actually using. Changing any part of
+the caption configuration, including the thread count or the health limits,
+restarts the captioner with the new values. Nothing else restarts it.
+
+Each new caption replaces the one on screen. A caption that is still showing when
+the next one starts is not erased or shown again later.
 
 **Current state:** the engine releases each caption to every captioned
 destination at its delay, but no output consumes those captions yet. The SEI
