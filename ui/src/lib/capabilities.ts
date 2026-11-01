@@ -369,6 +369,12 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     reasons: {
       sso: "wave3.x.sso",
       streamKey: "wave3.x.streamKey",
+      metadata: "wave3.x.metadata",
+      chatRead: "wave3.x.chatRead",
+      chatSend: "wave3.x.chatSend",
+      moderation: "wave3.x.moderation",
+      viewerStats: "wave3.x.viewerStats",
+      broadcastLifecycle: "wave3.x.broadcastLifecycle",
     },
   },
   {

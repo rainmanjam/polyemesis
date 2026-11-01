@@ -61,6 +61,7 @@ import {
 } from "@/lib/capabilities";
 import { TWITCH_LABELS } from "@/lib/types";
 import { CaptionModeControl } from "@/components/CaptionModeControl";
+import { XConsolePanel } from "@/components/XConsolePanel";
 import { captionModeToSend, captionsOffered } from "@/lib/captions";
 import type {
   Destination,
@@ -245,6 +246,9 @@ const PRESETS: DestPreset[] = [
     id: "x",
     name: "X (Twitter) Live",
     group: "video",
+    // The server's preset carries db.PlatformX. Without it here an X destination
+    // saved from this dialog was "custom", and the X lifecycle never reached it.
+    platform: "x",
     transport: "rtmps",
     kind: "rtmp",
     url: "",
@@ -650,6 +654,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   const [multitrack, setMultitrack] = useState(false);
   // Where live captions go (#8). "off" until the operator picks a route.
   const [captionMode, setCaptionMode] = useState<CaptionMode>("off");
+  // X only: the title sent when the X broadcast is published (see XConsolePanel).
+  const [goLiveTitle, setGoLiveTitle] = useState("");
   const [accountId, setAccountId] = useState<string>("none");
   // READ STATES, NOT BARE ARRAYS. #719.
   //
@@ -822,6 +828,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setBackupIngestWanted(destination.backupIngestWanted ?? false);
       setMultitrack(destination.multitrack ?? false);
       setCaptionMode(destination.captionMode ?? "off");
+      setGoLiveTitle(destination.goLiveTitle ?? "");
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -1098,6 +1105,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // row, so a missing key would keep the old route. Changing it on a
         // delivering destination is refused by the server with a 409.
         captionMode: captionModeToSend(kind, platform, captionMode),
+        // Only X sends a go-live title; every other platform clears it, as the server would.
+        goLiveTitle: platform === "x" ? goLiveTitle : "",
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -2096,6 +2105,14 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           <StepPanel n={4} step={step}>
           {platform === "youtube" && editing && destination && (
             <YouTubeVerticalPanel destinationId={destination.id} />
+          )}
+          {platform === "x" && (
+            <XConsolePanel
+              gate={rowsOf(guidesRead).find((g) => g.platform === "x")?.livestreamGate}
+              lifecycle={destination?.lifecycle}
+              title={goLiveTitle}
+              onTitleChange={setGoLiveTitle}
+            />
           )}
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">

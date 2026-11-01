@@ -2547,6 +2547,14 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 			row.Platform))
 	}
 
+	// The X go-live title, one platform wide too: only an X PUBLISH carries it.
+	if row.Platform != db.PlatformX && row.GoLiveTitle != "" {
+		row.GoLiveTitle = ""
+		warnings = append(warnings, fmt.Sprintf(
+			"The go-live title was removed: it is sent only when an X broadcast is "+
+				"published, and %s takes its title from the go-live composer.", row.Platform))
+	}
+
 	// THE CONNECTED ACCOUNT, AND WHOSE API ITS TOKEN IS SENT TO.
 	//
 	// account_id and platform are two independent columns and nothing compared

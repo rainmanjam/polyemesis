@@ -10,6 +10,19 @@ its first tagged release.
 
 ### Added
 
+- **X console: a go-live title, the broadcast's state, and the Livestream gate (#3).** An X
+  destination's editor shows whether X Livestream access is switched on (`POLYEMESIS_X_LIVESTREAM`;
+  "needs X Livestream access" while it is off), where its X broadcast stands, and a go-live title.
+  X takes a title only when the broadcast is published, so polyemesis now sends that title on the
+  publish step (or a recurring show's rendered title during its first 30 minutes). The field is
+  read-only while the broadcast is live, and the server refuses a change then, because X cannot
+  change a running broadcast's title. The title is at most 280 characters (PROVISIONAL: X gives no
+  number). After publishing, polyemesis tells the X chat adapter the new broadcast straight away
+  instead of waiting for the adapter's 15-second check, which stays as the fallback. The setup
+  guide now names `POLYEMESIS_X_LIVESTREAM` and `POLYEMESIS_X_APP_BEARER`. All of it is built from
+  X's documentation and waits for a whitelisted app to verify. X's scheduled broadcasts are
+  documented by X but not created yet.
+
 - **Live captions: custom vocabulary, masked words, a live cue log and VOD alignment (#8 step E).**
   Each programme can hold a caption policy: words spelled the way you want (a recognised word
   that matches one, ignoring case, is written in your spelling) and words masked on screen
@@ -942,6 +955,13 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- **An X destination saved from the editor is an X destination again.** The editor's X preset
+  carried no platform, so a destination made from it was saved as a custom RTMP endpoint, and
+  nothing X-specific (sign-in, the Livestream lifecycle, chat) reached it. It now saves as X, like
+  the server's own preset.
+- **X go-live sent no title.** The broadcast coordinator published X broadcasts through the generic
+  transition, which always sent an empty publish. It now sends the go-live title.
 
 - **The caption picker no longer says a route changes nothing on air (#8).** It says captions go
   out only for a route that is on, that a live destination must be stopped to change its route,

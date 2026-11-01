@@ -195,3 +195,37 @@ func TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen(t *testing.T) {
 		})
 	}
 }
+
+// TestPointingAnXDestinationElsewhereDropsItsGoLiveTitleWithAWarning: only X sends the title. A destination moved
+// to another platform would otherwise keep a title nothing sends, and the store refuses that, so the save would
+// fail for a field the operator never touched. It is dropped and the save says so, as Facebook's settings are.
+//
+// MUTATION: the go-live title branch removed from dropUnsendableSettings. Observed: FAIL, the save answered 400.
+func TestPointingAnXDestinationElsewhereDropsItsGoLiveTitleWithAWarning(t *testing.T) {
+	_, h, store, sign := engineServer(t, defaultTools(), Options{})
+	x, err := store.CreateDestination(&db.Destination{
+		Name: "x main", Kind: db.DestRTMP, Platform: db.PlatformX,
+		URL: "rtmps://a.live.x.com:443/x", StreamKey: "abc123", AudioBitrate: 160, GoLiveTitle: "Sunday",
+	})
+	if err != nil {
+		t.Fatalf("create X destination: %v", err)
+	}
+	r := jsonRequest(t, http.MethodPut, "/api/v1/destinations/"+strconv.FormatInt(x.ID, 10), map[string]any{
+		"platform": "twitch", "url": "rtmp://live.twitch.tv/app",
+	})
+	sign(r)
+	w := do(t, h, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("moving to Twitch: status %d %s, want 200", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "go-live title") {
+		t.Errorf("the save did not say the go-live title was dropped: %s", w.Body.String())
+	}
+	got, err := store.GetDestination(x.ID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.GoLiveTitle != "" {
+		t.Errorf("stored title on a Twitch destination = %q, want it dropped", got.GoLiveTitle)
+	}
+}

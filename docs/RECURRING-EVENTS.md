@@ -53,8 +53,10 @@ new event can issue a new stream key. Such a destination is skipped until it
 is off air.
 
 Platforms that cannot title a scheduled event are not given template events.
-Facebook is in this group until its Page API is checked (PROVISIONAL). X has no
-scheduled-event create in this build.
+Facebook is in this group until its Page API is checked (PROVISIONAL). X is in
+this group for now too: X's API documents scheduled broadcasts, but polyemesis
+does not create them yet (see the X entry below), so X takes the template's
+title when the broadcast is published.
 
 ## Twitch and Kick at go-live
 
@@ -166,6 +168,14 @@ rules.
 - **Kick.** Title and category written at go-live, once per show. No description,
   because Kick's live broadcast has none. A category Kick cannot match is a
   warning, and the title still lands.
-- **X.** Not yet. X has no scheduled-event create in this build, and it can
-  join the look-ahead once it implements the same editor capability YouTube
-  does.
+- **X.** The template title is sent when polyemesis publishes the X broadcast
+  (the PUBLISH step, which needs X Livestream access). If a template-bearing
+  start schedule that names the destination began in the last 30 minutes, its
+  rendered title is sent; otherwise the destination's own go-live title is. No
+  category, description, privacy or thumbnail is sent: X's publish step takes a
+  title and a chat option only. X's API also documents scheduled broadcasts
+  (`POST /2/broadcasts/scheduled`, bound to a stream source, with a title,
+  description, thumbnail and recurrence, published automatically at the start
+  time). polyemesis does not create them yet, so X viewers get no reminder page
+  ahead of the show. Building that means moving X's broadcast creation from
+  go-live to the look-ahead, and it waits for a whitelisted app to test against.

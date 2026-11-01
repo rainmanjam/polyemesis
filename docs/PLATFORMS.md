@@ -161,6 +161,25 @@ operator sees "needs X Livestream access (app must be whitelisted by X)", and
 pasting the server URL and stream key from X's producer tooling works exactly
 as before.
 
+With the switch on, the lifecycle works like this. When an X destination turns
+on, polyemesis opens a broadcast on its stream source; X keeps it private
+(`NOT_STARTED`). Once video arrives, polyemesis publishes it with the
+destination's **go-live title**, set in the X console in the destination editor
+(at most 280 characters: X says the title is "subject to X post length limits"
+and gives no number, PROVISIONAL). During the first 30 minutes of a recurring
+show, the show's template title is sent instead (see
+[RECURRING-EVENTS.md](RECURRING-EVENTS.md)). **X takes a title only at that
+publish step.** It has no write that changes a running broadcast's title, so the
+console makes the field read-only while the broadcast is live and the server
+refuses a change then (HTTP 409). Turning the destination off ends the
+broadcast. After a publish the X chat adapter is told the new broadcast at once,
+and its own 15-second check stays as the fallback.
+
+Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
+token from console.x.com, which X's activity stream requires. It is a secret.
+Without it the chat pane stays empty and sending still works. The X console and
+the setup guide show whether the Livestream switch is on.
+
 Every cell in the X row stays *Unverified* except the stream key, which is
 *By hand*. That is deliberate: no live request from a whitelisted app has
 confirmed any of the built paths yet. Two gates apply on top of the whitelist:

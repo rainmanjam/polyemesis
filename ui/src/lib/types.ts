@@ -270,7 +270,8 @@ export type Platform =
   | "kick"
   | "facebook"
   | "trovo"
-  | "vimeo";
+  | "vimeo"
+  | "x";
 
 export interface Destination {
   id: DestinationId;
@@ -2346,6 +2347,9 @@ export interface SetupGuide {
   /** Computed per request by the API, from the configuration and the Host it
    *  was reached on: reasons the displayed redirect URI may not work. */
   redirectWarnings?: string[];
+  /** "open" or "closed" for a platform whose live API the operator switches on
+   *  (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM); absent for the rest. */
+  livestreamGate?: "open" | "closed";
 }
 
 /** The verdict on a pasted client ID and secret.
