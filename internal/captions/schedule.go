@@ -41,7 +41,26 @@ type Cue struct {
 type event struct {
 	at    int64
 	pairs []Pair
+	// kind and cue say what the event is and which cue it belongs to (by the
+	// cue's start), so a newer cue can withdraw what an older one still has
+	// pending. See Add.
+	kind eventKind
+	cue  int64
 }
+
+// eventKind tells a cue's first script from its resends and its erase.
+type eventKind uint8
+
+const (
+	eventScript eventKind = iota
+	eventResend
+	eventClear
+)
+
+// maxResendsPerCue bounds the resends one cue may schedule. A live caption is on
+// screen for seconds, so this is never reached by a real cue; it stops a cue
+// with a bogus end time from filling memory with one script per interval.
+const maxResendsPerCue = 32
 
 // Schedule turns caption cues into CEA-608 byte pairs, keyed on picture
 // timestamps.
@@ -94,17 +113,48 @@ func NewSchedule(resendEvery time.Duration) *Schedule {
 
 // Add registers a cue. Blank text schedules nothing, so an empty line never
 // clears the screen on every resend interval.
+//
+// A cue that ends before it starts is clamped to end where it starts, so its
+// erase still follows its script and the caption cannot be left on screen. The
+// resends are bounded by maxResendsPerCue.
+//
+// A pop-on caption replaces whatever is displayed, so a newer cue supersedes the
+// cues that started before it. Their erase and resend events from the newer
+// cue's start onward are withdrawn first: an older cue's erase at its own end
+// would otherwise blank the newer caption halfway through, and its resends would
+// put the older text back over it. Pairs already in the queue have gone past
+// recall and are left alone.
 func (s *Schedule) Add(c Cue) {
 	if strings.TrimSpace(c.Text) == "" {
 		return
 	}
-	s.insert(event{at: c.StartPTS, pairs: PopOnScript(c.Text)})
+	if c.EndPTS < c.StartPTS {
+		c.EndPTS = c.StartPTS
+	}
+	s.dropSuperseded(c.StartPTS)
+	s.insert(event{at: c.StartPTS, pairs: PopOnScript(c.Text), kind: eventScript, cue: c.StartPTS})
 	if s.resendEvery > 0 {
-		for at := c.StartPTS + s.resendEvery; at < c.EndPTS; at += s.resendEvery {
-			s.insert(event{at: at, pairs: PopOnScript(c.Text)})
+		n := 0
+		for at := c.StartPTS + s.resendEvery; at < c.EndPTS && n < maxResendsPerCue; at += s.resendEvery {
+			s.insert(event{at: at, pairs: PopOnScript(c.Text), kind: eventResend, cue: c.StartPTS})
+			n++
 		}
 	}
-	s.insert(event{at: c.EndPTS, pairs: ClearScript()})
+	s.insert(event{at: c.EndPTS, pairs: ClearScript(), kind: eventClear, cue: c.StartPTS})
+}
+
+// dropSuperseded withdraws the pending erase and resend events, due at or after
+// start, of every cue that started at or before start. A cue's first script is
+// kept: a cue registered out of order still gets shown at its own time.
+func (s *Schedule) dropSuperseded(start int64) {
+	kept := s.events[:0]
+	for _, e := range s.events {
+		if e.kind != eventScript && e.cue <= start && e.at >= start {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	s.events = kept
 }
 
 // insert keeps events ordered by due time. Equal times keep arrival order, so an
@@ -241,7 +291,21 @@ func (s *Schedule) prune() {
 // cue registered for the new timeline must not be lost to the restart. The pairs
 // already queued belong to the old timeline, so they are replaced by an erase,
 // which clears whatever caption was on screen before the stream went backwards.
+//
+// Events far from the new position are dropped too. They were registered against
+// the old timeline: after a forward jump they are all already due and would pour
+// out in one burst, and after a backward jump they would fire at times that mean
+// nothing on the new clock. A cue registered for the new timeline is near the new
+// position, inside the same window Claim uses to tell a jump from reordering.
 func (s *Schedule) restart(k int64) {
+	now, span := k*slotTicks, int64(resetSlots)*slotTicks
+	kept := s.events[:0]
+	for _, e := range s.events {
+		if e.at >= now-span && e.at <= now+span {
+			kept = append(kept, e)
+		}
+	}
+	s.events = kept
 	s.queue = ClearScript()
 	s.claimed = make(map[int64]bool)
 	s.slots = make(map[int64]Pair)

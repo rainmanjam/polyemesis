@@ -96,3 +96,30 @@ func TestPolicyAppliesToEverySegmentWithoutMovingIt(t *testing.T) {
 		t.Fatalf("Segments modified its input slice in place")
 	}
 }
+
+// TestAWordInSingleQuotesIsStillMatchedAndItsQuotesAreKept. A word run takes in
+// apostrophes so that "don't" stays one word, but that also swallowed the single
+// quotes around a quoted word: "'damn'" was looked up as itself, matched no
+// entry, and went out unmasked. The leading and trailing apostrophes are trimmed
+// before the lookup and written back around the result, so the quotes survive
+// and an apostrophe inside a word still counts as part of it.
+//
+// MUTATION, internal/captions/text.go: call fn on the whole run in rewriteWords'
+// flush instead of on the trimmed core. Observed: FAIL -- "she said 'damn'" came
+// back unmasked.
+func TestAWordInSingleQuotesIsStillMatchedAndItsQuotesAreKept(t *testing.T) {
+	p := TextPolicy{Blocklist: []string{"damn", "don't"}, Vocabulary: []string{"Polyemesis"}}
+	cases := map[string]string{
+		"she said 'damn' twice":    "she said 'd***' twice",
+		"'polyemesis' is the name": "'Polyemesis' is the name",
+		"I don't know":             "I d**** know",
+		"the rock 'n' roll years":  "the rock 'n' roll years",
+		"a lone '' pair of quotes": "a lone '' pair of quotes",
+		"the dogs' bowls, damn'":   "the dogs' bowls, d***'",
+	}
+	for in, want := range cases {
+		if got := p.Apply(in); got != want {
+			t.Errorf("Apply(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
