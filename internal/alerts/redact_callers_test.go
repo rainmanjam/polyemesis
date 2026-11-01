@@ -46,6 +46,15 @@ var redactAllowlist = map[string]string{
 		"credential is in that text by construction -- tokens travel in headers, never in the " +
 		"message -- so there is no literal to declare; the events hub's RedactTree runs again " +
 		"on the poll.* payload.",
+	"internal/api/rollover_handlers.go": "the same residual pass over a manual rollover's 500 body. A live-start " +
+		"read's error (a liveBroadcasts.list refusal) reaches the handler unredacted by act, and its text can carry a " +
+		"platform response body. Redacted here, in the one place the error is written to a client; this is the outer " +
+		"net, not the boundary.",
+	"internal/api/rollover.go": "the same residual pass over a platform's refusal text (a YouTube " +
+		"rollover's create, bind or end error, which carries a response-body snippet) before it is clipped " +
+		"and written to the timeline, the result row, the webhook and the 502 body. Redacting first, then " +
+		"clipping, stops a clip from splitting a credential the pattern would have caught; this is the outer " +
+		"net, not the boundary.",
 	"internal/api/youtube_vertical.go": "the same residual pass over YouTube's error text (a refused liveStreams.insert for the vertical companion, a failed health read) shown as the 502 body and the health row. The stream key comes back only on a successful create, so a failed one carries none; this is the outer net, not the boundary.",
 	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
 		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +

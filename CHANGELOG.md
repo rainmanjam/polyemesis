@@ -12,16 +12,20 @@ its first tagged release.
 
 - **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in
   (OAuth 2.0 with PKCE, `broadcast.read`, `broadcast.write`, `offline.access`,
-  `users.read`, `tweet.read`), stream-source minting, go-live and end, chat read
+  `users.read`, `tweet.read`), stream-source minting, publish and end of an existing broadcast, chat read
   over the Activity API, chat send (140 characters), and mute, unmute and delete.
   **Switched off until X whitelists the app.** Set `POLYEMESIS_X_LIVESTREAM=1`
   once it is approved; until then the operator sees "needs X Livestream access
   (app must be whitelisted by X)" and pasting the key works as before. X has no
-  hide action, so moderation offers delete and mute only. PROVISIONAL until a
+  hide action, so moderation offers delete and mute only. Metadata is NOT at
+  parity with YouTube: X has no endpoint that changes a running broadcast's title
+  or chat option, so polyemesis refuses every metadata push to X. PROVISIONAL until a
   whitelisted app has run it live: the PKCE acceptance, the broadcast.chat
   payload, and the activity stream's app bearer, which is supplied as
   `POLYEMESIS_X_APP_BEARER`. Titles are set at go-live only, so a live title
-  cannot change.
+  cannot change. **Not built in this PR (deviation from #3):** creating the
+  broadcast itself. Create it in X's producer tooling; polyemesis can then
+  publish and end it.
 - **Twitch VOD track (#15): what is verified and what is not.** The second
   (VOD) mix is now checked against this FFmpeg before it is sent: a binary
   that cannot write two audio tracks into FLV drops the VOD mix with its
@@ -41,6 +45,11 @@ its first tagged release.
   **PROVISIONAL:** the Twitch path needs a live check on a test channel before
   it is offered. Nothing calls it yet: no API route, no UI control, and no
   destination path runs the injector.
+  **Not built in this PR (deviation from #8, which is agreed in full):** the
+  transcriber is not wired to a routed caption track; there is no per-destination
+  toggle in the API or the console; the player WebVTT track and the burn-in are
+  not wired into renditions; and the YouTube caption POST is not called. The
+  pieces above are library code, not a delivered feature.
 - Caption text policy: vocabulary spellings and profanity masking, applied once
   at the emit boundary so every output shows the same words. Timing, track and
   speaker are unchanged.
@@ -69,7 +78,9 @@ its first tagged release.
   broadcast never binds to the vertical stream, and the vertical stream is kept out of
   the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
   and a failed read stays on that half. The UI option, the sub-row and the Stream Deck
-  face are not built in this change.
+  face are not built in this change. **Not built in this PR (deviation from #7):**
+  the UI option, the sub-row, the Stream Deck face and the guided pairing step in
+  the console. The API is the only surface.
 - **Planned rollover (preview).** A destination can be replaced before its
   platform's cap: a live YouTube broadcast is swapped for a new one on the same
   stream, and a Twitch destination is reconnected. Triggers are a safety margin
@@ -77,13 +88,17 @@ its first tagged release.
   show a countdown only. Built against fakes; the YouTube auto-start and Twitch
   reset behaviour are provisional until checked on a live account. See
   [docs/ROLLOVER.md](docs/ROLLOVER.md).
+  **Not built in this PR (deviation from #19):** the countdown card and the
+  settings control in the console. The API serves the same data. A manual run
+  that the platform refuses answers 502 with the reason.
 - **Recurring broadcast events (preview).** A start schedule can carry a broadcast
   template: a title pattern with `{date}` and `{time}`, a description, privacy,
   category and thumbnail. The next occurrences (default 2, up to 10) are created as
   upcoming YouTube events, and the go-live uses the first one that is not skipped.
   One occurrence can be skipped or retitled, and deleting the template cancels its
   upcoming events. Facebook, Twitch, Kick and X are not given template events yet,
-  and the calendar screen is not in this build. See
+  and the calendar screen and any console UI are not built in this PR (deviation
+  from #18); the API serves the data. See
   [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
@@ -802,6 +817,22 @@ its first tagged release.
   are deleted from the database at the same time.
 
 ### Fixed
+
+- A manual planned rollover now answers 200 "rolled over" when it has finished,
+  502 with the redacted reason when the platform refuses it, and never 202
+  "rolling over" for a rollover that had already run. The sweep path is unchanged.
+- A manual planned rollover is no longer cancelled when the browser disconnects
+  partway through, so it cannot leave a new public broadcast unbound. It is
+  bounded to five minutes.
+- Platform refusal text from a planned rollover is redacted before it reaches the
+  timeline, the result row, the webhook and the response.
+- Two concurrent YouTube vertical pairings for one destination no longer both
+  create a vertical stream on YouTube. The second answers 409.
+- A YouTube vertical destination is repaired the same way as every other
+  destination write before it is stored, so a setting the platform cannot send
+  is dropped rather than kept.
+- X: while the Livestream switch is off, the connect-time entitlement check makes
+  no request to X and reports the gate.
 
 - **Phone Dashboard cards no longer run off the screen.** At 390px with a
   source, the Ingest, Chat and Pipeline cards were 546px wide in a 356px

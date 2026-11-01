@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
@@ -44,6 +45,36 @@ type verticalPairView struct {
 	HealthError      string `json:"healthError,omitempty"`
 }
 
+// verticalPairsInFlight holds the horizontal destinations whose pairing is under way. The zero value is ready. The
+// claim is taken before the existing-pair check, so the check and the create are one step: a second request for the
+// same destination is refused before it can reach YouTube, and a request that starts after the first has finished
+// sees the pair the first one stored.
+type verticalPairsInFlight struct {
+	mu  sync.Mutex
+	ids map[int64]struct{}
+}
+
+// begin claims a destination for one pairing. It reports false when a pairing for it is already under way.
+func (f *verticalPairsInFlight) begin(id int64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, busy := f.ids[id]; busy {
+		return false
+	}
+	if f.ids == nil {
+		f.ids = map[int64]struct{}{}
+	}
+	f.ids[id] = struct{}{}
+	return true
+}
+
+// end releases a claim taken by begin.
+func (f *verticalPairsInFlight) end(id int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.ids, id)
+}
+
 // handleCreateYouTubeVertical pairs a horizontal YouTube destination with a new vertical
 // one. The body names a tier from db.YouTubeVerticalTiers.
 func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +109,11 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "unknown vertical tier; choose one of the portrait tiers")
 		return
 	}
+	if !s.verticalPairs.begin(id) {
+		writeError(w, http.StatusConflict, "a vertical half is already being created for this destination")
+		return
+	}
+	defer s.verticalPairs.end(id)
 	if _, err := s.store.GetYouTubeVerticalPairByHorizontal(id); err == nil {
 		writeError(w, http.StatusConflict, "this destination already has a vertical half")
 		return
@@ -94,7 +130,7 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 	defer cancel()
 	acct, vp, err := s.verticalProviderFor(ctx, *dest.AccountID)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
 		return
 	}
 	rendID, err := s.verticalRenditionFor(dest, tier)
@@ -107,7 +143,7 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
 		return
 	}
-	vdest, err := s.store.CreateDestination(&db.Destination{
+	row := &db.Destination{
 		Name:         dest.Name + " (vertical)",
 		Kind:         db.DestRTMP,
 		Platform:     db.PlatformYouTube,
@@ -118,7 +154,14 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		Enabled:      dest.Enabled,
 		AudioBitrate: dest.AudioBitrate,
 		Profile:      dest.Profile,
-	})
+	}
+	// Every route that stores a destination repairs the row first, so a setting the platform cannot send is dropped
+	// before the write and not sent later. The vertical row copies settings from the horizontal one, so it gets the same repair.
+	if _, err := s.dropUnsendableSettings(row); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not prepare the vertical destination")
+		return
+	}
+	vdest, err := s.store.CreateDestination(row)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save the vertical destination")
 		return

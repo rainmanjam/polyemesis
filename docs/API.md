@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the eighteen `GET`s among the twenty refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,9 +133,9 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Nineteen routes are refused outright**, for three different reasons. Masking
+**Twenty routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
-command shown is the command that runs) and pointless for the next five, which
+command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last twelve are `403` because of what
 `read` was decided to mean:
 
@@ -147,6 +147,7 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against `readScopeDeniedPatterns`, and a row missing from one side tells the reader nothing about which side is right |
+| `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -771,6 +772,14 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `GET` `PUT` | `/destinations/{id}/rollover` |
 | `POST` | `/destinations/{id}/rollover/run` |
 | `GET` | `/rollover/limits` |
+| `POST` | `/destinations/{id}/youtube-vertical` |
+| `GET` | `/destinations/{id}/youtube-vertical` |
+| `POST` | `/destinations/{id}/youtube-vertical/confirm` |
+| `GET` | `/recurring/occurrences` |
+| `POST` | `/recurring/occurrences/{id}/skip` |
+| `POST` | `/recurring/occurrences/{id}/title` |
+| `GET` `PUT` `DELETE` | `/schedules/{id}/template` |
+| `PUT` | `/schedules/{id}/template/thumbnail` |
 
 The planned-rollover routes (#19) read and set one destination's rollover
 settings and its countdown, and run a rollover now. `GET /rollover/limits` is
@@ -778,8 +787,9 @@ the table of platform caps, each with its source and how well it is established.
 `PUT` takes `enabled`, `marginMinutes` (5 to 120), `quietStart`, `quietEnd`,
 `quietZone` and `obsScene`, and a bad value is refused with the reason. `POST
 .../rollover/run` is refused with a 409 when the destination is not delivering,
-the platform is countdown only, or a rollover ran in the last ten minutes. See
-[ROLLOVER.md](ROLLOVER.md).
+the platform is countdown only, or a rollover ran in the last ten minutes. The
+answer is 200 with `rolled over` once the rollover has finished, and 502 with the
+redacted reason when the platform refuses it. See [ROLLOVER.md](ROLLOVER.md).
 
 `POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
 destination. The body takes `muted` (boolean), `gain` (a finite number above

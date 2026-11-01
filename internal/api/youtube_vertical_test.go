@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,10 +36,14 @@ import (
 // fixture does not look like a credential.
 type ytVerticalPairStub struct {
 	srv   *httptest.Server
+	mu    sync.Mutex
 	calls []string
 	// streamsDown makes the health read fail, which is how a dead vertical half looks
 	// from polyemesis: the call errors and the pair must stay where it is.
 	streamsDown bool
+	// createDelay holds liveStreams.insert open, so two pairing requests can overlap in the
+	// test. Zero for every other test.
+	createDelay time.Duration
 }
 
 // verticalFakeKey is the key the fake hands back. It is built from a fixed fragment rather
@@ -49,12 +54,15 @@ func newYTVerticalPairStub(t *testing.T) *ytVerticalPairStub {
 	t.Helper()
 	p := &ytVerticalPairStub{}
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
 		p.calls = append(p.calls, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		p.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
 		case "GET /channels":
 			io.WriteString(w, `{"items":[{"id":"chan-1","snippet":{"title":"Night Owl"}}]}`)
 		case "POST /liveStreams":
+			time.Sleep(p.createDelay)
 			io.WriteString(w, `{"id":"stream-new-vert","snippet":{"title":"polyemesis - Show (vertical)"},
 				"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"`+verticalFakeKey+`",
 				"ingestionAddress":"rtmp://v.example/live2"}}}`)
@@ -77,6 +85,8 @@ func newYTVerticalPairStub(t *testing.T) *ytVerticalPairStub {
 // called reports whether a request with this method and path reached the fake, and returns
 // its raw query string.
 func (p *ytVerticalPairStub) called(method, path string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, c := range p.calls {
 		if strings.HasPrefix(c, method+" "+path+"?") {
 			return strings.TrimPrefix(c, method+" "+path+"?"), true
@@ -342,4 +352,63 @@ func TestConfirmingThePairingStepRecordsItAndRefusesAnUnpairedDestination(t *tes
 		t.Fatal("confirming the pairing step did not record it")
 	}
 	send(t, h, sign, http.MethodPost, "/api/v1/destinations/999999/youtube-vertical/confirm", nil, http.StatusNotFound)
+}
+
+// TestTwoConcurrentPairingsCreateOneVerticalStreamOnYouTube is the low finding on the pair create. The duplicate check
+// and the create were not one step, so two requests that arrived together both passed the check and both created a
+// vertical stream on YouTube. The second pair row then failed and only its destination row was rolled back, leaving an
+// orphan stream on the channel. The guard must stop the second call before it reaches YouTube.
+func TestTwoConcurrentPairingsCreateOneVerticalStreamOnYouTube(t *testing.T) {
+	fake := newYTVerticalPairStub(t)
+	fake.createDelay = 200 * time.Millisecond
+	s, h, store := verticalServer(t, fake.srv.URL)
+	sign := login(t, h)
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid-abc", "secret-xyz"); err != nil {
+		t.Fatalf("seed youtube credentials: %v", err)
+	}
+	acct := connectAccount(t, store, s.box, db.PlatformYouTube, "night-owl")
+	horiz := ytDest(t, store, acct, "Main channel", "key-abc")
+	path := "/api/v1/destinations/" + itoa(horiz.ID) + "/youtube-vertical"
+
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := jsonRequest(t, http.MethodPost, path, map[string]any{"tier": "vertical1080p30"})
+			sign(r)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			statuses <- w.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+
+	var ok, refused int
+	for code := range statuses {
+		switch code {
+		case http.StatusOK:
+			ok++
+		case http.StatusConflict:
+			refused++
+		default:
+			t.Errorf("a concurrent pairing answered %d, want 200 for one and 409 for the other", code)
+		}
+	}
+	if ok != 1 || refused != 1 {
+		t.Errorf("answers: %d ok, %d refused; want exactly one of each", ok, refused)
+	}
+	creates := 0
+	fake.mu.Lock()
+	for _, c := range fake.calls {
+		if strings.HasPrefix(c, "POST /liveStreams?") {
+			creates++
+		}
+	}
+	fake.mu.Unlock()
+	if creates != 1 {
+		t.Errorf("YouTube saw %d liveStreams.insert calls, want 1; a second one leaves an orphan stream on the channel", creates)
+	}
 }

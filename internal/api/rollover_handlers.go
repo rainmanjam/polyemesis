@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
@@ -199,10 +200,15 @@ func (s *Server) handleRunRollover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "no such destination")
+	case errors.Is(err, errRolloverFailed):
+		// The platform answered and refused. The message is already redacted by act.
+		writeError(w, http.StatusBadGateway, err.Error())
 	case err != nil:
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// A failed live-start read reaches here unredacted by act, and its text can carry a platform response body.
+		writeError(w, http.StatusInternalServerError, alerts.Redact(err.Error()))
 	default:
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "rolling over"})
+		// The call is synchronous, so the rollover has finished by the time this answers.
+		writeJSON(w, http.StatusOK, map[string]string{"status": "rolled over"})
 	}
 }
 

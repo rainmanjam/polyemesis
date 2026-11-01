@@ -316,11 +316,32 @@ func (x *X) EntitlementReason() string {
 		"the stream key from X's producer tooling."
 }
 
+// xGateError is what the Livestream family returns while the switch is off. Its
+// text is the gate copy the operator reads, and it names the app's whitelist, not
+// the operator's account. It matches the platform-wide ErrNotEntitled, which the
+// connect warning keys on, and ErrXLivestreamOff, which names the cause.
+type xGateError struct{}
+
+func (xGateError) Error() string {
+	return "Livestream " + xGateCopy + ". Sign-in works without it; paste the stream key from " +
+		"X's producer tooling until the app is whitelisted."
+}
+
+func (xGateError) Is(target error) bool {
+	return target == ErrNotEntitled || target == ErrXLivestreamOff
+}
+
 // CheckEntitlement probes the Livestream family once with the operator's fresh
 // token. It lists the account's stream sources, a read that changes nothing. A
 // 403 or 412 is the gate. Any other failure is reported as a failed probe, never
 // as a gate.
+//
+// While the gate is closed it refuses WITHOUT a request, /2/users/me included,
+// and the refusal is xGateError, which carries the gate copy.
 func (x *X) CheckEntitlement(ctx context.Context, clientID, accessToken string) error {
+	if !x.livestream {
+		return xGateError{}
+	}
 	u, err := x.me(ctx, accessToken)
 	if err != nil {
 		return err
@@ -622,15 +643,18 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 
 // ---------------------------------------------------------------- metadata
 
-// MetadataCaps reports no writable fields. X sets the title (and the chat option)
-// only on the PUBLISH transition, so nothing can change a broadcast that is
-// already running.
+// MetadataCaps reports no writable fields. X is NOT at parity with YouTube on
+// metadata. The Livestream API takes the title and the chat option only on the
+// PUBLISH transition, and it has no endpoint that changes them on a running
+// broadcast; END rejects a title (the Livestream reference at docs.x.com/livestream-api,
+// read 2026-10-31). Nothing here can change a live broadcast.
 func (x *X) MetadataCaps() MetadataCaps {
 	return MetadataCaps{Scope: "broadcast.write"}
 }
 
-// PushMetadata refuses, because X offers no way to change a live broadcast's
-// title. It says so in terms the operator can act on.
+// PushMetadata refuses every change, because X has no way to change a live
+// broadcast's title or chat option (see MetadataCaps). It says so in terms the
+// operator can act on, and it never sends a request.
 func (x *X) PushMetadata(ctx context.Context, clientID, accessToken, accountRef string, m Metadata) (*MetadataResult, error) {
 	return nil, errors.New("X sets the title only when a broadcast goes live: the publish " +
 		"step is the one write that takes one, and no write changes a broadcast that is already " +

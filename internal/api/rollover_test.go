@@ -140,11 +140,17 @@ type fakeYouTube struct {
 	err         error
 	outcome     *oauth.RolloverOutcome
 	sessionFrom time.Time
+	// ctxErr is the context error the platform call saw. A manual run must not hand the platform a context
+	// the browser's disconnect has already cancelled.
+	ctxErr error
+	// startErr makes the live-start read fail, the first platform call a manual run makes.
+	startErr error
 }
 
-func (y *fakeYouTube) RollOverBroadcast(_ context.Context, _ string, req oauth.RolloverRequest) (*oauth.RolloverOutcome, error) {
+func (y *fakeYouTube) RollOverBroadcast(ctx context.Context, _ string, req oauth.RolloverRequest) (*oauth.RolloverOutcome, error) {
 	y.mu.Lock()
 	defer y.mu.Unlock()
+	y.ctxErr = ctx.Err()
 	y.rolls = append(y.rolls, req)
 	if y.err != nil {
 		return nil, y.err
@@ -156,6 +162,9 @@ func (y *fakeYouTube) RollOverBroadcast(_ context.Context, _ string, req oauth.R
 }
 
 func (y *fakeYouTube) RolloverSessionStart(_ context.Context, _, _ string) (time.Time, error) {
+	if y.startErr != nil {
+		return time.Time{}, y.startErr
+	}
 	return y.sessionFrom, nil
 }
 

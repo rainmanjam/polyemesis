@@ -385,6 +385,9 @@ type Server struct {
 	// acctHealth is each connected account's last token-refresh outcome (A5).
 	// The zero value is ready; see account_health.go.
 	acctHealth accountHealthBook
+	// verticalPairs holds the YouTube pairings under way, so two requests cannot both create a vertical stream.
+	// The zero value is ready; see youtube_vertical.go.
+	verticalPairs verticalPairsInFlight
 	// diag is the debug-mode recorder and diagLevel the runtime log level it
 	// moves with. Both nil on a build without debug mode, which the handlers
 	// report as recording:false rather than as a missing route.

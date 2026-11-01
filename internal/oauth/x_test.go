@@ -243,6 +243,17 @@ func TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest(t *testing.T) {
 	if _, err := x.BroadcastState(ctx, "tok", "1ynJOZVeajOJR"); err == nil {
 		t.Error("BroadcastState with the gate off returned no error")
 	}
+	// The connect-time probe is a Livestream-family read too. With the gate off it must refuse without a request, and
+	// its refusal must name the gate, so the connect warning shows the honest copy and not a probe failure.
+	err := x.CheckEntitlement(ctx, "client", "tok")
+	if !errors.Is(err, ErrNotEntitled) || !errors.Is(err, ErrXLivestreamOff) {
+		t.Errorf("CheckEntitlement with the gate off = %v, want it to match ErrNotEntitled and ErrXLivestreamOff", err)
+	}
+	// The connect warning shows Error(). It must name the app's whitelist, and it must not blame the operator's
+	// account for a plan it does not have: the gate is polyemesis's app, not the account.
+	if err != nil && (!strings.Contains(err.Error(), "needs X Livestream access") || strings.Contains(err.Error(), "paid tier") || strings.Contains(err.Error(), "does not have")) {
+		t.Errorf("CheckEntitlement message = %q, want the whitelist gate copy and no account-plan wording", err.Error())
+	}
 	if _, err := x.TransitionBroadcast(ctx, "tok", "1ynJOZVeajOJR", PhaseLive); err == nil {
 		t.Error("TransitionBroadcast with the gate off returned no error")
 	}
@@ -288,6 +299,9 @@ func TestXEntitlementProbeMapsAGateRefusalToNotEntitled(t *testing.T) {
 				}
 				http.Error(w, `{"title":"Forbidden"}`, tc.status)
 			})
+			// The probe only reaches the family with the gate open; with it closed it refuses without a request, which
+			// TestXLivestreamIsSwitchedOffByDefaultAndMakesNoRequest covers. These cases are about the open gate's mapping.
+			x = x.WithLivestreamAccess()
 			err := x.CheckEntitlement(context.Background(), "client", "tok")
 			if got := errors.Is(err, ErrNotEntitled); got != tc.want {
 				t.Errorf("CheckEntitlement(%d) errors.Is(ErrNotEntitled) = %v, want %v (err: %v)",
@@ -306,6 +320,7 @@ func TestXEntitlementProbeSucceedsWhenTheLivestreamFamilyAnswers(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, xEmptySourcesFixture)
 	})
+	x = x.WithLivestreamAccess()
 	if err := x.CheckEntitlement(context.Background(), "client", "tok"); err != nil {
 		t.Fatalf("CheckEntitlement against an answering Livestream family = %v, want nil", err)
 	}

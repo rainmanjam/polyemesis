@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -40,6 +41,9 @@ import (
 // rolloverSweepInterval is how often the sweep looks at every enabled destination. A margin measured in minutes does
 // not need more, and the platform calls it makes are the cost that matters.
 const rolloverSweepInterval = 30 * time.Second
+
+// errRolloverFailed answers a manual run the platform refused. The timeline has the same reason.
+var errRolloverFailed = errors.New("the platform refused the rollover")
 
 // errRolloverTooSoon refuses a manual run inside the debounce after a rollover. The sweep already waits that long, so a
 // manual run is held to the same rule: the broadcast a rollover just created is not rolled over again at once.
@@ -219,7 +223,7 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
 		start, err := c.sessionStart(ctx, d, bid, now)
 		if err != nil {
-			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", err)
+			c.log.Warn("planned rollover: could not read the live start; trying again next sweep", "destination", d.Name, "err", alerts.Redact(err.Error()))
 			return false, err
 		}
 		if start.IsZero() && !force {
@@ -243,8 +247,8 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		}
 		trigger = plan.Trigger
 	}
-	c.act(ctx, d, cfg, bid, trigger, now)
-	return true, nil
+	err = c.act(ctx, d, cfg, bid, trigger, now)
+	return true, err
 }
 
 // sessionStart is the moment the countdown counts from. YouTube reports its own, and a zero answer means it has not
@@ -283,9 +287,10 @@ func (c *rolloverCoordinator) planInput(cfg db.RolloverSettings, p db.Platform, 
 	}
 }
 
-// act carries out one rollover and records and announces the outcome. It never returns an error: a failure is a
-// result, written to the timeline and the webhook, and the sweep goes on to the next destination.
-func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db.RolloverSettings, bid string, trigger oauth.RolloverTrigger, now time.Time) {
+// act carries out one rollover and records and announces the outcome. A failure is written to the timeline, the
+// webhook and the result row, and it is also returned, wrapped in errRolloverFailed, so a manual run can tell the
+// operator. The sweep ignores the return and goes on to the next destination.
+func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db.RolloverSettings, bid string, trigger oauth.RolloverTrigger, now time.Time) error {
 	c.announceEvent(d, d.Platform, hooks.TriggerRolloverStarted, string(trigger))
 
 	var (
@@ -302,19 +307,21 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 	}
 
 	if err != nil {
-		msg := clipDetail(err.Error())
+		// Redacted before it is clipped: a clip can cut a credential in half, and the pattern then misses it.
+		msg := clipDetail(alerts.Redact(err.Error()))
 		if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), "failed: "+msg, now); rerr != nil {
 			c.log.Warn("planned rollover: could not record the failure", "destination", d.Name, "err", rerr)
 		}
 		c.announceEvent(d, d.Platform, hooks.TriggerRolloverFailed, string(trigger)+": "+msg)
 		c.log.Warn("planned rollover failed", "destination", d.Name, "platform", d.Platform, "trigger", trigger, "err", msg)
-		return
+		return fmt.Errorf("%w: %s", errRolloverFailed, msg)
 	}
 	if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), result, now); rerr != nil {
 		c.log.Warn("planned rollover: could not record the result", "destination", d.Name, "err", rerr)
 	}
 	c.announceEvent(d, d.Platform, hooks.TriggerRolloverCompleted, string(trigger)+": "+reason)
 	c.log.Info("planned rollover done", "destination", d.Name, "platform", d.Platform, "trigger", trigger, "result", result)
+	return nil
 }
 
 // rollYouTube replaces the broadcast. The template, when there is one, decides the title, description and privacy;
@@ -459,6 +466,11 @@ func (c *rolloverCoordinator) recordTimeline(d *db.Destination, trigger hooks.Tr
 // RunNow carries out a rollover on one destination when an operator asks for it. It is the same act the sweep runs,
 // without the planner's timing: a manual rollover is wanted now, but it still needs a live destination and an action.
 func (c *rolloverCoordinator) RunNow(ctx context.Context, destinationID int64) error {
+	// The platform calls run on a context the browser cannot cancel. A disconnect between creating the new broadcast
+	// and binding it would otherwise leave a public broadcast with nothing bound to it. The timeout stops a stuck call
+	// from holding rollMu for ever.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), manualRolloverTimeout)
+	defer cancel()
 	cfg, err := c.store.GetRollover(destinationID)
 	if err != nil {
 		return err
@@ -482,6 +494,9 @@ func (c *rolloverCoordinator) RunNow(ctx context.Context, destinationID int64) e
 	}
 	return nil
 }
+
+// manualRolloverTimeout bounds one operator-triggered rollover, end to end, however long the browser stays connected.
+const manualRolloverTimeout = 5 * time.Minute
 
 var (
 	errRolloverNotLive  = errors.New("the destination is not delivering, so there is no live broadcast to roll over")
