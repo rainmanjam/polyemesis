@@ -46,7 +46,7 @@ import { goLiveRows, youtubeBroadcastsAtRisk, type GoLiveRow } from "@/lib/goLiv
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { setupChecklist } from "@/lib/setupChecklist";
 import { DestinationCard } from "@/components/DestinationCard";
-import { primaryDestinations, verticalHalfOf } from "@/lib/youtubeVertical";
+import { primaryDestinations, reorderCards, verticalHalfOf } from "@/lib/youtubeVertical";
 import { DestinationHoldNote } from "@/components/DestinationHoldNote";
 import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
@@ -1659,20 +1659,15 @@ export function Dashboard() {
 
   const move = async (id: DestinationId, delta: -1 | 1) => {
     // Swaps with the neighbouring CARD, stepping over any vertical half between
-    // them, so an arrow never does nothing. The saved order keeps every row.
-    const ids = destinations.map((d) => d.id);
-    const cards = primaryDestinations(destinations).map((d) => d.id);
-    const from = cards.indexOf(id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= cards.length) return;
-    const a = ids.indexOf(cards[from]);
-    const b = ids.indexOf(cards[to]);
-    [ids[a], ids[b]] = [ids[b], ids[a]];
+    // them (reorderCards), so an arrow never does nothing. The saved order keeps every row.
+    const ids = reorderCards(destinations, id, delta);
+    if (!ids) return;
+    const cards = primaryDestinations(destinations);
+    const to = cards.findIndex((d) => d.id === id) + delta;
+    const name = destinations.find((d) => d.id === id)?.name ?? "";
 
     setPending(ids);
-    setMoveNote(
-      `${destinations[a].name} moved to position ${to + 1} of ${cards.length}.`,
-    );
+    setMoveNote(`${name} moved to position ${to + 1} of ${cards.length}.`);
     try {
       await api.reorderDestinations(ids);
     } catch (err) {

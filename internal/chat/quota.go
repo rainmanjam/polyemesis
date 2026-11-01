@@ -329,6 +329,16 @@ func (b *budget) intervalFor(apiInterval time.Duration, idle float64) (time.Dura
 	return d, true
 }
 
+// allowRead reports whether a read of this cost fits after the send reserve. It is
+// affordable(), which is what the chat poll paces against, so a read made from outside the
+// poll loop cannot spend the units held back for sending and moderation.
+func (b *budget) allowRead(cost int) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.rollLocked()
+	return b.affordable(cost) >= 1
+}
+
 // allow reports whether a call of this cost still fits, ignoring the read
 // reserve. Sending is what the reserve exists for, so it spends into it.
 func (b *budget) allow(cost int) bool {

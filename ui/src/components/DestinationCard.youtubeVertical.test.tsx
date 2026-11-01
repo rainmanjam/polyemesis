@@ -53,6 +53,17 @@ describe("a YouTube pair on one card", () => {
     expect(screen.getByTestId("youtube-vertical-subrow")).toBeTruthy();
   });
 
+  it("anchors the sub-row as dest-<verticalId>, so a failed half can be revealed", () => {
+    draw(
+      base({ youtubeVertical: { verticalId: 2 as DestStatus["id"], pairingConfirmed: true } }),
+      base({ id: 2 as DestStatus["id"], name: "YouTube main (vertical)", verticalHalfOf: 1 as DestStatus["id"] }),
+    );
+    const anchor = document.getElementById("dest-2");
+    expect(anchor).not.toBeNull();
+    expect(anchor?.getAttribute("data-testid")).toBe("youtube-vertical-subrow");
+    expect(anchor?.tabIndex).toBe(-1);
+  });
+
   it("keeps the reminder on the card until the Live Control Room step is confirmed", () => {
     draw(base({ youtubeVertical: { verticalId: 2 as DestStatus["id"], pairingConfirmed: false } }));
     expect(screen.getByTestId("youtube-vertical-reminder")).toBeTruthy();

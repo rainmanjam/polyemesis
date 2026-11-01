@@ -38,6 +38,11 @@ export function YouTubeVerticalSubRow({
 
   return (
     <div
+      // The attention list and the on-air bar reveal a failed half by `dest-<id>`, and the
+      // vertical half's own row is not drawn, so this is the anchor they land on. tabIndex -1
+      // lets reveal() focus it without making it a tab stop.
+      id={`dest-${vertical.id}`}
+      tabIndex={-1}
       className="mt-2 flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2"
       data-testid="youtube-vertical-subrow"
       data-vertical-id={vertical.id}

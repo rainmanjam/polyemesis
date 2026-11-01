@@ -79,7 +79,7 @@ its first tagged release.
   the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
   and a failed read stays on that half. The status read is paced to one YouTube call a
   minute per pair, and only while one of its halves is live (correction 6 of the YouTube
-  truth sheet). The pairing is charged to the chat quota budget.
+  truth sheet). Each status read is charged to the chat quota budget and stops at its send reserve.
 - **YouTube vertical in the console (#7; PROVISIONAL).** A YouTube destination offers a
   "YouTube vertical" section in its dialog. It picks one of two 9:16 tiers, adds the
   vertical half, and walks the one-time Live Control Room steps with a confirm button. The

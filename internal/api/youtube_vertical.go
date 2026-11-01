@@ -271,11 +271,20 @@ func (s *Server) verticalChargeOK(accountRef string) bool {
 	if !ok {
 		return true
 	}
-	y, ok := a.(*chat.YouTubeAdapter)
+	// An interface, not the concrete *chat.YouTubeAdapter: the hub hands back whatever it
+	// attached, and a wrapped adapter that still paces must be charged too. A type assertion on
+	// the concrete type would fail silently and charge nothing.
+	c, ok := a.(quotaChargeable)
 	if !ok {
 		return true
 	}
-	return y.ChargeQuota(chat.QuotaCostListLiveStreams)
+	return c.ChargeQuota(chat.QuotaCostListLiveStreams)
+}
+
+// quotaChargeable is what the vertical read needs from a chat adapter that paces against a
+// YouTube allowance. chat.YouTubeAdapter satisfies it; an adapter that does not pace does not.
+type quotaChargeable interface {
+	ChargeQuota(cost int) bool
 }
 
 // handleYouTubeVerticalStatus reads the vertical half's health by stream id. It is paced and

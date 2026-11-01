@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  reorderCards,
   YOUTUBE_VERTICAL_POLL_MS,
   YOUTUBE_VERTICAL_TIERS,
   primaryDestinations, unconfirmedVerticalPairs, verticalHalfOf } from "./youtubeVertical";
@@ -54,5 +55,30 @@ describe("a vertical half is one card, not a second one", () => {
     const confirmed = row({ id: 4, youtubeVertical: { verticalId: id(5), pairingConfirmed: true } });
     expect(unconfirmedVerticalPairs([horiz, confirmed, other])).toBe(1);
     expect(unconfirmedVerticalPairs([other])).toBe(0);
+  });
+});
+
+describe("a move arrow steps over a vertical half", () => {
+  // Saved order is [card 1, its vertical half 11, card 2]. The half is not a step.
+  const one = row({ id: 1, youtubeVertical: { verticalId: id(11), pairingConfirmed: true } });
+  const half = row({ id: 11, verticalHalfOf: id(1) });
+  const two = row({ id: 2 });
+  const all = [one, half, two];
+
+  it("swaps a card with the next card, past the vertical half, and keeps the half", () => {
+    expect(reorderCards(all, id(1), 1)).toEqual([id(2), id(11), id(1)]);
+  });
+
+  it("swaps back the other way", () => {
+    expect(reorderCards(all, id(2), -1)).toEqual([id(2), id(11), id(1)]);
+  });
+
+  it("answers null when the move runs off the first or last card", () => {
+    expect(reorderCards(all, id(1), -1)).toBeNull();
+    expect(reorderCards(all, id(2), 1)).toBeNull();
+  });
+
+  it("answers null for a row that is not a card (a vertical half has no arrows)", () => {
+    expect(reorderCards(all, id(11), 1)).toBeNull();
   });
 });

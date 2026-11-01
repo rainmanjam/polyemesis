@@ -28,6 +28,22 @@ export function verticalHalfOf(dest: DestStatus, dests: DestStatus[]): DestStatu
   return dests.find((d) => d.id === id);
 }
 
+/** The order a move arrow saves (#7). The card at `id` swaps places with its neighbouring card in
+ *  `delta`'s direction. A vertical half between the two cards does not count as a step, so the arrow
+ *  never does nothing, and every row keeps its place in the saved list. Null when the move runs off
+ *  the list. Takes the full list, because that is what the server is told. */
+export function reorderCards(all: DestStatus[], id: DestinationId, delta: -1 | 1): DestinationId[] | null {
+  const ids = all.map((d) => d.id);
+  const cards = primaryDestinations(all).map((d) => d.id);
+  const from = cards.indexOf(id);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= cards.length) return null;
+  const a = ids.indexOf(cards[from]);
+  const b = ids.indexOf(cards[to]);
+  [ids[a], ids[b]] = [ids[b], ids[a]];
+  return ids;
+}
+
 /** How many horizontal pairs still lack the one-time Live Control Room step.
  *  The go-live sheet reads this to remind the operator until it is confirmed. */
 export function unconfirmedVerticalPairs(dests: DestStatus[]): number {

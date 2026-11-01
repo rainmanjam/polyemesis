@@ -665,7 +665,7 @@ func (y *YouTubeAdapter) ChargeQuota(cost int) bool {
 	if y == nil || y.budget == nil {
 		return true
 	}
-	if !y.budget.allow(cost) {
+	if !y.budget.allowRead(cost) {
 		return false
 	}
 	y.budget.spend(cost)

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
@@ -280,6 +282,7 @@ func verticalServer(t *testing.T, base string) (*Server, http.Handler, *db.DB) {
 		Log: quiet, Config: cfg, DB: store, Secrets: box,
 		Engine: eng, Events: bus, Version: "test",
 		Providers: oauth.NewSet(oauth.WithBaseURL(base)),
+		Chat:      chat.New(),
 	})
 	// The status read goes out only while a half is running (#7, correction 6). The engine
 	// here has nothing running, so the seam says a half is up; the tests that need the gate
@@ -535,5 +538,52 @@ func TestPairedStatusPayloadLinksTheTwoHalves(t *testing.T) {
 	}
 	if !vert {
 		t.Fatalf("the vertical row does not name the horizontal it belongs to: %s", body)
+	}
+}
+
+// TestVerticalStatusReadIsRefusedByTheRealYouTubeAdapterWhenItsBudgetIsSpent pins that the
+// status read reaches the quota pacer on the hub, not only the seam. A real chat adapter is
+// attached to the server's own hub with a one-unit allowance. Its discovery loop spends that unit
+// before the chat token is even used, so the budget is spent by the time the status read runs. The
+// read must then be refused, and YouTube must see no liveStreams read at all. Without the charge
+// the read would go out, and this test would fail.
+func TestVerticalStatusReadIsRefusedByTheRealYouTubeAdapterWhenItsBudgetIsSpent(t *testing.T) {
+	s, h, store, sign, fake, id := verticalCreate(t)
+	dest, err := store.GetDestination(id)
+	if err != nil || dest.AccountID == nil {
+		t.Fatalf("read the horizontal destination: %v", err)
+	}
+	acct, err := s.tokenFor(context.Background(), *dest.AccountID)
+	if err != nil {
+		t.Fatalf("read the account: %v", err)
+	}
+	noChatToken := func(context.Context) (string, error) { return "", errors.New("no chat token in this test") }
+	yt, err := chat.NewYouTube(chat.YouTubeConfig{
+		AccountRef: acct.AccountRef, Channel: acct.AccountName, Token: noChatToken,
+		APIBase: fake.srv.URL, QuotaUnits: 1, QuotaReserve: 0,
+		Sleep: func(ctx context.Context, _ time.Duration) bool { <-ctx.Done(); return false },
+	})
+	if err != nil {
+		t.Fatalf("new chat adapter: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := s.chat.Attach(ctx, yt); err != nil {
+		t.Fatalf("attach to the server's hub: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for yt.Health().Quota == nil || yt.Health().Quota.Used < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the attached adapter never spent its one unit, so the budget was not exhausted")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	before := fake.countCalls("GET /liveStreams?")
+	body := send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	if got := fake.countCalls("GET /liveStreams?") - before; got != 0 {
+		t.Fatalf("a status read against a spent budget still reached YouTube %d times", got)
+	}
+	if !strings.Contains(string(body), "quota") {
+		t.Fatalf("the refused read does not say why: %s", body)
 	}
 }
