@@ -188,6 +188,11 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			return
 		}
 
+		if s.templateCreateHeld(d.ID, sc.ID, now) {
+			// A recent refusal for this destination and schedule. The slot is counted, so the walk does
+			// not reach further ahead to fill it, and nothing calls the platform until the hold ends.
+			continue
+		}
 		b, ok := s.createTemplateEvent(ctx, ed, tpl, sc, d, at, now)
 		if ok && strings.TrimSpace(d.StreamKey) == "" && b.Ingest.Key != "" {
 			// The first create in this walk minted the destination's stream. The next one must be handed the same
@@ -264,7 +269,9 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		// The platform's reason is kept on the template, redacted, so the operator sees a limit in the
 		// screen and not only in the log. The log line below is still written once per run of failures.
 		_ = s.store.RecordBroadcastTemplateError(sc.ID, alerts.Redact(err.Error()), time.Now())
-		if s.noteAnnounceFailure(d.ID, sc.ID) == 1 {
+		n := s.noteAnnounceFailure(d.ID, sc.ID)
+		s.holdTemplateCreate(d.ID, sc.ID, now.Add(templateCreateBackoff(n, err)))
+		if n == 1 {
 			s.log.Warn("recurring: could not create the event for an occurrence; further identical "+
 				"failures for this show will not be logged until one succeeds",
 				"destination", d.Name, "schedule", sc.Name, "err", redactErr(err))
@@ -342,10 +349,54 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 		return nil, false
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
+	s.holdTemplateCreate(d.ID, sc.ID, time.Time{})
 	_ = s.store.ClearBroadcastTemplateError(sc.ID)
 	s.log.Info("recurring: created an event for an upcoming occurrence",
 		"destination", d.Name, "schedule", sc.Name, "at", at, "event", b.ID)
 	return b, true
+}
+
+// templateCreateBackoffMax caps the wait between creates after refusals, and is the whole wait when YouTube says
+// the channel is at its cap on upcoming broadcasts, which no retry lifts.
+const templateCreateBackoffMax = 6 * time.Hour
+
+// templateCreateBackoff is how long a destination's template creates wait after the n-th consecutive refusal:
+// one tick, doubling, up to templateCreateBackoffMax. Before this a refusal was retried on every five-minute tick,
+// 288 times a day per occurrence, at about 50 quota units each, and a destination with an ingest of its own gained
+// another unused stream on every try.
+func templateCreateBackoff(n int, err error) time.Duration {
+	if errors.Is(err, oauth.ErrUpcomingBroadcastLimit) {
+		return templateCreateBackoffMax
+	}
+	wait := recurringTick
+	for i := 1; i < n && wait < templateCreateBackoffMax; i++ {
+		wait *= 2
+	}
+	return min(wait, templateCreateBackoffMax)
+}
+
+// holdTemplateCreate sets when the next create for this destination and schedule may be tried. The zero time
+// clears it.
+func (s *Server) holdTemplateCreate(destID, scheduleID int64, until time.Time) {
+	s.preannounceMu.Lock()
+	defer s.preannounceMu.Unlock()
+	k := announceFailKey(destID, scheduleID)
+	if until.IsZero() {
+		delete(s.templateCreateHolds, k)
+		return
+	}
+	if s.templateCreateHolds == nil {
+		s.templateCreateHolds = map[showKey]time.Time{}
+	}
+	s.templateCreateHolds[k] = until
+}
+
+// templateCreateHeld reports whether a create for this destination and schedule must wait.
+func (s *Server) templateCreateHeld(destID, scheduleID int64, now time.Time) bool {
+	s.preannounceMu.Lock()
+	defer s.preannounceMu.Unlock()
+	until, ok := s.templateCreateHolds[announceFailKey(destID, scheduleID)]
+	return ok && now.Before(until)
 }
 
 // templatePrivacy is the privacy an occurrence's event is written with: the STRICTER of the template's and the

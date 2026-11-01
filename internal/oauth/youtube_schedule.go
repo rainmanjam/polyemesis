@@ -507,6 +507,10 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 // The refusal is documented at TRANSITION rather than at create, so reaching it
 // here would be a surprise; it is handled anyway because a surprise that reads
 // as a generic 403 is how an operator ends up debugging their own credentials.
+// ErrUpcomingBroadcastLimit marks a create YouTube refused with userBroadcastsExceedLimit: the channel's cap on live
+// and scheduled broadcasts, whose number YouTube does not publish (docs-youtube B28).
+var ErrUpcomingBroadcastLimit = errors.New("YouTube's cap on upcoming broadcasts, whose number it does not publish")
+
 func ytBroadcastCreateAdvice(err error) error {
 	// The WHOLE body, not the display snippet: the reason code YouTube
 	// returns sits past snippet()'s cut in a realistic refusal. See adviceBody.
@@ -520,6 +524,11 @@ func ytBroadcastCreateAdvice(err error) error {
 		return fmt.Errorf("%w — YouTube refused the start time this show was scheduled for. "+
 			"polyemesis sends it as RFC 3339 in UTC and enforces no limit of its own, because "+
 			"YouTube publishes none to enforce", err)
+	case strings.Contains(msg, "userBroadcastsExceedLimit"):
+		// docs-youtube B28: the cap exists and its number is not published. Retrying does not lift it, so the
+		// error carries ErrUpcomingBroadcastLimit and the caller backs off instead of trying every sweep.
+		return fmt.Errorf("%w — this channel has as many live and scheduled broadcasts as YouTube allows "+
+			"(%w); end or delete some on the channel, or lower the template's look-ahead", err, ErrUpcomingBroadcastLimit)
 	case strings.Contains(msg, "concurrentBroadcastsExceedLimit"),
 		strings.Contains(msg, "sharedIngestionBroadcastsExceedLimit"):
 		return fmt.Errorf("%w — this channel already has YouTube's maximum number of concurrent "+

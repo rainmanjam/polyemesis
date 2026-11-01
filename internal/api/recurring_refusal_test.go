@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
 
@@ -155,6 +157,7 @@ func TestALookaheadCreateFailureIsKeptOnTheTemplateUntilTheNextSuccess(t *testin
 	}
 
 	f.fake.ingestErr = nil
+	f.now = f.now.Add(time.Hour) // past the backoff the refusal set
 	f.sweep(t)
 	tpl, err = f.store.GetBroadcastTemplate(f.schedule)
 	if err != nil {
@@ -162,5 +165,53 @@ func TestALookaheadCreateFailureIsKeptOnTheTemplateUntilTheNextSuccess(t *testin
 	}
 	if tpl.LastError != "" {
 		t.Fatalf("template LastError = %q after a successful create, want it cleared", tpl.LastError)
+	}
+}
+
+// A refused create is not retried on every five-minute tick. Each refusal doubles the wait before the next try, and
+// YouTube's cap on upcoming broadcasts (userBroadcastsExceedLimit, docs-youtube B28), which no retry lifts, waits the
+// longest. Before this a refusal was retried 288 times a day per occurrence, each one spending quota and, for a
+// destination with an ingest of its own, creating another unused stream.
+func TestARefusedLookaheadCreateBacksOffInsteadOfRetryingEveryTick(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	f.fake.ingestErr = errors.New("refused")
+	tries := func() int {
+		f.fake.mu.Lock()
+		defer f.fake.mu.Unlock()
+		return f.fake.nextID
+	}
+
+	f.sweep(t)
+	if n := tries(); n != 1 {
+		t.Fatalf("first sweep tried %d creates, want 1: the second occurrence waits behind the first refusal", n)
+	}
+	f.now = f.now.Add(recurringTick)
+	f.sweep(t) // one tick later: the first wait is over
+	if n := tries(); n != 2 {
+		t.Fatalf("after one tick: %d tries, want 2", n)
+	}
+	f.now = f.now.Add(recurringTick)
+	f.sweep(t) // the second refusal doubled the wait, so this tick is still held
+	if n := tries(); n != 2 {
+		t.Fatalf("one tick after the second refusal: %d tries, want still 2", n)
+	}
+	f.now = f.now.Add(recurringTick)
+	f.sweep(t)
+	if n := tries(); n != 3 {
+		t.Fatalf("two ticks after the second refusal: %d tries, want 3", n)
+	}
+}
+
+func TestTheUpcomingBroadcastCapWaitsTheLongestBackoff(t *testing.T) {
+	capped := fmt.Errorf("refused (%w)", oauth.ErrUpcomingBroadcastLimit)
+	if got := templateCreateBackoff(1, capped); got != templateCreateBackoffMax {
+		t.Fatalf("cap backoff = %s, want %s", got, templateCreateBackoffMax)
+	}
+	if got := templateCreateBackoff(1, errors.New("x")); got != recurringTick {
+		t.Fatalf("first refusal backoff = %s, want one tick", got)
+	}
+	if got := templateCreateBackoff(40, errors.New("x")); got != templateCreateBackoffMax {
+		t.Fatalf("many refusals backoff = %s, want the cap %s", got, templateCreateBackoffMax)
 	}
 }

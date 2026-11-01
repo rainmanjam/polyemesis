@@ -631,6 +631,9 @@ type Server struct {
 	// In memory on purpose: a restart resetting the count only means the sweep
 	// is more patient, which is the safe direction.
 	announceFails map[showKey]int
+	// templateCreateHolds is when a recurring template's next platform create for a destination may be tried,
+	// after a refusal (recurring.go, templateCreateBackoff). Guarded by preannounceMu.
+	templateCreateHolds map[showKey]time.Time
 
 	// auditSink diverts audit events instead of publishing them, and is set
 	// only by tests.
