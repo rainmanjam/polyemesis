@@ -142,6 +142,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.profile.tracks.track":               sPublic,
 	"destination.renditionId":                        sPublic,
 	"destination.delaySeconds":                       sPublic,
+	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,
@@ -387,6 +388,7 @@ var leafSensitivity = map[string]sensitivity{
 	"source.createdAt":                             sPublic,
 	"source.enabled":                               sPublic,
 	"source.id":                                    sPublic,
+	"source.captionTrack":                          sPublic, // which routed track feeds the live captions
 	"source.ingest.annotations.denoise":            sPublic,
 	"source.ingest.annotations.label":              sPublic,
 	"source.ingest.annotations.language":           sPublic,
