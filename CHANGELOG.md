@@ -642,6 +642,16 @@ its first tagged release.
 
 ### Changed
 
+- **YouTube captions by HTTP POST: the delay is applied once, by YouTube (#8).** A YouTube
+  destination on *caption ingestion (HTTP POST)* still needs a 30 s or 60 s delay, and it is
+  still sent as the broadcast's `broadcastStreamDelayMs`. polyemesis no longer holds that
+  destination's output back as well, so viewers are about 30 or 60 seconds behind instead of
+  about 60 or 120. Each caption is posted as soon as it is recognised, stamped with the moment
+  its words were spoken, which is when the matching video reached YouTube (PROVISIONAL: YouTube
+  does not document the stamp's clock). Changing such a destination's delay between 30 s and 60 s
+  no longer restarts its output; switching a delayed YouTube destination to or from this route
+  does, because the delay moves, and the editor says so. The card still shows the delay. Stop
+  airs no delayed tail from polyemesis on this route. In all 15 languages.
 - **Routing has one save model (app-council A26, A27).** Every edit, mute and
   gain included, now waits for Save changes in a single bottom bar with
   Discard; mute and gain no longer apply the moment they move, and the header
@@ -1001,8 +1011,9 @@ its first tagged release.
 - **The caption picker no longer says a route changes nothing on air (#8).** It says captions go
   out only for a route that is on, that a live destination must be stopped to change its route,
   and, only for a change that adds or removes the in-stream (SEI) route, that the save restarts
-  an enabled destination. A change between off and YouTube's HTTP POST restarts nothing, so it
-  shows no restart warning. In all 15 languages.
+  an enabled destination. A change between off and YouTube's HTTP POST restarts nothing when the
+  destination has no delay; with a delay it moves the delay between polyemesis and YouTube, and
+  the picker says the save restarts the output. In all 15 languages.
 - **A tier that burns captions in now starts the captioner on its own (#8).** Burn-in is how a
   platform with no caption route gets captions, so a programme whose only caption demand is a
   burned-in tier used by an enabled destination now runs the captioner. A tier that starts while

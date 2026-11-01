@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick nie dokumentuje obsługi napisów, dlatego nie są one dla niego oferowane.",
   "wave3.captions.provisional": "Wstępne: ten tryb nie został jeszcze potwierdzony na żywej platformie.",
   "wave3.captions.delayNote": "Przyjmowanie napisów YouTube wymaga opóźnienia emisji 30 s lub 60 s. Ustaw opóźnienie tego miejsca docelowego albo użyj trybu w strumieniu.",
+  "wave3.captions.postDelayYouTube": "YouTube stosuje to opóźnienie {seconds} s do transmisji. polyemesis wysyła ten cel bez opóźnienia, więc widzowie są {seconds} s w tyle, a nie dwa razy tyle.",
+  "wave3.captions.changeMovesDelay": "Ta zmiana przenosi opóźnienie tego celu między polyemesis a YouTube, więc zapisanie jej uruchomi ponownie wyjście celu, jeśli jest włączony.",
   "wave3.captions.facebookSwitch": "Napisy Facebooka pozostają wyłączone, dopóki serwer nie zostanie uruchomiony z POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "Napisy są wysyłane razem ze strumieniem tego celu, dopóki działa generator napisów na żywo.",
   "wave3.captions.changeNeedsStop": "Aby zmienić drogę napisów celu nadającego na żywo, najpierw go zatrzymaj.",

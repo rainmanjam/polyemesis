@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick은 자막 지원을 문서화하지 않아 이 플랫폼에는 자막을 제공하지 않습니다.",
   "wave3.captions.provisional": "잠정: 이 방식은 아직 실제 라이브 플랫폼에서 확인되지 않았습니다.",
   "wave3.captions.delayNote": "YouTube 자막 수집에는 30초 또는 60초 방송 지연이 필요합니다. 이 대상의 지연을 설정하거나 스트림 내 방식을 쓰세요.",
+  "wave3.captions.postDelayYouTube": "YouTube가 이 {seconds}초 지연을 방송에 적용합니다. polyemesis는 이 대상을 지연 없이 보내므로 시청자는 그 두 배가 아니라 {seconds}초 뒤처집니다.",
+  "wave3.captions.changeMovesDelay": "이 변경은 이 대상의 지연을 polyemesis와 YouTube 사이에서 옮기므로, 대상이 켜져 있으면 저장할 때 출력이 다시 시작됩니다.",
   "wave3.captions.facebookSwitch": "Facebook 자막은 서버를 POLYEMESIS_CAPTIONS_FACEBOOK=1로 시작하기 전까지 꺼져 있습니다.",
   "wave3.captions.onAir": "실시간 자막 생성기가 실행되는 동안 자막이 이 대상의 스트림과 함께 전송됩니다.",
   "wave3.captions.changeNeedsStop": "라이브 중인 대상의 자막 경로를 바꾸려면 먼저 중지하세요.",

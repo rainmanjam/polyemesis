@@ -338,6 +338,28 @@ const (
 // internal/delayline, which is provisioned for exactly this.
 const MaxDestDelaySeconds = 15 * 60
 
+// OutputDelaySeconds is how long polyemesis itself holds this destination's
+// output back: the delay line the engine builds, and the delay its caption cues
+// wait for.
+//
+// It is DelaySeconds for every destination but one kind. A YouTube destination
+// that posts captions by HTTP POST must have a 30 s or 60 s broadcast delay, and
+// that delay is YouTube's: polyemesis sends it as the broadcast's
+// broadcastStreamDelayMs, and YouTube holds the viewers back by it while it
+// lines the posted captions up. Holding the output back here as well would put
+// viewers twice the delay behind, so for that destination this is 0. DelaySeconds
+// is still the configured value everywhere that says how far behind the viewers
+// are: the card, the events and the alert watcher.
+func (d *Destination) OutputDelaySeconds() int {
+	if d == nil {
+		return 0
+	}
+	if d.Platform == PlatformYouTube && captions.Mode(d.CaptionMode) == captions.ModeYouTubePOST {
+		return 0
+	}
+	return d.DelaySeconds
+}
+
 // Resilience bounds.
 const (
 	MinDestBackoffSeconds = 1

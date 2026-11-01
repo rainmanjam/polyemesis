@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick non documenta il supporto ai sottotitoli, quindi non vengono offerti per questa piattaforma.",
   "wave3.captions.provisional": "Provvisoria: questa via non è ancora confermata su una piattaforma in diretta.",
   "wave3.captions.delayNote": "L'ingestione sottotitoli YouTube richiede un ritardo di trasmissione di 30 s o 60 s. Imposta il ritardo per questa destinazione o usa la via nel flusso.",
+  "wave3.captions.postDelayYouTube": "YouTube applica questo ritardo di {seconds} s alla trasmissione. polyemesis invia questa destinazione senza ritardo, quindi gli spettatori sono indietro di {seconds} s, non del doppio.",
+  "wave3.captions.changeMovesDelay": "Questa modifica sposta il ritardo di questa destinazione tra polyemesis e YouTube, quindi salvarla riavvia l'uscita della destinazione se è attiva.",
   "wave3.captions.facebookSwitch": "I sottotitoli Facebook restano disattivati finché il server non viene avviato con POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "I sottotitoli escono con lo stream di questa destinazione mentre il sottotitolatore dal vivo è attivo.",
   "wave3.captions.changeNeedsStop": "Per cambiare il percorso dei sottotitoli di una destinazione in diretta, fermala prima.",

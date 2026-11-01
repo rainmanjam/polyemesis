@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick 未提供字幕支持文档，因此不为其提供字幕。",
   "wave3.captions.provisional": "临时：此通道尚未在实际直播平台上确认。",
   "wave3.captions.delayNote": "YouTube 字幕接收需要 30 秒或 60 秒的广播延迟。请为此目标设置延迟，或改用流内通道。",
+  "wave3.captions.postDelayYouTube": "此 {seconds} 秒延迟由 YouTube 应用于直播。polyemesis 不延迟地发送此目标，因此观众落后 {seconds} 秒，而不是两倍。",
+  "wave3.captions.changeMovesDelay": "此更改会在 polyemesis 与 YouTube 之间转移此目标的延迟，因此若目标已启用，保存后会重启其输出。",
   "wave3.captions.facebookSwitch": "在服务器以 POLYEMESIS_CAPTIONS_FACEBOOK=1 启动之前，Facebook 字幕保持关闭。",
   "wave3.captions.onAir": "实时字幕运行期间，字幕会随此目标的推流一起发送。",
   "wave3.captions.changeNeedsStop": "要更改正在直播的目标的字幕路径，请先停止它。",

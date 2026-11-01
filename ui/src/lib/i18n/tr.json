@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick altyazı desteğini belgelemediği için bu platform için altyazı sunulmaz.",
   "wave3.captions.provisional": "Geçici: bu yol henüz canlı bir platformda doğrulanmadı.",
   "wave3.captions.delayNote": "YouTube altyazı alımı 30 sn veya 60 sn yayın gecikmesi gerektirir. Bu hedefin gecikmesini ayarlayın ya da yayın içi yolu kullanın.",
+  "wave3.captions.postDelayYouTube": "YouTube bu {seconds} sn gecikmeyi yayına uygular. polyemesis bu hedefi gecikmesiz gönderir, bu yüzden izleyiciler iki katı değil {seconds} sn geride olur.",
+  "wave3.captions.changeMovesDelay": "Bu değişiklik bu hedefin gecikmesini polyemesis ile YouTube arasında taşır, bu yüzden kaydetmek hedef etkinse çıkışını yeniden başlatır.",
   "wave3.captions.facebookSwitch": "Facebook altyazıları, sunucu POLYEMESIS_CAPTIONS_FACEBOOK=1 ile başlatılana kadar kapalı kalır.",
   "wave3.captions.onAir": "Canlı altyazı çalıştığı sürece altyazılar bu hedefin yayınıyla birlikte gider.",
   "wave3.captions.changeNeedsStop": "Canlı bir hedefin altyazı yolunu değiştirmek için önce onu durdurun.",

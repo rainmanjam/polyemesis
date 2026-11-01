@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "A Kick não documenta suporte a legendas, então elas não são oferecidas para ela.",
   "wave3.captions.provisional": "Provisória: esta via ainda não foi confirmada em uma plataforma ao vivo.",
   "wave3.captions.delayNote": "A ingestão de legendas do YouTube exige atraso de transmissão de 30 s ou 60 s. Defina o atraso deste destino ou use a via no stream.",
+  "wave3.captions.postDelayYouTube": "O YouTube aplica este atraso de {seconds} s à transmissão. O polyemesis envia este destino sem atraso, então os espectadores ficam {seconds} s atrás, não o dobro.",
+  "wave3.captions.changeMovesDelay": "Esta mudança move o atraso deste destino entre o polyemesis e o YouTube, então salvá-la reinicia a saída do destino se ele estiver ativado.",
   "wave3.captions.facebookSwitch": "As legendas do Facebook ficam desligadas até o servidor iniciar com POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "As legendas saem com a transmissão deste destino enquanto o legendador ao vivo estiver em execução.",
   "wave3.captions.changeNeedsStop": "Para mudar a rota de legendas de um destino ao vivo, pare-o primeiro.",

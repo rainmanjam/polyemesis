@@ -72,6 +72,33 @@ describe("CaptionModeControl", () => {
     expect(screen.getByText(en["wave3.captions.delayNote"])).toBeTruthy();
   });
 
+  // MUTATION: the postDelayYouTube note dropped. Observed: FAIL, nothing said
+  // who applies the delay.
+  it("says YouTube applies a met 30 s or 60 s delay, so viewers are not twice it behind", () => {
+    render(<CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={60} />);
+    expect(screen.getByTestId("caption-post-delay").textContent).toBe(
+      en["wave3.captions.postDelayYouTube"].replaceAll("{seconds}", "60"),
+    );
+  });
+
+  // MUTATION: the output-delay comparison dropped from the restart note.
+  // Observed: FAIL, no restart was announced when the delay moved.
+  it("warns that switching a delayed YouTube destination to or from caption POST restarts it", () => {
+    const { rerender } = render(
+      <CaptionModeControl platform="youtube" value="youtube_post" storedMode="off" onChange={() => {}} delaySeconds={30} />,
+    );
+    expect(screen.getByTestId("caption-change-moves-delay")).toBeTruthy();
+    rerender(
+      <CaptionModeControl platform="youtube" value="off" storedMode="youtube_post" onChange={() => {}} delaySeconds={30} />,
+    );
+    expect(screen.getByTestId("caption-change-moves-delay")).toBeTruthy();
+    // No delay to move: nothing restarts.
+    rerender(
+      <CaptionModeControl platform="youtube" value="off" storedMode="youtube_post" onChange={() => {}} delaySeconds={0} />,
+    );
+    expect(screen.queryByTestId("caption-change-moves-delay")).toBeNull();
+  });
+
   it("does not ask for a delay once the delay is 30 s or 60 s", () => {
     render(<CaptionModeControl platform="youtube" value="youtube_post" onChange={() => {}} delaySeconds={60} />);
     expect(screen.queryByText(en["wave3.captions.delayNote"])).toBeNull();

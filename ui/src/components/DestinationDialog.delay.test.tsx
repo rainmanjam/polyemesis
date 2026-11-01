@@ -57,6 +57,18 @@ describe("the broadcast delay in the destination editor", () => {
     expect(screen.getByTestId("delay-restart-warning").textContent).toContain("120 s");
   });
 
+  // YouTube holds a caption POST destination's delay (broadcastStreamDelayMs), so
+  // changing it moves nothing in polyemesis's output and restarts nothing here.
+  // MUTATION: the warning comparing the configured delay again. Observed: FAIL,
+  // the restart warning was shown.
+  it("does not warn of a restart when a YouTube caption POST destination's delay changes", async () => {
+    open(stored({ platform: "youtube", captionMode: "youtube_post" }));
+    const input = (await waitFor(() => document.getElementById("dest-delay"))) as HTMLInputElement;
+    expect(input.value).toBe("30");
+    fireEvent.change(input, { target: { value: "60" } });
+    expect(screen.queryByTestId("delay-restart-warning")).toBeNull();
+  });
+
   it("clamps the delay to the agreed fifteen minutes", async () => {
     open(stored({ enabled: false }));
     const input = (await waitFor(() => document.getElementById("dest-delay"))) as HTMLInputElement;

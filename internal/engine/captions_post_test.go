@@ -139,8 +139,10 @@ func TestAPOSTCaptionDestinationIsATargetOnlyWithItsURLAndTheURLIsNotInTheSignat
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(in.targets) != 1 || in.targets[0].ID != with.ID || in.targets[0].Delay != 30*time.Second {
-		t.Fatalf("targets = %+v, want only the destination with a URL, at its 30s delay", in.targets)
+	if len(in.targets) != 1 || in.targets[0].ID != with.ID || in.targets[0].Delay != 0 {
+		// No local delay: the 30 s is YouTube's broadcastStreamDelayMs, and the cue is
+		// posted at once, stamped with when its words were spoken.
+		t.Fatalf("targets = %+v, want only the destination with a URL, with no local delay", in.targets)
 	}
 	if in.posts[with.ID] != plantedCaptionURL("a") || len(in.posts) != 1 {
 		t.Fatalf("posts carry %d URLs, want exactly the stored one", len(in.posts))

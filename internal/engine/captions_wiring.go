@@ -103,9 +103,12 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 			}
 			in.posts[d.ID] = u
 		}
+		// The delay polyemesis applies to the output, which the cue must wait
+		// for. A youtube_post destination's is 0: YouTube holds the delay, and its
+		// cues go at once, stamped with when the words were spoken (captionSink).
 		in.targets = append(in.targets, captions.CueTarget{
 			ID:    d.ID,
-			Delay: time.Duration(d.DelaySeconds) * time.Second,
+			Delay: time.Duration(d.OutputDelaySeconds()) * time.Second,
 		})
 	}
 	in.on = len(in.targets) > 0 || len(in.burns) > 0

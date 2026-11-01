@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick は字幕のサポートを文書化していないため、このプラットフォームでは提供しません。",
   "wave3.captions.provisional": "暫定：この方式はまだ実際のライブ配信で確認されていません。",
   "wave3.captions.delayNote": "YouTube の字幕取り込みには 30 秒または 60 秒の配信遅延が必要です。この宛先の遅延を設定するか、ストリーム内の方式を使ってください。",
+  "wave3.captions.postDelayYouTube": "この {seconds} 秒の遅延は YouTube が配信に適用します。polyemesis はこの配信先を遅延なしで送るため、視聴者の遅れは {seconds} 秒で、その 2 倍にはなりません。",
+  "wave3.captions.changeMovesDelay": "この変更でこの配信先の遅延が polyemesis と YouTube の間で移るため、有効な場合は保存すると配信先の出力が再起動します。",
   "wave3.captions.facebookSwitch": "Facebook の字幕は、サーバーを POLYEMESIS_CAPTIONS_FACEBOOK=1 で起動するまでオフのままです。",
   "wave3.captions.onAir": "ライブ字幕が動作している間、字幕はこの配信先のストリームと一緒に送られます。",
   "wave3.captions.changeNeedsStop": "ライブ中の配信先の字幕経路を変更するには、先に停止してください。",

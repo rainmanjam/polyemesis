@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { captionModeNeedsDelay, captionModesFor, captionModeToSend, captionsOffered } from "@/lib/captions";
+import {
+  captionModeNeedsDelay,
+  captionModesFor,
+  captionModeToSend,
+  captionsOffered,
+  outputDelaySeconds,
+} from "@/lib/captions";
 
 // The console's caption picker reads these. The server decides what is accepted;
 // these tests pin what the picker offers, so an operator cannot pick a route the
@@ -55,5 +61,25 @@ describe("the caption mode a save sends", () => {
 
   it("sends a mode the new platform does not offer as off, rather than the stored one", () => {
     expect(captionModeToSend("rtmp", "twitch", "youtube_post")).toBe("off");
+  });
+});
+
+// The delay polyemesis itself applies, mirroring db.OutputDelaySeconds. A YouTube
+// caption POST destination's 30 s or 60 s is YouTube's broadcast delay, so the
+// output is not held back here too; everything else is held back by its delay.
+//
+// MUTATION: outputDelaySeconds returning the delay for every mode. Observed:
+// FAIL, the YouTube POST destination was held back 30 s.
+describe("the delay polyemesis applies to a destination's output", () => {
+  it("is zero for YouTube captions by HTTP POST, whose delay YouTube holds", () => {
+    expect(outputDelaySeconds("youtube", "youtube_post", 30)).toBe(0);
+    expect(outputDelaySeconds("youtube", "youtube_post", 60)).toBe(0);
+  });
+
+  it("is the configured delay for every other route and platform", () => {
+    expect(outputDelaySeconds("youtube", "sei", 30)).toBe(30);
+    expect(outputDelaySeconds("youtube", "off", 45)).toBe(45);
+    expect(outputDelaySeconds("twitch", "sei", 20)).toBe(20);
+    expect(outputDelaySeconds("twitch", "youtube_post", 30)).toBe(30);
   });
 });

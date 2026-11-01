@@ -36,6 +36,17 @@ export function captionModeNeedsDelay(mode: CaptionMode): boolean {
   return mode === "youtube_post";
 }
 
+/** How long polyemesis itself holds a destination's output back, mirroring the
+ *  server's db.OutputDelaySeconds. A YouTube destination that posts captions by
+ *  HTTP POST keeps its 30 s or 60 s delay, but YouTube applies it (the
+ *  broadcast's stream delay), so its output is not held back here as well and
+ *  viewers are the delay behind, not twice it. Every other destination is held
+ *  back by its delay. */
+export function outputDelaySeconds(platform: string, mode: CaptionMode, delaySeconds: number): number {
+  if (platform === "youtube" && mode === "youtube_post") return 0;
+  return delaySeconds;
+}
+
 /** The caption mode a save should send for the dialog as it stands. A mode the
  *  picker cannot show (the kind was switched away from RTMP, or the platform
  *  changed to one that does not take it) is sent as "off". Without this, a

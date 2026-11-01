@@ -72,7 +72,9 @@ The save is refused, with a reason, in three cases:
 A change that adds or removes the in-stream (SEI) route changes the
 destination's video path, so it restarts an enabled destination that is not
 live yet. A change between off and YouTube's HTTP POST touches no video and
-restarts nothing. The picker says which applies.
+restarts nothing, unless the destination has a delay: then the delay moves
+between polyemesis and YouTube, and the output restarts to gain or lose its
+buffer. The picker says which applies.
 
 ## The player and the recordings
 
@@ -134,8 +136,11 @@ four steps:
    *HTTP POST*, monitor stream on, and the destination's 30 s or 60 s delay.
    YouTube allows these only before a broadcast goes to testing or live, so they
    are set when the broadcast is created.
-4. Go live. Each caption is posted when its delay has passed, which is when the
-   matching video reaches YouTube.
+4. Go live. YouTube holds the broadcast back by its delay, and polyemesis sends
+   this destination's video without a delay of its own. Each caption is posted
+   as soon as it is recognised, stamped with the moment its words were spoken,
+   which is when the matching video reached YouTube. YouTube lines the two up
+   inside its delay (PROVISIONAL: see below).
 
 What polyemesis refuses, and why:
 
@@ -175,10 +180,27 @@ shown in the console, the API, logs or events. A refused post is logged at most
 once a minute per destination, without the URL. If the ingest is slow, each
 destination keeps its newest 16 captions and drops the oldest.
 
-The broadcast delay counts twice on this route: once in polyemesis (the
-destination's own delay, which keeps the captions with the picture) and once on
-YouTube (the broadcast delay YouTube needs for this route). Viewers can see the
-show up to about two minutes after it happens at a 60 s setting.
+**The delay on this route is YouTube's.** The destination's 30 s or 60 s delay
+is sent as the broadcast's delay, and YouTube holds viewers back by it.
+polyemesis does not hold this destination's output back as well, so viewers are
+about 30 or 60 seconds behind, not twice that. Other destinations of the same
+programme keep their own delays. The card still shows the delay, because it is
+how far behind viewers are. Some consequences:
+
+- Changing the delay between 30 s and 60 s does not restart the output. It
+  takes effect on the next broadcast polyemesis creates, because YouTube fixes
+  a broadcast's delay once it is testing or live.
+- Switching a delayed YouTube destination to or from this route moves its delay
+  between YouTube and polyemesis, so the output restarts to gain or lose its
+  buffer. The editor says so before you save.
+- Stop does not air a delayed tail from polyemesis on this route, because there
+  is no buffer here. YouTube still holds its last 30 or 60 seconds when the
+  broadcast ends. That was already true before this change.
+
+PROVISIONAL: YouTube does not document the POST body. polyemesis stamps each
+caption with the wall-clock moment its words were spoken, which the third-party
+description says YouTube matches against the media it ingested. If the live
+check shows YouTube expects a different clock, only the stamp changes.
 
 **Facebook in-stream.** Facebook documents that CEA-608 can be added to a live
 stream, but not the carriage in the SEI. It stays off until a live check passes.
@@ -248,7 +270,9 @@ player's live track and the cue log fill only while the captioner runs. It trans
 programme chose (automatic when none is chosen). Turning every captioned
 destination off stops it. A destination's broadcast delay decides when its
 captions are released, so a destination set to 30 seconds receives each caption
-30 seconds after it was spoken, which keeps the words with the picture.
+30 seconds after it was spoken, which keeps the words with the picture. The
+exception is YouTube's HTTP POST route, whose delay YouTube applies: its
+captions are posted at once, with the time they were spoken.
 
 Three safety rules apply:
 

@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick documents no caption support, so captions are not offered for it.",
   "wave3.captions.provisional": "Provisional: this route is not confirmed against a live platform yet.",
   "wave3.captions.delayNote": "YouTube's caption ingestion needs a 30 s or 60 s broadcast delay. Set the delay on this destination, or use the in-stream route.",
+  "wave3.captions.postDelayYouTube": "YouTube applies this {seconds} s delay to the broadcast. polyemesis sends this destination undelayed, so viewers are {seconds} s behind, not twice that.",
+  "wave3.captions.changeMovesDelay": "This change moves this destination's delay between polyemesis and YouTube, so saving it restarts the destination's output if it is enabled.",
   "wave3.captions.facebookSwitch": "Facebook captions stay off until the server is started with POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "Captions go out with this destination's stream while the live captioner is running.",
   "wave3.captions.changeNeedsStop": "To change the caption route of a live destination, stop it first.",

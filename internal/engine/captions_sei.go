@@ -151,10 +151,10 @@ type captionSink struct{ e *Engine }
 // Deliver queues a caption on the destination's POST queue or SEI stage. A
 // destination with neither (none registered yet) drops the caption.
 func (s captionSink) Deliver(id int64, c transcribe.LiveCaption) {
-	// A destination posting to YouTube: stamp the cue with its release instant,
-	// which is when its video reaches YouTube, and queue it. Never blocks.
+	// A destination posting to YouTube: queue the cue, stamped with the moment
+	// its words reached YouTube's ingest. Never blocks.
 	if q, ok := s.e.postQueues.Load(id); ok {
-		q.(*captions.PostQueue).Enqueue(time.Now(), c.Text)
+		q.(*captions.PostQueue).Enqueue(postStamp(c), c.Text)
 		return
 	}
 	v, ok := s.e.seiStages.Load(id)
@@ -166,4 +166,27 @@ func (s captionSink) Deliver(id int64, c transcribe.LiveCaption) {
 		dur = 4 * time.Second
 	}
 	v.(*captions.SEIStage).Cue(c.Text, dur)
+}
+
+// postStamp is the timestamp a cue posted to YouTube carries: the wall-clock
+// moment its words were spoken (LiveCaption.SpokenAt).
+//
+// YouTube lines a posted caption up by its timestamp against the media it
+// ingested, and holds both for the broadcast's own 30 s or 60 s delay. This
+// destination's output is not delayed by polyemesis (db.OutputDelaySeconds), so
+// the media carrying the words reached YouTube when they were spoken, give or
+// take the encoder. The cue is released at once, so time.Now() would stamp it
+// the recognition lag plus the cue's own length late.
+//
+// A cue with no production time (a replay, a test) has no SpokenAt, and stamping
+// year one would put it outside YouTube's window, so it is stamped now.
+//
+// PROVISIONAL (docs-youtube C8): that YouTube reads the timestamp as the wall
+// clock of the ingested media is the third-party description, not Google's. A
+// live check on a test channel confirms it.
+func postStamp(c transcribe.LiveCaption) time.Time {
+	if c.At.IsZero() {
+		return time.Now()
+	}
+	return c.SpokenAt()
 }

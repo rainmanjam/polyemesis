@@ -589,13 +589,17 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// operator save of the caption mode restarts the destination (#8).
 		parts = append(parts, "sei=stage")
 	}
-	if row.DelaySeconds > 0 {
+	if delay := row.OutputDelaySeconds(); delay > 0 {
 		// The broadcast delay restarts the destination when it changes (#11):
 		// the buffer is sized and filled for one delay, and a running line
 		// cannot be stretched or shrunk without releasing data early or
 		// holding the platform on a gap. The UI says so before it is saved.
 		// Only when set, so an undelayed destination hashes as it always did.
-		parts = append(parts, "delay="+strconv.Itoa(row.DelaySeconds))
+		// It is the delay polyemesis applies, not the configured one: a YouTube
+		// caption POST destination's delay is YouTube's (OutputDelaySeconds), so
+		// changing it does not touch this output, and switching its caption mode
+		// moves the delay here or away, which does.
+		parts = append(parts, "delay="+strconv.Itoa(delay))
 	}
 	return hashStrings(parts)
 }
@@ -1073,7 +1077,9 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// keep test compares. readHub is what this destination's FFmpeg reads.
 	var dd *destDelay
 	readHub := hub
-	if row.DelaySeconds > 0 {
+	// OutputDelaySeconds, not DelaySeconds: a YouTube caption POST destination is
+	// held back by YouTube's broadcastStreamDelayMs, never by a line here too.
+	if row.OutputDelaySeconds() > 0 {
 		var derr error
 		dd, derr = e.buildDelay(row)
 		if derr != nil {

@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick dokumentiert keine Untertitel-Unterstützung, deshalb werden sie dafür nicht angeboten.",
   "wave3.captions.provisional": "Vorläufig: dieser Weg ist noch nicht gegen eine Live-Plattform bestätigt.",
   "wave3.captions.delayNote": "Der YouTube-Untertitel-Eingang braucht eine Sendeverzögerung von 30 s oder 60 s. Stellen Sie die Verzögerung für dieses Ziel ein oder nutzen Sie den Weg im Stream.",
+  "wave3.captions.postDelayYouTube": "YouTube wendet diese Verzögerung von {seconds} s auf die Übertragung an. polyemesis sendet dieses Ziel unverzögert, daher sind die Zuschauer {seconds} s zurück, nicht doppelt so viel.",
+  "wave3.captions.changeMovesDelay": "Diese Änderung verschiebt die Verzögerung dieses Ziels zwischen polyemesis und YouTube, daher startet das Speichern die Ausgabe des Ziels neu, wenn es aktiviert ist.",
   "wave3.captions.facebookSwitch": "Facebook-Untertitel bleiben aus, bis der Server mit POLYEMESIS_CAPTIONS_FACEBOOK=1 gestartet wird.",
   "wave3.captions.onAir": "Untertitel werden mit dem Stream dieses Ziels gesendet, solange die Live-Untertitelung läuft.",
   "wave3.captions.changeNeedsStop": "Um den Untertitelweg eines Ziels zu ändern, das live ist, stoppen Sie es zuerst.",

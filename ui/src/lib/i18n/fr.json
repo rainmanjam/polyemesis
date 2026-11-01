@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick ne documente aucune prise en charge des sous-titres, ils ne sont donc pas proposés pour cette plateforme.",
   "wave3.captions.provisional": "Provisoire : cette voie n'est pas encore confirmée sur une plateforme en direct.",
   "wave3.captions.delayNote": "L'ingestion de sous-titres YouTube nécessite un délai de diffusion de 30 s ou 60 s. Réglez le délai de cette destination ou utilisez la voie dans le flux.",
+  "wave3.captions.postDelayYouTube": "YouTube applique ce délai de {seconds} s à la diffusion. polyemesis envoie cette destination sans délai, donc les spectateurs ont {seconds} s de retard, pas le double.",
+  "wave3.captions.changeMovesDelay": "Ce changement déplace le délai de cette destination entre polyemesis et YouTube : l'enregistrer redémarre la sortie de la destination si elle est activée.",
   "wave3.captions.facebookSwitch": "Les sous-titres Facebook restent désactivés tant que le serveur n'est pas lancé avec POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "Les sous-titres partent avec le flux de cette destination tant que le sous-titrage en direct fonctionne.",
   "wave3.captions.changeNeedsStop": "Pour changer la voie des sous-titres d'une destination en direct, arrêtez-la d'abord.",

@@ -106,8 +106,9 @@ left behind by a crash are deleted when polyemesis next starts.
 - **MCP:** `get_status`, `list_destinations` and `get_destination` show the
   delay. `stop_destination` takes `now: true`. See [MCP.md](MCP.md).
 
-## Not yet
+## Live captions
 
-Live captions to outputs (#8) are not built yet. When they are, they will
-need to follow the destination's `delaySeconds` to stay in step with the
-picture.
+Live captions follow the destination's `delaySeconds` to stay in step with the
+picture. A YouTube destination that posts captions by HTTP POST is the
+exception: YouTube applies its 30 s or 60 s delay, and polyemesis sends it
+undelayed. See [CAPTIONS.md](CAPTIONS.md).

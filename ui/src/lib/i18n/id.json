@@ -3516,6 +3516,8 @@
   "wave3.captions.kickNone": "Kick tidak mendokumentasikan dukungan keterangan, jadi keterangan tidak ditawarkan untuknya.",
   "wave3.captions.provisional": "Sementara: jalur ini belum dikonfirmasi pada platform langsung.",
   "wave3.captions.delayNote": "Ingesti keterangan YouTube memerlukan tunda siaran 30 dtk atau 60 dtk. Atur tunda untuk tujuan ini, atau gunakan jalur dalam stream.",
+  "wave3.captions.postDelayYouTube": "YouTube menerapkan jeda {seconds} dtk ini pada siaran. polyemesis mengirim tujuan ini tanpa jeda, jadi penonton tertinggal {seconds} dtk, bukan dua kali lipatnya.",
+  "wave3.captions.changeMovesDelay": "Perubahan ini memindahkan jeda tujuan ini antara polyemesis dan YouTube, sehingga menyimpannya memulai ulang keluaran tujuan jika sedang aktif.",
   "wave3.captions.facebookSwitch": "Keterangan Facebook tetap mati sampai server dijalankan dengan POLYEMESIS_CAPTIONS_FACEBOOK=1.",
   "wave3.captions.onAir": "Teks takarir dikirim bersama siaran tujuan ini selama penerjemah teks langsung berjalan.",
   "wave3.captions.changeNeedsStop": "Untuk mengubah jalur teks takarir tujuan yang sedang live, hentikan dulu.",

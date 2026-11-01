@@ -62,7 +62,7 @@ import {
 import { TWITCH_LABELS } from "@/lib/types";
 import { CaptionModeControl } from "@/components/CaptionModeControl";
 import { XConsolePanel } from "@/components/XConsolePanel";
-import { captionModeToSend, captionsOffered } from "@/lib/captions";
+import { captionModeToSend, captionsOffered, outputDelaySeconds } from "@/lib/captions";
 import type {
   Destination,
   DestTransport,
@@ -2529,8 +2529,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 />
                 <span className="text-sm text-muted-foreground">{t("delay.help")}</span>
                 {/* Said BEFORE the save: a delay cannot be stretched on a
-                    running buffer, so the destination restarts and refills. */}
-                {destination?.enabled && delaySeconds !== loadedDelay && (
+                    running buffer, so the destination restarts and refills.
+                    A YouTube caption POST destination's delay is YouTube's,
+                    so changing it restarts nothing here. */}
+                {destination?.enabled &&
+                  outputDelaySeconds(platform, captionMode, delaySeconds) !==
+                    outputDelaySeconds(platform, captionMode, loadedDelay) && (
                   <span data-testid="delay-restart-warning" className="text-sm text-warn">
                     {t("delay.liveRestart", { seconds: delaySeconds })}
                   </span>

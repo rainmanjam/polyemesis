@@ -1,7 +1,13 @@
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useT, type TranslationKey } from "@/lib/i18n";
-import { CAPTION_ROUTES, captionModeNeedsDelay, captionModesFor, captionsOffered } from "@/lib/captions";
+import {
+  CAPTION_ROUTES,
+  captionModeNeedsDelay,
+  captionModesFor,
+  captionsOffered,
+  outputDelaySeconds,
+} from "@/lib/captions";
 import type { CaptionMode } from "@/lib/types";
 
 /** The label for each route. A mode maps to its catalogue key, not to its wire
@@ -78,6 +84,11 @@ export function CaptionModeControl({
           {captionModeNeedsDelay(value) && delaySeconds !== 30 && delaySeconds !== 60 && (
             <p className="text-xs text-warn">{t("wave3.captions.delayNote")}</p>
           )}
+          {captionModeNeedsDelay(value) && (delaySeconds === 30 || delaySeconds === 60) && (
+            <p className="text-xs text-muted-foreground" data-testid="caption-post-delay">
+              {t("wave3.captions.postDelayYouTube", { seconds: delaySeconds })}
+            </p>
+          )}
           {value === "facebook_sei" && <p className="text-xs text-warn">{t("wave3.captions.facebookSwitch")}</p>}
           {value === "youtube_post" &&
             (ingestReady ? (
@@ -97,7 +108,7 @@ export function CaptionModeControl({
               A change that adds or removes the in-stream (SEI) stage changes
               the destination's output spec, which restarts an enabled one; a
               change between off and YouTube POST touches no video and does
-              not. */}
+              not, unless a delay moves (below). */}
           <p className="text-xs text-muted-foreground" data-testid="caption-change-needs-stop">
             {t("wave3.captions.changeNeedsStop")}
           </p>
@@ -106,6 +117,16 @@ export function CaptionModeControl({
               {t("wave3.captions.changeRestarts")}
             </p>
           )}
+          {/* A delayed YouTube destination switched to or from caption POST
+              moves its delay between polyemesis's buffer and YouTube, so the
+              output gains or loses that buffer and restarts. */}
+          {storedMode !== undefined &&
+            outputDelaySeconds(platform, value, delaySeconds) !==
+              outputDelaySeconds(platform, storedMode, delaySeconds) && (
+              <p className="text-xs text-warn" data-testid="caption-change-moves-delay">
+                {t("wave3.captions.changeMovesDelay")}
+              </p>
+            )}
         </>
       )}
     </div>
