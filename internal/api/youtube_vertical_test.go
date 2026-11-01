@@ -281,6 +281,10 @@ func verticalServer(t *testing.T, base string) (*Server, http.Handler, *db.DB) {
 		Engine: eng, Events: bus, Version: "test",
 		Providers: oauth.NewSet(oauth.WithBaseURL(base)),
 	})
+	// The status read goes out only while a half is running (#7, correction 6). The engine
+	// here has nothing running, so the seam says a half is up; the tests that need the gate
+	// closed override it. Without this default every status test would read as stopped.
+	s.verticalHalfLive = func(...int64) bool { return true }
 	h := s.Handler()
 	setTestServer(s, h)
 	return s, h, store
@@ -410,5 +414,126 @@ func TestTwoConcurrentPairingsCreateOneVerticalStreamOnYouTube(t *testing.T) {
 	fake.mu.Unlock()
 	if creates != 1 {
 		t.Errorf("YouTube saw %d liveStreams.insert calls, want 1; a second one leaves an orphan stream on the channel", creates)
+	}
+}
+
+// countCalls reports how many recorded requests start with prefix. The status-pacing tests
+// count the YouTube reads that actually went out, so a cached or refused read is visible as
+// the absence of a call rather than as a response that merely looks right.
+func (p *ytVerticalPairStub) countCalls(prefix string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, c := range p.calls {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestVerticalStatusReadIsPacedToOneYouTubeCallPerMinute pins correction 6 of the YouTube
+// truth sheet. Two reads inside a minute reach YouTube once: the second is answered from the
+// read the first one made. The count is taken from the recorded requests, so a server that
+// returned the right body while still calling YouTube would fail here.
+func TestVerticalStatusReadIsPacedToOneYouTubeCallPerMinute(t *testing.T) {
+	s, h, _, sign, fake, id := verticalCreate(t)
+	before := fake.countCalls("GET /liveStreams?")
+	for i := 0; i < 2; i++ {
+		send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	}
+	if got := fake.countCalls("GET /liveStreams?") - before; got != 1 {
+		t.Fatalf("two status reads inside one minute made %d YouTube liveStreams reads, want 1", got)
+	}
+	_ = s
+}
+
+// TestVerticalStatusReadGoesOutAgainOnceTheMinuteHasPassed pins the other half of the pacing:
+// the cache expires, so the operator sees a fresh reading rather than a stale one forever.
+func TestVerticalStatusReadGoesOutAgainOnceTheMinuteHasPassed(t *testing.T) {
+	s, h, _, sign, fake, id := verticalCreate(t)
+	clock := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	s.verticalNow = func() time.Time { return clock }
+	send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	clock = clock.Add(61 * time.Second)
+	before := fake.countCalls("GET /liveStreams?")
+	send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	if got := fake.countCalls("GET /liveStreams?") - before; got != 1 {
+		t.Fatalf("a read 61 s after the last one made %d YouTube reads, want 1", got)
+	}
+}
+
+// TestVerticalStatusReadMakesNoYouTubeCallWhileNeitherHalfRuns pins the live gate. With both
+// halves stopped there is nothing to watch, so the status read answers from polyemesis alone
+// and YouTube is not called. The response says so with live:false.
+func TestVerticalStatusReadMakesNoYouTubeCallWhileNeitherHalfRuns(t *testing.T) {
+	s, h, _, sign, fake, id := verticalCreate(t)
+	s.verticalHalfLive = func(...int64) bool { return false }
+	before := fake.countCalls("GET /liveStreams?")
+	body := send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	if got := fake.countCalls("GET /liveStreams?") - before; got != 0 {
+		t.Fatalf("a status read with both halves stopped made %d YouTube reads, want 0", got)
+	}
+	if !strings.Contains(string(body), `"live":false`) {
+		t.Fatalf("status body %s does not say the halves are stopped", body)
+	}
+}
+
+// TestVerticalStatusReadIsRefusedWhenTheYouTubeBudgetHasNoRoom pins the quota pacer. The read
+// is charged to the same budget the chat adapter spends from, and a read the budget cannot
+// afford is refused on the sub-row without a call. The adapter itself is covered in
+// internal/chat; this test asserts the API consults it on the status path.
+func TestVerticalStatusReadIsRefusedWhenTheYouTubeBudgetHasNoRoom(t *testing.T) {
+	s, h, _, sign, fake, id := verticalCreate(t)
+	s.verticalHalfLive = func(...int64) bool { return true }
+	s.verticalChargeQuota = func(cost int) bool { return false }
+	before := fake.countCalls("GET /liveStreams?")
+	body := send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(id)+"/youtube-vertical", nil, http.StatusOK)
+	if got := fake.countCalls("GET /liveStreams?") - before; got != 0 {
+		t.Fatalf("a read the budget refused still reached YouTube %d times", got)
+	}
+	if !strings.Contains(string(body), "quota") {
+		t.Fatalf("the refused read does not say why on the sub-row: %s", body)
+	}
+}
+
+// TestPairedStatusPayloadLinksTheTwoHalves pins the payload fields the UI, the reminders and
+// the Stream Deck read. The horizontal row names its vertical half and whether the pairing is
+// confirmed; the vertical row names the horizontal it belongs to. Both come from /status, the
+// one payload every consumer reads, and cost no YouTube call.
+func TestPairedStatusPayloadLinksTheTwoHalves(t *testing.T) {
+	_, h, store, sign, _, id := verticalCreate(t)
+	pair, err := store.GetYouTubeVerticalPairByHorizontal(id)
+	if err != nil {
+		t.Fatalf("pair row: %v", err)
+	}
+	body := send(t, h, sign, http.MethodGet, "/api/v1/status", nil, http.StatusOK)
+	var st struct {
+		Destinations []struct {
+			ID              int64 `json:"id"`
+			YouTubeVertical *struct {
+				VerticalID       int64 `json:"verticalId"`
+				PairingConfirmed bool  `json:"pairingConfirmed"`
+			} `json:"youtubeVertical"`
+			VerticalHalfOf *int64 `json:"verticalHalfOf"`
+		} `json:"destinations"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	var horiz, vert bool
+	for _, d := range st.Destinations {
+		if d.ID == id {
+			horiz = d.YouTubeVertical != nil && d.YouTubeVertical.VerticalID == pair.VerticalID && !d.YouTubeVertical.PairingConfirmed
+		}
+		if d.ID == pair.VerticalID {
+			vert = d.VerticalHalfOf != nil && *d.VerticalHalfOf == id
+		}
+	}
+	if !horiz {
+		t.Fatalf("the horizontal row does not name its vertical half: %s", body)
+	}
+	if !vert {
+		t.Fatalf("the vertical row does not name the horizontal it belongs to: %s", body)
 	}
 }

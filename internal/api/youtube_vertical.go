@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
+	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
 
 // YouTube paired vertical (#7), HTTP layer.
@@ -40,9 +43,11 @@ type verticalPairView struct {
 	VerticalID       int64  `json:"verticalId"`
 	VerticalStreamID string `json:"verticalStreamId"`
 	PairingConfirmed bool   `json:"pairingConfirmed"`
-	StreamStatus     string `json:"streamStatus,omitempty"`
-	HealthStatus     string `json:"healthStatus,omitempty"`
-	HealthError      string `json:"healthError,omitempty"`
+	// Live says whether either half is running. The health fields are only read while it is true.
+	Live         bool   `json:"live"`
+	StreamStatus string `json:"streamStatus,omitempty"`
+	HealthStatus string `json:"healthStatus,omitempty"`
+	HealthError  string `json:"healthError,omitempty"`
 }
 
 // verticalPairsInFlight holds the horizontal destinations whose pairing is under way. The zero value is ready. The
@@ -179,8 +184,104 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// handleYouTubeVerticalStatus reads the vertical half's health by stream id. A failure to
-// read it is reported on the sub-row and does not change the horizontal half.
+// verticalHealthMinInterval is the least time between two YouTube reads of one pair's vertical
+// half (#7, correction 6 of the YouTube truth sheet). It is a floor on the reads that reach
+// Google, not on the responses: a request inside the window is answered from the last read.
+const verticalHealthMinInterval = 60 * time.Second
+
+// verticalHealthRead is one YouTube read of a vertical half, kept so a request inside the window
+// can be answered without a call. The error is kept with the health: a failed read is paced the
+// same as a good one, otherwise a dead stream would be retried on every page load.
+type verticalHealthRead struct {
+	at     time.Time
+	health *oauth.VerticalStreamHealth
+	err    string
+}
+
+// verticalHealthPacer holds the last read per horizontal destination. The zero value is ready.
+type verticalHealthPacer struct {
+	mu   sync.Mutex
+	last map[int64]verticalHealthRead
+}
+
+// recent returns the last read for a destination when it is still inside the window.
+func (p *verticalHealthPacer) recent(id int64, now time.Time) (verticalHealthRead, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.last[id]
+	if !ok || now.Sub(r.at) >= verticalHealthMinInterval {
+		return verticalHealthRead{}, false
+	}
+	return r, true
+}
+
+// remember stores a read so the next request inside the window can reuse it.
+func (p *verticalHealthPacer) remember(id int64, r verticalHealthRead) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.last == nil {
+		p.last = map[int64]verticalHealthRead{}
+	}
+	p.last[id] = r
+}
+
+// verticalClock is the status read's clock. A seam so the pacing test can move time forward
+// without sleeping for a minute.
+func (s *Server) verticalClock() time.Time {
+	if s.verticalNow != nil {
+		return s.verticalNow()
+	}
+	return time.Now()
+}
+
+// verticalHalfIsLive reports whether any of the given destinations is running. The status read
+// is gated on this: a vertical stream is only worth watching while one of its halves is on air.
+// The seam is for tests; production asks the engine.
+func (s *Server) verticalHalfIsLive(ids ...int64) bool {
+	if s.verticalHalfLive != nil {
+		return s.verticalHalfLive(ids...)
+	}
+	if s.mgr == nil {
+		return false
+	}
+	for _, ds := range s.mgr.DestinationStatuses() {
+		if ds.Process == nil || ds.Process.State != supervisor.StateRunning {
+			continue
+		}
+		for _, id := range ids {
+			if ds.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// verticalChargeOK spends one unit of the YouTube allowance for a read made on the operator's
+// behalf, through the same budget the chat poll uses. It answers true when no chat connection
+// paces against an allowance, because then there is no budget to protect.
+func (s *Server) verticalChargeOK(accountRef string) bool {
+	if s.verticalChargeQuota != nil {
+		return s.verticalChargeQuota(chat.QuotaCostListLiveStreams)
+	}
+	if s.chat == nil {
+		return true
+	}
+	a, ok := s.chat.Adapter(db.PlatformYouTube, accountRef)
+	if !ok {
+		return true
+	}
+	y, ok := a.(*chat.YouTubeAdapter)
+	if !ok {
+		return true
+	}
+	return y.ChargeQuota(chat.QuotaCostListLiveStreams)
+}
+
+// handleYouTubeVerticalStatus reads the vertical half's health by stream id. It is paced and
+// gated (#7, correction 6): no YouTube call unless one of the two halves is running, and at most
+// one call per pair per verticalHealthMinInterval. A failure to read is reported on the sub-row
+// and does not change the horizontal half.
 func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -200,6 +301,19 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		HorizontalID: pair.HorizontalID, VerticalID: pair.VerticalID,
 		VerticalStreamID: pair.VerticalStreamID, PairingConfirmed: pair.PairingConfirmedAt != 0,
 	}
+	// EITHER HALF COUNTS. A vertical half that is up while its horizontal is down still shows its
+	// health, which is the case the sub-row exists for.
+	view.Live = s.verticalHalfIsLive(pair.HorizontalID, pair.VerticalID)
+	if !view.Live {
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
+	now := s.verticalClock()
+	if prev, ok := s.verticalHealth.recent(id, now); ok {
+		applyVerticalRead(&view, prev)
+		writeJSON(w, http.StatusOK, view)
+		return
+	}
 	dest, err := s.store.GetDestination(id)
 	if err != nil {
 		writeStoreError(w, err)
@@ -218,15 +332,35 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	health, err := vp.VerticalStreamHealth(ctx, acct.AccessToken, pair.VerticalStreamID)
-	if err != nil {
-		view.HealthError = alerts.Redact(err.Error())
+	if !s.verticalChargeOK(acct.AccountRef) {
+		// Refused before the call, so nothing reached YouTube. Not remembered: the next request
+		// after the budget frees up should read. The sub-row says why in words, not a bare error.
+		view.HealthError = "the YouTube quota is nearly spent; the vertical status is paused until it resets"
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	view.StreamStatus = health.StreamStatus
-	view.HealthStatus = health.HealthStatus
+	health, err := vp.VerticalStreamHealth(ctx, acct.AccessToken, pair.VerticalStreamID)
+	read := verticalHealthRead{at: now, health: health}
+	if err != nil {
+		read.err = alerts.Redact(err.Error())
+		read.health = nil
+	}
+	s.verticalHealth.remember(id, read)
+	applyVerticalRead(&view, read)
 	writeJSON(w, http.StatusOK, view)
+}
+
+// applyVerticalRead copies a stored read onto the view. Kept in one place so a cached answer and a
+// fresh one cannot disagree about which fields they fill.
+func applyVerticalRead(view *verticalPairView, r verticalHealthRead) {
+	if r.err != "" {
+		view.HealthError = r.err
+		return
+	}
+	if r.health != nil {
+		view.StreamStatus = r.health.StreamStatus
+		view.HealthStatus = r.health.HealthStatus
+	}
 }
 
 // handleConfirmYouTubeVertical records that the operator completed the one-time Live
@@ -331,4 +465,36 @@ func findYouTubeVerticalTier(key string) (db.RenditionPreset, bool) {
 		}
 	}
 	return db.RenditionPreset{}, false
+}
+
+// linkVerticalPairs fills the pair fields on the status rows (#7). A horizontal row gets the
+// vertical half's id and the confirmation; the vertical row gets the horizontal it belongs to.
+// A store failure leaves the rows unlinked, which the UI reads as "no pair shown", never as a
+// wrong pair. Costs no YouTube call: the pair table is local.
+func (s *Server) linkVerticalPairs(dests []engine.DestStatus) []engine.DestStatus {
+	pairs, err := s.store.ListYouTubeVerticalPairs()
+	if err != nil || len(pairs) == 0 {
+		return dests
+	}
+	byHorizontal := make(map[int64]db.YouTubeVerticalPair, len(pairs))
+	for _, p := range pairs {
+		byHorizontal[p.HorizontalID] = p
+	}
+	for i := range dests {
+		if p, ok := byHorizontal[dests[i].ID]; ok {
+			dests[i].YouTubeVertical = &engine.YouTubeVerticalLink{
+				VerticalID: p.VerticalID, PairingConfirmed: p.PairingConfirmedAt != 0,
+			}
+		}
+	}
+	for i := range dests {
+		for _, p := range pairs {
+			if p.VerticalID == dests[i].ID {
+				h := p.HorizontalID
+				dests[i].VerticalHalfOf = &h
+				break
+			}
+		}
+	}
+	return dests
 }

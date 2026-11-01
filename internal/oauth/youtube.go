@@ -158,6 +158,11 @@ type ytLiveStream struct {
 //
 // This is the payoff of the OAuth flow: the user never sees, copies or
 // mistypes a stream key.
+// NOT REACHED FOR YOUTUBE IN PRODUCTION (#7). ingestFor routes every platform that implements
+// TargetedProvider through IngestFor, and YouTube does, so the call that carries
+// IngestOptions.ExcludeStreamIDs is the only one a YouTube destination makes. This path passes
+// empty options, which leaves the vertical-title marker as the only guard against adopting a
+// vertical stream. That marker is what keeps it correct if this is ever called for YouTube again.
 func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
 	s, err := y.reusableStream(ctx, accessToken)
 	if err != nil {
@@ -473,9 +478,9 @@ func (c *ytConcurrentViewers) UnmarshalJSON(b []byte) error {
 // one comparison and the alternative is reporting a stranger's audience as
 // yours.
 //
-// NO QUOTA NUMBER APPEARS HERE ON PURPOSE. The string "quota" occurs zero times
-// in the liveBroadcasts.list reference, so its cost is undocumented; videos.list
-// documents 1 unit. The project-wide ceiling is 10,000 units per day shared
+// liveBroadcasts.list costs 1 unit. The official-docs truth sheet (docs-youtube.md,
+// 2026-10-31) reads it from the quota table, because the method's own reference page
+// omits the cost. The project-wide ceiling is 10,000 units per day shared
 // across every YouTube feature polyemesis has -- metadata push and compliance
 // included -- so a caller polling this hard does not merely slow the viewer
 // count down, it takes title push down with it. The refusal to handle is

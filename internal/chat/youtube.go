@@ -656,6 +656,22 @@ func (y *YouTubeAdapter) classify(err error) error {
 	return err
 }
 
+// ChargeQuota spends cost units from this adapter's budget for a call that the adapter's own
+// loop did not make, and reports whether the budget can afford it. The vertical status read (#7)
+// is the caller: it reads YouTube on the operator's behalf, and it must not read past the budget
+// the chat poll is paced against. A nil adapter or one with no budget answers true, because
+// nothing is paced there and refusing would only stop a read that has no quota to protect.
+func (y *YouTubeAdapter) ChargeQuota(cost int) bool {
+	if y == nil || y.budget == nil {
+		return true
+	}
+	if !y.budget.allow(cost) {
+		return false
+	}
+	y.budget.spend(cost)
+	return true
+}
+
 // SetQuota replaces the daily allowance this adapter paces against, without
 // dropping the connection.
 //

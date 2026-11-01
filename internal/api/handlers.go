@@ -932,7 +932,7 @@ func compareSemver(a, b semver) int {
 // resolve it the same way: scopedEngine.
 func (s *Server) statusPayload(eng *engine.Engine) engine.Status {
 	st := eng.Status()
-	st.Destinations = s.mgr.DestinationStatuses()
+	st.Destinations = s.linkVerticalPairs(s.mgr.DestinationStatuses())
 	return st
 }
 
