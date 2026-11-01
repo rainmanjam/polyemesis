@@ -129,6 +129,14 @@ type DestStatus struct {
 	// along; the status simply never passed it on.
 	SourceID      *int64 `json:"sourceId,omitempty"`
 	RenditionName string `json:"renditionName,omitempty"`
+	// YouTubeVertical is set on a YouTube destination that has a vertical half (#7). It names the
+	// vertical row and whether the one-time Live Control Room step is confirmed, so the card can
+	// show the pair as one destination and remind the operator until the step is done. Filled by
+	// the API from the pair table; the engine does not know pairs. Nil on every other row.
+	YouTubeVertical *YouTubeVerticalLink `json:"youtubeVertical,omitempty"`
+	// VerticalHalfOf is set on the vertical row itself and names the horizontal destination it
+	// belongs to, so the dashboard draws it as that card's sub-row rather than a second card.
+	VerticalHalfOf *int64 `json:"verticalHalfOf,omitempty"`
 	// BackupProcess is the redundant output's live state, absent when this
 	// destination has none.
 	//
@@ -192,6 +200,12 @@ type DestStatus struct {
 	// PlatformHealth is the platform's own verdict on the stream, present only
 	// while it is poor. YouTube only: Twitch has no stream-health API.
 	PlatformHealth *PlatformHealth `json:"platformHealth,omitempty"`
+}
+
+// YouTubeVerticalLink is the pair as a horizontal destination sees it (#7).
+type YouTubeVerticalLink struct {
+	VerticalID       int64 `json:"verticalId"`
+	PairingConfirmed bool  `json:"pairingConfirmed"`
 }
 
 // DivergenceStatus is one advisory note about the negotiated configuration.
@@ -920,8 +934,8 @@ func (e *Engine) Processes() []*supervisor.Process {
 	}
 	// Sorted, because a map of analysers would otherwise reshuffle the
 	// monitoring page on every poll.
-	for _, id := range slices.Sorted(maps.Keys(e.loud)) {
-		if m := e.loud[id]; m != nil && m.proc != nil {
+	for _, k := range loudKeysSorted(e.loud) {
+		if m := e.loud[k]; m != nil && m.proc != nil {
 			out = append(out, m.proc)
 		}
 	}

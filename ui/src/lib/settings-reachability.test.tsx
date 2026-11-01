@@ -434,6 +434,9 @@ interface Screen {
   /** How few controls this screen may render before something is wrong. THE
    *  POSITIVE CONTROL: see the test that reads it. */
   atLeast: number;
+  /** How many write-pass tests this screen is split across (default 1). See
+   *  "ONE WRITE PASS PER SHARD" below for why a screen needs more than one. */
+  shards?: number;
 }
 
 const SCREENS: Screen[] = [
@@ -443,6 +446,7 @@ const SCREENS: Screen[] = [
     at: "/settings?tab=pipeline",
     element: <SettingsPage />,
     atLeast: 30,
+    shards: 3,
   },
   { name: "Recordings", at: "/recordings", element: <RecordingsPage />, atLeast: 5 },
   { name: "Playout", at: "/playout", element: <PlayoutPage />, atLeast: 15 },
@@ -726,7 +730,20 @@ interface WritePass {
 
 /** Render the screen, type into every control it can drive, and report the ones
  *  that did not keep what they were given. */
-async function writePass(screen: Screen, settings: Doc): Promise<WritePass> {
+/** A stable bucket for a control's key, so a shard drives the same controls on
+ *  every run and a failure names the same test twice. */
+function shardOf(key: string, of: number): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return Math.abs(h) % of;
+}
+
+async function writePass(
+  screen: Screen,
+  settings: Doc,
+  shard = 0,
+  of = 1,
+): Promise<WritePass> {
   serveWith(settings);
   const route = screen.at.split("?")[0];
   render(
@@ -764,6 +781,10 @@ async function writePass(screen: Screen, settings: Doc): Promise<WritePass> {
       if (isFrozen(el) || !drivable(el)) return;
       const key = `${screen.name} ${keyOf(el, ordinal)}`;
       if (seen.has(key)) return;
+      // A shard types into its own share of the FIELDS, but drives every
+      // toggle: toggles are what reveal fields, and a shard that skipped the
+      // MQTT switch would never see the four fields behind it.
+      if (!isToggle(el) && shardOf(key, of) !== shard) return;
       batch.push({ el, key });
     });
     if (batch.length === 0) break;
@@ -1282,24 +1303,60 @@ describe("every settings leaf an operator is meant to change", () => {
     ).toEqual([]);
   });
 
-  it("every control it can drive keeps what it is given", async () => {
-    const driven: string[] = [];
-    const reverted: string[] = [];
-    for (const screen of SCREENS) {
-      const pass = await writePass(screen, document_(leaves, new Set()));
-      driven.push(...pass.driven);
-      reverted.push(...pass.reverted);
-    }
+  /* ONE WRITE PASS PER SHARD, not one test walking all four screens.
+   *
+   * The four passes used to run inside a single test, so its 5s budget was
+   * the sum of every screen's controls. Each merge that added settings made it
+   * longer, until under coverage instrumentation on a loaded runner it ran past
+   * the default (the sonar job on 0a731e0e) -- and a failed run is a report
+   * vitest does not write, so the whole UI half of SonarCloud's new-code
+   * coverage read as zero with it.
+   *
+   * Nothing in it waits on anything: the cost is one re-render of the page per
+   * control driven, and it is the pipeline tab's sixty-odd controls that are
+   * most of it. So the work is divided rather than the budget raised. Each
+   * screen is its own test, and the pipeline tab is split into shards that each
+   * type into a stable third of its fields (and drive every toggle, which is
+   * what reveals fields). A field's check is about that field alone -- did it
+   * keep what was typed into it -- so a shard on a fresh render reaches the
+   * same verdict for it as the single pass did. Tests in a file run in order,
+   * which is what lets the aggregate below read what every shard collected. */
+  const PASSES = SCREENS.flatMap((screen) => {
+    const of = screen.shards ?? 1;
+    return Array.from({ length: of }, (_, shard) => ({
+      label: of === 1 ? screen.name : `${screen.name} (shard ${shard + 1} of ${of})`,
+      screen,
+      shard,
+      of,
+    }));
+  });
+  const writeDriven = new Map<string, string[]>();
+  const writeReverted = new Set<string>();
+
+  it.each(PASSES.map((p) => [p.label, p] as const))(
+    "drives every control on %s",
+    async (_label, p) => {
+      const pass = await writePass(p.screen, document_(leaves, new Set()), p.shard, p.of);
+      writeDriven.set(p.label, pass.driven);
+      pass.reverted.forEach((k) => writeReverted.add(k));
+    },
+  );
+
+  it("every control it can drive keeps what it is given", () => {
+    // Every pass ran. A pass that failed or was skipped contributes nothing,
+    // which would read as "nothing reverted" below.
+    expect([...writeDriven.keys()]).toEqual(PASSES.map((p) => p.label));
 
     // POSITIVE CONTROL. A pass that drove nothing reports no reverts, which
-    // looks exactly like a pass where everything is wired correctly.
+    // looks exactly like a pass where everything is wired correctly. A Set,
+    // because every shard of a screen drives that screen's toggles.
+    const driven = new Set([...writeDriven.values()].flat());
     expect(
-      driven.length,
+      driven.size,
       "the write pass drove no controls at all, so it is provably not checking anything",
     ).toBeGreaterThan(20);
 
-    // TEMP PROBE
-    const unexplained = reverted.filter((k) => !(reformatKey(k) in REFORMATS));
+    const unexplained = [...writeReverted].filter((k) => !(reformatKey(k) in REFORMATS));
     expect(
       unexplained,
       `these controls did not keep what was typed into them. A CONTROLLED input that ` +

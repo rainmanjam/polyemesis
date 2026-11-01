@@ -52,6 +52,12 @@ const engineFakeChildEchoLast = "POLYEMESIS_ENGINE_FAKE_CHILD_ECHO_LAST"
 // stdout until it is signalled, standing in for the meters sidecar.
 const engineFakeChildAstats = "POLYEMESIS_ENGINE_FAKE_CHILD_ASTATS"
 
+// engineFakeChildCaptionTap makes the fake child stand in for the live-caption
+// audio tap: "exit" ends at once with nothing on stdout, which is a tap whose
+// relay went away, and "hold" stays up silent until it is killed. Environment,
+// because the captioner builds the tap's whole argv.
+const engineFakeChildCaptionTap = "POLYEMESIS_ENGINE_FAKE_CHILD_CAPTION_TAP"
+
 // The second argument after engineFakeChildFlag that turns the fake child into
 // an FFmpeg -progress writer, frozen or moving. Arguments, not environment,
 // because one test runs both kinds at once.
@@ -90,6 +96,12 @@ func TestMain(m *testing.M) {
 		}
 		fmt.Fprintln(os.Stderr, prefix+last)
 		os.Exit(1)
+	}
+	if mode := os.Getenv(engineFakeChildCaptionTap); mode != "" {
+		if mode == "hold" {
+			time.Sleep(60 * time.Second)
+		}
+		os.Exit(0)
 	}
 	if os.Getenv(engineFakeChildAstats) != "" {
 		// A stand-in for the meters sidecar: astats frames on stdout, the shape

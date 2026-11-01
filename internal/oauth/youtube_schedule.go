@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/captions"
 )
 
 // YouTube's scheduled broadcasts: create one before the show, and move it when
@@ -164,14 +166,24 @@ func (y *YouTube) AccountFor(ctx context.Context, clientID, accessToken, targetR
 // which is a behaviour change to go-live wearing the clothes of a scheduling
 // change.
 func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRef string, opts IngestOptions) (*Broadcast, error) {
+	// A caption broadcast needs a delay YouTube takes for the HTTP POST path, and
+	// it is checked before any call, so a refusal leaves no stream or broadcast
+	// behind. db.Destination.Validate already refuses other delays for this mode;
+	// this is the same rule at the one place a broadcast is made with it.
+	if opts.CaptionPOST && !opts.ScheduledFor.IsZero() && !captions.YouTubePOSTDelayOK(opts.CaptionDelay) {
+		return nil, fmt.Errorf("a YouTube broadcast that receives captions by HTTP POST needs a 30 s or 60 s "+
+			"broadcast delay, and this destination's delay is %s; set the destination's delay to 30 or 60 seconds",
+			opts.CaptionDelay)
+	}
 	acct, err := y.AccountFor(ctx, clientID, accessToken, targetRef)
 	if err != nil {
 		return nil, err
 	}
-	stream, err := y.streamFor(ctx, accessToken, opts)
+	picked, err := y.pickStream(ctx, accessToken, opts)
 	if err != nil {
 		return nil, err
 	}
+	stream := picked.ytLiveStream
 	b := &Broadcast{
 		Target: acct.Ref,
 		Ingest: Ingest{
@@ -179,13 +191,35 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 			Key: stream.CDN.IngestionInfo.StreamName,
 		},
 	}
+	if opts.CaptionPOST {
+		// A stream created on the caption path carries its URL from the insert. A
+		// reused stream came from the list, which has none, so the URL the caller
+		// stored with the held key is the one that still applies.
+		b.CaptionIngestURL = stream.ContentDetails.ClosedCaptionsIngestionURL
+		if b.CaptionIngestURL == "" {
+			b.CaptionIngestURL = opts.CaptionIngestURL
+		}
+	}
 	if opts.ScheduledFor.IsZero() {
 		return b, nil
 	}
 
-	created, err := y.createScheduledBroadcast(ctx, accessToken, opts.ScheduledFor)
+	// From here an error means the caller never receives this stream's key. A stream this call created is then an
+	// orphan on the channel, so the error names it (review #31). It is NOT deleted: IngestFor is not serialised per
+	// account, and pickStream's shared path adopts "the first RTMP stream on the channel", so a concurrent call may
+	// already have handed this stream's key to another destination. internal/api's
+	// TestNothingSendsADeleteToTheLiveStreamsEndpoint holds that line until the owner settles it. A stream found on
+	// the channel is never mentioned: it is in use.
+	dropCreatedStream := func(cause error) error {
+		if !picked.created {
+			return cause
+		}
+		return fmt.Errorf("%w; the ingest stream %s was created for it and may now be unused; delete it in "+
+			"YouTube Studio after checking nothing streams to it", cause, stream.ID)
+	}
+	created, err := y.createScheduledBroadcast(ctx, accessToken, opts)
 	if err != nil {
-		return nil, err
+		return nil, dropCreatedStream(err)
 	}
 	if err := y.bindBroadcast(ctx, accessToken, created.ID, stream.ID); err != nil {
 		// THE BROADCAST IS DELETED, NOT NAMED IN A MESSAGE, AND THE DIFFERENCE
@@ -212,17 +246,17 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 		// instruction to follow. Best case beats worst case here because the
 		// worst case is exactly what we already had.
 		if delErr := y.deleteBroadcast(ctx, accessToken, created.ID); delErr == nil {
-			return nil, fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
+			return nil, dropCreatedStream(fmt.Errorf("YouTube would not bind scheduled broadcast %s to the "+
 				"channel's stream, so it was deleted rather than left as an event page for a "+
-				"show that publishes elsewhere: %w", created.ID, err)
+				"show that publishes elsewhere: %w", created.ID, err))
 		}
 		// The delete failed too. NOW the id belongs in the message, because it
 		// is the only remaining way anyone learns the page is there.
-		return nil, fmt.Errorf("YouTube created scheduled broadcast %s, would not bind it to "+
+		return nil, dropCreatedStream(fmt.Errorf("YouTube created scheduled broadcast %s, would not bind it to "+
 			"the channel's stream, and would not delete it either. Delete broadcast %s in "+
 			"YouTube Studio: it is a public event page for a show that goes out elsewhere, "+
 			"and the next attempt will create another: %w",
-			created.ID, created.ID, err)
+			created.ID, created.ID, err))
 	}
 	b.ID = created.ID
 	return b, nil
@@ -236,7 +270,20 @@ func (y *YouTube) IngestFor(ctx context.Context, clientID, accessToken, targetRe
 // youtube_broadcast.go -- so a part named without its fields supplied is a part
 // reset to defaults. Naming contentDetails here would ask YouTube to default
 // every toggle on a broadcast that has none yet.
-func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken string, at time.Time) (*ytBroadcast, error) {
+//
+// THE ONE EXCEPTION IS A CAPTION DESTINATION (#8), and it names contentDetails on
+// purpose. closedCaptionsType can be set only while the broadcast is created or
+// ready (docs-youtube B13), and the HTTP POST path needs the monitor stream on
+// with a 30 s or 60 s delay (C5, C7), so the broadcast is born with all three
+// rather than patched later. On an insert there are no current values for a
+// named part to reset: every field left out takes the default it would have had
+// anyway. enableClosedCaptions is never sent: it is deprecated and may not be sent
+// with closedCaptionsType (B11). PROVISIONAL: the insert reference lists neither
+// closedCaptionsType nor the monitor stream among the properties it accepts,
+// although its error table implies both are read (B12); a live check on a test
+// channel settles it.
+func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken string, opts IngestOptions) (*ytBroadcast, error) {
+	at := opts.ScheduledFor
 	var created ytBroadcast
 	// RFC 3339 in UTC. The resource types scheduledStartTime as a datetime and
 	// the errors page lists invalidValue/invalidScheduledStartTime for a value
@@ -249,6 +296,17 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 		},
 		"status": map[string]any{"privacyStatus": ytScheduledPrivacy},
 	}
+	parts := "snippet,status"
+	if opts.CaptionPOST {
+		payload["contentDetails"] = map[string]any{
+			"closedCaptionsType": ytClosedCaptionsHTTPPost,
+			"monitorStream": map[string]any{
+				"enableMonitorStream":    true,
+				"broadcastStreamDelayMs": int(opts.CaptionDelay / time.Millisecond),
+			},
+		}
+		parts += ",contentDetails"
+	}
 	// requestJSON, NOT postJSON, AND THE ADVICE BELOW DEPENDS ON IT. postJSON
 	// returns a plain fmt.Errorf carrying snippet(body) -- the 300-character
 	// DISPLAY cut. ytBroadcastCreateAdvice matches through adviceBody, which
@@ -259,7 +317,7 @@ func (y *YouTube) createScheduledBroadcast(ctx context.Context, accessToken stri
 	// for live streaming got the raw truncated body instead of the sentence
 	// telling them which button to press.
 	err := requestJSON(ctx, http.MethodPost,
-		y.apiEndpoint()+ytBroadcastsPath+"?part=snippet,status",
+		y.apiEndpoint()+ytBroadcastsPath+"?part="+parts,
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, ytBroadcastCreateAdvice(err)
@@ -297,14 +355,9 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 	// "id,contentDetails", which asks YouTube to compose a part of a body
 	// nobody reads.
 	//
-	// NOT EVIDENCED, AND SAYING SO IS THE POINT. The evidence file documents
-	// this endpoint, streamId's optionality, the cardinality rule and
-	// liveBroadcastBindingNotAllowed -- it does NOT record that bind takes a
-	// part parameter at all, nor any accepted value. "id" is used because it is
-	// the one part value the file does evidence for a sibling resource
-	// (part=id,snippet,status on liveBroadcasts.list) and because it is the
-	// smallest thing that could satisfy a required parameter.
-	// Resolve by: one live bind, with and without part, recording both answers.
+	// part IS REQUIRED. The discovery document and the bind reference (docs-youtube.md, B18)
+	// both name it, with values id, snippet, contentDetails and status. part=id is one of
+	// those values, and the response is discarded, so the smallest valid one is enough.
 	q.Set("part", "id")
 	// requestJSON with a nil payload sends no body and no Content-Type, which is
 	// what a method whose whole input is in the query string should send.
@@ -320,7 +373,11 @@ func (y *YouTube) bindBroadcast(ctx context.Context, accessToken, broadcastID, s
 // documents nothing of the kind: liveBroadcasts/insert requires
 // snippet.scheduledStartTime and says nothing about how far ahead it may point,
 // and the live errors page carries invalidScheduledStartTime with no limit
-// attached (both read 2026-08-16). A number invented to fill that silence would
+// attached (both read 2026-08-16). The official-docs truth sheet (2026-10-31)
+// adds that a scheduled start refused as too far off implies a limit, so a
+// refusal is a real signal and not a bug; still, no number is published, so the
+// horizon stays unbounded and the refusal is logged by the caller, not guessed
+// at here. A number invented to fill that silence would
 // be indistinguishable in this code from Facebook's documented one, and it would
 // fail by SKIPPING -- the caller's gate drops an out-of-range occurrence without
 // an error -- so a guess of 30 days would quietly stop pre-announcing a show
@@ -399,6 +456,10 @@ func (y *YouTube) RescheduleBroadcast(ctx context.Context, accessToken, broadcas
 		BroadcastSettings{ScheduledStart: &start}, &MetadataResult{})
 }
 
+// errBroadcastNotListed is what broadcastByID returns when the list has no match. Its text is the start of
+// that refusal, so a caller that tests for it reads the same words an operator would.
+var errBroadcastNotListed = errors.New("YouTube no longer lists the broadcast")
+
 // broadcastByID reads one broadcast, with every part a write has to carry back.
 func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID string) (*ytBroadcast, error) {
 	var list struct {
@@ -426,8 +487,8 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 	// Not an error to swallow. A broadcast id polyemesis stored and YouTube no
 	// longer lists is an event page that has been deleted from under the
 	// schedule, and the caller's retry-and-forget path is the right one for it.
-	return nil, fmt.Errorf("YouTube no longer lists broadcast %s on this channel; it may have "+
-		"been deleted in YouTube Studio, or the connected account may have changed", broadcastID)
+	return nil, fmt.Errorf("%w %s on this channel; it may have "+
+		"been deleted in YouTube Studio, or the connected account may have changed", errBroadcastNotListed, broadcastID)
 }
 
 // ytBroadcastCreateAdvice turns the create's documented refusals into something
@@ -446,6 +507,10 @@ func (y *YouTube) broadcastByID(ctx context.Context, accessToken, broadcastID st
 // The refusal is documented at TRANSITION rather than at create, so reaching it
 // here would be a surprise; it is handled anyway because a surprise that reads
 // as a generic 403 is how an operator ends up debugging their own credentials.
+// ErrUpcomingBroadcastLimit marks a create YouTube refused with userBroadcastsExceedLimit: the channel's cap on live
+// and scheduled broadcasts, whose number YouTube does not publish (docs-youtube B28).
+var ErrUpcomingBroadcastLimit = errors.New("YouTube's cap on upcoming broadcasts, whose number it does not publish")
+
 func ytBroadcastCreateAdvice(err error) error {
 	// The WHOLE body, not the display snippet: the reason code YouTube
 	// returns sits past snippet()'s cut in a realistic refusal. See adviceBody.
@@ -459,6 +524,11 @@ func ytBroadcastCreateAdvice(err error) error {
 		return fmt.Errorf("%w — YouTube refused the start time this show was scheduled for. "+
 			"polyemesis sends it as RFC 3339 in UTC and enforces no limit of its own, because "+
 			"YouTube publishes none to enforce", err)
+	case strings.Contains(msg, "userBroadcastsExceedLimit"):
+		// docs-youtube B28: the cap exists and its number is not published. Retrying does not lift it, so the
+		// error carries ErrUpcomingBroadcastLimit and the caller backs off instead of trying every sweep.
+		return fmt.Errorf("%w — this channel has as many live and scheduled broadcasts as YouTube allows "+
+			"(%w); end or delete some on the channel, or lower the template's look-ahead", err, ErrUpcomingBroadcastLimit)
 	case strings.Contains(msg, "concurrentBroadcastsExceedLimit"),
 		strings.Contains(msg, "sharedIngestionBroadcastsExceedLimit"):
 		return fmt.Errorf("%w — this channel already has YouTube's maximum number of concurrent "+

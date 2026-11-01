@@ -124,6 +124,15 @@ func (e *Engine) planDestinations(rows []*db.Destination, wantRends map[int64]st
 		switch {
 		case row.VODProfile == nil || cerr != nil:
 			// Nothing to pair, or nothing worth pairing.
+		case flvRefused(e.tools) != "":
+			// THIS FFMPEG CANNOT WRITE A SECOND AUDIO TRACK INTO FLV. The probe
+			// ran (ffmpeg.Tools.ProbeTwoAudioFLV) and the second stream did not
+			// survive the muxer, so pairing would push a one-track file while the
+			// argv says two. The live mix goes out alone and the card carries the
+			// probe's own words. Applies to every RTMP destination, not only
+			// Twitch, because the FLV muxer is the same for all of them. An
+			// unprobed binary is not refused: see ffmpeg.Tools.TwoAudioFLV.
+			p.vodDropped = "the second (VOD) audio track is not being sent: " + flvRefused(e.tools)
 		case provisional:
 			// SAY SO. This arm used to share the one above and set no note, so a
 			// destination on an unprobed ingest dropped its second mix on every
@@ -575,13 +584,22 @@ func destSpec(row *db.Destination, compiled routing.Result, upstream string) str
 		// sits on, restart that destination and no other.
 		source, upstream,
 	}
-	if row.DelaySeconds > 0 {
+	if wantsSEIStage(row) {
+		// Adding or removing the SEI stage changes what the FFmpeg reads, so an
+		// operator save of the caption mode restarts the destination (#8).
+		parts = append(parts, "sei=stage")
+	}
+	if delay := row.OutputDelaySeconds(); delay > 0 {
 		// The broadcast delay restarts the destination when it changes (#11):
 		// the buffer is sized and filled for one delay, and a running line
 		// cannot be stretched or shrunk without releasing data early or
 		// holding the platform on a gap. The UI says so before it is saved.
 		// Only when set, so an undelayed destination hashes as it always did.
-		parts = append(parts, "delay="+strconv.Itoa(row.DelaySeconds))
+		// It is the delay polyemesis applies, not the configured one: a YouTube
+		// caption POST destination's delay is YouTube's (OutputDelaySeconds), so
+		// changing it does not touch this output, and switching its caption mode
+		// moves the delay here or away, which does.
+		parts = append(parts, "delay="+strconv.Itoa(delay))
 	}
 	return hashStrings(parts)
 }
@@ -1059,7 +1077,9 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 	// keep test compares. readHub is what this destination's FFmpeg reads.
 	var dd *destDelay
 	readHub := hub
-	if row.DelaySeconds > 0 {
+	// OutputDelaySeconds, not DelaySeconds: a YouTube caption POST destination is
+	// held back by YouTube's broadcastStreamDelayMs, never by a line here too.
+	if row.OutputDelaySeconds() > 0 {
 		var derr error
 		dd, derr = e.buildDelay(row)
 		if derr != nil {
@@ -1067,9 +1087,20 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		}
 		readHub = dd.hub
 	}
+	// An SEI stage (#8) sits after the delay and before this FFmpeg. Its output
+	// hub is what the FFmpeg reads from here on.
+	capt, cerr := e.startCaptionStage(row, readHub)
+	if cerr != nil {
+		e.closeDelay(dd)
+		return cerr
+	}
+	if capt != nil {
+		readHub = capt.hub
+	}
 
 	port, err := e.allocPort()
 	if err != nil {
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return err
 	}
@@ -1080,6 +1111,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		// taking it would leave that one running, correct-looking and receiving
 		// nothing. Same release-and-bail shape as the port refusal above.
 		e.releasePort(port)
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return err
 	}
@@ -1109,6 +1141,7 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 			// into whatever now owns that socket.
 			readHub.Unsubscribe(subName)
 			e.releasePort(port)
+			e.closeCaptionStage(capt)
 			e.closeDelay(dd)
 			return err
 		}
@@ -1243,13 +1276,14 @@ func (e *Engine) startDest(p destPlan, hub *relay.Hub, startDelay time.Duration)
 		e.mu.Unlock()
 		readHub.Unsubscribe(subName)
 		e.releasePort(port)
+		e.closeCaptionStage(capt)
 		e.closeDelay(dd)
 		return nil
 	}
 	published := &destination{
 		row: row, proc: proc, port: port, subName: subName, watch: watch,
 		compiled: compiled, graph: graph, hub: hub, spec: spec,
-		multitrack: mt, vodDropped: vodDropped, delay: dd,
+		multitrack: mt, vodDropped: vodDropped, delay: dd, capt: capt,
 	}
 	e.dests[row.ID] = published
 	e.mu.Unlock()
@@ -1347,6 +1381,9 @@ func (e *Engine) teardownDest(d *destination) {
 		e.releasePort(d.port)
 	}
 	e.stopBackup(d)
+	// The SEI stage reads the upstream hub and feeds the output hub the backup
+	// and the FFmpeg read, so it closes after both have let go of it.
+	e.closeCaptionStage(d.capt)
 	// Last: the backup above reads the private hub this closes.
 	e.closeDelay(d.delay)
 }

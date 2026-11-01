@@ -166,6 +166,10 @@ func TestOBSStreamStartAndStopOverObsWebsocketDriveOnlyTheSelectedDestinations(t
 	}, http.StatusOK)
 	obs.WaitConnected(10 * time.Second)
 	waitUntil(t, "the connected state", func() bool { return o.b.Status().Connection.State == obsbridge.ConnConnected })
+	// Connected is not synced: a start pushed while the connect-time
+	// GetStreamStatus is in flight can be read back as "already streaming",
+	// adopted as a sync and never acted on.
+	waitUntil(t, "the sync read", func() bool { return o.b.Status().Streaming != nil })
 
 	obs.StreamState(obsbridge.OutputStarted)
 	waitUntil(t, "the selected destination to start", func() bool { return o.enabled(t, sel) })

@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Pakai slate",
   "streamdeck.issue.sourceDegraded": "Sumber menurun",
   "streamdeck.pi.issues": "Masalah saat ini",
-  "streamdeck.pi.noIssues": "Tidak ada laporan untuk tujuan ini."
+  "streamdeck.pi.noIssues": "Tidak ada laporan untuk tujuan ini.",
+  "streamdeck.issue.verticalHalfFailed": "Bagian vertikal gagal",
+  "streamdeck.issue.verticalHalfDown": "Bagian vertikal berhenti"
 }

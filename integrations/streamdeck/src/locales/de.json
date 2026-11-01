@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Auf Slate",
   "streamdeck.issue.sourceDegraded": "Quelle beeinträchtigt",
   "streamdeck.pi.issues": "Aktuelle Probleme",
-  "streamdeck.pi.noIssues": "Für dieses Ziel wird nichts gemeldet."
+  "streamdeck.pi.noIssues": "Für dieses Ziel wird nichts gemeldet.",
+  "streamdeck.issue.verticalHalfFailed": "Vertikale Hälfte fehlgeschlagen",
+  "streamdeck.issue.verticalHalfDown": "Vertikale Hälfte aus"
 }

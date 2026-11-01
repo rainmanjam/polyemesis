@@ -149,52 +149,79 @@ remembered from a page of documentation.
 destination saved before then is kept, switched off, so you can read its
 settings and delete it when you are ready.
 
-**X (Twitter) — paste your key, and the "there is no API" this page used to
-carry was wrong.** It said X's developer platform covers posts, users, media
-and the post firehose, not live-video ingest, and that "streaming" in X's
-documentation means streaming posts. That was read off X's navigation index,
-which has no Broadcasts section. The spec X actually serves does:
-`api.x.com/2/openapi.json` (read 2026-08-16, "X API v2" 2.167) declares 149
-paths and 178 operations, of which nine paths and thirteen operations sit under
-the tag **Broadcasts** — glossed "Endpoints related to live broadcasts and
-their chat" — under two scopes nothing else in the whole spec uses:
-`broadcast.read` and `broadcast.write`.
+**X (Twitter) — the Livestream API is real, and X whitelists each app for it.**
+X publishes a Livestream API (the Broadcasts and Chat families, under the
+`broadcast.read` and `broadcast.write` scopes, plus `/2/sources` and
+`/2/users/{id}/sources` for stream keys). Sign-in, stream-key minting,
+go-live and end, metadata, chat read and send, and chat moderation are built
+in `internal/oauth/x.go` and `internal/chat/x.go`. **All of it sits behind
+X's whitelist, and it is switched off until the app is whitelisted.** The
+switch is the `POLYEMESIS_X_LIVESTREAM` environment variable. Until then the
+operator sees "needs X Livestream access (app must be whitelisted by X)", and
+pasting the server URL and stream key from X's producer tooling works exactly
+as before.
 
-**The row still reads *Unverified* everywhere but the stream key, and those
-seven cells are the honest answer rather than a leftover.** polyemesis has a
-provider written against that family —
-`internal/oauth/x.go`, the OAuth flow and the two broadcast reads — and it is
-deliberately **not registered**: there is no X entry in the provider set, no
-setup guide and no *Connect account* button. The house rule is the one Rumble's
-viewer-stats cell already states: a capability nothing implements is not a
-capability, so a *Works* here would send you looking for a sign-in that does
-not exist. Nor is *Not possible* available, since X's own spec contradicts it.
-None of the four words means "documented and unbuilt"; *Unverified* is the
-fail-open one.
+With the switch on, the lifecycle works like this. When an X destination turns
+on, polyemesis opens a broadcast on its stream source; X keeps it private
+(`NOT_STARTED`). Once video arrives, polyemesis publishes it with the
+destination's **go-live title**, set in the X console in the destination editor
+(at most 280 characters: X says the title is "subject to X post length limits"
+and gives no number, PROVISIONAL). During the first 30 minutes of a recurring
+show, the show's template title is sent instead (see
+[RECURRING-EVENTS.md](RECURRING-EVENTS.md)). **X takes a title only at that
+publish step.** It has no write that changes a running broadcast's title, so the
+console makes the field read-only while the broadcast is live and the server
+refuses a change then (HTTP 409). Turning the destination off ends the
+broadcast. After a publish the X chat adapter is told the new broadcast at once,
+and its own 15-second check stays as the fallback.
 
-There is a second reason not to promise anything. **X publishes no access tier
-for Broadcasts**: no pricing or tier page names the family, so whether your
-account can call those endpoints at all is a question only a live request
-answers.
+**The go-live announcement, once per show by default.** X's publish step makes
+an announcement post on the account unless the publish asks it not to
+(`should_not_tweet`, PROVISIONAL until the app is whitelisted). The X console has
+a **Go-live announcement** setting with three choices:
 
-So today: create the source in X's own producer tooling and copy the URL and key
-across. **The key stays pasted even if the rest lands**, and the reason is
-narrow — X *consumes* a key (`source_id` is required when a broadcast is
-created, and is echoed back on every broadcast object) but publishes nothing
-that mints or enumerates one. polyemesis could confirm a binding it was given;
-it could not obtain one.
+- **On the first go-live of a show only** (the default). A show lasts while the
+  destination stays on. The broadcasts polyemesis opens again within it, after X
+  ends or times out the previous one, go live without a post. Switching the
+  destination off ends the show, so the next time it goes live it posts.
+- **On every go-live**, renewals included, which is what X does by default.
+- **Never.**
 
-What the family does publish, for anyone weighing whether to wait: title,
-description, language and the chat toggle on a **scheduled** broadcast
-(`POST`/`PUT /2/broadcasts/scheduled`, with `POST /2/broadcasts/scheduled/{id}/live`
-to publish it) and no metadata update on an already-live one, so a title change
-mid-show is not in it; chat history over `GET /2/broadcasts/{id}/chat` and
-sending over `POST` to the same path, capped at **140 characters**, which is X's
-bound and not ours; muting a viewer, lifting the mute, and deleting a message
-over `/2/broadcasts/{id}/chat/mutes` and `chat/{message_id}`; and
-`total_watching` and `total_watched` on the broadcast object, which X documents
-nothing about — all 26 fields in that schema are undescribed strings, so the
-numbers are readable but their unit and freshness are not stated.
+Schedules start and stop shows the same way: a start schedule switches the
+destination on, and a stop schedule switches it off. With both, each occurrence
+is a show of its own and posts once. With a start schedule only, the destination
+stays on between occurrences, so a later occurrence that gets a new broadcast is
+a renewal and does not post under the default. Choose **On every go-live** for
+that.
+
+When a broadcast ends while the destination is still on (X timed it out, or it
+was ended in X's own tooling), polyemesis opens the next one only after the
+encoder has been seen to stop, so ending a broadcast in the X app while the
+encoder keeps sending is an emergency stop that holds. A broadcast X **canceled**
+is not replaced by itself: it is shown as a fault, and switching the destination
+off and on again starts a new one.
+
+X publishes no rate limits for the Livestream endpoints. polyemesis reads X's
+`x-rate-limit-*` headers: after a 429, or an answer that says no calls remain,
+it makes no X calls for that account until the reset time X gave (at most 15
+minutes), and the wait is not counted as a failure. The account id
+(`GET /2/users/me`) is asked for once per token and kept for ten minutes. A
+confidential app authenticates its token requests with HTTP Basic, as X
+documents. The consent page is X's spec address `api.x.com/2/oauth2/authorize`;
+X's guide shows `x.com/i/oauth2/authorize` instead, and the two are one constant
+apart in `internal/oauth/x.go` (PROVISIONAL).
+
+Live chat needs a second setting: `POLYEMESIS_X_APP_BEARER`, the app's bearer
+token from console.x.com, which X's activity stream requires. It is a secret.
+Without it the chat pane stays empty and sending still works. The X console and
+the setup guide show whether the Livestream switch is on.
+
+Every cell in the X row stays *Unverified* except the stream key, which is
+*By hand*. That is deliberate: no live request from a whitelisted app has
+confirmed any of the built paths yet. Two gates apply on top of the whitelist:
+X's Broadcasts list refuses accounts without X Premium or more than 1,000
+followers (HTTP 412), and X has **no hide action**, so chat moderation offers
+mute, unmute and delete only.
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
 distinction matters and this page used to collapse it. Instagram's platform

@@ -108,6 +108,16 @@ func (s *Server) preannounceOnce(ctx context.Context, now time.Time) {
 			if !ok {
 				continue
 			}
+			// A schedule with a recurring template on a platform that can title
+			// its events is the template sweep's (recurring.go), which creates the
+			// same event with the template's title. Creating it here as well would
+			// put two event pages on one show. A DB error also skips, rather than
+			// falling through to an untitled create.
+			if _, editor := sb.(oauth.ScheduledEditor); editor {
+				if _, err := s.store.GetBroadcastTemplate(sc.ID); !errors.Is(err, db.ErrNotFound) {
+					continue
+				}
+			}
 			// The bound is read here rather than beside scheduler.Next above
 			// because it belongs to the DESTINATION's platform, and the
 			// occurrence is not out of range until there is somewhere to send
@@ -375,6 +385,12 @@ func (s *Server) announceOne(ctx context.Context, sb oauth.ScheduledBroadcaster,
 		return
 	}
 	s.clearAnnounceFailures(d.ID, sc.ID)
+	// Stored now, bound to the key the create returned: if the key write below
+	// is refused, the URL reads as absent for the key the row keeps.
+	if err := s.keepCaptionIngest(d, b); err != nil {
+		s.log.Warn("pre-announce: the caption ingestion URL could not be stored",
+			"destination", d.Name, "err", redactErr(err))
+	}
 
 	if backupURL, _ := firstBackup(b); d.BackupIngestWanted && backupURL == "" {
 		s.log.Warn("pre-announce: Facebook offered no backup ingest endpoint",

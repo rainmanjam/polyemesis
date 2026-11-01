@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -149,5 +150,24 @@ func TestYouTubeWriteAdviceReadsTheWholeBodyNotTheDisplaySnippet(t *testing.T) {
 	if !strings.Contains(got.Error(), "freezes DVR") {
 		t.Fatalf("broadcastWriteAdvice gave no advice for a ModificationNotAllowed "+
 			"refusal whose reason code sits past the display cut.\ngot: %s", got)
+	}
+}
+
+// userBroadcastsExceedLimit is the channel's cap on live and scheduled broadcasts (docs-youtube B28). No retry
+// lifts it, so the advice marks it with ErrUpcomingBroadcastLimit for the look-ahead to back off on, and says what
+// to do.
+func TestYouTubeUpcomingCapIsNamedAndMarkedSoTheLookaheadBacksOff(t *testing.T) {
+	body := `{"error":{"code":403,"message":"The user has created too many live or scheduled broadcasts ` +
+		`and must stop or delete some of them before creating another one. This message is long enough ` +
+		`that the reason code sits past the display cut of three hundred characters, which is the case ` +
+		`the advice has to survive.","errors":[{"message":"Too many.","domain":"youtube.liveBroadcast",` +
+		`"reason":"userBroadcastsExceedLimit"}]}}`
+	err := statusErrorFromWire(403, "https://www.googleapis.com/youtube/v3/liveBroadcasts", body)
+	got := ytBroadcastCreateAdvice(err)
+	if !errors.Is(got, ErrUpcomingBroadcastLimit) {
+		t.Fatalf("the cap is not marked: %v", got)
+	}
+	if !strings.Contains(got.Error(), "look-ahead") {
+		t.Fatalf("no advice: %v", got)
 	}
 }

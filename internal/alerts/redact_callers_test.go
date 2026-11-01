@@ -46,6 +46,32 @@ var redactAllowlist = map[string]string{
 		"credential is in that text by construction -- tokens travel in headers, never in the " +
 		"message -- so there is no literal to declare; the events hub's RedactTree runs again " +
 		"on the poll.* payload.",
+	"internal/api/rollover_handlers.go": "the same residual pass over a manual rollover's 500 body. A live-start " +
+		"read's error (a liveBroadcasts.list refusal) reaches the handler unredacted by act, and its text can carry a " +
+		"platform response body. Redacted here, in the one place the error is written to a client; this is the outer " +
+		"net, not the boundary.",
+	"internal/api/rollover.go": "the same residual pass over a platform's refusal text (a YouTube " +
+		"rollover's create, bind or end error, which carries a response-body snippet) before it is clipped " +
+		"and written to the timeline, the result row, the webhook and the 502 body. Redacting first, then " +
+		"clipping, stops a clip from splitting a credential the pattern would have caught; this is the outer " +
+		"net, not the boundary.",
+	"internal/api/recurring.go": "the same residual pass over a platform's refusal of a scheduled-event create, " +
+		"kept on the broadcast template row so the operator sees the limit. It runs on err.Error() before the " +
+		"store write, and nothing is clipped after it. A refused create carries no stream key, because a key only " +
+		"comes back on success; this is the outer net, not the boundary.",
+	"internal/api/lifecycle.go": "two residual passes. scrubSourceKey removes the destination's stream key as a " +
+		"LITERAL first, because X's problem detail can echo the source_id it was sent and the key has no credential " +
+		"shape; Redact then runs over what is left before the fault, log, escalation and timeline. X's PUBLISH " +
+		"warnings are platform text with the token in the Authorization header, never in the body, so the pass over " +
+		"them before the log line is the outer net, not the boundary.",
+	"internal/api/recurring_golive.go": "the same residual pass over a platform's warnings on a go-live metadata " +
+		"write (a title or category it did not take) before the log line. The write sends the token in a header and " +
+		"the warnings carry no stream key; this is the outer net, not the boundary.",
+	"internal/api/recurring_handlers.go": "the same residual pass over a platform's refusal of an occurrence's " +
+		"skip or retitle, and over a token refresh's error, written as the 502 body and the warnings list. None of " +
+		"those carries a stream key, because the calls only touch an existing event by id; this is the outer net, " +
+		"not the boundary.",
+	"internal/api/youtube_vertical.go": "the same residual pass over YouTube's error text (a refused liveStreams.insert for the vertical companion, a failed health read) shown as the 502 body and the health row. The stream key comes back only on a successful create, so a failed one carries none; this is the outer net, not the boundary.",
 	"internal/api/polls.go": "the same residual pass over Twitch's error text (a refused Create " +
 		"Poll, a failed token refresh) shown as a native mirror's reason. The access token is " +
 		"only ever a header; this is the outer net, not the boundary.",

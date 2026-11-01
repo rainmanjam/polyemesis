@@ -79,7 +79,8 @@ func TestChatOverviewSaysNotConfiguredRatherThanFailing(t *testing.T) {
 	// The limits are static knowledge, so a server with no chat running still
 	// answers "YouTube caps at 200" — the composer can warn before anything is
 	// ever connected.
-	if len(view.Limits) != 3 {
+	// Four since X joined: it can send, and its 140-character limit is published.
+	if len(view.Limits) != 4 {
 		t.Fatalf("limits = %d, want one per sending platform", len(view.Limits))
 	}
 }
@@ -322,6 +323,9 @@ func TestChatSendLimitsMatchTheAdapters(t *testing.T) {
 		db.PlatformKick:    chat.KickMaxMessage,
 		db.PlatformTwitch:  chat.TwitchMaxMessage,
 		db.PlatformYouTube: chat.YouTubeMaxMessage,
+		// X's spec caps a chat message at 140 characters (maxLength on
+		// SendBroadcastChatRequest.text), so the composer warns before a send.
+		db.PlatformX: chat.XMaxMessage,
 	}
 	got := chatSendLimits()
 	if len(got) != len(want) {

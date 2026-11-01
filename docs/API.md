@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the seventeen `GET`s among the nineteen refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the nineteen `GET`s among the twenty-one refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +133,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Nineteen routes are refused outright**, for three different reasons. Masking
+**Twenty-one routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
-command shown is the command that runs) and pointless for the next five, which
-are `403` because of what they *do*. The last twelve are `403` because of what
+command shown is the command that runs) and pointless for the next six, which
+are `403` because of what they *do*. The last thirteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -147,6 +147,7 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 | `GET /platforms/accounts/{id}/stats` | calls the platform; can refresh **and persist** an OAuth token |
 | `GET /destinations/{id}/facebook/stream-health` | the same, for what Facebook sees arriving at its ingest |
 | `POST /destinations/{id}/facebook/end-broadcast` | the same, to end the broadcast. A `POST`, so the method rule already denies it — it is listed because this table is read against `readScopeDeniedPatterns`, and a row missing from one side tells the reader nothing about which side is right |
+| `GET /destinations/{id}/youtube-vertical` | the vertical half's stream id and its health, read from YouTube with the account's token. Paced to one YouTube call a minute per pair, and made only while one of the two halves is live (`live` in the response says which); the call is charged to the chat quota budget |
 | `GET /metadata/broadcast-window` | the same, once per connected account |
 | `GET /recordings/{id}/download` | the recording itself |
 | `GET /recordings/stems/{name}/download` | a separated audio stem |
@@ -155,6 +156,7 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 | `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
 | `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
 | `GET /library/recordings/{id}/transcript` | the same, by the library's route |
+| `GET /library/recordings/{id}/transcript/export` | the same words again, as an SRT, WebVTT or JSON caption file |
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
 | `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
 | `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
@@ -561,6 +563,8 @@ does not get to change what another operator's console shows them.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/status` | Everything the dashboard renders, in one object |
+
+A YouTube destination that has a vertical half (#7) carries `youtubeVertical: {verticalId, pairingConfirmed}`, and its vertical row carries `verticalHalfOf`. Both come from the local pair table, so `/status` makes no YouTube call to fill them.
 | `GET` | `/system` | Host, FFmpeg, build |
 | `GET` | `/debug` | Debug-mode state: recording on/off, level, and how much is held |
 | `PUT` | `/debug` | Start or stop recording, and optionally clear the buffer |
@@ -768,6 +772,32 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `POST` | `/destinations/{id}/facebook/end-broadcast` |
 | `GET` | `/destinations/{id}/facebook/stream-health` |
 | `POST` | `/destinations/{id}/tracks/{track}/gain` |
+| `GET` `PUT` | `/destinations/{id}/rollover` |
+| `POST` | `/destinations/{id}/rollover/run` |
+| `GET` | `/rollover/limits` |
+| `POST` | `/destinations/{id}/youtube-vertical` |
+| `GET` | `/destinations/{id}/youtube-vertical` |
+| `POST` | `/destinations/{id}/youtube-vertical/confirm` |
+| `GET` | `/recurring/occurrences` |
+| `POST` | `/recurring/occurrences/{id}/skip` |
+| `POST` | `/recurring/occurrences/{id}/title` |
+| `GET` `PUT` `DELETE` | `/schedules/{id}/template` |
+| `PUT` | `/schedules/{id}/template/thumbnail` |
+
+`POST .../recurring/occurrences/{id}/skip` is refused with a `409` for a show whose
+start has passed, and for a destination that is on air. Nothing is cancelled in
+that case. A skip frees its look-ahead slot, so the next occurrence is created in
+its place. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
+
+The planned-rollover routes (#19) read and set one destination's rollover
+settings and its countdown, and run a rollover now. `GET /rollover/limits` is
+the table of platform caps, each with its source and how well it is established.
+`PUT` takes `enabled`, `marginMinutes` (5 to 120), `quietStart`, `quietEnd`,
+`quietZone` and `obsScene`, and a bad value is refused with the reason. `POST
+.../rollover/run` is refused with a 409 when the destination is not delivering,
+the platform is countdown only, or a rollover ran in the last ten minutes. The
+answer is 200 with `rolled over` once the rollover has finished, and 502 with the
+redacted reason when the platform refuses it. See [ROLLOVER.md](ROLLOVER.md).
 
 `POST /destinations/{id}/tracks/{track}/gain` sets one track's mute or gain on a
 destination. The body takes `muted` (boolean), `gain` (a finite number above
@@ -824,12 +854,24 @@ destination lets its buffered tail air before it stops, and the answer carries
 `drainingSeconds`. `POST /destinations/{id}/stop?now=true` cuts the tail
 instead. It also cuts a tail that is already airing from an earlier stop, and
 then the answer has `"cut": true`. `now` must be `true` or `false`; anything else is `400`.
-`stop-all` and `DELETE` always cut.
+`stop-all` and `DELETE` always cut. A YouTube destination whose `captionMode` is
+`youtube_post` must have a `delaySeconds` of 30 or 60, and YouTube applies it as
+the broadcast's delay: polyemesis does not hold that destination's output back,
+and there is no tail to drain ([CAPTIONS.md](CAPTIONS.md)).
 
 **`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
 it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
 (below), and a dialog in the console is a confirmation a script or a replayed
 request never sees. `start-all` takes no body.
+
+**X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
+default, also what an absent or empty value means), `every` or `never`. X posts
+an announcement when a broadcast is published. Under `first` it does so on the
+first go-live after the destination is switched on, and the broadcasts
+polyemesis opens again after X ends one are published with `should_not_tweet`.
+`lifecycle.renewed` is `true` on such a broadcast. Any other value is `400`. A
+destination that is not X has the field removed on save, with a warning.
+PROVISIONAL: X Livestream is gated until the app is whitelisted.
 
 **`DELETE /destinations/{id}` needs `{"confirm": true}` when the destination is
 carrying a broadcast in `testing` or `live`** (its `lifecycle.phase`), and
@@ -1140,6 +1182,7 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` `PUT` `DELETE` | `/library/sessions/{id}` |
 | `GET` `PUT` | `/library/recordings/{id}` |
 | `GET` `DELETE` | `/library/recordings/{id}/transcript` |
+| `GET` | `/library/recordings/{id}/transcript/export` |
 | `PUT` | `/library/recordings/{id}/speaker` |
 | `POST` | `/library/recordings/{id}/jobs/{kind}` |
 | `GET` | `/library/recordings/{id}/media/{file}` |
@@ -1155,6 +1198,12 @@ Absent, it deletes the whole transcript; present, it deletes one track's, so a
 single bad microphone can be re-run without discarding every other track's work
 alongside it. `N` is zero-based, as track numbers are everywhere in this API,
 and a negative or non-numeric one is `400` `invalid track`.
+
+**`GET /library/recordings/{id}/transcript/export` takes `?format=srt|vtt|json`.**
+It is the transcript as a caption file, served as an attachment with
+`Cache-Control: no-store`. Any other format is `400`; a recording with no
+transcript is `404`. It carries the same words as the transcript route, so a
+`read` token is refused it the same way.
 
 #### Searching transcripts
 
@@ -1291,11 +1340,21 @@ answer later is refused then. See [HOOKS.md](HOOKS.md#private-and-lan-endpoints-
 | `GET` `POST` | `/schedules` |
 | `GET` | `/schedules/runs` |
 | `GET` `PUT` `DELETE` | `/schedules/{id}` |
+| `GET` `PUT` `DELETE` | `/schedules/{id}/template` |
+| `PUT` | `/schedules/{id}/template/thumbnail` |
+| `GET` | `/recurring/occurrences` |
+| `POST` | `/recurring/occurrences/{id}/skip`, `/recurring/occurrences/{id}/title` |
 
 A schedule create or update may also return `warnings`, on the same terms as a
 destination write. The one that exists today: a `once` schedule firing further
 ahead than Facebook accepts a scheduled broadcast gets no event page, and is
 told so. The schedule still saves and still runs.
+
+A start schedule may carry a recurring broadcast template (`/schedules/{id}/template`).
+The template is a title pattern, description, privacy, category and thumbnail; the
+look-ahead creates the next occurrences as upcoming YouTube events. The calendar
+(`/recurring/occurrences`, at most 90 days wide) lists them; skip cancels one occurrence's
+event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 
 ### Platforms, metadata, chat
 

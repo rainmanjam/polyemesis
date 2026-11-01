@@ -10,6 +10,232 @@ its first tagged release.
 
 ### Added
 
+- **X go-live announcement: once per show by default (#3, PROVISIONAL).** An X destination has a
+  **Go-live announcement** setting in the X console (`xGoLiveTweet`): *on the first go-live of a
+  show only* (the default), *on every go-live*, or *never*. A show lasts while the destination is
+  on. The broadcasts polyemesis opens again within it, after X ends or times out the previous one,
+  are published with `should_not_tweet`, so a show no longer posts a fresh announcement on every
+  renewal. Switching the destination off ends the show. `lifecycle.renewed` marks a renewed
+  broadcast. Any other value is refused, and a destination that is not X has the setting removed
+  on save, with a warning. PROVISIONAL: `should_not_tweet` is a boolean in the PUBLISH body per
+  X's documentation, and X Livestream stays gated until the app is whitelisted. In all 15
+  languages.
+- **X console: a go-live title, the broadcast's state, and the Livestream gate (#3).** An X
+  destination's editor shows whether X Livestream access is switched on (`POLYEMESIS_X_LIVESTREAM`;
+  "needs X Livestream access" while it is off), where its X broadcast stands, and a go-live title.
+  X takes a title only when the broadcast is published, so polyemesis now sends that title on the
+  publish step (or a recurring show's rendered title during its first 30 minutes). The field is
+  read-only while the broadcast is live, and the server refuses a change then, because X cannot
+  change a running broadcast's title. The title is at most 280 characters (PROVISIONAL: X gives no
+  number). After publishing, polyemesis tells the X chat adapter the new broadcast straight away
+  instead of waiting for the adapter's 15-second check, which stays as the fallback. The setup
+  guide now names `POLYEMESIS_X_LIVESTREAM` and `POLYEMESIS_X_APP_BEARER`. All of it is built from
+  X's documentation and waits for a whitelisted app to verify. X's scheduled broadcasts are
+  documented by X but not created yet.
+
+- **Live captions: custom vocabulary, masked words, a live cue log and VOD alignment (#8 step E).**
+  Each programme can hold a caption policy: words spelled the way you want (a recognised word
+  that matches one, ignoring case, is written in your spelling) and words masked on screen
+  (`d***`). It is applied once, where captions leave the captioner, so the dashboard, the player
+  track, SEI, YouTube POST and the exports all show the same words, and a save reaches captions
+  that are already running without restarting speech recognition. Entries are single words
+  (letters, digits, inner apostrophes), at most 200 per list and 48 characters each. Every live
+  caption is also kept in the programme's cue log (`<data>/captions/cues-source-<id>.jsonl`, at
+  most 64 MiB on disk) with the wall-clock moment it was spoken, and the caption export takes
+  `source=live` to serve what viewers saw during a recording, lined up with the recording's own
+  timeline. The stored-transcript export now applies the programme's policy too. The player
+  sidecar `captions.vtt` names its epoch (`X-POLYEMESIS-EPOCH-MS`) and places each cue when it
+  was spoken, so a player can line it up through HLS program date-time.
+- **Live captions on the public player, in the Library, as downloads and burned in (#8 step E).**
+  The public player shows the live captions as a *Captions* track, placed on the picture through
+  HLS program date-time, live and after a DVR seek. A recording's player in the Library shows its
+  transcript, or else the captions viewers saw live, and *Export captions* downloads either as SRT,
+  VTT or JSON. A programme's *Caption words* (spellings and masked words) are edited under
+  *Sources*. A rendition can burn the live captions into its picture, at the bottom or the top:
+  FFmpeg's `subtitles` filter reads its file only once (measured on the shipped FFmpeg 8.1.3), so
+  the burn-in is `drawtext` re-reading a burn file the captioner replaces on every caption, in the
+  built-in font. It needs a fixed width and height, and a change restarts the tier.
+- **SEI captions are re-sent every 2 s while on screen (#8).** A viewer who joins a Twitch
+  stream after a caption's End Of Caption now sees that caption within one segment instead of
+  waiting for the next one.
+
+- **Live captions to YouTube by HTTP POST (#8, PROVISIONAL).** A YouTube destination on
+  *caption ingestion (HTTP POST)* now posts each caption, after its delay, to the caption
+  ingestion URL of its own YouTube stream, through a bounded per-destination queue that never
+  holds up the other outputs. Press **Refresh stream key** once after choosing the route: it
+  creates the destination's own stream and stores its caption URL, so **the stream key changes
+  once**. The pre-announce and recurring sweeps never do this; they only reuse a stored URL.
+  Broadcasts polyemesis schedules for such a destination are created with caption type HTTP
+  POST, the monitor stream on and the destination's 30 s or 60 s delay. The destination will
+  not start without a caption URL for its current key (409 naming the button), and a scheduled
+  broadcast that is not set for POST captions is not taken to testing or live (the card says
+  why; the stream keeps going out). The URL is stored encrypted, apart from the destination,
+  and is never in the console, the API, logs or events. PROVISIONAL: YouTube does not publish
+  the POST body format, so it is isolated in one function and needs a live check on a test
+  channel. Ultra-low latency is not checked because polyemesis never sets it.
+
+- **X go-live lifecycle (#3, coordinator slice).** With the X Livestream gate open,
+  enabling an X destination opens its broadcast on the stream source, unpublished. The
+  broadcast goes live once bytes arrive, and disabling the destination while it is on air
+  ends it. A finished broadcast on a destination that is still enabled is replaced by a new
+  one for the next show, so a second show needs no manual step. The coordinator reads all six
+  X states explicitly. The gate closed means nothing is opened and nothing is faulted. The
+  stream source key stays out of faults and logs. PROVISIONAL: no live X account has run this
+  path yet.
+- **Live captions on Twitch as SEI, behind the broadcast delay (#8 step D).**
+  A Twitch destination whose caption mode is SEI now reads through a caption
+  stage between the stream and its FFmpeg. The stage adds one CEA-608 caption
+  SEI per picture on the copied H.264, so Twitch receives the captions inside
+  the video, and video is still copied. Captions are placed on the pictures live
+  at delivery time, so a delayed destination's captions follow its delay (#11).
+  Turning SEI captions on or off for a running destination restarts that
+  destination, as a delay change does. Kick is still off, and Facebook SEI stays
+  behind its provisional flag. Twitch has not been checked against a live
+  channel yet. The RTMP `onCaptionInfo` fallback is not built.
+- **Live captions: engine wiring (#8 step B).** The captioner now runs for a
+  programme when one of its enabled destinations has a caption mode its platform
+  accepts, on the track the programme chose. Each captioned destination receives
+  its captions at its broadcast delay (#11), and stopping the captioner cancels
+  every caption still waiting. The health guard's switch-off stays latched until
+  an operator saves a caption setting. Captions pass one text policy at the emit
+  boundary. No output consumes the delayed captions yet (the SEI injector and the
+  YouTube caption POST are later steps), and no operator setting stores the
+  custom vocabulary or profanity filter yet, so the policy is empty.
+- **X (Twitter) Livestream, behind X's whitelist (wave 3, #3).** X sign-in
+  (OAuth 2.0 with PKCE, `broadcast.read`, `broadcast.write`, `offline.access`,
+  `users.read`, `tweet.read`), stream-source minting, publish and end of an existing broadcast, chat read
+  over the Activity API, chat send (140 characters), and mute, unmute and delete.
+  **Switched off until X whitelists the app.** Set `POLYEMESIS_X_LIVESTREAM=1`
+  once it is approved; until then the operator sees "needs X Livestream access
+  (app must be whitelisted by X)" and pasting the key works as before. X has no
+  hide action, so moderation offers delete and mute only. Metadata is NOT at
+  parity with YouTube: X has no endpoint that changes a running broadcast's title
+  or chat option, so polyemesis refuses every metadata push to X. PROVISIONAL until a
+  whitelisted app has run it live: the PKCE acceptance, the broadcast.chat
+  payload, and the activity stream's app bearer, which is supplied as
+  `POLYEMESIS_X_APP_BEARER`. Titles are set at go-live only, so a live title
+  cannot change. **Not built in this PR (deviation from #3):** creating the
+  broadcast itself. Create it in X's producer tooling; polyemesis can then
+  publish and end it.
+- **Twitch VOD track (#15): what is verified and what is not.** The second
+  (VOD) mix is now checked against this FFmpeg before it is sent: a binary
+  that cannot write two audio tracks into FLV drops the VOD mix with its
+  reason on the card, and the live stream goes out alone. A new second mix
+  defaults to everything except music. Live mute reaches the VOD mix's copy of
+  the same track, and so does live gain except in a matrix VOD mix (gain there
+  is per cell). Twitch acceptance of the two-track publish is PROVISIONAL until
+  a live test on a Twitch test channel.
+- **Twitch VOD track (#15): a meter for each mix, and matrix gain says it
+  restarts.** Every destination with a VOD mix now has a second loudness
+  reading on the Meters page, labelled "VOD mix", beside its live one. Each
+  mix has its own analyser process reading the destination's relay, so the
+  command line that publishes is unchanged. The analyser for a paired graph
+  previously could not start at all, because FFmpeg refused the unused VOD
+  output; it now terminates the other mix. A gain change on a matrix VOD mix
+  restarts the destination for a moment, which interrupts the live mix too, and
+  the VOD editor says so. A live fader gain does not reach a matrix VOD mix, and
+  the response now says so. Alerts stay on the live mix. The startup FLV probe
+  fails open: a probe that times out, cannot create its temporary directory, or
+  cannot start FFmpeg records "probe inconclusive" and keeps the VOD mix; only a
+  real refusal by this FFmpeg drops it.
+- **Live captions, part 1: the in-band path (#8, not yet switched on).** New
+  `internal/captions` package. It builds CEA-608 pop-on captions (RCL, row
+  addressing, 32-column wrapping, EOC and EDM, the basic and special character
+  sets), and a Go SEI injector that rewrites the H.264 PID of an MPEG-TS stream
+  so each picture carries the caption pair due at its presentation time. Pairs
+  are keyed on picture timestamps, not arrival order, so B-frames read back in
+  order; a short reorder window is the only added latency. Verified by FFmpeg's
+  own CEA-608 decoder (host FFmpeg 9.0.2) reading the injected captions back.
+  **PROVISIONAL:** the Twitch path needs a live check on a test channel before
+  it is offered. Nothing calls it yet: no API route, no UI control, and no
+  destination path runs the injector.
+  **Not built in this PR (deviation from #8, which is agreed in full):** the
+  transcriber is not wired to a routed caption track; the per-destination mode is stored
+  but not read by the engine; the player WebVTT track and the burn-in are
+  not wired into renditions; and the YouTube caption POST is not called. The
+  pieces above are library code, not a delivered feature.
+- Caption text policy: vocabulary spellings and profanity masking, applied once
+  at the emit boundary so every output shows the same words. Timing, track and
+  speaker are unchanged.
+- Live captions settings (#8): a per-destination caption route, and a per-programme
+  caption track. The route is chosen on a destination (off, Twitch in-stream CEA-608,
+  YouTube caption ingestion, or Facebook in-stream, which is provisional and needs
+  `POLYEMESIS_CAPTIONS_FACEBOOK=1`). Kick offers no route. YouTube caption ingestion
+  needs a 30 s or 60 s broadcast delay, and a route cannot change while the destination
+  is live. The track is chosen on a programme, and "automatic" is the default. Both are
+  stored and shown, and the engine does not send captions from them yet. See
+  `docs/CAPTIONS.md`.
+- Per-destination caption mode (`destinations.caption_mode`, default `off`).
+  The console has a picker for it and the API stores it, but the engine does not
+  read it yet, so the choice changes nothing on air. Twitch SEI is marked go,
+  and its on-stream display still needs a live check. YouTube's embedded
+  CEA-608 route is go. YouTube's caption POST is provisional and needs a 30 s
+  or 60 s broadcast delay. Facebook SEI stays off behind a flag. Kick is
+  skipped: Kick documents no caption route for live streams.
+- Burn-in filter builder for the `subtitles` filter. The shipped image's FFmpeg
+  (8.1.3-r0 on the pinned `alpine:3.24` digest) has `subtitles` (libass) and
+  `drawtext`; checked in a local container on 2026-10-31, amd64 only. Not yet
+  wired into renditions.
+- The injector drops video packets whose adaptation field runs past the packet
+  and counts them. It bounds the units it holds, releasing units over the cap
+  unchanged, and it restarts its caption schedule on a clock jump in either
+  direction.
+
+- **YouTube vertical half (API, #7; PROVISIONAL).** A YouTube destination can now
+  pair with a 9:16 vertical destination. `POST /api/v1/destinations/{id}/youtube-vertical`
+  creates the vertical liveStream through the API and stores it as its own destination
+  with a portrait rendition. The pair is recorded in polyemesis, not in YouTube:
+  the Live Streaming API cannot attach a vertical companion, so the one-time Live
+  Control Room step (choosing this key as the vertical "second stream key") stays a
+  human action, recorded by `POST .../youtube-vertical/confirm`. The horizontal
+  broadcast never binds to the vertical stream, and the vertical stream is kept out of
+  the first-RTMP fallback. `GET .../youtube-vertical` reads its health by stream id,
+  and a failed read stays on that half. The status read is paced to one YouTube call a
+  minute per pair, and only while one of its halves is live (correction 6 of the YouTube
+  truth sheet). Each status read is charged to the chat quota budget and stops at its send reserve.
+- **YouTube vertical in the console (#7; PROVISIONAL).** A YouTube destination offers a
+  "YouTube vertical" section in its dialog. It picks one of two 9:16 tiers, adds the
+  vertical half, and walks the one-time Live Control Room steps with a confirm button. The
+  pair shows as one dashboard card with a vertical sub-row. That sub-row has its own
+  start, stop and restart, and a failed half shows there without stopping the other. The
+  card and the go-live sheet keep a reminder until the step is confirmed. polyemesis records
+  the confirmation and does not verify it. The Stream Deck key for a pair covers both halves
+  (red "Vertical half failed", amber "Vertical half down").
+- **Planned rollover (preview).** A destination can be replaced before its
+  platform's cap: a live YouTube broadcast is swapped for a new one on the same
+  stream, and a Twitch destination is reconnected. Triggers are a safety margin
+  against a stated cap, a daily quiet window, or an OBS scene. Other platforms
+  show a countdown only. Built against fakes; the YouTube auto-start and Twitch
+  reset behaviour are provisional until checked on a live account. See
+  [docs/ROLLOVER.md](docs/ROLLOVER.md).
+  **Not built in this PR (deviation from #19):** the countdown card and the
+  settings control in the console. The API serves the same data. A manual run
+  that the platform refuses answers 502 with the reason.
+- **Recurring broadcast events (preview).** A start schedule can carry a broadcast
+  template: a title pattern with `{date}` and `{time}`, a description, privacy,
+  category and thumbnail. The next occurrences (default 2, up to 10) are created as
+  upcoming YouTube events, and the go-live uses the first one that is not skipped.
+  One occurrence can be skipped or retitled, and deleting the template cancels its
+  upcoming events, but never one whose start has passed, one on a destination that is
+  delivering (kept and retried after it stops), or one YouTube reports as no longer
+  upcoming; a skip of such a show is refused with a 409. Facebook, Twitch, Kick and X
+  are not given template events yet,
+  and the calendar screen and any console UI are not built in this PR (deviation
+  from #18); the API serves the data. See
+  upcoming events. Facebook and X are not given template events yet; Twitch and Kick
+  take the title and category at go-live (see the entry below). The calendar screen
+  and any console UI are not built in this PR (deviation from #18); the API serves
+  the data. See
+  [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).
+- **Recurring events: Twitch and Kick go-live, skip backfill, safer cancels (#18).**
+  Twitch and Kick take the template's title and category when the show starts,
+  once per show, through the go-live metadata write. A skipped occurrence no longer
+  uses up a look-ahead slot: the next occurrence fills it. A skip is refused with
+  409 for a show that has started or a destination that is on air. A template event
+  whose title and cancel both fail is kept as stranded and its cancel is retried,
+  rather than shown as an upcoming show with no title. YouTube template events are
+  deleted only while `created` or `ready`. A started show's platform event is never
+  removed by an orphan sweep.
 - **Shared console kit.** One empty state (`EmptyState`), one status pill and
   vocabulary (`StatusPill`, `lib/status.ts`), one disabled-control reason
   (`DisabledReason`), and one save model with a save status line (`useSaveModel`,
@@ -411,9 +637,31 @@ its first tagged release.
   hosted plans, dated to its evidence file; a GitHub star count and latest
   release read at build time, left out when the read fails; and a routing
   table for each use case, with sports and esports added.
+- **Recurring events and planned rollover: the console (wave 3, #18 and #19).**
+  The Automation page gets a broadcast template editor on each start schedule
+  (title pattern with `{date}`, description, privacy, category, upcoming events
+  to keep, thumbnail) and an upcoming-events list with skip and single-event
+  retitle. Each destination card whose platform has a cap shows the cap with
+  its source, a countdown to the cutoff, the rollover settings, and a "Roll over
+  now" button that reports the server's answer as it came back. A platform's
+  refusal of an upcoming-event create is kept on the template and shown there.
+  Skipping a show that has already started, or whose destination is live, is
+  refused with a 409, and reconciling an orphaned row for such a show removes
+  only the local row. The optional chat notice before a rollover is off by
+  default. The Twitch countdown starts from Helix `started_at` when it can be read.
 
 ### Changed
 
+- **YouTube captions by HTTP POST: the delay is applied once, by YouTube (#8).** A YouTube
+  destination on *caption ingestion (HTTP POST)* still needs a 30 s or 60 s delay, and it is
+  still sent as the broadcast's `broadcastStreamDelayMs`. polyemesis no longer holds that
+  destination's output back as well, so viewers are about 30 or 60 seconds behind instead of
+  about 60 or 120. Each caption is posted as soon as it is recognised, stamped with the moment
+  its words were spoken, which is when the matching video reached YouTube (PROVISIONAL: YouTube
+  does not document the stamp's clock). Changing such a destination's delay between 30 s and 60 s
+  no longer restarts its output; switching a delayed YouTube destination to or from this route
+  does, because the delay moves, and the editor says so. The card still shows the delay. Stop
+  airs no delayed tail from polyemesis on this route. In all 15 languages.
 - **BREAKING for native installs: polyemesis requires FFmpeg 8.0 or later.**
   It was 6.0. polyemesis now refuses to start on an older FFmpeg, and the
   refusal names the binary, the version it found and the fix. Enhanced RTMP
@@ -754,6 +1002,150 @@ its first tagged release.
 
 ### Fixed
 
+- **Wave 3 review fixes: captions, rollover, X and the recurring look-ahead.**
+  Two captioned programmes no longer share live-caption scratch files: each
+  captioner run writes its audio windows in a directory of its own, so one
+  programme can no longer air another's speech as captions. A planned YouTube
+  rollover of a broadcast taking captions by HTTP POST now creates the replacement
+  with them, the monitor stream and the old delay, and takes it through testing
+  before live; before, the replacement went live with captions off. In the SEI
+  route, a picture that goes out without a caption (a PCR inside it, for example)
+  no longer spends the caption pair it was due, so scripts are no longer garbled
+  or left on screen; a program map that spans packets is read; a caption that
+  arrives at a clock jump is kept; a short backward jump restarts captions within
+  two seconds; and an HEVC source is named in the log. The cue log reopens after
+  a failed roll, the YouTube caption `seq` no longer restarts at 1 after a
+  restart, and the player's caption track fetches only what was appended.
+  X: rate limits are read from X's headers and every call waits for the reset
+  after a 429, without counting toward the give-up budget; the account id is
+  asked for once per token; X's `{error_type, message}` refusals are shown in
+  X's words; an empty answer to a publish, an end or a read is a failure; token
+  requests use HTTP Basic for a confidential app. A broadcast ended in X while the
+  encoder is still sending is not replaced until the encoder stops, a canceled
+  one is a fault released by switching the destination off and on, and a
+  switched-off X destination is no longer read every 15 seconds. Publishing an X
+  broadcast posts X's default announcement, which is now documented. Recurring:
+  a refused event create backs off (five minutes, doubling to six hours, and six
+  hours at once for YouTube's upcoming-broadcast cap) instead of retrying every
+  five minutes; switching a schedule off, removing a target or lowering the
+  look-ahead cancels the events nothing will air; the go-live mirror never moves
+  to a later week's event; and a second rollover still uses the template. The
+  template editor no longer shows an editable form of defaults when the stored
+  template could not be read.
+
+- **An X go-live keeps every warning X sends.** When X published a broadcast but reported errors
+  and also failed to post the announcement, only the announcement warning reached the log; X's
+  own report was dropped. Both are kept now. (X stays gated off until the app is whitelisted.)
+
+- **An X destination saved from the editor is an X destination again.** The editor's X preset
+  carried no platform, so a destination made from it was saved as a custom RTMP endpoint, and
+  nothing X-specific (sign-in, the Livestream lifecycle, chat) reached it. It now saves as X, like
+  the server's own preset.
+- **X go-live sent no title.** The broadcast coordinator published X broadcasts through the generic
+  transition, which always sent an empty publish. It now sends the go-live title.
+
+- **The caption picker no longer says a route changes nothing on air (#8).** It says captions go
+  out only for a route that is on, that a live destination must be stopped to change its route,
+  and, only for a change that adds or removes the in-stream (SEI) route, that the save restarts
+  an enabled destination. A change between off and YouTube's HTTP POST restarts nothing when the
+  destination has no delay; with a delay it moves the delay between polyemesis and YouTube, and
+  the picker says the save restarts the output. In all 15 languages.
+- **A tier that burns captions in now starts the captioner on its own (#8).** Burn-in is how a
+  platform with no caption route gets captions, so a programme whose only caption demand is a
+  burned-in tier used by an enabled destination now runs the captioner. A tier that starts while
+  no captioner runs starts from an empty burn file, so a caption left by a crash is never drawn.
+
+- **A metadata push or reschedule no longer switches a YouTube broadcast's captions off.**
+  `liveBroadcasts.update` resets every field of a part it is sent without, and the update
+  sent `contentDetails` without `closedCaptionsType` and `latencyPreference`. Both are now
+  read back and carried through unchanged.
+
+- **A scheduled YouTube broadcast that fails to create or bind now names the ingest stream it
+  made.** With a stream of its own and no held key, the stream was left on the channel
+  with no mention. The error now gives its id, so the stream can be removed in YouTube Studio
+  once nothing streams to it. polyemesis never deletes a YouTube ingest stream itself, because
+  a concurrent request may already be using it.
+
+- **Wave 3 review fixes (API).**
+  - An X destination whose broadcast create is refused now stops retrying after the usual 20 attempts. It tries again after an UP edge, or after the operator switches the destination off and on.
+  - A refusal that echoes the stream source key no longer puts that key in the fault, the log or the alert.
+  - A planned YouTube rollover whose replacement would not start after the old broadcast had ended now points the destination at the replacement, so the show is not left dark.
+  - Facebook and other countdown-only destinations now show their countdown.
+  - The rollover chat notice goes only to the destination's own account's chat.
+  - A Twitch reconnect re-reads the stream's start time and no longer restarts the destination every ten minutes when Twitch keeps its count.
+  - A replacement broadcast gets the recurring template's category and thumbnail.
+  - Rollover warnings are redacted.
+  - A recurring template never makes a private or unlisted destination's events public.
+  - Recurring look-ahead logs and the calendar's 502 answers are redacted.
+  - A second event created in the same look-ahead pass reuses the first one's stream key.
+  - An event whose record cannot be written is stranded or cancelled, instead of becoming a duplicate later.
+  - Retitling an occurrence is refused for a show that has started or a destination that is live.
+  - A thumbnail one byte over 2 MB answers 413, not 500.
+  - Creating a YouTube vertical half now starts it straight away.
+  - A vertical half reuses an existing rendition only when the whole encode matches, not just the shape.
+  - Concurrent vertical status reads make one YouTube call.
+  - The vertical create body is size-limited and refuses unknown fields.
+  - The caption export route is documented in [API.md](docs/API.md) as refused to read tokens.
+- **Live captions: the captioner restarts when it stops on its own, within a budget.**
+  A captioner whose audio tap or speech recognition stopped by itself used to stay
+  "enabled" but dead until a setting changed. It now reports itself stopped at
+  once and is rebuilt. If it stops within 30 seconds of starting three times in a
+  row, captions are switched off with a warning rather than respawning a new
+  FFmpeg and whisper on every reconcile. Switching captions off now publishes a
+  status too, so the dashboard no longer shows a captioner that is gone.
+- **Live captions: an automatic track stays automatic, and every setting applies.**
+  Starting the captioner no longer replaces the stored configuration with its
+  resolved track and model, so a later source change picks the new layout's
+  track. The restart check now covers the whole resolved configuration (threads,
+  health limits, denoise, speaker), so changing one restarts the captioner, and
+  the reconcile right after a start no longer restarts it for nothing.
+- **Live captions: overlapping cues.** A new caption no longer gets erased by the
+  previous caption's end time or overwritten by its resends. A cue that ends
+  before it starts is erased right after it is shown, and one cue schedules at
+  most 32 resends. After a timestamp jump, captions registered against the old
+  timeline are dropped rather than sent in one burst.
+- **Live captions: in-stream injection follows PMT changes safely.** Program
+  tables are read only from packets that start a section and carry a payload. A
+  PMT that moves video to a new PID or to HEVC releases the pictures still held,
+  unchanged, on the PID they arrived on, and stops rewriting the old PID.
+- The caption profanity filter now masks a word in single quotes ('damn').
+- The burn-in subtitles filter (not wired yet) escapes its path at both FFmpeg
+  levels, the filter option and the filtergraph, so paths with quotes, colons or
+  commas open correctly.
+- **Console fixes for YouTube vertical, rollover and the recurring calendar.**
+  A vertical half that is switched off can now be started from its sub-row. Start
+  switches it on, and the sub-row is its only Start button. Before, a pair created
+  while the horizontal half was off could never be started. The YouTube vertical
+  section treats only a 404 as "no vertical half yet". Any other failed read shows
+  the error with a Retry button, and no longer offers an Add that the server
+  refuses. On the planned-rollover panel, "Roll over now" appears only on a
+  platform that rolls over automatically, and a failed read shows the error
+  instead of an empty card. A refused or platform-rejected title edit in the
+  recurring calendar now says the title was not changed. Before, it reused the
+  skip messages ("Not removed", "refused to delete the event").
+- **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
+- **X broadcast errors no longer carry the stream key.** X's create call sends the stream key as `source_id`, and X's error text can echo it back. Polyemesis now removes the key from that text, on a refused create and on a successful answer that carries errors, before the error reaches a fault, a log line or the timeline.
+- **X go-live and end report X's errors.** A publish or end that X answers with errors and no state is now a failure, instead of a success with an empty state. The end also reads the state from the broadcast object. A broadcast's stream is now found by the source's id as well as its key. PROVISIONAL: X is still switched off until the app is whitelisted.
+- **X live chat shows your own new broadcast from its first message.** Another account's chat used to start a 15-second wait, so the opening of your show could be dropped. A broadcast seen for the first time is now checked straight away. One that has already been judged as someone else's is checked again only every 15 seconds. Live chat also stops with a clear reason if X creates a chat subscription without returning its id, because that subscription could never be removed.
+- **YouTube cleans up after a failed scheduled broadcast.** When a destination with its own ingest has a new stream made for a scheduled show, and the broadcast create or bind then fails, that new stream is deleted. A stream found on the channel is never deleted. A vertical stream that YouTube returns without an id is now refused.
+- **A YouTube rollover never deletes a replacement that may be live.** When the start fails with an error that is not a refusal, polyemesis reads the replacement's state again before removing it. The replacement is also scheduled two minutes ahead, because YouTube wants a start time in the future. PROVISIONAL.
+- **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped.
+- A manual planned rollover now answers 200 "rolled over" when it has finished,
+  502 with the redacted reason when the platform refuses it, and never 202
+  "rolling over" for a rollover that had already run. The sweep path is unchanged.
+- A manual planned rollover is no longer cancelled when the browser disconnects
+  partway through, so it cannot leave a new public broadcast unbound. It is
+  bounded to five minutes.
+- Platform refusal text from a planned rollover is redacted before it reaches the
+  timeline, the result row, the webhook and the response.
+- Two concurrent YouTube vertical pairings for one destination no longer both
+  create a vertical stream on YouTube. The second answers 409.
+- A YouTube vertical destination is repaired the same way as every other
+  destination write before it is stored, so a setting the platform cannot send
+  is dropped rather than kept.
+- X: while the Livestream switch is off, the connect-time entitlement check makes
+  no request to X and reports the gate.
+
 - **Phone Dashboard cards no longer run off the screen.** At 390px with a
   source, the Ingest, Chat and Pipeline cards were 546px wide in a 356px
   column; the top-row grid now has a shrinkable single column below the
@@ -952,6 +1344,49 @@ its first tagged release.
 
 - **A track's role chip no longer wraps into its meter.** The label column is
   bounded and the chip truncates, with its full name on hover.
+
+- **Recordings keep their finish time.** The 30-second scan re-indexes every
+  segment, and it was clearing the finish time an earlier writer had recorded.
+  A re-index with no finish time of its own now keeps the stored one. Found by
+  #940.
+- **A restarted two-track destination keeps publishing while a one-track
+  standby is on air.** The backup and the playlist now carry one silent pad
+  per primary track, and the slate publishes one silent track per primary
+  track. Before, a destination restarted in that window exited at once and
+  stopped publishing after a few seconds. Verified with real FFmpeg; the
+  Docker drift matrix run is recorded in the PR notes.
+- **A live level restart says so.** `destination.restarted` said "the process
+  exited and was started again" for restarts the engine made to apply a live
+  audio level. It now says a live audio level change restarted the output (#933).
+- **A broadcast delay that is still filling reads "Filling delay".** The
+  destination card and the Renditions chip said Stopped while the buffer filled,
+  before any process existed. They now read Filling delay, in amber.
+- **Wave 3 review, last eleven findings.**
+  - Roll over now can retry a failed rollover straight away. The ten-minute
+    wait now applies only after a rollover that worked, or one that moved the
+    destination to its replacement. The 15-second sweep still waits after a
+    failure.
+  - A browser that leaves while the vertical status read is in flight no
+    longer leaves an error on the sub-row for a minute.
+  - A failed vertical pairing removes the portrait rendition it made, unless
+    another destination now uses it.
+  - A store error during the "already a vertical half" check refuses the pair
+    with a 500. Before, the error let the pair go through.
+  - Deleting an X destination while X is still publishing its broadcast now
+    ends the broadcast once X has it running. Before, the broadcast was left
+    on air. That delete now asks for confirmation, as deleting a live one does.
+  - A retitle whose template or destination cannot be read answers 500. Only
+    a deleted row answers 409.
+  - A skip is refused if the destination was switched on after the skip's
+    first check. The skip now reads the destination again just before the
+    platform delete.
+  - When two schedules for one X destination fire close together, X's PUBLISH
+    carries the title of the show that started last.
+  - The caption go-live check refuses a YouTube broadcast set to ultra-low
+    latency. YouTube takes no captions on those.
+  - After a failed X broadcast list read, X chat checks again after 3 seconds,
+    not 15. Before, the first 15 seconds of chat on a show started outside
+    polyemesis could be lost.
 
 ## [0.11.0] — 2026-09-24
 

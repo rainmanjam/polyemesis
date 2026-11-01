@@ -52,7 +52,7 @@ import { storedMixes } from "@/lib/storedMixes";
 import { readVodStash, writeVodStash } from "@/lib/vodStash";
 import { isLevelOnlySave } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
-import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
+import { isLiveMix, outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
 import { OutputStrip } from "@/components/signature/OutputStrip";
 import {
   carryMutes,
@@ -695,6 +695,9 @@ export function RoutingPage() {
           setLoudSeen((prev) => {
             const next: Record<number, { key: string; at: number }> = {};
             for (const r of f.reports ?? []) {
+              // The VOD mix has its own reading on the Meters page; this strip
+              // and its frame timing are the live mix's only.
+              if (!isLiveMix(r)) continue;
               const key = reportKey(r);
               const was = prev[r.destinationId];
               next[r.destinationId] = was && was.key === key ? was : { key, at: now };
@@ -1083,20 +1086,33 @@ export function RoutingPage() {
                     // above. The unconditional sentence is reserved for the case
                     // where nothing is conditional: a probed ingest, off Twitch.
                     footer={() => {
-                      if (vodBlockedByToggle) {
-                        return <>{t("route.vodFooterBlocked")}</>;
+                      const base = (() => {
+                        if (vodBlockedByToggle) {
+                          return t("route.vodFooterBlocked");
+                        }
+                        // engine/destinations.go refuses the pair on the provisional
+                        // path for EVERY platform, not just Twitch: a provisional
+                        // compile already runs on a guessed channel layout, and a
+                        // second guessed mix on top of it doubles what is approximate.
+                        if (!ctx.probed) {
+                          return t("route.vodFooterUnprobed");
+                        }
+                        if (twitchRtmp) {
+                          return t("route.vodFooterTwitch");
+                        }
+                        return t("route.vodFooterSecond");
+                      })();
+                      // A MATRIX VOD mix takes its gain per cell, and a cell change is
+                      // structural: the destination restarts, which interrupts both
+                      // mixes for a moment. Said here, where the cells are edited.
+                      if (vodProfile?.mode === "matrix") {
+                        return (
+                          <>
+                            {t("wave3.vod.matrixRestart")} {base}
+                          </>
+                        );
                       }
-                      // engine/destinations.go refuses the pair on the provisional
-                      // path for EVERY platform, not just Twitch: a provisional
-                      // compile already runs on a guessed channel layout, and a
-                      // second guessed mix on top of it doubles what is approximate.
-                      if (!ctx.probed) {
-                        return <>{t("route.vodFooterUnprobed")}</>;
-                      }
-                      if (twitchRtmp) {
-                        return <>{t("route.vodFooterTwitch")}</>;
-                      }
-                      return <>{t("route.vodFooterSecond")}</>;
+                      return <>{base}</>;
                     }}
                   />
                 )}
@@ -1687,12 +1703,20 @@ function SecondMixCard({
     // in fact, which is better than a confirmation dialog: there is nothing to
     // confirm if nothing is lost.
     //
-    // Otherwise seed from the live mix rather than from a blank profile. A
-    // second mix is defined by how it DIFFERS from the first — drop the music,
-    // keep the commentary — so starting from a copy means the first edit is the
-    // actual decision, and an operator who switches this on and changes nothing
-    // gets two identical tracks rather than a silent one.
-    onChange(structuredClone(restorable ?? liveProfile));
+    // Otherwise seed from the live mix rather than from a blank profile, so the
+    // first edit is the actual decision. The seed excludes music, because that
+    // is the reason a second mix exists at all (the archive must not carry the
+    // licensed bed). DEFAULT: EVERYTHING EXCEPT MUSIC (#15). The archive mix is the live mix
+    // without the music bed, so a first-time switch-on carries the music rights
+    // guard already. The operator can still change it; a restored profile is
+    // returned untouched above.
+    if (restorable !== null) {
+      onChange(structuredClone(restorable));
+      return;
+    }
+    const seeded = structuredClone(liveProfile);
+    seeded.excludeRoles = [...new Set([...(seeded.excludeRoles ?? []), "music" as TrackRole])];
+    onChange(seeded);
   };
 
   return (

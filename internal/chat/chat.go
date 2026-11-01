@@ -108,6 +108,7 @@ type Deleter interface {
 //	YouTube  banDurationSeconds   seconds
 //	Twitch   duration             seconds
 //	Kick     duration             MINUTES, max 10080
+//	X        end_at_ms            ABSOLUTE Unix MILLISECONDS (now + d, at the call site)
 //
 // A unified API taking "600" would mean ten minutes on two platforms and seven
 // days on the third, and nothing would report an error. Each adapter converts

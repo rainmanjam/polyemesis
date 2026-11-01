@@ -253,6 +253,25 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Verify: chat.KickVerifier(s.kickKeys),
 		})
 
+	case db.PlatformX:
+		// X chat is part of the Livestream family, so it is attached only while
+		// the operator's Livestream gate is open (POLYEMESIS_X_LIVESTREAM). With
+		// the gate closed the account stays connected for sign-in and nothing
+		// reads or posts chat for it.
+		if !oauth.NewX().LivestreamAccess() {
+			return nil, fmt.Errorf("X chat needs X Livestream access (app must be whitelisted by X)")
+		}
+		return chat.NewX(chat.XConfig{
+			AccountRef: a.AccountRef,
+			Channel:    a.AccountName,
+			Token:      s.chatToken(a.ID),
+			// PROVISIONAL: the activity stream needs an app-only bearer token,
+			// which the operator supplies from the X developer console. Nothing
+			// here mints it. Empty makes the adapter's Run refuse with a Fatal
+			// error that says so.
+			AppBearer: strings.TrimSpace(os.Getenv("POLYEMESIS_X_APP_BEARER")),
+		})
+
 	case db.PlatformFacebook:
 		// Facebook comments hang off one live video, and the only place its id
 		// survives a restart is the destination's stream key — see
@@ -424,6 +443,29 @@ func (s *Server) setFacebookBroadcast(accountRef, liveVideoID string) {
 	}
 	if fb, ok := a.(*chat.FacebookAdapter); ok {
 		fb.SetLiveVideoID(liveVideoID)
+	}
+}
+
+// setXBroadcast is the lifecycle coordinator's pointChat: it points the running
+// X chat adapter of one account at the broadcast the coordinator just published,
+// or clears it with "" after an end. The adapter's own 15-second poll stays as
+// the fallback for a broadcast published outside polyemesis. Every miss -- chat
+// off, the account gone, no adapter because the Livestream gate is closed -- is
+// a quiet no-op, because it runs on the coordinator's sweep.
+func (s *Server) setXBroadcast(accountID int64, broadcastID string) {
+	if s.chat == nil || s.store == nil {
+		return
+	}
+	acct, err := s.store.GetPlatformAccount(s.box, accountID)
+	if err != nil || acct.Platform != db.PlatformX {
+		return
+	}
+	a, ok := s.chat.Adapter(db.PlatformX, acct.AccountRef)
+	if !ok {
+		return
+	}
+	if xa, ok := a.(*chat.XAdapter); ok {
+		xa.SetBroadcast(broadcastID)
 	}
 }
 

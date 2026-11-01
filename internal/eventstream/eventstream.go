@@ -68,6 +68,9 @@ const (
 	TypeDestinationRestarted  Type = "destination.restarted"
 	TypeDestinationLevel      Type = "destination.level"
 	TypeDestinationRolledOver Type = Type(hooks.TriggerDestinationRolledOver)
+	TypeRolloverStarted       Type = Type(hooks.TriggerRolloverStarted)
+	TypeRolloverCompleted     Type = Type(hooks.TriggerRolloverCompleted)
+	TypeRolloverFailed        Type = Type(hooks.TriggerRolloverFailed)
 	TypeDestinationDelay      Type = "destination.delay"
 	TypeIngestPublished       Type = Type(hooks.TriggerIngestPublished)
 	TypeIngestDisconnected    Type = Type(hooks.TriggerIngestDisconnected)
@@ -150,9 +153,12 @@ var catalogue = []Spec{
 	{TypeDestinationUp, TopicDestination, Granted, "A destination started delivering.", nil},
 	{TypeDestinationDown, TopicDestination, Granted, "A destination stopped: failed, stalled, disabled or removed; reason says which, cause and failure say why.", nil},
 	{TypeDestinationHeld, TopicDestination, Granted, "Polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry.", nil},
-	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned after it exited.", nil},
+	{TypeDestinationRestarted, TopicDestination, Granted, "A destination's process was respawned: after it exited, or because a live level change restarted it; reason says which.", nil},
 	{TypeDestinationLevel, TopicDestination, Granted, "A level (gain or mute) change reached a destination, applied live or by a restart.", nil},
 	{TypeDestinationRolledOver, TopicDestination, Granted, "A file destination continued into a new file because the configured one already held footage.", nil},
+	{TypeRolloverStarted, TopicDestination, Granted, "A planned rollover began: a replacement broadcast is being created for a live one. reason says which trigger fired.", nil},
+	{TypeRolloverCompleted, TopicDestination, Granted, "A planned rollover finished: the replacement is live and the destination points at it. Connecting Twitch is a reconnect; reason says which.", nil},
+	{TypeRolloverFailed, TopicDestination, Granted, "A planned rollover stopped. The old broadcast is still on air unless reason says it could not be ended; no ingest was touched.", nil},
 	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer.", nil},
 
 	// Ingest and failover.

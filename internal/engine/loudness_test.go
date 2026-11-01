@@ -96,7 +96,7 @@ func TestLoudnessWantedOnlyMonitorsDestinationsThatAreOnAir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &Engine{dests: map[int64]*destination{1: tc.dest(t)}}
 			got := e.loudnessWanted(on)
-			if _, ok := got[1]; ok != tc.want {
+			if _, ok := got[liveKey(1)]; ok != tc.want {
 				t.Fatalf("wanted=%v, want %v", ok, tc.want)
 			}
 		})
@@ -162,7 +162,7 @@ func TestLoudnessPlanTargetsComeFromTheProfileThenThePlatform(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &Engine{dests: map[int64]*destination{1: runningDest(t, tc.row)}}
-			p, ok := e.loudnessWanted(on)[1]
+			p, ok := e.loudnessWanted(on)[liveKey(1)]
 			if !ok {
 				t.Fatal("expected a plan")
 			}
@@ -180,7 +180,7 @@ func TestLoudnessSignatureMovesWithTheGraphAndTheTarget(t *testing.T) {
 		d := runningDest(t, &db.Destination{ID: 1, Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube})
 		mutate(d)
 		e := &Engine{dests: map[int64]*destination{1: d}}
-		return e.loudnessWanted(on)[1].sig
+		return e.loudnessWanted(on)[liveKey(1)].sig
 	}
 
 	baseSig := sigFor(t, func(*destination) {})
@@ -255,7 +255,7 @@ func TestALateStartFindsTheDestinationGoneAndPublishesNothing(t *testing.T) {
 
 	e := &Engine{
 		dests:     map[int64]*destination{1: d},
-		loud:      map[int64]*loudnessMon{},
+		loud:      map[loudKey]*loudnessMon{},
 		loudStore: meters.NewStore(),
 		alloc:     relay.NewPortAllocator(freeUDPPort(t), 4),
 		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -263,7 +263,7 @@ func TestALateStartFindsTheDestinationGoneAndPublishesNothing(t *testing.T) {
 	}
 
 	// The plan this reconcile is carrying, taken while the destination was live.
-	plan, ok := loudnessPlanFor(1, d)
+	plan, ok := loudnessPlanFor(liveKey(1), d)
 	if !ok {
 		t.Fatal("fixture: a running destination must earn an analyser, or this proves nothing")
 	}
@@ -273,7 +273,7 @@ func TestALateStartFindsTheDestinationGoneAndPublishesNothing(t *testing.T) {
 
 	e.startLoudness(plan)
 
-	if m := e.loud[1]; m != nil {
+	if m := e.loud[liveKey(1)]; m != nil {
 		t.Errorf("a monitor was published for a destination that had already been deleted "+
 			"(port %d, sub %q). It holds a relay port and is subscribed to a hub that is "+
 			"about to be closed under it, so it receives nothing and never exits -- which is "+
@@ -293,11 +293,11 @@ func TestTheLateStartGuardAcceptsADestinationThatHasNotChanged(t *testing.T) {
 	row := &db.Destination{ID: 1, Name: "yt", Kind: db.DestRTMP, Platform: db.PlatformYouTube}
 	d := runningDest(t, row)
 
-	plan, ok := loudnessPlanFor(1, d)
+	plan, ok := loudnessPlanFor(liveKey(1), d)
 	if !ok {
 		t.Fatal("a running destination must earn an analyser")
 	}
-	again, ok := loudnessPlanFor(1, d)
+	again, ok := loudnessPlanFor(liveKey(1), d)
 	if !ok {
 		t.Fatal("the same running destination stopped earning an analyser when asked twice")
 	}
@@ -317,13 +317,13 @@ func TestALateStartRejectsADestinationReplacedUnderTheSameID(t *testing.T) {
 
 	e := &Engine{
 		dests:     map[int64]*destination{1: d},
-		loud:      map[int64]*loudnessMon{},
+		loud:      map[loudKey]*loudnessMon{},
 		loudStore: meters.NewStore(),
 		alloc:     relay.NewPortAllocator(freeUDPPort(t), 4),
 		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		tools:     &ffmpeg.Tools{FFmpeg: "true"},
 	}
-	plan, ok := loudnessPlanFor(1, d)
+	plan, ok := loudnessPlanFor(liveKey(1), d)
 	if !ok {
 		t.Fatal("fixture: a running destination must earn an analyser")
 	}
@@ -336,7 +336,7 @@ func TestALateStartRejectsADestinationReplacedUnderTheSameID(t *testing.T) {
 
 	e.startLoudness(plan)
 
-	if m := e.loud[1]; m != nil {
+	if m := e.loud[liveKey(1)]; m != nil {
 		t.Errorf("a monitor from a stale plan was published against a destination that had "+
 			"been replaced under the same id (port %d): it would measure a graph that is no "+
 			"longer running", m.port)

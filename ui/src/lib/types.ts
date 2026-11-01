@@ -119,6 +119,11 @@ export interface TrackAnnotation {
 
 // -------------------------------------------------------- destination audio
 
+/** Which of a destination's two mixes a loudness report measures (meters.Report.mix).
+ *  A destination with a VOD track has one analyser per mix. An absent mix reads as
+ *  live, which is what every report was before the VOD mix had a reading. */
+export type LoudnessMix = "live" | "vod";
+
 /** Programme-loudness target. Absent leaves the fixed loudnorm parameters that
  *  shipped with `loudnorm` alone, byte for byte. */
 export interface Loudness {
@@ -248,6 +253,9 @@ export interface SourceInfo {
 }
 
 export type DestKind = "rtmp" | "srt" | "file";
+
+/** How captions reach one destination. Mirrors internal/captions Mode. */
+export type CaptionMode = "off" | "sei" | "youtube_post" | "facebook_sei";
 /*  "rumble" is absent on purpose: its Platform value exists in Go for CHAT and
  *  its destination preset deliberately does not carry it, so no destination row
  *  ever arrives with it. "vimeo" IS here because its preset does carry it —
@@ -262,7 +270,8 @@ export type Platform =
   | "kick"
   | "facebook"
   | "trovo"
-  | "vimeo";
+  | "vimeo"
+  | "x";
 
 export interface Destination {
   id: DestinationId;
@@ -349,6 +358,29 @@ export interface Destination {
    *  so once. Opt-in only because a network round trip at go-live should be
    *  something the operator asked for. */
   multitrack?: boolean;
+  /** How live captions reach this destination. "off" is the default and the
+   *  value an upgrade leaves in place. The others are the routes the platform
+   *  takes; which one a platform accepts is decided by the server, and the
+   *  console mirrors that table in lib/captions.ts. */
+  captionMode?: CaptionMode;
+  /** X only: the title sent when polyemesis publishes the X broadcast. X takes
+   *  a title only at that publish step and cannot change it while the broadcast
+   *  runs, so the server refuses a change while the destination is live. At most
+   *  280 characters (X's post limit; X gives no exact number). */
+  goLiveTitle?: string;
+  /** X only: when X's announcement post is made as polyemesis publishes the
+   *  X broadcast. "first" (also what absent means) posts on the first go-live
+   *  of a show only, not on the broadcasts polyemesis opens again after X ends
+   *  one while the destination stays on; "every" posts each time; "never"
+   *  never does. Sent as X's should_not_tweet, which is PROVISIONAL until the
+   *  app is whitelisted. "" is the default too, and is what a save sends for
+   *  a destination that is not X. */
+  xGoLiveTweet?: XGoLiveTweet | "";
+  /** Read-only. True when a YouTube caption ingestion URL is stored for this
+   *  destination's current stream key, which "youtube_post" needs before the
+   *  destination may start. The URL itself is a credential and never leaves
+   *  the server; Refresh stream key is what fetches it. */
+  captionIngestReady?: boolean;
   /** The SECOND audio mix — the VOD track, separate from the live one. Same
    *  shape as `profile`, because it is the same kind of thing.
    *
@@ -425,6 +457,9 @@ export interface Rendition {
    *  overlay. Always present in the payload and empty when there is none, for
    *  the same reason `overlay` is. */
   text: RenditionText;
+  /** Where the programme's live captions are burned into this tier's picture
+   *  (#8); empty draws none. Needs both a width and a height. */
+  captionBurn?: "" | "bottom" | "top";
   note: string;
   createdAt: string;
   updatedAt: string;
@@ -878,6 +913,12 @@ export interface DestStatus {
    *  destination on the install in one grid, so without this two destinations
    *  called "Twitch" on different programmes are indistinguishable. */
   sourceId?: SourceId | null;
+  /** The YouTube vertical half this horizontal destination is paired with (#7),
+   *  absent when it has none. The vertical half is its own row, drawn as this
+   *  card's sub-row. `pairingConfirmed` is the one-time Live Control Room step. */
+  youtubeVertical?: YouTubeVerticalLink | null;
+  /** Set on a vertical row: the horizontal destination it belongs to (#7). */
+  verticalHalfOf?: DestinationId | null;
   /** The pre-announced scheduled Facebook broadcast, when one exists. */
   facebookBroadcastId?: string;
   /** The file a recording is actually being written to, when that is not the
@@ -932,6 +973,26 @@ export interface DestStatus {
   /** The platform's own verdict on the stream, present only while it is poor.
    *  YouTube only. */
   platformHealth?: { platform: string; status: string; issues?: string[] };
+}
+
+/** A horizontal YouTube destination's vertical half, as /status reports it (#7). */
+export interface YouTubeVerticalLink {
+  verticalId: DestinationId;
+  pairingConfirmed: boolean;
+}
+
+/** The vertical half as GET /destinations/{id}/youtube-vertical serves it (#7).
+ *  It carries no stream key. `live` is false when neither half is running, and
+ *  then no health is read. `healthError` is the reason on the sub-row. */
+export interface YouTubeVerticalView {
+  horizontalId: DestinationId;
+  verticalId: DestinationId;
+  verticalStreamId: string;
+  pairingConfirmed: boolean;
+  live: boolean;
+  streamStatus?: string;
+  healthStatus?: string;
+  healthError?: string;
 }
 
 /** One advisory note about a negotiated Enhanced Broadcasting configuration. */
@@ -1224,6 +1285,17 @@ export interface PullSettings {
   rtspTransport: string;
 }
 
+/** The caption export formats and sources (#8). */
+export type CaptionExportFormat = "srt" | "vtt" | "json";
+export type CaptionExportSource = "recording" | "live";
+
+/** A programme's caption text policy, applied where captions leave the
+ *  captioner, so every output and export shows the same words. */
+export interface CaptionPolicy {
+  vocabulary?: string[];
+  blocklist?: string[];
+}
+
 /** One ingested programme.
  *
  *  Multi-source exists because a horizontal and a vertical feed out of OBS's
@@ -1234,6 +1306,14 @@ export interface Source {
   id: SourceId;
   name: string;
   enabled: boolean;
+  /** The audio track of this programme the live captioner transcribes. null is
+   *  the automatic choice, the one the captioner makes today. */
+  captionTrack?: number | null;
+  /** This programme's caption text policy (#8): words spelled the operator's
+   *  way, and words masked on screen. Absent when none is set. Each entry is
+   *  one word; the server refuses a phrase, a hyphen, more than 200 entries or
+   *  an entry over 48 characters. */
+  captionPolicy?: CaptionPolicy;
   /** Same shape as Settings.ingest, deliberately: one form serves both. */
   ingest: Settings["ingest"];
   /** Publish secret. See SourceView.tokenEnforced before presenting this as
@@ -1848,6 +1928,9 @@ export interface Recording {
   bytes: number;
   durationMs: number;
   tracks: number;
+  /** The programme it was recorded from; absent on an older recording or one
+   *  whose programme was deleted. Its live captions are kept per programme. */
+  sourceId?: number | null;
 }
 
 export interface DiskUsage {
@@ -2272,6 +2355,9 @@ export interface SetupGuide {
   /** Computed per request by the API, from the configuration and the Host it
    *  was reached on: reasons the displayed redirect URI may not work. */
   redirectWarnings?: string[];
+  /** "open" or "closed" for a platform whose live API the operator switches on
+   *  (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM); absent for the rest. */
+  livestreamGate?: "open" | "closed";
 }
 
 /** The verdict on a pasted client ID and secret.
@@ -2824,6 +2910,9 @@ export interface FacebookSettings {
  *  Everything here is a RECORD OF WHAT THE PLATFORM SAID, never a belief about
  *  what polyemesis asked for — which is what makes it worth showing an operator
  *  whose broadcast will not start. */
+/** When an X destination posts X's go-live announcement (Destination.xGoLiveTweet). */
+export type XGoLiveTweet = "first" | "every" | "never";
+
 export interface BroadcastControl {
   /** Which broadcast the rest of this describes. */
   broadcastId?: string;
@@ -2834,6 +2923,10 @@ export interface BroadcastControl {
   phase?: string;
   /** How many consecutive sweeps have failed. */
   attempts?: number;
+  /** X only: true when this broadcast was opened again within the same show,
+   *  after X ended the previous one while the destination stayed on. Cleared
+   *  when the destination is switched off. */
+  renewed?: boolean;
   /** What went wrong, in the operator's words, or absent when nothing has.
    *
    *  A fault here NEVER means the stream stopped: the server does not stop a
@@ -3746,4 +3839,80 @@ export interface ObsStatus {
 export interface ObsResponse {
   config: ObsConfig;
   status: ObsStatus;
+}
+
+/* ---------------------------------------------------------- recurring (#18) */
+
+/** A recurring broadcast template, attached to one start schedule (#18). The
+ *  thumbnail's bytes never travel in JSON: hasThumbnail says whether one is stored. */
+export interface BroadcastTemplate {
+  scheduleId: number;
+  titlePattern: string;
+  description: string;
+  privacy: string;
+  category: string;
+  lookahead: number;
+  hasThumbnail: boolean;
+  /** The platform's refusal of the most recent look-ahead create, redacted. Empty when none. */
+  lastError?: string;
+  /** When lastError was recorded. Absent when lastError is empty. */
+  lastErrorAt?: string;
+}
+
+/** One calendar cell: a planned show's event on one destination (#18). */
+export interface OccurrenceView {
+  id: number;
+  scheduleId: number;
+  destinationId: number;
+  at: string;
+  state: "pending" | "upcoming" | "skipped";
+  title: string;
+  eventId: string;
+}
+
+/* ----------------------------------------------------- planned rollover (#19) */
+
+/** The planned-rollover settings one destination carries (#19). */
+export interface RolloverSettings {
+  destinationId: number;
+  enabled: boolean;
+  marginMinutes: number;
+  quietStart?: string;
+  quietEnd?: string;
+  quietZone?: string;
+  obsScene?: string;
+  /** Optional line to the rolled-over platform's chat before a rollover. Off by default. */
+  chatNotice: boolean;
+  sessionStartedAt?: string;
+  lastRolloverAt?: string;
+  lastTrigger?: string;
+  lastResult?: string;
+}
+
+/** A platform's broadcast cap, with the source it is read from (#19). */
+export interface RolloverLimit {
+  presetId: string;
+  kind: string;
+  hours: number;
+  /** "documented" was read on the platform's page; "reported" comes from a secondary source;
+   *  "unverified" means no source is confirmed and no countdown may be shown. */
+  status: "documented" | "reported" | "unverified";
+  source?: string;
+  note?: string;
+}
+
+/** What one destination's rollover card shows (#19). `action` says whether polyemesis acts on
+ *  its own ("automatic") or only shows the cap ("countdown"). */
+export interface RolloverView {
+  settings: RolloverSettings;
+  platform: string;
+  action: "automatic" | "countdown";
+  limit?: RolloverLimit;
+  cutoffAt?: string;
+  delivering: boolean;
+  due: boolean;
+  dueTrigger?: string;
+  nextAt?: string;
+  planReason?: string;
+  reasonIfNone?: string;
 }

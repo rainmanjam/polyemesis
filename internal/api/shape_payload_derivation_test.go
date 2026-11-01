@@ -304,6 +304,12 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 		"text/csv": {Shape: "file-download",
 			Why: "the chat poll export (#14), GET /polls/export: an attachment with a " +
 				"Content-Disposition, counts only."},
+		"application/x-subrip": {Shape: "file-download",
+			Why: "the SRT caption export, GET /library/recordings/{id}/transcript/export: " +
+				"an attachment with a Content-Disposition, built from the recording id and format."},
+		"text/vtt": {Shape: "file-download",
+			Why: "the WebVTT caption export, the same route and the same attachment shape as " +
+				"the SRT one. The live sidecar is served by the playout handler, not this site."},
 		"application/x-pem-file": {Shape: "file-download",
 			Why: "the CA certificate download; the fourth of the four Content-Disposition " +
 				"sites the header family already names."},
@@ -313,6 +319,12 @@ func mediaTypeShapeClaims() map[string]mediaTypeClaim {
 				"download (no Content-Disposition, and it is served inline to a player), " +
 				"and not the manifest-and-segments shape streaming-media names -- so the " +
 				"honest classification was a row that did not exist."},
+		"image/png": {Shape: "",
+			Why: "NOT AN EMISSION. This is the thumbnail UPLOAD for a recurring broadcast template (#18): " +
+				"the operator's picture arrives as an INBOUND request body, checked against the PNG signature in " +
+				"recurring_handlers.go, and then sent to the platform. The bytes travel into this process, so no " +
+				"response shape describes them. Its JPEG sibling is claimed by the playout-poster row, which is an " +
+				"emission; this one is an input."},
 		"application/vnd.github+json": {Shape: "",
 			Why: "NOT AN EMISSION. This is an Accept header on an OUTBOUND request from " +
 				"this process to the GitHub release API in handlers.go, so the bytes " +

@@ -187,11 +187,21 @@ func (t Target) Evaluate(f Frame) (Verdict, float64, string) {
 	return worse(loud, peak), dev, reason
 }
 
+// The two mixes a destination can send. A destination with a VOD track has an
+// analyser for each, and a report names which one it measured.
+const (
+	MixLive = "live"
+	MixVOD  = "vod"
+)
+
 // Report is one destination's loudness state, as the dashboard renders it and
 // the WebSocket carries it.
 type Report struct {
 	DestinationID int64  `json:"destinationId"`
 	Destination   string `json:"destination"`
+	// Mix is MixLive or MixVOD. A report with no mix is the live mix; Store
+	// normalises it, so anything read back from a Store always says which.
+	Mix string `json:"mix"`
 	Frame
 	Target      Target    `json:"target"`
 	Verdict     Verdict   `json:"verdict"`
@@ -210,6 +220,20 @@ func Observe(id int64, name string, t Target, f Frame, at time.Time) Report {
 		DestinationID: id, Destination: name, Frame: f,
 		Target: t, Verdict: v, DeviationLU: dev, Reason: reason, At: at,
 	}
+}
+
+// ForMix returns the report labelled as measuring the named mix.
+func (r Report) ForMix(mix string) Report {
+	r.Mix = mix
+	return r
+}
+
+// mixOf is the mix a report measures, with the empty value read as live.
+func mixOf(r Report) string {
+	if r.Mix == "" {
+		return MixLive
+	}
+	return r.Mix
 }
 
 // Starting is the placeholder report for an analyser that has just been
@@ -288,7 +312,13 @@ func (r Report) Aged(now time.Time) Report {
 	return r
 }
 
-// Store holds the latest report per destination.
+// Key names one analyser: a destination and the mix it measures.
+type Key struct {
+	ID  int64
+	Mix string
+}
+
+// Store holds the latest report per analyser, which is per destination and mix.
 //
 // Reports are published as they arrive, but a browser that connects mid-stream
 // has to be given the current state from somewhere, and re-deriving it would
@@ -301,48 +331,72 @@ func (r Report) Aged(now time.Time) Report {
 // here without the clock having been applied to it.
 type Store struct {
 	mu      sync.RWMutex
-	reports map[int64]Report
+	reports map[Key]Report
 }
 
 // NewStore creates an empty store.
-func NewStore() *Store { return &Store{reports: map[int64]Report{}} }
+func NewStore() *Store { return &Store{reports: map[Key]Report{}} }
 
-// Put records the latest report for a destination.
+// Put records the latest report for an analyser.
 func (s *Store) Put(r Report) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reports[r.DestinationID] = r
+	r.Mix = mixOf(r)
+	s.reports[Key{ID: r.DestinationID, Mix: r.Mix}] = r
 }
 
-// Drop forgets one destination.
+// Drop forgets one destination, both of its mixes.
 func (s *Store) Drop(id int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.reports, id)
-}
-
-// Keep forgets every destination not in ids, which is how a report for a
-// destination that has been deleted stops being pushed to browsers forever.
-func (s *Store) Keep(ids map[int64]bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id := range s.reports {
-		if !ids[id] {
-			delete(s.reports, id)
+	for k := range s.reports {
+		if k.ID == id {
+			delete(s.reports, k)
 		}
 	}
 }
 
-// Get returns one report, aged against the clock.
+// Keep forgets every destination not in ids, both of its mixes. See KeepFor for
+// the finer form the engine uses once a destination can have two analysers.
+func (s *Store) Keep(ids map[int64]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.reports {
+		if !ids[k.ID] {
+			delete(s.reports, k)
+		}
+	}
+}
+
+// KeepFor forgets every analyser not in keys. A VOD report whose analyser has
+// been removed (the destination lost its second mix) goes with it, so no
+// report outlives the measurement that produced it.
+func (s *Store) KeepFor(keys map[Key]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.reports {
+		if !keys[k] {
+			delete(s.reports, k)
+		}
+	}
+}
+
+// Get returns one destination's live-mix report, aged against the clock.
 func (s *Store) Get(id int64) (Report, bool) {
+	return s.GetMix(id, MixLive)
+}
+
+// GetMix returns one analyser's report, aged against the clock.
+func (s *Store) GetMix(id int64, mix string) (Report, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	r, ok := s.reports[id]
+	r, ok := s.reports[Key{ID: id, Mix: mix}]
 	return r.Aged(time.Now()), ok
 }
 
 // All returns every report, aged against the clock and ordered by destination
-// id so the dashboard does not reshuffle itself on every push.
+// id, live mix before VOD mix, so the dashboard does not reshuffle itself on
+// every push.
 func (s *Store) All() []Report {
 	now := time.Now()
 	s.mu.RLock()
@@ -351,6 +405,11 @@ func (s *Store) All() []Report {
 		out = append(out, r.Aged(now))
 	}
 	s.mu.RUnlock()
-	sort.Slice(out, func(i, j int) bool { return out[i].DestinationID < out[j].DestinationID })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DestinationID != out[j].DestinationID {
+			return out[i].DestinationID < out[j].DestinationID
+		}
+		return mixOf(out[i]) == MixLive && mixOf(out[j]) != MixLive
+	})
 	return out
 }

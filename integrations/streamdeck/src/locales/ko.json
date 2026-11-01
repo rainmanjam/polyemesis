@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "슬레이트 사용 중",
   "streamdeck.issue.sourceDegraded": "소스 품질 저하",
   "streamdeck.pi.issues": "현재 문제",
-  "streamdeck.pi.noIssues": "이 대상에 보고된 문제가 없습니다."
+  "streamdeck.pi.noIssues": "이 대상에 보고된 문제가 없습니다.",
+  "streamdeck.issue.verticalHalfFailed": "세로 방송 실패",
+  "streamdeck.issue.verticalHalfDown": "세로 방송 중지됨"
 }

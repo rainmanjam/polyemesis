@@ -253,6 +253,18 @@ type Policy struct {
 	MaxRestarts int
 }
 
+// RestartCause says why a counted restart happened.
+type RestartCause string
+
+const (
+	// RestartCauseExit is a respawn after the child exited on its own.
+	RestartCauseExit RestartCause = "exit"
+	// RestartCauseLevel is a restart the engine made to apply a live audio level:
+	// the child could not take the change in place, or the audio format changed
+	// while a level was in force. The child did not exit for it.
+	RestartCauseLevel RestartCause = "live-level"
+)
+
 // Status is the externally visible state of a process.
 type Status struct {
 	Name        string          `json:"name"`
@@ -321,6 +333,11 @@ type Status struct {
 	// "kept reconnecting" is a claim about now, which only a window can make.
 	// The engine judges it against RestartStormAbove.
 	RecentRestarts int `json:"-"`
+	// RestartCause is why the latest counted restart happened: a crash respawn
+	// or a live level change the engine applied by restart. NOT JSON. It exists
+	// so the event for a restart can say what happened: a level restart did not
+	// exit anything, and "the process exited" was the only sentence it had.
+	RestartCause RestartCause `json:"-"`
 	// DroppedRecent and FramesRecent are the frames FFmpeg dropped, and the
 	// frames it output, over the last RateWindow of this run, with DropsKnown
 	// false until there is that much history. NOT JSON, for Rate's reason:
@@ -373,10 +390,12 @@ type Process struct {
 	state State
 	// gen counts supervise loops: Start bumps it (under mu) each time it
 	// launches one. setStateFor drops a write made for an older one.
-	gen       uint64
-	pid       int
-	restarts  int
-	startedAt time.Time
+	gen      uint64
+	pid      int
+	restarts int
+	// restartCause is the cause of the latest counted restart; see RestartCause.
+	restartCause RestartCause
+	startedAt    time.Time
 	// mediaAt is when this run first carried media, which is what uptime
 	// reports. It is NOT startedAt: an ingest is spawned listening, so the
 	// process exists and is Running from the moment it can accept a connection,
@@ -858,6 +877,7 @@ func (p *Process) RestartCounted(ctx context.Context) {
 	if wasRunning {
 		p.mu.Lock()
 		p.restarts++
+		p.restartCause = RestartCauseLevel
 		p.noteRestartLocked(time.Now())
 		p.mu.Unlock()
 	}
@@ -884,6 +904,7 @@ func (p *Process) InheritRestarts(prev *Process) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.restarts += n + 1
+	p.restartCause = RestartCauseLevel
 	p.restartAt = append(at, p.restartAt...)
 	p.noteRestartLocked(time.Now())
 }
@@ -1167,6 +1188,7 @@ func (p *Process) supervise(ctx context.Context, done chan struct{}) {
 
 		p.mu.Lock()
 		p.restarts++
+		p.restartCause = RestartCauseExit
 		p.noteRestartLocked(time.Now())
 		p.nextRetry = time.Now().Add(backoff)
 		p.mu.Unlock()
@@ -2018,6 +2040,7 @@ func (p *Process) Status() Status {
 		}
 	}
 	st.RecentRestarts = p.recentRestartsLocked(time.Now())
+	st.RestartCause = p.restartCause
 	if p.state == StateRunning {
 		st.Rate, st.RateKnown = p.rateLocked(time.Now())
 		st.DroppedRecent, st.FramesRecent, st.DropsKnown = p.dropsLocked(time.Now())

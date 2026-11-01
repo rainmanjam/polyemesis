@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/auth"
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
@@ -30,8 +31,33 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 			// than letting the platform reject it after the fact.
 			guides[i].RedirectWarnings = redirectWarnings(s.cfg, r, guides[i].RedirectPath)
 		}
+		guides[i].LivestreamGate = s.livestreamGate(guides[i].Platform)
 	}
 	writeJSON(w, http.StatusOK, guides)
+}
+
+// livestreamGated is a provider whose live API the operator switches on, X's
+// Livestream family today.
+type livestreamGated interface {
+	LivestreamAccess() bool
+}
+
+// livestreamGate is "open" or "closed" for a gated platform and "" for the rest.
+// It reads the provider this server resolves through, so a test's set and
+// production agree.
+func (s *Server) livestreamGate(platform db.Platform) string {
+	p, err := s.providers.Get(platform)
+	if err != nil {
+		return ""
+	}
+	g, ok := p.(livestreamGated)
+	if !ok {
+		return ""
+	}
+	if g.LivestreamAccess() {
+		return "open"
+	}
+	return "closed"
 }
 
 // origin reconstructs the browser-visible base URL.
@@ -815,6 +841,7 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	//
 	// Behaviour for every other platform is unchanged: they always answer with
 	// a URL, so the branch is never taken for them.
+	var warnings []string
 	if b.Ingest.URL != "" {
 		dest.URL = b.Ingest.URL
 	} else if strings.TrimSpace(dest.URL) == "" {
@@ -826,11 +853,22 @@ func (s *Server) handleRefreshKey(w http.ResponseWriter, r *http.Request) {
 	}
 	dest.StreamKey = b.Ingest.Key
 	dest.Kind = db.DestRTMP
+	if sendsCaptionPOST(dest) {
+		if b.CaptionIngestURL == "" {
+			warnings = append(warnings, "YouTube returned no caption ingestion URL for this destination's "+
+				"stream, so captions cannot be posted to it and the destination will not start with captions "+
+				"set to HTTP POST. Press Refresh stream key again, or set captions to off or embedded.")
+		} else if err := s.keepCaptionIngest(dest, b); err != nil {
+			s.log.Warn("refresh key: the caption ingestion URL could not be stored",
+				"destination", dest.ID, "err", redactErr(err))
+			warnings = append(warnings, "the caption ingestion URL YouTube returned could not be stored, so "+
+				"captions cannot be posted to this destination yet: "+redactErr(err))
+		}
+	}
 	// Recorded even when empty: a destination that used to have a backup
 	// endpoint and no longer does must stop publishing to the old one, which
 	// belongs to a broadcast that no longer exists.
 	dest.BackupURL, dest.BackupStreamKey = firstBackup(b)
-	var warnings []string
 	if dest.BackupIngestWanted && dest.BackupURL == "" {
 		warnings = append(warnings,
 			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
@@ -942,6 +980,21 @@ func ingestOptionsFor(dest *db.Destination, scheduledFor time.Time) oauth.Ingest
 func (s *Server) ingestOptions(dest *db.Destination, scheduledFor time.Time) oauth.IngestOptions {
 	opts := ingestOptionsFor(dest, scheduledFor)
 	opts.DedicatedIngest = s.needsOwnIngestStream(dest)
+	// Captions by HTTP POST (#8), on the paths that must never move a key. The
+	// caption branch of the stream pick CREATES a stream (a new key) whenever no
+	// URL is stored, so it is asked for here only when a URL for the held key
+	// already exists. A sweep then reuses that stream and its URL; a destination
+	// with no URL is left on its ordinary stream, and the go-live refusal in
+	// db.SetDestinationEnabled tells the operator to press Refresh stream key.
+	if sendsCaptionPOST(dest) {
+		if u, err := s.store.CaptionIngestURL(dest.ID, dest.StreamKey); err == nil && u != "" {
+			opts.CaptionPOST, opts.CaptionIngestURL = true, u
+			opts.CaptionDelay = time.Duration(dest.DelaySeconds) * time.Second
+		}
+	}
+	// The vertical halves of YouTube pairs (#7) are never a fallback candidate. See
+	// verticalStreamIDs and oauth.IngestOptions.ExcludeStreamIDs.
+	opts.ExcludeStreamIDs = s.verticalStreamIDs()
 	return opts
 }
 
@@ -965,7 +1018,32 @@ func (s *Server) ingestOptionsForRefresh(dest *db.Destination) oauth.IngestOptio
 	// end-to-end refresh test caught a second destination being moved off its
 	// own perfectly good stream onto a freshly created one.
 	opts.RotateKey = s.keyIsSharedWithASibling(dest)
+	// The operator pressed the button, so this is the one path that may give a
+	// caption destination its own stream when it has no URL yet. That is a key
+	// change, once, and the console says so beside the caption control.
+	if sendsCaptionPOST(dest) {
+		opts.CaptionPOST = true
+		opts.CaptionDelay = time.Duration(dest.DelaySeconds) * time.Second
+	}
 	return opts
+}
+
+// sendsCaptionPOST reports whether a destination sends captions by YouTube's HTTP
+// POST path, the one mode with a caption ingestion URL to fetch and store.
+func sendsCaptionPOST(dest *db.Destination) bool {
+	return dest != nil && dest.Platform == db.PlatformYouTube &&
+		captions.Mode(dest.CaptionMode) == captions.ModeYouTubePOST
+}
+
+// keepCaptionIngest stores the caption ingestion URL a create returned, bound to
+// the stream key it came with. Nothing is stored for a destination that does not
+// post captions, or when the platform returned no URL. The URL never reaches the
+// error: the store's own errors do not carry it.
+func (s *Server) keepCaptionIngest(dest *db.Destination, b *oauth.Broadcast) error {
+	if !sendsCaptionPOST(dest) || b == nil || b.CaptionIngestURL == "" {
+		return nil
+	}
+	return s.store.PutCaptionIngestURL(dest.ID, b.Ingest.Key, b.CaptionIngestURL)
 }
 
 // keyIsSharedWithASibling reports whether another destination on the same

@@ -734,3 +734,18 @@ CREATE TABLE IF NOT EXISTS polls (
     result      TEXT    NOT NULL DEFAULT '{}'  -- JSON polls.Result
 );
 CREATE INDEX IF NOT EXISTS idx_polls_started ON polls(started_at);
+
+-- The YouTube caption ingestion URL of one destination (#8), sealed. YouTube
+-- documents the URL only on the liveStreams.insert response, so it is stored the
+-- moment a caption-enabled destination's stream is created. It is a signed URL:
+-- anyone holding it can post captions onto the broadcast, so it is a credential
+-- and lives in a table of its own, out of every destination read and save.
+-- stream_key_hash is the SHA-256 of the stream key the URL was issued with: a URL
+-- whose stream key has since changed (a hand edit, a rotation) belongs to a
+-- different stream and reads back as absent.
+CREATE TABLE IF NOT EXISTS caption_ingest (
+    destination_id  INTEGER PRIMARY KEY REFERENCES destinations(id) ON DELETE CASCADE,
+    url_secret_enc  BLOB NOT NULL,      -- secretbox sealed
+    stream_key_hash TEXT NOT NULL,
+    updated_at      INTEGER NOT NULL
+);

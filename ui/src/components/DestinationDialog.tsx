@@ -1,3 +1,4 @@
+import { YouTubeVerticalPanel } from "@/components/YouTubeVerticalPanel";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -59,6 +60,9 @@ import {
   tierInfo,
 } from "@/lib/capabilities";
 import { TWITCH_LABELS } from "@/lib/types";
+import { CaptionModeControl } from "@/components/CaptionModeControl";
+import { XConsolePanel } from "@/components/XConsolePanel";
+import { captionModeToSend, captionsOffered, outputDelaySeconds } from "@/lib/captions";
 import type {
   Destination,
   DestTransport,
@@ -79,6 +83,8 @@ import type {
   RenditionView,
   SourceView,
   RenditionConcern,
+  CaptionMode,
+  XGoLiveTweet,
 } from "@/lib/types";
 import { MoreAbout } from "@/components/MoreAbout";
 
@@ -241,6 +247,9 @@ const PRESETS: DestPreset[] = [
     id: "x",
     name: "X (Twitter) Live",
     group: "video",
+    // The server's preset carries db.PlatformX. Without it here an X destination
+    // saved from this dialog was "custom", and the X lifecycle never reached it.
+    platform: "x",
     transport: "rtmps",
     kind: "rtmp",
     url: "",
@@ -644,6 +653,11 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // platform that publishes this negotiation today — see
   // db.Destination.Multitrack.
   const [multitrack, setMultitrack] = useState(false);
+  // Where live captions go (#8). "off" until the operator picks a route.
+  const [captionMode, setCaptionMode] = useState<CaptionMode>("off");
+  // X only: the title sent when the X broadcast is published (see XConsolePanel).
+  const [goLiveTitle, setGoLiveTitle] = useState("");
+  const [xGoLiveTweet, setXGoLiveTweet] = useState<XGoLiveTweet>("first");
   const [accountId, setAccountId] = useState<string>("none");
   // READ STATES, NOT BARE ARRAYS. #719.
   //
@@ -815,6 +829,10 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setFacebook(destination.facebook ?? {});
       setBackupIngestWanted(destination.backupIngestWanted ?? false);
       setMultitrack(destination.multitrack ?? false);
+      setCaptionMode(destination.captionMode ?? "off");
+      setGoLiveTitle(destination.goLiveTitle ?? "");
+      // Absent or empty is the server's default, the first go-live of a show only.
+      setXGoLiveTweet(destination.xGoLiveTweet || "first");
       setAccountId(destination.accountId ? String(destination.accountId) : "none");
       // A destination saved before renditions existed has no rendition id at
       // all, which is exactly passthrough — the same thing it has always done.
@@ -1087,6 +1105,15 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         // JSON.stringify omits is a key the server leaves alone. `false` has
         // to travel or switching this off saves nothing.
         multitrack,
+        // Sent every save, like multitrack: the server decodes over the stored
+        // row, so a missing key would keep the old route. Changing it on a
+        // delivering destination is refused by the server with a 409.
+        captionMode: captionModeToSend(kind, platform, captionMode),
+        // Only X sends a go-live title; every other platform clears it, as the server would.
+        goLiveTitle: platform === "x" ? goLiveTitle : "",
+        // Only X reads the announcement setting; any other platform clears it,
+        // as the server would.
+        xGoLiveTweet: platform === "x" ? xGoLiveTweet : "",
       };
       // The stream key travels ONLY when this dialog is what changed it.
       //
@@ -2083,6 +2110,19 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
           </StepPanel>
 
           <StepPanel n={4} step={step}>
+          {platform === "youtube" && editing && destination && (
+            <YouTubeVerticalPanel destinationId={destination.id} />
+          )}
+          {platform === "x" && (
+            <XConsolePanel
+              gate={rowsOf(guidesRead).find((g) => g.platform === "x")?.livestreamGate}
+              lifecycle={destination?.lifecycle}
+              title={goLiveTitle}
+              onTitleChange={setGoLiveTitle}
+              tweet={xGoLiveTweet}
+              onTweetChange={setXGoLiveTweet}
+            />
+          )}
           {(platform === "youtube" || platform === "twitch" || platform === "facebook") && (
             <div className="flex flex-col gap-3 rounded-md border border-warn/40 bg-warn/5 p-2">
               <p className="text-xs font-medium">{t("dest.compliance")}</p>
@@ -2233,6 +2273,16 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               one platform that publishes this negotiation, and offering it
               elsewhere would be a control that cannot do anything. The label is
               the feature's name, which every catalogue keeps in English. */}
+          {kind === "rtmp" && (captionsOffered(platform) || platform === "kick") && (
+            <CaptionModeControl
+              platform={platform}
+              value={captionMode}
+              onChange={setCaptionMode}
+              delaySeconds={delaySeconds}
+              ingestReady={destination?.captionIngestReady}
+              storedMode={destination ? (destination.captionMode ?? "off") : undefined}
+            />
+          )}
           {platform === "twitch" && (
             <div className="flex flex-col gap-1">
               <Label htmlFor="dest-multitrack" className="flex items-center gap-1.5">
@@ -2488,8 +2538,12 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 />
                 <span className="text-sm text-muted-foreground">{t("delay.help")}</span>
                 {/* Said BEFORE the save: a delay cannot be stretched on a
-                    running buffer, so the destination restarts and refills. */}
-                {destination?.enabled && delaySeconds !== loadedDelay && (
+                    running buffer, so the destination restarts and refills.
+                    A YouTube caption POST destination's delay is YouTube's,
+                    so changing it restarts nothing here. */}
+                {destination?.enabled &&
+                  outputDelaySeconds(platform, captionMode, delaySeconds) !==
+                    outputDelaySeconds(platform, captionMode, loadedDelay) && (
                   <span data-testid="delay-restart-warning" className="text-sm text-warn">
                     {t("delay.liveRestart", { seconds: delaySeconds })}
                   </span>

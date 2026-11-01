@@ -8,6 +8,8 @@ import type {
   MetaTarget,
 } from "@/lib/metadataPush";
 import type {
+  CaptionExportFormat,
+  CaptionExportSource,
   RenditionConcern,
   AccountStats,
   AcmePreflight,
@@ -24,6 +26,7 @@ import type {
   AutomodTestResult,
   BitrateSample,
   BroadcastEnd,
+  YouTubeVerticalView,
   BulkDestReport,
   ChatMessage,
   ChatModerationResult,
@@ -883,6 +886,21 @@ export const api = {
    *  route is not implemented server-side yet. */
   endFacebookBroadcast: (id: DestinationId) =>
     post<BroadcastEnd>(`/destinations/${id}/facebook/end-broadcast`),
+
+  /* --- YouTube vertical half (#7) ------------------------------------- */
+  /** Pairs a YouTube destination with a new 9:16 vertical half. `tier` is a key
+   *  from YOUTUBE_VERTICAL_TIERS (lib/youtubeVertical.ts), pinned to the server. */
+  createYouTubeVertical: (id: DestinationId, tier: string) =>
+    post<{ horizontalId: DestinationId; verticalId: DestinationId; verticalStreamId: string }>(
+      `/destinations/${id}/youtube-vertical`,
+      { tier },
+    ),
+  /** The vertical half's health. Served at most once a minute, and only while a half is live. */
+  youtubeVerticalStatus: (id: DestinationId) =>
+    get<YouTubeVerticalView>(`/destinations/${id}/youtube-vertical`),
+  /** Records that the one-time Live Control Room step was done. The server stores it and does not verify it. */
+  confirmYouTubeVertical: (id: DestinationId) =>
+    post<{ pairingConfirmed: boolean }>(`/destinations/${id}/youtube-vertical/confirm`),
   /** Reads Facebook's view of the encoder feed. Callers must not poll faster
    *  than FACEBOOK_STREAM_HEALTH_INTERVAL_MS — that is Facebook's published
    *  floor, quoted beside the constant in types.ts. See the block above: the
@@ -1231,6 +1249,13 @@ export const api = {
 
   transcript: (id: number) =>
     get<TranscriptView>(`/library/recordings/${id}/transcript`),
+  /** A caption file for one recording (#8): the stored transcript, or with
+   *  source "live" the captions viewers saw during the broadcast, lined up with
+   *  the recording. A plain URL, because it is a download and a <track> src:
+   *  the session cookie authorises it like downloadUrl. */
+  captionExportUrl: (id: number, format: CaptionExportFormat, source: CaptionExportSource = "recording") =>
+    `${BASE}/library/recordings/${id}/transcript/export?format=${format}` +
+    (source === "live" ? "&source=live" : ""),
   deleteTranscript: (id: number, track?: number) =>
     del<{ status: string }>(
       `/library/recordings/${id}/transcript` +

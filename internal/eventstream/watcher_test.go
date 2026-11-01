@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -181,5 +182,33 @@ func TestADelayedDestinationsHeldEdgeCarriesItsDelayOnce(t *testing.T) {
 	}
 	if got := w.Observe(prog, snapAt(4, held), nil); len(got) != 0 {
 		t.Errorf("the hold was announced again with no edge: %v", typesOf(got))
+	}
+}
+
+// A RESTART THE ENGINE MADE FOR A LIVE LEVEL IS NOT DESCRIBED AS A CRASH.
+//
+// The destination.restarted reason said "the process exited and was started
+// again" for every respawn. A restart to apply a live audio level changed the
+// count but did not exit anything, so the sentence was wrong for those (#933).
+// A crash respawn keeps its sentence.
+//
+// Mutation: make restartReason ignore the cause. Observed: FAIL, the level
+// restart reads as an exit.
+func TestARestartForALiveLevelIsReasonedAsALevelChangeNotAnExit(t *testing.T) {
+	w := NewWatcher()
+	d := func(n int, cause string) alerts.DestState {
+		return alerts.DestState{ID: 3, Enabled: true, Restarts: n, RestartCause: cause}
+	}
+	w.Observe(prog, snapAt(0, d(7, "")), nil)
+	got := w.Observe(prog, snapAt(2, d(8, "live-level")), nil)
+	if len(got) != 1 {
+		t.Fatalf("got %v, want one restarted edge", typesOf(got))
+	}
+	if reason := got[0].Reason; strings.Contains(reason, "exited") || !strings.Contains(reason, "live audio level") {
+		t.Errorf("reason = %q: a live-level restart did not exit, and must say a live level restarted it", reason)
+	}
+	got = w.Observe(prog, snapAt(4, d(9, "")), nil)
+	if len(got) != 1 || !strings.Contains(got[0].Reason, "exited") {
+		t.Errorf("a crash respawn lost its reason: %+v", got)
 	}
 }

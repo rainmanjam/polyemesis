@@ -3,6 +3,7 @@ import Hls from "hls.js";
 import { api, ApiError } from "@/lib/api";
 import type { PlayoutPublicView } from "@/lib/types";
 import { useT } from "@/lib/i18n";
+import { type ClockAnchor, useLiveCaptionTrack } from "@/lib/liveCaptions";
 
 /** The public player page, served at /watch and /watch/:token.
  *
@@ -57,7 +58,25 @@ export function PublicPlayer() {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [playing, setPlaying] = useState(false);
   const [copied, setCopied] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The element as state as well, so the caption track hook runs once it exists.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const attachVideo = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setVideoEl(el);
+  }, []);
+  // Where the playhead is on the wall clock, from the newest fragment's
+  // EXT-X-PROGRAM-DATE-TIME. The live captions are placed through it (#8).
+  const clockRef = useRef<ClockAnchor | null>(null);
+  const captionClock = useCallback((): ClockAnchor | null => {
+    if (clockRef.current) return clockRef.current;
+    // Safari's native HLS exposes the playlist's date as the start date of
+    // media time 0 instead of handing out fragments.
+    const v = videoRef.current as (HTMLVideoElement & { getStartDate?: () => Date }) | null;
+    const d = v?.getStartDate?.();
+    if (d && !Number.isNaN(d.getTime())) return { wallMs: d.getTime(), mediaTime: 0 };
+    return null;
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -114,6 +133,10 @@ export function PublicPlayer() {
   // URL either. Without the token in the query the poster 404s on every
   // token-protected stream — which is the default.
   const poster = phase.kind === "ready" ? api.playoutPosterUrl(token) : "";
+  // The live caption sidecar sits beside the master playlist. It is fetched
+  // under /playout/, so the playback cookie the manifest request earned covers it.
+  const captionsUrl = master ? new URL("captions.vtt", new URL(master, window.location.href)).pathname : "";
+  useLiveCaptionTrack(videoEl, captionsUrl, t("wave3.captions.playerTrack"), captionClock);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -125,6 +148,7 @@ export function PublicPlayer() {
     const src = master + (token ? `?t=${encodeURIComponent(token)}` : "");
     let hls: Hls | null = null;
     let retry: number | undefined;
+    clockRef.current = null;
 
     const start = () => {
       if (Hls.isSupported()) {
@@ -146,6 +170,10 @@ export function PublicPlayer() {
         // and break playback outright.
         hls.loadSource(src);
         hls.attachMedia(video);
+        hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+          const pdt = data.frag.programDateTime;
+          if (pdt) clockRef.current = { wallMs: pdt, mediaTime: data.frag.start };
+        });
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
           setPlaying(false);
@@ -227,7 +255,7 @@ export function PublicPlayer() {
         <div className="relative w-full overflow-hidden rounded-lg bg-black shadow-lg">
           <div className="aspect-video w-full">
             <video
-              ref={videoRef}
+              ref={attachVideo}
               className="h-full w-full"
               poster={poster || undefined}
               controls

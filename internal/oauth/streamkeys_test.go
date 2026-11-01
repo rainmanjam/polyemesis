@@ -65,7 +65,10 @@ func TestTwitchStreamKeysIsTheChannelsOneKey(t *testing.T) {
 // key endpoint at all. Offering the capability for any of them would mean the
 // cross-check either created broadcasts or lied.
 func TestOnlyPlatformsWithAReadOnlyKeyEndpointOfferStreamKeys(t *testing.T) {
-	want := map[db.Platform]bool{db.PlatformYouTube: true, db.PlatformTwitch: true}
+	// X joined with a read-only list of the account's sources (GET
+	// /2/users/{id}/sources). It is behind the Livestream gate, and while the gate
+	// is closed StreamKeys refuses without a request.
+	want := map[db.Platform]bool{db.PlatformYouTube: true, db.PlatformTwitch: true, db.PlatformX: true}
 	for p := range NewSet().All() {
 		_, ok := NewSet().StreamKeysFor(p)
 		if ok != want[p] {

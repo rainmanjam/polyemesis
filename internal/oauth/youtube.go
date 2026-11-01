@@ -24,6 +24,10 @@ type YouTube struct {
 	// driven without a real minute of waiting, which is the difference between
 	// that path being covered and being hoped about.
 	vodRetry []time.Duration
+	// testingWait replaces the waits a caption rollover spends watching its
+	// replacement reach testing (youtube_rollover.go). Nil means
+	// ytRolloverTestingWait; a test sets zero delays, as with vodRetry.
+	testingWait []time.Duration
 }
 
 // Google splits what other platforms combine: consent is granted on
@@ -151,6 +155,12 @@ type ytLiveStream struct {
 			BackupIngestionAddr string `json:"backupIngestionAddress"`
 		} `json:"ingestionInfo"`
 	} `json:"cdn"`
+	// ContentDetails is only present in a response that asked for the
+	// contentDetails part, which is liveStreams.insert on the caption path. The
+	// list call never asks for it, so a listed stream decodes with this empty.
+	ContentDetails struct {
+		ClosedCaptionsIngestionURL string `json:"closedCaptionsIngestionUrl"`
+	} `json:"contentDetails"`
 }
 
 // Ingest returns the channel's reusable RTMP ingest, creating one if the
@@ -158,6 +168,11 @@ type ytLiveStream struct {
 //
 // This is the payoff of the OAuth flow: the user never sees, copies or
 // mistypes a stream key.
+// NOT REACHED FOR YOUTUBE IN PRODUCTION (#7). ingestFor routes every platform that implements
+// TargetedProvider through IngestFor, and YouTube does, so the call that carries
+// IngestOptions.ExcludeStreamIDs is the only one a YouTube destination makes. This path passes
+// empty options, which leaves the vertical-title marker as the only guard against adopting a
+// vertical stream. That marker is what keeps it correct if this is ever called for YouTube again.
 func (y *YouTube) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, error) {
 	s, err := y.reusableStream(ctx, accessToken)
 	if err != nil {
@@ -225,9 +240,50 @@ func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLi
 // invented number. The refusal is handled where it arrives -- see
 // ytBroadcastCreateAdvice and RefusalSharedIngestionFull.
 func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts IngestOptions) (*ytLiveStream, error) {
+	picked, err := y.pickStream(ctx, accessToken, opts)
+	return picked.ytLiveStream, err
+}
+
+// pickedStream is pickStream's answer: the stream, and whether it was created by this call rather than found on the
+// channel. IngestFor needs the difference to clean up after itself: a stream made here whose key never reaches the
+// caller is an orphan, while a stream found on the channel feeds other destinations and must never be removed.
+type pickedStream struct {
+	*ytLiveStream
+	created bool
+}
+
+// pickStream is the body of streamFor. Every return names whether it created the stream.
+func (y *YouTube) pickStream(ctx context.Context, accessToken string, opts IngestOptions) (pickedStream, error) {
+	// A CAPTION-ENABLED DESTINATION IS THE ONE CASE THAT NEVER SHARES, AND ITS
+	// KEY CAN MOVE ONCE.
+	//
+	// Its caption ingest URL is documented only on the insert response, so a
+	// stream it adopts from the list has a URL polyemesis cannot know. The rule:
+	//   - a stored URL plus the held key reuses that stream (the URL comes back
+	//     from the store, see IngestFor);
+	//   - anything else creates a stream, and the new key is the rotation the
+	//     operator is told about. A stored URL with no held key to match is not
+	//     enough to reuse a stream, so the destination rotates too.
+	// No shared or sibling stream is ever adopted on this path: its URL would be
+	// unknown, and a sibling's stream would give two destinations one source.
+	if opts.CaptionPOST {
+		if opts.HeldKey != "" && opts.CaptionIngestURL != "" && !(opts.RotateKey && opts.DedicatedIngest) {
+			streams, err := y.listStreams(ctx, accessToken)
+			if err != nil {
+				return pickedStream{}, err
+			}
+			for i := range streams {
+				if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
+					return pickedStream{ytLiveStream: &streams[i]}, nil
+				}
+			}
+		}
+		return y.createdStream(ctx, accessToken, opts.IngestLabel, true)
+	}
+
 	streams, err := y.listStreams(ctx, accessToken)
 	if err != nil {
-		return nil, err
+		return pickedStream{}, err
 	}
 
 	// Byte for byte, with no trimming and no case folding. This is the
@@ -241,7 +297,7 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 	if opts.HeldKey != "" && !(opts.RotateKey && opts.DedicatedIngest) {
 		for i := range streams {
 			if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
-				return &streams[i], nil
+				return pickedStream{ytLiveStream: &streams[i]}, nil
 			}
 		}
 	}
@@ -270,21 +326,41 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 		// scheduled broadcasts are already bound to.
 		for i := range streams {
 			if strings.EqualFold(streams[i].CDN.IngestionType, "rtmp") &&
-				streams[i].CDN.IngestionInfo.StreamName != "" {
-				return &streams[i], nil
+				streams[i].CDN.IngestionInfo.StreamName != "" &&
+				!isVerticalStreamTitle(streams[i].Snippet.Title) &&
+				!containsString(opts.ExcludeStreamIDs, streams[i].ID) {
+				return pickedStream{ytLiveStream: &streams[i]}, nil
 			}
 		}
 	}
 
-	return y.createStream(ctx, accessToken, opts.IngestLabel)
+	return y.createdStream(ctx, accessToken, opts.IngestLabel, false)
 }
 
-// listStreams reads the channel's liveStreams.
-func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLiveStream, error) {
-	var list struct {
-		Items []ytLiveStream `json:"items"`
+// createdStream is createStream, marked as made by this call.
+func (y *YouTube) createdStream(ctx context.Context, accessToken, label string, withCaptions bool) (pickedStream, error) {
+	s, err := y.createStream(ctx, accessToken, label, withCaptions)
+	if err != nil {
+		return pickedStream{}, err
 	}
-	err := getJSON(ctx,
+	return pickedStream{ytLiveStream: s, created: true}, nil
+}
+
+// ytStreamsMaxPages bounds the liveStreams.list walk. A channel with many streams
+// pages through them, and the cap keeps a misbehaving nextPageToken from looping
+// forever.
+const ytStreamsMaxPages = 20
+
+// listStreams reads every page of the channel's liveStreams. One request returns at
+// most 50 streams, and a destination's held stream can sit past the first page.
+func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLiveStream, error) {
+	var all []ytLiveStream
+	pageToken := ""
+	for page := 0; page < ytStreamsMaxPages; page++ {
+		var list struct {
+			NextPageToken string         `json:"nextPageToken"`
+			Items         []ytLiveStream `json:"items"`
+		}
 		// part=id was ADDED to a shipping path, and it is worth naming why the
 		// risk is asymmetric. The scheduled path needs the stream's id to bind
 		// a broadcast to it; without id in the part list there is no documented
@@ -294,12 +370,20 @@ func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLive
 		// additive -- it cannot remove snippet or cdn, which is what this call
 		// already depended on. Resolve by: one live liveStreams.list without
 		// part=id, recording whether id is present.
-		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn&mine=true&maxResults=50",
-		accessToken, nil, &list)
-	if err != nil {
-		return nil, err
+		target := y.apiEndpoint() + ytStreamsPath + "?part=id,snippet,cdn&mine=true&maxResults=50"
+		if pageToken != "" {
+			target += "&pageToken=" + url.QueryEscape(pageToken)
+		}
+		if err := getJSON(ctx, target, accessToken, nil, &list); err != nil {
+			return nil, err
+		}
+		all = append(all, list.Items...)
+		if list.NextPageToken == "" || list.NextPageToken == pageToken {
+			return all, nil
+		}
+		pageToken = list.NextPageToken
 	}
-	return list.Items, nil
+	return all, nil
 }
 
 const (
@@ -364,7 +448,7 @@ func ytStreamTitle(label string) string {
 // Every caller has to have decided it wants one. Called where a destination
 // already has a working key, this is a rotation an operator did not ask for --
 // which is why streamFor tries opts.HeldKey before it gets here.
-func (y *YouTube) createStream(ctx context.Context, accessToken, label string) (*ytLiveStream, error) {
+func (y *YouTube) createStream(ctx context.Context, accessToken, label string, withCaptions bool) (*ytLiveStream, error) {
 	// Create a reusable variable-resolution stream. variable/variable
 	// is what lets polyemesis pass through whatever OBS is sending without
 	// YouTube rejecting a resolution mismatch.
@@ -377,8 +461,15 @@ func (y *YouTube) createStream(ctx context.Context, accessToken, label string) (
 			"frameRate":     "variable",
 		},
 	}
+	// The contentDetails part is requested ONLY when the caller needs the caption
+	// ingest URL. It is documented on this response and not on list, so it is
+	// asked for here and nowhere it would not be returned.
+	part := "id,snippet,cdn"
+	if withCaptions {
+		part += ",contentDetails"
+	}
 	err := postJSON(ctx,
-		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn",
+		y.apiEndpoint()+ytStreamsPath+"?part="+part,
 		accessToken, payload, nil, &created)
 	if err != nil {
 		return nil, fmt.Errorf("could not create a YouTube ingest stream: %w", err)
@@ -471,9 +562,9 @@ func (c *ytConcurrentViewers) UnmarshalJSON(b []byte) error {
 // one comparison and the alternative is reporting a stranger's audience as
 // yours.
 //
-// NO QUOTA NUMBER APPEARS HERE ON PURPOSE. The string "quota" occurs zero times
-// in the liveBroadcasts.list reference, so its cost is undocumented; videos.list
-// documents 1 unit. The project-wide ceiling is 10,000 units per day shared
+// liveBroadcasts.list costs 1 unit. The official-docs truth sheet (docs-youtube.md,
+// 2026-10-31) reads it from the quota table, because the method's own reference page
+// omits the cost. The project-wide ceiling is 10,000 units per day shared
 // across every YouTube feature polyemesis has -- metadata push and compliance
 // included -- so a caller polling this hard does not merely slow the viewer
 // count down, it takes title push down with it. The refusal to handle is

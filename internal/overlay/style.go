@@ -56,7 +56,7 @@ var fonts = map[string]bool{"sans": true, "serif": true, "mono": true, "rounded"
 // Platforms an overlay can filter on: the ones chat adapters exist for.
 var Platforms = []string{
 	string(db.PlatformTwitch), string(db.PlatformYouTube), string(db.PlatformKick),
-	string(db.PlatformFacebook), string(db.PlatformRumble),
+	string(db.PlatformFacebook), string(db.PlatformRumble), string(db.PlatformX),
 }
 
 // Bounds.

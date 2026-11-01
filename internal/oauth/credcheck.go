@@ -95,6 +95,9 @@ var unverifiableProviders = map[db.Platform]string{
 	db.PlatformYouTube: "Google offers no way to validate a client ID and secret " +
 		"without a user consent round-trip. The credentials are checked for shape " +
 		"only; the real verdict arrives the first time you connect an account.",
+	db.PlatformX: "X's OAuth 2.0 token endpoint has no client-only verification that " +
+		"runs without a user consent round-trip. The credentials are checked for shape " +
+		"only; the real verdict arrives the first time you connect an account.",
 }
 
 // CheckCredentialsFor dispatches to the provider, or reports honestly that no

@@ -123,6 +123,9 @@ func (s *Server) engOrNil() *engine.Engine {
 // side; TestReconcileHasOneSpellingAndItsResultCannotBeDropped is what keeps
 // this from growing a second one.
 func (s *Server) reconcile() error {
+	if s.reconciled != nil {
+		s.reconciled()
+	}
 	if s.mgr == nil {
 		return nil
 	}
@@ -385,6 +388,20 @@ type Server struct {
 	// acctHealth is each connected account's last token-refresh outcome (A5).
 	// The zero value is ready; see account_health.go.
 	acctHealth accountHealthBook
+	// verticalPairs holds the YouTube pairings under way, so two requests cannot both create a vertical stream.
+	// The zero value is ready; see youtube_vertical.go.
+	verticalPairs verticalPairsInFlight
+	// verticalHealth paces the vertical status read to one YouTube call a minute per pair (#7).
+	// The zero value is ready; see youtube_vertical.go.
+	verticalHealth verticalHealthPacer
+	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
+	// the engine answers liveness, the wall clock answers time, and the chat budget is charged.
+	verticalHalfLive    func(ids ...int64) bool
+	verticalNow         func() time.Time
+	verticalChargeQuota func(cost int) bool
+	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
+	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
+	reconciled func()
 	// diag is the debug-mode recorder and diagLevel the runtime log level it
 	// moves with. Both nil on a build without debug mode, which the handlers
 	// report as recording:false rather than as a missing route.
@@ -394,9 +411,11 @@ type Server struct {
 	store     *db.DB
 	box       *secrets.Box
 	mgr       *engine.Manager
-	bus       *events.Broker
-	sessions  *auth.Manager
-	logins    *auth.Throttle
+	// deliveringFn answers whether a destination is delivering. Nil means the live process table; tests set it.
+	deliveringFn func(destinationID int64) bool
+	bus          *events.Broker
+	sessions     *auth.Manager
+	logins       *auth.Throttle
 	// setups throttles POST /api/v1/setup per client address.
 	//
 	// SEPARATE FROM logins, not shared with it. They count different things
@@ -544,6 +563,9 @@ type Server struct {
 	// method writes one column, a provider set, a token refresher and an
 	// escalation callback. See the header of lifecycle.go.
 	lifecycle *lifecycleCoordinator
+	// rollover is the planned-rollover sweep (#19). Built beside the lifecycle coordinator, with the same narrow
+	// host: a token source, a predicate and one restart. See rollover.go.
+	rollover *rolloverCoordinator
 
 	// kickKeys caches Kick's webhook signing key. One per server rather than
 	// one per adapter: the key belongs to Kick, not to an account, so two
@@ -609,6 +631,9 @@ type Server struct {
 	// In memory on purpose: a restart resetting the count only means the sweep
 	// is more patient, which is the safe direction.
 	announceFails map[showKey]int
+	// templateCreateHolds is when a recurring template's next platform create for a destination may be tried,
+	// after a refusal (recurring.go, templateCreateBackoff). Guarded by preannounceMu.
+	templateCreateHolds map[showKey]time.Time
 
 	// auditSink diverts audit events instead of publishing them, and is set
 	// only by tests.
@@ -825,10 +850,24 @@ func New(o Options) *Server {
 		s.lifecycle = newLifecycleCoordinator(o.Log, o.DB, o.Providers,
 			s.tokenFor, s.escalateBroadcastFault)
 		s.lifecycle.announce = s.announceBroadcastPhase
+		// X: the title its PUBLISH carries, and the chat adapter told the new
+		// broadcast at once rather than after its poll.
+		s.lifecycle.goLiveTitle = s.xGoLiveTitle
+		s.lifecycle.pointChat = s.setXBroadcast
 		// A READ-ONLY PREDICATE, not a handle on the engine: it can only make
 		// the coordinator wait, never stop or start anything. See
 		// lifecycleCoordinator.airing.
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
+	}
+	if o.DB != nil {
+		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
+			tokenFor:    s.tokenFor,
+			restart:     s.restartDestinationForRollover,
+			delivering:  s.destinationDelivering,
+			announce:    s.publishRollover,
+			chatNotice:  s.sendRolloverNotice,
+			twitchStart: s.twitchStreamStart,
+		})
 	}
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
@@ -1165,6 +1204,17 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
+			// YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast. See
+			// youtube_vertical.go. The status read is a GET; create and confirm are POSTs.
+			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical", s.handleCreateYouTubeVertical)
+			r.Get("/destinations/{id}/youtube-vertical", s.handleYouTubeVerticalStatus)
+			r.With(s.requireSource).Post("/destinations/{id}/youtube-vertical/confirm", s.handleConfirmYouTubeVertical)
+			// Planned rollover (#19): the platform caps, one destination's countdown and settings, and a manual rollover.
+			r.Get("/rollover/limits", s.handleListRolloverLimits)
+			r.With(s.requireSource).Get("/destinations/{id}/rollover", s.handleGetRollover)
+			r.With(s.requireSource).Put("/destinations/{id}/rollover", s.handleSaveRollover)
+			r.With(s.requireSource).Post("/destinations/{id}/rollover/run", s.handleRunRollover)
+
 			// Expert mode: hand-edited FFmpeg arguments for one destination.
 			// Preview and dry-run are POSTs because they carry a candidate
 			// edit in the body, not because they change anything — neither
@@ -1290,6 +1340,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/library/recordings/{id}", s.handleGetLibraryRecording)
 			r.Put("/library/recordings/{id}", s.handleUpdateLibraryRecording)
 			r.Get("/library/recordings/{id}/transcript", s.handleGetTranscript)
+			r.Get("/library/recordings/{id}/transcript/export", s.handleExportTranscriptCaptions)
 			r.Delete("/library/recordings/{id}/transcript", s.handleDeleteTranscript)
 			r.Put("/library/recordings/{id}/speaker", s.handleSetTranscriptSpeaker)
 			// Submitting the work the library page offers. One route per
@@ -1346,6 +1397,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/schedules/{id}", s.handleGetSchedule)
 			r.Put("/schedules/{id}", s.handleUpdateSchedule)
 			r.Delete("/schedules/{id}", s.handleDeleteSchedule)
+
+			// Recurring broadcast templates (#18): the event a start schedule creates ahead of each
+			// show, and the calendar that lists and skips the occurrences. The sweep is recurring.go.
+			r.Get("/schedules/{id}/template", s.handleGetBroadcastTemplate)
+			r.Put("/schedules/{id}/template", s.handleSaveBroadcastTemplate)
+			r.Delete("/schedules/{id}/template", s.handleDeleteBroadcastTemplate)
+			r.Put("/schedules/{id}/template/thumbnail", s.handleSetBroadcastThumbnail)
+			r.Get("/recurring/occurrences", s.handleListOccurrences)
+			r.Post("/recurring/occurrences/{id}/skip", s.handleSkipOccurrence)
+			r.Post("/recurring/occurrences/{id}/title", s.handleOccurrenceTitle)
 
 			// The rolling clip buffer, and the split down the middle of it.
 			//
@@ -2050,6 +2111,10 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/destinations/{id}/facebook/stream-health": true,
 	"/api/v1/destinations/{id}/facebook/end-broadcast": true,
 	"/api/v1/metadata/broadcast-window":                true,
+	// The vertical half's health read (#7). It makes an outbound YouTube call on the
+	// caller's token, which is the same property as the Facebook stream-health read
+	// above: a read-scoped token must not spend the platform budget.
+	"/api/v1/destinations/{id}/youtube-vertical": true,
 
 	// #154: content, not metadata. Media bytes.
 	"/api/v1/recordings/{id}/download":             true,
@@ -2060,7 +2125,9 @@ var readScopeDeniedPatterns = map[string]bool{
 	// #154: content, not metadata. The words.
 	"/api/v1/clipper/recordings/{id}/transcript": true,
 	"/api/v1/library/recordings/{id}/transcript": true,
-	"/api/v1/library/search":                     true,
+	// #8 caption export: the same words in a caption file, so the same denial.
+	"/api/v1/library/recordings/{id}/transcript/export": true,
+	"/api/v1/library/search":                            true,
 	// Staging-readiness row 32: content, not metadata. What viewers wrote. The
 	// overview is here too because it carries the recent messages alongside
 	// the connection states; the live copy on /ws is withheld by wsEventPolicy.
@@ -2407,6 +2474,11 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	// with the world, and the sentence naming the shutdown is the whole answer.
 	// Without this case it fell through to 500, which reads as a server fault.
 	case errors.Is(err, db.ErrPlatformRetired):
+		writeError(w, http.StatusConflict, err.Error())
+	// A START REFUSED BECAUSE CAPTIONS GO TO YOUTUBE BY HTTP POST AND NO CAPTION
+	// INGESTION URL IS STORED FOR THE CURRENT KEY (#8). Same shape: the request is
+	// fine, the world is not ready, and the sentence names the button.
+	case errors.Is(err, db.ErrCaptionIngestMissing):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrStateConflict):
 		// The sentence is passed through rather than replaced, because unlike

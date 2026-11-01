@@ -699,6 +699,15 @@ rather than making you guess between them.
    negotiated: both mixes are published and whether the second is accepted is a
    property of that ingest. Many RTMP ingests ignore or reject it.
 
+5. **This FFmpeg cannot write two audio tracks into FLV.** The startup probe
+   muxes a two-tone FLV and reads it back. If it finds one track, not two, the
+   second mix is dropped on every RTMP destination that asks for it, and the card
+   carries the probe's words. A probe that could not run at all (it timed out,
+   could not create a temporary directory, or could not start FFmpeg) says
+   "probe inconclusive" in its record and keeps the second mix, so it is not a
+   cause of this symptom. The shipped Docker image pins FFmpeg 8.1.3. The
+   probe runs once at startup, so a change of FFmpeg needs a restart to be seen.
+
 A refusal at any of these never fails the broadcast: the destination falls back
 to publishing the live mix alone to the ordinary ingest.
 

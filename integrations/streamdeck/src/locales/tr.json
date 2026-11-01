@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Slate'te",
   "streamdeck.issue.sourceDegraded": "Kaynak bozuk",
   "streamdeck.pi.issues": "Mevcut sorunlar",
-  "streamdeck.pi.noIssues": "Bu hedef için bildirilen bir şey yok."
+  "streamdeck.pi.noIssues": "Bu hedef için bildirilen bir şey yok.",
+  "streamdeck.issue.verticalHalfFailed": "Dikey yarı hatalı",
+  "streamdeck.issue.verticalHalfDown": "Dikey yarı durdu"
 }

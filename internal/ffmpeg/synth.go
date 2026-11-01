@@ -206,6 +206,10 @@ type SlateSpec struct {
 	AudioChannels int // 0 => stereo
 	SampleRate    int // 0 => 48000
 	AudioKbps     int // 0 => 128
+	// AudioTracks is how many silent tracks to publish, each at the format above.
+	// 0 or 1 is the single track the slate has always carried. A multi-track
+	// primary needs one per track, or a destination compiled for it cannot bind.
+	AudioTracks int
 
 	// TimestampOffsetSeconds shifts the slate's output timestamps forward. The
 	// slate's synthetic inputs start at zero while the destinations have been
@@ -285,7 +289,13 @@ func SlateArgs(s SlateSpec) []string {
 
 	args = append(args,
 		"-map", "0:v:0",
-		"-map", "1:a:0",
+	)
+	// One silent map per track. They all come from the one silence source, at
+	// the format the -ac/-ar/-b:a options below give every audio output.
+	for range max(1, s.AudioTracks) {
+		args = append(args, "-map", "1:a:0")
+	}
+	args = append(args,
 		"-c:v", s.Encoder,
 	)
 	args = append(args, presetArgs(prof, s.Preset)...)

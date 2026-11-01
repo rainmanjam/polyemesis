@@ -329,6 +329,13 @@ func TestReconnectingIsNotStoppingAndArmsNoStop(t *testing.T) {
 	obs := obstest.New(t, "")
 	r := newRig(t, baseConfig(obs.URL()), "")
 	obs.WaitConnected(5 * time.Second)
+	// Identified is not synced. The connect-time GetStreamStatus is still in
+	// flight, and if the mock answers it AFTER the push below has flipped its
+	// state, the bridge reads "already streaming" as a sync -- adopted, never
+	// acted on -- and the push that follows is a repeat. Start is then never
+	// called (seen on ubuntu-latest). OBS itself has the same window, so the
+	// test waits it out rather than pretending it is not there.
+	waitFor(t, "the sync read", func() bool { return r.b.Status().Streaming != nil })
 	obs.StreamState(obsbridge.OutputStarted)
 	expectCall(t, r.acts.startCalled, "Start")
 
@@ -389,6 +396,9 @@ func TestADroppedConnectionNeverStopsAnythingEvenWhenOBSStoppedMeanwhile(t *test
 	obs := obstest.New(t, "")
 	r := newRig(t, baseConfig(obs.URL()), "")
 	obs.WaitConnected(5 * time.Second)
+	// The connect-time read first, or a push racing it is adopted as a sync
+	// and never starts anything (see TestReconnectingIsNotStoppingAndArmsNoStop).
+	waitFor(t, "the sync read", func() bool { return r.b.Status().Streaming != nil })
 	obs.StreamState(obsbridge.OutputStarted)
 	expectCall(t, r.acts.startCalled, "Start")
 

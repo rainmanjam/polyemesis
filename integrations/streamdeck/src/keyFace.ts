@@ -83,6 +83,7 @@ export const ISSUE_RANK = [
   "restartStorm",
   "droppingFrames",
   "platform",
+  "verticalHalf",
   "source",
   "uploadSlow",
 ] as const;
@@ -111,12 +112,17 @@ export interface SourceContext {
   failover?: FailoverStatus | null;
 }
 
-/** The face of a destination key bound to one destination and, optionally, one programme. */
+/** The face of a destination key bound to one destination and, optionally, one programme.
+ *
+ *  `vertical` is the YouTube vertical half of `dest`, when it has one (#7). Passing it lets the
+ *  key cover both halves: the state stays the horizontal half's, and a failing vertical half is
+ *  added as an issue beside it. */
 export function destinationFace(
   dest: DestStatus | undefined,
   boundSourceId: number | undefined,
   hold: HoldStatus | null | undefined,
   source?: SourceContext,
+  vertical?: DestStatus,
 ): KeyFace {
   if (!dest) {
     return { tone: "unbound", label: "streamdeck.state.missing" };
@@ -127,7 +133,11 @@ export function destinationFace(
     return { tone: "unbound", label: "streamdeck.state.otherProgramme" };
   }
   const state = stateFace(dest, hold);
-  const issues = [...(state.issue ? [state.issue] : []), ...signalIssues(dest, source, state.stormOnFace)];
+  const issues = [
+    ...(state.issue ? [state.issue] : []),
+    ...signalIssues(dest, source, state.stormOnFace),
+    ...(verticalIssue(dest, vertical) ? [verticalIssue(dest, vertical) as KeyIssue] : []),
+  ];
   issues.sort((a, b) => ISSUE_RANK.indexOf(a.kind) - ISSUE_RANK.indexOf(b.kind));
 
   // The face is the state, unless a worse issue than the state's own is open.
@@ -154,6 +164,22 @@ export function destinationFace(
   const seconds = dest.delay?.seconds ?? dest.delaySeconds ?? 0;
   if (seconds > 0) face.delaySeconds = seconds;
   return face;
+}
+
+/** The vertical half's issue on its horizontal key (#7).
+ *
+ *  A failure on the vertical half (its own error, or a classified reason) is red. A vertical half
+ *  that is stopped while the horizontal half is on air is amber: the 9:16 copy has gone dark and
+ *  nothing else on the key says so. A stopped pair stays quiet, because nothing is supposed to be on air. */
+function verticalIssue(dest: DestStatus, vertical: DestStatus | undefined): KeyIssue | undefined {
+  if (!dest.youtubeVertical || !vertical) return undefined;
+  if (vertical.error || vertical.reason) {
+    return { kind: "verticalHalf", tone: "error", key: "streamdeck.issue.verticalHalfFailed" };
+  }
+  if (vertical.enabled && vertical.process?.state !== "running" && dest.process?.state === "running") {
+    return { kind: "verticalHalf", tone: "warn", key: "streamdeck.issue.verticalHalfDown" };
+  }
+  return undefined;
 }
 
 /** The key's state, and the issue that state is, if it is one. */

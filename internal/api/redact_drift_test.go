@@ -103,6 +103,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.lifecycle.broadcastId": sPublic,
 	"destination.lifecycle.fault":       sPublic,
 	"destination.lifecycle.phase":       sPublic,
+	"destination.lifecycle.renewed":     sPublic, // whether this broadcast was reopened within the show (X renew)
 	// The reason a stream key could not be decrypted on this machine. sPublic
 	// despite sitting next to two sSecret leaves and despite the word "key"
 	// being in it: it is a fixed instruction to the operator -- re-enter the
@@ -142,6 +143,10 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.profile.tracks.track":               sPublic,
 	"destination.renditionId":                        sPublic,
 	"destination.delaySeconds":                       sPublic,
+	"destination.captionIngestReady":                 sPublic, // a yes/no about the stored URL; the URL itself is in caption_ingest and on no type
+	"destination.captionMode":                        sPublic, // off / youtube / twitch-sei / facebook: a route, not a credential
+	"destination.goLiveTitle":                        sPublic, // the X broadcast title, published to viewers by design
+	"destination.xGoLiveTweet":                       sPublic, // first / every / never: when X posts its go-live announcement
 	"destination.resilience.giveUpAfter":             sPublic,
 	"destination.resilience.maxBackoffSeconds":       sPublic,
 	"destination.resilience.minBackoffSeconds":       sPublic,
@@ -387,6 +392,9 @@ var leafSensitivity = map[string]sensitivity{
 	"source.createdAt":                             sPublic,
 	"source.enabled":                               sPublic,
 	"source.id":                                    sPublic,
+	"source.captionTrack":                          sPublic, // which routed track feeds the live captions
+	"source.captionPolicy.vocabulary":              sPublic, // operator's spellings of their own terms, shown on screen
+	"source.captionPolicy.blocklist":               sPublic, // words masked in captions; a word list, not a credential
 	"source.ingest.annotations.denoise":            sPublic,
 	"source.ingest.annotations.label":              sPublic,
 	"source.ingest.annotations.language":           sPublic,

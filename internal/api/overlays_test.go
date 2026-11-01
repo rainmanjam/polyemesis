@@ -459,8 +459,10 @@ func TestTheOverlayPagesSendNoReferrer(t *testing.T) {
 		// The first paint must already be transparent: OBS shows it.
 		if _, built := transparentIndex(); built {
 			body := w.Body.String()
+			// The check is on the background declaration, not on the colour: the shell's <meta name="theme-color">
+			// carries the same value, and a theme colour does not paint over OBS.
 			if !strings.Contains(body, `<body style="background:transparent">`) ||
-				strings.Contains(body, "#0f1115") {
+				strings.Contains(body, "background:#0f1115") {
 				t.Errorf("%s: the page is not transparent before the bundle loads", p)
 			}
 		}

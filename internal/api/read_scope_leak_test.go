@@ -163,6 +163,21 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	if err != nil {
 		t.Fatalf("create audio destination: %v", err)
 	}
+	// One upcoming recurring occurrence (#18), so the sweep of /recurring/occurrences
+	// reads a row rather than "[]" and is not counted inert. Inside the calendar's
+	// default two-week window from the real clock, which is what the handler reads.
+	// No schedule row is planted with it: a schedule would be fired by the runner, and
+	// the occurrence table has no foreign key, so the row stands on its own.
+	occID, err := store.ClaimOccurrence(scheduler.Occurrence{
+		ScheduleID: 1, DestinationID: dest.ID,
+		At: time.Now().Add(48 * time.Hour).Truncate(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("plant a recurring occurrence: %v", err)
+	}
+	if err := store.ResolveOccurrence(occID, "ledger-event-1", "Ledger show"); err != nil {
+		t.Fatalf("resolve the planted occurrence: %v", err)
+	}
 	// The sweep and the round-trip tests address these by literal URL, because
 	// the reconciliation below compares chi PATTERNS and a path built from a
 	// variable is harder to read against the route table. Assert the ids rather
@@ -383,6 +398,15 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 		t.Fatalf("plant schedule: %v", err)
 	}
 
+	// A recurring template on that schedule (#18), so /schedules/1/template answers 200 for the
+	// read token and the sweep sees a body rather than a not-found. The title is the operator's own
+	// text; the template holds no credential, and the body carries no clock, so it is stable.
+	if _, err := store.SaveBroadcastTemplate(scheduler.BroadcastTemplate{
+		ScheduleID: 1, TitlePattern: "Ledger {date}", Description: "Ledger template",
+	}); err != nil {
+		t.Fatalf("plant broadcast template: %v", err)
+	}
+
 	// A finished chat poll, at a fixed time so the bodies are stable, and a
 	// poll engine so the three poll GETs answer rather than 503. Its result is
 	// counts with no voter in it; the sweep checks that is all a read token
@@ -600,6 +624,16 @@ func leakRoutes() []string {
 		"/api/v1/library/sessions/1",
 		"/api/v1/renditions/1",
 		"/api/v1/schedules/1",
+		// Recurring templates (#18): the template a schedule carries and the calendar window of its
+		// occurrences. A read a read-scoped token may make. Titles and descriptions are the operator's
+		// own text; no credential is stored in either.
+		"/api/v1/schedules/1/template",
+		// Planned rollover (#19): one destination's settings and countdown, and the table of platform caps. The view
+		// carries the operator's quiet window and OBS scene name, the session's broadcast id and the cap's source
+		// link, and never a stream key or a token.
+		"/api/v1/destinations/1/rollover",
+		"/api/v1/rollover/limits",
+		"/api/v1/recurring/occurrences",
 		// Chat polls (#14): counts per option and platform, never a voter.
 		"/api/v1/polls",
 		"/api/v1/polls/1",

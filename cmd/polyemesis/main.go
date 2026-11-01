@@ -481,6 +481,9 @@ func run(h *hooks) error {
 	// ahead of the stream and nothing downstream waits on it, so a failure
 	// here never delays or blocks a go-live.
 	go srv.PreannounceLoop(ctx)
+	// The recurring-template look-ahead (#18). Same contract: best-effort, runs ahead of the
+	// stream, and a platform refusal is logged and retried, never allowed to delay a go-live.
+	go srv.RecurringLoop(ctx)
 	// Drives a platform's broadcast lifecycle: puts a YouTube broadcast on air
 	// once bytes are arriving, and ends it when the operator turns the
 	// destination off or deletes it.
@@ -494,6 +497,9 @@ func run(h *hooks) error {
 	// reconciles, and every broadcast on the box sits in "testing" for ever.
 	eng.SetLifecycle(srv.Lifecycle())
 	go srv.LifecycleLoop(ctx)
+	// Planned rollover (#19): the sweep that replaces a live broadcast before its platform cap, and the OBS scene
+	// trigger it listens to. See internal/api/rollover.go.
+	go srv.RolloverLoop(ctx)
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())

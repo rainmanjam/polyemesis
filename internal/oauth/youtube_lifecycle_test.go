@@ -448,14 +448,16 @@ func assertBoolPtr(t *testing.T, name string, got, want *bool) {
 // whose broadcast lifecycle can be commanded, and the value of the interface is
 // that ABSENT is a supported answer rather than a stub method that returns an
 // error.
-func TestOnlyYouTubeOffersBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t *testing.T) {
+func TestOnlyYouTubeAndXOfferBroadcastLifecycleAndTheSetTwinResolvesToTheStub(t *testing.T) {
 	var claimed, denied int
 	for platform := range Providers() {
 		_, ok := LifecycleFor(platform)
-		if platform == db.PlatformYouTube {
+		// X joined with the publish and end calls (PUT .../state). Both sit behind
+		// the Livestream gate and refuse without a request while it is closed.
+		if platform == db.PlatformYouTube || platform == db.PlatformX {
 			claimed++
 			if !ok {
-				t.Error("LifecycleFor(youtube) did not resolve, but YouTube implements the transition calls")
+				t.Errorf("LifecycleFor(%s) did not resolve, but it implements the transition calls", platform)
 			}
 			continue
 		}

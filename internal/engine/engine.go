@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/clips"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -113,7 +115,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu, healthMu -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu, healthMu, captPostMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
@@ -122,6 +124,20 @@ var stopTimeout = 12 * time.Second
 // by construction -- Hub.Publish takes nothing else and calls nothing back --
 // so holding mu across it orders nothing.
 type Engine struct {
+	// seiStages maps a destination id to its running SEI stage (captions_sei.go).
+	// The caption sink looks stages up here from the CueRouter's timers.
+	seiStages sync.Map
+	// postQueues maps a destination id to its YouTube caption POST queue
+	// (captions_post.go), looked up by the caption sink the same lock-free way.
+	// captPosts is the owner's view of the same queues, under captPostMu, which is
+	// a leaf: nothing else is taken while it is held. captionPosterFor builds a
+	// poster from a URL; nil is the real YouTube poster, and tests replace it.
+	postQueues       sync.Map
+	captPostMu       sync.Mutex
+	captPosts        map[int64]*destPoster
+	captPostWarned   sync.Map
+	captionPosterFor func(ingestURL string) captions.CaptionPoster
+
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
 	// rendition map are all per-instance already, so running N of them is what
@@ -342,11 +358,10 @@ type Engine struct {
 	// heldSilenceSig freezes the silence tier's signature while the selector is
 	// standing in for a departed primary. See holdSilence.
 	heldSilenceSig string
-	// loud is the per-destination EBU R128 analyser set, keyed by destination
-	// id. See reconcileLoudness: these are measurement processes and nothing
+	// loud is the EBU R128 analyser set, keyed by destination and mix. See reconcileLoudness: these are measurement processes and nothing
 	// downstream depends on one, so they are reconciled last and their failure
 	// costs a number on a dashboard rather than a stream.
-	loud map[int64]*loudnessMon
+	loud map[loudKey]*loudnessMon
 	// loudOff is the operator's override of the analyser tier, pending a
 	// settings field of its own. See SetLoudnessMonitor.
 	loudOff bool
@@ -378,10 +393,40 @@ type Engine struct {
 	captPort int
 	captHub  *relay.Hub
 	captVTT  *transcribe.LiveVTT
+	// captRoute fans the captioner's cues out to the captioned destinations, each
+	// behind its own broadcast delay (#11). It lives and dies with the captioner.
+	captRoute *captions.CueRouter
+	// captDesired is the signature of the last configuration the destinations
+	// asked for. The captioner's switch follows the destinations only when this
+	// changes, so a degrade that switched it off stays off until the operator
+	// saves something (the health guard is not overridden by a reconcile).
+	captDesired string
+	// captTargets are the captioned destinations and their delays, as the last
+	// reconcile decided them. A route started later begins with this set.
+	captTargets []captions.CueTarget
+	// captPolicy is the programme's caption text policy, read on every cue by
+	// the running fanout. Atomic because the captioner's goroutine reads it
+	// while a reconcile writes it.
+	captPolicy atomic.Pointer[captions.TextPolicy]
+	// captLog is the running captioner's live cue log, closed with it.
+	captLog *captions.CueLog
+	// captBurn writes the running captioner's burn file; closing it blanks it.
+	captBurn *captions.BurnWriter
 	// captWarn is why captioning stopped, kept after the captioner is gone so
 	// the operator finds out. A caption stream that vanishes silently is the
 	// failure mode this whole feature is designed against.
 	captWarn string
+	// captBudget counts the captioner's quick self-exits in a row, so a tap that
+	// dies right after every start is switched off rather than respawned on
+	// every reconcile. See captionRestartBudget.
+	captBudget captionRestartBudget
+	// captAutoModel is the model the installed captioner picked for a blank
+	// operator model, or "". See resolveCaptionConfig.
+	captAutoModel string
+	// captWake asks for a reconcile after the captioner's loop ends on its own.
+	// Nil is the production behaviour, a Reconcile on its own goroutine; a test
+	// on a partly built engine replaces it.
+	captWake func()
 
 	// whisper is the detected whisper.cpp, nil on an install without it, and
 	// whisperDir where its models live. Both are set once by SetTranscriber.
@@ -648,7 +693,10 @@ type Engine struct {
 
 // destination is one running output.
 type destination struct {
-	row      *db.Destination
+	row *db.Destination
+	// capt is the destination's SEI stage, when its row asks for one. Its hub is
+	// what the FFmpeg reads; see destination.readHub.
+	capt     *destCaption
 	proc     *supervisor.Process
 	port     int
 	subName  string
@@ -778,7 +826,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		host:       host,
 		dests:      map[int64]*destination{},
 		rends:      map[int64]*rendition{},
-		loud:       map[int64]*loudnessMon{},
+		loud:       map[loudKey]*loudnessMon{},
 		rolledOver: map[int64]string{},
 		retiring:   map[int64]*destination{},
 		draining:   map[int64]*destination{},
@@ -1213,7 +1261,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// with a whisper child still holding CPU.
 	capt, captPort, captHub, captVTT := e.capt, e.captPort, e.captHub, e.captVTT
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = nil, 0, nil, nil, ""
-	e.loud = map[int64]*loudnessMon{}
+	e.loud = map[loudKey]*loudnessMon{}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = nil, 0, nil, ""
 	silence := e.silence
 	sel, backup, playlist := e.sel, e.backup, e.playlist
@@ -1280,6 +1328,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// waiting for it before starting everything else.
 	wg.Add(1)
 	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
+	e.closeCaptionPosters()
 	stop(recorder)
 	if recorder != nil {
 		e.streamRecording(false, "the programme was stopped")
@@ -3049,6 +3098,8 @@ func renditionSig(r *db.Rendition, sourceFPS float64, silenceSig, dataDir string
 		// graph: a different anchor, width or opacity is a different encode.
 		overlaySig(r.Overlay, dataDir),
 		textSig(r.Text, dataDir),
+		// Burned-in captions add a drawtext to the graph (#8).
+		"captionBurn=" + string(r.CaptionBurn),
 		// Which relay it reads. RenditionArgs copies audio with -map 0:a, so a
 		// tier started against the raw ingest of a video-only stream produces a
 		// video-only hub; it has to be restarted onto the silence tier when one
@@ -3176,6 +3227,52 @@ func textSpecOf(t db.RenditionText, dataDir string) *ffmpeg.TextSpec {
 	}
 }
 
+// captionBurnSpecOf is the burn-in of the programme's live captions for a tier
+// set to draw them (#8): the programme's burn file (captions.BurnPath), which
+// the captioner rewrites and drawtext re-reads every frame, in the built-in
+// font on a translucent box. nil when the tier draws no captions, has no
+// programme, or the font will not resolve, for the reason textSpecOf gives: a
+// missing caption is a disappointment, a missing stream is an outage.
+func captionBurnSpecOf(r *db.Rendition, dataDir string) *ffmpeg.TextSpec {
+	if r.CaptionBurn == db.CaptionBurnOff || r.SourceID == nil || dataDir == "" {
+		return nil
+	}
+	font, err := textFontPath(ffmpeg.DefaultFont, dataDir)
+	if err != nil {
+		return nil
+	}
+	anchor := ffmpeg.AnchorBottomCenter
+	if r.CaptionBurn == db.CaptionBurnTop {
+		anchor = ffmpeg.AnchorTopCenter
+	}
+	return &ffmpeg.TextSpec{
+		TextFile:   captions.BurnPath(dataDir, *r.SourceID),
+		FontFile:   font,
+		Anchor:     anchor,
+		SizePct:    0.05,
+		Color:      "white",
+		MarginYPct: 0.06,
+		Box:        true,
+		BoxColor:   "black",
+		BoxOpacity: 0.6,
+	}
+}
+
+// prepareBurnFile readies the burn file a tier is about to draw. drawtext stops
+// on a missing file, so it is created. And when no captioner runs for the
+// programme it is emptied: a crash inside a caption's hold window leaves the
+// last caption in the file with its clear timer gone, and a restarted tier
+// would otherwise draw it with nobody speaking.
+func (e *Engine) prepareBurnFile(path string) error {
+	e.mu.RLock()
+	running := e.capt != nil
+	e.mu.RUnlock()
+	if running {
+		return captions.EnsureBurnFile(path)
+	}
+	return captions.ClearBurnFile(path)
+}
+
 // overlaySpecOf resolves the stored relative path against the data directory.
 //
 // Joined to an absolute path only here, at process-build time, exactly as the
@@ -3214,6 +3311,7 @@ func renditionSpecOf(r *db.Rendition, in, out string, sourceFPS float64, vaapiDe
 	return ffmpeg.RenditionSpec{
 		Overlay:     overlaySpecOf(r.Overlay, dataDir),
 		Text:        textSpecOf(r.Text, dataDir),
+		Captions:    captionBurnSpecOf(r, dataDir),
 		Deinterlace: ffmpeg.DeinterlaceMode(r.Deinterlace),
 		// Only meaningful for the VAAPI encoders, and empty everywhere else.
 		// Until this was threaded through, every VAAPI rendition fell back to
@@ -3367,6 +3465,21 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	// Dropping the text keeps the picture up. The same choice the unresolvable
 	// font makes below, and for the same reason: a missing caption is a
 	// disappointment, a missing stream is an outage.
+	if rspec.Captions != nil && !e.tools.HasFilter("drawtext") {
+		rspec.Captions = nil
+		e.log.Warn("this FFmpeg has no drawtext filter, so live captions are not burned in; "+
+			"the rendition runs without them rather than failing to start",
+			"rendition", row.ID)
+	}
+	// drawtext refuses to start on a missing textfile, so the burn file is
+	// created (empty, which draws nothing) before the encode is.
+	if rspec.Captions != nil {
+		if err := e.prepareBurnFile(rspec.Captions.TextFile); err != nil {
+			e.log.Warn("live captions cannot be burned in: no burn file",
+				"rendition", row.ID, "err", err)
+			rspec.Captions = nil
+		}
+	}
 	if rspec.Text != nil && !e.tools.HasFilter("drawtext") {
 		rspec.Text = nil
 		e.log.Warn("this FFmpeg has no drawtext filter, so no text is drawn; "+
@@ -4146,7 +4259,41 @@ const (
 	loudnessSubPrefix       = "loudness:"
 )
 
-// loudnessMon is one destination's running analyser.
+// loudKey names one analyser: a destination and the mix it measures. A
+// destination with a VOD track has two, and they are reconciled separately.
+type loudKey struct {
+	id  int64
+	mix string
+}
+
+// liveKey is the analyser for a destination's live mix, the one every
+// destination has.
+func liveKey(id int64) loudKey { return loudKey{id: id, mix: meters.MixLive} }
+
+// vodKey is the analyser for a destination's VOD mix. It exists only where the
+// destination's running graph carries a second mix.
+func vodKey(id int64) loudKey { return loudKey{id: id, mix: meters.MixVOD} }
+
+// loudKeysSorted orders analysers by destination, live before VOD, so anything
+// that walks them (the monitoring page, a reconcile) does not reshuffle.
+func loudKeysSorted[V any](m map[loudKey]V) []loudKey {
+	keys := make([]loudKey, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b loudKey) int {
+		if a.id != b.id {
+			if a.id < b.id {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.mix, b.mix) // "live" sorts before "vod"
+	})
+	return keys
+}
+
+// loudnessMon is one analyser's running process.
 type loudnessMon struct {
 	proc    *supervisor.Process
 	hub     *relay.Hub
@@ -4157,14 +4304,18 @@ type loudnessMon struct {
 	sig string
 }
 
-// loudnessPlan is what one destination's analyser should look like.
+// loudnessPlan is what one analyser should look like.
 type loudnessPlan struct {
+	key      loudKey
 	id       int64
 	name     string
 	hub      *relay.Hub
 	compiled routing.Result
-	target   meters.Target
-	sig      string
+	// sink is the mix label this analyser must terminate and not measure: the
+	// other half of a paired graph. See meters.Spec.Sink.
+	sink   []string
+	target meters.Target
+	sig    string
 }
 
 // loudnessWanted is the analyser set this reconcile should end with.
@@ -4172,7 +4323,9 @@ type loudnessPlan struct {
 // Only destinations that are actually RUNNING earn one. A destination that is
 // disabled, broken or waiting on a rendition is sending nothing, and metering
 // nothing would produce a confident -70 LUFS that reads like a mixing fault.
-func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
+// A destination earns a VOD analyser only where its running graph carries a
+// second mix, which is what it actually publishes.
+func (e *Engine) loudnessWanted(s db.Settings) map[loudKey]loudnessPlan {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -4181,10 +4334,13 @@ func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
 	if !e.loudnessTierWantedLocked(s) {
 		return nil
 	}
-	out := make(map[int64]loudnessPlan, len(e.dests))
+	out := make(map[loudKey]loudnessPlan, 2*len(e.dests))
 	for id, d := range e.dests {
-		if p, ok := loudnessPlanFor(id, d); ok {
-			out[id] = p
+		if p, ok := loudnessPlanFor(liveKey(id), d); ok {
+			out[p.key] = p
+		}
+		if p, ok := loudnessPlanFor(vodKey(id), d); ok {
+			out[p.key] = p
 		}
 	}
 	return out
@@ -4215,8 +4371,7 @@ func (e *Engine) LoudnessMonitorEnabled() bool {
 	return e.loudnessTierWantedLocked(e.settings)
 }
 
-// loudnessPlanFor derives one destination's analyser plan, or reports that this
-// destination earns none.
+// loudnessPlanFor derives one analyser's plan, or reports that it earns none.
 //
 // SEPARATED OUT SO THE PREDICATE CAN BE ASKED TWICE. It is evaluated once when a
 // reconcile decides what it wants, and again in startLoudness under the lock that
@@ -4226,17 +4381,46 @@ func (e *Engine) LoudnessMonitorEnabled() bool {
 // duplicating the first and letting the two drift.
 //
 // Pure in d, and takes no lock: both callers already hold one.
-func loudnessPlanFor(id int64, d *destination) (loudnessPlan, bool) {
+//
+// THE SIGNATURE HASHES THE UNMASKED GRAPH. d.spec masks live levels so that a
+// fader does not restart the publisher. The analyser has no such obligation: a
+// fader that moved while its analyser kept the old level would show a muted
+// track as loud, so the level is part of what it is judged on, and a change
+// cycles the analyser (cheap; it is not the publisher).
+func loudnessPlanFor(k loudKey, d *destination) (loudnessPlan, bool) {
 	if d == nil || d.proc == nil || d.hub == nil || d.err != "" || d.compiled.FilterComplex == "" {
 		return loudnessPlan{}, false
 	}
-	t := meters.TargetFor(d.row.Profile.Loudness,
-		routing.PlatformFor(string(d.row.Platform), string(d.row.Kind)))
+	routingPlatform := routing.PlatformFor(string(d.row.Platform), string(d.row.Kind))
+	var loud *routing.Loudness
+	out, sink := d.compiled.OutLabel, []string{}
+	switch k.mix {
+	case meters.MixLive:
+		loud = d.row.Profile.Loudness
+		if d.compiled.SecondOutLabel != "" {
+			sink = []string{d.compiled.SecondOutLabel}
+		}
+	case meters.MixVOD:
+		if d.compiled.SecondOutLabel == "" {
+			return loudnessPlan{}, false
+		}
+		// The VOD mix is judged against its own target when it has one, and
+		// against the platform's otherwise. The live mix's target is not
+		// inherited, because the VOD mix is a different programme.
+		if d.row.VODProfile != nil {
+			loud = d.row.VODProfile.Loudness
+		}
+		out, sink = d.compiled.SecondOutLabel, []string{d.compiled.OutLabel}
+	default:
+		return loudnessPlan{}, false
+	}
+	t := meters.TargetFor(loud, routingPlatform)
 	return loudnessPlan{
-		id: id, name: d.row.Name, hub: d.hub, compiled: d.compiled, target: t,
-		// d.spec already hashes the graph and the upstream, so this adds
-		// only what the analyser cares about that the destination does not.
-		sig: hashStrings([]string{d.spec, t.Sig()}),
+		key: k, id: k.id, name: d.row.Name, hub: d.hub, compiled: d.compiled,
+		sink: sink, target: t,
+		// The graph is hashed as compiled, levels included, and out is part of
+		// it: the same graph measured at the other label is another analyser.
+		sig: hashStrings([]string{d.spec, d.compiled.FilterComplex, k.mix, out, strings.Join(sink, ","), t.Sig()}),
 	}, true
 }
 
@@ -4251,12 +4435,12 @@ func (e *Engine) reconcileLoudness(s db.Settings) {
 
 	e.mu.Lock()
 	var stop []*loudnessMon
-	for id, m := range e.loud {
-		if p, ok := want[id]; ok && p.sig == m.sig {
+	for k, m := range e.loud {
+		if p, ok := want[k]; ok && p.sig == m.sig {
 			continue
 		}
 		stop = append(stop, m)
-		delete(e.loud, id)
+		delete(e.loud, k)
 	}
 	e.mu.Unlock()
 
@@ -4264,32 +4448,31 @@ func (e *Engine) reconcileLoudness(s db.Settings) {
 		e.teardownLoudness(m)
 	}
 
-	ids := make([]int64, 0, len(want))
-	keep := make(map[int64]bool, len(want))
-	for id := range want {
-		ids = append(ids, id)
-		keep[id] = true
+	keys := loudKeysSorted(want)
+	keep := make(map[meters.Key]bool, len(want))
+	for _, k := range keys {
+		keep[meters.Key{ID: k.id, Mix: k.mix}] = true
 	}
-	slices.Sort(ids)
-	for _, id := range ids {
+	for _, k := range keys {
 		e.mu.RLock()
-		running := e.loud[id] != nil
+		running := e.loud[k] != nil
 		e.mu.RUnlock()
 		if running {
 			continue
 		}
-		e.startLoudness(want[id])
+		e.startLoudness(want[k])
 	}
 	// Reports outlive their analyser by exactly one reconcile, which is what
-	// stops a deleted destination being pushed to browsers forever.
-	e.loudStore.Keep(keep)
+	// stops a deleted destination, or a VOD mix that was switched off, being
+	// pushed to browsers forever.
+	e.loudStore.KeepFor(keep)
 }
 
 func (e *Engine) startLoudness(p loudnessPlan) {
 	now := time.Now()
 	fail := func(err error) {
-		e.loudStore.Put(meters.Failed(p.id, p.name, p.target, err.Error(), now))
-		e.log.Warn("loudness monitor cannot run", "dest", p.name, "err", err)
+		e.loudStore.Put(meters.Failed(p.id, p.name, p.target, err.Error(), now).ForMix(p.key.mix))
+		e.log.Warn("loudness monitor cannot run", "dest", p.name, "mix", p.key.mix, "err", err)
 	}
 
 	port, err := e.allocPort()
@@ -4298,6 +4481,9 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		return
 	}
 	subName := loudnessSubPrefix + strconv.FormatInt(p.id, 10)
+	if p.key.mix == meters.MixVOD {
+		subName += ":" + meters.MixVOD
+	}
 	url, err := p.hub.Subscribe(subName, port)
 	if err != nil {
 		e.releasePort(port)
@@ -4305,13 +4491,18 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		return
 	}
 
+	outLabel := p.compiled.OutLabel
+	if p.key.mix == meters.MixVOD {
+		outLabel = p.compiled.SecondOutLabel
+	}
 	args := meters.Args(meters.Spec{
 		RelayURL:      url,
 		FilterComplex: p.compiled.FilterComplex,
-		OutLabel:      p.compiled.OutLabel,
+		OutLabel:      outLabel,
+		Sink:          p.sink,
 	})
 
-	id, name, target := p.id, p.name, p.target
+	id, name, target, mix := p.id, p.name, p.target, p.key.mix
 	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
 	var proc *supervisor.Process
 	proc = supervisor.New(e.log, supervisor.Spec{
@@ -4321,7 +4512,7 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 			var last time.Time
 			return meters.Parse(r, func(f meters.Frame) {
 				proc.NoteMedia() // as the meters do: a frame is media flowing
-				rep := meters.Observe(id, name, target, f, time.Now())
+				rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
 				// Stored on every frame, published on a throttle: a browser
 				// that connects between pushes still gets the current number.
 				e.loudStore.Put(rep)
@@ -4341,32 +4532,23 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	// becoming an orphan holding a UDP port.
 	//
 	// AND THE DESTINATION MAY HAVE GONE, which is the same hazard by a different
-	// route and was not covered. This guard read `if e.stopped` alone, so a
-	// reconcile that computed its wanted-set before a destination was deleted and
-	// arrived here after it published a monitor for a destination that no longer
-	// existed -- holding a relay port, subscribed to a hub about to be closed
-	// under it, and receiving nothing forever. Measured: adding then deleting one
-	// destination reliably left exactly one of these behind (#453), and the
-	// comment above already described the failure without covering this path to
-	// it.
-	//
-	// Re-asking loudnessPlanFor rather than testing `e.dests[p.id] != nil` is
-	// deliberate: a destination that was deleted and re-created, or respecced,
+	// route. Re-asking loudnessPlanFor rather than testing `e.dests[p.id] != nil`
+	// is deliberate: a destination that was deleted and re-created, or respecced,
 	// is present under the same id but is not the thing this plan was made for.
 	// The signature is what distinguishes them.
-	cur, want := loudnessPlanFor(p.id, e.dests[p.id])
+	cur, want := loudnessPlanFor(p.key, e.dests[p.id])
 	if e.stopped || !want || cur.sig != p.sig {
 		e.mu.Unlock()
 		p.hub.Unsubscribe(subName)
 		e.releasePort(port)
 		return
 	}
-	e.loud[p.id] = &loudnessMon{proc: proc, hub: p.hub, port: port, subName: subName, sig: p.sig}
+	e.loud[p.key] = &loudnessMon{proc: proc, hub: p.hub, port: port, subName: subName, sig: p.sig}
 	e.mu.Unlock()
 
-	e.loudStore.Put(meters.Starting(p.id, p.name, p.target, now))
+	e.loudStore.Put(meters.Starting(p.id, p.name, p.target, now).ForMix(mix))
 	proc.Start()
-	e.log.Info("loudness monitor started", "dest", p.name,
+	e.log.Info("loudness monitor started", "dest", p.name, "mix", mix,
 		"target", p.target.Source, "lufs", p.target.LUFS)
 }
 
@@ -4714,6 +4896,29 @@ func (e *Engine) ClipBuffer() ClipStatus {
 
 // ------------------------------------------------------- realtime captions
 
+// captionQuickExit and captionRestartLimit are the captioner's restart budget:
+// a loop that ends on its own within captionQuickExit of starting is a quick
+// exit, and after captionRestartLimit of them in a row captions are switched
+// off with a reason.
+const (
+	captionQuickExit    = 30 * time.Second
+	captionRestartLimit = 3
+)
+
+// captionRestartBudget counts quick self-exits in a row.
+type captionRestartBudget struct{ quick int }
+
+// exited records a self-exit after a run of ran, and reports whether the budget
+// is spent.
+func (b *captionRestartBudget) exited(ran time.Duration) bool {
+	if ran >= captionQuickExit {
+		b.quick = 0
+		return false
+	}
+	b.quick++
+	return b.quick >= captionRestartLimit
+}
+
 // captSubName is fixed: there is at most one captioner.
 const captSubName = "captions"
 
@@ -4772,6 +4977,11 @@ func (e *Engine) SetTranscriber(w *transcribe.Tools, modelsDir string, nice func
 
 // SetLiveCaptions turns realtime captioning on or off.
 //
+// It must not be called from the reconcile path: it ends in Reconcile, which
+// takes reconcileMu and is not reentrant. The destinations drive the switch from
+// inside Reconcile (see captionIntentNow), so this stays the operator's override
+// for callers outside a reconcile.
+//
 // Off is the default and an upgrade never turns it on: this is the one job that
 // takes CPU away from a live broadcast, and nobody should discover that by
 // noticing dropped frames.
@@ -4788,14 +4998,11 @@ func (e *Engine) SetLiveCaptions(cfg transcribe.LiveConfig) error {
 		return fmt.Errorf("%s", w.Unavailable())
 	}
 
-	e.mu.Lock()
-	e.captCfg, e.captOn = cfg, cfg.Enabled
-	if cfg.Enabled {
-		// A fresh opt-in clears the last refusal. The operator has seen it and
-		// chosen to try again, possibly with a smaller model.
-		e.captWarn = ""
+	// A fresh opt-in clears the last refusal inside setCaptionConfig. The operator
+	// has seen it and chosen to try again, possibly with a smaller model.
+	if err := e.setCaptionConfig(cfg); err != nil {
+		return err
 	}
-	e.mu.Unlock()
 	return e.Reconcile()
 }
 
@@ -4821,12 +5028,66 @@ func (e *Engine) LiveCaptions() CaptionStatus {
 		Config:      cfg,
 	}
 	if capt != nil {
+		// The resolved values the captioner runs with; Config stays the
+		// operator's, with an automatic track and a blank model left as chosen.
+		run := capt.Config()
+		st.Track, st.Speaker, st.Model = run.Track, run.Speaker, run.Model
 		st.Stats = capt.Stats()
 		if st.Stats.Warning != "" {
 			st.Warning = st.Stats.Warning
 		}
 	}
 	return st
+}
+
+// captionerIsCurrent reports whether the captioner, if any, already matches what the intent wants, so a reconcile may
+// leave it alone. The signature alone is not enough: the audio tap or the transcription loop can exit on its own and
+// leave the pointer set, so a captioner that is no longer running is not current.
+func captionerIsCurrent(cur *transcribe.LiveCaptioner, sig, want string) bool {
+	if (cur != nil) != (want != "") || sig != want {
+		return false
+	}
+	return cur == nil || cur.Running()
+}
+
+// resolveCaptionConfig fills in everything the operator left to the engine: the
+// track the source offers (with its speaker and denoise annotations), the
+// track's language, the live default model and the thread count. The result is
+// what the captioner will run, and what its signature is taken from.
+//
+// pinned is the model the installed captioner chose for a blank model, or "".
+// The default comes from the hardware hint, which a re-probe of the encoders can
+// change mid-show; without the pin, that would restart a running captioner on a
+// different model, or switch captions off when that model is not downloaded.
+func resolveCaptionConfig(cfg transcribe.LiveConfig, choice transcribe.TrackChoice, hint transcribe.HardwareHint, pinned string) transcribe.LiveConfig {
+	cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
+	if cfg.Language == "" {
+		cfg.Language = choice.Language
+	}
+	if cfg.Model == "" {
+		cfg.Model = pinned
+	}
+	if cfg.Model == "" {
+		cfg.Model = transcribe.LiveDefaultModel(hint).Name
+	}
+	if cfg.Threads == 0 {
+		cfg.Threads = transcribe.LiveThreads(hint.CPUCores)
+	}
+	return cfg.Normalized()
+}
+
+// captionSig identifies a resolved caption configuration on a hub. Every field
+// goes in, through its JSON form, so a change to any of them (threads, health
+// budget, denoise, speaker as well as track and model) restarts the captioner,
+// and nothing outside it does.
+func captionSig(cfg transcribe.LiveConfig, hub string) string {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		// LiveConfig is plain data and always marshals; a failure here would be a
+		// programming error, and the %+v form still identifies the config.
+		b = []byte(fmt.Sprintf("%+v", cfg))
+	}
+	return hashStrings([]string{string(b), hub})
 }
 
 // reconcileCaptions brings the captioner into line with the switch.
@@ -4841,26 +5102,57 @@ func (e *Engine) LiveCaptions() CaptionStatus {
 // can read and nothing more — a destination must never be held back because
 // speech recognition could not start.
 func (e *Engine) reconcileCaptions() {
+	// The destinations decide whether captions are wanted and which track they
+	// use. They are read first so the snapshot below sees the decision. A failed
+	// read keeps whatever the captioner was doing: a database hiccup must not
+	// stop a running captioner.
+	if in, err := e.captionIntentNow(); err != nil {
+		e.log.Warn("live captions: could not read the destinations; keeping the current captioner", "err", err)
+	} else {
+		e.applyCaptionIntent(in)
+		e.useCaptionPolicy(in.policy)
+		e.syncCaptionRoute(in.targets)
+		e.syncCaptionPosters(in.posts)
+	}
+
 	e.mu.RLock()
 	on, cfg, cur, sig, stopped := e.captOn, e.captCfg, e.capt, e.captSig, e.stopped
+	pinned := ""
+	if cur != nil {
+		pinned = e.captAutoModel
+	}
 	whisper, modelsDir, nice := e.whisper, e.whisperDir, e.whisperNice
 	e.mu.RUnlock()
 
 	choice, haveTrack := transcribe.LiveTrack(e.effectiveSource(), cfg.Track)
 
+	// cfg is the operator's configuration until here, and the resolved one the
+	// captioner runs from here on. e.captCfg keeps the operator's: an automatic
+	// track must stay automatic, so a later source change can pick another one.
 	want := ""
+	autoModel := cfg.Model == ""
 	if on && !stopped && whisper.Available() && haveTrack {
-		cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
-		if cfg.Language == "" {
-			cfg.Language = choice.Language
-		}
-		want = hashStrings([]string{
-			strconv.Itoa(cfg.Track), cfg.Model, string(cfg.Backend), cfg.Language,
-			cfg.Window.String(), cfg.Step.String(), cfg.VTTPath, e.sourceLabel(),
-		})
+		cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools), pinned)
+		want = captionSig(cfg, e.sourceLabel())
 	}
-	if (cur != nil) == (want != "") && sig == want {
+	if captionerIsCurrent(cur, sig, want) {
 		return
+	}
+
+	// A captioner that is still installed with the wanted signature but no longer
+	// running ended on its own: the tap or the relay went away, or whisper
+	// crashed. It is rebuilt, but only within the restart budget, measured on the
+	// captioner's own clock so a reconcile that comes late does not make a quick
+	// death look like a long run.
+	giveUp := false
+	if cur != nil && want != "" && sig == want && !cur.Running() {
+		ran, _ := cur.RanFor()
+		e.mu.Lock()
+		giveUp = e.captBudget.exited(ran)
+		e.mu.Unlock()
+		if !giveUp {
+			e.log.Warn("live captions stopped on their own; starting them again", "ran", ran)
+		}
 	}
 
 	if cur != nil {
@@ -4870,17 +5162,18 @@ func (e *Engine) reconcileCaptions() {
 		e.mu.Unlock()
 		e.teardownCaptions(old, port, hub, vtt)
 	}
+	if giveUp {
+		e.captionsFailed(fmt.Sprintf("live captions stopped on their own %d times in a row, each within %s of starting, "+
+			"so they were switched off; check the audio source and turn them on again", captionRestartLimit, captionQuickExit))
+		return
+	}
 	if want == "" {
+		// Something was torn down, or this return would have been the early one
+		// above. Say so, or a dashboard keeps showing a captioner that is gone.
+		e.publishCaptionStatus()
 		return
 	}
 
-	hint := transcribe.HintFromTools(e.tools)
-	if cfg.Model == "" {
-		cfg.Model = transcribe.LiveDefaultModel(hint).Name
-	}
-	if cfg.Threads == 0 {
-		cfg.Threads = transcribe.LiveThreads(hint.CPUCores)
-	}
 	modelPath, err := transcribe.ResolveModel(modelsDir, cfg.Model)
 	if err != nil {
 		e.captionsFailed(fmt.Sprintf("live captions need the %s model: %v", cfg.Model, err))
@@ -4902,10 +5195,9 @@ func (e *Engine) reconcileCaptions() {
 
 	// The sidecar lands in the playout directory by default so it sits beside
 	// the HLS window it describes. It is a growing WebVTT file, not a
-	// conformant HLS subtitle rendition — see transcribe.LiveVTT — and the
-	// playout handler serves a closed list of extensions that does not yet
-	// include .vtt, so today this is for anything that reads the directory
-	// directly.
+	// conformant HLS subtitle rendition — see transcribe.LiveVTT. The playout
+	// handler serves it, and the public player polls it and places each cue on
+	// the picture through the epoch the file names.
 	vttPath := cfg.VTTPath
 	if vttPath == "" {
 		vttPath = filepath.Join(e.play.Dir(), transcribe.LiveVTTName)
@@ -4918,15 +5210,42 @@ func (e *Engine) reconcileCaptions() {
 		vtt = nil
 	}
 
-	capt, err := transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
-		transcribe.WithLiveNice(nice),
-		transcribe.WithLiveEmit(func(c transcribe.LiveCaption) {
-			if err := vtt.Append(c); err != nil {
-				e.log.Warn("live captions: sidecar write failed", "err", err)
-			}
+	// One route per captioner. It is closed on every path that does not hand it
+	// to e.captRoute, so a run that never starts leaves no timer behind.
+	route := captions.NewCueRouter(captionSink{e: e}, nil, nil)
+	route.SetTargets(e.captionTargets())
+	routeHeld := false
+	defer func() {
+		if !routeHeld {
+			route.Close()
+		}
+	}()
+	// The cue log lives as long as this captioner, like the route: it is
+	// handed to e.captLog with it, and closed on every path that does not.
+	cueLog := e.openCueLog()
+	burn := e.openBurnWriter()
+	logHeld := false
+	defer func() {
+		if !logHeld {
+			_ = cueLog.Close()
+			_ = burn.Close()
+		}
+	}()
+	fan := e.captionFanout(
+		func(c transcribe.LiveCaption) {
 			e.bus.Publish(events.TypeCaption, CaptionEvent{Line: &c})
-		}),
+		},
+		e.captionSidecar(vtt, cueLog, burn),
+		route,
+	)
+
+	var capt *transcribe.LiveCaptioner
+	capt, err = transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
+		transcribe.WithLiveNice(nice),
+		transcribe.WithLiveEmit(fan.Emit),
 		transcribe.WithLiveDegrade(e.onCaptionsDegraded),
+		// capt is assigned before Start, so the hook always sees it.
+		transcribe.WithLiveExit(func() { go e.onCaptionerExited(capt) }),
 	)
 	if err != nil {
 		hub.Unsubscribe(captSubName)
@@ -4955,8 +5274,20 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = capt, port, hub, vtt, want
-	e.captCfg = capt.Config()
+	e.captAutoModel = ""
+	if autoModel {
+		e.captAutoModel = cfg.Model
+	}
+	e.captRoute = route
+	routeHeld = true
+	e.captLog, e.captBurn = cueLog, burn
+	logHeld = true
 	e.mu.Unlock()
+	if !capt.Running() {
+		// The loop ended before the captioner was installed, so the exit hook
+		// found nothing to act on. Act on it now.
+		e.onCaptionerExited(capt)
+	}
 
 	// Warn, not Info. This is the one thing in the pipeline that takes CPU away
 	// from the encoders, and an operator reading the log after a stutter should
@@ -4965,6 +5296,32 @@ func (e *Engine) reconcileCaptions() {
 		"track", cfg.Track, "speaker", cfg.Speaker, "model", cfg.Model,
 		"threads", cfg.Threads, "niced", nice != nil)
 	e.publishCaptionStatus()
+}
+
+// onCaptionerExited runs when a captioner's loop has ended. If it is still the
+// installed captioner and captions are still wanted, it ended on its own: the
+// status goes out at once, so the dashboard stops showing it running, and a
+// reconcile is asked for, which rebuilds it within the restart budget. A
+// captioner that was torn down (the pointer already moved on), stopped with the
+// engine, or switched off by the health guard needs neither.
+func (e *Engine) onCaptionerExited(c *transcribe.LiveCaptioner) {
+	e.mu.RLock()
+	current := c != nil && e.capt == c && e.captOn && !e.stopped
+	wake := e.captWake
+	e.mu.RUnlock()
+	if !current {
+		return
+	}
+	e.publishCaptionStatus()
+	if wake != nil {
+		wake()
+		return
+	}
+	go func() {
+		if err := e.Reconcile(); err != nil {
+			e.log.Error("live captions: reconcile after the captioner stopped", "err", err)
+		}
+	}()
 }
 
 // captionsFailed records a reason captioning could not start, switches the
@@ -5011,6 +5368,18 @@ func (e *Engine) publishCaptionStatus() {
 }
 
 func (e *Engine) teardownCaptions(c *transcribe.LiveCaptioner, port int, hub *relay.Hub, vtt *transcribe.LiveVTT) {
+	// The route goes first: no delayed caption may be delivered for a captioner
+	// that is already stopping.
+	e.mu.Lock()
+	route, cueLog, burn := e.captRoute, e.captLog, e.captBurn
+	e.captRoute, e.captLog, e.captBurn = nil, nil, nil
+	e.mu.Unlock()
+	if route != nil {
+		route.Close()
+	}
+	// The burn file is left empty, not removed: a tier burning captions in
+	// keeps reading it, and drawtext stops on a missing file.
+	defer func() { _ = cueLog.Close(); _ = burn.Close() }()
 	if c == nil {
 		_ = vtt.Close()
 		return
@@ -5546,6 +5915,7 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 			ds.DropFrames = d.Process.Progress.DropFrames
 			ds.DupFrames = d.Process.Progress.DupFrames
 			ds.Restarts = d.Process.Restarts
+			ds.RestartCause = string(d.Process.RestartCause)
 		}
 		snap.Destinations = append(snap.Destinations, ds)
 	}
@@ -5557,6 +5927,12 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		}
 	}
 	for _, r := range st.Loudness {
+		// The alert watcher keys its state by destination, and a VOD mix is
+		// judged for the archive, not for the platform's live normaliser, so
+		// its verdict is not an alert. It stays on the Meters page.
+		if r.Mix == meters.MixVOD {
+			continue
+		}
 		// Only a fail, and only from an analyser that is working: a broken
 		// meter is a measurement problem, and reporting it as a loudness
 		// failure would send somebody to remix a stream that is fine.

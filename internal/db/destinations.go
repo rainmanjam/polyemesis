@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
+	"github.com/rainmanjam/polyemesis/internal/captions"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 )
 
@@ -63,6 +65,10 @@ const (
 	// pretending otherwise is how a destination starts claiming a key fetch that
 	// does not exist.
 	PlatformRumble Platform = "rumble"
+	// PlatformX is X (Twitter) Livestream. Sign-in and the Livestream family are
+	// behind X's whitelist, so the integration is switched off until the owner's
+	// app is whitelisted. Paste-the-key works either way. See oauth/x.go.
+	PlatformX Platform = "x"
 	// PlatformTrovo is RETIRED. Trovo ceased live streaming on 30 June 2026,
 	// and polyemesis no longer offers it anywhere: no preset, no sign-in, no
 	// create. The constant stays because rows created before the shutdown still
@@ -178,6 +184,32 @@ type Destination struct {
 	// once. It is opt-in only because a network round trip at go-live should be
 	// something the operator asked for.
 	Multitrack bool `json:"multitrack,omitempty"`
+	// CaptionMode is how live captions reach this destination: "off" (the
+	// default and the empty value), "sei", "youtube_post" or "facebook_sei".
+	// Which of these a platform accepts is decided by captions.Allowed, and
+	// Validate refuses a mode the platform cannot carry. The engine reads it to
+	// route each destination's captions (internal/engine/captions_*.go).
+	CaptionMode string `json:"captionMode,omitempty"`
+	// GoLiveTitle is the title sent when an X broadcast is published. X takes a
+	// title only on the PUBLISH transition and nothing changes it while the
+	// broadcast runs, so it is set here, before the show. Empty sends no title.
+	// Only X reads it, so Validate refuses it on every other platform, and the
+	// update handler refuses a change while the destination is live.
+	GoLiveTitle string `json:"goLiveTitle,omitempty"`
+	// XGoLiveTweet is when X's announcement post is wanted as an X broadcast is
+	// published: "first" (also the empty value every upgraded row carries) on
+	// the first go-live of a show only, "every" on every go-live, or "never".
+	// A show is the time the destination stays switched on. The broadcasts
+	// polyemesis opens again within it, after X ends one or times it out, are
+	// published with should_not_tweet under "first". Only X reads it, so
+	// Validate refuses a value on every other platform. See XGoLiveTweetMode.
+	XGoLiveTweet string `json:"xGoLiveTweet,omitempty"`
+	// CaptionIngestReady reports whether a YouTube caption ingestion URL is stored
+	// for this destination's CURRENT stream key, which the "youtube_post" mode
+	// needs before the destination may start. It is set by scanDestination and
+	// never by a column, like KeyUnreadable. The URL itself is a credential and is
+	// never on this type: see caption_ingest.go.
+	CaptionIngestReady bool `json:"captionIngestReady,omitempty"`
 	// VODProfile is the SECOND audio mix -- the VOD track, separate from the
 	// live one, which is the whole ask of #141.
 	//
@@ -313,6 +345,28 @@ const (
 // fifteen minutes. The buffer it needs is bounded in RAM and disk by
 // internal/delayline, which is provisioned for exactly this.
 const MaxDestDelaySeconds = 15 * 60
+
+// OutputDelaySeconds is how long polyemesis itself holds this destination's
+// output back: the delay line the engine builds, and the delay its caption cues
+// wait for.
+//
+// It is DelaySeconds for every destination but one kind. A YouTube destination
+// that posts captions by HTTP POST must have a 30 s or 60 s broadcast delay, and
+// that delay is YouTube's: polyemesis sends it as the broadcast's
+// broadcastStreamDelayMs, and YouTube holds the viewers back by it while it
+// lines the posted captions up. Holding the output back here as well would put
+// viewers twice the delay behind, so for that destination this is 0. DelaySeconds
+// is still the configured value everywhere that says how far behind the viewers
+// are: the card, the events and the alert watcher.
+func (d *Destination) OutputDelaySeconds() int {
+	if d == nil {
+		return 0
+	}
+	if d.Platform == PlatformYouTube && captions.Mode(d.CaptionMode) == captions.ModeYouTubePOST {
+		return 0
+	}
+	return d.DelaySeconds
+}
 
 // Resilience bounds.
 const (
@@ -651,6 +705,41 @@ func (d Destination) Validate() error {
 	var probs []string
 	add := func(f string, a ...any) { probs = append(probs, fmt.Sprintf(f, a...)) }
 
+	// Captions: the mode must be one this build knows, the platform must accept
+	// it, and the YouTube HTTP POST path needs the 30 s or 60 s delay YouTube
+	// documents for it. "" and "off" need no check. facebook_sei is allowed
+	// here regardless of its switch: the handler checks that switch on a save
+	// that turns the mode on, so a row saved while the switch was open is not
+	// made unsaveable when it closes.
+	if d.CaptionMode != "" && !captions.ValidMode(d.CaptionMode) {
+		add("unknown caption mode %q", d.CaptionMode)
+	} else if mode := captions.Mode(d.CaptionMode); mode != captions.ModeOff && mode != "" {
+		if !captions.Allowed(string(d.Platform), mode, true) {
+			add("captions cannot be sent to %s as %s", d.Platform, mode)
+		}
+		if mode == captions.ModeYouTubePOST && !captions.YouTubePOSTDelayOK(time.Duration(d.DelaySeconds)*time.Second) {
+			add("YouTube caption POST needs a 30 s or 60 s broadcast delay, not %d s", d.DelaySeconds)
+		}
+	}
+
+	// The X go-live announcement: one of three choices, and only X acts on it.
+	if d.XGoLiveTweet != "" {
+		if !validXGoLiveTweet(d.XGoLiveTweet) {
+			add("unknown X go-live announcement setting %q: use first, every or never", d.XGoLiveTweet)
+		} else if d.Platform != PlatformX {
+			add("the go-live announcement setting is read only by X; %s posts no announcement", d.Platform)
+		}
+	}
+
+	// The X go-live title: only X sends it, and X bounds it by its post length.
+	if d.GoLiveTitle != "" {
+		if d.Platform != PlatformX {
+			add("a go-live title is sent only to X; %s takes its title from the go-live composer", d.Platform)
+		} else if n := utf8.RuneCountInString(d.GoLiveTitle); n > XGoLiveTitleMax {
+			add("the go-live title is %d characters and X allows %d", n, XGoLiveTitleMax)
+		}
+	}
+
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is required")
 	}
@@ -660,7 +749,7 @@ func (d Destination) Validate() error {
 		add("unknown destination kind %q", d.Kind)
 	}
 	switch d.Platform {
-	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, "":
+	case PlatformCustom, PlatformYouTube, PlatformTwitch, PlatformKick, PlatformFacebook, PlatformRumble, PlatformTrovo, PlatformVimeo, PlatformX, "":
 	default:
 		add("unknown platform %q", d.Platform)
 	}
@@ -1035,8 +1124,11 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		// column existed decodes to a nil VODProfile rather than to a profile
 		// that fails Validate.
 		vodProfileRaw = ""
-		created       int64
-		updated       int64
+		// The fingerprint of the key the stored caption URL was issued with, NULL
+		// when no URL is stored. Never the URL itself: see caption_ingest.go.
+		captionKeyHash sql.NullString
+		created        int64
+		updated        int64
 	)
 	err := s.Scan(&dst.ID, &dst.Name, &dst.Kind, &dst.Platform, &acct, &dst.URL,
 		&dst.StreamKey, &streamEnc,
@@ -1049,7 +1141,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
-		&dst.Multitrack, &vodProfileRaw,
+		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &captionKeyHash,
 		&dst.Position, &created, &updated)
 	if err != nil {
 		return nil, err
@@ -1076,6 +1168,10 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 	default:
 		dst.StreamKey, dst.BackupStreamKey = primary, backup
 	}
+	// Ready only for the key the URL was issued with, the rule CaptionIngestURL
+	// applies, so the card and the engine cannot disagree.
+	dst.CaptionIngestReady = captionKeyHash.Valid && sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) &&
+		captionKeyHash.String != "" && captionKeyHash.String == streamKeyHash(dst.StreamKey)
 	// The other fail-closed point, for the same reason it is here: every read
 	// passes through. A row on a platform that has shut down is reported off
 	// whatever its column says, so nothing that reads it -- the engine's
@@ -1152,7 +1248,8 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
-	multitrack, vod_profile,
+	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
+	(SELECT stream_key_hash FROM caption_ingest WHERE caption_ingest.destination_id = destinations.id),
 	position, created_at, updated_at`
 
 // The reads below, as whole compile-time constants.
@@ -1191,7 +1288,7 @@ const (
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
 		delay_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
-		multitrack=?, vod_profile=?,
+		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?,
 		updated_at=? WHERE id=?`
 	destUpdateQuery        = `UPDATE destinations SET ` + destUpdateKeyCols + destUpdateCols
 	destUpdateKeepKeyQuery = `UPDATE destinations SET ` + destUpdateCols
@@ -1388,6 +1485,12 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if dst.Platform.RetiredReason() != "" {
 		return nil, retiredError(dst.Platform, "a destination can no longer be created for it")
 	}
+	// A new row has no caption URL yet (the URL is stored against its id), so a
+	// create that would start it with POST captions is the go-live refusal too.
+	if dst.Enabled && sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) {
+		return nil, fmt.Errorf("%w: a new destination that sends captions to YouTube by HTTP POST has no caption "+
+			"ingestion URL yet; create it switched off, press Refresh stream key on it, then start it", ErrCaptionIngestMissing)
+	}
 	if dst.AudioBitrate == 0 {
 		dst.AudioBitrate = 160
 	}
@@ -1482,9 +1585,9 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
 		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
-		 multitrack, vod_profile,
+		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1495,7 +1598,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		dst.Position, now, now)
 	if err != nil {
 		return nil, err
@@ -1533,6 +1636,25 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		}
 		if was != dst.Platform {
 			return nil, retiredError(dst.Platform, "a destination can no longer be switched to it")
+		}
+	}
+	// The caption go-live refusal (#8), on the off-to-on edge only: a save of a
+	// destination that is already running never stops it, and turning captions
+	// on while live is allowed (the URL is fetched by Refresh stream key, which
+	// needs the mode saved first).
+	if dst.Enabled && dst.Platform == PlatformYouTube {
+		var was bool
+		err := d.sql.QueryRow(`SELECT enabled FROM destinations WHERE id=?`, dst.ID).Scan(&was)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !was {
+			if rerr := d.captionIngestRefusal(dst.ID, dst.Platform, dst.CaptionMode, dst.StreamKey); rerr != nil {
+				return nil, rerr
+			}
 		}
 	}
 	// The programme the rendition is held against, or nil for a pairing this
@@ -1577,7 +1699,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
 		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
-		dst.Multitrack, vodProfile,
+		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		time.Now().Unix(), dst.ID,
 	}
 	// Four cases, because the two halves are decided separately.
@@ -1618,6 +1740,13 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
+	}
+	// A destination that no longer posts captions to YouTube has no use for a
+	// signed caption URL, and a credential nothing uses is one to forget.
+	if !sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) {
+		if err := d.DeleteCaptionIngestURL(dst.ID); err != nil {
+			return nil, err
+		}
 	}
 	return d.GetDestination(dst.ID)
 }
@@ -1811,6 +1940,21 @@ func (d *DB) SetDestinationEnabled(id int64, enabled bool) error {
 		}
 		if p.RetiredReason() != "" {
 			return retiredError(p, "this destination can no longer be started")
+		}
+		// Captions by YouTube HTTP POST need the URL YouTube issued with this
+		// destination's stream (#8). Refused at the same one write, for the same
+		// reason: every way of starting a destination arrives here. A destination
+		// already on is left alone, so a repeated start never stops a running show.
+		if p == PlatformYouTube {
+			row, gerr := d.GetDestination(id)
+			if gerr != nil {
+				return gerr
+			}
+			if !row.Enabled {
+				if rerr := d.captionIngestRefusal(id, row.Platform, row.CaptionMode, row.StreamKey); rerr != nil {
+					return rerr
+				}
+			}
 		}
 	}
 	res, err := d.sql.Exec(`UPDATE destinations SET enabled=?, updated_at=? WHERE id=?`,
@@ -2499,4 +2643,14 @@ func tableExists(sqldb *sql.DB, table string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// captionModeStored is the value written to destinations.caption_mode. The
+// column is NOT NULL and "off" is the default, so an unset mode is stored as off
+// rather than as an empty string the engine does not recognise.
+func captionModeStored(mode string) string {
+	if mode == "" {
+		return string(captions.ModeOff)
+	}
+	return mode
 }

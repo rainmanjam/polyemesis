@@ -421,49 +421,19 @@ var platformCapabilities = []PlatformCapability{
 		},
 	},
 	{
-		PresetID: "x", Name: "X (Twitter) Live", Tier: TierManual,
-		Summary:   "Paste your ingest URL and stream key. X does publish a live-video API \u2014 broadcasts, chat and moderation \u2014 and polyemesis has not wired it up yet, so for now this is a paste-the-key destination that streams exactly as well as any other.",
-		ReadFirst: "X's live-video API is real but its access tier is not published. Every endpoint below is in X's own served OpenAPI spec, and no pricing or tier page names the Broadcasts family -- so whether your account can call them at all is a question only a live request answers. Get the stream key from X's producer tooling and paste it; everything else is automatic once you connect.",
+		PresetID: "x", Name: "X (Twitter) Live", Platform: db.PlatformX, Tier: TierManual,
+		Summary:   "Paste your server URL and stream key from X's producer tooling. X's Livestream API can also create the stream source and read chat, but X whitelists each app for it: until polyemesis's app is whitelisted, the paste is the working path.",
+		ReadFirst: "The Livestream API needs X Livestream access (app must be whitelisted by X). Request it with X's Livestream access form, using your developer App ID. Until X approves the app, the Livestream features stay switched off (the operator turns them on with POLYEMESIS_X_LIVESTREAM=1 once X has approved it) and the paste works on its own. Sign-in works without the whitelist. X's Livestream guide says access is limited to whitelisted apps, and no pricing page lists the Livestream family.",
+		HelpURL:   "https://docs.x.com/livestream-api/getting-started",
 		Caps: map[Capability]Support{
-			// THIS ROW WAS SEVEN SupportNo CELLS AND ALMOST ALL OF THEM WERE
-			// WRONG. The summary used to say "There is no API to connect: X's
-			// developer platform covers posts, users, media and the post
-			// firehose, not live-video ingest", and a comment here claimed
-			// everything below "hangs off a live broadcast object that the X
-			// API does not expose to third parties in the first place".
-			// GET /2/broadcasts/{id} is that object.
-			//
-			// Established by counting, not by reading: api.x.com/2/openapi.json
-			// (856,423 bytes, "X API v2" 2.167) declares 149 paths and 178
-			// operations, of which the Broadcasts tag holds 13 and Chat 16,
-			// under the scopes broadcast.read and broadcast.write. Nine paths
-			// carry the word broadcast, including POST
-			// /2/broadcasts/scheduled/{id}/live and GET+POST
-			// /2/broadcasts/{id}/chat. See docs/evidence/facebook-chat-rumble-x-2026-08-16.md.
-			// EVERY CELL BELOW WAS SupportYes FOR ABOUT AN HOUR, AND THAT WAS A
-			// PROMISE THE UI COULD NOT KEEP. X's API genuinely publishes all of
-			// it -- see docs/evidence/facebook-chat-rumble-x-2026-08-16.md, and
-			// the OpenAPI counts in this row's history -- but the provider is
-			// not registered, there is no connect affordance, and an operator
-			// reading "Works" would go looking for a sign-in button that does
-			// not exist.
-			//
-			// The house rule is the one Rumble's viewer-stats cell already
-			// states: a capability nothing implements is not a capability. It
-			// was applied there and broken here in the same commit.
-			//
-			// None of the four Support values says "the platform documents it
-			// and we have not built it" -- the same expressive gap that got
-			// Twitch predictions cut. SupportUnknown is the least wrong: it
-			// renders as Unverified, which is fail-open and invites the
-			// operator to try, rather than as a refusal or a lie.
+			// Sign-in is built (PKCE, the five scopes) but no live authorize
+			// request has run, so it stays Unknown until one does.
 			CapSSO: SupportUnknown,
-			// Still pasted, and the reason is narrower than it looks: X
-			// CONSUMES a key (source_id is required at create) and echoes it
-			// back on every broadcast object, but publishes nothing that mints
-			// or enumerates one. So polyemesis can verify a binding it was
-			// given; it cannot obtain one.
-			CapStreamKey:          SupportManual,
+			// The stream key is pasted until the Livestream gate opens. Once it
+			// does, polyemesis mints the source itself; the cell stays Manual
+			// because the operator must still do the access request by hand.
+			CapStreamKey: SupportManual,
+			// Built behind the gate, not yet exercised against a whitelisted app.
 			CapMetadata:           SupportUnknown,
 			CapChatRead:           SupportUnknown,
 			CapChatSend:           SupportUnknown,
@@ -472,13 +442,14 @@ var platformCapabilities = []PlatformCapability{
 			CapBroadcastLifecycle: SupportUnknown,
 		},
 		Reasons: map[Capability]string{
-			CapSSO:         "OAuth 2.0 authorization code at api.x.com/2/oauth2/authorize with the broadcast.read and broadcast.write scopes, declared in X's served OpenAPI spec. PKCE is X's documented practice elsewhere but is not stated in the spec for this flow.",
-			CapStreamKey:   "X consumes a stream key and hands it back -- source_id is required when the broadcast is created and is read back on every broadcast object -- but nothing mints or lists one. Paste it once from X's producer tooling; polyemesis can then confirm the binding rather than trust its stored copy.",
-			CapMetadata:    "Title, description, language and the chat option are set on a SCHEDULED broadcast, over POST and PUT /2/broadcasts/scheduled. There is no metadata update on an already-live broadcast, so a title change mid-show is not possible here.",
-			CapChatRead:    "Chat history over GET /2/broadcasts/{id}/chat with broadcast.read. Real-time push needs two separate auth objects -- a user-context subscription for the broadcast.chat event, plus an app-only bearer token on the activity stream.",
-			CapChatSend:    "POST /2/broadcasts/{id}/chat with broadcast.read and broadcast.write. Messages are limited to 140 characters, which is X's own bound and not ours.",
-			CapModeration:  "Mute a viewer, lift the mute, and delete a message, over /2/broadcasts/{id}/chat/mutes and chat/{message_id}. X publishes no error taxonomy for any of the three -- every Broadcasts operation declares only a success code and a generic default -- so a refusal arrives without a reason to show you.",
-			CapViewerStats: "total_watching and total_watched are on the broadcast object, and X documents NOTHING about what they mean. Every one of the 26 fields in that schema is an undescribed string, so the numbers are readable but their unit, freshness and whether either counts unique people are all unstated. A viewer count shown to an operator asserts a meaning, so this stays unverified until X documents them or a live broadcast calibrates them.",
+			CapSSO:                "OAuth 2.0 authorization code with PKCE at api.x.com/2/oauth2/authorize, with broadcast.read, broadcast.write, offline.access, users.read and tweet.read. X's Livestream guide recommends PKCE; no live request has confirmed it yet.",
+			CapStreamKey:          "X's Livestream API can create a stream source and return its URL and key (POST /2/users/{id}/sources). That call needs X Livestream access (app must be whitelisted by X), so until then this is a paste from X's producer tooling.",
+			CapMetadata:           "X takes a title only at the publish step, so polyemesis sends the destination's go-live title (or the title of a recurring show starting now) when it publishes the broadcast. Changing the title is not available while live: X has no write that changes a running broadcast.",
+			CapChatRead:           "Live chat arrives on the Activity API's broadcast.chat event, read from X's activity stream with the app's bearer token, which the operator supplies as POLYEMESIS_X_APP_BEARER. Without it the chat pane stays empty and sending still works. Not yet checked against a whitelisted app.",
+			CapChatSend:           "POST /2/broadcasts/{id}/chat, limited to 140 characters by X's spec. Gated behind Livestream access.",
+			CapModeration:         "Mute and unmute a viewer, and delete a single message. X offers no hide action, so there is no hide here: a removed message is gone, not kept back.",
+			CapViewerStats:        "total_watching and total_watched are on the broadcast object, and X does not describe them. Their unit and meaning are unstated, so no viewer count is shown.",
+			CapBroadcastLifecycle: "With Livestream access, polyemesis opens a broadcast on the stream source when the destination turns on, publishes it once bytes arrive (with the go-live title), and ends it when the destination turns off. Not yet checked against a whitelisted app.",
 		},
 	},
 	{

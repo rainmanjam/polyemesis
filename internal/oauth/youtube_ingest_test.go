@@ -497,3 +497,52 @@ func TestYouTubeLeavesAnUpgradedDestinationAloneWhenNobodyAsked(t *testing.T) {
 		t.Errorf("creates = %d; a sweep created a stream nobody asked for", *creates)
 	}
 }
+
+// ytStubStreamsPaged is liveStreams.list across two pages. The stream the destination holds is on page two, past the
+// first 50 results a single request returns, so a reader that stops at page one never sees it.
+const ytStubStreamsPageOne = `{"nextPageToken":"page-2","items":[
+	{"id":"stream-1","snippet":{"title":"polyemesis"},
+		"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"key-one","ingestionAddress":"rtmp://a.example/live2"}}}
+]}`
+
+const ytStubStreamsPageTwo = `{"items":[
+	{"id":"stream-120","snippet":{"title":"polyemesis - Held show"},
+		"cdn":{"ingestionType":"rtmp","ingestionInfo":{"streamName":"key-held","ingestionAddress":"rtmp://z.example/live2"}}}
+]}`
+
+// TestYouTubeFindsAHeldStreamOnALaterPageOfTheChannelsStreams: liveStreams.list is paged, and a single request
+// returns at most 50 streams. A destination whose held stream sits past the first page was reported as deleted, so
+// streamFor provisioned a new stream and rotated the key an encoder was still using. The read must follow
+// nextPageToken to the end before it decides a held stream is gone.
+//
+// MUTATION, internal/oauth/youtube.go in listStreams: drop the nextPageToken loop and read page one only. Observed:
+// FAIL -- the key rotates to key-new and a POST to /liveStreams is sent.
+func TestYouTubeFindsAHeldStreamOnALaterPageOfTheChannelsStreams(t *testing.T) {
+	var log []capture
+	srv := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+		"GET " + ytStreamsPath: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("pageToken") == "page-2" {
+				io.WriteString(w, ytStubStreamsPageTwo)
+				return
+			}
+			io.WriteString(w, ytStubStreamsPageOne)
+		},
+	})
+
+	b, err := srv.IngestFor(context.Background(), "cid", "tok", "UCchannel", IngestOptions{
+		HeldKey:         "key-held",
+		DedicatedIngest: true,
+		IngestLabel:     "Held show",
+	})
+	if err != nil {
+		t.Fatalf("IngestFor: %v", err)
+	}
+	if b.Ingest.Key != "key-held" {
+		t.Errorf("key = %q, want the held key %q: the stream is on page two and must not be treated as deleted", b.Ingest.Key, "key-held")
+	}
+	for _, c := range log {
+		if c.Method == http.MethodPost && c.Path == ytStreamsPath {
+			t.Errorf("a stream was created although the held stream exists on page two: POST %s", c.Path)
+		}
+	}
+}

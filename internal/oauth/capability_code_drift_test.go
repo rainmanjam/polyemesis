@@ -65,6 +65,14 @@ func capabilityJoins() []capabilityJoin {
 		{
 			cap: CapSSO, label: "Sign in",
 			implemented: registered,
+			exceptions: map[db.Platform]string{
+				// X's Livestream family sits behind X's whitelist: while the gate is closed
+				// (POLYEMESIS_X_LIVESTREAM unset) the code refuses without a request, so the
+				// cell reads Unknown until a whitelisted app verifies it live. Delete the
+				// exception once the cell is set to Yes.
+
+				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
+			},
 		},
 		{
 			cap: CapStreamKey, label: "Stream key",
@@ -72,6 +80,7 @@ func capabilityJoins() []capabilityJoin {
 			// interface, so signing in is exactly what makes a key fetchable.
 			implemented: registered,
 			exceptions: map[db.Platform]string{
+				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
 				// SIGNING IN IS NOT WHAT MAKES A KEY FETCHABLE HERE, which is
 				// the assumption the resolver above encodes and the first
 				// platform to break it.
@@ -102,11 +111,15 @@ func capabilityJoins() []capabilityJoin {
 		{
 			cap: CapMetadata, label: "Title / category",
 			implemented: func(p db.Platform) bool { _, ok := MetadataFor(p); return ok },
+			exceptions: map[db.Platform]string{
+				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
+			},
 		},
 		{
 			cap: CapBroadcastLifecycle, label: "Start / end",
 			implemented: func(p db.Platform) bool { _, ok := LifecycleFor(p); return ok },
 			exceptions: map[db.Platform]string{
+				db.PlatformX: "X Livestream gate: built, switched off until X whitelists the app",
 				// COMMANDED BY HAND RATHER THAN DRIVEN, and both are real, which
 				// is why the cell is Yes and LifecycleFor is false.
 				//

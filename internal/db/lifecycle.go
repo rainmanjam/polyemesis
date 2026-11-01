@@ -94,6 +94,15 @@ type BroadcastControl struct {
 	// and "this is polyemesis's shared-stream ceiling, not yours" are the same
 	// HTTP status and must never render as the same sentence.
 	Fault string `json:"fault,omitempty"`
+	// Renewed is true when the broadcast this block describes, or is about to
+	// open, was opened by the coordinator AGAIN within one show, after X ended
+	// the previous one while the destination stayed on (an X renew). The
+	// destination's XGoLiveTweet setting reads it: under the default, a renewed
+	// broadcast is published with should_not_tweet, so a show posts its
+	// announcement once. Cleared when the destination is switched off, which
+	// ends the show. Never set for any other platform. Not part of Empty: alone
+	// it says nothing about a broadcast.
+	Renewed bool `json:"renewed,omitempty"`
 }
 
 // Empty reports whether this block says anything at all.

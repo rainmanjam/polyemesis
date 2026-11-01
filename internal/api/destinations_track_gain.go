@@ -89,6 +89,16 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 		row.Profile.Tracks[idx].Gain = *body.Gain
 	}
 	changed := row.Profile.Tracks[idx] != before
+	// THE VOD MIX FOLLOWS THE SAME FADER. A destination with a second mix carries
+	// the same source in both, so a live mute or gain on a track reaches the VOD
+	// mix's copy of that track too. A track the VOD mix does not select is left
+	// out, so a live change to the music bed cannot put it back into the archive.
+	// In a matrix VOD mix the gain is per cell and structural, so only mute mirrors.
+	if row.VODProfile != nil {
+		if mirrored := mirrorTrackLevel(row.VODProfile, track, body.Muted, body.Gain); mirrored {
+			changed = true
+		}
+	}
 
 	lw, storeErr, updateErr := s.persistTrackLevels(row, changed)
 	switch {
@@ -98,6 +108,12 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	case updateErr != nil:
 		writeError(w, http.StatusBadRequest, updateErr.Error())
 		return
+	}
+	// A matrix VOD mix is left out of a fader change, and the response must
+	// say so: its gain is per cell, so the change is not applied to the archive
+	// and the reply must not imply it was. See matrixVODNote.
+	if body.Gain != nil && vodMatrixSelects(row.VODProfile, track) {
+		lw.warnings = append(lw.warnings, matrixVODNote)
 	}
 	applied, reason, updated, warnings, rw := lw.applied, lw.reason, lw.updated, lw.warnings, lw.reconcileWarn
 	resp := map[string]any{"applied": applied, "destination": updated}
@@ -111,6 +127,53 @@ func (s *Server) handleSetTrackGain(w http.ResponseWriter, r *http.Request) {
 	// is reported the way every other mutation reports it (#709), not as a 500
 	// that would read as "nothing happened".
 	writeMutation(w, http.StatusOK, rw, resp)
+}
+
+// matrixVODNote is what a fader gain change is told when the VOD mix is a
+// matrix. The fader cannot set matrix cells, so the archive keeps its cells, and
+// changing them is a structural edit that restarts the destination. The copy
+// names the mix and the restart, because "applied" alone reads as if the archive
+// had moved too.
+const matrixVODNote = "the VOD mix is a matrix, so this gain did not change its cell gains and the archive keeps the cells it has; change them in the VOD mix's matrix, which restarts the destination"
+
+// vodMatrixSelects reports whether vod is a matrix mix that selects track, which
+// is the one case where a fader's gain reaches the archive by no path at all.
+func vodMatrixSelects(vod *routing.Profile, track int) bool {
+	if vod == nil || vod.Mode != routing.ModeMatrix {
+		return false
+	}
+	for _, sel := range vod.Tracks {
+		if sel.Track == track {
+			return true
+		}
+	}
+	for _, c := range vod.Matrix {
+		if c.Track == track {
+			return true
+		}
+	}
+	return false
+}
+
+// mirrorTrackLevel applies a live mute and gain to the VOD mix's copy of track,
+// and reports whether anything moved. A track the VOD mix does not select is not
+// added: the second mix's selection is its own decision, made in the routing
+// editor, and a live control must not change what it contains.
+func mirrorTrackLevel(vod *routing.Profile, track int, muted *bool, gain *float64) bool {
+	for i := range vod.Tracks {
+		if vod.Tracks[i].Track != track {
+			continue
+		}
+		before := vod.Tracks[i]
+		if muted != nil {
+			vod.Tracks[i].Muted = *muted
+		}
+		if gain != nil && vod.Mode != routing.ModeMatrix {
+			vod.Tracks[i].Gain = *gain
+		}
+		return vod.Tracks[i] != before
+	}
+	return false
 }
 
 // levelWrite is what persistTrackLevels did: the stored row, and how the level

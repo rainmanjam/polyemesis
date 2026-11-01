@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { CaptionPolicyEditor } from "@/components/CaptionPolicyEditor";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -163,6 +164,10 @@ export function SourcesPage() {
         ingest: s.ingest,
         token: s.token,
         position: s.position,
+        // Carried every save, null included: the server decodes over the stored
+        // row, so an absent key would keep the old track and null is how a
+        // chosen track is cleared back to automatic.
+        captionTrack: s.captionTrack ?? null,
         ...changes,
       };
       await api.updateSource(s.id, body);
@@ -512,6 +517,38 @@ export function SourceCard({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
+        {/* Which audio track of this programme the live captioner listens to
+            (#8). Saved on change; the captioner follows it on the next reconcile. */}
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`src-caption-track-${source.id}`}>{t("wave3.captions.trackLabel")}</Label>
+          <Select
+            value={source.captionTrack == null ? "auto" : String(source.captionTrack)}
+            onValueChange={(v) => onPatch({ captionTrack: v === "auto" ? null : Number(v) })}
+            disabled={busy}
+          >
+            <SelectTrigger id={`src-caption-track-${source.id}`} aria-label={t("wave3.captions.trackLabel")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{t("wave3.captions.trackAuto")}</SelectItem>
+              {Array.from({ length: 16 }, (_, i) => (
+                <SelectItem key={i} value={String(i)}>
+                  {t("wave3.captions.trackN", { n: i + 1 })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("wave3.captions.trackHint")}</p>
+        </div>
+        {/* The programme's caption words (#8). The key remounts the editor
+            when the stored policy changes, so a reload shows what was saved. */}
+        <CaptionPolicyEditor
+          key={JSON.stringify(source.captionPolicy ?? {})}
+          sourceId={source.id}
+          policy={source.captionPolicy}
+          busy={busy}
+          onSave={(captionPolicy) => onPatch({ captionPolicy })}
+        />
         {!source.running && (
           <p className="flex items-start gap-1.5 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />

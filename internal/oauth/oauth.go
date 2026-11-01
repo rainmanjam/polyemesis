@@ -167,6 +167,9 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		// connect time, instead of leaving them to discover it from a refusal
 		// mid-broadcast. See vimeo.go and entitlement.go.
 		db.PlatformVimeo: NewVimeo(opts...),
+		// X (Twitter) sign-in is open to everyone; the Livestream family behind it
+		// is whitelisted by X and switched off until the app is. See x.go.
+		db.PlatformX: NewX(opts...),
 	}
 }
 
@@ -262,6 +265,11 @@ type Broadcast struct {
 	// arrive in the same response and re-fetching them means creating a second
 	// broadcast.
 	Backups []Ingest `json:"-"`
+	// CaptionIngestURL is the YouTube caption ingest URL for a caption-enabled
+	// destination. It is a credential: it is never serialised (json:"-"), never
+	// logged, and only the caller that stores it sees it. Empty for every other
+	// platform and for a YouTube destination with captions off.
+	CaptionIngestURL string `json:"-"`
 }
 
 // IngestOptions carries what a platform needs when the broadcast is CREATED,
@@ -280,6 +288,21 @@ type Broadcast struct {
 // two platforms accept at create time -- not a question a file move gets to
 // answer in passing.
 type IngestOptions struct {
+	// CaptionPOST marks a YouTube destination that receives captions by HTTP POST
+	// (closedCaptionsHttpPost). Such a destination must hold a stream whose caption
+	// ingest URL polyemesis knows, because the URL is only documented on the
+	// liveStreams.insert response. See streamFor for the rule that follows.
+	CaptionPOST bool
+	// CaptionIngestURL is the caption ingest URL already stored for this
+	// destination, passed back in so a reused stream keeps its URL. It is a
+	// credential and is never logged or placed in an error.
+	CaptionIngestURL string
+	// CaptionDelay is the broadcast delay a caption-enabled YouTube broadcast is
+	// created with (contentDetails.monitorStream.broadcastStreamDelayMs). YouTube
+	// requires 30 s or 60 s for the HTTP POST path; the caller passes the
+	// destination's own delay, which db.Destination.Validate already holds to
+	// those two values for this mode. Read only when CaptionPOST is set.
+	CaptionDelay    time.Duration
 	Privacy         db.FacebookPrivacy
 	Crosspost       []db.CrosspostTarget
 	DonateCharityID string
@@ -342,6 +365,13 @@ type IngestOptions struct {
 	// stream whatever this says, so flipping the flag on an established
 	// destination does not mint a second stream for it.
 	DedicatedIngest bool
+	// ExcludeStreamIDs names platform stream ids the first-RTMP fallback must never
+	// adopt. The vertical half of a YouTube pair (#7) is one: it is created on its own,
+	// and if the horizontal destination adopted it, the horizontal broadcast would bind
+	// to the vertical ingest. The title marker covers the zero-options path, which has
+	// nowhere to carry this list. This list covers a stream renamed in Studio, which
+	// drops the marker.
+	ExcludeStreamIDs []string
 	// RotateKey says the OPERATOR ASKED FOR A NEW KEY, which is the one
 	// circumstance in which the key on a destination may change.
 	//
@@ -687,6 +717,11 @@ type SetupGuide struct {
 	// where the configuration and the inbound Host live. Empty here; filled in
 	// by handlePlatformGuides.
 	RedirectWarnings []string `json:"redirectWarnings,omitempty"`
+	// LivestreamGate is "open" or "closed" for a platform whose live API sits
+	// behind an operator switch (X's Livestream whitelist, POLYEMESIS_X_LIVESTREAM),
+	// and empty for every other platform. Filled in per request by the API
+	// layer from the provider it actually uses.
+	LivestreamGate string `json:"livestreamGate,omitempty"`
 }
 
 // Guides returns the setup instructions rendered on the credentials page.
@@ -809,6 +844,30 @@ func guides() []SetupGuide {
 				"Click Connect account. Kick uses OAuth 2.1, so polyemesis sends a PKCE challenge automatically.",
 				"Nothing to paste: polyemesis reads the ingest URL and stream key from the channels " +
 					"resource over the streamkey:read scope, the same way it does for the other platforms.",
+			},
+		},
+		{
+			Platform:        db.PlatformX,
+			Name:            "X (Twitter) Live",
+			ConsoleURL:      "https://console.x.com",
+			RedirectPath:    "/api/v1/oauth/x/callback",
+			Supported:       true,
+			ManualStreamKey: true,
+			Scopes:          (&X{}).Scopes(),
+			Note: "Read this first: X's Livestream API is open only to apps X has whitelisted. " +
+				"Signing in works for any X account, and polyemesis tells you at connect time whether " +
+				"your app reaches the Livestream family. Until it does, paste the server URL and stream " +
+				"key from X's producer tooling; streaming works exactly the same. X also needs the " +
+				"account to be allowed to broadcast (X Premium or more than 1,000 followers for listing).",
+			Steps: []string{
+				"Request Livestream API access with the Livestream access form (linked from docs.x.com/livestream-api/getting-started). X reviews it and whitelists the app by its developer App ID.",
+				"Open console.x.com, create a project and an app, and copy the Client ID and Client secret.",
+				"Under the app's user authentication settings, add exactly the redirect URI shown below.",
+				"Copy the Client ID and Client secret into the fields on this page and save.",
+				"Go to a destination and click Connect account. X will ask you to grant access.",
+				"If X has not whitelisted the app yet, copy the server URL and stream key from X's producer tooling and paste them into the destination.",
+				"Once X has whitelisted the app, set POLYEMESIS_X_LIVESTREAM=1 in polyemesis's environment and restart it. polyemesis then creates the stream source, opens and publishes each broadcast with the destination's go-live title, ends it, and sends and moderates chat.",
+				"To read live chat as well, set POLYEMESIS_X_APP_BEARER to the app's bearer token from console.x.com. It is a secret: keep it out of shared files and screenshots.",
 			},
 		},
 		{

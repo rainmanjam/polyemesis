@@ -30,8 +30,10 @@ import {
 import { StatusDot } from "@/components/signature/StatusDot";
 import { StatusReason } from "@/components/signature/StatusReason";
 import { DelayPanel } from "@/components/DelayPanel";
+import { RolloverPanel } from "@/components/RolloverPanel";
 import { FailureRemedy } from "@/components/signature/FailureRemedy";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { YouTubeVerticalSubRow } from "@/components/YouTubeVerticalSubRow";
 import { ExperimentalBadge } from "@/components/Experimental";
 import { FacebookStreamHealthPanel } from "@/components/FacebookStreamHealth";
 import { useFacebookStreamHealth } from "@/hooks/useFacebookStreamHealth";
@@ -60,6 +62,8 @@ const PLATFORM_LABEL: Record<string, string> = {
   // carries the platform, and its card should still name it properly.
   trovo: "Trovo",
   vimeo: "Vimeo",
+  // X destinations carry "x" since the editor's X preset gained its platform.
+  x: "X",
   custom: "Custom",
 };
 
@@ -101,8 +105,20 @@ export function DestinationCard({
   domId,
   trackLabels,
   trackCount,
+  vertical,
+  verticalBusy,
+  onVerticalStart,
+  onVerticalStop,
+  onVerticalRestart,
 }: {
   dest: DestStatus;
+  /** The YouTube vertical half of this destination, when it has one (#7). Drawn
+   *  as a sub-row with its own controls. Absent for every other row. */
+  vertical?: DestStatus;
+  verticalBusy?: boolean;
+  onVerticalStart?: () => void;
+  onVerticalStop?: () => void;
+  onVerticalRestart?: () => void;
   onStart: () => void;
   onStop: () => void;
   /** The broadcast delay's "Stop now" (#11): stop and discard the buffered
@@ -266,7 +282,7 @@ export function DestinationCard({
               {dest.enabled && state === "running" && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}
-              {t(destinationStatus(dest.enabled, state).labelKey)}
+              {t(destinationStatus(dest.enabled, state, dest.delay?.phase).labelKey)}
             </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -493,6 +509,7 @@ export function DestinationCard({
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
         <DelayPanel dest={dest} onCutNow={onStopNow} busy={busy} />
+        <RolloverPanel dest={dest} />
         {dest.stopWarning && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
@@ -783,6 +800,21 @@ export function DestinationCard({
             anyway. A platform where ending destroys the artefact, or where
             only the API can do it, is a different decision and should get one.
             ================================================================= */}
+        {vertical && (
+          <YouTubeVerticalSubRow
+            horizontal={dest}
+            vertical={vertical}
+            busy={verticalBusy}
+            onStart={() => onVerticalStart?.()}
+            onStop={() => onVerticalStop?.()}
+            onRestart={() => onVerticalRestart?.()}
+          />
+        )}
+        {dest.youtubeVertical != null && !dest.youtubeVertical.pairingConfirmed && (
+          <p className="mt-2 text-xs text-warn" data-testid="youtube-vertical-reminder">
+            {t("wave3.vertical.reminder")}
+          </p>
+        )}
         {canEndBroadcast && (
           <ConfirmDestructive
             open={endOpen}

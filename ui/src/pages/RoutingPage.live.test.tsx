@@ -279,6 +279,26 @@ describe("one save model: mute and gain wait for Save changes (A26)", () => {
   });
 });
 
+/* #15 default: switching on a second (VOD) mix seeds it with everything except
+ * the music. The plan's default is the archive without the music bed, so an
+ * operator who switches the VOD mix on and changes nothing gets the right
+ * default, not two identical tracks. A restored profile is still an undo. */
+describe("the second (VOD) mix's default: everything except music", () => {
+  // MUTATION: in SecondMixCard.enable, seed from the live mix unchanged (drop the
+  // excludeRoles union). Observed: FAIL, "the VOD mix does not exclude music".
+  it("switching the VOD mix on seeds it from the live mix with music excluded", async () => {
+    stored = dest({ vodProfile: null } as Partial<Destination>);
+    await renderPage();
+    await act(async () => fireEvent.click(document.getElementById("vod-enabled") as HTMLElement));
+    await save();
+    const body = updateDestination.mock.calls[0][1] as { vodProfile: RoutingProfile };
+    expect(body.vodProfile).not.toBeNull();
+    expect(body.vodProfile.excludeRoles ?? []).toContain("music");
+    // Everything else the live mix carries is still in the archive mix.
+    expect(body.vodProfile.tracks.map((s) => s.track).sort()).toEqual([0, 1]);
+  });
+});
+
 /* app-council A27: Presets, Mute and gain and Music rights stay in the main
  * column; loudness, A/V delay, ducking, the second mix and the compiled graph
  * move into an Advanced section that starts collapsed, and the graph itself is
@@ -644,5 +664,25 @@ describe("the save status beside Save", () => {
     await act(async () => fireEvent.click(screen.getByLabelText("Include track 3")));
     // The failure is history once the draft moves on; the edit is pending again.
     expect(status().getAttribute("data-save-state")).toBe("dirty");
+  });
+});
+
+/* #15 matrix VOD: a gain change on a matrix second mix is structural, so the
+ * destination restarts and the interruption reaches the live mix too. The
+ * VOD editor says so where the cells are edited, because "applied" alone reads
+ * as a live change. */
+describe("a matrix VOD mix says that a gain change restarts the destination", () => {
+  // MUTATION: in the VOD footer, drop the matrix branch. Observed: FAIL, "the
+  // matrix VOD mix does not say a gain change restarts the destination".
+  it("shows the restart copy on a matrix second mix and not on a simple one", async () => {
+    stored = dest({ vodProfile: { ...storedProfile(), mode: "matrix", matrix: [] } } as Partial<Destination>);
+    await renderPage();
+    expect(screen.getAllByText(/restarts the destination for a moment/).length).toBeGreaterThan(0);
+  });
+
+  it("does not show the restart copy on a simple second mix", async () => {
+    stored = dest({ vodProfile: storedProfile() } as Partial<Destination>);
+    await renderPage();
+    expect(screen.queryByText(/restarts the destination for a moment/)).toBeNull();
   });
 });

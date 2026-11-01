@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Op slate",
   "streamdeck.issue.sourceDegraded": "Bron verslechterd",
   "streamdeck.pi.issues": "Huidige problemen",
-  "streamdeck.pi.noIssues": "Niets gemeld voor deze bestemming."
+  "streamdeck.pi.noIssues": "Niets gemeld voor deze bestemming.",
+  "streamdeck.issue.verticalHalfFailed": "Verticale helft mislukt",
+  "streamdeck.issue.verticalHalfDown": "Verticale helft gestopt"
 }

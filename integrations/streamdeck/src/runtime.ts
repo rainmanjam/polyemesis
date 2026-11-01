@@ -541,10 +541,14 @@ export class Runtime {
         if (s.settings.destinationId === undefined) return { tone: "unbound", label: "streamdeck.state.missing" };
         const dest = payload.destinations?.find((d) => d.id === s.settings.destinationId);
         // The payload's failover is source.id's: placed on a destination only when it is that programme's.
+        // The vertical half of a YouTube pair (#7) rides on the same key, so the key covers both halves.
+        const vertical = dest?.youtubeVertical
+          ? payload.destinations?.find((d) => d.id === dest.youtubeVertical?.verticalId)
+          : undefined;
         return destinationFace(dest, s.settings.sourceId, payload.destinationHold, {
           sourceId: payload.source?.id,
           failover: payload.failover,
-        });
+        }, vertical);
       }
       case "failover":
         return failoverFace(payload.failover);

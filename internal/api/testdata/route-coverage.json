@@ -9,20 +9,20 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
   "shapeFloor": 29,
-  "guardedFloor": 24,
+  "guardedFloor": 29,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 263,
-    "swept": 71,
+    "methodPatternPairs": 278,
+    "swept": 75,
     "excused": 60,
-    "denied": 132,
+    "denied": 143,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
     "differential": 8,
-    "invariant": 57,
+    "invariant": 61,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -449,6 +449,24 @@
       "zeroSource": "guarded"
     },
     {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/{id}/rollover",
+      "coverage": "swept",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/destinations/{id}/rollover",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/rollover/run",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/start",
       "coverage": "denied-by-method",
@@ -463,6 +481,24 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/tracks/{track}/gain",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/destinations/{id}/youtube-vertical",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/youtube-vertical",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/youtube-vertical/confirm",
       "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
@@ -673,6 +709,12 @@
     {
       "method": "GET",
       "pattern": "/api/v1/library/recordings/{id}/transcript",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/library/recordings/{id}/transcript/export",
       "coverage": "denied",
       "zeroSource": "unguarded"
     },
@@ -1074,6 +1116,24 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/recurring/occurrences",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recurring/occurrences/{id}/skip",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/recurring/occurrences/{id}/title",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/renditions",
       "coverage": "swept",
       "zeroSource": "unguarded"
@@ -1119,6 +1179,12 @@
       "pattern": "/api/v1/renditions/{id}/restart",
       "coverage": "denied-by-method",
       "zeroSource": "guarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/rollover/limits",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
     },
     {
       "method": "POST",
@@ -1171,6 +1237,30 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/schedules/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/schedules/{id}/template",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/schedules/{id}/template/thumbnail",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -1707,6 +1797,11 @@
       ]
     },
     {
+      "path": "/api/v1/destinations/1/rollover",
+      "pattern": "GET /api/v1/destinations/{id}/rollover",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/destinations/2",
       "pattern": "GET /api/v1/destinations/{id}",
       "class": "differential",
@@ -1907,6 +2002,11 @@
       "class": "unstable"
     },
     {
+      "path": "/api/v1/recurring/occurrences",
+      "pattern": "GET /api/v1/recurring/occurrences",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/renditions",
       "pattern": "GET /api/v1/renditions",
       "class": "invariant"
@@ -1927,6 +2027,11 @@
       "class": "invariant"
     },
     {
+      "path": "/api/v1/rollover/limits",
+      "pattern": "GET /api/v1/rollover/limits",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/routing/presets",
       "pattern": "GET /api/v1/routing/presets",
       "class": "invariant"
@@ -1939,6 +2044,11 @@
     {
       "path": "/api/v1/schedules/1",
       "pattern": "GET /api/v1/schedules/{id}",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/schedules/1/template",
+      "pattern": "GET /api/v1/schedules/{id}/template",
       "class": "invariant"
     },
     {
@@ -2238,6 +2348,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/destinations/{id}/youtube-vertical",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "youtubeVerticalStatus"
+    },
+    {
       "route": "GET /api/v1/events",
       "scope": "route",
       "why": "a Server-Sent Events stream: the response never ends, so the body sweep cannot read it to completion any more than it can read /ws. The sweep's fixture wires no events hub, so the GET is a 503 at once, which is what the Want below observes; the counterpart opens a real stream as a read token.",
@@ -2286,6 +2406,16 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/library/recordings/{id}/transcript/export",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "transcriptCaptionExport"
     },
     {
       "route": "GET /api/v1/library/search",

@@ -188,7 +188,7 @@ func (e *Engine) delayRoom(dir string) func(n int64) error {
 func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 	dd := &destDelay{inSub: delayDestSubName(row.ID)}
 	id := row.ID
-	delay := time.Duration(row.DelaySeconds) * time.Second
+	delay := time.Duration(row.OutputDelaySeconds()) * time.Second
 	sweepDelayRoot(e.cfg.DataDir)
 	dir := delaySpillDir(e.cfg.DataDir, row.ID, spillNonce.Add(1))
 	// Registered BEFORE the directory exists, so a sweep that lists it has
@@ -308,6 +308,11 @@ func (e *Engine) closeDelay(dd *destDelay) {
 // readHub is the hub a destination's FFmpeg reads: the private one when it is
 // delayed, its upstream otherwise.
 func (d *destination) readHub(fallback *relay.Hub) *relay.Hub {
+	if d.capt != nil {
+		// A captioned destination reads its SEI stage's output, which is the
+		// stream with the captions in it. See captions_sei.go.
+		return d.capt.hub
+	}
 	if d.delay != nil {
 		return d.delay.hub
 	}
@@ -441,7 +446,7 @@ func (e *Engine) attachDelay(row *db.Destination, d *destination, upstream *rela
 		return err
 	}
 	e.log.Info("destination buffering its broadcast delay", "dest", row.Name,
-		"delay", time.Duration(row.DelaySeconds)*time.Second)
+		"delay", time.Duration(row.OutputDelaySeconds())*time.Second)
 	e.streamDelay(row, d.delay, DelayBuffering, "")
 	return nil
 }
@@ -503,7 +508,7 @@ func (e *Engine) streamDelay(row *db.Destination, dd *destDelay, reason, detail 
 	if hub == nil || row == nil {
 		return
 	}
-	data := map[string]any{"seconds": row.DelaySeconds}
+	data := map[string]any{"seconds": row.OutputDelaySeconds()}
 	if dd != nil {
 		if st := delayStatusOf(dd); st != nil {
 			data["fill"] = st.Fill

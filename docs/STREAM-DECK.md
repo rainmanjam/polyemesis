@@ -198,6 +198,8 @@ How the server applies a level live is in
 | Face | Meaning |
 |---|---|
 | Live | The destination's process is running and sending |
+| Live, with **Vertical half failed** | A YouTube destination with a vertical half (#7): its 9:16 copy has failed. The key still says Live for the horizontal half, which keeps running |
+| Live, with **Vertical half down** | The vertical half is stopped while its horizontal half is on air (#7). Start it from the dashboard sub-row |
 | Starting, Reconnecting | Coming up, or retrying after a drop |
 | Stalled | Running, but not making progress |
 | Failed | Stopped on an error. The second line names the cause the server classified (**Key rejected**, **Not ready**, **DNS failed**, **Refused**, **Timed out**, **TLS failed**, **Codec rejected**, **Unknown** with FFmpeg's own line), or **Key changed** when the connected account reports a different stream key |

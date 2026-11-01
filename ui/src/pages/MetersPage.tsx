@@ -15,6 +15,7 @@ import { useLiveData, useSourceTracks, useStaleTracker } from "@/hooks/useLiveDa
 import { autoApi } from "@/lib/autoApi";
 import { db } from "@/lib/format";
 import { loudnessMeasured } from "@/lib/meterFacts";
+import type { LoudnessMix } from "@/lib/types";
 import { autoZoomRange, FIXED_RANGE, type DbRange } from "@/lib/meterScale";
 import { toneBadge, type SignalTone } from "@/lib/signal";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,9 @@ type Verdict = "unknown" | "pass" | "warn" | "fail";
 interface LoudnessReport {
   destinationId: number;
   destination: string;
+  /** Which mix this reading is of. A destination with a VOD track has two rows,
+   *  one per mix; an absent mix reads as live. */
+  mix?: LoudnessMix;
   seconds: number;
   momentaryLufs: number;
   shortTermLufs: number;
@@ -449,7 +453,7 @@ export function MetersPage() {
           ) : (
             reports.map((rep) => (
               <ComplianceRow
-                key={rep.destinationId}
+                key={`${rep.destinationId}-${rep.mix ?? "live"}`}
                 report={rep}
                 truePeakFailOverDb={loudness?.bounds.truePeakFailOverDb ?? 1}
                 integrationSeconds={loudness?.bounds.minIntegrationSeconds ?? 20}
@@ -500,6 +504,7 @@ export function ComplianceRow({
     <div className="flex flex-col gap-1.5 border-b border-border pb-2 last:border-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[12px]">{report.destination}</span>
+        {report.mix === "vod" && <Badge variant="outline">{t("wave3.vod.mixVod")}</Badge>}
         <Badge variant={toneBadge[tone]} title={report.reason}>
           {report.error ? t("meters.analyserFailed") : notSet ? t("routing.meters.notSet") : report.verdict}
         </Badge>

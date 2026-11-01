@@ -2068,11 +2068,28 @@ const conformAudioKbps = 128
 // and AAC decodes to planar float, as most lossy codecs do -- but a primary
 // whose decoder emits something else (PCM, say) still sees a format change.
 // tests: failover_format_conform_test.go.
+//
+// SILENT PADS. A standby with fewer audio tracks than the primary (a one-track
+// backup under a two-track primary) would leave the relay with no track N, and
+// a destination compiled for the primary's layout refuses to bind its graph
+// against it: FFmpeg exits "Stream specifier ':a:1' ... matches no streams", and
+// a restarted destination dies at once. So when every primary track is measured,
+// the hop appends one pad per primary track, each `volume=0` of the standby's
+// own track 0. The pads are after the standby's real tracks, so a missing
+// track N is exactly the pad that lands in slot N, and an extra pad beyond the
+// standby's count is only an unused silent track. A pad shares the standby's
+// timeline, so it cannot race ahead of a live relay the way a free-running
+// anullsrc would. The pads are encoded at the primary's slot format, which is
+// why video is copied with -c:v and audio is encoded here, not with -c copy.
+// A standby with no audio at all has no track 0 to pad from and fails the
+// feed, as it did before, since the destinations need audio from it anyway.
 func conformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []ffmpeg.AudioStream) []string {
 	args := relayFeedArgs(inURL, outURL, offsetSeconds)
 	var conform []string
+	allMeasured := len(primary) > 0
 	for _, a := range primary {
 		if a.Index < 0 || a.SampleRate <= 0 || a.Channels <= 0 {
+			allMeasured = false
 			continue
 		}
 		kbps := a.Bitrate / 1000
@@ -2094,7 +2111,24 @@ func conformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []ff
 	// after it to override it, and every flag here has to come before the
 	// output target to attach to it.
 	at := slices.Index(args, "copy") + 1
-	return slices.Insert(args, at, conform...)
+	if !allMeasured || len(primary) < 2 {
+		return slices.Insert(args, at, conform...)
+	}
+	// Two or more primary tracks, all measured: pad to the primary's count. The
+	// video stays a copy; the audio, real and pad alike, is encoded.
+	var graph []string
+	extra := []string{"-filter_complex"}
+	for i := range primary {
+		graph = append(graph, "[0:a:0]volume=0[pad"+strconv.Itoa(i)+"]")
+	}
+	extra = append(extra, strings.Join(graph, ";"))
+	for i := range primary {
+		extra = append(extra, "-map", "[pad"+strconv.Itoa(i)+"]")
+	}
+	extra = append(extra, "-c:a", "aac")
+	extra = append(extra, conform...)
+	args[at-2] = "-c:v"
+	return slices.Insert(args, at, extra...)
 }
 
 // slateSpec builds the standby source, and reports why a configured encoder was
@@ -2122,6 +2156,12 @@ func (e *Engine) slateSpec(s db.Settings, out string, offset float64) (ffmpeg.Sl
 	// that is the track it stands in for. Unmeasured, SlateArgs' default stands.
 	if len(audio) > 0 && audio[0].Index == 0 {
 		spec.SampleRate, spec.AudioChannels = audio[0].SampleRate, audio[0].Channels
+	}
+	// One silent track per primary track, so a destination compiled for the
+	// primary binds to the slate as it does to a conformed standby (see
+	// conformedFeedArgs). A one-track primary keeps the single track.
+	if len(audio) >= 2 {
+		spec.AudioTracks = len(audio)
 	}
 	// Geometry from the probe, never from a form: matching the departed ingest
 	// is what gives a `-c:v copy` destination a chance of riding the change, and

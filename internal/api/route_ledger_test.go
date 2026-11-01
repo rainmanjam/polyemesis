@@ -608,6 +608,11 @@ var excusedRoutes = map[string]coverageExcus{
 	// budget on somebody holding a read token.
 	"GET /api/v1/destinations/{id}/facebook/stream-health": denied(),
 	"GET /api/v1/metadata/broadcast-window":                denied(),
+	// The vertical half's health read (#7). It calls YouTube on the caller's token, so a
+	// read token is refused, the same as the Facebook stream-health read above. The
+	// counterpart plants the vertical half's own stream key and scans both the admin's
+	// and the read token's answers for it.
+	"GET /api/v1/destinations/{id}/youtube-vertical": deniedWithCounterpart("youtubeVerticalStatus"),
 
 	// ---- session-only: no bearer of either scope reaches these. 403, driven.
 	"GET /api/v1/auth/tokens": sessionOnly(),
@@ -734,13 +739,17 @@ var excusedRoutes = map[string]coverageExcus{
 	// What is left here is not "a row nobody wrote yet". Each of the two
 	// survivors needs something a store INSERT cannot produce, and each says
 	// which thing.
-	"GET /api/v1/recordings/{id}/download":             denied(),
-	"GET /api/v1/recordings/stems/{name}/download":     denied(),
-	"GET /api/v1/clips/{name}/download":                denied(),
-	"GET /api/v1/clipper/recordings/{id}/transcript":   denied(),
-	"GET /api/v1/clipper/jobs/{id}/download":           denied(),
-	"GET /api/v1/library/recordings/{id}/transcript":   denied(),
-	"GET /api/v1/library/recordings/{id}/media/{file}": denied(),
+	"GET /api/v1/recordings/{id}/download":           denied(),
+	"GET /api/v1/recordings/stems/{name}/download":   denied(),
+	"GET /api/v1/clips/{name}/download":              denied(),
+	"GET /api/v1/clipper/recordings/{id}/transcript": denied(),
+	"GET /api/v1/clipper/jobs/{id}/download":         denied(),
+	"GET /api/v1/library/recordings/{id}/transcript": denied(),
+	// #8 caption export: the transcript's words in a caption file. A read token
+	// must not get them through a second route, so it is denied like its parent.
+	// The counterpart exports planted speech as the admin in all three formats.
+	"GET /api/v1/library/recordings/{id}/transcript/export": deniedWithCounterpart("transcriptCaptionExport"),
+	"GET /api/v1/library/recordings/{id}/media/{file}":      denied(),
 	"GET /api/v1/metadata/push/{id}": {
 		Why: "reached only with a LIVE metadata push, which is an entry in the " +
 			"in-process metadataRegistry rather than a row in any table: it is created " +
@@ -773,6 +782,14 @@ func denied() coverageExcus {
 			"assert about because the handler never runs",
 		Want: &routeWant{As: "read", Status: http.StatusForbidden},
 	}
+}
+
+// deniedWithCounterpart is denied() plus a proof that drives the route's bytes, for a
+// route whose 403 would say nothing about what it carries if it ever became a 200.
+func deniedWithCounterpart(proof string) coverageExcus {
+	e := denied()
+	e.Counterpart = proof
+	return e
 }
 func sessionOnly() coverageExcus {
 	return coverageExcus{
@@ -1220,6 +1237,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"previewTiles":                          provePreviewTiles,
 	"overlayConfig":                         proveOverlayConfig,
 	"overlayDisplayStream":                  proveOverlayDisplayStream,
+	"transcriptCaptionExport":               proveTranscriptCaptionExport,
+	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

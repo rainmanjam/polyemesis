@@ -3,6 +3,7 @@ import {
   FacebookGlyph,
   KickGlyph,
   TwitchGlyph,
+  XGlyph,
   YouTubeGlyph,
 } from "@/components/platformGlyphs";
 import type { TranslationKey } from "@/lib/i18n";
@@ -85,6 +86,16 @@ const ACCENT: Record<
     icon: Tv,
     rule: "border-l-border-strong",
     text: "text-muted-foreground",
+    chipOn: "border-border-strong bg-secondary text-secondary-foreground",
+  },
+  /* X (Twitter) Live chat, read from X's activity stream once X Livestream
+     access is on. Neutral, like every platform beyond the four with an accent
+     of their own: the palette has no colour to spare. */
+  x: {
+    label: "X",
+    icon: XGlyph,
+    rule: "border-l-border-strong",
+    text: "text-foreground",
     chipOn: "border-border-strong bg-secondary text-secondary-foreground",
   },
   custom: {

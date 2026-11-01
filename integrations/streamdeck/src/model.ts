@@ -42,6 +42,10 @@ export interface DestStatus {
   enabled: boolean;
   /** The programme (source) this destination carries. Absent on legacy rows. */
   sourceId?: number;
+  /** The YouTube vertical half this row is paired with (#7). Absent when it has none. */
+  youtubeVertical?: { verticalId: number; pairingConfirmed: boolean } | null;
+  /** Set on a vertical row: the horizontal destination it belongs to (#7). */
+  verticalHalfOf?: number | null;
   process?: ProcessStatus | null;
   backupProcess?: ProcessStatus | null;
   backupError?: string;

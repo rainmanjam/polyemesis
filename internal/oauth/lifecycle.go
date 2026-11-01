@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -102,6 +103,57 @@ type BroadcastLifecycleState struct {
 	// call a broadcast ready on one.
 	StreamActive  *bool `json:"streamActive,omitempty"`
 	MonitorStream *bool `json:"monitorStream,omitempty"`
+	// ClosedCaptionsType is YouTube's contentDetails.closedCaptionsType verbatim
+	// (closedCaptionsDisabled, closedCaptionsHttpPost, closedCaptionsEmbedded), or
+	// "" when not reported. StreamDelayMs is monitorStream.broadcastStreamDelayMs,
+	// nil when not reported. Both are read for the caption go-live check (#8).
+	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+	StreamDelayMs      *int   `json:"streamDelayMs,omitempty"`
+	// LatencyPreference is contentDetails.latencyPreference verbatim (normal, low,
+	// ultraLow), or "" when not reported. Read for the same check: YouTube does
+	// not take captions on an ultra-low-latency broadcast (B9).
+	LatencyPreference string `json:"latencyPreference,omitempty"`
+}
+
+// ytClosedCaptionsHTTPPost is the closedCaptionsType of a broadcast that takes
+// captions by HTTP POST to its stream's caption ingestion URL.
+const ytClosedCaptionsHTTPPost = "closedCaptionsHttpPost"
+
+// ytLatencyUltraLow is the latencyPreference YouTube refuses captions with (B9).
+const ytLatencyUltraLow = "ultraLow"
+
+// CaptionPOSTProblem says why a broadcast cannot take HTTP POST captions, or ""
+// when it can: closedCaptionsHttpPost, the monitor stream on, a 30 s or 60 s
+// delay, and a latency other than ultra-low (docs-youtube C3, C5, C7, B9). An
+// unreported value is a problem, not a pass, because the broadcast cannot be
+// shown to be ready. The one exception is the latency: an unreported one is the
+// default, which takes captions.
+//
+// polyemesis never sets latencyPreference, but the coordinator also reads
+// broadcasts it did not create, such as one scheduled in YouTube Studio, so an
+// ultra-low-latency broadcast can reach this check.
+func (s *BroadcastLifecycleState) CaptionPOSTProblem() string {
+	if s == nil {
+		return "the broadcast's state is unknown"
+	}
+	if s.ClosedCaptionsType != ytClosedCaptionsHTTPPost {
+		got := s.ClosedCaptionsType
+		if got == "" {
+			got = "not reported"
+		}
+		return fmt.Sprintf("the broadcast is not set to take captions by HTTP POST (closedCaptionsType is %s)", got)
+	}
+	if s.MonitorStream == nil || !*s.MonitorStream {
+		return "the broadcast's monitor stream is off, and YouTube needs it on for the caption delay"
+	}
+	if s.StreamDelayMs == nil || (*s.StreamDelayMs != 30000 && *s.StreamDelayMs != 60000) {
+		return "the broadcast's delay is not 30 or 60 seconds, which YouTube needs for captions by HTTP POST"
+	}
+	if strings.EqualFold(strings.TrimSpace(s.LatencyPreference), ytLatencyUltraLow) {
+		return "the broadcast is set to ultra-low latency, and YouTube takes no captions with it; " +
+			"choose normal or low latency in YouTube Studio"
+	}
+	return ""
 }
 
 // ReadyForTesting reports whether both documented preconditions for the
@@ -159,6 +211,10 @@ type TransitionResult struct {
 	// than no retry at all -- it invites a caller to escalate, or to send a
 	// different transition, on a broadcast that is doing what was asked.
 	Redundant bool `json:"redundant,omitempty"`
+	// Warnings are the parts of a transition that succeeded but reported a
+	// side problem, such as X's announcing Post failing after the broadcast went
+	// live. They never make the transition a failure.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // BroadcastLifecycler is the optional capability for a platform whose broadcast
@@ -182,6 +238,25 @@ type BroadcastLifecycler interface {
 	// different correct responses. Anything else arrives as the underlying
 	// error, unclassified rather than guessed at.
 	TransitionBroadcast(ctx context.Context, accessToken, broadcastID string, to BroadcastPhase) (*TransitionResult, error)
+}
+
+// BroadcastCreator is the optional capability for a platform whose broadcast has
+// to be OPENED by polyemesis before it can be commanded. X is the first: its
+// broadcast is created on the stream source in NOT_STARTED, where nothing can see
+// it, and only PUBLISH makes it public. A platform whose broadcasts already exist
+// (YouTube, through the announce path) does not implement this.
+//
+// The coordinator opens one only for an enabled destination that has no recorded
+// broadcast, or whose recorded broadcast is finished. LivestreamAccess is checked
+// first, so a closed gate costs no network call and is not a fault.
+type BroadcastCreator interface {
+	Provider
+	// LivestreamAccess reports whether the platform's Livestream gate is open.
+	LivestreamAccess() bool
+	// OpenBroadcast opens an unpublished broadcast on the source whose stream key
+	// is sourceKey, and returns its id. The platform may return a broadcast that
+	// is already running on that source instead of making a second one.
+	OpenBroadcast(ctx context.Context, accessToken, sourceKey string) (string, error)
 }
 
 // LifecycleFor reports whether a platform's broadcast lifecycle can be
