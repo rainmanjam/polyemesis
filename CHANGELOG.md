@@ -866,6 +866,7 @@ its first tagged release.
 
 ### Fixed
 
+- **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
 - A manual planned rollover now answers 200 "rolled over" when it has finished,
   502 with the redacted reason when the platform refuses it, and never 202
   "rolling over" for a rollover that had already run. The sweep path is unchanged.

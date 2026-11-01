@@ -32,6 +32,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -316,7 +317,7 @@ func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
 	subID := sub.Data.Subscription.ID
 	defer x.removeSubscription(subID)
 
-	return x.streamChat(ctx, sink)
+	return x.streamChat(ctx, sink, &xBroadcastOwner{x: x})
 }
 
 // removeSubscription deletes the activity subscription. It uses a fresh context
@@ -332,7 +333,7 @@ func (x *XAdapter) removeSubscription(subID string) {
 
 // streamChat reads the app-only activity stream line by line. A broadcast.chat
 // event becomes a Message; every other event is skipped.
-func (x *XAdapter) streamChat(ctx context.Context, sink Sink) error {
+func (x *XAdapter) streamChat(ctx context.Context, sink Sink, owner *xBroadcastOwner) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, x.cfg.APIBase+"/2/activity/stream", nil)
 	if err != nil {
 		return err
@@ -361,7 +362,9 @@ func (x *XAdapter) streamChat(ctx context.Context, sink Sink) error {
 		if line == "" {
 			continue
 		}
-		if m, ok := x.decodeChat([]byte(line)); ok {
+		// The stream is the whole app's, so it also carries chat for every other
+		// account's broadcasts. Only this account's running broadcast gets through.
+		if m, broadcastID, ok := x.decodeChat([]byte(line)); ok && owner.owns(ctx, broadcastID) {
 			sink.Deliver(m)
 		}
 	}
@@ -393,14 +396,14 @@ type xChatPayload struct {
 
 // decodeChat turns one stream line into a Message. Anything that is not a
 // broadcast.chat event, or that carries no text, is dropped.
-func (x *XAdapter) decodeChat(line []byte) (Message, bool) {
+func (x *XAdapter) decodeChat(line []byte) (Message, string, bool) {
 	var ev xChatEvent
 	if err := json.Unmarshal(line, &ev); err != nil || ev.Data.EventType != "broadcast.chat" {
-		return Message{}, false
+		return Message{}, "", false
 	}
 	var p xChatPayload
 	if err := json.Unmarshal(ev.Data.Payload, &p); err != nil || strings.TrimSpace(p.Text) == "" {
-		return Message{}, false
+		return Message{}, "", false
 	}
 	at := x.cfg.Now()
 	if ms, err := strconv.ParseInt(p.CreatedAtMS, 10, 64); err == nil && ms > 0 {
@@ -423,5 +426,45 @@ func (x *XAdapter) decodeChat(line []byte) (Message, bool) {
 		Text:      p.Text,
 		At:        at,
 		ReplyToID: p.ReplyTo,
-	}, true
+	}, p.BroadcastID, true
+}
+
+// xOwnerRefreshEvery bounds how often an unfamiliar broadcast id makes the
+// adapter ask X which broadcast this account is running. Chat for another
+// account's show arrives continually on a shared stream, so without a bound each
+// of those lines would cost a request.
+const xOwnerRefreshEvery = 15 * time.Second
+
+// xBroadcastOwner answers whether a chat event belongs to this account. The
+// activity stream is the app's, not the account's: one subscription per user
+// covers all of that user's broadcasts, and every other connected account's chat
+// arrives on the same stream. An event is this account's only when its
+// broadcast_id is the broadcast this account is running now.
+type xBroadcastOwner struct {
+	x       *XAdapter
+	mu      sync.Mutex
+	running string
+	checked time.Time
+}
+
+func (o *xBroadcastOwner) owns(ctx context.Context, broadcastID string) bool {
+	if broadcastID == "" {
+		return false // an event that names no broadcast cannot be placed, so it is not shown as ours
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if broadcastID == o.running {
+		return true
+	}
+	now := o.x.cfg.Now()
+	if !o.checked.IsZero() && now.Sub(o.checked) < xOwnerRefreshEvery {
+		return false
+	}
+	o.checked = now
+	id, err := o.x.runningBroadcastID(ctx)
+	if err != nil {
+		return false
+	}
+	o.running = id
+	return broadcastID == id
 }

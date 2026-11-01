@@ -320,6 +320,42 @@ func TestXRunReadsBroadcastChatFromTheActivityStream(t *testing.T) {
 	}
 }
 
+// TestXRunDeliversOnlyChatFromThisAccountsRunningBroadcast: the activity stream
+// belongs to the whole app, not to one account, so a second connected X account,
+// or a subscription left behind by an earlier run, puts other broadcasts' chat
+// on the same stream. Stamping every event with this adapter's account would show
+// another account's chat as this one's, and send its moderation to the wrong
+// broadcast. Only chat for the broadcast this account is running may pass; an
+// event that names no broadcast at all is dropped too.
+func TestXRunDeliversOnlyChatFromThisAccountsRunningBroadcast(t *testing.T) {
+	st := newXChatStub(t)
+	st.streamLines = []string{
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"1","payload":{"id":"1761904801001","broadcast_id":"B9other","text":"from someone else's show","author_id":"1","author_name":"Other"}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","payload":{"id":"1761904801002","text":"no broadcast named","author_id":"2","author_name":"Nobody"}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"3","payload":{"id":"1761904801003","broadcast_id":"B1run","text":"mine","author_id":"3","author_name":"Mine"}}}`,
+	}
+	a := st.adapter(t, time.Unix(1761904800, 0))
+
+	var got []Message
+	var mu sync.Mutex
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = a.Run(ctx, SinkFunc(func(m Message) {
+		mu.Lock()
+		got = append(got, m)
+		mu.Unlock()
+		if m.Text == "mine" {
+			cancel()
+		}
+	}))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Text != "mine" {
+		t.Fatalf("delivered %+v, want only the message from this account's running broadcast B1run", got)
+	}
+}
+
 // TestXRunDoesNotLeakTheBearerIntoItsError: a refused stream must not carry the
 // app token into an error an operator will read or log.
 func TestXRunDoesNotLeakTheBearerIntoItsError(t *testing.T) {
