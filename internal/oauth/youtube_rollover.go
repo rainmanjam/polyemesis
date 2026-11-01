@@ -48,7 +48,8 @@ type RolloverRequest struct {
 	// Description and Privacy follow the same rule. Privacy is one of public, unlisted or private.
 	Description string
 	Privacy     string
-	// Now is when the new broadcast is scheduled to start, and so when the rollover's own clock starts.
+	// Now is the rollover's own clock. The new broadcast is scheduled ytRolloverStartLead after it, because YouTube
+	// wants a scheduledStartTime in the future and Now is already past when the insert lands.
 	Now time.Time
 }
 
@@ -126,7 +127,7 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 
 	newID, err := y.createRolloverBroadcast(ctx, accessToken, rolloverBody{
 		Title: title, Description: description, Privacy: privacy,
-		EnableAutoStart: src.EnableAutoStart, At: req.Now,
+		EnableAutoStart: src.EnableAutoStart, At: req.Now.Add(ytRolloverStartLead),
 	})
 	if err != nil {
 		return nil, &RolloverError{Stage: "create", OldStillLive: true, err: err}
@@ -156,20 +157,33 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 		if terr != nil {
 			var refused *TransitionRefused
 			if !errors.As(terr, &refused) || !channelCannotCarryTwo(refused.Refusal) {
-				return abandon("start", terr)
+				// A failed answer does not prove the transition did not happen: a 500 can follow a transition
+				// YouTube carried out, and auto-start can take the replacement live in the meantime. Deleting a
+				// broadcast that is on air would break the rule this file keeps, so the state is read again first.
+				again, rerr := y.BroadcastState(ctx, accessToken, newID)
+				if rerr != nil {
+					// Nothing here knows whether the replacement is on air, so it is kept and named.
+					return nil, &RolloverError{Stage: "start", OldStillLive: true, NewBroadcastID: newID,
+						err: fmt.Errorf("%w; the replacement %s could not be read again, so it was kept rather than deleted; check it in YouTube Studio: %v", terr, newID, rerr)}
+				}
+				if !broadcastIsOnAir(again.Status) {
+					return abandon("start", terr)
+				}
+				// The replacement is on air after all, so the rollover carries on below and ends the old one.
+			} else {
+				// The channel will not carry two live broadcasts at once. End the old one, then take the new one live.
+				gap = true
+				if _, endErr := y.TransitionBroadcast(ctx, accessToken, oldID, PhaseComplete); endErr != nil {
+					return abandon("end", endErr)
+				}
+				if _, startErr := y.TransitionBroadcast(ctx, accessToken, newID, PhaseLive); startErr != nil {
+					// The gap is now real and the new broadcast will not start. Keep it, so the coordinator can take
+					// it live once the stream is delivering, and report that the old one is ended.
+					return nil, &RolloverError{Stage: "start", OldStillLive: false, NewBroadcastID: newID,
+						err: fmt.Errorf("the old broadcast was ended to make room, but the replacement %s would not go live: %w", newID, startErr)}
+				}
+				return &RolloverOutcome{NewBroadcastID: newID, OldEnded: true, Gap: true}, nil
 			}
-			// The channel will not carry two live broadcasts at once. End the old one, then take the new one live.
-			gap = true
-			if _, endErr := y.TransitionBroadcast(ctx, accessToken, oldID, PhaseComplete); endErr != nil {
-				return abandon("end", endErr)
-			}
-			if _, startErr := y.TransitionBroadcast(ctx, accessToken, newID, PhaseLive); startErr != nil {
-				// The gap is now real and the new broadcast will not start. Keep it, so the coordinator can take
-				// it live once the stream is delivering, and report that the old one is ended.
-				return nil, &RolloverError{Stage: "start", OldStillLive: false, NewBroadcastID: newID,
-					err: fmt.Errorf("the old broadcast was ended to make room, but the replacement %s would not go live: %w", newID, startErr)}
-			}
-			return &RolloverOutcome{NewBroadcastID: newID, OldEnded: true, Gap: true}, nil
 		}
 	}
 
@@ -274,6 +288,12 @@ func (y *YouTube) createRolloverBroadcast(ctx context.Context, accessToken strin
 	}
 	return created.ID, nil
 }
+
+// ytRolloverStartLead is how far ahead of the rollover's clock the replacement is scheduled. YouTube's insert wants
+// a scheduledStartTime in the future (docs-youtube B3), and "now" is already past when the request lands.
+// PROVISIONAL: YouTube documents no minimum lead, so two minutes is a choice, small enough that the replacement is
+// still the show starting now.
+const ytRolloverStartLead = 2 * time.Minute
 
 func firstNonEmptyString(a, b string) string {
 	if strings.TrimSpace(a) != "" {

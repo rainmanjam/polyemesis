@@ -236,6 +236,20 @@ func (y *YouTube) reusableStream(ctx context.Context, accessToken string) (*ytLi
 // invented number. The refusal is handled where it arrives -- see
 // ytBroadcastCreateAdvice and RefusalSharedIngestionFull.
 func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts IngestOptions) (*ytLiveStream, error) {
+	picked, err := y.pickStream(ctx, accessToken, opts)
+	return picked.ytLiveStream, err
+}
+
+// pickedStream is pickStream's answer: the stream, and whether it was created by this call rather than found on the
+// channel. IngestFor needs the difference to clean up after itself: a stream made here whose key never reaches the
+// caller is an orphan, while a stream found on the channel feeds other destinations and must never be removed.
+type pickedStream struct {
+	*ytLiveStream
+	created bool
+}
+
+// pickStream is the body of streamFor. Every return names whether it created the stream.
+func (y *YouTube) pickStream(ctx context.Context, accessToken string, opts IngestOptions) (pickedStream, error) {
 	// A CAPTION-ENABLED DESTINATION IS THE ONE CASE THAT NEVER SHARES, AND ITS
 	// KEY CAN MOVE ONCE.
 	//
@@ -252,20 +266,20 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 		if opts.HeldKey != "" && opts.CaptionIngestURL != "" && !(opts.RotateKey && opts.DedicatedIngest) {
 			streams, err := y.listStreams(ctx, accessToken)
 			if err != nil {
-				return nil, err
+				return pickedStream{}, err
 			}
 			for i := range streams {
 				if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
-					return &streams[i], nil
+					return pickedStream{ytLiveStream: &streams[i]}, nil
 				}
 			}
 		}
-		return y.createStream(ctx, accessToken, opts.IngestLabel, true)
+		return y.createdStream(ctx, accessToken, opts.IngestLabel, true)
 	}
 
 	streams, err := y.listStreams(ctx, accessToken)
 	if err != nil {
-		return nil, err
+		return pickedStream{}, err
 	}
 
 	// Byte for byte, with no trimming and no case folding. This is the
@@ -279,7 +293,7 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 	if opts.HeldKey != "" && !(opts.RotateKey && opts.DedicatedIngest) {
 		for i := range streams {
 			if streams[i].CDN.IngestionInfo.StreamName == opts.HeldKey {
-				return &streams[i], nil
+				return pickedStream{ytLiveStream: &streams[i]}, nil
 			}
 		}
 	}
@@ -311,12 +325,21 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 				streams[i].CDN.IngestionInfo.StreamName != "" &&
 				!isVerticalStreamTitle(streams[i].Snippet.Title) &&
 				!containsString(opts.ExcludeStreamIDs, streams[i].ID) {
-				return &streams[i], nil
+				return pickedStream{ytLiveStream: &streams[i]}, nil
 			}
 		}
 	}
 
-	return y.createStream(ctx, accessToken, opts.IngestLabel, false)
+	return y.createdStream(ctx, accessToken, opts.IngestLabel, false)
+}
+
+// createdStream is createStream, marked as made by this call.
+func (y *YouTube) createdStream(ctx context.Context, accessToken, label string, withCaptions bool) (pickedStream, error) {
+	s, err := y.createStream(ctx, accessToken, label, withCaptions)
+	if err != nil {
+		return pickedStream{}, err
+	}
+	return pickedStream{ytLiveStream: s, created: true}, nil
 }
 
 // ytStreamsMaxPages bounds the liveStreams.list walk. A channel with many streams

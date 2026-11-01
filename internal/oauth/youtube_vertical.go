@@ -89,6 +89,12 @@ func (y *YouTube) CreateVerticalStream(ctx context.Context, accessToken, label s
 	if created.CDN.IngestionInfo.StreamName == "" {
 		return nil, fmt.Errorf("YouTube created the vertical stream but returned no stream key")
 	}
+	if strings.TrimSpace(created.ID) == "" {
+		// A stream with no id cannot be read for health, excluded from the fallback by id, or deleted, so it is
+		// refused. The message names no key: the key just received is a secret.
+		return nil, fmt.Errorf("YouTube created the vertical stream but returned no stream id, so polyemesis " +
+			"cannot track or remove it; check the channel's streams in YouTube Studio before trying again")
+	}
 	return &VerticalStream{
 		ID: created.ID,
 		Ingest: Ingest{

@@ -314,7 +314,14 @@ func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
 	}, &sub); err != nil {
 		return fmt.Errorf("X refused the broadcast.chat subscription: %s", xProblemMessage(err))
 	}
-	subID := sub.Data.Subscription.ID
+	subID := strings.TrimSpace(sub.Data.Subscription.ID)
+	if subID == "" {
+		// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
+		// only create, and leak, another one.
+		return Fatal(errors.New("X created the broadcast.chat subscription but returned no subscription_id, " +
+			"so polyemesis could not remove it later; live chat is stopped rather than leaving subscriptions " +
+			"running on X's side"))
+	}
 	defer x.removeSubscription(subID)
 
 	return x.streamChat(ctx, sink, &xBroadcastOwner{x: x})
@@ -443,11 +450,18 @@ func (x *XAdapter) decodeChat(line []byte) (Message, string, bool) {
 	}, p.BroadcastID, true
 }
 
-// xOwnerRefreshEvery bounds how often an unfamiliar broadcast id makes the
-// adapter ask X which broadcast this account is running. Chat for another
-// account's show arrives continually on a shared stream, so without a bound each
-// of those lines would cost a request.
+// xOwnerRefreshEvery bounds how often a broadcast id already judged not this account's is checked again. Chat for
+// another account's show arrives continually on the shared stream, so without a bound each of those lines would
+// cost a request.
 const xOwnerRefreshEvery = 15 * time.Second
+
+// xOwnerRefreshFloor is the shortest gap between two checks of any kind. A broadcast id never seen before is checked
+// as soon as the floor allows, so this account's own new show is recognised from its first lines rather than after
+// another account's chat has used up the long window (review #44).
+const xOwnerRefreshFloor = time.Second
+
+// xOwnerSeenMax bounds the memory of judged ids. Past it the memory starts again, which costs one check per id.
+const xOwnerSeenMax = 1024
 
 // xBroadcastOwner answers whether a chat event belongs to this account. The
 // activity stream is the app's, not the account's: one subscription per user
@@ -459,6 +473,8 @@ type xBroadcastOwner struct {
 	mu      sync.Mutex
 	running string
 	checked time.Time
+	// seen records when each id was last judged not this account's. An id not in it has never been checked.
+	seen map[string]time.Time
 }
 
 func (o *xBroadcastOwner) owns(ctx context.Context, broadcastID string) bool {
@@ -471,14 +487,24 @@ func (o *xBroadcastOwner) owns(ctx context.Context, broadcastID string) bool {
 		return true
 	}
 	now := o.x.cfg.Now()
-	if !o.checked.IsZero() && now.Sub(o.checked) < xOwnerRefreshEvery {
+	if last, ok := o.seen[broadcastID]; ok && now.Sub(last) < xOwnerRefreshEvery {
+		return false
+	}
+	if !o.checked.IsZero() && now.Sub(o.checked) < xOwnerRefreshFloor {
 		return false
 	}
 	o.checked = now
-	id, err := o.x.runningBroadcastID(ctx)
-	if err != nil {
-		return false
+	// An error is either no answer or "no running broadcast". Either way the id is remembered as checked below, so
+	// another account's chat does not cost a request per line; it is checked again once the long window has passed.
+	if id, err := o.x.runningBroadcastID(ctx); err == nil {
+		o.running = id
+		if broadcastID == id {
+			return true
+		}
 	}
-	o.running = id
-	return broadcastID == id
+	if o.seen == nil || len(o.seen) >= xOwnerSeenMax {
+		o.seen = map[string]time.Time{}
+	}
+	o.seen[broadcastID] = now
+	return false
 }

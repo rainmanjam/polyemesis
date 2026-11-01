@@ -29,6 +29,8 @@ type xChatStub struct {
 	streamDelay time.Duration
 	// broadcasts is what GET /2/broadcasts answers.
 	broadcasts string
+	// subscription is what POST /2/activity/subscriptions answers. Empty means the documented sub-42 answer.
+	subscription string
 }
 
 func newXChatStub(t *testing.T) *xChatStub {
@@ -51,9 +53,18 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/2/users/me":
 		_, _ = io.WriteString(w, `{"data":{"id":"1234567890","username":"sundaypractice"}}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/2/broadcasts":
-		_, _ = io.WriteString(w, st.broadcasts)
+		st.mu.Lock()
+		b := st.broadcasts
+		st.mu.Unlock()
+		_, _ = io.WriteString(w, b)
 	case r.Method == http.MethodPost && r.URL.Path == "/2/activity/subscriptions":
-		_, _ = io.WriteString(w, `{"data":{"subscription":{"subscription_id":"sub-42"}}}`)
+		st.mu.Lock()
+		sub := st.subscription
+		st.mu.Unlock()
+		if sub == "" {
+			sub = `{"data":{"subscription":{"subscription_id":"sub-42"}}}`
+		}
+		_, _ = io.WriteString(w, sub)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/2/activity/subscriptions/"):
 		_, _ = io.WriteString(w, `{"data":{"deleted":true}}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/2/activity/stream":
@@ -410,5 +421,82 @@ func TestXRunDoesNotLeakTheBearerIntoItsError(t *testing.T) {
 	err = a.Run(context.Background(), SinkFunc(func(Message) {}))
 	if err != nil && strings.Contains(err.Error(), "bearer-canary-xyz") {
 		t.Errorf("the app bearer appeared in the error: %v", err)
+	}
+}
+
+// countCalls counts recorded requests that start with prefix ("METHOD path").
+func (st *xChatStub) countCalls(prefix string) int {
+	n := 0
+	for _, c := range st.recorded() {
+		if strings.HasPrefix(c, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestXRunRefusesASubscriptionWithNoID (review #30): a subscription X created but whose id did not decode can never
+// be removed, so every reconnect would leave one more running on X's side. Run stops, as a Fatal error because a
+// retry would only leak another, and it never opens the stream.
+func TestXRunRefusesASubscriptionWithNoID(t *testing.T) {
+	st := newXChatStub(t)
+	st.subscription = `{"data":{"subscription":{}}}`
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := a.Run(ctx, SinkFunc(func(Message) {}))
+	if err == nil || !IsFatal(err) {
+		t.Fatalf("Run with an empty subscription_id = %v, want a Fatal error", err)
+	}
+	if n := st.countCalls("GET /2/activity/stream"); n != 0 {
+		t.Errorf("the activity stream was opened %d time(s) on a subscription that can never be removed", n)
+	}
+}
+
+// TestXOwnerSeesItsOwnNewBroadcastWithoutWaitingOutTheRefreshWindow (review #44): chat for another account's
+// broadcast used to set the one refresh clock, so the first 15 seconds of this account's own show were dropped when
+// it started inside that window. A broadcast id never seen before is checked straight away (within the short
+// floor), while an id already judged foreign waits out the long window, so other accounts' chat stays cheap.
+func TestXOwnerSeesItsOwnNewBroadcastWithoutWaitingOutTheRefreshWindow(t *testing.T) {
+	st := newXChatStub(t)
+	st.broadcasts = `{"data":[]}`
+	now := time.Unix(1761904800, 0)
+	a, err := NewX(XConfig{
+		AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewX: %v", err)
+	}
+	o := &xBroadcastOwner{x: a}
+	ctx := context.Background()
+
+	// Another account's chat while this account is not live: one check, then cached.
+	for i := 0; i < 20; i++ {
+		if o.owns(ctx, "B9other") {
+			t.Fatal("another account's broadcast was taken as this account's")
+		}
+		now = now.Add(100 * time.Millisecond)
+	}
+	if n := st.countCalls("GET /2/broadcasts"); n != 1 {
+		t.Errorf("20 lines of one foreign broadcast cost %d broadcast reads, want 1", n)
+	}
+
+	// This account goes live five seconds later, well inside the old 15 second window.
+	now = now.Add(5 * time.Second)
+	st.mu.Lock()
+	st.broadcasts = `{"data":[{"id":"B2mine","state":"RUNNING"}]}`
+	st.mu.Unlock()
+	if !o.owns(ctx, "B2mine") {
+		t.Fatal("the first chat line of this account's new broadcast was dropped")
+	}
+	if !o.owns(ctx, "B2mine") {
+		t.Fatal("the running broadcast stopped being recognised")
+	}
+	if o.owns(ctx, "B9other") {
+		t.Fatal("the foreign broadcast became this account's")
+	}
+	if n := st.countCalls("GET /2/broadcasts"); n != 2 {
+		t.Errorf("broadcast reads = %d, want 2: one for the foreign id, one for the new own id", n)
 	}
 }
