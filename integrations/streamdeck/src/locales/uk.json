@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "На заставці",
   "streamdeck.issue.sourceDegraded": "Джерело погіршене",
   "streamdeck.pi.issues": "Поточні проблеми",
-  "streamdeck.pi.noIssues": "Для цього призначення нічого не повідомлено."
+  "streamdeck.pi.noIssues": "Для цього призначення нічого не повідомлено.",
+  "streamdeck.issue.verticalHalfFailed": "Вертикальна частина: збій",
+  "streamdeck.issue.verticalHalfDown": "Вертикальну частину зупинено"
 }

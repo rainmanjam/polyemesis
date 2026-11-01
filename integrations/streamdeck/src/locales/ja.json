@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "スレートに切替",
   "streamdeck.issue.sourceDegraded": "入力品質低下",
   "streamdeck.pi.issues": "現在の問題",
-  "streamdeck.pi.noIssues": "この配信先に報告はありません。"
+  "streamdeck.pi.noIssues": "この配信先に報告はありません。",
+  "streamdeck.issue.verticalHalfFailed": "縦型の配信が失敗",
+  "streamdeck.issue.verticalHalfDown": "縦型の配信が停止中"
 }

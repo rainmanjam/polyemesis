@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "On slate",
   "streamdeck.issue.sourceDegraded": "Source degraded",
   "streamdeck.pi.issues": "Current issues",
-  "streamdeck.pi.noIssues": "Nothing reported for this destination."
+  "streamdeck.pi.noIssues": "Nothing reported for this destination.",
+  "streamdeck.issue.verticalHalfFailed": "Vertical half failed",
+  "streamdeck.issue.verticalHalfDown": "Vertical half down"
 }

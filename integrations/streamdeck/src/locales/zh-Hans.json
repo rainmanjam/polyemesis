@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "正在垫片",
   "streamdeck.issue.sourceDegraded": "源质量下降",
   "streamdeck.pi.issues": "当前问题",
-  "streamdeck.pi.noIssues": "此目标没有报告任何问题。"
+  "streamdeck.pi.noIssues": "此目标没有报告任何问题。",
+  "streamdeck.issue.verticalHalfFailed": "竖屏部分失败",
+  "streamdeck.issue.verticalHalfDown": "竖屏部分已停止"
 }

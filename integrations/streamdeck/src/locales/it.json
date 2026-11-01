@@ -105,5 +105,7 @@
   "streamdeck.issue.sourceSlate": "Su slate",
   "streamdeck.issue.sourceDegraded": "Sorgente degradata",
   "streamdeck.pi.issues": "Problemi attuali",
-  "streamdeck.pi.noIssues": "Nessuna segnalazione per questa destinazione."
+  "streamdeck.pi.noIssues": "Nessuna segnalazione per questa destinazione.",
+  "streamdeck.issue.verticalHalfFailed": "Metà verticale in errore",
+  "streamdeck.issue.verticalHalfDown": "Metà verticale ferma"
 }
