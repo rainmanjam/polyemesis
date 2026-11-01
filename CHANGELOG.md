@@ -902,6 +902,32 @@ its first tagged release.
 
 ### Fixed
 
+- **Live captions: the captioner restarts when it stops on its own, within a budget.**
+  A captioner whose audio tap or speech recognition stopped by itself used to stay
+  "enabled" but dead until a setting changed. It now reports itself stopped at
+  once and is rebuilt. If it stops within 30 seconds of starting three times in a
+  row, captions are switched off with a warning rather than respawning a new
+  FFmpeg and whisper on every reconcile. Switching captions off now publishes a
+  status too, so the dashboard no longer shows a captioner that is gone.
+- **Live captions: an automatic track stays automatic, and every setting applies.**
+  Starting the captioner no longer replaces the stored configuration with its
+  resolved track and model, so a later source change picks the new layout's
+  track. The restart check now covers the whole resolved configuration (threads,
+  health limits, denoise, speaker), so changing one restarts the captioner, and
+  the reconcile right after a start no longer restarts it for nothing.
+- **Live captions: overlapping cues.** A new caption no longer gets erased by the
+  previous caption's end time or overwritten by its resends. A cue that ends
+  before it starts is erased right after it is shown, and one cue schedules at
+  most 32 resends. After a timestamp jump, captions registered against the old
+  timeline are dropped rather than sent in one burst.
+- **Live captions: in-stream injection follows PMT changes safely.** Program
+  tables are read only from packets that start a section and carry a payload. A
+  PMT that moves video to a new PID or to HEVC releases the pictures still held,
+  unchanged, on the PID they arrived on, and stops rewriting the old PID.
+- The caption profanity filter now masks a word in single quotes ('damn').
+- The burn-in subtitles filter (not wired yet) escapes its path at both FFmpeg
+  levels, the filter option and the filtergraph, so paths with quotes, colons or
+  commas open correctly.
 - **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
 - A manual planned rollover now answers 200 "rolled over" when it has finished,
   502 with the redacted reason when the platform refuses it, and never 202

@@ -114,8 +114,10 @@ func (e *Engine) setCaptionConfig(cfg transcribe.LiveConfig) error {
 	e.captCfg, e.captOn = cfg, cfg.Enabled
 	if cfg.Enabled {
 		// A fresh decision clears the last refusal. The operator has seen it and
-		// chosen to try again, possibly with a smaller model.
+		// chosen to try again, possibly with a smaller model. The restart budget
+		// starts again with it.
 		e.captWarn = ""
+		e.captBudget = captionRestartBudget{}
 	}
 	return nil
 }

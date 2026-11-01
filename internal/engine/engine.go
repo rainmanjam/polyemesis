@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -397,6 +398,14 @@ type Engine struct {
 	// the operator finds out. A caption stream that vanishes silently is the
 	// failure mode this whole feature is designed against.
 	captWarn string
+	// captBudget counts the captioner's quick self-exits in a row, so a tap that
+	// dies right after every start is switched off rather than respawned on
+	// every reconcile. See captionRestartBudget.
+	captBudget captionRestartBudget
+	// captWake asks for a reconcile after the captioner's loop ends on its own.
+	// Nil is the production behaviour, a Reconcile on its own goroutine; a test
+	// on a partly built engine replaces it.
+	captWake func()
 
 	// whisper is the detected whisper.cpp, nil on an install without it, and
 	// whisperDir where its models live. Both are set once by SetTranscriber.
@@ -4801,6 +4810,29 @@ func (e *Engine) ClipBuffer() ClipStatus {
 
 // ------------------------------------------------------- realtime captions
 
+// captionQuickExit and captionRestartLimit are the captioner's restart budget:
+// a loop that ends on its own within captionQuickExit of starting is a quick
+// exit, and after captionRestartLimit of them in a row captions are switched
+// off with a reason.
+const (
+	captionQuickExit    = 30 * time.Second
+	captionRestartLimit = 3
+)
+
+// captionRestartBudget counts quick self-exits in a row.
+type captionRestartBudget struct{ quick int }
+
+// exited records a self-exit after a run of ran, and reports whether the budget
+// is spent.
+func (b *captionRestartBudget) exited(ran time.Duration) bool {
+	if ran >= captionQuickExit {
+		b.quick = 0
+		return false
+	}
+	b.quick++
+	return b.quick >= captionRestartLimit
+}
+
 // captSubName is fixed: there is at most one captioner.
 const captSubName = "captions"
 
@@ -4910,12 +4942,58 @@ func (e *Engine) LiveCaptions() CaptionStatus {
 		Config:      cfg,
 	}
 	if capt != nil {
+		// The resolved values the captioner runs with; Config stays the
+		// operator's, with an automatic track and a blank model left as chosen.
+		run := capt.Config()
+		st.Track, st.Speaker, st.Model = run.Track, run.Speaker, run.Model
 		st.Stats = capt.Stats()
 		if st.Stats.Warning != "" {
 			st.Warning = st.Stats.Warning
 		}
 	}
 	return st
+}
+
+// captionerIsCurrent reports whether the captioner, if any, already matches what the intent wants, so a reconcile may
+// leave it alone. The signature alone is not enough: the audio tap or the transcription loop can exit on its own and
+// leave the pointer set, so a captioner that is no longer running is not current.
+func captionerIsCurrent(cur *transcribe.LiveCaptioner, sig, want string) bool {
+	if (cur != nil) != (want != "") || sig != want {
+		return false
+	}
+	return cur == nil || cur.Running()
+}
+
+// resolveCaptionConfig fills in everything the operator left to the engine: the
+// track the source offers (with its speaker and denoise annotations), the
+// track's language, the live default model and the thread count. The result is
+// what the captioner will run, and what its signature is taken from.
+func resolveCaptionConfig(cfg transcribe.LiveConfig, choice transcribe.TrackChoice, hint transcribe.HardwareHint) transcribe.LiveConfig {
+	cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
+	if cfg.Language == "" {
+		cfg.Language = choice.Language
+	}
+	if cfg.Model == "" {
+		cfg.Model = transcribe.LiveDefaultModel(hint).Name
+	}
+	if cfg.Threads == 0 {
+		cfg.Threads = transcribe.LiveThreads(hint.CPUCores)
+	}
+	return cfg.Normalized()
+}
+
+// captionSig identifies a resolved caption configuration on a hub. Every field
+// goes in, through its JSON form, so a change to any of them (threads, health
+// budget, denoise, speaker as well as track and model) restarts the captioner,
+// and nothing outside it does.
+func captionSig(cfg transcribe.LiveConfig, hub string) string {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		// LiveConfig is plain data and always marshals; a failure here would be a
+		// programming error, and the %+v form still identifies the config.
+		b = []byte(fmt.Sprintf("%+v", cfg))
+	}
+	return hashStrings([]string{string(b), hub})
 }
 
 // reconcileCaptions brings the captioner into line with the switch.
@@ -4948,19 +5026,32 @@ func (e *Engine) reconcileCaptions() {
 
 	choice, haveTrack := transcribe.LiveTrack(e.effectiveSource(), cfg.Track)
 
+	// cfg is the operator's configuration until here, and the resolved one the
+	// captioner runs from here on. e.captCfg keeps the operator's: an automatic
+	// track must stay automatic, so a later source change can pick another one.
 	want := ""
 	if on && !stopped && whisper.Available() && haveTrack {
-		cfg.Track, cfg.Speaker, cfg.Denoise = choice.Track, choice.Speaker, choice.Denoise
-		if cfg.Language == "" {
-			cfg.Language = choice.Language
-		}
-		want = hashStrings([]string{
-			strconv.Itoa(cfg.Track), cfg.Model, string(cfg.Backend), cfg.Language,
-			cfg.Window.String(), cfg.Step.String(), cfg.VTTPath, e.sourceLabel(),
-		})
+		cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools))
+		want = captionSig(cfg, e.sourceLabel())
 	}
-	if (cur != nil) == (want != "") && sig == want {
+	if captionerIsCurrent(cur, sig, want) {
 		return
+	}
+
+	// A captioner that is still installed with the wanted signature but no longer
+	// running ended on its own: the tap or the relay went away, or whisper
+	// crashed. It is rebuilt, but only within the restart budget, measured on the
+	// captioner's own clock so a reconcile that comes late does not make a quick
+	// death look like a long run.
+	giveUp := false
+	if cur != nil && want != "" && sig == want && !cur.Running() {
+		ran, _ := cur.RanFor()
+		e.mu.Lock()
+		giveUp = e.captBudget.exited(ran)
+		e.mu.Unlock()
+		if !giveUp {
+			e.log.Warn("live captions stopped on their own; starting them again", "ran", ran)
+		}
 	}
 
 	if cur != nil {
@@ -4970,17 +5061,18 @@ func (e *Engine) reconcileCaptions() {
 		e.mu.Unlock()
 		e.teardownCaptions(old, port, hub, vtt)
 	}
+	if giveUp {
+		e.captionsFailed(fmt.Sprintf("live captions stopped on their own %d times in a row, each within %s of starting, "+
+			"so they were switched off; check the audio source and turn them on again", captionRestartLimit, captionQuickExit))
+		return
+	}
 	if want == "" {
+		// Something was torn down, or this return would have been the early one
+		// above. Say so, or a dashboard keeps showing a captioner that is gone.
+		e.publishCaptionStatus()
 		return
 	}
 
-	hint := transcribe.HintFromTools(e.tools)
-	if cfg.Model == "" {
-		cfg.Model = transcribe.LiveDefaultModel(hint).Name
-	}
-	if cfg.Threads == 0 {
-		cfg.Threads = transcribe.LiveThreads(hint.CPUCores)
-	}
 	modelPath, err := transcribe.ResolveModel(modelsDir, cfg.Model)
 	if err != nil {
 		e.captionsFailed(fmt.Sprintf("live captions need the %s model: %v", cfg.Model, err))
@@ -5043,10 +5135,13 @@ func (e *Engine) reconcileCaptions() {
 		Route: route,
 	}
 
-	capt, err := transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
+	var capt *transcribe.LiveCaptioner
+	capt, err = transcribe.NewLiveCaptioner(e.log, e.tools, whisper, cfg,
 		transcribe.WithLiveNice(nice),
 		transcribe.WithLiveEmit(fan.Emit),
 		transcribe.WithLiveDegrade(e.onCaptionsDegraded),
+		// capt is assigned before Start, so the hook always sees it.
+		transcribe.WithLiveExit(func() { go e.onCaptionerExited(capt) }),
 	)
 	if err != nil {
 		hub.Unsubscribe(captSubName)
@@ -5075,10 +5170,14 @@ func (e *Engine) reconcileCaptions() {
 		return
 	}
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = capt, port, hub, vtt, want
-	e.captCfg = capt.Config()
 	e.captRoute = route
 	routeHeld = true
 	e.mu.Unlock()
+	if !capt.Running() {
+		// The loop ended before the captioner was installed, so the exit hook
+		// found nothing to act on. Act on it now.
+		e.onCaptionerExited(capt)
+	}
 
 	// Warn, not Info. This is the one thing in the pipeline that takes CPU away
 	// from the encoders, and an operator reading the log after a stutter should
@@ -5087,6 +5186,32 @@ func (e *Engine) reconcileCaptions() {
 		"track", cfg.Track, "speaker", cfg.Speaker, "model", cfg.Model,
 		"threads", cfg.Threads, "niced", nice != nil)
 	e.publishCaptionStatus()
+}
+
+// onCaptionerExited runs when a captioner's loop has ended. If it is still the
+// installed captioner and captions are still wanted, it ended on its own: the
+// status goes out at once, so the dashboard stops showing it running, and a
+// reconcile is asked for, which rebuilds it within the restart budget. A
+// captioner that was torn down (the pointer already moved on), stopped with the
+// engine, or switched off by the health guard needs neither.
+func (e *Engine) onCaptionerExited(c *transcribe.LiveCaptioner) {
+	e.mu.RLock()
+	current := c != nil && e.capt == c && e.captOn && !e.stopped
+	wake := e.captWake
+	e.mu.RUnlock()
+	if !current {
+		return
+	}
+	e.publishCaptionStatus()
+	if wake != nil {
+		wake()
+		return
+	}
+	go func() {
+		if err := e.Reconcile(); err != nil {
+			e.log.Error("live captions: reconcile after the captioner stopped", "err", err)
+		}
+	}()
 }
 
 // captionsFailed records a reason captioning could not start, switches the
