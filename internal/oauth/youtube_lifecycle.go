@@ -79,6 +79,7 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 			ContentDetails struct {
 				BoundStreamID      string `json:"boundStreamId"`
 				ClosedCaptionsType string `json:"closedCaptionsType"`
+				LatencyPreference  string `json:"latencyPreference"`
 				MonitorStream      struct {
 					// A POINTER, so an absent key stays absent. See
 					// BroadcastLifecycleState for why a precondition read as
@@ -118,6 +119,7 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 		// extra call.
 		ClosedCaptionsType: b.ContentDetails.ClosedCaptionsType,
 		StreamDelayMs:      b.ContentDetails.MonitorStream.BroadcastStreamDelayMs,
+		LatencyPreference:  b.ContentDetails.LatencyPreference,
 	}
 	if state.BoundStreamID == "" {
 		// Nothing to ask about. StreamActive stays nil, which reads as

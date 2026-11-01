@@ -226,6 +226,9 @@ const (
 	phaseLiveStarting = "livestarting"
 	phaseComplete     = "complete"
 	phaseRevoked      = "revoked"
+	// phasePrePublished is X's PRE_PUBLISHED as recorded here: this process sent the PUBLISH and X is still
+	// moving the broadcast to RUNNING. It is on its way to air, so it counts as confirmed for ending.
+	phasePrePublished = "prepublished"
 )
 
 // isTerminalPhase reports whether the platform has said this broadcast is over
@@ -239,10 +242,12 @@ const (
 // recorded for this broadcast, which covers a row that predates the coordinator
 // (an upgrade) and a broadcast created in somebody else's console. `created`
 // and `ready` are excluded for the reason lifecycleTarget.Phase documents --
-// YouTube has no documented path from either to `complete`.
+// YouTube has no documented path from either to `complete`. X's `prepublished`
+// is included: it is recorded only after this process sent the PUBLISH.
 func endableFromPhase(phase string) bool {
 	switch {
-	case strings.EqualFold(phase, phaseTesting), strings.EqualFold(phase, phaseLive):
+	case strings.EqualFold(phase, phaseTesting), strings.EqualFold(phase, phaseLive),
+		strings.EqualFold(phase, phasePrePublished):
 		return true
 	default:
 		return false
@@ -1255,6 +1260,15 @@ func (c *lifecycleCoordinator) endOrphan(ctx context.Context, t lifecycleTarget)
 		c.noteOrphanFailure(t, err)
 		return
 	}
+	// X IS STILL PUBLISHING IT. A PRE_PUBLISHED broadcast cannot be ended yet and goes RUNNING by itself, so
+	// letting go of it now would leave a show on air with nothing to end it until X times it out. It stays tracked
+	// and is read again next sweep, against the same give-up budget as a failed end.
+	if st.Status == oauth.XStatePrePublished {
+		c.mu.Lock()
+		c.orphanAttempts[t.destinationID]++
+		c.mu.Unlock()
+		return
+	}
 	// enabled=false: a deleted row cannot want anything to be running.
 	plan := planLifecycle(false, st)
 	if plan.Send != oauth.PhaseComplete {
@@ -1308,7 +1322,7 @@ func xLifecyclePhase(status string) string {
 	case oauth.XStateNotStarted:
 		return phaseCreated
 	case oauth.XStatePrePublished:
-		return "prepublished"
+		return phasePrePublished
 	case oauth.XStateRunning:
 		return phaseLive
 	case oauth.XStateEnded:

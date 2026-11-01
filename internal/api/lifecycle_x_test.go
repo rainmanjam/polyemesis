@@ -758,3 +758,42 @@ func TestXEndedBroadcastWithAnUnknownEncoderWaitsUntilAnUpEdge(t *testing.T) {
 		t.Fatalf("after an UP edge opened %v, want the next show's broadcast", opened)
 	}
 }
+
+// A DELETED X DESTINATION WHOSE BROADCAST X IS STILL PUBLISHING IS ENDED ONCE IT RUNS (w3h tail, #28). The PUBLISH
+// was sent, X answered PRE_PUBLISHED, and the row was deleted before X moved the broadcast to RUNNING.
+// endableFromPhase did not count "prepublished" as confirmed, and the read that still said PRE_PUBLISHED planned
+// "never aired", so endOrphan let go of the broadcast both ways and it went RUNNING with nothing left to end it.
+// It is now kept and read again, and the END goes out on the sweep that sees it RUNNING.
+//
+// MUTATION, internal/api/lifecycle.go, in endOrphan: delete the XStatePrePublished keep-tracking branch. Observed:
+// FAIL -- ended 0 after the broadcast went RUNNING. And separately in endableFromPhase: drop phasePrePublished.
+// Observed: FAIL, the same way.
+func TestADeletedXDestinationWhoseBroadcastIsStillPublishingIsEndedOnceItRuns(t *testing.T) {
+	fake := &xcFake{active: true, state: oauth.XStatePrePublished, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phasePrePublished}))
+
+	c.sweepOnce(context.Background(), sweepEverything)
+	store.mu.Lock()
+	delete(store.rows, 5)
+	store.mu.Unlock()
+
+	// Still PRE_PUBLISHED: nothing can be ended yet, and the broadcast must not be let go.
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, _, ended, _ := fake.snapshot(); ended != 0 {
+		t.Fatalf("an END was sent to a broadcast X was still publishing: %d", ended)
+	}
+
+	fake.set(func(f *xcFake) { f.state = oauth.XStateRunning })
+	c.sweepOnce(context.Background(), sweepEverything)
+	if _, _, ended, state := fake.snapshot(); ended != 1 || state != oauth.XStateEnded {
+		t.Fatalf("ended %d (state %s) after the deleted destination's broadcast went RUNNING; want one END", ended, state)
+	}
+}
+
+// Deleting an X destination whose broadcast X is still publishing asks for confirmation, as deleting one that is
+// live does: endOrphan will end it, so the delete is a request to end a show.
+func TestAPrePublishedXBroadcastIsEndableSoItsDeleteNeedsConfirmation(t *testing.T) {
+	if !endableFromPhase(phasePrePublished) {
+		t.Fatal("a broadcast this process published is not endable, so its delete would neither confirm nor end it")
+	}
+}

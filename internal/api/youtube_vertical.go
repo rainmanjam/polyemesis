@@ -125,7 +125,12 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not read the vertical pair")
 		return
 	}
-	if s.isVerticalHalf(id) {
+	// A failed read is not "no": the guard fails closed, or a transient error would let a vertical half get a
+	// vertical half of its own.
+	if half, err := s.isVerticalHalf(id); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read the vertical pairs")
+		return
+	} else if half {
 		writeError(w, http.StatusBadRequest, "this destination is already the vertical half of a pair")
 		return
 	}
@@ -137,11 +142,19 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
 		return
 	}
-	rendID, err := s.verticalRenditionFor(dest, tier)
+	rendID, rendCreated, err := s.verticalRenditionFor(dest, tier)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not prepare the vertical rendition")
 		return
 	}
+	// A rendition this request made is removed again if the pair is not made, so a failed attempt does not leave an
+	// unused portrait rendition on the programme. A rendition that was reused belongs to whoever made it and stays.
+	paired := false
+	defer func() {
+		if !paired && rendCreated {
+			s.dropUnusedVerticalRendition(rendID)
+		}
+	}()
 	vs, err := vp.CreateVerticalStream(ctx, acct.AccessToken, dest.Name)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, alerts.Redact(err.Error()))
@@ -178,6 +191,7 @@ func (s *Server) handleCreateYouTubeVertical(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "could not record the vertical pair")
 		return
 	}
+	paired = true
 	// A new destination and, often, a new rendition: the pipeline is reconciled as every other destination create
 	// does, so an enabled pair starts now rather than at whatever save comes next. The vertical row is removed through
 	// DELETE /destinations/{id}, which reconciles already.
@@ -366,7 +380,9 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Not tied to the browser. The read is cached for every caller for a minute, so a request abandoned mid-read
+	// must not cancel it: a cancelled read would be remembered as a failure and shown to everyone as an error.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 20*time.Second)
 	defer cancel()
 	acct, vp, err := s.verticalProviderFor(ctx, *dest.AccountID)
 	if err != nil {
@@ -444,28 +460,47 @@ func (s *Server) verticalProviderFor(ctx context.Context, accountID int64) (*db.
 
 // verticalRenditionFor finds or creates the portrait rendition a tier names, under the
 // destination's programme. A rendition is shared by every destination that picks the same
-// shape, so the function reuses a match rather than creating a copy each time.
-func (s *Server) verticalRenditionFor(dest *db.Destination, tier db.RenditionPreset) (int64, error) {
+// shape, so the function reuses a match rather than creating a copy each time. created says
+// whether this call made the rendition, which is the only case a failed pairing may remove it.
+func (s *Server) verticalRenditionFor(dest *db.Destination, tier db.RenditionPreset) (id int64, created bool, err error) {
 	if dest.SourceID == nil {
-		return 0, errors.New("destination has no programme")
+		return 0, false, errors.New("destination has no programme")
 	}
 	existing, err := s.store.ListRenditionsBySource(*dest.SourceID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	want := tier.Rendition
 	for _, r := range existing {
 		if sameVerticalEncode(*r, *want) {
-			return r.ID, nil
+			return r.ID, false, nil
 		}
 	}
 	dup := *want
 	dup.SourceID = dest.SourceID
-	created, err := s.store.CreateRendition(&dup)
+	made, err := s.store.CreateRendition(&dup)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return created.ID, nil
+	return made.ID, true, nil
+}
+
+// dropUnusedVerticalRendition removes a portrait rendition a failed pairing made. It is removed only while no
+// destination selects it: a pairing on another destination of the same programme can pick the same shape in the
+// meantime, and its rendition must not be taken from under it.
+func (s *Server) dropUnusedVerticalRendition(id int64) {
+	dests, err := s.store.ListDestinations()
+	if err != nil {
+		return
+	}
+	for _, d := range dests {
+		if d.RenditionID != nil && *d.RenditionID == id {
+			return
+		}
+	}
+	if err := s.store.DeleteRendition(id); err != nil && !errors.Is(err, db.ErrNotFound) {
+		s.log.Warn("youtube vertical: could not remove the rendition a failed pairing made", "rendition", id, "err", err)
+	}
 }
 
 // sameVerticalEncode reports whether a stored rendition encodes exactly as the tier would, so reusing it changes
@@ -481,18 +516,19 @@ func sameVerticalEncode(r, want db.Rendition) bool {
 		r.Overlay == want.Overlay && r.Text == want.Text
 }
 
-// isVerticalHalf reports whether a destination is already the vertical half of some pair.
-func (s *Server) isVerticalHalf(destID int64) bool {
+// isVerticalHalf reports whether a destination is already the vertical half of some pair. A
+// store error is returned, not read as "no", so the caller's guard fails closed.
+func (s *Server) isVerticalHalf(destID int64) (bool, error) {
 	pairs, err := s.store.ListYouTubeVerticalPairs()
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, p := range pairs {
 		if p.VerticalID == destID {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // verticalStreamIDs lists every vertical stream id the fallback must not adopt. A store

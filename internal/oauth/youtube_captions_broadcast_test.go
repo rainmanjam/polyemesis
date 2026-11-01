@@ -149,3 +149,44 @@ func TestYouTubeBroadcastStateReportsTheCaptionSettings(t *testing.T) {
 		t.Errorf("MonitorStream = %v, want true", st.MonitorStream)
 	}
 }
+
+// TestAnUltraLowLatencyBroadcastIsRefusedForPOSTCaptions (w3h tail, #33): YouTube takes no captions on an
+// ultra-low-latency broadcast (B9). polyemesis never sets the latency, but the coordinator also reads broadcasts it
+// did not create, so an adopted ultraLow broadcast with closedCaptionsHttpPost used to pass the go-live check and
+// air without captions. The latency is read from the same call, and only ultraLow is refused: normal, low and an
+// unreported latency (the default) all take captions.
+//
+// MUTATION, internal/oauth/lifecycle.go, in CaptionPOSTProblem: delete the ultraLow refusal. Observed: FAIL --
+// "an ultraLow broadcast passed the caption check". And separately in youtube_lifecycle.go: drop the
+// LatencyPreference copy. Observed: FAIL, the same way.
+func TestAnUltraLowLatencyBroadcastIsRefusedForPOSTCaptions(t *testing.T) {
+	for _, tc := range []struct {
+		latency string
+		refused bool
+	}{
+		{`"latencyPreference":"ultraLow",`, true},
+		{`"latencyPreference":"low",`, false},
+		{`"latencyPreference":"normal",`, false},
+		{``, false},
+	} {
+		var log []capture
+		y := ytScheduleStub(t, &log, map[string]http.HandlerFunc{
+			"GET " + ytBroadcastsPath: func(w http.ResponseWriter, _ *http.Request) {
+				io.WriteString(w, `{"items":[{"id":"bcast-1","status":{"lifeCycleStatus":"ready"},
+					"contentDetails":{"closedCaptionsType":"closedCaptionsHttpPost",`+tc.latency+`
+					"monitorStream":{"enableMonitorStream":true,"broadcastStreamDelayMs":30000}}}]}`)
+			},
+		})
+		st, err := y.BroadcastState(context.Background(), "tok", "bcast-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		why := st.CaptionPOSTProblem()
+		switch {
+		case tc.refused && why == "":
+			t.Errorf("an ultraLow broadcast passed the caption check (%s)", tc.latency)
+		case !tc.refused && why != "":
+			t.Errorf("latency %q was refused: %s", tc.latency, why)
+		}
+	}
+}

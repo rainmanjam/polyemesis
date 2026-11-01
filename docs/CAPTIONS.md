@@ -146,11 +146,11 @@ What polyemesis refuses, and why:
   deletes the stored URL.
 - **Going live on a broadcast that is not set for POST captions.** Before a
   scheduled broadcast is moved to testing or live, polyemesis reads it. If its
-  caption type is not *HTTP POST*, its monitor stream is off, or its delay is not
-  30 or 60 seconds, the broadcast is left where it is and the destination card
-  shows the reason. The stream keeps going out. While the broadcast is still
-  upcoming, set those three on it in YouTube Studio, or set captions to off or
-  embedded. Rescheduling does not fix it: polyemesis keeps the broadcast's
+  caption type is not *HTTP POST*, its monitor stream is off, its delay is not
+  30 or 60 seconds, or it is set to ultra-low latency, the broadcast is left
+  where it is and the destination card shows the reason. The stream keeps going
+  out. While the broadcast is still upcoming, fix those settings in YouTube
+  Studio, or set captions to off or embedded. Rescheduling does not fix it: polyemesis keeps the broadcast's
   caption settings as they are when it moves the start time.
 - **A show announced before the first Refresh stream key** stays bound to the
   stream it was announced on, and the refresh moves the destination to a new
@@ -158,9 +158,11 @@ What polyemesis refuses, and why:
 - **Creating a destination already switched on with this route.** It has no URL
   yet, so create it switched off, press Refresh stream key, then start it. The
   console always creates destinations switched off.
-- **Ultra-low latency** does not apply. YouTube does not allow captions with
-  ultra-low latency, but polyemesis never sets a latency preference, so the
-  broadcasts it creates use YouTube's default.
+- **Ultra-low latency.** YouTube does not allow captions with ultra-low
+  latency. polyemesis never sets a latency preference, so the broadcasts it
+  creates use YouTube's default. A broadcast made in YouTube Studio can be set
+  to ultra-low latency, and the go-live check above holds it back with that
+  reason. Choose normal or low latency in Studio.
 
 What polyemesis does not check: a show started without a scheduled broadcast
 (YouTube's default *Stream now* event, or a broadcast made in YouTube Studio)

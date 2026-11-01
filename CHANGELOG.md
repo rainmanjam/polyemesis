@@ -1314,6 +1314,32 @@ its first tagged release.
 - **A broadcast delay that is still filling reads "Filling delay".** The
   destination card and the Renditions chip said Stopped while the buffer filled,
   before any process existed. They now read Filling delay, in amber.
+- **Wave 3 review, last eleven findings.**
+  - Roll over now can retry a failed rollover straight away. The ten-minute
+    wait now applies only after a rollover that worked, or one that moved the
+    destination to its replacement. The 15-second sweep still waits after a
+    failure.
+  - A browser that leaves while the vertical status read is in flight no
+    longer leaves an error on the sub-row for a minute.
+  - A failed vertical pairing removes the portrait rendition it made, unless
+    another destination now uses it.
+  - A store error during the "already a vertical half" check refuses the pair
+    with a 500. Before, the error let the pair go through.
+  - Deleting an X destination while X is still publishing its broadcast now
+    ends the broadcast once X has it running. Before, the broadcast was left
+    on air. That delete now asks for confirmation, as deleting a live one does.
+  - A retitle whose template or destination cannot be read answers 500. Only
+    a deleted row answers 409.
+  - A skip is refused if the destination was switched on after the skip's
+    first check. The skip now reads the destination again just before the
+    platform delete.
+  - When two schedules for one X destination fire close together, X's PUBLISH
+    carries the title of the show that started last.
+  - The caption go-live check refuses a YouTube broadcast set to ultra-low
+    latency. YouTube takes no captions on those.
+  - After a failed X broadcast list read, X chat checks again after 3 seconds,
+    not 15. Before, the first 15 seconds of chat on a show started outside
+    polyemesis could be lost.
 
 ## [0.11.0] — 2026-09-24
 

@@ -293,14 +293,22 @@ func (s *Server) handleOccurrenceTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this show has already started, so its event is past retitling from here")
 		return
 	}
+	// Only a row that is gone is a conflict. Any other store error is the server's, and is answered as one rather
+	// than told to the operator as a deleted template or destination.
 	tpl, err := s.store.GetBroadcastTemplate(occ.ScheduleID)
-	if err != nil {
+	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusConflict, "this occurrence's template was deleted, so its event is an orphan")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read this occurrence's template")
 		return
 	}
 	d, err := s.store.GetDestination(occ.DestinationID)
-	if err != nil {
+	if errors.Is(err, db.ErrNotFound) {
 		writeError(w, http.StatusConflict, "this occurrence's destination no longer exists")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read this occurrence's destination")
 		return
 	}
 	sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)

@@ -626,3 +626,59 @@ func TestASecondRolloverStillUsesTheRecurringTemplate(t *testing.T) {
 		t.Fatalf("the template is not found by the replacement's id after the first rollover: %v", err)
 	}
 }
+
+// TestAManualRunMayRetryAFailedRolloverInsideTheDebounce (w3h tail, #24): a failed rollover recorded its time, so the
+// ten-minute debounce held back the operator's retry too, close to the platform's cap and with the old broadcast
+// still live. The debounce guards the broadcast a rollover just created; a failed one created nothing the destination
+// is on, so a manual run may retry it at once. The sweep still waits: whether it should retry sooner is a quota call.
+//
+// MUTATION, internal/api/rollover.go, in considerOne: drop the !retriesAFailedRollover(cfg, bid) term. Observed:
+// FAIL -- "manual retry two minutes after a failed rollover: err = a rollover ran less than ten minutes ago".
+func TestAManualRunMayRetryAFailedRolloverInsideTheDebounce(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+	r.yt.err = errors.New("the replacement would not start")
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 {
+		t.Fatalf("setup: rollovers = %d, want 1", len(r.yt.rolls))
+	}
+
+	// The sweep keeps its debounce after a failure.
+	r.now = r.now.Add(2 * time.Minute)
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 {
+		t.Fatalf("the sweep retried inside the debounce: %d rollovers", len(r.yt.rolls))
+	}
+
+	r.yt.err = nil
+	if err := r.c.RunNow(context.Background(), 1); err != nil {
+		t.Fatalf("manual retry two minutes after a failed rollover: err = %v, want a rollover", err)
+	}
+	if len(r.yt.rolls) != 2 {
+		t.Fatalf("rollovers after the manual retry = %d, want 2", len(r.yt.rolls))
+	}
+
+	// That retry succeeded, so the next click is held again: it would roll over the broadcast just created.
+	r.now = r.now.Add(time.Minute)
+	if err := r.c.RunNow(context.Background(), 1); !errors.Is(err, errRolloverTooSoon) {
+		t.Fatalf("manual run a minute after a good rollover: err = %v, want errRolloverTooSoon", err)
+	}
+}
+
+// TestAManualRunAfterAFailureThatMovedTheBroadcastIsStillDebounced: a failure that ended the old broadcast and
+// pointed the destination at a replacement that would not start changes the broadcast the destination is on. A click
+// then would roll over that replacement, so the debounce still holds.
+func TestAManualRunAfterAFailureThatMovedTheBroadcastIsStillDebounced(t *testing.T) {
+	cfg := db.RolloverSettings{LastResult: rolloverFailedPrefix + "the replacement would not start", SessionBroadcastID: "live-1"}
+	if !retriesAFailedRollover(cfg, "live-1") {
+		t.Fatal("a failure on the unchanged broadcast is not a retry")
+	}
+	if retriesAFailedRollover(cfg, "new-1") {
+		t.Fatal("a failure that moved the destination to its replacement was treated as a retry")
+	}
+	if retriesAFailedRollover(db.RolloverSettings{LastResult: "rolled over to new-1 from live-1", SessionBroadcastID: "live-1"}, "live-1") {
+		t.Fatal("a successful rollover was treated as a failure to retry")
+	}
+}

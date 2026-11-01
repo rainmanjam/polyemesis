@@ -181,8 +181,12 @@ func (x *XAdapter) runningBroadcastID(ctx context.Context) (string, error) {
 		}
 		return b.BroadcastID, nil
 	}
-	return "", errors.New("X has no running broadcast on this account, so chat has nowhere to go; go live first")
+	return "", errXNoRunningBroadcast
 }
+
+// errXNoRunningBroadcast is X's own answer that the account is not live, as against a list read that failed. The
+// chat owner check treats the two differently: the first is a judgement, the second is no answer at all.
+var errXNoRunningBroadcast = errors.New("X has no running broadcast on this account, so chat has nowhere to go; go live first")
 
 // --------------------------------------------------------------------- send
 
@@ -491,6 +495,10 @@ const xOwnerRefreshEvery = 15 * time.Second
 // another account's chat has used up the long window (review #44).
 const xOwnerRefreshFloor = time.Second
 
+// xOwnerRetryAfterFailure is how soon an id is asked about again after a broadcast list read that failed. Shorter
+// than xOwnerRefreshEvery, because a failure judged nothing; longer than the floor, because X may be rate limiting.
+const xOwnerRetryAfterFailure = 3 * time.Second
+
 // xOwnerSeenMax bounds the memory of judged ids. Past it the memory starts again, which costs one check per id.
 const xOwnerSeenMax = 1024
 
@@ -530,17 +538,29 @@ func (o *xBroadcastOwner) owns(ctx context.Context, broadcastID string) bool {
 		return false
 	}
 	o.checked = now
-	// An error is either no answer or "no running broadcast". Either way the id is remembered as checked below, so
-	// another account's chat does not cost a request per line; it is checked again once the long window has passed.
-	if id, err := o.x.runningBroadcastID(ctx); err == nil {
+	// "No running broadcast" is a judgement, and the id is remembered as checked below, so another account's chat
+	// does not cost a request per line; it is checked again once the long window has passed. A read that failed is
+	// no judgement: the id is held only for the short retry, so one transient error does not drop this account's
+	// own chat for the whole window, and a rate-limited X is not asked again every second either.
+	id, err := o.x.runningBroadcastID(ctx)
+	if err != nil && !errors.Is(err, errXNoRunningBroadcast) {
+		o.remember(broadcastID, now.Add(xOwnerRetryAfterFailure-xOwnerRefreshEvery))
+		return false
+	}
+	if err == nil {
 		o.running = id
 		if broadcastID == id {
 			return true
 		}
 	}
+	o.remember(broadcastID, now)
+	return false
+}
+
+// remember records when an id was last judged, bounded by xOwnerSeenMax. The caller holds o.mu.
+func (o *xBroadcastOwner) remember(broadcastID string, at time.Time) {
 	if o.seen == nil || len(o.seen) >= xOwnerSeenMax {
 		o.seen = map[string]time.Time{}
 	}
-	o.seen[broadcastID] = now
-	return false
+	o.seen[broadcastID] = at
 }

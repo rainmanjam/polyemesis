@@ -257,7 +257,8 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		// Not announced, so there is no broadcast to replace and nothing to count from.
 		return false, nil
 	}
-	if force && !cfg.LastRolloverAt.IsZero() && now.Before(oauth.RolloverDebounceEnds(cfg.LastRolloverAt)) {
+	if force && !cfg.LastRolloverAt.IsZero() && now.Before(oauth.RolloverDebounceEnds(cfg.LastRolloverAt)) &&
+		!retriesAFailedRollover(cfg, bid) {
 		return false, errRolloverTooSoon
 	}
 	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
@@ -289,6 +290,19 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 	}
 	err = c.act(ctx, d, cfg, bid, trigger, now)
 	return true, err
+}
+
+// rolloverFailedPrefix starts the result act records for a rollover that failed.
+const rolloverFailedPrefix = "failed: "
+
+// retriesAFailedRollover reports whether a manual run inside the debounce is the operator retrying a rollover that
+// failed, which the debounce does not hold back. The debounce exists so a click does not roll over the broadcast a
+// rollover just created; a failed one created nothing the destination is on. So the last attempt must have failed,
+// and the destination must still be on the broadcast that attempt was replacing. A failure that moved the destination
+// to a replacement that would not start (adoptStrandedReplacement) changes the broadcast, so that one stays debounced,
+// and the lifecycle coordinator takes the replacement live. The sweep keeps the debounce either way.
+func retriesAFailedRollover(cfg db.RolloverSettings, bid string) bool {
+	return strings.HasPrefix(cfg.LastResult, rolloverFailedPrefix) && cfg.SessionBroadcastID == bid
 }
 
 // sessionStart is the moment the countdown counts from. YouTube reports its own, and a zero answer means it has not
@@ -372,7 +386,7 @@ func (c *rolloverCoordinator) act(ctx context.Context, d *db.Destination, cfg db
 	if err != nil {
 		// Redacted before it is clipped: a clip can cut a credential in half, and the pattern then misses it.
 		msg := clipDetail(alerts.Redact(err.Error()))
-		if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), "failed: "+msg, now); rerr != nil {
+		if rerr := c.store.RecordRolloverResult(d.ID, string(trigger), rolloverFailedPrefix+msg, now); rerr != nil {
 			c.log.Warn("planned rollover: could not record the failure", "destination", d.Name, "err", rerr)
 		}
 		c.announceEvent(d, d.Platform, hooks.TriggerRolloverFailed, string(trigger)+": "+msg)

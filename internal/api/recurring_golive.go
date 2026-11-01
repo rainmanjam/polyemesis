@@ -219,6 +219,14 @@ func (s *Server) xGoLiveTitleAt(d *db.Destination, now time.Time) string {
 	for _, sc := range scheds {
 		schedByID[sc.ID] = sc
 	}
+	// Every schedule that fired inside the window is a candidate, and the one that fired last wins: two shows on
+	// the same destination half an hour apart must not publish the second under the first one's title. A tie goes
+	// to the lower schedule id, so the answer does not depend on the order the store lists templates in.
+	var (
+		best   string
+		bestAt time.Time
+		bestID int64
+	)
 	for _, tpl := range tpls {
 		sc, ok := schedByID[tpl.ScheduleID]
 		if !ok || !sc.Enabled || sc.Action != scheduler.ActionStart || !scheduleTargets(sc, d.ID) {
@@ -236,9 +244,15 @@ func (s *Server) xGoLiveTitleAt(d *db.Destination, now time.Time) string {
 		if err != nil || strings.TrimSpace(title) == "" {
 			continue
 		}
+		if best != "" && (at.Before(bestAt) || (at.Equal(bestAt) && sc.ID > bestID)) {
+			continue
+		}
 		// No length check here: a template renders to at most 100 characters
 		// (scheduler.BroadcastTemplate.Validate), well inside X's 280.
-		return title
+		best, bestAt, bestID = title, at, sc.ID
+	}
+	if best != "" {
+		return best
 	}
 	return d.GoLiveTitle
 }

@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -108,20 +109,29 @@ type BroadcastLifecycleState struct {
 	// nil when not reported. Both are read for the caption go-live check (#8).
 	ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
 	StreamDelayMs      *int   `json:"streamDelayMs,omitempty"`
+	// LatencyPreference is contentDetails.latencyPreference verbatim (normal, low,
+	// ultraLow), or "" when not reported. Read for the same check: YouTube does
+	// not take captions on an ultra-low-latency broadcast (B9).
+	LatencyPreference string `json:"latencyPreference,omitempty"`
 }
 
 // ytClosedCaptionsHTTPPost is the closedCaptionsType of a broadcast that takes
 // captions by HTTP POST to its stream's caption ingestion URL.
 const ytClosedCaptionsHTTPPost = "closedCaptionsHttpPost"
 
+// ytLatencyUltraLow is the latencyPreference YouTube refuses captions with (B9).
+const ytLatencyUltraLow = "ultraLow"
+
 // CaptionPOSTProblem says why a broadcast cannot take HTTP POST captions, or ""
-// when it can: closedCaptionsHttpPost, the monitor stream on, and a 30 s or 60 s
-// delay (docs-youtube C3, C5, C7). An unreported value is a problem, not a pass,
-// because the broadcast cannot be shown to be ready.
+// when it can: closedCaptionsHttpPost, the monitor stream on, a 30 s or 60 s
+// delay, and a latency other than ultra-low (docs-youtube C3, C5, C7, B9). An
+// unreported value is a problem, not a pass, because the broadcast cannot be
+// shown to be ready. The one exception is the latency: an unreported one is the
+// default, which takes captions.
 //
-// Ultra-low latency is not checked. YouTube refuses captions with it (B9), but
-// polyemesis never sets latencyPreference, so a broadcast it created has the
-// default, and the check would guard a state this build cannot reach.
+// polyemesis never sets latencyPreference, but the coordinator also reads
+// broadcasts it did not create, such as one scheduled in YouTube Studio, so an
+// ultra-low-latency broadcast can reach this check.
 func (s *BroadcastLifecycleState) CaptionPOSTProblem() string {
 	if s == nil {
 		return "the broadcast's state is unknown"
@@ -138,6 +148,10 @@ func (s *BroadcastLifecycleState) CaptionPOSTProblem() string {
 	}
 	if s.StreamDelayMs == nil || (*s.StreamDelayMs != 30000 && *s.StreamDelayMs != 60000) {
 		return "the broadcast's delay is not 30 or 60 seconds, which YouTube needs for captions by HTTP POST"
+	}
+	if strings.EqualFold(strings.TrimSpace(s.LatencyPreference), ytLatencyUltraLow) {
+		return "the broadcast is set to ultra-low latency, and YouTube takes no captions with it; " +
+			"choose normal or low latency in YouTube Studio"
 	}
 	return ""
 }

@@ -2775,7 +2775,7 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// the title it carried, so a change now could not reach X either.
 	xBroadcastLive := existing.Platform == db.PlatformX &&
 		(strings.EqualFold(existing.Lifecycle.Phase, phaseLive) ||
-			strings.EqualFold(existing.Lifecycle.Phase, "prepublished"))
+			strings.EqualFold(existing.Lifecycle.Phase, phasePrePublished))
 	if err := decodeJSONInto(body, existing); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

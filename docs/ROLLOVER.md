@@ -63,7 +63,7 @@ reported. PROVISIONAL.
 | `GET /api/v1/rollover/limits` | The platform caps, with their sources and how well each is established. |
 | `GET /api/v1/destinations/{id}/rollover` | One destination's settings, its countdown and what the planner would do now. |
 | `PUT /api/v1/destinations/{id}/rollover` | Save the settings: `enabled`, `marginMinutes`, `quietStart`, `quietEnd`, `quietZone`, `obsScene`. A bad value is refused with the reason. |
-| `POST /api/v1/destinations/{id}/rollover/run` | Roll over now. Refused with a 409 if the destination is not delivering, the platform is countdown only, or a rollover ran in the last ten minutes. If the platform refuses the rollover, answers 502 with the redacted reason; the timeline and webhook record the failure too. |
+| `POST /api/v1/destinations/{id}/rollover/run` | Roll over now. Refused with a 409 if the destination is not delivering, the platform is countdown only, or a rollover ran in the last ten minutes. A run that retries a failed rollover is not held to the ten minutes, as long as the destination is still on the broadcast that rollover was replacing. If the platform refuses the rollover, answers 502 with the redacted reason; the timeline and webhook record the failure too. |
 
 ## Events
 

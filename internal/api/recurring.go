@@ -671,6 +671,13 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 			return fmt.Errorf("the destination for this show no longer exists, so its event %s cannot be "+
 				"removed from here; delete it in the platform's own studio: %w", o.PlatformEventID, err)
 		}
+		// The operator's skip checked Enabled before it got here, and the scheduler can switch the destination on
+		// in between to take this very show live. The row just read is the latest word, so the skip is refused again
+		// on it. The sweep's withdraw does not take this check: an always-on destination would never withdraw an
+		// event nothing will air.
+		if !removeRow && d.Enabled {
+			return fmt.Errorf("%w: the destination was switched on, so its event may be about to go on air", errOccurrenceRefused)
+		}
 		sb, ok := s.providers.ScheduledBroadcastsFor(d.Platform)
 		if !ok {
 			return fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, o.PlatformEventID)

@@ -73,14 +73,14 @@ func TestAPortraitRenditionAtAnotherBitrateIsNotReused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRendition: %v", err)
 	}
-	got, err := s.verticalRenditionFor(&db.Destination{SourceID: &src}, tier)
+	got, _, err := s.verticalRenditionFor(&db.Destination{SourceID: &src}, tier)
 	if err != nil {
 		t.Fatalf("verticalRenditionFor: %v", err)
 	}
 	if got == created.ID {
 		t.Errorf("reused rendition %d at %d kbps for a %d kbps tier", got, other.VideoBitrate, tier.Rendition.VideoBitrate)
 	}
-	again, err := s.verticalRenditionFor(&db.Destination{SourceID: &src}, tier)
+	again, _, err := s.verticalRenditionFor(&db.Destination{SourceID: &src}, tier)
 	if err != nil || again != got {
 		t.Errorf("the matching rendition was not reused: %d then %d (%v)", got, again, err)
 	}

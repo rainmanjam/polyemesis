@@ -29,6 +29,8 @@ type xChatStub struct {
 	streamDelay time.Duration
 	// broadcasts is what GET /2/broadcasts answers.
 	broadcasts string
+	// broadcastsDown makes GET /2/broadcasts fail with a 503, which is how a transient X outage looks.
+	broadcastsDown bool
 	// subscription is what POST /2/activity/subscriptions answers. Empty means the documented sub-42 answer.
 	subscription string
 }
@@ -54,8 +56,13 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"id":"1234567890","username":"sundaypractice"}}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/2/broadcasts":
 		st.mu.Lock()
-		b := st.broadcasts
+		b, down := st.broadcasts, st.broadcastsDown
 		st.mu.Unlock()
+		if down {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"title":"Service Unavailable","detail":"try again"}`)
+			return
+		}
 		_, _ = io.WriteString(w, b)
 	case r.Method == http.MethodPost && r.URL.Path == "/2/activity/subscriptions":
 		st.mu.Lock()
@@ -574,5 +581,50 @@ func TestXSendUsesTheToldBroadcastAndFallsBackToTheListWhenCleared(t *testing.T)
 	}
 	if n := st.countCalls("POST /2/broadcasts/B1run/chat"); n != 1 {
 		t.Errorf("sends to the listed running broadcast = %d, want 1; calls %v", n, st.recorded())
+	}
+}
+
+// TestXOwnerDoesNotHoldAFailedReadAgainstTheBroadcastForTheLongWindow (w3h tail, #34): a broadcast list read that
+// failed was remembered as a judgement, so a show this account started outside polyemesis lost its chat for the
+// whole 15-second window after one transient error. A failed read is no answer: the id is asked about again after
+// the short retry, which is still longer than the floor so a rate-limited X is not asked every second. "No running
+// broadcast" is still a judgement, and keeps the long window, so another account's chat stays cheap
+// (TestXOwnerSeesItsOwnNewBroadcastWithoutWaitingOutTheRefreshWindow).
+//
+// MUTATION, internal/chat/x.go, in owns: drop the early return on a failed read, so it falls through to the long
+// window. Observed: FAIL -- "this account's chat was dropped for the long window after one failed read".
+func TestXOwnerDoesNotHoldAFailedReadAgainstTheBroadcastForTheLongWindow(t *testing.T) {
+	st := newXChatStub(t)
+	st.broadcastsDown = true
+	now := time.Unix(1761904800, 0)
+	a, err := NewX(XConfig{
+		AccountRef: "1234567890", Token: StaticToken("user-token"), AppBearer: "app-bearer",
+		APIBase: st.srv.URL, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewX: %v", err)
+	}
+	o := &xBroadcastOwner{x: a}
+	ctx := context.Background()
+
+	if o.owns(ctx, "B2mine") {
+		t.Fatal("a broadcast was placed on a read that failed")
+	}
+	// Inside the short retry, a second line is not another read.
+	now = now.Add(2 * time.Second)
+	if o.owns(ctx, "B2mine") {
+		t.Fatal("a broadcast was placed inside the retry after a failed read")
+	}
+	// X recovers; the retry has passed, and the long window has not.
+	now = now.Add(2 * time.Second)
+	st.mu.Lock()
+	st.broadcastsDown = false
+	st.broadcasts = `{"data":[{"id":"B2mine","state":"RUNNING"}]}`
+	st.mu.Unlock()
+	if !o.owns(ctx, "B2mine") {
+		t.Fatal("this account's chat was dropped for the long window after one failed read")
+	}
+	if n := st.countCalls("GET /2/broadcasts"); n != 2 {
+		t.Errorf("broadcast reads = %d, want 2: the failed one and the retry", n)
 	}
 }
