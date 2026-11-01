@@ -163,6 +163,21 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	if err != nil {
 		t.Fatalf("create audio destination: %v", err)
 	}
+	// One upcoming recurring occurrence (#18), so the sweep of /recurring/occurrences
+	// reads a row rather than "[]" and is not counted inert. Inside the calendar's
+	// default two-week window from the real clock, which is what the handler reads.
+	// No schedule row is planted with it: a schedule would be fired by the runner, and
+	// the occurrence table has no foreign key, so the row stands on its own.
+	occID, err := store.ClaimOccurrence(scheduler.Occurrence{
+		ScheduleID: 1, DestinationID: dest.ID,
+		At: time.Now().Add(48 * time.Hour).Truncate(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("plant a recurring occurrence: %v", err)
+	}
+	if err := store.ResolveOccurrence(occID, "ledger-event-1", "Ledger show"); err != nil {
+		t.Fatalf("resolve the planted occurrence: %v", err)
+	}
 	// The sweep and the round-trip tests address these by literal URL, because
 	// the reconciliation below compares chi PATTERNS and a path built from a
 	// variable is harder to read against the route table. Assert the ids rather

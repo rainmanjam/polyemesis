@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the eighteen `GET`s among the twenty refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the nineteen `GET`s among the twenty-one refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +133,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty routes are refused outright**, for three different reasons. Masking
+**Twenty-one routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last twelve are `403` because of what
+are `403` because of what they *do*. The last thirteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -156,6 +156,7 @@ are `403` because of what they *do*. The last twelve are `403` because of what
 | `GET /library/recordings/{id}/media/{file}` | a media file inside a library recording |
 | `GET /clipper/recordings/{id}/transcript` | the verbatim transcript |
 | `GET /library/recordings/{id}/transcript` | the same, by the library's route |
+| `GET /library/recordings/{id}/transcript/export` | the same words again, as an SRT, WebVTT or JSON caption file |
 | `GET /library/search` | hits carry the segment `text`, its `context` and the `speaker` |
 | `GET /chat` | the chat overview carries the recent messages, not only each platform's connection state |
 | `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
@@ -1169,6 +1170,7 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` `PUT` `DELETE` | `/library/sessions/{id}` |
 | `GET` `PUT` | `/library/recordings/{id}` |
 | `GET` `DELETE` | `/library/recordings/{id}/transcript` |
+| `GET` | `/library/recordings/{id}/transcript/export` |
 | `PUT` | `/library/recordings/{id}/speaker` |
 | `POST` | `/library/recordings/{id}/jobs/{kind}` |
 | `GET` | `/library/recordings/{id}/media/{file}` |
@@ -1184,6 +1186,12 @@ Absent, it deletes the whole transcript; present, it deletes one track's, so a
 single bad microphone can be re-run without discarding every other track's work
 alongside it. `N` is zero-based, as track numbers are everywhere in this API,
 and a negative or non-numeric one is `400` `invalid track`.
+
+**`GET /library/recordings/{id}/transcript/export` takes `?format=srt|vtt|json`.**
+It is the transcript as a caption file, served as an attachment with
+`Cache-Control: no-store`. Any other format is `400`; a recording with no
+transcript is `404`. It carries the same words as the transcript route, so a
+`read` token is refused it the same way.
 
 #### Searching transcripts
 

@@ -1,12 +1,12 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 60,
-  "counterpartlessExcusedCeiling": 33,
+  "counterpartlessExcusedCeiling": 32,
   "differentialFloor": 8,
   "sentinelWitnessFloor": 24,
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
-  "inertCeiling": 7,
+  "inertCeiling": 6,
   "varianceExemptCeiling": 6,
   "shapeFloor": 29,
   "guardedFloor": 29,
@@ -23,7 +23,7 @@
   "partition": {
     "differential": 8,
     "invariant": 61,
-    "inertSubsetOfInvariant": 7,
+    "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
   },
@@ -2004,8 +2004,7 @@
     {
       "path": "/api/v1/recurring/occurrences",
       "pattern": "GET /api/v1/recurring/occurrences",
-      "class": "invariant",
-      "inert": true
+      "class": "invariant"
     },
     {
       "path": "/api/v1/renditions",
@@ -2356,7 +2355,7 @@
         "as": "read",
         "status": 403
       },
-      "counterpart": ""
+      "counterpart": "youtubeVerticalStatus"
     },
     {
       "route": "GET /api/v1/events",
@@ -2416,7 +2415,7 @@
         "as": "read",
         "status": 403
       },
-      "counterpart": ""
+      "counterpart": "transcriptCaptionExport"
     },
     {
       "route": "GET /api/v1/library/search",
