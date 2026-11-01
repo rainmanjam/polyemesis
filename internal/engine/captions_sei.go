@@ -142,10 +142,15 @@ func (e *Engine) closeCaptionStage(capt *destCaption) {
 // lock, which keeps it clear of the lock order the reconcile path holds.
 type captionSink struct{ e *Engine }
 
-// Deliver queues a caption on the destination's stage, if it has one. A
-// destination with no stage (a platform that is not SEI, or none registered yet)
-// drops the caption, as the inert sink did.
+// Deliver queues a caption on the destination's POST queue or SEI stage. A
+// destination with neither (none registered yet) drops the caption.
 func (s captionSink) Deliver(id int64, c transcribe.LiveCaption) {
+	// A destination posting to YouTube: stamp the cue with its release instant,
+	// which is when its video reaches YouTube, and queue it. Never blocks.
+	if q, ok := s.e.postQueues.Load(id); ok {
+		q.(*captions.PostQueue).Enqueue(time.Now(), c.Text)
+		return
+	}
 	v, ok := s.e.seiStages.Load(id)
 	if !ok {
 		return

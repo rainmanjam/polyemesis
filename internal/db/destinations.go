@@ -1430,6 +1430,11 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 	if dst.Platform.RetiredReason() != "" {
 		return nil, retiredError(dst.Platform, "a destination can no longer be created for it")
 	}
+	// A new row has no caption URL yet (the URL is stored against its id), so a
+	// create that would start it with POST captions is the go-live refusal too.
+	if dst.Enabled && sendsYouTubeCaptionPOST(dst.Platform, dst.CaptionMode) {
+		return nil, fmt.Errorf("%w: %s", ErrCaptionIngestMissing, captionIngestMissingReason)
+	}
 	if dst.AudioBitrate == 0 {
 		dst.AudioBitrate = 160
 	}

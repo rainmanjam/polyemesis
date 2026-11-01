@@ -21,6 +21,9 @@ type captionIntent struct {
 	// sig identifies the intent. It changes only when the operator saves a
 	// caption-relevant setting, which is what re-arms the switch after a degrade.
 	sig string
+	// posts maps each captioned youtube_post destination to its caption
+	// ingestion URL. It is a credential and is deliberately NOT part of sig.
+	posts map[int64]string
 }
 
 // captionIntentNow reads the programme's destinations and track. Without a store
@@ -53,6 +56,19 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 		}
 		if !captions.Allowed(string(d.Platform), mode, captions.FacebookSEIEnabled()) {
 			continue
+		}
+		if mode == captions.ModeYouTubePOST {
+			// Without a URL for the current key there is nowhere to post, so the
+			// destination is not a caption target at all. db.SetDestinationEnabled
+			// already refuses to start one, so this is a URL lost mid-show.
+			u, err := e.store.CaptionIngestURL(d.ID, d.StreamKey)
+			if err != nil || u == "" {
+				continue
+			}
+			if in.posts == nil {
+				in.posts = map[int64]string{}
+			}
+			in.posts[d.ID] = u
 		}
 		in.targets = append(in.targets, captions.CueTarget{
 			ID:    d.ID,

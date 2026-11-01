@@ -15,11 +15,11 @@ import (
 // YouTubePoster sends caption text to a YouTube caption ingestion URL, the HTTP
 // POST path the #8 spike found documented.
 //
-// PROVISIONAL: the request body is plain caption text with the sequence number
-// in the query. The URL and the sequence parameter follow the documented shape,
-// but the body encoding has not been checked against a live ingest, so a
-// platform may reject it. The embedded CEA-608 path is the working fallback
-// until a live check passes.
+// PROVISIONAL: the body is whatever the caller passes, which in production is
+// YouTubeCaptionBody (the one function that decides the format), and the
+// sequence number goes in the query. Neither is documented by Google (docs-youtube
+// C8), so a live ingest may reject them. The embedded CEA-608 path is the working
+// fallback until a live check passes.
 type YouTubePoster struct {
 	client *http.Client
 	// allowHost decides whether the ingest host may receive the signed request.
@@ -45,7 +45,7 @@ func NewYouTubePoster(client *http.Client, ingestionURL string) *YouTubePoster {
 	return &YouTubePoster{client: client, ingest: ingestionURL, allowHost: ingestHostAllowed}
 }
 
-// Post sends one batch of caption text with its sequence number. The sequence
+// Post sends one request body with its sequence number. The sequence
 // must increase by one per batch, which the ingest uses to order them.
 func (p *YouTubePoster) Post(ctx context.Context, seq int, text string) error {
 	u, err := url.Parse(p.ingest)

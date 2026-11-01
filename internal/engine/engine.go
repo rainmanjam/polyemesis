@@ -115,7 +115,7 @@ var stopTimeout = 12 * time.Second
 //	2  previewMu                -- preview lifecycle
 //	3  selMu                    -- the selector tier
 //	4  mu                       -- the engine's maps and children
-//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu, healthMu -- leaves: take nothing while holding one
+//	5  stopMu, heldMu, sinkMu, levelRespawnMu, keyMu, healthMu, captPostMu -- leaves: take nothing while holding one
 //
 // previewMu before selMu is what StopWithin does, and nothing takes previewMu
 // under selMu. Atomics and the locks inside other types (the hub, the
@@ -127,6 +127,16 @@ type Engine struct {
 	// seiStages maps a destination id to its running SEI stage (captions_sei.go).
 	// The caption sink looks stages up here from the CueRouter's timers.
 	seiStages sync.Map
+	// postQueues maps a destination id to its YouTube caption POST queue
+	// (captions_post.go), looked up by the caption sink the same lock-free way.
+	// captPosts is the owner's view of the same queues, under captPostMu, which is
+	// a leaf: nothing else is taken while it is held. captionPosterFor builds a
+	// poster from a URL; nil is the real YouTube poster, and tests replace it.
+	postQueues       sync.Map
+	captPostMu       sync.Mutex
+	captPosts        map[int64]*destPoster
+	captPostWarned   sync.Map
+	captionPosterFor func(ingestURL string) captions.CaptionPoster
 
 	// sourceID is the programme this engine owns. One engine per source: the
 	// hub, the ingest, the recorder, the meters and the whole destination and
@@ -1310,6 +1320,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// waiting for it before starting everything else.
 	wg.Add(1)
 	go func() { defer wg.Done(); e.teardownCaptions(capt, captPort, captHub, captVTT) }()
+	e.closeCaptionPosters()
 	stop(recorder)
 	if recorder != nil {
 		e.streamRecording(false, "the programme was stopped")
@@ -5028,6 +5039,7 @@ func (e *Engine) reconcileCaptions() {
 	} else {
 		e.applyCaptionIntent(in)
 		e.syncCaptionRoute(in.targets)
+		e.syncCaptionPosters(in.posts)
 	}
 
 	e.mu.RLock()

@@ -97,6 +97,11 @@ func TestACaptionIngestURLIsRefusedWithoutASecretBox(t *testing.T) {
 func TestADestinationThatPostsCaptionsCannotStartWithoutItsCaptionURL(t *testing.T) {
 	d := boxedCaptionDB(t)
 	dst := captionPOSTDest(t, d)
+	on := captionDest(PlatformYouTube, 30)
+	on.CaptionMode, on.Enabled = "youtube_post", true
+	if _, err := d.CreateDestination(on); !errors.Is(err, ErrCaptionIngestMissing) {
+		t.Fatalf("creating it already on = %v, want ErrCaptionIngestMissing", err)
+	}
 	err := d.SetDestinationEnabled(dst.ID, true)
 	if !errors.Is(err, ErrCaptionIngestMissing) {
 		t.Fatalf("start with no caption URL = %v, want ErrCaptionIngestMissing", err)
