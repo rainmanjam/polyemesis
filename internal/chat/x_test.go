@@ -24,6 +24,9 @@ type xChatStub struct {
 	srv   *httptest.Server
 	// streamLines is what GET /2/activity/stream writes, one JSON document per line.
 	streamLines []string
+	// streamDelay holds the stream open before its first line, so a test can prove the stream outlives a short
+	// client timeout.
+	streamDelay time.Duration
 	// broadcasts is what GET /2/broadcasts answers.
 	broadcasts string
 }
@@ -55,6 +58,9 @@ func (st *xChatStub) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":{"deleted":true}}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/2/activity/stream":
 		w.Header().Set("Content-Type", "application/json")
+		if st.streamDelay > 0 {
+			time.Sleep(st.streamDelay)
+		}
 		for _, ln := range st.streamLines {
 			_, _ = io.WriteString(w, ln+"\n")
 		}
@@ -276,7 +282,7 @@ func TestXRunReadsBroadcastChatFromTheActivityStream(t *testing.T) {
 	st := newXChatStub(t)
 	st.streamLines = []string{
 		`{"data":{"event_type":"follow.follow","event_uuid":"1","created_at":"2026-10-31T12:00:00.000Z","payload":{}}}`,
-		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","created_at":"2026-10-31T12:00:01.000Z","payload":{"id":"1761904801000","broadcast_id":"B1run","text":"hi from chat","author_id":"777","author_username":"viewer","author_name":"Viewer"}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","created_at":"2026-10-31T12:00:01.000Z","payload":{"message_id":"1761904801000","broadcast_id":"B1run","message":"hi from chat","is_subscriber":false,"is_moderator":false,"author":{"data":{"id":"777","username":"viewer","name":"Viewer"}}}}}`,
 	}
 	a := st.adapter(t, time.Unix(1761904800, 0))
 
@@ -320,6 +326,38 @@ func TestXRunReadsBroadcastChatFromTheActivityStream(t *testing.T) {
 	}
 }
 
+// TestXRunKeepsTheActivityStreamOpenPastTheControlClientTimeout: the control client carries a 30 second
+// whole-request Timeout, and Go applies that to reading the response body too. The activity stream is long-lived,
+// so the same client cut it every 30 seconds, which tore the chat run down and rebuilt its subscription over and over.
+// The stream must outlive the control client's timeout. The test uses a 50ms timeout and a stream that stays silent
+// for 200ms before its first chat line, so the old client would drop the line.
+func TestXRunKeepsTheActivityStreamOpenPastTheControlClientTimeout(t *testing.T) {
+	st := newXChatStub(t)
+	st.streamDelay = 200 * time.Millisecond
+	st.streamLines = []string{
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","payload":{"message_id":"M9","broadcast_id":"B1run","message":"still here","author":{"data":{"id":"5","name":"Late"}}}}}`,
+	}
+	a := st.adapter(t, time.Unix(1761904800, 0))
+	a.cfg.HTTP = &http.Client{Timeout: 50 * time.Millisecond}
+
+	var got []Message
+	var mu sync.Mutex
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = a.Run(ctx, SinkFunc(func(m Message) {
+		mu.Lock()
+		got = append(got, m)
+		mu.Unlock()
+		cancel()
+	}))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].Text != "still here" {
+		t.Fatalf("delivered %+v, want the chat line that arrives after the control timeout; the stream was cut", got)
+	}
+}
+
 // TestXRunDeliversOnlyChatFromThisAccountsRunningBroadcast: the activity stream
 // belongs to the whole app, not to one account, so a second connected X account,
 // or a subscription left behind by an earlier run, puts other broadcasts' chat
@@ -330,9 +368,9 @@ func TestXRunReadsBroadcastChatFromTheActivityStream(t *testing.T) {
 func TestXRunDeliversOnlyChatFromThisAccountsRunningBroadcast(t *testing.T) {
 	st := newXChatStub(t)
 	st.streamLines = []string{
-		`{"data":{"event_type":"broadcast.chat","event_uuid":"1","payload":{"id":"1761904801001","broadcast_id":"B9other","text":"from someone else's show","author_id":"1","author_name":"Other"}}}`,
-		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","payload":{"id":"1761904801002","text":"no broadcast named","author_id":"2","author_name":"Nobody"}}}`,
-		`{"data":{"event_type":"broadcast.chat","event_uuid":"3","payload":{"id":"1761904801003","broadcast_id":"B1run","text":"mine","author_id":"3","author_name":"Mine"}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"1","payload":{"message_id":"1761904801001","broadcast_id":"B9other","message":"from someone else's show","author":{"data":{"id":"1","name":"Other"}}}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"2","payload":{"message_id":"1761904801002","message":"no broadcast named","author":{"data":{"id":"2","name":"Nobody"}}}}}`,
+		`{"data":{"event_type":"broadcast.chat","event_uuid":"3","payload":{"message_id":"1761904801003","broadcast_id":"B1run","message":"mine","author":{"data":{"id":"3","name":"Mine"}}}}}`,
 	}
 	a := st.adapter(t, time.Unix(1761904800, 0))
 

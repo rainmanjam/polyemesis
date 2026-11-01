@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,6 +152,13 @@ func (f *rolloverFake) insert(w http.ResponseWriter, r *http.Request) {
 		f.refuseInsert = ""
 		return
 	}
+	// YouTube reads the monitor flag only from the nested contentDetails.monitorStream object. A flat
+	// contentDetails.enableMonitorStream key is ignored, so the replacement would keep the default monitor
+	// stream on. The fake therefore reads the nested key and fails the test when the flat key is sent.
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		f.t.Errorf("insert body: %v", err)
+	}
 	var body struct {
 		Snippet struct {
 			Title              string `json:"title"`
@@ -161,18 +169,33 @@ func (f *rolloverFake) insert(w http.ResponseWriter, r *http.Request) {
 			PrivacyStatus string `json:"privacyStatus"`
 		} `json:"status"`
 		ContentDetails struct {
-			EnableMonitorStream bool `json:"enableMonitorStream"`
-			EnableAutoStart     bool `json:"enableAutoStart"`
+			EnableAutoStart bool `json:"enableAutoStart"`
+			MonitorStream   *struct {
+				EnableMonitorStream *bool `json:"enableMonitorStream"`
+			} `json:"monitorStream"`
 		} `json:"contentDetails"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		f.t.Errorf("insert body: %v", err)
+	}
+	var flat struct {
+		ContentDetails map[string]json.RawMessage `json:"contentDetails"`
+	}
+	_ = json.Unmarshal(raw, &flat)
+	if _, ok := flat.ContentDetails["enableMonitorStream"]; ok {
+		f.t.Errorf("the insert body sent a flat contentDetails.enableMonitorStream, which YouTube ignores")
+	}
+	monitor := false
+	if body.ContentDetails.MonitorStream == nil || body.ContentDetails.MonitorStream.EnableMonitorStream == nil {
+		f.t.Errorf("the insert body must nest enableMonitorStream under contentDetails.monitorStream")
+	} else {
+		monitor = *body.ContentDetails.MonitorStream.EnableMonitorStream
 	}
 	f.nextID++
 	id := fmt.Sprintf("new-%d", f.nextID)
 	f.broadcasts[id] = &fakeBroadcast{
 		id: id, title: body.Snippet.Title, description: body.Snippet.Description, privacy: body.Status.PrivacyStatus,
-		status: "created", monitor: body.ContentDetails.EnableMonitorStream, autoStart: body.ContentDetails.EnableAutoStart,
+		status: "created", monitor: monitor, autoStart: body.ContentDetails.EnableAutoStart,
 		scheduledStart: body.Snippet.ScheduledStartTime,
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"id": id})
@@ -573,5 +596,26 @@ func TestASessionWithNoActualStartYetReportsZero(t *testing.T) {
 	}
 	if !got.IsZero() {
 		t.Errorf("session start = %s, want zero until YouTube reports one", got)
+	}
+}
+
+// TestAReplacementWhoseSourcePrivacyIsUnknownStaysPrivate: when the source read returns no privacyStatus, the
+// replacement used to fall back to public. A show that was private or unlisted would then start its next session
+// with a public event page, and nothing in the rollover ever corrects that before go-live. The rollover must fail
+// closed to private when it cannot read the privacy it is copying.
+//
+// MUTATION, internal/oauth/youtube_rollover.go in RollOverBroadcast: restore the fallback to ytScheduledPrivacy.
+// Observed: FAIL -- privacy = "public".
+func TestAReplacementWhoseSourcePrivacyIsUnknownStaysPrivate(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	f.broadcasts["old-1"].privacy = ""
+	y := f.client()
+	out, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	if err != nil {
+		t.Fatalf("rollover: %v", err)
+	}
+	if got := f.broadcasts[out.NewBroadcastID].privacy; got != "private" {
+		t.Errorf("privacy = %q, want private: an unreadable source privacy must not widen to public", got)
 	}
 }

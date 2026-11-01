@@ -331,6 +331,18 @@ func (x *XAdapter) removeSubscription(subID string) {
 	_ = x.xCall(ctx, http.MethodDelete, "/2/activity/subscriptions/"+url.PathEscape(subID), false, nil, nil)
 }
 
+// streamClient is the HTTP client for the long-lived activity stream. The control client carries a whole-request
+// Timeout, and Go applies that to reading the response body as well, so it would cut the stream every 30 seconds.
+// The stream keeps the control client's transport and redirect and cookie handling, but has no overall deadline:
+// the run's context ends it.
+func (x *XAdapter) streamClient() *http.Client {
+	return &http.Client{
+		Transport:     x.cfg.HTTP.Transport,
+		CheckRedirect: x.cfg.HTTP.CheckRedirect,
+		Jar:           x.cfg.HTTP.Jar,
+	}
+}
+
 // streamChat reads the app-only activity stream line by line. A broadcast.chat
 // event becomes a Message; every other event is skipped.
 func (x *XAdapter) streamChat(ctx context.Context, sink Sink, owner *xBroadcastOwner) error {
@@ -340,7 +352,7 @@ func (x *XAdapter) streamChat(ctx context.Context, sink Sink, owner *xBroadcastO
 	}
 	req.Header.Set("Authorization", "Bearer "+x.cfg.AppBearer)
 	req.Header.Set("Accept", "application/json")
-	resp, err := x.cfg.HTTP.Do(req)
+	resp, err := x.streamClient().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -382,16 +394,21 @@ type xChatEvent struct {
 	} `json:"data"`
 }
 
-// xChatPayload is the broadcast.chat payload. PROVISIONAL; see the file header.
+// xChatPayload is the broadcast.chat payload in the documented shape: the text is in message, the message id is
+// message_id, and the author sits under author.data. The documented payload has no created time, so the arrival time
+// stands in for it. PROVISIONAL against live X: see the file header.
 type xChatPayload struct {
-	ID             string `json:"id"`
-	BroadcastID    string `json:"broadcast_id"`
-	Text           string `json:"text"`
-	AuthorID       string `json:"author_id"`
-	AuthorUsername string `json:"author_username"`
-	AuthorName     string `json:"author_name"`
-	CreatedAtMS    string `json:"created_at_ms"`
-	ReplyTo        string `json:"reply_to"`
+	MessageID   string `json:"message_id"`
+	BroadcastID string `json:"broadcast_id"`
+	Message     string `json:"message"`
+	ReplyTo     string `json:"reply_to"`
+	Author      struct {
+		Data struct {
+			ID       string `json:"id"`
+			Username string `json:"username"`
+			Name     string `json:"name"`
+		} `json:"data"`
+	} `json:"author"`
 }
 
 // decodeChat turns one stream line into a Message. Anything that is not a
@@ -402,28 +419,25 @@ func (x *XAdapter) decodeChat(line []byte) (Message, string, bool) {
 		return Message{}, "", false
 	}
 	var p xChatPayload
-	if err := json.Unmarshal(ev.Data.Payload, &p); err != nil || strings.TrimSpace(p.Text) == "" {
+	if err := json.Unmarshal(ev.Data.Payload, &p); err != nil || strings.TrimSpace(p.Message) == "" {
 		return Message{}, "", false
 	}
 	at := x.cfg.Now()
-	if ms, err := strconv.ParseInt(p.CreatedAtMS, 10, 64); err == nil && ms > 0 {
-		at = time.UnixMilli(ms)
-	}
-	name := p.AuthorName
+	name := p.Author.Data.Name
 	if name == "" {
-		name = p.AuthorUsername
+		name = p.Author.Data.Username
 	}
-	id := p.ID
+	id := p.MessageID
 	if id == "" {
-		id = "syn-x-" + p.AuthorID + "-" + strconv.FormatInt(at.UnixNano(), 10)
+		id = "syn-x-" + p.Author.Data.ID + "-" + strconv.FormatInt(at.UnixNano(), 10)
 	}
 	return Message{
 		ID:        id,
 		Platform:  db.PlatformX,
 		Account:   x.cfg.AccountRef,
 		Channel:   x.cfg.Channel,
-		Author:    Author{ID: p.AuthorID, Name: name},
-		Text:      p.Text,
+		Author:    Author{ID: p.Author.Data.ID, Name: name},
+		Text:      p.Message,
 		At:        at,
 		ReplyToID: p.ReplyTo,
 	}, p.BroadcastID, true

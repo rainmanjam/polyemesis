@@ -319,12 +319,21 @@ func (y *YouTube) streamFor(ctx context.Context, accessToken string, opts Ingest
 	return y.createStream(ctx, accessToken, opts.IngestLabel, false)
 }
 
-// listStreams reads the channel's liveStreams.
+// ytStreamsMaxPages bounds the liveStreams.list walk. A channel with many streams
+// pages through them, and the cap keeps a misbehaving nextPageToken from looping
+// forever.
+const ytStreamsMaxPages = 20
+
+// listStreams reads every page of the channel's liveStreams. One request returns at
+// most 50 streams, and a destination's held stream can sit past the first page.
 func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLiveStream, error) {
-	var list struct {
-		Items []ytLiveStream `json:"items"`
-	}
-	err := getJSON(ctx,
+	var all []ytLiveStream
+	pageToken := ""
+	for page := 0; page < ytStreamsMaxPages; page++ {
+		var list struct {
+			NextPageToken string         `json:"nextPageToken"`
+			Items         []ytLiveStream `json:"items"`
+		}
 		// part=id was ADDED to a shipping path, and it is worth naming why the
 		// risk is asymmetric. The scheduled path needs the stream's id to bind
 		// a broadcast to it; without id in the part list there is no documented
@@ -334,12 +343,20 @@ func (y *YouTube) listStreams(ctx context.Context, accessToken string) ([]ytLive
 		// additive -- it cannot remove snippet or cdn, which is what this call
 		// already depended on. Resolve by: one live liveStreams.list without
 		// part=id, recording whether id is present.
-		y.apiEndpoint()+ytStreamsPath+"?part=id,snippet,cdn&mine=true&maxResults=50",
-		accessToken, nil, &list)
-	if err != nil {
-		return nil, err
+		target := y.apiEndpoint() + ytStreamsPath + "?part=id,snippet,cdn&mine=true&maxResults=50"
+		if pageToken != "" {
+			target += "&pageToken=" + url.QueryEscape(pageToken)
+		}
+		if err := getJSON(ctx, target, accessToken, nil, &list); err != nil {
+			return nil, err
+		}
+		all = append(all, list.Items...)
+		if list.NextPageToken == "" || list.NextPageToken == pageToken {
+			return all, nil
+		}
+		pageToken = list.NextPageToken
 	}
-	return list.Items, nil
+	return all, nil
 }
 
 const (

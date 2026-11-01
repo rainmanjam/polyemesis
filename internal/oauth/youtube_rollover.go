@@ -119,7 +119,9 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 		privacy = src.Privacy
 	}
 	if privacy == "" {
-		privacy = ytScheduledPrivacy
+		// Fail closed. A source whose privacy cannot be read must not widen to public, so the
+		// replacement starts private and a person sets it deliberately.
+		privacy = "private"
 	}
 
 	newID, err := y.createRolloverBroadcast(ctx, accessToken, rolloverBody{
@@ -253,9 +255,11 @@ func (y *YouTube) createRolloverBroadcast(ctx context.Context, accessToken strin
 			"scheduledStartTime": b.At.UTC().Format(time.RFC3339),
 		},
 		"status": map[string]any{"privacyStatus": b.Privacy},
+		// The monitor flag is nested under monitorStream, the same shape lifecycle.go and youtube_broadcast.go
+		// use. A flat contentDetails.enableMonitorStream key is ignored by YouTube.
 		"contentDetails": map[string]any{
-			"enableMonitorStream": false,
-			"enableAutoStart":     b.EnableAutoStart,
+			"monitorStream":   map[string]any{"enableMonitorStream": false},
+			"enableAutoStart": b.EnableAutoStart,
 		},
 	}
 	var created ytBroadcast
