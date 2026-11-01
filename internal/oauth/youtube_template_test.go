@@ -204,3 +204,33 @@ func TestYouTubeCancelsAScheduledBroadcastByIdOnly(t *testing.T) {
 		t.Fatalf("cancel did not delete bcast-9: %+v", del)
 	}
 }
+
+// THE CANCEL OF A TEMPLATE EVENT MUST NOT DELETE A BROADCAST THAT IS ON AIR. The template sweep
+// reaches the platform through CancelScheduledBroadcast, and liveBroadcasts.delete would remove a live
+// show's page with no further question. The delete is made only once the broadcast is read back as
+// created or ready, which is the state a never-live template event is in.
+func TestYouTubeRefusesToCancelATemplateEventThatHasAlreadyGoneLive(t *testing.T) {
+	var log []capture
+	srv := httptest.NewServer(recordAll(t, &log, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET " + ytBroadcastsPath:
+			io.WriteString(w, `{"items":[{"id":"bcast-9","snippet":{"title":"On air"},
+				"status":{"lifeCycleStatus":"live"}}]}`)
+		case "DELETE " + ytBroadcastsPath:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	y := NewYouTube(WithBaseURL(srv.URL))
+
+	if err := y.CancelScheduledBroadcast(context.Background(), "tok", "bcast-9"); err == nil {
+		t.Fatalf("cancel of a live broadcast succeeded; it must be refused")
+	}
+	if del := findCapture(log, "DELETE", ytBroadcastsPath); del != nil {
+		t.Fatalf("a live broadcast was sent to liveBroadcasts.delete: %+v", del)
+	}
+}

@@ -37,7 +37,7 @@ const (
 		WHERE occurrence_at >= ? AND occurrence_at < ? AND state IN ('upcoming', 'skipped')
 		ORDER BY occurrence_at, destination_id`
 	occurrenceOpenQuery = `SELECT ` + occurrenceColumns + ` FROM recurring_occurrences
-		WHERE state IN ('pending', 'upcoming') ORDER BY occurrence_at, id`
+		WHERE state IN ('pending', 'upcoming', 'stranded') ORDER BY occurrence_at, id`
 )
 
 // SaveBroadcastTemplate creates or updates the template for one schedule. It writes the text fields
@@ -162,6 +162,14 @@ func (d *DB) ResolveOccurrence(id int64, platformEventID, title string) error {
 		string(scheduler.OccurrenceUpcoming), platformEventID, title)
 }
 
+// StrandOccurrence records a platform event that exists without the operator's title, and whose cancel
+// was refused. The id is stored so the sweep can retry the cancel; the title stays empty, which is the
+// truth about the event. Used only by createTemplateEvent's failure path.
+func (d *DB) StrandOccurrence(id int64, platformEventID string) error {
+	return d.updateOccurrence(id, `state=?, platform_event_id=?, title=?`,
+		string(scheduler.OccurrenceStranded), platformEventID, "")
+}
+
 // SetOccurrenceState moves an occurrence to a new state.
 func (d *DB) SetOccurrenceState(id int64, state scheduler.OccurrenceState) error {
 	return d.updateOccurrence(id, `state=?`, string(state))
@@ -274,4 +282,18 @@ func scanOccurrence(s interface{ Scan(...any) error }) (*scheduler.Occurrence, e
 	o.CreatedAt = time.Unix(created, 0).UTC()
 	o.UpdatedAt = time.Unix(upd, 0).UTC()
 	return &o, nil
+}
+
+// ClaimGoLive records that the go-live title for one show was attempted on one destination. It returns
+// false when that show was already claimed, which is the signal that the write has been made and must
+// not be made again. The unique key does the compare-and-set, as ClaimOccurrence does.
+func (d *DB) ClaimGoLive(destinationID, scheduleID int64, at time.Time) (bool, error) {
+	res, err := d.sql.Exec(`INSERT INTO recurring_go_live (destination_id, schedule_id, occurrence_at, created_at)
+		VALUES (?,?,?,?) ON CONFLICT (destination_id, schedule_id, occurrence_at) DO NOTHING`,
+		destinationID, scheduleID, at.UTC().Unix(), time.Now().Unix())
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
 }

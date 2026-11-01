@@ -1,7 +1,8 @@
 package db
 
 // MigrateWave3RecurringTemplates creates the #18 recurring-events tables: one broadcast template per
-// start schedule, and one row per occurrence per destination that a look-ahead has created.
+// start schedule, one row per occurrence per destination that a look-ahead has created, and one row per
+// Twitch or Kick show whose go-live title was attempted.
 //
 // Both tables are CREATE TABLE IF NOT EXISTS, run on every boot, so the body is idempotent and the
 // schema version does not move: an older binary never reads these tables, so there is nothing it
@@ -42,5 +43,19 @@ func (d *DB) MigrateWave3RecurringTemplates() error {
 		return err
 	}
 	_, err = d.sql.Exec(`CREATE INDEX IF NOT EXISTS recurring_occurrences_at ON recurring_occurrences (occurrence_at)`)
+	if err != nil {
+		return err
+	}
+	// One row per (destination, schedule, show) whose go-live title was attempted. Twitch and Kick
+	// have no event to create, so this row is the only record that the title was written for a show.
+	// It is the claim: the write happens once, and a restart does not write it again over an
+	// operator's own edit.
+	_, err = d.sql.Exec(`CREATE TABLE IF NOT EXISTS recurring_go_live (
+		destination_id INTEGER NOT NULL,
+		schedule_id    INTEGER NOT NULL,
+		occurrence_at  INTEGER NOT NULL,
+		created_at     INTEGER NOT NULL,
+		PRIMARY KEY (destination_id, schedule_id, occurrence_at)
+	)`)
 	return err
 }

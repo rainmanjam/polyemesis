@@ -223,6 +223,10 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 			writeStoreError(w, err)
 			return
 		}
+		if errors.Is(err, errOccurrenceNotSkippable) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		writeError(w, http.StatusBadGateway, "the event could not be cancelled: "+err.Error())
 		return
 	}

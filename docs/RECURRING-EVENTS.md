@@ -8,7 +8,7 @@ before it starts.
 
 > **Status.** The templates, the look-ahead and the single-occurrence skip and
 > retitle are built and tested against fakes. Only YouTube creates events
-> today. The calendar screen is not in this build yet; the same data is served
+> today. Twitch and Kick take the template's title and category at go-live. The calendar screen is not in this build yet; the same data is served
 > over the API described below. Items marked PROVISIONAL have not been checked
 > against a live platform account.
 
@@ -29,12 +29,20 @@ A template belongs to one start schedule. A stop schedule cannot carry one.
 
 Every five minutes, and once when the server starts, the look-ahead:
 
-1. Works out the next `lookahead` occurrences of each enabled start schedule
-   that has a template.
-2. For each destination that schedule targets, creates any occurrence that does
-   not yet have an event. Each event is created scheduled, titled from the
-   template, given the thumbnail, and then recorded. If the title write fails,
-   the new event is cancelled, so no event goes public with a placeholder name.
+1. Walks forward through the occurrences of each enabled start schedule that
+   has a template, and counts the first `lookahead` of them that are **not
+   skipped**. A skipped occurrence does not use up a slot: the occurrence after
+   the window takes its place, so the look-ahead always keeps that many shows
+   created.
+2. For each destination that schedule targets, creates any counted occurrence
+   that does not yet have an event. Each event is created scheduled, titled from
+   the template, given the thumbnail, and then recorded. If the title write
+   fails, the new event is cancelled, so no event goes public with a placeholder
+   name. If the title write fails and the cancel is refused too, the event's id
+   is kept as **stranded**: it is not listed as a show and does not count
+   toward the look-ahead, and the cancel is retried on every pass until it
+   succeeds. Its title is empty, which is the truth about it, and it is not
+   presented as an upcoming show.
 3. Points the destination's go-live at the **first occurrence that is not
    skipped**. When the show starts, its stream key and that event are the ones
    used. The stream does not depend on the look-ahead: if an event could not be
@@ -45,17 +53,41 @@ new event can issue a new stream key. Such a destination is skipped until it
 is off air.
 
 Platforms that cannot title a scheduled event are not given template events.
-Facebook is in this group until its Page API is checked (PROVISIONAL). Twitch
-and Kick have no scheduled events, and X has none in this build. Applying the
-template's title and category to those platforms at go-live is not wired yet,
-so for them the template has no effect today.
+Facebook is in this group until its Page API is checked (PROVISIONAL). X has no
+scheduled-event create in this build.
+
+## Twitch and Kick at go-live
+
+Twitch and Kick have no scheduled event, so the template reaches them when the
+show starts instead:
+
+- Every 30 seconds the server looks for a template-bearing start schedule whose
+  show began in the last 30 minutes, and that targets an enabled Twitch or Kick
+  destination.
+- It writes the rendered title and the template's category to that channel,
+  through the same metadata write the go-live composer uses. It does this **once
+  per show**: the attempt is recorded before the write, so a restart does not
+  write it again over an operator's own edit.
+- A destination turned on by hand long after its show started is not written.
+  The template title is not sent to a destination the operator started, after
+  the show's window has closed.
+- The template's description is not sent. Twitch has no stream description, and
+  Kick's live broadcast has none either.
+- A refused write, or a category the platform cannot find, is logged as a
+  warning with the platform's own words. It is not retried for the same show.
+  Set the title and category in the composer if one of them did not land.
 
 ## Skipping, retitling and deleting
 
 - **Skip an occurrence** (`POST /api/v1/recurring/occurrences/{id}/skip`)
   deletes that occurrence's platform event and records it as skipped, so the
-  look-ahead does not create it again. The schedule still starts the
-  destinations at that time. To stop the show outright, switch the schedule off.
+  look-ahead does not create it again. The look-ahead then creates the occurrence
+  after the window, so the count of created shows stays at `lookahead`. The
+  schedule still starts the destinations at that time. To stop the show outright,
+  switch the schedule off.
+  A skip is **refused with 409** for a show whose start has passed, and for a
+  destination that is on air now. Nothing is cancelled in that case. A show that
+  has started may be the live broadcast, or the page of a show that aired.
 - **Retitle one occurrence** (`POST /api/v1/recurring/occurrences/{id}/title`)
   changes the title of that event only. The template still applies to every
   other occurrence.
@@ -69,6 +101,15 @@ An event that cannot be cancelled keeps its record, so the next pass tries
 again. If its destination has been deleted too, the event cannot be reached
 from here, and the error names it so it can be removed in the platform's own
 studio.
+
+A template or schedule that disappears cancels only the events of shows that
+have not started, on a destination that is not on air. For a show that has
+started, or whose destination is on air, the record is dropped and the platform
+event is left alone: that event may be the live broadcast or the page of a show
+that aired, and removing it is the operator's decision.
+
+On YouTube, a template event is deleted only while YouTube reports it as
+`created` or `ready`. A broadcast that has gone live is refused and kept.
 
 ## API
 
@@ -93,6 +134,11 @@ rules.
   video id, but it has not been checked on a live channel.
 - **Facebook.** PROVISIONAL. Not given template events until its Page API
   accepts a titled scheduled video.
+- **Twitch.** Title and category written at go-live, once per show. No
+  description. Live verification is pending: no Twitch account was used.
+- **Kick.** Title and category written at go-live, once per show. No description,
+  because Kick's live broadcast has none. A category Kick cannot match is a
+  warning, and the title still lands.
 - **X.** Not yet. X has no scheduled-event create in this build, and it can
   join the look-ahead once it implements the same editor capability YouTube
   does.

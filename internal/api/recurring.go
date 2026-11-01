@@ -60,10 +60,13 @@ const (
 	templateCallTimeout = 30 * time.Second
 )
 
-// RecurringLoop runs the look-ahead until ctx ends. Started beside PreannounceLoop.
+// RecurringLoop runs the look-ahead until ctx ends, and the go-live title write for Twitch and Kick
+// (recurring_golive.go) on its own, faster tick. Started beside PreannounceLoop.
 func (s *Server) RecurringLoop(ctx context.Context) {
 	tick := time.NewTicker(recurringTick)
 	defer tick.Stop()
+	golive := time.NewTicker(goLiveTick)
+	defer golive.Stop()
 	// One sweep before the first tick, for the same reason PreannounceLoop does.
 	s.recurringOnce(ctx, time.Now())
 	for {
@@ -72,6 +75,8 @@ func (s *Server) RecurringLoop(ctx context.Context) {
 			return
 		case <-tick.C:
 			s.recurringOnce(ctx, time.Now())
+		case <-golive.C:
+			s.goLiveTemplatesOnce(ctx, time.Now())
 		}
 	}
 }
@@ -111,10 +116,6 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 		if !ok || !sc.Enabled || sc.Action != scheduler.ActionStart {
 			continue
 		}
-		planned := scheduler.Occurrences(sc, now, tpl.Lookahead)
-		if len(planned) == 0 {
-			continue
-		}
 		for _, d := range dests {
 			if !scheduleTargets(sc, d.ID) || d.AccountID == nil || d.Enabled {
 				continue
@@ -127,23 +128,44 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 			if !ok {
 				continue
 			}
-			s.lookaheadFor(ctx, ed, tpl, sc, d, planned, now)
+			s.lookaheadFor(ctx, ed, tpl, sc, d, now)
 		}
 	}
 }
 
-// lookaheadFor brings one destination's planned occurrences into line with the record. It walks them
-// in time order and creates whatever is missing. The go-live mirror is set to the first occurrence
-// that is not skipped, and it is re-asserted every sweep so it follows a skip or a passed show.
+// lookaheadWalkLimit bounds how many instants one destination's look-ahead walks while it looks for
+// N that are not skipped. Four times the largest look-ahead: a run of skips longer than that is an
+// operator who removed the whole window, and the walk stops there rather than running on.
+const lookaheadWalkLimit = 4 * scheduler.MaxLookahead
+
+// lookaheadFor brings one destination's next N occurrences into line with the record. A skipped
+// occurrence does not count toward N: the walk passes over it and the occurrence after the window is
+// the one that fills the slot, so the operator always has N shows created ahead of time. A skipped
+// occurrence is never created again. The go-live mirror is set to the first counted occurrence, and
+// it is re-asserted every sweep so it follows a skip or a passed show.
 func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl scheduler.BroadcastTemplate,
-	sc scheduler.Schedule, d *db.Destination, planned []time.Time, now time.Time) {
+	sc scheduler.Schedule, d *db.Destination, now time.Time) {
+	sc = sc.Normalized()
+	if _, err := sc.Location(); err != nil {
+		return
+	}
 	mirrored := false
-	for _, at := range planned {
+	counted := 0
+	cursor := now
+	for step := 0; counted < tpl.Lookahead && step < lookaheadWalkLimit; step++ {
+		at, ok := scheduler.Next(sc, cursor)
+		if !ok {
+			break
+		}
+		cursor = at
 		occ, err := s.store.OccurrenceFor(sc.ID, d.ID, at)
-		switch {
-		case err == nil && occ.State == scheduler.OccurrenceSkipped:
-			// The operator removed this one. It is neither created nor mirrored.
+		if err == nil && occ.State == scheduler.OccurrenceSkipped {
+			// The operator removed this one. It is neither created nor mirrored, and it does not use a
+			// slot, so the walk goes on to the next instant to fill it.
 			continue
+		}
+		counted++
+		switch {
 		case err == nil && occ.State == scheduler.OccurrenceUpcoming:
 			if !mirrored {
 				s.pointGoLiveAt(d, sc, at, occ.PlatformEventID, nil, now)
@@ -151,7 +173,8 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			}
 			continue
 		case err == nil:
-			// Pending: another sweep is inside its create. Nothing to mirror yet.
+			// Pending or stranded: another sweep is inside its create, or the cancel is being retried.
+			// It holds its slot and nothing is mirrored for it.
 			continue
 		case !errors.Is(err, db.ErrNotFound):
 			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", err)
@@ -247,9 +270,16 @@ func (s *Server) createTemplateEvent(ctx context.Context, ed oauth.ScheduledEdit
 				"destination", d.Name, "schedule", sc.Name, "err", err)
 			return nil, false
 		}
-		_ = s.store.ResolveOccurrence(claimID, b.ID, "")
+		// NOT ResolveOccurrence: that would record an upcoming show with an empty title. The row is
+		// stranded instead, which keeps the event id so reconcileOccurrences retries the cancel every
+		// sweep, and which keeps the occurrence out of the list of shows and out of the look-ahead count.
+		if serr := s.store.StrandOccurrence(claimID, b.ID); serr != nil {
+			s.log.Error("recurring: the event could not be cancelled and its record could not be "+
+				"stranded; delete it in the platform's own studio",
+				"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", serr)
+		}
 		s.log.Error("recurring: the platform refused the event's title and the event could not be "+
-			"cancelled; delete it in the platform's own studio",
+			"cancelled; the cancel is retried every sweep until it succeeds",
 			"destination", d.Name, "schedule", sc.Name, "event", b.ID, "err", err)
 		return nil, false
 	}
@@ -326,12 +356,8 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 		}
 		_, schedOK := schedByID[o.ScheduleID]
 		_, tplOK := tplByID[o.ScheduleID]
-		if !schedOK || !tplOK {
-			if err := s.cancelOccurrence(ctx, o, true); err != nil {
-				s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
-					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
-			}
-			continue
+		if !schedOK || !tplOK || o.State == scheduler.OccurrenceStranded {
+			s.releaseOpenOccurrence(ctx, o, now)
 		}
 	}
 	// Past occurrences: only the local row goes. The platform event is a page that already aired, and
@@ -346,6 +372,43 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	}
 }
 
+// releaseOpenOccurrence takes one open occurrence out of the record when its schedule or template has
+// gone, or retries a stranded cancel. A platform event is deleted only when its show has not started and
+// its destination is not delivering: an event whose show has started may be the live broadcast, or the
+// page of a show that aired, and deleting it is the operator's decision. For those the local row goes and
+// the platform event stays. A stranded event never went live, so its cancel is retried whenever its
+// destination is off air.
+func (s *Server) releaseOpenOccurrence(ctx context.Context, o scheduler.Occurrence, now time.Time) {
+	live := false
+	if d, err := s.store.GetDestination(o.DestinationID); err == nil {
+		live = d.Enabled
+	}
+	switch {
+	case o.State == scheduler.OccurrenceStranded:
+		if live {
+			return
+		}
+		if err := s.cancelOccurrence(ctx, o, true); err != nil {
+			s.log.Warn("recurring: a stranded event could not be cancelled; it will be retried",
+				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+		}
+	case live || !o.At.After(now):
+		// The show has started, or its destination is delivering. Only the local row goes.
+		if err := s.store.DeleteOccurrence(o.ID); err != nil {
+			s.log.Warn("recurring: cannot drop the record of a started show", "schedule", o.ScheduleID, "err", err)
+		}
+	default:
+		if err := s.cancelOccurrence(ctx, o, true); err != nil {
+			s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
+				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+		}
+	}
+}
+
+// errOccurrenceNotSkippable is the refusal for a skip the sweep must not make: the show has started, or
+// its destination is on air. The handler maps it to 409, and nothing is cancelled.
+var errOccurrenceNotSkippable = errors.New("this show cannot be skipped")
+
 // skipOccurrence is the operator's "skip this one". It is cancelOccurrence keeping the row, so the
 // occurrence is not created again.
 func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
@@ -358,6 +421,13 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
 		return nil
 	case scheduler.OccurrencePending:
 		return fmt.Errorf("this show's event is still being created; try again in a moment")
+	}
+	if !o.At.After(time.Now()) {
+		return fmt.Errorf("%w: it was scheduled for %s, which has passed or started", errOccurrenceNotSkippable,
+			o.At.UTC().Format(time.RFC3339))
+	}
+	if d, err := s.store.GetDestination(o.DestinationID); err == nil && d.Enabled {
+		return fmt.Errorf("%w: its destination is on air now", errOccurrenceNotSkippable)
 	}
 	return s.cancelOccurrence(ctx, *o, false)
 }

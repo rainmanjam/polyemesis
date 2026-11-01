@@ -91,6 +91,43 @@ func (y *YouTube) SetScheduledThumbnail(ctx context.Context, accessToken, broadc
 // CancelScheduledBroadcast deletes one scheduled broadcast by id. deleteBroadcast already treats a
 // 404 as deleted, so a page removed by hand reads as cancelled.
 func (y *YouTube) CancelScheduledBroadcast(ctx context.Context, accessToken, broadcastID string) error {
+	return y.deleteUpcomingBroadcast(ctx, accessToken, broadcastID)
+}
+
+// deleteUpcomingBroadcast removes a template-created broadcast that has NOT gone live.
+//
+// It is a separate path on purpose. deleteBroadcast is documented as safe only for a broadcast this
+// package created seconds earlier, and the template sweep reaches the platform through
+// CancelScheduledBroadcast long after create, for an event an operator may already have started. So
+// this reads the broadcast back first and deletes only when lifeCycleStatus is created or ready. Any
+// other status is refused with its name, and a broadcast that is gone is success, the same answer
+// deleteBroadcast gives. The read and the delete are two calls, so a broadcast that starts between
+// them can still be deleted; the read narrows that window and does not close it.
+func (y *YouTube) deleteUpcomingBroadcast(ctx context.Context, accessToken, broadcastID string) error {
+	if strings.TrimSpace(broadcastID) == "" {
+		return fmt.Errorf("no broadcast id to delete")
+	}
+	var list struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Status struct {
+				LifeCycleStatus string `json:"lifeCycleStatus"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	q := url.Values{}
+	q.Set("part", "status")
+	q.Set("id", broadcastID)
+	if err := getJSON(ctx, y.apiEndpoint()+ytBroadcastsPath+"?"+q.Encode(), accessToken, nil, &list); err != nil {
+		return err
+	}
+	if len(list.Items) == 0 {
+		return nil
+	}
+	if status := list.Items[0].Status.LifeCycleStatus; status != "created" && status != "ready" {
+		return fmt.Errorf("YouTube reports broadcast %s as %q, so it is not deleted from here: only an "+
+			"event that has not gone live is removed by the recurring sweep", broadcastID, status)
+	}
 	return y.deleteBroadcast(ctx, accessToken, broadcastID)
 }
 

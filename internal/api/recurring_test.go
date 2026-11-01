@@ -36,6 +36,8 @@ type fakeYouTubeEditor struct {
 	cancels   []string
 	// editErr, when set, is the refusal every title write answers with.
 	editErr error
+	// cancelErr, when set, is the refusal every cancel answers with.
+	cancelErr error
 }
 
 func (f *fakeYouTubeEditor) IngestFor(_ context.Context, _, _, _ string, opts oauth.IngestOptions) (*oauth.Broadcast, error) {
@@ -67,7 +69,7 @@ func (f *fakeYouTubeEditor) CancelScheduledBroadcast(_ context.Context, _, broad
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels = append(f.cancels, broadcastID)
-	return nil
+	return f.cancelErr
 }
 
 func (f *fakeYouTubeEditor) createCount() int {
@@ -270,8 +272,14 @@ func TestSkippingAnOccurrenceDeletesItsEventAndIsNotRecreated(t *testing.T) {
 		t.Fatalf("skip cancelled %v, want exactly the skipped event %s", got, first.PlatformEventID)
 	}
 	f.sweep(t)
-	if got := f.fake.createCount(); got != 2 {
-		t.Fatalf("after a skip a sweep over the same window created %d events in total, want 2: the skipped one is not recreated", got)
+	// The skip frees its slot, so the sweep backfills it with the occurrence after the window (see
+	// TestASkippedOccurrenceIsBackfilledByTheNextOneAndNotRecreated). The skipped one is not recreated:
+	// the only new create is the 17th.
+	if got := f.fake.createCount(); got != 3 {
+		t.Fatalf("after a skip a sweep created %d events in total, want 3: two, then the backfill", got)
+	}
+	if last := f.fake.creates[len(f.fake.creates)-1]; last.ScheduledFor.Day() != 17 {
+		t.Fatalf("the sweep after a skip recreated occurrence %v; it must backfill the 17th", last.ScheduledFor)
 	}
 }
 

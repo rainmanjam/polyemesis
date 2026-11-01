@@ -224,6 +224,11 @@ const (
 	// OccurrenceSkipped means the operator removed this occurrence. The row is
 	// kept so the look-ahead does not create it again.
 	OccurrenceSkipped OccurrenceState = "skipped"
+	// OccurrenceStranded means the platform event exists but carries no title the operator chose: its
+	// title write was refused and its cancel was refused too. The event id is kept, so the sweep keeps
+	// retrying the cancel. It is never a show, so it is not listed as upcoming and does not count
+	// toward the look-ahead.
+	OccurrenceStranded OccurrenceState = "stranded"
 )
 
 // contains reports whether want is one of values.
