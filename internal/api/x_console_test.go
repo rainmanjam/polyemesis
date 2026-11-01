@@ -151,6 +151,17 @@ func TestTheGoLiveTitleCannotChangeWhileTheXBroadcastIsLive(t *testing.T) {
 	if got.GoLiveTitle != "before the show" {
 		t.Errorf("stored title = %q, want the refused change not stored", got.GoLiveTitle)
 	}
+
+	// PRE_PUBLISHED: the PUBLISH has already gone to X with the old title, so a change now could not reach it either.
+	if _, err := store.UpdateLifecycle(x.ID, func(d *db.Destination) bool {
+		d.Lifecycle.Phase = "prepublished"
+		return true
+	}); err != nil {
+		t.Fatalf("mark prepublished: %v", err)
+	}
+	if w := put(map[string]any{"goLiveTitle": "while X publishes"}); w.Code != http.StatusConflict {
+		t.Fatalf("title change while X is publishing: status %d, want 409", w.Code)
+	}
 }
 
 // TestTheXSetupGuideSaysWhetherTheLivestreamGateIsOpen: the console shows "needs X Livestream access" while the gate

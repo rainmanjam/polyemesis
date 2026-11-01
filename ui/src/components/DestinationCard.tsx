@@ -62,6 +62,8 @@ const PLATFORM_LABEL: Record<string, string> = {
   // carries the platform, and its card should still name it properly.
   trovo: "Trovo",
   vimeo: "Vimeo",
+  // X destinations carry "x" since the editor's X preset gained its platform.
+  x: "X",
   custom: "Custom",
 };
 

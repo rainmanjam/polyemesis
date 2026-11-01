@@ -2771,7 +2771,11 @@ func (s *Server) handleUpdateDestination(w http.ResponseWriter, r *http.Request)
 	// The stored go-live title and whether its X broadcast is on air, read
 	// before the decode for the same reason: the body could name a phase too.
 	storedGoLiveTitle := existing.GoLiveTitle
-	xBroadcastLive := existing.Platform == db.PlatformX && strings.EqualFold(existing.Lifecycle.Phase, phaseLive)
+	// PRE_PUBLISHED counts as live here: the PUBLISH has already gone to X with
+	// the title it carried, so a change now could not reach X either.
+	xBroadcastLive := existing.Platform == db.PlatformX &&
+		(strings.EqualFold(existing.Lifecycle.Phase, phaseLive) ||
+			strings.EqualFold(existing.Lifecycle.Phase, "prepublished"))
 	if err := decodeJSONInto(body, existing); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

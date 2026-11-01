@@ -52,6 +52,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   kick: "Kick",
   facebook: "Facebook",
   rumble: "Rumble",
+  x: "X",
 };
 
 /** Sample chat for the live preview: one line per platform, so the platform

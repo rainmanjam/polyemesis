@@ -63,6 +63,18 @@ describe("the X console", () => {
     expect(screen.getByText(en["wave3.x.titleLocked"])).toBeTruthy();
   });
 
+  it("keeps the title read-only while X is publishing, because the publish already carried it", () => {
+    render(
+      <XConsolePanel
+        gate="open"
+        lifecycle={{ broadcastId: "bc-1", phase: "prepublished" }}
+        title="Sunday"
+        onTitleChange={noop}
+      />,
+    );
+    expect((screen.getByLabelText(en["wave3.x.titleLabel"]) as HTMLInputElement).disabled).toBe(true);
+  });
+
   it("shows the platform's fault next to the state", () => {
     render(
       <XConsolePanel

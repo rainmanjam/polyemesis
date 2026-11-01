@@ -47,7 +47,8 @@ export function XConsolePanel({
   onTitleChange: (title: string) => void;
 }>) {
   const t = useT();
-  const live = lifecycle?.phase === "live";
+  // "prepublished" locks the title too: the publish already carried it to X.
+  const live = lifecycle?.phase === "live" || lifecycle?.phase === "prepublished";
   return (
     <div className="flex flex-col gap-2 rounded-md border p-2">
       <p className="text-xs font-medium">{t("wave3.x.consoleTitle")}</p>
