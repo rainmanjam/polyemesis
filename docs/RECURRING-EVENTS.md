@@ -102,6 +102,11 @@ again. If its destination has been deleted too, the event cannot be reached
 from here, and the error names it so it can be removed in the platform's own
 studio.
 
+A stranded event (see step 2 above) is cancelled on a later pass once the platform
+accepts the cancel. If the platform keeps refusing it until its show has passed,
+its record is dropped and the error log names the event, which must then be
+removed in the platform's own studio, so a refusal cannot hold a record for ever.
+
 A template or schedule that disappears cancels only the events of shows that
 have not started, on a destination that is not on air. For a show that has
 started, or whose destination is on air, the record is dropped and the platform

@@ -370,6 +370,10 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	for _, o := range past {
 		_ = s.store.DeleteOccurrence(o.ID)
 	}
+	// The go-live claims of Twitch and Kick shows age out on the same clock, so the table stays bounded.
+	if err := s.store.PruneGoLiveBefore(cutoff); err != nil {
+		s.log.Warn("recurring: cannot prune go-live records", "err", err)
+	}
 }
 
 // releaseOpenOccurrence takes one open occurrence out of the record when its schedule or template has
@@ -389,6 +393,20 @@ func (s *Server) releaseOpenOccurrence(ctx context.Context, o scheduler.Occurren
 			return
 		}
 		if err := s.cancelOccurrence(ctx, o, true); err != nil {
+			// The retry is bounded by the show's own time. Until the show passes, a refused cancel is
+			// retried (a transient failure clears, and a show the operator started is refused every pass).
+			// Once it has passed, the record is dropped and the event is named for removal in the
+			// platform's studio: a refusal that never clears must not hold the row for ever.
+			if !o.At.After(now) {
+				if derr := s.store.DeleteOccurrence(o.ID); derr != nil {
+					s.log.Warn("recurring: cannot drop a stranded record whose show has passed",
+						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", derr)
+				}
+				s.log.Error("recurring: a stranded event's show has passed and its cancel is still refused; "+
+					"its record is dropped, and the event must be removed in the platform's own studio",
+					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
+				return
+			}
 			s.log.Warn("recurring: a stranded event could not be cancelled; it will be retried",
 				"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", err)
 		}
@@ -411,7 +429,7 @@ var errOccurrenceNotSkippable = errors.New("this show cannot be skipped")
 
 // skipOccurrence is the operator's "skip this one". It is cancelOccurrence keeping the row, so the
 // occurrence is not created again.
-func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
+func (s *Server) skipOccurrence(ctx context.Context, id int64, now time.Time) error {
 	o, err := s.store.GetOccurrence(id)
 	if err != nil {
 		return err
@@ -422,7 +440,7 @@ func (s *Server) skipOccurrence(ctx context.Context, id int64) error {
 	case scheduler.OccurrencePending:
 		return fmt.Errorf("this show's event is still being created; try again in a moment")
 	}
-	if !o.At.After(time.Now()) {
+	if !o.At.After(now) {
 		return fmt.Errorf("%w: it was scheduled for %s, which has passed or started", errOccurrenceNotSkippable,
 			o.At.UTC().Format(time.RFC3339))
 	}

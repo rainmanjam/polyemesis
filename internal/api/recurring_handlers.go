@@ -218,7 +218,7 @@ func (s *Server) handleSkipOccurrence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := s.skipOccurrence(r.Context(), id); err != nil {
+	if err := s.skipOccurrence(r.Context(), id, time.Now()); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeStoreError(w, err)
 			return

@@ -55,7 +55,7 @@ func TestASkippedOccurrenceIsBackfilledByTheNextOneAndNotRecreated(t *testing.T)
 	if err != nil {
 		t.Fatalf("ListOpenOccurrences: %v", err)
 	}
-	if err := f.s.skipOccurrence(context.Background(), rows[0].ID); err != nil {
+	if err := f.s.skipOccurrence(context.Background(), rows[0].ID, f.now); err != nil {
 		t.Fatalf("skipOccurrence: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestSkippingAnOccurrenceThatHasAlreadyStartedIsRefused(t *testing.T) {
 		t.Fatalf("ResolveOccurrence: %v", err)
 	}
 
-	if err := f.s.skipOccurrence(context.Background(), id); err == nil {
+	if err := f.s.skipOccurrence(context.Background(), id, f.now); err == nil {
 		t.Fatalf("skipping a show that already started succeeded; it must be refused")
 	}
 	if got := f.fake.cancelled(); len(got) != 0 {
@@ -342,11 +342,42 @@ func TestSkippingAShowOnAnAirDestinationIsRefused(t *testing.T) {
 		t.Fatalf("enable destination: %v", err)
 	}
 
-	err = f.s.skipOccurrence(context.Background(), rows[0].ID)
+	err = f.s.skipOccurrence(context.Background(), rows[0].ID, f.now)
 	if !errors.Is(err, errOccurrenceNotSkippable) {
 		t.Fatalf("skip on an on-air destination = %v, want the not-skippable refusal", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 0 {
 		t.Fatalf("a refused skip still cancelled %v", got)
+	}
+}
+
+// A stranded event whose show has passed is not held for ever by a cancel the platform keeps refusing.
+// Once the show's time is past, its record is dropped and the event is named in an error for removal in
+// the platform's studio. A show still to come keeps its record, so the cancel is retried.
+func TestAStrandedEventWhoseShowHasPassedIsDroppedWhenItsCancelIsStillRefused(t *testing.T) {
+	f := newRecurringFixture(t)
+	f.attachTemplate(t)
+	past := time.Date(2026, 10, 27, 19, 0, 0, 0, time.UTC)
+	id, err := f.store.ClaimOccurrence(scheduler.Occurrence{
+		ScheduleID: f.schedule, DestinationID: f.dest.ID, At: past, State: scheduler.OccurrencePending,
+	})
+	if err != nil {
+		t.Fatalf("ClaimOccurrence: %v", err)
+	}
+	if err := f.store.StrandOccurrence(id, "yt-stranded"); err != nil {
+		t.Fatalf("StrandOccurrence: %v", err)
+	}
+	f.fake.cancelErr = fmt.Errorf("YouTube refuses the delete of a live broadcast")
+
+	f.sweep(t)
+
+	rows, err := f.store.ListOpenOccurrences()
+	if err != nil {
+		t.Fatalf("ListOpenOccurrences: %v", err)
+	}
+	for _, r := range rows {
+		if r.ID == id {
+			t.Fatalf("the stranded record of a show that has passed survived a refused cancel; it must be dropped")
+		}
 	}
 }

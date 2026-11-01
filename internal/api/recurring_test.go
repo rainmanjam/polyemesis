@@ -265,7 +265,7 @@ func TestSkippingAnOccurrenceDeletesItsEventAndIsNotRecreated(t *testing.T) {
 	}
 	first := rows[0]
 
-	if err := f.s.skipOccurrence(context.Background(), first.ID); err != nil {
+	if err := f.s.skipOccurrence(context.Background(), first.ID, f.now); err != nil {
 		t.Fatalf("skipOccurrence: %v", err)
 	}
 	if got := f.fake.cancelled(); len(got) != 1 || got[0] != first.PlatformEventID {
@@ -293,7 +293,7 @@ func TestSkippingTheNearestShowClearsTheGoLiveMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOpenOccurrences: %v", err)
 	}
-	if err := f.s.skipOccurrence(context.Background(), rows[0].ID); err != nil {
+	if err := f.s.skipOccurrence(context.Background(), rows[0].ID, f.now); err != nil {
 		t.Fatalf("skipOccurrence: %v", err)
 	}
 	got, err := f.store.GetDestination(f.dest.ID)

@@ -119,14 +119,6 @@ func (s *Server) goLiveTemplatesOnce(ctx context.Context, now time.Time) {
 // goLiveFor writes one show's title and category to one destination, once.
 func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate, sc scheduler.Schedule,
 	d *db.Destination, at time.Time) {
-	claimed, err := s.store.ClaimGoLive(d.ID, sc.ID, at)
-	if err != nil {
-		s.log.Warn("recurring: cannot record the go-live title for a show", "destination", d.Name, "err", err)
-		return
-	}
-	if !claimed {
-		return
-	}
 	loc, err := sc.Location()
 	if err != nil {
 		return
@@ -149,6 +141,30 @@ func (s *Server) goLiveFor(ctx context.Context, tpl scheduler.BroadcastTemplate,
 	if err != nil {
 		s.log.Warn("recurring: no platform credentials for the go-live title", "destination", d.Name)
 		return
+	}
+	// The claim is taken here, immediately before the write, so a token or credentials failure above
+	// does not use up the show's one attempt.
+	claimed, err := s.store.ClaimGoLive(d.ID, sc.ID, at)
+	if err != nil {
+		s.log.Warn("recurring: cannot record the go-live title for a show", "destination", d.Name, "err", err)
+		return
+	}
+	if !claimed {
+		return
+	}
+	// Each template field the platform cannot take is named once, so an operator can tell why the
+	// channel does not show it. Only the title and the category are sent.
+	if tpl.Description != "" {
+		s.log.Warn("recurring: the template's description is not sent; the platform has no stream description",
+			"platform", d.Platform, "destination", d.Name, "schedule", sc.Name)
+	}
+	if tpl.HasThumbnail {
+		s.log.Warn("recurring: the template's thumbnail is not sent; the platform takes no thumbnail at go-live",
+			"platform", d.Platform, "destination", d.Name, "schedule", sc.Name)
+	}
+	if tpl.Privacy != "" && tpl.Privacy != "public" {
+		s.log.Warn("recurring: the template's privacy is not sent; the platform has no scheduled privacy at go-live",
+			"platform", d.Platform, "destination", d.Name, "schedule", sc.Name)
 	}
 	cctx, cancel := context.WithTimeout(ctx, templateCallTimeout)
 	defer cancel()

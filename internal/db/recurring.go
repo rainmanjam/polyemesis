@@ -297,3 +297,10 @@ func (d *DB) ClaimGoLive(destinationID, scheduleID int64, at time.Time) (bool, e
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
+
+// PruneGoLiveBefore removes the go-live claims of shows that started before cutoff. A claim is only the
+// record that a title was attempted, so once its show is past the retention window it is not needed.
+func (d *DB) PruneGoLiveBefore(cutoff time.Time) error {
+	_, err := d.sql.Exec(`DELETE FROM recurring_go_live WHERE occurrence_at < ?`, cutoff.UTC().Unix())
+	return err
+}

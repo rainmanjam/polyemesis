@@ -96,9 +96,10 @@ its first tagged release.
   category and thumbnail. The next occurrences (default 2, up to 10) are created as
   upcoming YouTube events, and the go-live uses the first one that is not skipped.
   One occurrence can be skipped or retitled, and deleting the template cancels its
-  upcoming events. Facebook, Twitch, Kick and X are not given template events yet,
-  and the calendar screen and any console UI are not built in this PR (deviation
-  from #18); the API serves the data. See
+  upcoming events. Facebook and X are not given template events yet; Twitch and Kick
+  take the title and category at go-live (see the entry below). The calendar screen
+  and any console UI are not built in this PR (deviation from #18); the API serves
+  the data. See
   [docs/RECURRING-EVENTS.md](docs/RECURRING-EVENTS.md).
 - **Recurring events: Twitch and Kick go-live, skip backfill, safer cancels (#18).**
   Twitch and Kick take the template's title and category when the show starts,
