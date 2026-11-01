@@ -1025,9 +1025,14 @@ func (c *lifecycleCoordinator) openOrHold(ctx context.Context, d *db.Destination
 // phase all describe the broadcast that just ended, and must not be carried
 // into the new show.
 func (c *lifecycleCoordinator) renew(ctx context.Context, creator oauth.BroadcastCreator, d *db.Destination) {
-	// Renewed survives the reset on purpose: the next broadcast is the same show
-	// going on, and its PUBLISH reads it (xShouldNotTweet).
-	cur := c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{Renewed: true} })
+	// The next broadcast is the same show going on, and its PUBLISH reads Renewed
+	// (xShouldNotTweet), so it survives the reset -- but only once the show has
+	// posted: the finished broadcast went past created (it was published), or it
+	// was already a renewal. A broadcast opened when the destination was switched
+	// on and ended by X before the encoder ever sent is renewed WITHOUT the
+	// marker, so the show's first real go-live still posts. Read before the reset.
+	renewed := d.Lifecycle.Renewed || (d.Lifecycle.Phase != "" && d.Lifecycle.Phase != phaseCreated)
+	cur := c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{Renewed: renewed} })
 	if cur == nil {
 		return
 	}
@@ -1431,8 +1436,9 @@ func planXLifecycle(enabled bool, st *oauth.BroadcastLifecycleState) lifecyclePl
 
 // xEndedWhileSending is the wait an ended X broadcast holds while bytes may still
 // be arriving. considerRow releases it on an UP edge: the ingest stopped and came
-// back, which is the next show, and is the only release when X's answer cannot
-// say whether the encoder is sending (no source, or one that no longer matches).
+// back, which renews the broadcast within the same show, and is the only release
+// when X's answer cannot say whether the encoder is sending (no source, or one
+// that no longer matches).
 const xEndedWhileSending = "the broadcast ended while the encoder is still sending; a new one opens " +
 	"once the stream stops and starts again"
 

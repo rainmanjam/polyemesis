@@ -156,3 +156,28 @@ func TestTheNextShowAfterASwitchOffPostsItsFirstGoLive(t *testing.T) {
 		t.Fatalf("should_not_tweet per PUBLISH = %v, want one PUBLISH that posts", got)
 	}
 }
+
+// TestABroadcastXEndedBeforeItWasEverPublishedDoesNotUseUpTheShowsPost: polyemesis
+// opens the X broadcast as soon as the destination is switched on, which can be
+// long before the encoder starts. If X ends that unpublished broadcast while the
+// encoder is idle, it is renewed, but nothing has been posted yet, so the show's
+// first real go-live must still post.
+//
+// MUTATION: renew carrying Renewed unconditionally. Observed: FAIL, the first
+// real go-live was published with should_not_tweet.
+func TestABroadcastXEndedBeforeItWasEverPublishedDoesNotUseUpTheShowsPost(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateEnded, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+	row := xcSweep(t, c, store) // ended unpublished, encoder idle: renewed to bc-2
+	if row.Lifecycle.BroadcastID == "bc-1" || row.Lifecycle.BroadcastID == "" {
+		t.Fatalf("recorded broadcast = %q, want a renewal", row.Lifecycle.BroadcastID)
+	}
+	if row.Lifecycle.Renewed {
+		t.Fatalf("a renewal of a never-published broadcast is marked as a renewal of the show: %+v", row.Lifecycle)
+	}
+	fake.set(func(f *xcFake) { f.active = true })
+	xcSweep(t, c, store)
+	if got := xcPublishedTweetFlags(t, fake); len(got) != 1 || got[0] {
+		t.Fatalf("should_not_tweet per PUBLISH = %v, want one PUBLISH that posts", got)
+	}
+}
