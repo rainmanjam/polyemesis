@@ -342,11 +342,10 @@ type Engine struct {
 	// heldSilenceSig freezes the silence tier's signature while the selector is
 	// standing in for a departed primary. See holdSilence.
 	heldSilenceSig string
-	// loud is the per-destination EBU R128 analyser set, keyed by destination
-	// id. See reconcileLoudness: these are measurement processes and nothing
+	// loud is the EBU R128 analyser set, keyed by destination and mix. See reconcileLoudness: these are measurement processes and nothing
 	// downstream depends on one, so they are reconciled last and their failure
 	// costs a number on a dashboard rather than a stream.
-	loud map[int64]*loudnessMon
+	loud map[loudKey]*loudnessMon
 	// loudOff is the operator's override of the analyser tier, pending a
 	// settings field of its own. See SetLoudnessMonitor.
 	loudOff bool
@@ -778,7 +777,7 @@ func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools,
 		host:       host,
 		dests:      map[int64]*destination{},
 		rends:      map[int64]*rendition{},
-		loud:       map[int64]*loudnessMon{},
+		loud:       map[loudKey]*loudnessMon{},
 		rolledOver: map[int64]string{},
 		retiring:   map[int64]*destination{},
 		draining:   map[int64]*destination{},
@@ -1213,7 +1212,7 @@ func (e *Engine) StopWithin(ctx context.Context) {
 	// with a whisper child still holding CPU.
 	capt, captPort, captHub, captVTT := e.capt, e.captPort, e.captHub, e.captVTT
 	e.capt, e.captPort, e.captHub, e.captVTT, e.captSig = nil, 0, nil, nil, ""
-	e.loud = map[int64]*loudnessMon{}
+	e.loud = map[loudKey]*loudnessMon{}
 	e.clipCap, e.clipPort, e.clipHub, e.clipSig = nil, 0, nil, ""
 	silence := e.silence
 	sel, backup, playlist := e.sel, e.backup, e.playlist
@@ -4146,7 +4145,41 @@ const (
 	loudnessSubPrefix       = "loudness:"
 )
 
-// loudnessMon is one destination's running analyser.
+// loudKey names one analyser: a destination and the mix it measures. A
+// destination with a VOD track has two, and they are reconciled separately.
+type loudKey struct {
+	id  int64
+	mix string
+}
+
+// liveKey is the analyser for a destination's live mix, the one every
+// destination has.
+func liveKey(id int64) loudKey { return loudKey{id: id, mix: meters.MixLive} }
+
+// vodKey is the analyser for a destination's VOD mix. It exists only where the
+// destination's running graph carries a second mix.
+func vodKey(id int64) loudKey { return loudKey{id: id, mix: meters.MixVOD} }
+
+// loudKeysSorted orders analysers by destination, live before VOD, so anything
+// that walks them (the monitoring page, a reconcile) does not reshuffle.
+func loudKeysSorted[V any](m map[loudKey]V) []loudKey {
+	keys := make([]loudKey, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b loudKey) int {
+		if a.id != b.id {
+			if a.id < b.id {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.mix, b.mix) // "live" sorts before "vod"
+	})
+	return keys
+}
+
+// loudnessMon is one analyser's running process.
 type loudnessMon struct {
 	proc    *supervisor.Process
 	hub     *relay.Hub
@@ -4157,14 +4190,18 @@ type loudnessMon struct {
 	sig string
 }
 
-// loudnessPlan is what one destination's analyser should look like.
+// loudnessPlan is what one analyser should look like.
 type loudnessPlan struct {
+	key      loudKey
 	id       int64
 	name     string
 	hub      *relay.Hub
 	compiled routing.Result
-	target   meters.Target
-	sig      string
+	// sink is the mix label this analyser must terminate and not measure: the
+	// other half of a paired graph. See meters.Spec.Sink.
+	sink   []string
+	target meters.Target
+	sig    string
 }
 
 // loudnessWanted is the analyser set this reconcile should end with.
@@ -4172,7 +4209,9 @@ type loudnessPlan struct {
 // Only destinations that are actually RUNNING earn one. A destination that is
 // disabled, broken or waiting on a rendition is sending nothing, and metering
 // nothing would produce a confident -70 LUFS that reads like a mixing fault.
-func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
+// A destination earns a VOD analyser only where its running graph carries a
+// second mix, which is what it actually publishes.
+func (e *Engine) loudnessWanted(s db.Settings) map[loudKey]loudnessPlan {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -4181,10 +4220,13 @@ func (e *Engine) loudnessWanted(s db.Settings) map[int64]loudnessPlan {
 	if !e.loudnessTierWantedLocked(s) {
 		return nil
 	}
-	out := make(map[int64]loudnessPlan, len(e.dests))
+	out := make(map[loudKey]loudnessPlan, 2*len(e.dests))
 	for id, d := range e.dests {
-		if p, ok := loudnessPlanFor(id, d); ok {
-			out[id] = p
+		if p, ok := loudnessPlanFor(liveKey(id), d); ok {
+			out[p.key] = p
+		}
+		if p, ok := loudnessPlanFor(vodKey(id), d); ok {
+			out[p.key] = p
 		}
 	}
 	return out
@@ -4215,8 +4257,7 @@ func (e *Engine) LoudnessMonitorEnabled() bool {
 	return e.loudnessTierWantedLocked(e.settings)
 }
 
-// loudnessPlanFor derives one destination's analyser plan, or reports that this
-// destination earns none.
+// loudnessPlanFor derives one analyser's plan, or reports that it earns none.
 //
 // SEPARATED OUT SO THE PREDICATE CAN BE ASKED TWICE. It is evaluated once when a
 // reconcile decides what it wants, and again in startLoudness under the lock that
@@ -4226,17 +4267,46 @@ func (e *Engine) LoudnessMonitorEnabled() bool {
 // duplicating the first and letting the two drift.
 //
 // Pure in d, and takes no lock: both callers already hold one.
-func loudnessPlanFor(id int64, d *destination) (loudnessPlan, bool) {
+//
+// THE SIGNATURE HASHES THE UNMASKED GRAPH. d.spec masks live levels so that a
+// fader does not restart the publisher. The analyser has no such obligation: a
+// fader that moved while its analyser kept the old level would show a muted
+// track as loud, so the level is part of what it is judged on, and a change
+// cycles the analyser (cheap; it is not the publisher).
+func loudnessPlanFor(k loudKey, d *destination) (loudnessPlan, bool) {
 	if d == nil || d.proc == nil || d.hub == nil || d.err != "" || d.compiled.FilterComplex == "" {
 		return loudnessPlan{}, false
 	}
-	t := meters.TargetFor(d.row.Profile.Loudness,
-		routing.PlatformFor(string(d.row.Platform), string(d.row.Kind)))
+	routingPlatform := routing.PlatformFor(string(d.row.Platform), string(d.row.Kind))
+	var loud *routing.Loudness
+	out, sink := d.compiled.OutLabel, []string{}
+	switch k.mix {
+	case meters.MixLive:
+		loud = d.row.Profile.Loudness
+		if d.compiled.SecondOutLabel != "" {
+			sink = []string{d.compiled.SecondOutLabel}
+		}
+	case meters.MixVOD:
+		if d.compiled.SecondOutLabel == "" {
+			return loudnessPlan{}, false
+		}
+		// The VOD mix is judged against its own target when it has one, and
+		// against the platform's otherwise. The live mix's target is not
+		// inherited, because the VOD mix is a different programme.
+		if d.row.VODProfile != nil {
+			loud = d.row.VODProfile.Loudness
+		}
+		out, sink = d.compiled.SecondOutLabel, []string{d.compiled.OutLabel}
+	default:
+		return loudnessPlan{}, false
+	}
+	t := meters.TargetFor(loud, routingPlatform)
 	return loudnessPlan{
-		id: id, name: d.row.Name, hub: d.hub, compiled: d.compiled, target: t,
-		// d.spec already hashes the graph and the upstream, so this adds
-		// only what the analyser cares about that the destination does not.
-		sig: hashStrings([]string{d.spec, t.Sig()}),
+		key: k, id: k.id, name: d.row.Name, hub: d.hub, compiled: d.compiled,
+		sink: sink, target: t,
+		// The graph is hashed as compiled, levels included, and out is part of
+		// it: the same graph measured at the other label is another analyser.
+		sig: hashStrings([]string{d.spec, d.compiled.FilterComplex, k.mix, out, strings.Join(sink, ","), t.Sig()}),
 	}, true
 }
 
@@ -4251,12 +4321,12 @@ func (e *Engine) reconcileLoudness(s db.Settings) {
 
 	e.mu.Lock()
 	var stop []*loudnessMon
-	for id, m := range e.loud {
-		if p, ok := want[id]; ok && p.sig == m.sig {
+	for k, m := range e.loud {
+		if p, ok := want[k]; ok && p.sig == m.sig {
 			continue
 		}
 		stop = append(stop, m)
-		delete(e.loud, id)
+		delete(e.loud, k)
 	}
 	e.mu.Unlock()
 
@@ -4264,32 +4334,31 @@ func (e *Engine) reconcileLoudness(s db.Settings) {
 		e.teardownLoudness(m)
 	}
 
-	ids := make([]int64, 0, len(want))
-	keep := make(map[int64]bool, len(want))
-	for id := range want {
-		ids = append(ids, id)
-		keep[id] = true
+	keys := loudKeysSorted(want)
+	keep := make(map[meters.Key]bool, len(want))
+	for _, k := range keys {
+		keep[meters.Key{ID: k.id, Mix: k.mix}] = true
 	}
-	slices.Sort(ids)
-	for _, id := range ids {
+	for _, k := range keys {
 		e.mu.RLock()
-		running := e.loud[id] != nil
+		running := e.loud[k] != nil
 		e.mu.RUnlock()
 		if running {
 			continue
 		}
-		e.startLoudness(want[id])
+		e.startLoudness(want[k])
 	}
 	// Reports outlive their analyser by exactly one reconcile, which is what
-	// stops a deleted destination being pushed to browsers forever.
-	e.loudStore.Keep(keep)
+	// stops a deleted destination, or a VOD mix that was switched off, being
+	// pushed to browsers forever.
+	e.loudStore.KeepFor(keep)
 }
 
 func (e *Engine) startLoudness(p loudnessPlan) {
 	now := time.Now()
 	fail := func(err error) {
-		e.loudStore.Put(meters.Failed(p.id, p.name, p.target, err.Error(), now))
-		e.log.Warn("loudness monitor cannot run", "dest", p.name, "err", err)
+		e.loudStore.Put(meters.Failed(p.id, p.name, p.target, err.Error(), now).ForMix(p.key.mix))
+		e.log.Warn("loudness monitor cannot run", "dest", p.name, "mix", p.key.mix, "err", err)
 	}
 
 	port, err := e.allocPort()
@@ -4298,6 +4367,9 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		return
 	}
 	subName := loudnessSubPrefix + strconv.FormatInt(p.id, 10)
+	if p.key.mix == meters.MixVOD {
+		subName += ":" + meters.MixVOD
+	}
 	url, err := p.hub.Subscribe(subName, port)
 	if err != nil {
 		e.releasePort(port)
@@ -4305,13 +4377,18 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 		return
 	}
 
+	outLabel := p.compiled.OutLabel
+	if p.key.mix == meters.MixVOD {
+		outLabel = p.compiled.SecondOutLabel
+	}
 	args := meters.Args(meters.Spec{
 		RelayURL:      url,
 		FilterComplex: p.compiled.FilterComplex,
-		OutLabel:      p.compiled.OutLabel,
+		OutLabel:      outLabel,
+		Sink:          p.sink,
 	})
 
-	id, name, target := p.id, p.name, p.target
+	id, name, target, mix := p.id, p.name, p.target, p.key.mix
 	// Declared ahead of the Spec for the NoteMedia call, as in reconcileMeters.
 	var proc *supervisor.Process
 	proc = supervisor.New(e.log, supervisor.Spec{
@@ -4321,7 +4398,7 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 			var last time.Time
 			return meters.Parse(r, func(f meters.Frame) {
 				proc.NoteMedia() // as the meters do: a frame is media flowing
-				rep := meters.Observe(id, name, target, f, time.Now())
+				rep := meters.Observe(id, name, target, f, time.Now()).ForMix(mix)
 				// Stored on every frame, published on a throttle: a browser
 				// that connects between pushes still gets the current number.
 				e.loudStore.Put(rep)
@@ -4341,32 +4418,23 @@ func (e *Engine) startLoudness(p loudnessPlan) {
 	// becoming an orphan holding a UDP port.
 	//
 	// AND THE DESTINATION MAY HAVE GONE, which is the same hazard by a different
-	// route and was not covered. This guard read `if e.stopped` alone, so a
-	// reconcile that computed its wanted-set before a destination was deleted and
-	// arrived here after it published a monitor for a destination that no longer
-	// existed -- holding a relay port, subscribed to a hub about to be closed
-	// under it, and receiving nothing forever. Measured: adding then deleting one
-	// destination reliably left exactly one of these behind (#453), and the
-	// comment above already described the failure without covering this path to
-	// it.
-	//
-	// Re-asking loudnessPlanFor rather than testing `e.dests[p.id] != nil` is
-	// deliberate: a destination that was deleted and re-created, or respecced,
+	// route. Re-asking loudnessPlanFor rather than testing `e.dests[p.id] != nil`
+	// is deliberate: a destination that was deleted and re-created, or respecced,
 	// is present under the same id but is not the thing this plan was made for.
 	// The signature is what distinguishes them.
-	cur, want := loudnessPlanFor(p.id, e.dests[p.id])
+	cur, want := loudnessPlanFor(p.key, e.dests[p.id])
 	if e.stopped || !want || cur.sig != p.sig {
 		e.mu.Unlock()
 		p.hub.Unsubscribe(subName)
 		e.releasePort(port)
 		return
 	}
-	e.loud[p.id] = &loudnessMon{proc: proc, hub: p.hub, port: port, subName: subName, sig: p.sig}
+	e.loud[p.key] = &loudnessMon{proc: proc, hub: p.hub, port: port, subName: subName, sig: p.sig}
 	e.mu.Unlock()
 
-	e.loudStore.Put(meters.Starting(p.id, p.name, p.target, now))
+	e.loudStore.Put(meters.Starting(p.id, p.name, p.target, now).ForMix(mix))
 	proc.Start()
-	e.log.Info("loudness monitor started", "dest", p.name,
+	e.log.Info("loudness monitor started", "dest", p.name, "mix", mix,
 		"target", p.target.Source, "lufs", p.target.LUFS)
 }
 
@@ -5558,6 +5626,12 @@ func (e *Engine) alertSnapshot(now time.Time, ingestLive bool) alerts.Snapshot {
 		}
 	}
 	for _, r := range st.Loudness {
+		// The alert watcher keys its state by destination, and a VOD mix is
+		// judged for the archive, not for the platform's live normaliser, so
+		// its verdict is not an alert. It stays on the Meters page.
+		if r.Mix == meters.MixVOD {
+			continue
+		}
 		// Only a fail, and only from an analyser that is working: a broken
 		// meter is a measurement problem, and reporting it as a loudness
 		// failure would send somebody to remix a stream that is fine.

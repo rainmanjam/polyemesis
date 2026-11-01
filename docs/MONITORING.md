@@ -504,7 +504,7 @@ difference between an alert and a mute button.
 | `audio.clipping` | `warning` | an ingest channel has been at or above **-0.1 dBFS for 3 consecutive observations**. Digital full scale is 0, and -0.1 is where a limiter is already working; one sample is a snare hit, several in a row is a level problem. The counter resets after firing, so the next alert needs another full run |
 | `disk.low` | `warning`, or `critical` once the recorder has already halted | free space on the recordings volume is under **2 GiB** *or* under **5%** — either one trips it, because a small volume runs out of percent slowly and a large one runs out of gigabytes slowly, and both end the same way. No dwell time: disk space does not flap, and a recorder that has already stopped writing should not wait twenty seconds to say so. A volume that cannot be measured says nothing rather than alerting on the zero it reads |
 | `disk.recovered` | `info` | there is room again |
-| `loudness.out_of_compliance` | `warning` | a destination has been outside its loudness target for **90 seconds**. EBU R128 integrates over the whole programme, so a minute and a half of drift is a mix that is wrong rather than a quiet passage. Carries the measured and target LUFS |
+| `loudness.out_of_compliance` | `warning` | a destination's **live mix** has been outside its loudness target for **90 seconds** (a VOD mix is shown on the Meters page only). EBU R128 integrates over the whole programme, so a minute and a half of drift is a mix that is wrong rather than a quiet passage. Carries the measured and target LUFS |
 | `loudness.recovered` | `info` | it is back inside the target |
 
 `destination.falling_behind` and `destination.caught_up` are stream conditions

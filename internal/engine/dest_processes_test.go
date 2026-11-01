@@ -29,7 +29,7 @@ func TestTheMonitoringPageListsTheBackupOutput(t *testing.T) {
 			backup: supervisor.New(testLogger(), supervisor.Spec{Name: backup}),
 		}},
 		rends:     map[int64]*rendition{},
-		loud:      map[int64]*loudnessMon{},
+		loud:      map[loudKey]*loudnessMon{},
 		playProcs: map[string]*supervisor.Process{},
 	}
 

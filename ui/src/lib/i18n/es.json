@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat y canalización",
   "dashMobile.streamInfo": "Información de la emisión (título, etiquetas, categoría)",
   "dashMobile.failoverOff": "La conmutación por error está desactivada",
-  "wave3.bugs.delayFilling": "Llenando el retardo"
+  "wave3.bugs.delayFilling": "Llenando el retardo",
+  "wave3.vod.mixVod": "Mezcla VOD",
+  "wave3.vod.matrixRestart": "Un cambio de ganancia en esta mezcla matricial reinicia el destino un momento, lo que también interrumpe brevemente la mezcla en vivo. Silenciar sigue en vivo."
 }

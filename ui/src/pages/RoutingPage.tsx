@@ -52,7 +52,7 @@ import { storedMixes } from "@/lib/storedMixes";
 import { readVodStash, writeVodStash } from "@/lib/vodStash";
 import { isLevelOnlySave } from "@/lib/saveImpact";
 import { autoApi } from "@/lib/autoApi";
-import { outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
+import { isLiveMix, outputState, reportKey, sourcePeak, type LoudnessFeed } from "@/lib/outputStrip";
 import { OutputStrip } from "@/components/signature/OutputStrip";
 import {
   carryMutes,
@@ -695,6 +695,9 @@ export function RoutingPage() {
           setLoudSeen((prev) => {
             const next: Record<number, { key: string; at: number }> = {};
             for (const r of f.reports ?? []) {
+              // The VOD mix has its own reading on the Meters page; this strip
+              // and its frame timing are the live mix's only.
+              if (!isLiveMix(r)) continue;
               const key = reportKey(r);
               const was = prev[r.destinationId];
               next[r.destinationId] = was && was.key === key ? was : { key, at: now };
@@ -1083,20 +1086,33 @@ export function RoutingPage() {
                     // above. The unconditional sentence is reserved for the case
                     // where nothing is conditional: a probed ingest, off Twitch.
                     footer={() => {
-                      if (vodBlockedByToggle) {
-                        return <>{t("route.vodFooterBlocked")}</>;
+                      const base = (() => {
+                        if (vodBlockedByToggle) {
+                          return t("route.vodFooterBlocked");
+                        }
+                        // engine/destinations.go refuses the pair on the provisional
+                        // path for EVERY platform, not just Twitch: a provisional
+                        // compile already runs on a guessed channel layout, and a
+                        // second guessed mix on top of it doubles what is approximate.
+                        if (!ctx.probed) {
+                          return t("route.vodFooterUnprobed");
+                        }
+                        if (twitchRtmp) {
+                          return t("route.vodFooterTwitch");
+                        }
+                        return t("route.vodFooterSecond");
+                      })();
+                      // A MATRIX VOD mix takes its gain per cell, and a cell change is
+                      // structural: the destination restarts, which interrupts both
+                      // mixes for a moment. Said here, where the cells are edited.
+                      if (vodProfile?.mode === "matrix") {
+                        return (
+                          <>
+                            {t("wave3.vod.matrixRestart")} {base}
+                          </>
+                        );
                       }
-                      // engine/destinations.go refuses the pair on the provisional
-                      // path for EVERY platform, not just Twitch: a provisional
-                      // compile already runs on a guessed channel layout, and a
-                      // second guessed mix on top of it doubles what is approximate.
-                      if (!ctx.probed) {
-                        return <>{t("route.vodFooterUnprobed")}</>;
-                      }
-                      if (twitchRtmp) {
-                        return <>{t("route.vodFooterTwitch")}</>;
-                      }
-                      return <>{t("route.vodFooterSecond")}</>;
+                      return <>{base}</>;
                     }}
                   />
                 )}

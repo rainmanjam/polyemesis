@@ -666,3 +666,23 @@ describe("the save status beside Save", () => {
     expect(status().getAttribute("data-save-state")).toBe("dirty");
   });
 });
+
+/* #15 matrix VOD: a gain change on a matrix second mix is structural, so the
+ * destination restarts and the interruption reaches the live mix too. The
+ * VOD editor says so where the cells are edited, because "applied" alone reads
+ * as a live change. */
+describe("a matrix VOD mix says that a gain change restarts the destination", () => {
+  // MUTATION: in the VOD footer, drop the matrix branch. Observed: FAIL, "the
+  // matrix VOD mix does not say a gain change restarts the destination".
+  it("shows the restart copy on a matrix second mix and not on a simple one", async () => {
+    stored = dest({ vodProfile: { ...storedProfile(), mode: "matrix", matrix: [] } } as Partial<Destination>);
+    await renderPage();
+    expect(screen.getAllByText(/restarts the destination for a moment/).length).toBeGreaterThan(0);
+  });
+
+  it("does not show the restart copy on a simple second mix", async () => {
+    stored = dest({ vodProfile: storedProfile() } as Partial<Destination>);
+    await renderPage();
+    expect(screen.queryByText(/restarts the destination for a moment/)).toBeNull();
+  });
+});

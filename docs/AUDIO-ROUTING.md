@@ -95,9 +95,27 @@ second mix's copy of that track too. In a matrix second mix only the mute does,
 because the gain there is per cell. A track the second mix does not select is
 never added by a live change.
 
+A live fader gain does not reach a matrix second mix, and the response to that
+change says so. To change a matrix second mix's gain, edit its cells in the
+second mix's matrix. That is a structural change: the destination restarts for a
+moment, which interrupts the live mix as well, and the editor says so.
+
 The second mix needs an FFmpeg that writes two audio tracks into FLV. polyemesis
 checks this once at startup. If the check fails, the second mix is dropped on the
-destination card with the reason, and the live mix goes out alone.
+destination card with the reason, and the live mix goes out alone. A check that
+could not run (it timed out, could not create its temporary directory, or could
+not start FFmpeg) is recorded as "probe inconclusive" and the second mix is
+kept. Only a real refusal by this FFmpeg drops it.
+
+### Meters for both mixes
+
+A destination with a second mix has two rows on the Meters page's loudness
+compliance card: the live mix, and a row labelled **VOD mix**. Each row is
+measured by its own analyser, which reads the destination's relay and applies
+that mix's graph. The analyser is a separate process, so the command line that
+publishes the destination is unchanged, and it decodes audio only. Alerts are
+raised for the live mix alone, because the VOD mix is judged for the archive and
+not for the platform's normaliser.
 
 Over the API, two fields on the destination, both off by default:
 

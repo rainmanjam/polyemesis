@@ -1,3 +1,5 @@
+import type { LoudnessMix } from "@/lib/types";
+
 /* A10: the two-stage signal path on the routing page, source then output.
  *
  * SOURCE is the ingest meter (peak per channel, measured BEFORE any routing).
@@ -11,6 +13,8 @@
 /** One destination's report, as GET /loudness returns it (meters.Report). */
 export interface OutputReport {
   destinationId: number;
+  /** Which mix this reading is of. The routing strip compares the live mix only. */
+  mix?: LoudnessMix;
   seconds: number;
   momentaryLufs: number;
   truePeakDbtp: number;
@@ -44,6 +48,13 @@ export type OutputState =
   | { kind: "stale"; report: OutputReport }
   | { kind: "live"; report: OutputReport };
 
+/** Whether a report measures the live mix. The routing strip and its frame
+ *  tracking read only this one: a destination's VOD reading is a second reading
+ *  of the same destination, and taking it for the live one would mix the two. */
+export function isLiveMix(r: { mix?: LoudnessMix }): boolean {
+  return (r.mix ?? "live") === "live";
+}
+
 export function outputState(
   feed: LoudnessFeed | null,
   destinationId: number,
@@ -54,7 +65,7 @@ export function outputState(
   changedAt: number,
 ): OutputState {
   if (!feed || feed.enabled === false) return { kind: "off" };
-  const report = feed.reports.find((r) => r.destinationId === destinationId);
+  const report = feed.reports.find((r) => r.destinationId === destinationId && isLiveMix(r));
   if (!report) return { kind: "absent" };
   if (report.error) return { kind: "error", error: report.error };
   // meters.Starting has measured nothing yet: no programme time has passed.

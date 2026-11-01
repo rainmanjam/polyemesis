@@ -45,7 +45,7 @@ func lifeEngine(t *testing.T) *Engine {
 	t.Helper()
 	e := failoverEngine(t)
 	e.cfg = config.Config{DataDir: t.TempDir()}
-	e.loud = map[int64]*loudnessMon{}
+	e.loud = map[loudKey]*loudnessMon{}
 	e.loudStore = meters.NewStore()
 	return e
 }
@@ -836,7 +836,7 @@ func lifePlan(t *testing.T, e *Engine, hub *relay.Hub) loudnessPlan {
 	e.dests[7] = d
 	e.mu.Unlock()
 
-	p, ok := loudnessPlanFor(7, d)
+	p, ok := loudnessPlanFor(liveKey(7), d)
 	if !ok {
 		t.Fatal("fixture: this destination must earn an analyser or every test below proves nothing")
 	}
@@ -861,7 +861,7 @@ func TestALoudnessMonitorThatCannotGetAPortIsReportedAsFailed(t *testing.T) {
 		t.Errorf("report = %+v, want the failure recorded; a meter that is broken must "+
 			"never read as a destination that is compliant", rep)
 	}
-	if _, running := e.loud[7]; running {
+	if _, running := e.loud[liveKey(7)]; running {
 		t.Error("an analyser that never started was published as running")
 	}
 }
@@ -874,7 +874,7 @@ func TestALoudnessMonitorStartingIntoAShutdownEngineLeavesNoOrphan(t *testing.T)
 
 	e.startLoudness(lifePlan(t, e, hub))
 
-	if m, ok := e.loud[7]; ok {
+	if m, ok := e.loud[liveKey(7)]; ok {
 		t.Fatalf("an analyser was published into a stopped engine (%+v); nothing will stop "+
 			"it and it holds a UDP port for the life of the process", m)
 	}
@@ -895,7 +895,7 @@ func TestALoudnessMonitorRoundTripsItsPortAndSubscription(t *testing.T) {
 	plan := lifePlan(t, e, hub)
 	e.startLoudness(plan)
 
-	m := e.loud[7]
+	m := e.loud[liveKey(7)]
 	if m == nil {
 		t.Fatal("the analyser was not published")
 	}

@@ -34,6 +34,12 @@ type Spec struct {
 	// OutLabel is the label in that graph carrying the finished stereo mix.
 	// Empty means routing's default.
 	OutLabel string
+	// Sink lists the labels of OTHER mixes in FilterComplex, which this analyser
+	// does not measure. FFmpeg refuses a filter output that nothing consumes, so
+	// a paired graph (live mix plus VOD mix) cannot be handed over with one of
+	// its halves dangling; each label listed here is terminated in anullsink.
+	// Empty for a single-mix graph, which is the ordinary case.
+	Sink []string
 }
 
 // Graph labels the analyser splices on. Deliberately unlikely names: the graph
@@ -80,8 +86,15 @@ func Args(s Spec) []string {
 	// dead for twenty seconds and then jumps. It has been an ametadata option
 	// since FFmpeg 4.0; a build old enough to reject it loses this meter and
 	// nothing else, which is the failure this tier is shaped to survive.
-	graph := fmt.Sprintf("%s;[%s]ebur128=metadata=1:peak=true[%s];[%s]ametadata=mode=print:file=-:direct=1[%s]",
-		s.FilterComplex, out, analyserIn, analyserIn, analyserOut)
+	// Each sunk label is consumed by anullsink, so its half of a paired graph is
+	// still wired up but nothing is measured from it. The sunk half is audio the
+	// analyser decodes and throws away; the video is never mapped.
+	graph := s.FilterComplex
+	for _, sink := range s.Sink {
+		graph += fmt.Sprintf(";[%s]anullsink", sink)
+	}
+	graph += fmt.Sprintf(";[%s]ebur128=metadata=1:peak=true[%s];[%s]ametadata=mode=print:file=-:direct=1[%s]",
+		out, analyserIn, analyserIn, analyserOut)
 
 	return []string{
 		"-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning",

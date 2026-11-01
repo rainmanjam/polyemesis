@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "チャットとパイプライン",
   "dashMobile.streamInfo": "配信情報（タイトル、タグ、カテゴリ）",
   "dashMobile.failoverOff": "フェイルオーバーはオフです",
-  "wave3.bugs.delayFilling": "ディレイを蓄積中"
+  "wave3.bugs.delayFilling": "ディレイを蓄積中",
+  "wave3.vod.mixVod": "VOD ミックス",
+  "wave3.vod.matrixRestart": "このマトリクスミックスでゲインを変えると、送信先が一時的に再起動し、ライブミックスも一瞬途切れます。ミュートは即時に反映されます。"
 }
