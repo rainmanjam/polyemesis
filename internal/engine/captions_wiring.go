@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
 // captionIntent is what this programme's destinations ask of the captioner.
 //
 // A destination asks for captions when it is enabled and its caption mode is one
-// its platform accepts. The captioner's track comes from the programme (the
+// its platform accepts. A tier that burns captions in asks for them too, while
+// an enabled destination uses it: burned-in captions need a running captioner
+// even when no destination carries a caption route. The captioner's track comes from the programme (the
 // source row), with nil meaning the automatic choice.
 type captionIntent struct {
 	on      bool
@@ -24,6 +27,11 @@ type captionIntent struct {
 	// posts maps each captioned youtube_post destination to its caption
 	// ingestion URL. It is a credential and is deliberately NOT part of sig.
 	posts map[int64]string
+	// burns lists the programme's tiers that burn captions in and that an
+	// enabled destination uses, as "id:position". Burn-in is caption demand of
+	// its own (a platform with no caption route), and it is part of sig, so a
+	// save of the setting re-arms a degraded captioner.
+	burns []string
 	// policy is the programme's caption text policy. It is NOT part of sig
 	// either: the running fanout reads it on every cue, so a change needs no
 	// restart, and a save of it must not re-arm a degraded captioner.
@@ -56,6 +64,21 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 	if err != nil {
 		return in, err
 	}
+	used := map[int64]bool{}
+	for _, d := range dests {
+		if d.Enabled && d.RenditionID != nil {
+			used[*d.RenditionID] = true
+		}
+	}
+	rends, err := e.store.ListRenditionsBySource(e.sourceID)
+	if err != nil {
+		return in, err
+	}
+	for _, r := range rends {
+		if r.CaptionBurn != db.CaptionBurnOff && used[r.ID] {
+			in.burns = append(in.burns, fmt.Sprintf("%d:%s", r.ID, r.CaptionBurn))
+		}
+	}
 	for _, d := range dests {
 		if !d.Enabled {
 			continue
@@ -85,7 +108,8 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 			Delay: time.Duration(d.DelaySeconds) * time.Second,
 		})
 	}
-	in.on = len(in.targets) > 0
+	in.on = len(in.targets) > 0 || len(in.burns) > 0
+	sort.Strings(in.burns)
 	sort.Slice(in.targets, func(i, j int) bool { return in.targets[i].ID < in.targets[j].ID })
 	in.sig = intentSig(in)
 	return in, nil
@@ -98,6 +122,9 @@ func intentSig(in captionIntent) string {
 	s := fmt.Sprintf("on=%t track=%d", in.on, in.track)
 	for _, t := range in.targets {
 		s += fmt.Sprintf(" dest=%d delay=%s", t.ID, t.Delay)
+	}
+	for _, b := range in.burns {
+		s += " burn=" + b
 	}
 	return s
 }

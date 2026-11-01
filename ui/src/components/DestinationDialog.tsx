@@ -2254,6 +2254,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
               onChange={setCaptionMode}
               delaySeconds={delaySeconds}
               ingestReady={destination?.captionIngestReady}
+              storedMode={destination ? (destination.captionMode ?? "off") : undefined}
             />
           )}
           {platform === "twitch" && (

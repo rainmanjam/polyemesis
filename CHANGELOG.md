@@ -945,7 +945,13 @@ its first tagged release.
 
 - **The caption picker no longer says a route changes nothing on air (#8).** It says captions go
   out only for a route that is on, that a live destination must be stopped to change its route,
-  and that a save restarts an enabled one. In all 15 languages.
+  and, only for a change that adds or removes the in-stream (SEI) route, that the save restarts
+  an enabled destination. A change between off and YouTube's HTTP POST restarts nothing, so it
+  shows no restart warning. In all 15 languages.
+- **A tier that burns captions in now starts the captioner on its own (#8).** Burn-in is how a
+  platform with no caption route gets captions, so a programme whose only caption demand is a
+  burned-in tier used by an enabled destination now runs the captioner. A tier that starts while
+  no captioner runs starts from an empty burn file, so a caption left by a crash is never drawn.
 
 - **A metadata push or reschedule no longer switches a YouTube broadcast's captions off.**
   `liveBroadcasts.update` resets every field of a part it is sent without, and the update

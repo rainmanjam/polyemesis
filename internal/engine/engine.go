@@ -3258,6 +3258,21 @@ func captionBurnSpecOf(r *db.Rendition, dataDir string) *ffmpeg.TextSpec {
 	}
 }
 
+// prepareBurnFile readies the burn file a tier is about to draw. drawtext stops
+// on a missing file, so it is created. And when no captioner runs for the
+// programme it is emptied: a crash inside a caption's hold window leaves the
+// last caption in the file with its clear timer gone, and a restarted tier
+// would otherwise draw it with nobody speaking.
+func (e *Engine) prepareBurnFile(path string) error {
+	e.mu.RLock()
+	running := e.capt != nil
+	e.mu.RUnlock()
+	if running {
+		return captions.EnsureBurnFile(path)
+	}
+	return captions.ClearBurnFile(path)
+}
+
 // overlaySpecOf resolves the stored relative path against the data directory.
 //
 // Joined to an absolute path only here, at process-build time, exactly as the
@@ -3459,7 +3474,7 @@ func (e *Engine) startRendition(row *db.Rendition, spec string, sourceFPS float6
 	// drawtext refuses to start on a missing textfile, so the burn file is
 	// created (empty, which draws nothing) before the encode is.
 	if rspec.Captions != nil {
-		if err := captions.EnsureBurnFile(rspec.Captions.TextFile); err != nil {
+		if err := e.prepareBurnFile(rspec.Captions.TextFile); err != nil {
 			e.log.Warn("live captions cannot be burned in: no burn file",
 				"rendition", row.ID, "err", err)
 			rspec.Captions = nil

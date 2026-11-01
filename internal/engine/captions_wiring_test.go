@@ -227,6 +227,8 @@ func TestCaptionIntentWithNoStoreIsOffAndDoesNotPanic(t *testing.T) {
 //
 // MUTATION: the fanout built with the policy captured at start (Policy:
 // e.captionPolicy()). Observed: FAIL, the cue after the save was unmasked.
+// MUTATION: reconcileCaptions does not call useCaptionPolicy. Observed: FAIL,
+// the same.
 func TestAProgrammesCaptionPolicyReachesCaptionsAlreadyRunningWithoutARestart(t *testing.T) {
 	e := failoverEngine(t)
 	dest, err := e.store.CreateDestination(&db.Destination{
@@ -262,7 +264,9 @@ func TestAProgrammesCaptionPolicyReachesCaptionsAlreadyRunningWithoutARestart(t 
 	if after.sig != before.sig {
 		t.Fatalf("a policy save changed the intent signature (%q -> %q); it would re-arm a degraded captioner", before.sig, after.sig)
 	}
-	e.useCaptionPolicy(after.policy)
+	// The reconcile a source save triggers. It fails later, at the model (none
+	// is installed in a test), which is after the policy is taken up.
+	e.reconcileCaptions()
 	fan.Emit(transcribe.LiveCaption{Segment: transcribe.Segment{Text: "darn polyemesis"}})
 
 	want := []string{"darn polyemesis", "d*** Polyemesis"}

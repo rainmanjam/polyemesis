@@ -274,3 +274,68 @@ func TestTheLiveCaptionExportReadsTheProgrammesCueLogForTheRecording(t *testing.
 		}
 	}
 }
+
+// TestTheTranscriptExportMasksWordsByTheRecordingsProgrammesPolicy drives the
+// stored-transcript export end to end: the recording's programme holds caption
+// words, and the downloaded file shows them applied. With no live captions in
+// the recording's window, the live export says so with a 404, as it does for a
+// recording that names no programme.
+//
+// MUTATION: the handler renders with an empty policy instead of
+// recordingCaptionPolicy. Observed: FAIL, "darn" was downloaded unmasked.
+func TestTheTranscriptExportMasksWordsByTheRecordingsProgrammesPolicy(t *testing.T) {
+	h, store, sign := sourceServer(t)
+	srv := serverUnderTest(t, h)
+	srv.cfg.DataDir = t.TempDir()
+	src, err := store.GetSource(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src.CaptionPolicy = db.CaptionPolicy{Vocabulary: []string{"Polyemesis"}, Blocklist: []string{"darn"}}
+	if err := store.UpdateSource(src); err != nil {
+		t.Fatalf("UpdateSource: %v", err)
+	}
+	srcID := src.ID
+	plantRecordingOnDisk(t, store, srv.eng().Recordings().Dir(), db.Recording{
+		Filename: "policy-export.mkv", StartedAt: time.Now().Add(-time.Hour), FinishedAt: time.Now(),
+		Bytes: 4096, DurationMS: 60_000, Tracks: 1,
+	}, 1)
+	recs, err := store.ListRecordings()
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("recordings = %d (%v), want 1", len(recs), err)
+	}
+	id := recs[0].ID
+	if err := store.SaveTranscript(&db.Transcript{RecordingID: id, Tracks: []db.TranscriptTrack{{
+		RecordingID: id, Track: 0, Speaker: "Host", Language: "en", Model: "small", Backend: "whisper",
+		Segments: []db.TranscriptSegment{{StartMS: 0, EndMS: 2000, Text: "darn it polyemesis"}},
+	}}}); err != nil {
+		t.Fatalf("SaveTranscript: %v", err)
+	}
+	get := func(q string) (int, string) {
+		r := jsonRequest(t, http.MethodGet, "/api/v1/library/recordings/"+itoa(id)+"/transcript/export?format=srt"+q, nil)
+		sign(r)
+		w := do(t, h, r)
+		return w.Code, w.Body.String()
+	}
+
+	// No programme on the recording yet: the words go out as recognised, and
+	// there is no live log to read.
+	if code, body := get(""); code != http.StatusOK || !strings.Contains(body, "darn it polyemesis") {
+		t.Fatalf("export with no programme = %d:\n%s", code, body)
+	}
+	if code, _ := get("&source=live"); code != http.StatusNotFound {
+		t.Errorf("live export of a recording with no programme = %d, want 404", code)
+	}
+
+	recs[0].SourceID = &srcID
+	if err := store.UpsertRecording(&recs[0]); err != nil {
+		t.Fatal(err)
+	}
+	code, body := get("")
+	if code != http.StatusOK || !strings.Contains(body, "Host: d*** it Polyemesis") {
+		t.Fatalf("export with the programme's policy = %d:\n%s", code, body)
+	}
+	if code, _ := get("&source=live"); code != http.StatusNotFound {
+		t.Errorf("live export with nothing logged in the window = %d, want 404", code)
+	}
+}

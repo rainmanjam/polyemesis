@@ -43,9 +43,28 @@ describe("CaptionModeControl", () => {
   // The server refuses a caption-route change on a live destination (409) and
   // restarts an enabled one that is not yet delivering, so the picker says both
   // before the operator presses Save.
-  it("says a live destination must be stopped to change its route, and that a save restarts an enabled one", () => {
+  it("says a live destination must be stopped to change its route", () => {
     render(<CaptionModeControl platform="twitch" value="sei" onChange={() => {}} delaySeconds={0} />);
     expect(screen.getByTestId("caption-change-needs-stop").textContent).toBe(en["wave3.captions.changeNeedsStop"]);
+  });
+
+  // MUTATION: the restart line shown for any changed route. Observed: FAIL, a
+  // change from off to YouTube POST, which touches no video, said it restarts.
+  it("says a save restarts the destination only when the change adds or removes the in-stream stage", () => {
+    const { rerender } = render(
+      <CaptionModeControl platform="twitch" value="sei" storedMode="off" onChange={() => {}} delaySeconds={0} />,
+    );
+    expect(screen.getByTestId("caption-change-restarts").textContent).toBe(en["wave3.captions.changeRestarts"]);
+    rerender(
+      <CaptionModeControl platform="youtube" value="youtube_post" storedMode="off" onChange={() => {}} delaySeconds={30} />,
+    );
+    expect(screen.queryByTestId("caption-change-restarts")).toBeNull();
+    rerender(
+      <CaptionModeControl platform="youtube" value="youtube_post" storedMode="sei" onChange={() => {}} delaySeconds={30} />,
+    );
+    expect(screen.getByTestId("caption-change-restarts")).toBeTruthy();
+    rerender(<CaptionModeControl platform="twitch" value="sei" storedMode="sei" onChange={() => {}} delaySeconds={0} />);
+    expect(screen.queryByTestId("caption-change-restarts")).toBeNull();
   });
 
   it("asks for the 30 s or 60 s delay when YouTube's caption POST is chosen at another delay", () => {

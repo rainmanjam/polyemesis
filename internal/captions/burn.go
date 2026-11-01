@@ -58,6 +58,11 @@ func EnsureBurnFile(path string) error {
 	return f.Close()
 }
 
+// ClearBurnFile leaves the burn file existing and empty, whatever it held.
+func ClearBurnFile(path string) error {
+	return NewBurnWriter(path, nil).Close()
+}
+
 // BurnWriter keeps one burn file showing the caption on screen. It is safe for
 // concurrent use and safe on a nil receiver.
 type BurnWriter struct {

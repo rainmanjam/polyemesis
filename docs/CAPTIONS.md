@@ -69,8 +69,10 @@ The save is refused, with a reason, in three cases:
 - YouTube's caption POST is chosen at a delay other than 30 s or 60 s;
 - a route changes while the destination is live. Stop the destination first.
 
-A route change on an enabled destination that is not live yet restarts its
-output. The picker says both.
+A change that adds or removes the in-stream (SEI) route changes the
+destination's video path, so it restarts an enabled destination that is not
+live yet. A change between off and YouTube's HTTP POST touches no video and
+restarts nothing. The picker says which applies.
 
 ## The player and the recordings
 
@@ -91,6 +93,8 @@ spoken. The log is private to the server's user and rolls over once past
 32 MiB, so at most 64 MiB is on disk per programme. In the *Library*, a
 recording's player shows a *Captions* track: the stored transcript when there
 is one, otherwise the live captions lined up with the recording's own timeline.
+A recording's start is stored to the second, so live captions on a recording
+can be up to a second early or late.
 
 **Exports.** Beside the transcript, *Export captions* offers SRT, VTT and JSON:
 
@@ -216,12 +220,20 @@ Rules:
 - The rendition sits before any destination's broadcast delay, so the burned
   caption is delayed with its picture and stays in step with it.
 - An FFmpeg without `drawtext` runs the tier without captions and logs why.
+- A tier that starts while no captioner runs starts from an empty burn file, so
+  a caption left by a crash is never drawn.
+- The built-in font is Inter, which has no Chinese, Japanese or Korean glyphs.
+  Captions in those languages burn in as missing glyphs; use the caption track
+  or a platform route for them.
 
 
 ## How the captioner is driven
 
 The captioner runs for a programme when at least one of its enabled destinations
-has a caption mode that its platform accepts. It transcribes the track the
+has a caption mode that its platform accepts, or uses a rendition that burns
+captions in. Burned-in captions are how a platform with no caption route (Kick,
+a custom RTMP server) gets them, so such a tier is enough on its own. The
+player's live track and the cue log fill only while the captioner runs. It transcribes the track the
 programme chose (automatic when none is chosen). Turning every captioned
 destination off stops it. A destination's broadcast delay decides when its
 captions are released, so a destination set to 30 seconds receives each caption

@@ -14,6 +14,12 @@ const MODE_KEY: Record<CaptionMode, TranslationKey> = {
   facebook_sei: "wave3.captions.facebookSei",
 };
 
+/** Whether a route runs through the in-stream SEI stage, which sits in the
+ *  destination's video path. */
+function inStream(mode: CaptionMode): boolean {
+  return mode === "sei" || mode === "facebook_sei";
+}
+
 /** Where captions go for one destination (#8). The picker offers only the routes
  *  the platform takes, from the same table the server enforces.
  *
@@ -27,6 +33,7 @@ export function CaptionModeControl({
   onChange,
   delaySeconds,
   ingestReady,
+  storedMode,
 }: Readonly<{
   platform: string;
   value: CaptionMode;
@@ -36,6 +43,9 @@ export function CaptionModeControl({
   /** The SAVED destination's captionIngestReady. Undefined for a destination
    *  not yet saved, which has no URL either. */
   ingestReady?: boolean;
+  /** The SAVED destination's caption mode. Undefined for a destination not
+   *  yet saved, which has nothing running to restart. */
+  storedMode?: CaptionMode;
 }>) {
   const t = useT();
   const route = CAPTION_ROUTES[platform];
@@ -83,12 +93,19 @@ export function CaptionModeControl({
             <p className="text-xs text-muted-foreground">{t("wave3.captions.postBroadcast")}</p>
           )}
           {value !== "off" && <p className="text-xs text-muted-foreground">{t("wave3.captions.onAir")}</p>}
-          {/* The server answers 409 to a route change on a live destination,
-              and a change on an enabled one that is not delivering yet changes
-              its output spec, which restarts it. */}
+          {/* The server answers 409 to a route change on a live destination.
+              A change that adds or removes the in-stream (SEI) stage changes
+              the destination's output spec, which restarts an enabled one; a
+              change between off and YouTube POST touches no video and does
+              not. */}
           <p className="text-xs text-muted-foreground" data-testid="caption-change-needs-stop">
             {t("wave3.captions.changeNeedsStop")}
           </p>
+          {storedMode !== undefined && value !== storedMode && (inStream(value) || inStream(storedMode)) && (
+            <p className="text-xs text-warn" data-testid="caption-change-restarts">
+              {t("wave3.captions.changeRestarts")}
+            </p>
+          )}
         </>
       )}
     </div>
