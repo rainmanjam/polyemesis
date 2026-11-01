@@ -24,6 +24,10 @@ type YouTube struct {
 	// driven without a real minute of waiting, which is the difference between
 	// that path being covered and being hoped about.
 	vodRetry []time.Duration
+	// testingWait replaces the waits a caption rollover spends watching its
+	// replacement reach testing (youtube_rollover.go). Nil means
+	// ytRolloverTestingWait; a test sets zero delays, as with vodRetry.
+	testingWait []time.Duration
 }
 
 // Google splits what other platforms combine: consent is granted on

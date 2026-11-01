@@ -27,6 +27,7 @@ package oauth
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,9 +41,22 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
 
-// xAPIBase is the one production host: consent, tokens and data all live on
-// api.x.com.
+// xAPIBase is the production host for tokens and data.
 const xAPIBase = "https://api.x.com"
+
+// xAuthorizeBase and xAuthorizePath are the consent page, kept apart from the
+// token and data host so a change to one does not move the other.
+//
+// PROVISIONAL. X's two official sources disagree (docs-x section 1, VERDICTS
+// X#8): the OpenAPI spec's authorizationUrl is https://api.x.com/2/oauth2/authorize,
+// which is what this follows, and every example in the user-access-token guide
+// uses https://x.com/i/oauth2/authorize. If a live authorize request on the
+// spec's host does not show the consent page, set these two to the guide's
+// "https://x.com" and "/i/oauth2/authorize"; the token and API hosts stay put.
+const (
+	xAuthorizeBase = "https://api.x.com"
+	xAuthorizePath = "/2/oauth2/authorize"
+)
 
 // xLivestreamEnv is the operator's switch for the Livestream family. Set it to
 // 1 or true once X has whitelisted the app.
@@ -66,6 +80,8 @@ type X struct {
 	endpoints
 	// livestream is the gate. False is the production default.
 	livestream bool
+	// calls holds the rate-limit holds X's answers set and the cached user id (x_ratelimit.go).
+	calls xCallState
 }
 
 // Compile-time assertions. The EntitlementGated one is the gate's probe.
@@ -148,25 +164,36 @@ func (x *X) AuthURL(clientID, redirectURI, state, challenge string) string {
 		q.Set("code_challenge", challenge)
 		q.Set("code_challenge_method", "S256")
 	}
-	return x.authEndpoint() + "/2/oauth2/authorize?" + q.Encode()
+	return x.authBase(xAuthorizeBase) + xAuthorizePath + "?" + q.Encode()
 }
 
-// Exchange trades the code for tokens. The client pair travels in the body, the
-// shape every provider here uses. X's spec names no client-authentication method
-// for the token endpoint, so if a live exchange answers invalid_client with a
-// valid pair, switch to HTTP Basic. That is PROVISIONAL until a live exchange.
+// Exchange trades the code for tokens. A confidential client (one with a secret)
+// authenticates with HTTP Basic, which is what X documents for /2/oauth2/token
+// (docs-x section 1, CONFIRMED); the secret never travels in the body. A public
+// client sends client_id in the body and no secret. client_id stays in the body
+// in both cases, as every example in X's guide has it.
 func (x *X) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, code, verifier string) (*Token, error) {
 	form := url.Values{
-		"client_id":     {clientID},
-		"client_secret": {clientSecret},
-		"code":          {code},
-		"grant_type":    {"authorization_code"},
-		"redirect_uri":  {redirectURI},
+		"client_id":    {clientID},
+		"code":         {code},
+		"grant_type":   {"authorization_code"},
+		"redirect_uri": {redirectURI},
 	}
 	if verifier != "" {
 		form.Set("code_verifier", verifier)
 	}
-	return postForm(ctx, x.tokenEndpoint(), form, nil)
+	return postForm(ctx, x.tokenEndpoint(), form, xClientAuth(clientID, clientSecret))
+}
+
+// xClientAuth is the Authorization header a confidential client sends to the
+// token endpoint, or nil for a public client. RFC 6749 section 2.3.1: both halves
+// are form-encoded before they are joined and base64-encoded.
+func xClientAuth(clientID, clientSecret string) map[string]string {
+	if clientSecret == "" {
+		return nil
+	}
+	pair := url.QueryEscape(clientID) + ":" + url.QueryEscape(clientSecret)
+	return map[string]string{"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte(pair))}
 }
 
 func (x *X) tokenEndpoint() string { return x.authEndpoint() + "/2/oauth2/token" }
@@ -177,10 +204,9 @@ func (x *X) tokenEndpoint() string { return x.authEndpoint() + "/2/oauth2/token"
 func (x *X) Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (*Token, error) {
 	tok, err := postForm(ctx, x.tokenEndpoint(), url.Values{
 		"client_id":     {clientID},
-		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
 		"grant_type":    {"refresh_token"},
-	}, nil)
+	}, xClientAuth(clientID, clientSecret))
 	if err != nil {
 		return nil, err
 	}
@@ -207,9 +233,14 @@ func (e *xStatusError) Error() string {
 	return fmt.Sprintf("X returned %d: %s", e.Status, e.Problems)
 }
 
-// xDo performs one authenticated JSON call. payload nil sends no body. out nil
-// discards the response.
-func xDo(ctx context.Context, method, endpoint, accessToken string, payload, out any) error {
+// do performs one authenticated JSON call. payload nil sends no body. out nil
+// discards the response. A rate-limit hold on the token refuses the call before
+// any request (x_ratelimit.go).
+func (x *X) do(ctx context.Context, method, endpoint, accessToken string, payload, out any) error {
+	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
+	if until, held := x.calls.heldUntil(fp); held {
+		return &xRateLimitedError{Until: until, Held: true}
+	}
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -234,6 +265,12 @@ func xDo(ctx context.Context, method, endpoint, accessToken string, payload, out
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
+	if until, limited := x.calls.rateHoldFrom(resp); limited {
+		x.calls.hold(fp, until)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return &xRateLimitedError{Until: until, Problems: xProblemText(raw)}
+		}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &xStatusError{Status: resp.StatusCode, Problems: xProblemText(raw)}
 	}
@@ -279,6 +316,10 @@ type xUser struct {
 // me returns the authenticated user. It is needed by every Livestream path that
 // has a /2/users/{id}/... address and by the account read.
 func (x *X) me(ctx context.Context, accessToken string) (xUser, error) {
+	fp := xTokenFingerprint(accessToken, x.apiEndpoint())
+	if u, ok := x.calls.cachedUser(fp); ok {
+		return u, nil
+	}
 	var out struct {
 		Data   xUser      `json:"data"`
 		Errors []xProblem `json:"errors"`
@@ -286,7 +327,7 @@ func (x *X) me(ctx context.Context, accessToken string) (xUser, error) {
 	endpoint := x.apiEndpoint() + "/2/users/me?" + url.Values{
 		"user.fields": {"username,name"},
 	}.Encode()
-	if err := xDo(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
+	if err := x.do(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
 		return xUser{}, fmt.Errorf("X would not say which account this token belongs to: %w", err)
 	}
 	if out.Data.ID == "" {
@@ -295,6 +336,7 @@ func (x *X) me(ctx context.Context, accessToken string) (xUser, error) {
 		}
 		return xUser{}, errors.New("X returned no user id for this token")
 	}
+	x.calls.rememberUser(fp, out.Data)
 	return out.Data, nil
 }
 
@@ -358,7 +400,7 @@ func (x *X) CheckEntitlement(ctx context.Context, clientID, accessToken string) 
 			Sources []xSource `json:"sources"`
 		} `json:"data"`
 	}
-	err = xDo(ctx, http.MethodGet, x.sourcesEndpoint(u.ID), accessToken, nil, &out)
+	err = x.do(ctx, http.MethodGet, x.sourcesEndpoint(u.ID), accessToken, nil, &out)
 	if err == nil {
 		return nil
 	}
@@ -427,12 +469,17 @@ func (x *X) listSources(ctx context.Context, accessToken string) ([]xSource, err
 	if err != nil {
 		return nil, err
 	}
+	return x.listSourcesFor(ctx, accessToken, u.ID)
+}
+
+// listSourcesFor lists the sources of a user whose id the caller already holds.
+func (x *X) listSourcesFor(ctx context.Context, accessToken, userID string) ([]xSource, error) {
 	var out struct {
 		Data struct {
 			Sources []xSource `json:"sources"`
 		} `json:"data"`
 	}
-	if err := xDo(ctx, http.MethodGet, x.sourcesEndpoint(u.ID), accessToken, nil, &out); err != nil {
+	if err := x.do(ctx, http.MethodGet, x.sourcesEndpoint(userID), accessToken, nil, &out); err != nil {
 		return nil, fmt.Errorf("X would not list stream sources: %w", err)
 	}
 	return out.Data.Sources, nil
@@ -450,7 +497,7 @@ func (x *X) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, 
 	if err != nil {
 		return nil, err
 	}
-	srcs, err := x.listSources(ctx, accessToken)
+	srcs, err := x.listSourcesFor(ctx, accessToken, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +513,7 @@ func (x *X) Ingest(ctx context.Context, clientID, accessToken string) (*Ingest, 
 			Source xSource `json:"source"`
 		} `json:"data"`
 	}
-	if err := xDo(ctx, http.MethodPost, x.sourcesEndpoint(u.ID), accessToken,
+	if err := x.do(ctx, http.MethodPost, x.sourcesEndpoint(u.ID), accessToken,
 		map[string]string{"name": xSourceName}, &out); err != nil {
 		return nil, fmt.Errorf("X would not create a stream source: %w", err)
 	}
@@ -503,17 +550,23 @@ type XBroadcast struct {
 // read so an empty field means X sent nothing rather than that it was not asked.
 const xBroadcastFields = "id,broadcast_id,twitter_user_id,source_id,title,share_url,media_key,state,start_ms,end_ms"
 
-// xProblem is X's typed error object.
+// xProblem is X's typed error object. Two shapes reach it: the RFC 7807 problem
+// (title, detail, type) X uses for a 400, and {error_type, message}, which the
+// broadcasts overview lists for 403, 404, 412 and 503 (docs-x section 10). A 412
+// such as "requires X Premium" arrives in the second shape, and without these
+// two fields it reached the operator as a bare "X returned 412".
 type xProblem struct {
-	Type   string `json:"type"`
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
-	Status int    `json:"status"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	Detail    string `json:"detail"`
+	Status    int    `json:"status"`
+	ErrorType string `json:"error_type"`
+	Message   string `json:"message"`
 }
 
 func (p xProblem) String() string {
-	parts := make([]string, 0, 3)
-	for _, s := range []string{p.Title, p.Detail, p.Type} {
+	parts := make([]string, 0, 5)
+	for _, s := range []string{p.Title, p.Message, p.Detail, p.ErrorType, p.Type} {
 		if strings.TrimSpace(s) != "" {
 			parts = append(parts, s)
 		}
@@ -549,7 +602,7 @@ func (x *X) Broadcasts(ctx context.Context, clientID, accessToken string) ([]XBr
 	endpoint := x.apiEndpoint() + "/2/broadcasts?" + url.Values{
 		"broadcast.fields": {xBroadcastFields},
 	}.Encode()
-	if err := xDo(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
+	if err := x.do(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
 		return nil, fmt.Errorf("X would not list broadcasts: %w", err)
 	}
 	if len(out.Data) == 0 && len(out.Errors) > 0 {
@@ -573,11 +626,15 @@ func (x *X) BroadcastByID(ctx context.Context, clientID, accessToken, id string)
 	endpoint := x.apiEndpoint() + "/2/broadcasts/" + url.PathEscape(id) + "?" + url.Values{
 		"broadcast.fields": {xBroadcastFields},
 	}.Encode()
-	if err := xDo(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
+	if err := x.do(ctx, http.MethodGet, endpoint, accessToken, nil, &out); err != nil {
 		return nil, fmt.Errorf("X would not read broadcast %s: %w", id, err)
 	}
-	if out.Data.ID == "" && out.Data.BroadcastID == "" && len(out.Errors) > 0 {
-		return nil, fmt.Errorf("X would not read broadcast %s: %s", id, xProblems(out.Errors))
+	if out.Data.ID == "" && out.Data.BroadcastID == "" {
+		if len(out.Errors) > 0 {
+			return nil, fmt.Errorf("X would not read broadcast %s: %s", id, xProblems(out.Errors))
+		}
+		// An empty 2xx is not a broadcast with no state: read as one, the coordinator would plan from a zero value.
+		return nil, fmt.Errorf("X answered the read of broadcast %s with no broadcast", id)
 	}
 	return &out.Data, nil
 }
@@ -712,7 +769,7 @@ func (x *X) CreateBroadcast(ctx context.Context, clientID, accessToken, sourceKe
 		Errors []xProblem `json:"errors"`
 	}
 	endpoint := x.userPath(u.ID) + "/broadcasts"
-	if err := xDo(ctx, http.MethodPost, endpoint, accessToken,
+	if err := x.do(ctx, http.MethodPost, endpoint, accessToken,
 		map[string]string{"source_id": sourceKey}, &out); err != nil {
 		// source_id is the stream key, and X's problem text can echo it. The status error is scrubbed in place
 		// BEFORE the wrap, because fmt.Errorf builds its message now and a later scrub would not reach it.
@@ -808,19 +865,32 @@ func (x *X) PublishBroadcast(ctx context.Context, accessToken, broadcastID strin
 				ID    string `json:"id"`
 				State string `json:"state"`
 			} `json:"broadcast"`
+			// State is read as a fallback, the way END's answer is: the spec nests it under broadcast, and a flat
+			// data.state is the other shape X's state answers use.
+			State      string `json:"state"`
 			TweetError string `json:"tweet_error"`
 		} `json:"data"`
 		Errors []xProblem `json:"errors"`
 	}
 	endpoint := x.userPath(u.ID) + "/broadcasts/" +
 		url.PathEscape(broadcastID) + "/state"
-	if err := xDo(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
+	if err := x.do(ctx, http.MethodPut, endpoint, accessToken, body, &out); err != nil {
 		return nil, fmt.Errorf("X would not publish broadcast %s: %w", broadcastID, err)
 	}
 	// A 2xx can still carry X's errors. With no state the publish did nothing, so it is a failure in X's words;
 	// with a state the broadcast moved, and the errors are warnings the operator reads. PROVISIONAL, X is gated.
-	if out.Data.Broadcast.State == "" && len(out.Errors) > 0 {
+	if out.Data.Broadcast.State == "" {
+		out.Data.Broadcast.State = out.Data.State
+	}
+	switch st := out.Data.Broadcast.State; {
+	case st == "" && len(out.Errors) > 0:
 		return nil, fmt.Errorf("X would not publish broadcast %s: %s", broadcastID, xProblems(out.Errors))
+	case st == "":
+		// A 2xx with neither a state nor an error does not show the broadcast moved, and recording it as live
+		// would stop the coordinator from trying again.
+		return nil, fmt.Errorf("X answered the publish of broadcast %s with no state, so it cannot be shown to be live", broadcastID)
+	case st != XStateRunning && st != XStatePrePublished:
+		return nil, fmt.Errorf("X answered the publish of broadcast %s with state %s, not %s", broadcastID, st, XStateRunning)
 	}
 	res := &XPublishResult{ID: out.Data.Broadcast.ID, State: out.Data.Broadcast.State}
 	if res.ID == "" {
@@ -860,7 +930,9 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 				State string `json:"state"`
 			} `json:"broadcast"`
 		} `json:"data"`
-		Errors []xProblem `json:"errors"`
+		// Success is END's documented answer, {success:true} (docs-x, publish-or-end).
+		Success bool       `json:"success"`
+		Errors  []xProblem `json:"errors"`
 	}
 	switch to {
 	case PhaseTesting:
@@ -877,7 +949,7 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		res.Warnings = pub.Warnings
 	case PhaseComplete:
 		endpoint := x.apiEndpoint() + "/2/broadcasts/" + url.PathEscape(broadcastID) + "/state"
-		if err := xDo(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "END"}, &out); err != nil {
+		if err := x.do(ctx, http.MethodPut, endpoint, accessToken, map[string]string{"state": "END"}, &out); err != nil {
 			return nil, fmt.Errorf("X would not end broadcast %s: %w", broadcastID, err)
 		}
 		// The END answer may carry the state at data.state or under data.broadcast.state, so both are read. A
@@ -886,10 +958,20 @@ func (x *X) TransitionBroadcast(ctx context.Context, accessToken, broadcastID st
 		if res.Status == "" {
 			res.Status = out.Data.Broadcast.State
 		}
+		if res.Status == "" && len(out.Errors) > 0 {
+			return nil, fmt.Errorf("X would not end broadcast %s: %s", broadcastID, xProblems(out.Errors))
+		}
+		switch {
+		case res.Status == "" && !out.Success:
+			// Neither the documented success nor a state: nothing shows the broadcast ended, and a disabled row
+			// recorded as ended would never be tried again.
+			return nil, fmt.Errorf("X answered the end of broadcast %s with neither success nor a state, so it cannot be shown to have ended", broadcastID)
+		case res.Status == "":
+			res.Status = XStateEnded
+		case res.Status != XStateEnded && res.Status != XStateTimedOut && res.Status != XStateCanceled:
+			return nil, fmt.Errorf("X answered the end of broadcast %s with state %s, which is not ended", broadcastID, res.Status)
+		}
 		if len(out.Errors) > 0 {
-			if res.Status == "" {
-				return nil, fmt.Errorf("X would not end broadcast %s: %s", broadcastID, xProblems(out.Errors))
-			}
 			res.Warnings = append(res.Warnings, "X ended the broadcast but reported: "+xProblems(out.Errors))
 		}
 	}

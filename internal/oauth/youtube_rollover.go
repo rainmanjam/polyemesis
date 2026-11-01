@@ -125,9 +125,15 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 		privacy = "private"
 	}
 
+	// A broadcast taking captions by HTTP POST passes them on (#8). closedCaptionsType can be set only while the
+	// replacement is created or ready (docs-youtube B13), so it is born with them, with the monitor stream on and the
+	// old broadcast's delay (C5, C7). Without this the replacement went live with captions off and every POST to the
+	// ingestion URL showed nothing, with no warning.
+	captionPOST := state.ClosedCaptionsType == ytClosedCaptionsHTTPPost
 	newID, err := y.createRolloverBroadcast(ctx, accessToken, rolloverBody{
 		Title: title, Description: description, Privacy: privacy,
 		EnableAutoStart: src.EnableAutoStart, At: req.Now.Add(ytRolloverStartLead),
+		CaptionPOST: captionPOST, CaptionDelayMs: rolloverCaptionDelay(state.StreamDelayMs),
 	})
 	if err != nil {
 		return nil, &RolloverError{Stage: "create", OldStillLive: true, err: err}
@@ -151,6 +157,12 @@ func (y *YouTube) RollOverBroadcast(ctx context.Context, accessToken string, req
 	newState, err := y.BroadcastState(ctx, accessToken, newID)
 	if err != nil {
 		return abandon("start", err)
+	}
+	if captionPOST && !broadcastIsOnAir(newState.Status) {
+		// The monitor stream the captions need forces a testing stage before live (B14, B22).
+		if err := y.reachTesting(ctx, accessToken, newID, newState.Status); err != nil {
+			return abandon("testing", err)
+		}
 	}
 	if !broadcastIsOnAir(newState.Status) {
 		_, terr := y.TransitionBroadcast(ctx, accessToken, newID, PhaseLive)
@@ -254,6 +266,56 @@ type rolloverBody struct {
 	Privacy         string
 	EnableAutoStart bool
 	At              time.Time
+	// CaptionPOST makes the replacement take captions by HTTP POST, with the monitor stream on and CaptionDelayMs
+	// of delay, the way the old broadcast did.
+	CaptionPOST    bool
+	CaptionDelayMs int
+}
+
+// rolloverCaptionDelay is the old broadcast's caption delay when it is one YouTube accepts for captions by HTTP POST
+// (30 s or 60 s, docs-youtube C5), and 30 s otherwise.
+func rolloverCaptionDelay(ms *int) int {
+	if ms != nil && (*ms == 30000 || *ms == 60000) {
+		return *ms
+	}
+	return 30000
+}
+
+// ytRolloverTestingWait is how long a caption rollover waits, read by read, for its replacement to reach testing
+// after the transition is accepted. PROVISIONAL: YouTube documents testStarting but not how long it lasts.
+var ytRolloverTestingWait = []time.Duration{
+	2 * time.Second, 3 * time.Second, 5 * time.Second, 5 * time.Second, 5 * time.Second, 10 * time.Second,
+}
+
+// reachTesting takes a caption replacement to testing and waits until YouTube reports it there, because live is
+// refused until it is. status is the replacement's last read state.
+func (y *YouTube) reachTesting(ctx context.Context, accessToken, id, status string) error {
+	if status != "testing" && status != "testStarting" {
+		if _, err := y.TransitionBroadcast(ctx, accessToken, id, PhaseTesting); err != nil {
+			return err
+		}
+	}
+	waits := y.testingWait
+	if waits == nil {
+		waits = ytRolloverTestingWait
+	}
+	for attempt := 0; ; attempt++ {
+		st, err := y.BroadcastState(ctx, accessToken, id)
+		if err != nil {
+			return err
+		}
+		if st.Status == "testing" {
+			return nil
+		}
+		if attempt >= len(waits) {
+			return fmt.Errorf("the replacement %s did not reach testing (it is %q), and a broadcast with captions by HTTP POST must pass through testing before it can go live", id, st.Status)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(waits[attempt]):
+		}
+	}
 }
 
 // createRolloverBroadcast is liveBroadcasts.insert for a replacement. It is separate from createScheduledBroadcast,
@@ -275,6 +337,18 @@ func (y *YouTube) createRolloverBroadcast(ctx context.Context, accessToken strin
 			"monitorStream":   map[string]any{"enableMonitorStream": false},
 			"enableAutoStart": b.EnableAutoStart,
 		},
+	}
+	if b.CaptionPOST {
+		// The one case the monitor stream is on: captions by HTTP POST need its delay (docs-youtube C7), and the
+		// testing stage it forces is taken by reachTesting.
+		payload["contentDetails"] = map[string]any{
+			"closedCaptionsType": ytClosedCaptionsHTTPPost,
+			"monitorStream": map[string]any{
+				"enableMonitorStream":    true,
+				"broadcastStreamDelayMs": b.CaptionDelayMs,
+			},
+			"enableAutoStart": b.EnableAutoStart,
+		}
 	}
 	var created ytBroadcast
 	err := requestJSON(ctx, http.MethodPost,

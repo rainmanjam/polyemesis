@@ -443,6 +443,11 @@ func TestXGoLiveIsPublishAndEndIsEndAndTestingIsRefused(t *testing.T) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		seen = append(seen, r.Method+" "+r.URL.Path+" "+string(body))
+		if strings.Contains(string(body), "END") {
+			// END's documented answer.
+			_, _ = io.WriteString(w, `{"success":true}`)
+			return
+		}
 		_, _ = io.WriteString(w, `{"data":{"id":"1ynJOZVeajOJR","state":"RUNNING","broadcast_id":"1ynJOZVeajOJR"}}`)
 	})
 	ctx := context.Background()

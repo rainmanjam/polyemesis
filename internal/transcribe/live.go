@@ -108,6 +108,24 @@ const LiveVTTName = "captions.vtt"
 // LiveWorkDir is the scratch directory for live captioning under the data dir.
 func LiveWorkDir(dataDir string) string { return filepath.Join(dataDir, LiveSubdir) }
 
+// newLiveScratch makes a scratch directory of its own for one captioner run,
+// inside the shared workDir. Every captioner names its windows live-1.wav,
+// live-2.wav and so on, and there is one captioner per programme, so two
+// captioned programmes sharing workDir itself would overwrite, read and delete
+// each other's windows: one programme would air the other's speech as its
+// captions. The same holds for a Stop that times out and leaves its loop
+// running beside the replacement. cleanup removes this run's directory only.
+func newLiveScratch(workDir string) (dir string, cleanup func(), err error) {
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return "", nil, err
+	}
+	dir, err = os.MkdirTemp(workDir, "captioner-")
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
+}
+
 // LiveConfig is everything the operator chose.
 type LiveConfig struct {
 	// Enabled is false in the zero value and false in DefaultLiveConfig, and
@@ -1195,7 +1213,8 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 	}
 	c.mu.Unlock()
 
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	scratch, cleanScratch, err := newLiveScratch(workDir)
+	if err != nil {
 		return fmt.Errorf("live captions: %w", err)
 	}
 
@@ -1212,15 +1231,18 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		cleanScratch()
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
+		cleanScratch()
 		return err
 	}
 	if err := cmd.Start(); err != nil {
 		cancel()
+		cleanScratch()
 		return fmt.Errorf("live captions: start audio tap: %w", err)
 	}
 	childcensus.Enrol(cmd.Process.Pid, "live-captions-audio-tap", "transcribe") // #717
@@ -1229,7 +1251,7 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 		tools:   c.whisper,
 		cfg:     c.cfg,
 		model:   modelPath,
-		workDir: workDir,
+		workDir: scratch,
 		nice:    c.opt.nice,
 	}
 	sess := NewLiveSession(c.log, c.cfg, tr, c.opts...)
@@ -1256,6 +1278,10 @@ func (c *LiveCaptioner) Start(ctx context.Context, relayURL, modelPath, workDir 
 		}
 		defer close(done)
 		defer cancel()
+		// Removed only once whisper can no longer be writing into it: this
+		// loop owns the directory, so a Stop that times out and a replacement
+		// captioner started beside it never share or delete each other's files.
+		defer cleanScratch()
 		if err := sess.Run(ctx, stdout); err != nil && ctx.Err() == nil {
 			c.log.Warn("live captions: stopped", "err", err)
 		}

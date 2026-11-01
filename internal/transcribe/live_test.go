@@ -917,3 +917,42 @@ func TestLiveVTTPlacesEachCueWhenItWasSpokenAgainstTheEpochItNames(t *testing.T)
 		t.Fatalf("SpokenAt = %v, want 10 s after the epoch", got)
 	}
 }
+
+// Two captioned programmes share one data directory, and every captioner names
+// its windows live-1.wav, live-2.wav and so on. If both wrote into the shared
+// directory itself, one programme's whisper could read the other's audio and
+// air it as captions, or find its window deleted under it. Each run therefore
+// gets a directory of its own inside the shared one, and its cleanup removes
+// that directory and nothing else.
+func TestEachLiveCaptionerRunGetsItsOwnScratchDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), LiveSubdir)
+
+	a, cleanA, err := newLiveScratch(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, cleanB, err := newLiveScratch(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanB()
+
+	if a == b {
+		t.Fatalf("two captioner runs share scratch directory %q; their live-N.wav windows collide", a)
+	}
+	for _, d := range []string{a, b} {
+		if filepath.Dir(d) != root {
+			t.Fatalf("scratch %q is not inside the shared work dir %q", d, root)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(b, "live-1.wav"), []byte("b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cleanA()
+	if _, err := os.Stat(a); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left run A's directory behind: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(b, "live-1.wav")); err != nil {
+		t.Fatalf("cleaning run A removed run B's window: %v", err)
+	}
+}

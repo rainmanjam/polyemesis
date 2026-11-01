@@ -14,9 +14,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
@@ -52,6 +54,9 @@ type xcFake struct {
 	creates int
 	// seq numbers broadcasts so a second show gets a different id.
 	seq int
+	// limited makes every call answer 429 with a reset a minute ahead; requests counts every call that reached X.
+	limited  bool
+	requests int
 }
 
 func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
@@ -60,6 +65,13 @@ func (f *xcFake) handler(t *testing.T) http.HandlerFunc {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		f.requests++
+		if f.limited {
+			w.Header().Set("x-rate-limit-reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"title":"Too Many Requests","detail":"slow down"}`)
+			return
+		}
 		path := r.URL.Path
 		switch {
 		case path == "/2/users/me":
@@ -258,12 +270,26 @@ func TestXNotStartedWaitsForBytesBeforeItGoesLive(t *testing.T) {
 
 // A finished X broadcast on an enabled destination is a second show, not a
 // fault. The plan asks for a renewal; the YouTube behaviour (fault) is unchanged.
+//
+// Only once the encoder has stopped: an END with bytes still arriving is the
+// operator's emergency stop in the X app, and renewing then would publish a new
+// public broadcast within a sweep. CANCELED is never renewed by itself.
 func TestXFinishedBroadcastWhileEnabledRenewsRatherThanFaults(t *testing.T) {
-	for _, s := range []string{oauth.XStateEnded, oauth.XStateTimedOut, oauth.XStateCanceled} {
-		plan := planLifecycle(true, &oauth.BroadcastLifecycleState{Status: s, StreamActive: boolPtr(true)})
+	for _, s := range []string{oauth.XStateEnded, oauth.XStateTimedOut} {
+		plan := planLifecycle(true, &oauth.BroadcastLifecycleState{Status: s, StreamActive: boolPtr(false)})
 		if !plan.Renew || plan.Fault != "" {
-			t.Errorf("%s while enabled: plan = %+v, want Renew with no fault", s, plan)
+			t.Errorf("%s while enabled, encoder stopped: plan = %+v, want Renew with no fault", s, plan)
 		}
+		for _, active := range []*bool{boolPtr(true), nil} {
+			plan := planLifecycle(true, &oauth.BroadcastLifecycleState{Status: s, StreamActive: active})
+			if plan.Renew || plan.Send != "" || plan.Wait == "" {
+				t.Errorf("%s while bytes may still arrive (%v): plan = %+v, want a wait, no renewal", s, active, plan)
+			}
+		}
+	}
+	plan := planLifecycle(true, &oauth.BroadcastLifecycleState{Status: oauth.XStateCanceled, StreamActive: boolPtr(false)})
+	if plan.Renew || plan.Fault == "" {
+		t.Errorf("canceled: plan = %+v, want a fault and no renewal", plan)
 	}
 }
 
@@ -347,7 +373,7 @@ func TestXCoordinatorOpensOnEnableThenPublishesWhenBytesArrive(t *testing.T) {
 // lifecycle block, and it must not seed from the Facebook mirror, which still
 // names the ended broadcast.
 func TestXSecondShowOpensANewBroadcastAndForgetsTheEndedOne(t *testing.T) {
-	fake := &xcFake{active: true, state: oauth.XStateEnded, id: "bc-1", seq: 1}
+	fake := &xcFake{active: false, state: oauth.XStateEnded, id: "bc-1", seq: 1}
 	stale := xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive, Attempts: 3, Fault: "old"})
 	stale.Facebook.BroadcastID = "bc-1"
 	c, store, faults := xcFixture(t, fake, true, stale)
@@ -590,12 +616,105 @@ func TestXPublishAndEndTellTheChatAdapterWhichBroadcastIsLive(t *testing.T) {
 // TestXRenewClearsTheChatTell: a broadcast X ended on its own (TIMED_OUT, or ended in X's tooling) is renewed rather
 // than ended by polyemesis, so the renewal is where the adapter learns the old id is over.
 func TestXRenewClearsTheChatTell(t *testing.T) {
-	fake := &xcFake{active: true, state: oauth.XStateTimedOut, id: "bc-1", seq: 1}
+	fake := &xcFake{active: false, state: oauth.XStateTimedOut, id: "bc-1", seq: 1}
 	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
 	var told []string
 	c.pointChat = func(_ int64, id string) { told = append(told, id) }
 	xcSweep(t, c, store)
 	if len(told) == 0 || told[0] != "" {
 		t.Errorf("tells on renewal = %q, want the old broadcast cleared first", told)
+	}
+}
+
+// THE EMERGENCY STOP. The operator ends the X broadcast in the X app while the
+// encoder is still pushing. Nothing is reopened or published while the bytes keep
+// coming; once the encoder stops, the next show gets a new broadcast.
+func TestXBroadcastEndedWhileTheEncoderStillSendsIsNotReopenedUntilItStops(t *testing.T) {
+	fake := &xcFake{active: true, state: oauth.XStateEnded, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	opened, published, _, _ := fake.snapshot()
+	if len(opened) != 0 || published != 0 {
+		t.Fatalf("ended with bytes still arriving: opened %v, published %d; want nothing reopened", opened, published)
+	}
+	fake.set(func(f *xcFake) { f.active = false })
+	xcSweep(t, c, store)
+	if opened, _, _, _ := fake.snapshot(); len(opened) != 1 {
+		t.Fatalf("after the encoder stopped: opened %v, want the next show's broadcast", opened)
+	}
+}
+
+// A CANCELED broadcast is a fault, not a renewal, so a cancel-and-reopen cycle
+// cannot post an announcement on every turn. Switching the destination off
+// forgets it, so switching it on again opens a new one.
+func TestXCanceledBroadcastIsAFaultReleasedBySwitchingTheDestinationOffAndOn(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateCanceled, id: "bc-1", seq: 1}
+	c, store, faults := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseLive}))
+
+	for range 3 {
+		xcSweep(t, c, store)
+	}
+	if opened, _, _, _ := fake.snapshot(); len(opened) != 0 {
+		t.Fatalf("a canceled broadcast was reopened: %v", opened)
+	}
+	if len(*faults) == 0 {
+		t.Fatal("a canceled broadcast raised no fault")
+	}
+	store.mu.Lock()
+	store.rows[5].Enabled = false
+	store.mu.Unlock()
+	if row := xcSweep(t, c, store); row.Lifecycle.BroadcastID != "" || row.Lifecycle.Fault != "" {
+		t.Fatalf("switched off: lifecycle = %+v, want the canceled broadcast forgotten", row.Lifecycle)
+	}
+	store.mu.Lock()
+	store.rows[5].Enabled = true
+	store.mu.Unlock()
+	xcSweep(t, c, store)
+	if opened, _, _, _ := fake.snapshot(); len(opened) != 1 {
+		t.Fatalf("switched on again: opened %v, want one new broadcast", opened)
+	}
+}
+
+// open() records a broadcast for every enabled X destination before any bytes
+// arrive. Switched off before it aired, that broadcast cannot become anything
+// without this coordinator's PUBLISH, so nothing asks X about it.
+func TestADisabledXDestinationWhoseBroadcastNeverAiredIsNotReadEverySweep(t *testing.T) {
+	fake := &xcFake{state: oauth.XStateNotStarted, id: "bc-1", seq: 1}
+	c, store, _ := xcFixture(t, fake, true, xcRow(false, db.BroadcastControl{BroadcastID: "bc-1", Phase: phaseCreated}))
+	for range 5 {
+		xcSweep(t, c, store)
+	}
+	fake.mu.Lock()
+	n := fake.requests
+	fake.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("X was asked %d times about a never-aired broadcast on a disabled destination, want 0", n)
+	}
+}
+
+// X publishes no Livestream rate limits. A 429 is X asking for a pause: the
+// provider holds its calls until the reset, and the coordinator records why but
+// does not count it toward the give-up budget.
+func TestAnXRateLimitIsNotCountedAgainstTheGiveUpBudget(t *testing.T) {
+	fake := &xcFake{limited: true}
+	c, store, _ := xcFixture(t, fake, true, xcRow(true, db.BroadcastControl{}))
+	var row *db.Destination
+	for range lifecycleGiveUpAfter + 5 {
+		row = xcSweep(t, c, store)
+	}
+	if row.Lifecycle.Attempts != 0 {
+		t.Fatalf("attempts = %d after rate-limit answers, want 0", row.Lifecycle.Attempts)
+	}
+	if !strings.Contains(row.Lifecycle.Fault, "rate-limiting") {
+		t.Fatalf("fault = %q, want the rate limit named", row.Lifecycle.Fault)
+	}
+	fake.mu.Lock()
+	n := fake.requests
+	fake.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("X was asked %d times during the hold, want 1", n)
 	}
 }

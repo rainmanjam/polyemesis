@@ -58,6 +58,10 @@ type fakeBroadcast struct {
 	id, title, description, privacy, status, streamID string
 	monitor, autoStart                                bool
 	scheduledStart                                    string
+	// captions is contentDetails.closedCaptionsType and delayMs the monitor stream's delay, both as the
+	// broadcast was created with them.
+	captions string
+	delayMs  int
 }
 
 func newRolloverFake(t *testing.T) *rolloverFake {
@@ -145,8 +149,10 @@ func (f *rolloverFake) listBroadcasts(w http.ResponseWriter, id string) {
 		ContentDetails struct {
 			BoundStreamID   string `json:"boundStreamId,omitempty"`
 			EnableAutoStart bool   `json:"enableAutoStart"`
-			MonitorStream   struct {
-				EnableMonitorStream bool `json:"enableMonitorStream"`
+			ClosedCaptionsType string `json:"closedCaptionsType,omitempty"`
+			MonitorStream      struct {
+				EnableMonitorStream    bool `json:"enableMonitorStream"`
+				BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
 			} `json:"monitorStream"`
 		} `json:"contentDetails"`
 	}
@@ -159,6 +165,8 @@ func (f *rolloverFake) listBroadcasts(w http.ResponseWriter, id string) {
 		it.ContentDetails.BoundStreamID = b.streamID
 		it.ContentDetails.EnableAutoStart = b.autoStart
 		it.ContentDetails.MonitorStream.EnableMonitorStream = b.monitor
+		it.ContentDetails.MonitorStream.BroadcastStreamDelayMs = b.delayMs
+		it.ContentDetails.ClosedCaptionsType = b.captions
 		items = append(items, it)
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
@@ -188,9 +196,11 @@ func (f *rolloverFake) insert(w http.ResponseWriter, r *http.Request) {
 			PrivacyStatus string `json:"privacyStatus"`
 		} `json:"status"`
 		ContentDetails struct {
-			EnableAutoStart bool `json:"enableAutoStart"`
-			MonitorStream   *struct {
-				EnableMonitorStream *bool `json:"enableMonitorStream"`
+			EnableAutoStart    bool   `json:"enableAutoStart"`
+			ClosedCaptionsType string `json:"closedCaptionsType"`
+			MonitorStream      *struct {
+				EnableMonitorStream    *bool `json:"enableMonitorStream"`
+				BroadcastStreamDelayMs int   `json:"broadcastStreamDelayMs"`
 			} `json:"monitorStream"`
 		} `json:"contentDetails"`
 	}
@@ -204,11 +214,12 @@ func (f *rolloverFake) insert(w http.ResponseWriter, r *http.Request) {
 	if _, ok := flat.ContentDetails["enableMonitorStream"]; ok {
 		f.t.Errorf("the insert body sent a flat contentDetails.enableMonitorStream, which YouTube ignores")
 	}
-	monitor := false
+	monitor, delay := false, 0
 	if body.ContentDetails.MonitorStream == nil || body.ContentDetails.MonitorStream.EnableMonitorStream == nil {
 		f.t.Errorf("the insert body must nest enableMonitorStream under contentDetails.monitorStream")
 	} else {
 		monitor = *body.ContentDetails.MonitorStream.EnableMonitorStream
+		delay = body.ContentDetails.MonitorStream.BroadcastStreamDelayMs
 	}
 	f.nextID++
 	id := fmt.Sprintf("new-%d", f.nextID)
@@ -216,6 +227,7 @@ func (f *rolloverFake) insert(w http.ResponseWriter, r *http.Request) {
 		id: id, title: body.Snippet.Title, description: body.Snippet.Description, privacy: body.Status.PrivacyStatus,
 		status: "created", monitor: monitor, autoStart: body.ContentDetails.EnableAutoStart,
 		scheduledStart: body.Snippet.ScheduledStartTime,
+		captions:       body.ContentDetails.ClosedCaptionsType, delayMs: delay,
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"id": id})
 }
@@ -263,7 +275,22 @@ func (f *rolloverFake) transition(w http.ResponseWriter, id, target string) {
 		return
 	}
 	switch target {
+	case "testing":
+		// Testing needs the monitor stream (docs-youtube B22). The fake moves straight to testing; the real
+		// channel passes through testStarting first.
+		if !b.monitor {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(ytTransitionRefusal("invalidTransition", "no monitor stream")))
+			return
+		}
+		b.status = "testing"
 	case "live":
+		if b.monitor && b.status != "testing" {
+			// An enabled monitor stream forces testing before live (B14).
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(ytTransitionRefusal("invalidTransition", "testing first")))
+			return
+		}
 		if b.status == "live" {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(ytTransitionRefusal("redundantTransition", "already live")))
@@ -721,5 +748,41 @@ func TestTheReplacementIsScheduledSlightlyAheadOfNow(t *testing.T) {
 	}
 	if !got.Equal(now.Add(ytRolloverStartLead)) || !got.After(now) {
 		t.Errorf("scheduledStartTime = %v, want %v (now plus the lead)", got, now.Add(ytRolloverStartLead))
+	}
+}
+
+// A broadcast taking captions by HTTP POST must hand them to its replacement. closedCaptionsType cannot change once
+// the replacement is testing or live (docs-youtube B13), so the replacement is created with it, with the monitor
+// stream on and the old delay, and taken through testing, which that monitor stream forces, before live. Before
+// this, the replacement went live with captions off and every POST to the ingestion URL showed nothing.
+func TestACaptionedBroadcastRollsOverToACaptionedReplacementThroughTesting(t *testing.T) {
+	f := newRolloverFake(t)
+	f.liveOld()
+	old := f.broadcasts["old-1"]
+	old.monitor, old.captions, old.delayMs = true, ytClosedCaptionsHTTPPost, 60000
+	y := f.client()
+	y.testingWait = []time.Duration{0, 0}
+
+	out, err := y.RollOverBroadcast(context.Background(), "tok", rolloverReq(time.Now()))
+	if err != nil {
+		t.Fatalf("rollover: %v", err)
+	}
+	newB := f.broadcasts[out.NewBroadcastID]
+	if newB.captions != ytClosedCaptionsHTTPPost || !newB.monitor || newB.delayMs != 60000 {
+		t.Fatalf("replacement captions=%q monitor=%v delay=%d, want HTTP POST, monitor on and the old 60 s delay",
+			newB.captions, newB.monitor, newB.delayMs)
+	}
+	if newB.status != "live" || !out.OldEnded {
+		t.Fatalf("replacement %+v, outcome %+v: want the replacement live and the old ended", newB, out)
+	}
+	want := []string{
+		"POST /liveBroadcasts",
+		"POST /liveBroadcasts/bind",
+		"POST /liveBroadcasts/transition testing new-1",
+		"POST /liveBroadcasts/transition live new-1",
+		"POST /liveBroadcasts/transition complete old-1",
+	}
+	if strings.Join(f.writes, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("writes = %v, want %v", f.writes, want)
 	}
 }

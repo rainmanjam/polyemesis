@@ -730,6 +730,25 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 		// phase has never been confirmed on air by this process, so there is
 		// nothing here that could justify sending `complete` to it.
 		return
+	case !d.Enabled && d.Platform == db.PlatformX && strings.EqualFold(d.Lifecycle.Phase, phaseCreated):
+		// AN X BROADCAST THAT NEVER AIRED, ON A DESTINATION SWITCHED OFF. open()
+		// records one for every enabled X destination before any bytes arrive,
+		// and only this coordinator's PUBLISH can take it to RUNNING, so with the
+		// destination off there is nothing it can become that needs an answer.
+		// Reading it anyway cost a broadcast read, a source list and the user
+		// lookup against X, which publishes no rate limits, every fifteen
+		// seconds for the life of the daemon. Re-enabling reads it again.
+		c.untrack(d.ID)
+		return
+	case !d.Enabled && d.Platform == db.PlatformX && isTerminalPhase(d.Lifecycle.Phase):
+		// Finished, as below, and the finished broadcast is forgotten as well, so
+		// switching the destination on again opens a new one. This is the release
+		// the CANCELED fault names.
+		if d.Lifecycle.BroadcastID != "" || d.Lifecycle.Fault != "" || d.Lifecycle.Attempts > 0 {
+			c.recordControl(d, "", func(b *db.BroadcastControl) { *b = db.BroadcastControl{} })
+		}
+		c.untrack(d.ID)
+		return
 	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
 		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
 		// disabled row whose broadcast has already completed has nothing left
@@ -826,8 +845,8 @@ func (c *lifecycleCoordinator) considerRow(ctx context.Context, d *db.Destinatio
 
 	st, err := prov.BroadcastState(cctx, acct.AccessToken, broadcastID)
 	if err != nil {
-		c.noteFailure(d, broadcastID, fmt.Sprintf(
-			"%s would not say what state broadcast %s is in: %v", d.Platform, broadcastID, err))
+		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
+			"%s would not say what state broadcast %s is in: %v", d.Platform, broadcastID, err), err)
 		return
 	}
 
@@ -991,8 +1010,8 @@ func (c *lifecycleCoordinator) open(ctx context.Context, d *db.Destination, crea
 	defer cancel()
 	id, err := creator.OpenBroadcast(cctx, acct.AccessToken, d.StreamKey)
 	if err != nil {
-		c.noteFailure(d, "", scrubSourceKey(fmt.Sprintf(
-			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey))
+		c.noteFailureUnlessPaused(d, "", scrubSourceKey(fmt.Sprintf(
+			"%s would not open a broadcast for this destination: %v", d.Platform, err), d.StreamKey), err)
 		return
 	}
 	c.recordControl(d, id, func(b *db.BroadcastControl) {
@@ -1324,10 +1343,24 @@ func planXLifecycle(enabled bool, st *oauth.BroadcastLifecycleState) lifecyclePl
 		plan.Wait = "X is still moving the broadcast to published"
 	case oauth.XStateRunning:
 		plan.Wait = "already live"
+	case oauth.XStateCanceled:
+		// X, or somebody in X's tooling, canceled it. Opening another one by
+		// itself would let a cancel-and-reopen cycle post a fresh public
+		// announcement on every turn, so it is a fault the operator releases.
+		plan.Fault = "X canceled this broadcast. polyemesis does not open another one by itself; " +
+			"switch the destination off and on again to start a new broadcast"
 	default:
-		// ENDED, TIMED_OUT and CANCELED. A finished X broadcast cannot return to
-		// live, and the destination still wants to be on air, so the next show
-		// gets a new broadcast instead of a fault.
+		// ENDED and TIMED_OUT. A finished X broadcast cannot return to live, so
+		// the next show gets a new broadcast instead of a fault -- but only once
+		// the encoder has been seen to stop. An END with bytes still arriving is
+		// the operator's emergency stop in the X app, and renewing then would
+		// publish a new public broadcast, with a new announcement, within a
+		// sweep. Unknown counts as still arriving.
+		if st.StreamActive == nil || *st.StreamActive {
+			plan.Wait = "the broadcast ended while the encoder is still sending; a new one opens " +
+				"once the stream stops and starts again"
+			return plan
+		}
 		plan.Renew = true
 	}
 	return plan
@@ -1453,8 +1486,8 @@ func (c *lifecycleCoordinator) handleRefusal(d *db.Destination, broadcastID stri
 		// Unclassified: an expired token, a transport failure, a body that
 		// would not decode. Counted and retried; oauth deliberately does not
 		// invent a classification for these, and neither does this.
-		c.noteFailure(d, broadcastID, fmt.Sprintf(
-			"could not move broadcast %s to %q: %v", broadcastID, to, err))
+		c.noteFailureUnlessPaused(d, broadcastID, fmt.Sprintf(
+			"could not move broadcast %s to %q: %v", broadcastID, to, err), err)
 		return
 	}
 	if !ref.Fault() {
@@ -1533,6 +1566,22 @@ func (c *lifecycleCoordinator) noteFailure(d *db.Destination, broadcastID, detai
 			"destination", d.Name, "broadcast", broadcastID,
 			"consecutiveSweeps", n, "fault", detail)
 	}
+}
+
+// noteFailureUnlessPaused is noteFailure, except for a platform asking for a
+// pause. X publishes no Livestream rate limits, so its 429 is the only word on
+// them, and the provider already holds every call until X's reset time. Counting
+// those answers would spend the give-up budget on X saying "later", and leave the
+// destination held long after the limit lifted. The fault is still recorded, so
+// the operator sees why nothing is moving; the count is left alone.
+func (c *lifecycleCoordinator) noteFailureUnlessPaused(d *db.Destination, broadcastID, detail string, err error) {
+	if until, ok := oauth.XRateLimited(err); ok {
+		c.recordControl(d, broadcastID, func(b *db.BroadcastControl) { b.Fault = detail })
+		c.log.Debug("broadcast lifecycle: the platform asked for a pause", "destination", d.Name,
+			"broadcast", broadcastID, "until", until)
+		return
+	}
+	c.noteFailure(d, broadcastID, detail)
 }
 
 func (c *lifecycleCoordinator) noteOrphanFailure(t lifecycleTarget, err error) {
