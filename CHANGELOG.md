@@ -902,6 +902,26 @@ its first tagged release.
 
 ### Fixed
 
+- **Wave 3 review fixes (API).**
+  - An X destination whose broadcast create is refused now stops retrying after the usual 20 attempts. It tries again after an UP edge, or after the operator switches the destination off and on.
+  - A refusal that echoes the stream source key no longer puts that key in the fault, the log or the alert.
+  - A planned YouTube rollover whose replacement would not start after the old broadcast had ended now points the destination at the replacement, so the show is not left dark.
+  - Facebook and other countdown-only destinations now show their countdown.
+  - The rollover chat notice goes only to the destination's own account's chat.
+  - A Twitch reconnect re-reads the stream's start time and no longer restarts the destination every ten minutes when Twitch keeps its count.
+  - A replacement broadcast gets the recurring template's category and thumbnail.
+  - Rollover warnings are redacted.
+  - A recurring template never makes a private or unlisted destination's events public.
+  - Recurring look-ahead logs and the calendar's 502 answers are redacted.
+  - A second event created in the same look-ahead pass reuses the first one's stream key.
+  - An event whose record cannot be written is stranded or cancelled, instead of becoming a duplicate later.
+  - Retitling an occurrence is refused for a show that has started or a destination that is live.
+  - A thumbnail one byte over 2 MB answers 413, not 500.
+  - Creating a YouTube vertical half now starts it straight away.
+  - A vertical half reuses an existing rendition only when the whole encode matches, not just the shape.
+  - Concurrent vertical status reads make one YouTube call.
+  - The vertical create body is size-limited and refuses unknown fields.
+  - The caption export route is documented in [API.md](docs/API.md) as refused to read tokens.
 - **X live chat shows only this account's own broadcast.** X's activity stream is shared by the whole app, so it also carries chat from every other connected X account. Before, every chat event on it was labelled as this account's, so another account's viewers could appear in your chat and be moderated against your broadcast. Now a message passes only when its `broadcast_id` is the broadcast this account is running, and an event that names no broadcast is dropped. The running broadcast is re-read at most every 15 seconds.
 - A manual planned rollover now answers 200 "rolled over" when it has finished,
   502 with the redacted reason when the platform refuses it, and never 202

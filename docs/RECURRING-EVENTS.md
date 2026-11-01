@@ -18,7 +18,7 @@ before it starts.
 |---|---|
 | `titlePattern` | The event title. `{date}` becomes `YYYY-MM-DD` and `{time}` becomes `HH:MM`, both read in the schedule's own time zone. Any other `{...}` is refused by name. The rendered title is limited to 100 characters, YouTube's limit. |
 | `description` | The event description, the same for every occurrence. Up to 5,000 characters. |
-| `privacy` | `public`, `unlisted` or `private`. Empty means `public`. A private event announces the show to nobody. |
+| `privacy` | `public`, `unlisted` or `private`. Empty means `public`. A private event announces the show to nobody. The template never widens the destination's own compliance privacy: a destination set to private or unlisted gets private or unlisted events even from a public template. |
 | `category` | The platform category, applied to the event's video where the platform allows it. A refusal is reported as a warning and does not stop the event. |
 | `lookahead` | How many upcoming occurrences are kept created, from 1 to 10. Default 2. |
 | thumbnail | A PNG or JPEG of up to 2 MB. Stored once and sent with each event. It is never returned by the read API, only as `hasThumbnail`. |
@@ -90,7 +90,8 @@ show starts instead:
   has started may be the live broadcast, or the page of a show that aired.
 - **Retitle one occurrence** (`POST /api/v1/recurring/occurrences/{id}/title`)
   changes the title of that event only. The template still applies to every
-  other occurrence.
+  other occurrence. A retitle is **refused with 409**, like a skip, for a show
+  whose start has passed and for a destination that is on air now.
 - **Delete the template** (`DELETE /api/v1/schedules/{id}/template`) removes it.
   The schedule keeps running. Upcoming events for that schedule are cancelled
   at the next look-ahead pass.
@@ -147,7 +148,7 @@ rules.
 | `GET /api/v1/schedules/{id}/template` | Read the template. |
 | `PUT /api/v1/schedules/{id}/template` | Create or replace the template. Refused with the reason if it is invalid. |
 | `DELETE /api/v1/schedules/{id}/template` | Remove the template. |
-| `PUT /api/v1/schedules/{id}/template/thumbnail` | Upload the thumbnail as a raw PNG or JPEG body. The bytes must match the type. |
+| `PUT /api/v1/schedules/{id}/template/thumbnail` | Upload the thumbnail as a raw PNG or JPEG body. The bytes must match the type. A body over 2 MB is refused with 413; a body that breaks off partway is 400. |
 | `GET /api/v1/recurring/occurrences?from=&to=` | List occurrences in a window, at most 90 days. Defaults to the next two weeks. |
 | `POST /api/v1/recurring/occurrences/{id}/skip` | Skip one occurrence. |
 | `POST /api/v1/recurring/occurrences/{id}/title` | Retitle one occurrence. Body: `{"title": "..."}`. |

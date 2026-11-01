@@ -88,10 +88,10 @@ the panel counts down to it, refreshing about once a minute.
 ## Chat notice
 
 The chat notice is off by default. When on, one fixed line goes to the chat of
-the rolled-over destination's platform, just before the platform call. It is
-sent to every connected chat account on that platform, so a second account on
-the same platform also receives it. A notice that fails is logged and the
-rollover goes ahead.
+the rolled-over destination's own account, just before the platform call. A
+second account connected on the same platform is a different channel, and it
+does not receive the notice. A notice that fails is logged and the rollover
+goes ahead.
 
 ## Twitch countdown start
 
@@ -100,6 +100,30 @@ The Twitch countdown counts from the stream's own start, read from Helix
 polyemesis sees the destination on air is used instead, which was the behaviour
 before. That fallback means a restart mid-stream can reset the count when the
 read is unavailable.
+
+After a reconnect the session is cleared, so the next sweep reads `started_at`
+again. If Twitch still reports the old start, Twitch kept its count across the
+reconnect. The countdown then counts from the reconnect, so the margin does not
+come due again as soon as the ten-minute wait ends, and the destination is not
+restarted every ten minutes.
+
+## Countdown-only platforms
+
+A countdown-only destination (Facebook, for example) records its session the
+first time it is seen on air, and shows a countdown from that moment. Nothing
+here can read the platform's own start time for these platforms.
+
+## A replacement that would not start
+
+If the old YouTube broadcast has ended and the replacement exists but would not
+go live, the destination is pointed at the replacement with a fresh retry
+budget, and the broadcast lifecycle takes it live once the ingest arrives there.
+The rollover is still recorded as failed. While the old broadcast is still live,
+a failed rollover leaves the destination on the old broadcast, as before.
+
+With a recurring template, the replacement also gets the template's category and
+thumbnail. These are applied best effort: if the platform refuses either one,
+the rollover still succeeds and the refusal is recorded as a warning.
 
 ## Not in this build
 
