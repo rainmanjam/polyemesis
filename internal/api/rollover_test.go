@@ -117,6 +117,16 @@ func (f *fakeRolloverStore) RolloverTemplateFor(id int64, broadcastID string) (*
 	return nil, db.ErrNotFound
 }
 
+func (f *fakeRolloverStore) RebindOccurrenceEvent(id int64, from, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t, ok := f.templates[fmt.Sprintf("%d/%s", id, from)]; ok {
+		delete(f.templates, fmt.Sprintf("%d/%s", id, from))
+		f.templates[fmt.Sprintf("%d/%s", id, to)] = t
+	}
+	return nil
+}
+
 func (f *fakeRolloverStore) RecordTimelineEvent(ev db.TimelineEvent) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -594,5 +604,25 @@ func TestAManualRunWithNoRecordedStartStillRollsOver(t *testing.T) {
 	}
 	if len(r.yt.rolls) != 1 {
 		t.Errorf("rollovers = %d, want 1", len(r.yt.rolls))
+	}
+}
+
+// A show longer than two caps rolls over twice. The template is found by the live broadcast's id, so the occurrence
+// must follow the show onto the replacement, or the second rollover copies the live broadcast and loses the
+// template's category and thumbnail.
+func TestASecondRolloverStillUsesTheRecurringTemplate(t *testing.T) {
+	r := newRolloverRig(t)
+	r.addDest(1, db.PlatformYouTube, "live-1")
+	r.enable(1, "")
+	r.yt.sessionFrom = r.now.Add(-(11*time.Hour + 45*time.Minute))
+	r.store.templates["1/live-1"] = &scheduler.BroadcastTemplate{
+		ScheduleID: 5, TitlePattern: "Thursday show {date}", Description: "Weekly notes", Privacy: "unlisted",
+	}
+	r.c.sweepOnce(context.Background())
+	if len(r.yt.rolls) != 1 {
+		t.Fatalf("rollovers = %d, want 1", len(r.yt.rolls))
+	}
+	if _, err := r.store.RolloverTemplateFor(1, "new-1"); err != nil {
+		t.Fatalf("the template is not found by the replacement's id after the first rollover: %v", err)
 	}
 }

@@ -135,3 +135,31 @@ func TestARolloverFindsTheTemplateTheLiveBroadcastCameFrom(t *testing.T) {
 		t.Errorf("the same broadcast on a different destination found a template: err = %v", err)
 	}
 }
+
+// A rollover moves the occurrence onto the replacement, so the next rollover finds the template by the new live
+// broadcast. Another destination's row with the same event id is never touched.
+func TestRebindingAnOccurrenceMovesTheTemplateLinkToTheReplacement(t *testing.T) {
+	d := testDB(t)
+	at := time.Date(2026, 11, 1, 19, 0, 0, 0, time.UTC)
+	if _, err := d.SaveBroadcastTemplate(scheduler.BroadcastTemplate{ScheduleID: 5, TitlePattern: "Show {date}"}); err != nil {
+		t.Fatalf("save template: %v", err)
+	}
+	for _, dest := range []int64{8, 9} {
+		id, err := d.ClaimOccurrence(scheduler.Occurrence{ScheduleID: 5, DestinationID: dest, At: at})
+		if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+		if err := d.ResolveOccurrence(id, "live-1", "Show"); err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+	}
+	if err := d.RebindOccurrenceEvent(8, "live-1", "live-2"); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	if _, err := d.RolloverTemplateFor(8, "live-2"); err != nil {
+		t.Fatalf("the replacement finds no template: %v", err)
+	}
+	if _, err := d.RolloverTemplateFor(9, "live-1"); err != nil {
+		t.Fatalf("another destination's occurrence was moved too: %v", err)
+	}
+}

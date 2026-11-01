@@ -172,3 +172,15 @@ func (d *DB) RolloverTemplateFor(destinationID int64, broadcastID string) (*sche
 	}
 	return t, err
 }
+
+// RebindOccurrenceEvent moves a destination's recurring occurrence from one platform event to another: a planned
+// rollover replaced the live broadcast it was created as. Only that destination's rows are touched, and an empty id
+// on either side changes nothing.
+func (d *DB) RebindOccurrenceEvent(destinationID int64, from, to string) error {
+	if from == "" || to == "" {
+		return nil
+	}
+	_, err := d.sql.Exec(`UPDATE recurring_occurrences SET platform_event_id=?, updated_at=?
+		WHERE destination_id=? AND platform_event_id=?`, to, time.Now().Unix(), destinationID, from)
+	return err
+}

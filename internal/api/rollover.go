@@ -64,6 +64,7 @@ type rolloverStore interface {
 	GetDestination(id int64) (*db.Destination, error)
 	UpdateLifecycle(id int64, apply func(*db.Destination) bool) (*db.Destination, error)
 	RolloverTemplateFor(destinationID int64, broadcastID string) (*scheduler.BroadcastTemplate, error)
+	RebindOccurrenceEvent(destinationID int64, from, to string) error
 	GetSchedule(id int64) (*scheduler.Schedule, error)
 	BroadcastThumbnail(scheduleID int64) ([]byte, string, error)
 }
@@ -445,6 +446,13 @@ func (c *rolloverCoordinator) rollYouTube(ctx context.Context, d *db.Destination
 	}
 	if terr == nil {
 		out.Warnings = append(out.Warnings, c.applyTemplateExtras(ctx, br, acct.AccessToken, out.NewBroadcastID, *tpl, req)...)
+		// The occurrence follows the show onto its replacement. The template is found by the live broadcast's id,
+		// so without this a show longer than two caps lost its template at the second rollover: the second
+		// replacement copied the live broadcast and dropped the template's category and thumbnail.
+		if err := c.store.RebindOccurrenceEvent(d.ID, bid, out.NewBroadcastID); err != nil {
+			c.log.Warn("planned rollover: the recurring occurrence could not follow the replacement; a later "+
+				"rollover will copy the live broadcast instead of the template", "destination", d.Name, "err", err)
+		}
 	}
 	// Platform text, so it is redacted before it reaches the fault, the result, the webhook or the timeline, the same
 	// as a failure's reason is.

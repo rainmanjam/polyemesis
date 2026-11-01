@@ -38,6 +38,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -156,7 +157,6 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 	if _, err := sc.Location(); err != nil {
 		return
 	}
-	mirrored := false
 	counted := 0
 	cursor := now
 	for step := 0; counted < tpl.Lookahead && step < lookaheadWalkLimit; step++ {
@@ -174,9 +174,11 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 		counted++
 		switch {
 		case err == nil && occ.State == scheduler.OccurrenceUpcoming:
-			if !mirrored {
+			// The mirror is the FIRST counted occurrence's or nobody's. When that one's create failed or is still
+			// pending, the mirror is not moved to the next one: this week's show would then go live on next
+			// week's event.
+			if counted == 1 {
 				s.pointGoLiveAt(d, sc, at, occ.PlatformEventID, nil, now)
-				mirrored = true
 			}
 			continue
 		case err == nil:
@@ -209,9 +211,8 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			// failed does not hold back the ones after it. Nothing is mirrored for a failed create.
 			continue
 		}
-		if !mirrored {
+		if counted == 1 {
 			s.pointGoLiveAt(d, sc, at, b.ID, b, now)
-			mirrored = true
 		}
 	}
 }
@@ -471,6 +472,7 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 		s.log.Warn("recurring: cannot read occurrences", "err", redactErr(err))
 		return
 	}
+	beyond := occurrencesBeyondLookahead(open, tplByID, now)
 	for _, o := range open {
 		if o.State == scheduler.OccurrencePending {
 			if now.Sub(o.CreatedAt) > claimAbandonAfter {
@@ -481,14 +483,21 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 			}
 			continue
 		}
-		_, schedOK := schedByID[o.ScheduleID]
+		sc, schedOK := schedByID[o.ScheduleID]
 		_, tplOK := tplByID[o.ScheduleID]
 		if o.State == scheduler.OccurrenceStranded {
 			// A stranded row keeps its own bounded retry: releaseOpenOccurrence holds it while the destination is live.
 			s.releaseOpenOccurrence(ctx, o, now)
 			continue
 		}
-		if !schedOK || !tplOK {
+		// An event is withdrawn when nothing will air it any more: its schedule or template is gone, the schedule
+		// is switched off or no longer starts a show, the destination is no longer one of its targets, or the
+		// look-ahead was lowered below it. docs/RECURRING-EVENTS.md tells the operator to switch the schedule off
+		// to stop a show, and before this every event already created stayed up, announcing shows that would
+		// never run. cancelOccurrence keeps its own refusals: a show that has started, or a destination on air.
+		withdrawn := !schedOK || !tplOK || !sc.Enabled || sc.Action != scheduler.ActionStart ||
+			!scheduleTargets(sc, o.DestinationID) || beyond[o.ID]
+		if withdrawn {
 			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
 				if errors.Is(err, errDestinationDelivering) {
 					// The destination is live, so the event may be bound to its broadcast. The row is kept and the
@@ -527,6 +536,34 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	if err := s.store.PruneGoLiveBefore(cutoff); err != nil {
 		s.log.Warn("recurring: cannot prune go-live records", "err", redactErr(err))
 	}
+}
+
+// occurrencesBeyondLookahead names the upcoming occurrences that sit past their template's look-ahead, counted
+// per schedule and destination from the soonest future one. They exist because the look-ahead was lowered after
+// they were created.
+func occurrencesBeyondLookahead(open []scheduler.Occurrence, tplByID map[int64]scheduler.BroadcastTemplate,
+	now time.Time) map[int64]bool {
+	type key struct{ sched, dest int64 }
+	groups := map[key][]scheduler.Occurrence{}
+	for _, o := range open {
+		if o.State != scheduler.OccurrenceUpcoming || !o.At.After(now) {
+			continue
+		}
+		k := key{o.ScheduleID, o.DestinationID}
+		groups[k] = append(groups[k], o)
+	}
+	out := map[int64]bool{}
+	for k, rows := range groups {
+		tpl, ok := tplByID[k.sched]
+		if !ok || tpl.Lookahead <= 0 || len(rows) <= tpl.Lookahead {
+			continue
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].At.Before(rows[j].At) })
+		for _, o := range rows[tpl.Lookahead:] {
+			out[o.ID] = true
+		}
+	}
+	return out
 }
 
 // releaseOpenOccurrence retries a stranded cancel. A stranded event never went live, so its cancel is retried
