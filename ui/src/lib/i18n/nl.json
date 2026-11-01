@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat en verwerkingsketen",
   "dashMobile.streamInfo": "Streaminfo (titel, tags, categorie)",
   "dashMobile.failoverOff": "Failover staat uit",
-  "wave3.bugs.delayFilling": "Vertraging vult zich"
+  "wave3.bugs.delayFilling": "Vertraging vult zich",
+  "wave3.vod.mixVod": "VOD-mix",
+  "wave3.vod.matrixRestart": "Een gainwijziging in deze matrixmix start de bestemming even opnieuw, waardoor ook de livemix even wordt onderbroken. Dempen blijft live."
 }

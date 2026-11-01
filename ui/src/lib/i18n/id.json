@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Obrolan dan alur proses",
   "dashMobile.streamInfo": "Info siaran (judul, tag, kategori)",
   "dashMobile.failoverOff": "Failover nonaktif",
-  "wave3.bugs.delayFilling": "Mengisi jeda"
+  "wave3.bugs.delayFilling": "Mengisi jeda",
+  "wave3.vod.mixVod": "Mix VOD",
+  "wave3.vod.matrixRestart": "Perubahan gain pada mix matriks ini memulai ulang tujuan sebentar, yang juga sebentar mengganggu mix langsung. Bisukan tetap langsung."
 }

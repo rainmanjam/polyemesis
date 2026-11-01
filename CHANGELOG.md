@@ -34,6 +34,19 @@ its first tagged release.
   the same track, and so does live gain except in a matrix VOD mix (gain there
   is per cell). Twitch acceptance of the two-track publish is PROVISIONAL until
   a live test on a Twitch test channel.
+- **Twitch VOD track (#15): a meter for each mix, and matrix gain says it
+  restarts.** Every destination with a VOD mix now has a second loudness
+  reading on the Meters page, labelled "VOD mix", beside its live one. Each
+  mix has its own analyser process reading the destination's relay, so the
+  command line that publishes is unchanged. The analyser for a paired graph
+  previously could not start at all, because FFmpeg refused the unused VOD
+  output; it now terminates the other mix. A gain change on a matrix VOD mix
+  restarts the destination for a moment, which interrupts the live mix too, and
+  the VOD editor says so. A live fader gain does not reach a matrix VOD mix, and
+  the response now says so. Alerts stay on the live mix. The startup FLV probe
+  fails open: a probe that times out, cannot create its temporary directory, or
+  cannot start FFmpeg records "probe inconclusive" and keeps the VOD mix; only a
+  real refusal by this FFmpeg drops it.
 - **Live captions, part 1: the in-band path (#8, not yet switched on).** New
   `internal/captions` package. It builds CEA-608 pop-on captions (RCL, row
   addressing, 32-column wrapping, EOC and EDM, the basic and special character

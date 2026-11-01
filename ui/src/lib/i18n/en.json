@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat and pipeline",
   "dashMobile.streamInfo": "Stream info (title, tags, category)",
   "dashMobile.failoverOff": "Failover is off",
-  "wave3.bugs.delayFilling": "Filling delay"
+  "wave3.bugs.delayFilling": "Filling delay",
+  "wave3.vod.mixVod": "VOD mix",
+  "wave3.vod.matrixRestart": "A gain change in this matrix mix restarts the destination for a moment, which briefly interrupts the live mix too. Mute stays live."
 }

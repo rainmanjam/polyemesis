@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { outputState, routingDropsSignal, sourcePeak, type OutputReport } from "./outputStrip";
+import { isLiveMix, outputState, routingDropsSignal, sourcePeak, type OutputReport } from "./outputStrip";
 
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 const report = (over: Partial<OutputReport> = {}): OutputReport => ({
@@ -66,5 +66,33 @@ describe("routingDropsSignal", () => {
     expect(routingDropsSignal(stale, -12)).toBe(false);
     expect(routingDropsSignal(live(-120), null)).toBe(false);
     expect(routingDropsSignal(live(-120), -70)).toBe(false);
+  });
+});
+
+describe("the two mixes of one destination", () => {
+  // A destination with a VOD track has a reading for each mix, both under its id.
+  // The strip is the live mix's, so a VOD reading listed first must not be taken
+  // for it: the two would be judged as one output.
+  //
+  // MUTATION: in outputState, drop the isLiveMix test from the find. Observed:
+  // FAIL, the strip read the VOD mix's -30 LUFS.
+  it("reads the live mix even when the VOD mix is listed first", () => {
+    const feed = {
+      enabled: true,
+      reports: [report({ mix: "vod", momentaryLufs: -30 }), report({ mix: "live", momentaryLufs: -16 })],
+    };
+    const st = outputState(feed, 7, NOW, NOW);
+    expect(st.kind).toBe("live");
+    if (st.kind === "live") expect(st.report.momentaryLufs).toBe(-16);
+  });
+
+  it("a destination with only a VOD reading has no live output reading", () => {
+    expect(outputState({ enabled: true, reports: [report({ mix: "vod" })] }, 7, NOW, NOW).kind).toBe("absent");
+  });
+
+  it("a report with no mix is the live mix, as every report was before the VOD mix", () => {
+    expect(isLiveMix({})).toBe(true);
+    expect(isLiveMix({ mix: "live" })).toBe(true);
+    expect(isLiveMix({ mix: "vod" })).toBe(false);
   });
 });

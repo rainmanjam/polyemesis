@@ -119,6 +119,11 @@ export interface TrackAnnotation {
 
 // -------------------------------------------------------- destination audio
 
+/** Which of a destination's two mixes a loudness report measures (meters.Report.mix).
+ *  A destination with a VOD track has one analyser per mix. An absent mix reads as
+ *  live, which is what every report was before the VOD mix had a reading. */
+export type LoudnessMix = "live" | "vod";
+
 /** Programme-loudness target. Absent leaves the fixed loudnorm parameters that
  *  shipped with `loudnorm` alone, byte for byte. */
 export interface Loudness {

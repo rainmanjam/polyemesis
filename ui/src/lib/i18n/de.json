@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat und Verarbeitungskette",
   "dashMobile.streamInfo": "Stream-Infos (Titel, Tags, Kategorie)",
   "dashMobile.failoverOff": "Ausfallsicherung ist aus",
-  "wave3.bugs.delayFilling": "Verzögerung füllt sich"
+  "wave3.bugs.delayFilling": "Verzögerung füllt sich",
+  "wave3.vod.mixVod": "VOD-Mix",
+  "wave3.vod.matrixRestart": "Eine Verstärkungsänderung in dieser Matrix-Mischung startet das Ziel kurz neu und unterbricht dadurch auch den Live-Mix kurz. Stummschalten bleibt live."
 }

@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Sohbet ve işlem hattı",
   "dashMobile.streamInfo": "Yayın bilgileri (başlık, etiketler, kategori)",
   "dashMobile.failoverOff": "Yük devretme kapalı",
-  "wave3.bugs.delayFilling": "Gecikme dolduruluyor"
+  "wave3.bugs.delayFilling": "Gecikme dolduruluyor",
+  "wave3.vod.mixVod": "VOD karışımı",
+  "wave3.vod.matrixRestart": "Bu matris karışımındaki bir kazanç değişikliği hedefi kısa süreliğine yeniden başlatır; bu da canlı karışımı kısa süre keser. Sessize alma canlı kalır."
 }

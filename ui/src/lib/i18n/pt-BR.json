@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat e pipeline de processamento",
   "dashMobile.streamInfo": "Informações da transmissão (título, tags, categoria)",
   "dashMobile.failoverOff": "O failover está desligado",
-  "wave3.bugs.delayFilling": "Preenchendo o atraso"
+  "wave3.bugs.delayFilling": "Preenchendo o atraso",
+  "wave3.vod.mixVod": "Mix VOD",
+  "wave3.vod.matrixRestart": "Uma mudança de ganho nesta mixagem matricial reinicia o destino por um instante, o que também interrompe brevemente a mixagem ao vivo. Silenciar continua ao vivo."
 }

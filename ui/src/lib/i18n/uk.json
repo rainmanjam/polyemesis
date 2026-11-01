@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Чат і конвеєр",
   "dashMobile.streamInfo": "Відомості про трансляцію (назва, теги, категорія)",
   "dashMobile.failoverOff": "Резервування вимкнено",
-  "wave3.bugs.delayFilling": "Заповнення затримки"
+  "wave3.bugs.delayFilling": "Заповнення затримки",
+  "wave3.vod.mixVod": "VOD-мікс",
+  "wave3.vod.matrixRestart": "Зміна підсилення в цьому матричному мікшері на мить перезапускає призначення, що також ненадовго перериває живий мікс. Вимкнення звуку діє одразу."
 }

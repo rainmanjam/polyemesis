@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Chat et chaîne de traitement",
   "dashMobile.streamInfo": "Infos du direct (titre, tags, catégorie)",
   "dashMobile.failoverOff": "La bascule est désactivée",
-  "wave3.bugs.delayFilling": "Remplissage du différé"
+  "wave3.bugs.delayFilling": "Remplissage du différé",
+  "wave3.vod.mixVod": "Mixage VOD",
+  "wave3.vod.matrixRestart": "Un changement de gain dans ce mixage matriciel redémarre la destination un instant, ce qui interrompt aussi brièvement le mixage en direct. La mise en sourdine reste en direct."
 }

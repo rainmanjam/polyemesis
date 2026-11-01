@@ -3409,5 +3409,7 @@
   "dashMobile.chatPipeline": "Czat i potok przetwarzania",
   "dashMobile.streamInfo": "Informacje o transmisji (tytuł, tagi, kategoria)",
   "dashMobile.failoverOff": "Przełączanie awaryjne jest wyłączone",
-  "wave3.bugs.delayFilling": "Wypełnianie opóźnienia"
+  "wave3.bugs.delayFilling": "Wypełnianie opóźnienia",
+  "wave3.vod.mixVod": "Miks VOD",
+  "wave3.vod.matrixRestart": "Zmiana wzmocnienia w tym miksie macierzowym na chwilę uruchamia ponownie miejsce docelowe, co także na moment przerywa miks na żywo. Wyciszenie działa na żywo."
 }
