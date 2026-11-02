@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Afficher",
   "streamdeck.pi.viewersTotal": "Total, toutes plateformes",
   "streamdeck.pi.viewersHint": "L'audience de toutes les plateformes, mesurée tant qu'une destination tourne. Un nombre qu'une plateforme ne communique pas s'affiche Non communiqué, jamais 0. Nécessite un jeton administrateur.",
-  "streamdeck.pi.viewersPlayer": "Lecteur public"
+  "streamdeck.pi.viewersPlayer": "Lecteur public",
+  "streamdeck.viewers.partial": "Partiel"
 }

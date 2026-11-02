@@ -194,6 +194,9 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Token:        s.chatToken(a.ID),
 			QuotaUnits:   units,
 			QuotaReserve: reserve,
+			// The Google client's ONE allowance, shared with every other
+			// YouTube channel on it and every other spender (PR #950 review).
+			Quota: s.ytQuota(),
 		})
 
 	case db.PlatformTwitch:

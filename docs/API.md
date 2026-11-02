@@ -1721,16 +1721,35 @@ Admin-only: all three are refused to a `read` token (see the table near the top)
 None of them calls a platform. They read what the audience sampler stored: while
 any destination is running it asks each connected account that a running
 destination streams to for its viewer count, every `analytics.intervalSeconds`
-(default 60, 30–900). A YouTube read is three list calls and is charged to the
-chat quota pacer for that account; a refused charge is a reading with
-`reason: "quota"`, not a stale number. Finished streams are kept for
-`analytics.retentionDays` (default 90).
+(default 60, 30–900). A running vertical half is read through its paired
+horizontal's account, once per broadcast; a running destination with a pasted
+key and no connected account is a reading with `reason: "unlinked"`.
+
+**YouTube quota.** Every YouTube spender — chat, the vertical read, title push,
+compliance, the broadcast lifecycle and this sampler — draws on one daily
+allowance per Google client, the one `chat.youtubeQuotaUnits` describes. The
+sampler finds each account's live video once (`liveBroadcasts.list`, 1 unit) and
+then spends **1 unit a tick** on `videos.list` against the remembered id. It is
+held to **15%** of the allowance: one account at 60 s is 1,440 units per 24 h on
+air, inside the 1,500-unit share of a default 10,000; when the share cannot
+afford the configured interval until the reset, the wait is stretched and
+`effectiveIntervalSeconds` / `stretched` say so. A refused or spent quota is a
+reading with `reason: "quota"`, never a stale number, and YouTube's own
+`quotaExceeded` pauses every spender until the reset. A platform's 429 is
+honoured: that account is not asked again until its `Retry-After` passes.
+Finished streams are kept for `analytics.retentionDays` (default 90); a stream
+on air for 24 hours is closed and a new one opened, so retention reaches a
+broadcast that never stops.
 
 **A count the platform did not report is absent, never `0`.** A reading carries
 `viewers` only when the platform sent one; otherwise `reason` says why —
 `offline`, `hidden` (live, no count: a hidden YouTube count, a Kick streamer who
-opted out, Twitch sending none), `quota` or `error`. `total` sums the readings
-that carried a count and is absent when none did; `reported` says how many did.
+opted out, Twitch sending none), `quota`, `error` or `unlinked`. `total` sums the
+readings that carried a count and is absent when none did; `reported` says how
+many did. A tick at which a platform failed (`offline`, `quota` or `error`) is
+`partial`: its total is the rest of the audience, so it is left out of the
+sparkline, the stream's peak and average, the scrape's
+`polyemesis_audience_viewers` and the MQTT total.
 
 `/analytics/live` is the panel: `onAir`, the open `stream` (`id`, `startedAt`),
 the last tick's `readings`, `total`, `reported`, a sparkline of tick totals in
@@ -1738,7 +1757,8 @@ the last tick's `readings`, `total`, `reported`, a sparkline of tick totals in
 gap), and `player` — the public player's QoE since the stream began (sessions,
 startups, rebuffers, `sessionsWithErrors`, the startup histogram). The public
 player is a reading of its own with `platform: "player"`, counted from the
-playout origin's session table and added to the total once.
+playout origin's session table and added to the total once (the panel labels
+the total "including the public player").
 
 `/analytics/streams` lists the newest 100 streams with `peakTotal` and
 `averageTotal`. `/analytics/streams/{id}` is the report: per account `samples`,

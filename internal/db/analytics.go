@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
@@ -36,7 +37,19 @@ CREATE TABLE IF NOT EXISTS analytics_streams (
 	title       TEXT    NOT NULL DEFAULT '',
 	chat_cursor INTEGER NOT NULL DEFAULT 0,     -- chat_messages.id already tallied
 	qoe_start   TEXT    NOT NULL DEFAULT '',    -- the player's counters at the start, JSON; '' none
-	qoe_last    TEXT    NOT NULL DEFAULT ''
+	qoe_last    TEXT    NOT NULL DEFAULT '',
+	chat_from   INTEGER NOT NULL DEFAULT 0,     -- unix ms: chat before this is not the stream's
+	peak_total  INTEGER,                        -- set at close; NULL while open or when nothing reported
+	avg_total   REAL
+);
+-- The accounts a stream was read from. Its chat is theirs and nobody else's:
+-- a second connected channel the stream is not on is not its audience.
+CREATE TABLE IF NOT EXISTS analytics_stream_accounts (
+	stream_id INTEGER NOT NULL,
+	platform  TEXT    NOT NULL,
+	account   TEXT    NOT NULL,
+	PRIMARY KEY (stream_id, platform, account),
+	FOREIGN KEY (stream_id) REFERENCES analytics_streams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_analytics_streams_started ON analytics_streams(started_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS analytics_samples (
@@ -64,34 +77,49 @@ CREATE TABLE IF NOT EXISTS analytics_chatters (
 
 // The statements, as whole constants.
 const (
-	analyticsOpenQuery = `INSERT INTO analytics_streams (started_at, last_at, chat_cursor, qoe_start, qoe_last)
-		VALUES (?, ?, (SELECT COALESCE(MAX(id), 0) FROM chat_messages), ?, ?)`
+	// The cursor starts just before the first message of the go-live lead, so
+	// chat between going live and the first tick is the stream's; the tally's
+	// at_ms bound keeps anything older out.
+	analyticsOpenQuery = `INSERT INTO analytics_streams (started_at, last_at, chat_from, chat_cursor, qoe_start, qoe_last)
+		VALUES (?, ?, ?, COALESCE((SELECT MIN(id) FROM chat_messages WHERE at_ms >= ?) - 1,
+			(SELECT COALESCE(MAX(id), 0) FROM chat_messages)), ?, ?)`
 	analyticsOpenStateQuery = `SELECT id, started_at, last_at FROM analytics_streams WHERE ended_at = 0
 		ORDER BY id DESC LIMIT 1`
 	analyticsSampleInsert = `INSERT INTO analytics_samples (stream_id, at, platform, account, name, viewers, reason)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
 	analyticsTickUpdate = `UPDATE analytics_streams SET last_at = ?,
 		title = CASE WHEN title = '' THEN ? ELSE title END, qoe_last = ? WHERE id = ?`
-	analyticsCursorQuery  = `SELECT chat_cursor FROM analytics_streams WHERE id = ?`
+	analyticsCursorQuery  = `SELECT chat_cursor, chat_from FROM analytics_streams WHERE id = ?`
+	analyticsAccountAdd   = `INSERT OR IGNORE INTO analytics_stream_accounts (stream_id, platform, account) VALUES (?, ?, ?)`
 	analyticsChatMaxQuery = `SELECT COALESCE(MAX(id), 0) FROM chat_messages`
 	// echo = 0: what polyemesis itself sent is not audience chat.
+	// Only the stream's own accounts (#7), only from its chat_from, and -- at
+	// the close -- only up to its last on-air tick (#8).
 	analyticsChatTally = `INSERT INTO analytics_chatters (stream_id, platform, author_id, author_name, messages)
-		SELECT ?, platform, author_id, MAX(author_name), COUNT(*) FROM chat_messages
-		WHERE id > ? AND id <= ? AND echo = 0 GROUP BY platform, author_id
+		SELECT ?, m.platform, m.author_id, MAX(m.author_name), COUNT(*) FROM chat_messages m
+		JOIN analytics_stream_accounts a ON a.stream_id = ? AND a.platform = m.platform AND a.account = m.account
+		WHERE m.id > ? AND m.id <= ? AND m.echo = 0 AND m.at_ms >= ? AND m.at_ms <= ?
+		GROUP BY m.platform, m.author_id
 		ON CONFLICT (stream_id, platform, author_id) DO UPDATE SET
 			messages = analytics_chatters.messages + excluded.messages,
 			author_name = CASE WHEN excluded.author_name <> '' THEN excluded.author_name
 				ELSE analytics_chatters.author_name END`
 	analyticsCursorUpdate = `UPDATE analytics_streams SET chat_cursor = ? WHERE id = ?`
 	analyticsCloseUpdate  = `UPDATE analytics_streams SET ended_at = ?,
-		last_at = CASE WHEN last_at > ? THEN last_at ELSE ? END WHERE id = ?`
-	analyticsSamplesQuery = `SELECT at, platform, account, name, viewers FROM analytics_samples
+		last_at = CASE WHEN last_at > ? THEN last_at ELSE ? END, peak_total = ?, avg_total = ? WHERE id = ?`
+	analyticsSamplesQuery = `SELECT at, platform, account, name, viewers, reason FROM analytics_samples
 		WHERE stream_id = ? ORDER BY at, rowid`
-	analyticsPrune       = `DELETE FROM analytics_streams WHERE ended_at > 0 AND ended_at < ?`
-	analyticsForgetQoE   = `UPDATE analytics_streams SET qoe_start = '' WHERE id = ?`
-	analyticsStreamQuery = `SELECT id, started_at, ended_at, last_at, title, qoe_start, qoe_last
+	analyticsRecentQuery = `SELECT at, platform, account, name, viewers, reason FROM analytics_samples
+		WHERE stream_id = ? AND at >= COALESCE((SELECT at FROM (SELECT DISTINCT at FROM analytics_samples
+			WHERE stream_id = ? ORDER BY at DESC LIMIT 1 OFFSET ?)), 0) ORDER BY at, rowid`
+	// A stream that is still open keeps its row, but not samples older than
+	// the retention (#11).
+	analyticsPruneSamples = `DELETE FROM analytics_samples WHERE at < ?`
+	analyticsPrune        = `DELETE FROM analytics_streams WHERE ended_at > 0 AND ended_at < ?`
+	analyticsForgetQoE    = `UPDATE analytics_streams SET qoe_start = '' WHERE id = ?`
+	analyticsStreamQuery  = `SELECT id, started_at, ended_at, last_at, title, qoe_start, qoe_last, peak_total, avg_total
 		FROM analytics_streams WHERE id = ?`
-	analyticsStreamsQuery = `SELECT id, started_at, ended_at, last_at, title, qoe_start, qoe_last
+	analyticsStreamsQuery = `SELECT id, started_at, ended_at, last_at, title, qoe_start, qoe_last, peak_total, avg_total
 		FROM analytics_streams ORDER BY started_at DESC, id DESC LIMIT ?`
 	analyticsChatByPlatform = `SELECT platform, SUM(messages) FROM analytics_chatters WHERE stream_id = ?
 		GROUP BY platform ORDER BY platform`
@@ -127,13 +155,14 @@ func qoeParse(s string) *analytics.PlayerQoE {
 
 // OpenAnalyticsStream starts a stream record. Chat that arrived before this
 // moment is not the stream's: the cursor starts at the newest message.
-func (d *DB) OpenAnalyticsStream(at time.Time, qoe *analytics.PlayerQoE) (int64, error) {
+func (d *DB) OpenAnalyticsStream(at time.Time, qoe *analytics.PlayerQoE, lead time.Duration) (int64, error) {
 	q, err := qoeJSON(qoe)
 	if err != nil {
 		return 0, err
 	}
 	ms := at.UnixMilli()
-	res, err := d.sql.Exec(analyticsOpenQuery, ms, ms, q, q)
+	from := at.Add(-lead).UnixMilli()
+	res, err := d.sql.Exec(analyticsOpenQuery, ms, ms, from, from, q, q)
 	if err != nil {
 		return 0, err
 	}
@@ -170,6 +199,11 @@ func (d *DB) RecordAnalyticsTick(id int64, at time.Time, rs []analytics.Reading,
 	defer func() { _ = tx.Rollback() }()
 	ms := at.UnixMilli()
 	for _, r := range rs {
+		if r.Account != "" {
+			if _, err := tx.Exec(analyticsAccountAdd, id, r.Platform, r.Account); err != nil {
+				return err
+			}
+		}
 		var v any
 		if r.Viewers != nil {
 			v = *r.Viewers
@@ -181,15 +215,18 @@ func (d *DB) RecordAnalyticsTick(id int64, at time.Time, rs []analytics.Reading,
 	if _, err := tx.Exec(analyticsTickUpdate, ms, title, q, id); err != nil {
 		return err
 	}
-	if err := tallyAnalyticsChat(tx, id); err != nil {
+	if err := tallyAnalyticsChat(tx, id, math.MaxInt64); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func tallyAnalyticsChat(tx *sql.Tx, id int64) error {
-	var cursor, hi int64
-	if err := tx.QueryRow(analyticsCursorQuery, id).Scan(&cursor); err != nil {
+// tallyAnalyticsChat counts the chat that arrived since the last tally, from
+// the stream's own accounts, at or after its chat_from and at or before
+// until (unix ms).
+func tallyAnalyticsChat(tx *sql.Tx, id int64, until int64) error {
+	var cursor, from, hi int64
+	if err := tx.QueryRow(analyticsCursorQuery, id).Scan(&cursor, &from); err != nil {
 		return err
 	}
 	if err := tx.QueryRow(analyticsChatMaxQuery).Scan(&hi); err != nil {
@@ -198,7 +235,7 @@ func tallyAnalyticsChat(tx *sql.Tx, id int64) error {
 	if hi <= cursor {
 		return nil
 	}
-	if _, err := tx.Exec(analyticsChatTally, id, cursor, hi); err != nil {
+	if _, err := tx.Exec(analyticsChatTally, id, id, cursor, hi, from, until); err != nil {
 		return err
 	}
 	_, err := tx.Exec(analyticsCursorUpdate, hi, id)
@@ -206,19 +243,34 @@ func tallyAnalyticsChat(tx *sql.Tx, id int64) error {
 }
 
 // CloseAnalyticsStream ends a stream at `at`, after a last chat tally.
+//
+// The stream's peak and average are computed once here and stored on the row
+// (#12), so the list never reads samples, and a report outlives them.
 func (d *DB) CloseAnalyticsStream(id int64, at time.Time) error {
+	samples, err := d.AnalyticsSamples(id)
+	if err != nil {
+		return err
+	}
+	sum := analytics.Summarise(samples)
+	var peak, avg any
+	if sum.PeakTotal != nil {
+		peak = *sum.PeakTotal
+	}
+	if sum.AverageTotal != nil {
+		avg = *sum.AverageTotal
+	}
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := tallyAnalyticsChat(tx, id); err != nil {
+	ms := at.UnixMilli()
+	if err := tallyAnalyticsChat(tx, id, ms); err != nil {
 		return err
 	}
-	ms := at.UnixMilli()
 	// ended_at is never 0 for a closed stream, even one closed at the epoch in
 	// a test: 0 is the "open" marker.
-	if _, err := tx.Exec(analyticsCloseUpdate, max(ms, 1), ms, ms, id); err != nil {
+	if _, err := tx.Exec(analyticsCloseUpdate, max(ms, 1), ms, ms, peak, avg, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -232,7 +284,19 @@ func (d *DB) ForgetAnalyticsQoE(id int64) error {
 
 // AnalyticsSamples is a stream's samples in time order.
 func (d *DB) AnalyticsSamples(id int64) ([]analytics.Sample, error) {
-	rows, err := d.sql.Query(analyticsSamplesQuery, id)
+	return d.scanSamples(analyticsSamplesQuery, id)
+}
+
+// AnalyticsRecentSamples is the samples of a stream's last `ticks` ticks.
+func (d *DB) AnalyticsRecentSamples(id int64, ticks int) ([]analytics.Sample, error) {
+	if ticks <= 0 {
+		return []analytics.Sample{}, nil
+	}
+	return d.scanSamples(analyticsRecentQuery, id, id, ticks-1)
+}
+
+func (d *DB) scanSamples(query string, args ...any) ([]analytics.Sample, error) {
+	rows, err := d.sql.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +308,7 @@ func (d *DB) AnalyticsSamples(id int64) ([]analytics.Sample, error) {
 			s  analytics.Sample
 			v  sql.NullInt64
 		)
-		if err := rows.Scan(&at, &s.Platform, &s.Account, &s.Name, &v); err != nil {
+		if err := rows.Scan(&at, &s.Platform, &s.Account, &s.Name, &v, &s.Reason); err != nil {
 			return nil, err
 		}
 		s.At = time.UnixMilli(at)
@@ -266,6 +330,10 @@ func (d *DB) PruneAnalytics(cutoff time.Time) (int, error) {
 		return 0, err
 	}
 	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	_, err = d.sql.Exec(analyticsPruneSamples, cutoff.UnixMilli())
 	return int(n), err
 }
 
@@ -273,11 +341,21 @@ func scanAnalyticsStream(sc interface{ Scan(...any) error }) (AnalyticsStreamRow
 	var (
 		id, start, end, last int64
 		title, qs, ql        string
+		peak                 sql.NullInt64
+		avg                  sql.NullFloat64
 	)
-	if err := sc.Scan(&id, &start, &end, &last, &title, &qs, &ql); err != nil {
+	if err := sc.Scan(&id, &start, &end, &last, &title, &qs, &ql, &peak, &avg); err != nil {
 		return AnalyticsStreamRow{}, err
 	}
 	st := analytics.Stream{ID: id, Title: title, StartedAt: time.UnixMilli(start)}
+	if peak.Valid {
+		v := int(peak.Int64)
+		st.PeakTotal = &v
+	}
+	if avg.Valid {
+		v := avg.Float64
+		st.AverageTotal = &v
+	}
 	stop := last
 	if end > 0 {
 		e := time.UnixMilli(end)

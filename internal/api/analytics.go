@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -33,18 +34,61 @@ import (
 // pipeline, and the scrape (polyemesis_platform_viewers) already gives a
 // dashboard the numbers without the names.
 
-// youTubeStatsQuotaCost is what one oauth.YouTube.Stats call spends:
-// channels.list (Account), liveBroadcasts.list, then videos.list. Each is a
-// list operation, one unit per the truth sheet's correction 6
-// (docs-youtube.md); liveBroadcasts.list carries chat's own, unverified,
-// figure so the two cannot drift apart.
-const youTubeStatsQuotaCost = 1 + chat.QuotaCostListBroadcasts + 1
+// analyticsQuotaShare is the fraction of the Google client's daily YouTube
+// allowance the sampler may spend, and analyticsQuotaTag the name it spends
+// it under. Chat, title push and the lifecycle need the rest: a viewer count
+// is the thing to give up first.
+//
+// AT ONE UNIT A TICK (videos.list against the cached id; the lookup is one
+// more, once per broadcast), one YouTube account at the default 60 s costs
+// 1,440 units a day of continuous streaming -- 14.4% of a default 10,000, just
+// under the 1,500-unit share. A second account, or a shorter interval, would
+// pass it, and then the interval stretches: see analyticsSource.Interval.
+const (
+	analyticsQuotaShare = 0.15
+	analyticsQuotaTag   = "analytics"
+)
 
 // analyticsTopChatters is how many authors a report names.
 const analyticsTopChatters = 10
 
 // analyticsStreamsLimit bounds the stream list.
 const analyticsStreamsLimit = 100
+
+// ytQuota is the shared YouTube allowance of this install's Google client:
+// the one the chat adapters, the vertical read, the sampler and the request
+// meter all draw on. An install with no YouTube credentials has an empty
+// client id, which still names one budget.
+func (s *Server) ytQuota() *chat.YouTubeQuota {
+	id := ""
+	if s.store != nil {
+		if creds, err := s.store.GetPlatformCreds(s.box, db.PlatformYouTube); err == nil {
+			id = creds.ClientID
+		}
+	}
+	return s.ytQuotaPool.For(id)
+}
+
+// YouTubeMeter charges the shared allowance for each YouTube Data API call
+// internal/oauth makes on a path that did not charge it already. main
+// installs it with oauth.SetYouTubeMeter.
+func (s *Server) YouTubeMeter() oauth.YouTubeMeter {
+	return func(cost int) { s.ytQuotaPool.Current().Spend(cost) }
+}
+
+// ytLiveVideo is an account's live video, remembered so each tick is one
+// videos.list instead of a lookup and a read.
+type ytLiveVideo struct {
+	id, title string
+}
+
+// youTubeViewerReader is the two cheap reads oauth.YouTube offers the
+// sampler. Asserted on the provider the Set resolves, so a stubbed Set never
+// falls through to production.
+type youTubeViewerReader interface {
+	ActiveBroadcast(ctx context.Context, accessToken, channelRef string) (string, string, error)
+	LiveViewers(ctx context.Context, accessToken, videoID string) (oauth.LiveVideo, error)
+}
 
 // analyticsSource is the sampler's view of this server.
 type analyticsSource struct{ s *Server }
@@ -76,28 +120,63 @@ func (s *Server) runningDestinationIDs() map[int64]bool {
 // Targets is the connected accounts that a RUNNING destination streams to,
 // and that can be asked for a count. An account nothing is streaming to is not
 // this broadcast's audience, and asking it would spend quota on nobody.
+//
+// A running VERTICAL half has no account of its own: it is the paired
+// horizontal's broadcast, so it counts as that account, once (#9). A running
+// destination with a pasted key and no account at all is a row that says the
+// viewers are unavailable, rather than nothing (owner question 2).
 func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 	s := a.s
 	running := s.runningDestinationIDs()
+	if len(running) == 0 {
+		return []analytics.Target{}, nil
+	}
 	dests, err := s.store.ListDestinations()
 	if err != nil {
 		return nil, err
 	}
-	linked := map[int64]bool{}
+	byID := map[int64]*db.Destination{}
 	for _, d := range dests {
-		if d.AccountID == nil || !running[d.ID] {
+		byID[d.ID] = d
+	}
+	horizontalOf := map[int64]int64{}
+	if pairs, err := s.store.ListYouTubeVerticalPairs(); err == nil {
+		for _, p := range pairs {
+			horizontalOf[p.VerticalID] = p.HorizontalID
+		}
+	}
+	linked := map[int64]bool{}
+	out := []analytics.Target{}
+	for _, d := range dests {
+		if !running[d.ID] {
 			continue
 		}
-		linked[*d.AccountID] = true
+		acct := d.AccountID
+		if acct == nil {
+			if h, ok := byID[horizontalOf[d.ID]]; ok && h.AccountID != nil {
+				acct = h.AccountID
+			}
+		}
+		if acct != nil {
+			linked[*acct] = true
+			continue
+		}
+		if _, paired := horizontalOf[d.ID]; paired {
+			// A vertical half whose horizontal has no account: there is no
+			// broadcast to read, and the horizontal's own row says so.
+			continue
+		}
+		if _, ok := s.providers.StatsFor(d.Platform); ok {
+			out = append(out, analytics.Target{Platform: string(d.Platform), Name: d.Name, Unlinked: true})
+		}
 	}
 	if len(linked) == 0 {
-		return []analytics.Target{}, nil
+		return out, nil
 	}
 	accts, err := s.store.ListPlatformAccounts()
 	if err != nil {
 		return nil, err
 	}
-	out := []analytics.Target{}
 	for _, acct := range accts {
 		if !linked[acct.ID] {
 			continue
@@ -112,52 +191,166 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 	return out, nil
 }
 
-// Allow charges a YouTube read to the chat poll's quota budget for that
-// account, through the same seam the vertical status read uses. Every other
-// platform has no daily allowance to protect.
+// Allow reports whether a YouTube read fits the sampler's share of the shared
+// allowance, spending nothing: Read charges each call it actually makes.
+// Every other platform has no daily allowance; it is paced by its own
+// Retry-After instead (#4).
 func (a analyticsSource) Allow(t analytics.Target) bool {
-	s := a.s
 	if t.Platform != string(db.PlatformYouTube) {
 		return true
 	}
-	if s.analyticsChargeQuota != nil {
-		return s.analyticsChargeQuota(t.Account, youTubeStatsQuotaCost)
+	return a.s.ytQuota().AffordShare(analyticsQuotaTag, analyticsQuotaShare, 1)
+}
+
+// Interval stretches the configured interval when the sampler's share of the
+// YouTube allowance cannot afford it until the reset: with r reads left in
+// the share and c YouTube accounts read each tick, the wait is at least
+// reset-in / (r / c). Platforms without an allowance never stretch it.
+func (a analyticsSource) Interval(configured time.Duration, targets []analytics.Target) time.Duration {
+	perTick := 0
+	for _, t := range targets {
+		if t.Platform == string(db.PlatformYouTube) && !t.Unlinked {
+			perTick++
+		}
 	}
-	if s.chat == nil {
-		return true
+	if perTick == 0 {
+		return configured
 	}
-	ad, ok := s.chat.Adapter(db.PlatformYouTube, t.Account)
-	if !ok {
-		return true
+	q := a.s.ytQuota()
+	left := min(q.ShareLeft(analyticsQuotaTag, analyticsQuotaShare), q.Status().Remaining)
+	ticks := left / perTick
+	resetIn := q.ResetIn()
+	if ticks <= 0 {
+		// Nothing left until the reset. Waiting for it costs nothing on the
+		// other platforms only if there are none; keep sampling them at the
+		// configured interval and let YouTube read "quota".
+		return configured
 	}
-	c, ok := ad.(quotaChargeable)
-	if !ok {
-		return true
-	}
-	return c.ChargeQuota(youTubeStatsQuotaCost)
+	return max(configured, resetIn/time.Duration(ticks))
 }
 
 // Read is handleAccountStats without the HTTP: refresh the token if it has
-// expired, then ask through the provider Set's Stats twin.
+// expired, then ask the platform. A platform refusal is mapped to the
+// sampler's kinds: a spent quota is ErrQuota (and pauses the shared YouTube
+// allowance), a rate limit is a RetryAfterError (#4, #5).
 func (a analyticsSource) Read(ctx context.Context, t analytics.Target) (analytics.Stats, error) {
 	s := a.s
-	st, ok := s.providers.StatsFor(db.Platform(t.Platform))
-	if !ok {
-		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", t.Platform)
-	}
 	acct, err := s.tokenFor(ctx, t.AccountID)
 	if err != nil {
 		return analytics.Stats{}, err
+	}
+	var st analytics.Stats
+	if t.Platform == string(db.PlatformYouTube) {
+		st, err = a.readYouTube(ctx, t, acct.AccessToken)
+	} else {
+		st, err = a.readStats(ctx, acct)
+	}
+	return st, a.platformError(t, err)
+}
+
+func (a analyticsSource) readStats(ctx context.Context, acct *db.PlatformAccount) (analytics.Stats, error) {
+	s := a.s
+	sf, ok := s.providers.StatsFor(acct.Platform)
+	if !ok {
+		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", acct.Platform)
 	}
 	creds, err := s.store.GetPlatformCreds(s.box, acct.Platform)
 	if err != nil {
 		return analytics.Stats{}, err
 	}
-	ls, err := st.Stats(ctx, creds.ClientID, acct.AccessToken)
+	ls, err := sf.Stats(ctx, creds.ClientID, acct.AccessToken)
 	if err != nil {
 		return analytics.Stats{}, err
 	}
 	return statsOf(ls), nil
+}
+
+// readYouTube is the cheap YouTube read (#3): one videos.list against the
+// account's remembered live video, and a liveBroadcasts.list only when there
+// is none, or it has gone or ended. Each call is charged to the sampler's
+// share before it is made; the context tells the request meter not to count
+// it a second time.
+func (a analyticsSource) readYouTube(ctx context.Context, t analytics.Target, token string) (analytics.Stats, error) {
+	s := a.s
+	p, err := s.providers.Get(db.PlatformYouTube)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	yr, ok := p.(youTubeViewerReader)
+	if !ok {
+		return analytics.Stats{}, fmt.Errorf("polyemesis does not read a viewer count from %s", t.Platform)
+	}
+	q := s.ytQuota()
+	charge := func() bool { return q.ChargeShare(analyticsQuotaTag, analyticsQuotaShare, 1) }
+	ctx = oauth.WithQuotaCharged(ctx)
+
+	s.ytVideosMu.Lock()
+	cached, have := s.ytVideos[t.AccountID]
+	s.ytVideosMu.Unlock()
+	if have {
+		if !charge() {
+			return analytics.Stats{}, analytics.ErrQuota
+		}
+		v, err := yr.LiveViewers(ctx, token, cached.id)
+		if err != nil {
+			return analytics.Stats{}, err
+		}
+		if v.Found && !v.Ended {
+			return analytics.Stats{Live: true, Viewers: v.Viewers, Title: cached.title}, nil
+		}
+		s.forgetYouTubeVideo(t.AccountID)
+	}
+	if !charge() {
+		return analytics.Stats{}, analytics.ErrQuota
+	}
+	id, title, err := yr.ActiveBroadcast(ctx, token, t.Account)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	if id == "" {
+		return analytics.Stats{}, nil
+	}
+	s.ytVideosMu.Lock()
+	s.ytVideos[t.AccountID] = ytLiveVideo{id: id, title: title}
+	s.ytVideosMu.Unlock()
+	if !charge() {
+		return analytics.Stats{}, analytics.ErrQuota
+	}
+	v, err := yr.LiveViewers(ctx, token, id)
+	if err != nil {
+		return analytics.Stats{}, err
+	}
+	if !v.Found || v.Ended {
+		s.forgetYouTubeVideo(t.AccountID)
+		return analytics.Stats{}, nil
+	}
+	return analytics.Stats{Live: true, Viewers: v.Viewers, Title: title}, nil
+}
+
+func (s *Server) forgetYouTubeVideo(accountID int64) {
+	s.ytVideosMu.Lock()
+	delete(s.ytVideos, accountID)
+	s.ytVideosMu.Unlock()
+}
+
+// platformError maps a platform's typed refusal onto the sampler's kinds.
+func (a analyticsSource) platformError(t analytics.Target, err error) error {
+	var se *oauth.StatusError
+	if err == nil || !errors.As(err, &se) {
+		return err
+	}
+	switch {
+	case se.QuotaExceeded:
+		if t.Platform == string(db.PlatformYouTube) {
+			// YouTube is the authority on its own counter: every spender of
+			// this client stops until the reset.
+			a.s.ytQuota().Pause()
+		}
+		return fmt.Errorf("%w: %v", analytics.ErrQuota, err)
+	case se.Status == http.StatusTooManyRequests:
+		return &analytics.RetryAfterError{After: max(se.RetryAfter, time.Minute)}
+	}
+	return err
 }
 
 func statsOf(ls *oauth.LiveStats) analytics.Stats {
@@ -252,9 +445,14 @@ func (s *Server) handleAnalyticsStreams(w http.ResponseWriter, r *http.Request) 
 	out := make([]analytics.Stream, 0, len(rows))
 	for _, row := range rows {
 		st := row.Stream
-		if samples, err := s.store.AnalyticsSamples(st.ID); err == nil {
-			sum := analytics.Summarise(samples)
-			st.PeakTotal, st.AverageTotal = sum.PeakTotal, sum.AverageTotal
+		// A closed stream carries its peak and average, stored at close (#12).
+		// Only the one open stream -- at most a day of samples, by the
+		// rollover -- is summed here.
+		if st.EndedAt == nil {
+			if samples, err := s.store.AnalyticsSamples(st.ID); err == nil {
+				sum := analytics.Summarise(samples)
+				st.PeakTotal, st.AverageTotal = sum.PeakTotal, sum.AverageTotal
+			}
 		}
 		out = append(out, st)
 	}
@@ -376,7 +574,11 @@ func (s *Server) audienceMetrics() *metrics.Audience {
 		return a
 	}
 	a.Platforms = l.ByPlatform()
-	a.Total = l.Total
+	// A partial tick's total is the audience minus whoever failed; graphing
+	// it would draw a dip that never happened (#6).
+	if !l.Partial {
+		a.Total = l.Total
+	}
 	return a
 }
 
@@ -394,7 +596,10 @@ func (s *Server) AudienceState() *mqtt.AudienceState {
 	if !l.OnAir {
 		return out
 	}
-	out.Total, out.Reported = l.Total, l.Reported
+	out.Reported = l.Reported
+	if !l.Partial {
+		out.Total = l.Total
+	}
 	by := l.ByPlatform()
 	out.YouTube, out.Twitch, out.Kick = by[string(db.PlatformYouTube)], by[string(db.PlatformTwitch)], by[string(db.PlatformKick)]
 	for _, r := range l.Readings {

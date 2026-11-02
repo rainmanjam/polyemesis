@@ -156,11 +156,19 @@ func floatCell(v *float64) string {
 // "=HYPERLINK(...)" from a CSV runs it. A leading apostrophe is the
 // spreadsheet's own "this is text" marker (OWASP's CSV injection guidance).
 // A negative number never reaches here: every count this file writes is >= 0.
+//
+// The first character that is not white space is the one checked: a
+// spreadsheet ignores leading spaces and line breaks, so " =1+1" and
+// "\n@SUM(A1)" are formulae too.
 func neutralise(s string) string {
 	if s == "" {
 		return s
 	}
-	if strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+	if strings.ContainsRune("\t\r", rune(s[0])) {
+		return "'" + s
+	}
+	t := strings.TrimLeft(s, " \t\r\n")
+	if t != "" && strings.ContainsRune("=+-@", rune(t[0])) {
 		return "'" + s
 	}
 	return s

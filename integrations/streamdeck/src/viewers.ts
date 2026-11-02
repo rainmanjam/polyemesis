@@ -46,6 +46,8 @@ export function viewersFace(live: ViewersLive, platform: ViewerPlatform | undefi
   const count = viewerCount(live, platform);
   if (count === undefined) return { tone: "warn", label: "streamdeck.viewers.notReported", detail: name };
   const shown = count.toLocaleString(locale);
+  // A partial tick's total is the audience minus whoever failed: said so, not shown as the audience.
+  if (platform === undefined && live.partial) return { tone: "warn", label: "streamdeck.viewers.partial", detail: shown };
   return {
     tone: "live",
     label: "streamdeck.viewers.total",
@@ -64,5 +66,8 @@ export function viewersFeedback(
   if (!live.onAir) return { title, value: t(locale, "streamdeck.viewers.offAir"), indicator: 0 };
   const count = viewerCount(live, platform);
   if (count === undefined) return { title, value: t(locale, "streamdeck.viewers.notReported"), indicator: 0 };
+  if (platform === undefined && live.partial) {
+    return { title, value: `${t(locale, "streamdeck.viewers.partial")} · ${count.toLocaleString(locale)}`, indicator: 0 };
+  }
   return { title, value: count.toLocaleString(locale), indicator: 0 };
 }

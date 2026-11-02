@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Tampilkan",
   "streamdeck.pi.viewersTotal": "Total, semua platform",
   "streamdeck.pi.viewersHint": "Penonton di semua platform, dicatat selama ada tujuan yang berjalan. Jumlah yang tidak dilaporkan platform tampil sebagai Tidak dilaporkan, bukan 0. Perlu token admin.",
-  "streamdeck.pi.viewersPlayer": "Pemutar publik"
+  "streamdeck.pi.viewersPlayer": "Pemutar publik",
+  "streamdeck.viewers.partial": "Sebagian"
 }

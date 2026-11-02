@@ -29,6 +29,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
@@ -507,6 +508,10 @@ func run(h *hooks) error {
 	// charges YouTube reads to the chat quota pacer. See internal/api/analytics.go.
 	go srv.AnalyticsLoop(ctx)
 	mqttAudience.set(srv.AudienceState)
+	// Every YouTube Data API call internal/oauth makes -- title push,
+	// compliance, the lifecycle, rollover -- is charged to the Google
+	// client's one shared allowance, the one chat paces against.
+	oauth.SetYouTubeMeter(srv.YouTubeMeter())
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())

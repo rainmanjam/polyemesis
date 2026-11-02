@@ -183,6 +183,7 @@ export class PolyemesisClient {
       enabled: body.enabled === true,
       onAir: body.onAir,
       total: count(body.total),
+      partial: body.partial === true,
       readings: readings
         .filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && typeof (r as { platform?: unknown }).platform === "string")
         .map((r) => ({ platform: r.platform as string, viewers: count(r.viewers) })),

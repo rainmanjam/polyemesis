@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Mientras un destino está activo, polyemesis pide a cada cuenta conectada a la que transmite su número de espectadores. Las consultas a YouTube usan la cuota del chat.",
   "set.analyticsInterval": "Muestrear cada (segundos)",
   "set.analyticsIntervalNote": "De 30 a 900. Cada muestra de YouTube cuesta 3 unidades de cuota.",
-  "set.analyticsRetention": "Conservar informes (días)"
+  "set.analyticsRetention": "Conservar informes (días)",
+  "aud.totalWithPlayer": "Espectadores totales, incluido el reproductor público",
+  "aud.partial": "Parcial: una plataforma no respondió en esta muestra, así que el total la deja fuera y no se grafica.",
+  "aud.stretched": "Muestreo cada {seconds} s para no pasar de la parte de la cuota de YouTube.",
+  "aud.reasonUnlinked": "Este destino usa una clave de transmisión pegada, así que no hay una cuenta conectada a la que preguntar.",
+  "aud.notConnected": "no conectado"
 }

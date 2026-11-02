@@ -16,6 +16,8 @@
 package analytics
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -36,9 +38,34 @@ const (
 	ReasonHidden = "hidden"
 	// ReasonQuota: the YouTube quota pacer refused the read.
 	ReasonQuota = "quota"
-	// ReasonError: the read failed.
+	// ReasonError: the read failed, or the platform asked us to wait.
 	ReasonError = "error"
+	// ReasonUnlinked: a destination is running with a pasted stream key and
+	// no connected account, so there is nobody to ask. Shown, never read.
+	ReasonUnlinked = "unlinked"
 )
+
+// ErrQuota is what a Source's Read answers when the quota pacer refused the
+// read, or the platform answered that the quota is spent.
+var ErrQuota = errors.New("analytics: quota refused the read")
+
+// RetryAfterError is a platform asking us to wait (HTTP 429 and its
+// Retry-After). The sampler does not ask that account again until it passes.
+type RetryAfterError struct{ After time.Duration }
+
+func (e *RetryAfterError) Error() string {
+	return fmt.Sprintf("analytics: the platform asked to wait %s", e.After)
+}
+
+// transient reports whether a reason is a failure of this tick rather than a
+// steady fact. A tick with one is PARTIAL: its total is not the audience, it
+// is the audience minus whoever failed, and graphing it would draw a dip that
+// never happened. Offline counts: a platform that is not live while its
+// destination runs is going live or has failed, not an audience of none.
+// Hidden and unlinked do not: they are true for the whole stream.
+func transient(reason string) bool {
+	return reason == ReasonOffline || reason == ReasonQuota || reason == ReasonError
+}
 
 // Reading is one account's answer at one tick.
 type Reading struct {
@@ -89,6 +116,8 @@ type Sample struct {
 	Account  string
 	Name     string
 	Viewers  *int
+	// Reason is why Viewers is nil; empty when it is not.
+	Reason string
 }
 
 // Row is one platform account's line in a report.
@@ -111,6 +140,9 @@ type Row struct {
 type Point struct {
 	At    time.Time `json:"at"`
 	Total *int      `json:"total,omitempty"`
+	// Partial marks a tick at which a platform failed (see transient): its
+	// Total is left out, so the line has a gap rather than a false dip.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // Summary is the audience half of a per-stream report.
@@ -164,6 +196,9 @@ func Summarise(samples []Sample) Summary {
 			ticks[at] = p
 			tickOrder = append(tickOrder, at)
 		}
+		if transient(s.Reason) {
+			p.Partial = true
+		}
 		if s.Viewers == nil {
 			continue
 		}
@@ -206,6 +241,9 @@ func Summarise(samples []Sample) Summary {
 	sum, n := 0, 0
 	for _, at := range tickOrder {
 		p := *ticks[at]
+		if p.Partial {
+			p.Total = nil
+		}
 		out.Points = append(out.Points, p)
 		if p.Total == nil {
 			continue

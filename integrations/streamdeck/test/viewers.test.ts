@@ -132,3 +132,27 @@ describe("viewers key", () => {
     expect(dial.feedback).toEqual([{ title: "Player", value: "3", indicator: 0 }]);
   });
 });
+
+describe("viewers on a partial tick (PR #950 review, #6)", () => {
+  it("does not show the rest of the audience as the total", () => {
+    const live = { enabled: true, onAir: true, total: 12, partial: true, readings: [{ platform: "twitch", viewers: 12 }, { platform: "youtube" }] };
+    expect(viewersFace(live, undefined, "en")).toMatchObject({ tone: "warn", label: "streamdeck.viewers.partial", detail: "12" });
+    // One platform's own count is still its count.
+    expect(viewersFace(live, "twitch", "en")).toMatchObject({ tone: "live", detail: "Twitch 12" });
+    expect(viewersFeedback(live, undefined, "en")).toEqual({ title: "Viewers", value: "Partial · 12", indicator: 0 });
+  });
+
+  it("reads partial off the install's answer", async () => {
+    const { rt } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/analytics/live": json(200, { ...LIVE, partial: true }),
+    });
+    rt.configure(PAIRED);
+    await rt.verify();
+    const key = surface("k", "viewers");
+    rt.add(key);
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.warn);
+    expect(key.titles.at(-1)).toBe("Partial\n15");
+  });
+});

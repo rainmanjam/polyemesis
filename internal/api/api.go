@@ -402,10 +402,16 @@ type Server struct {
 	verticalChargeQuota func(cost int) bool
 	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning,
 	// analyticsChargeQuota and analyticsNow are its test seams; nil in production. See analytics.go.
-	audience             *analytics.Sampler
-	analyticsRunning     func() map[int64]bool
-	analyticsChargeQuota func(accountRef string, cost int) bool
-	analyticsNow         func() time.Time
+	audience         *analytics.Sampler
+	analyticsRunning func() map[int64]bool
+	analyticsNow     func() time.Time
+	// ytQuotaPool is one shared YouTube allowance per Google client ID, drawn
+	// on by chat, the vertical read, the sampler and the oauth request meter.
+	// ytVideos is each YouTube account's live video, remembered by the
+	// sampler so a tick is one videos.list. See analytics.go.
+	ytQuotaPool *chat.YouTubeQuotaPool
+	ytVideosMu  sync.Mutex
+	ytVideos    map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -871,6 +877,13 @@ func New(o Options) *Server {
 		// lifecycleCoordinator.airing.
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
+	cs := db.DefaultSettings().Chat
+	if s.store != nil {
+		cs = s.youtubeQuota()
+	}
+	units, reserve := youtubeQuotaPair(cs)
+	s.ytQuotaPool = chat.NewYouTubeQuotaPool(units, reserve, nil)
+	s.ytVideos = map[int64]ytLiveVideo{}
 	if o.DB != nil {
 		s.audience = s.newAudienceSampler()
 		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{

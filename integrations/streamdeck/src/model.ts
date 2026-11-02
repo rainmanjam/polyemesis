@@ -220,5 +220,7 @@ export interface ViewersLive {
   enabled: boolean;
   onAir: boolean;
   total?: number;
+  /** A platform failed at the last tick: `total` is the rest of the audience, not all of it. */
+  partial?: boolean;
   readings: { platform: string; viewers?: number }[];
 }

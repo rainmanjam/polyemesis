@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Anzeigen",
   "streamdeck.pi.viewersTotal": "Gesamt, alle Plattformen",
   "streamdeck.pi.viewersHint": "Das Publikum über alle Plattformen, erfasst solange ein Ziel läuft. Eine Zahl, die eine Plattform nicht meldet, erscheint als Nicht gemeldet, nie als 0. Braucht ein Admin-Token.",
-  "streamdeck.pi.viewersPlayer": "Öffentlicher Player"
+  "streamdeck.pi.viewersPlayer": "Öffentlicher Player",
+  "streamdeck.viewers.partial": "Unvollständig"
 }

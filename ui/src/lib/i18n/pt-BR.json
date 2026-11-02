@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Enquanto um destino está ativo, o polyemesis pergunta a cada conta conectada para a qual transmite quantos espectadores há. As leituras do YouTube usam a cota do chat.",
   "set.analyticsInterval": "Amostrar a cada (segundos)",
   "set.analyticsIntervalNote": "De 30 a 900. Cada amostra do YouTube custa 3 unidades de cota.",
-  "set.analyticsRetention": "Manter relatórios (dias)"
+  "set.analyticsRetention": "Manter relatórios (dias)",
+  "aud.totalWithPlayer": "Total de espectadores, incluindo o player público",
+  "aud.partial": "Parcial: uma plataforma não respondeu nesta amostra, então o total a deixa de fora e não é desenhado.",
+  "aud.stretched": "Amostrando a cada {seconds} s para ficar dentro da parte da cota do YouTube.",
+  "aud.reasonUnlinked": "Este destino usa uma chave de transmissão colada, então não há conta conectada para consultar.",
+  "aud.notConnected": "não conectado"
 }

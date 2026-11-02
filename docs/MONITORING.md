@@ -214,7 +214,9 @@ exist on every install; their samples exist only while something is on air.
   reported a count at the last tick and 0 when it was asked and did not, so an
   absent viewers sample can be told from a platform that was never asked.
 - `polyemesis_audience_viewers` is every reported count plus the public
-  player's, absent when nothing reported. The player is not repeated per
+  player's, absent when nothing reported **and absent on a partial tick** -- one
+  at which a platform failed or was not yet live -- because that total is the
+  audience minus whoever failed. The player is not repeated per
   platform: `polyemesis_playout_viewers` already carries it.
 
 ```promql

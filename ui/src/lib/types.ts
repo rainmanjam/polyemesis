@@ -4074,7 +4074,7 @@ export interface RolloverView {
 
 /** Why a reading carries no count. A count that was not reported is NOT zero:
  *  the row says "not reported" and the total leaves it out. */
-export type AnalyticsReason = "offline" | "hidden" | "quota" | "error";
+export type AnalyticsReason = "offline" | "hidden" | "quota" | "error" | "unlinked";
 
 /** One connected account's answer at the last sample. `platform` is
  *  `"player"` for the public player, which is its own row and counted once. */
@@ -4090,8 +4090,11 @@ export interface AnalyticsReading {
 
 export interface AnalyticsPoint {
   at: string;
-  /** Absent for a tick at which nothing reported: a gap, not a dip to 0. */
+  /** Absent for a tick at which nothing reported, or a partial one: a gap,
+   *  not a dip to 0. */
   total?: number;
+  /** A platform failed at this tick (quota, error, not yet live). */
+  partial?: boolean;
 }
 
 /** The public player's QoE over the stream so far. */
@@ -4127,7 +4130,13 @@ export interface AnalyticsLive {
   readings: AnalyticsReading[];
   points: AnalyticsPoint[];
   player?: AnalyticsPlayerQoE;
+  /** A platform failed at the last tick: `total` is the rest of the audience. */
+  partial?: boolean;
   intervalSeconds: number;
+  /** What the sampler actually waits; longer than intervalSeconds when the
+   *  YouTube quota share cannot afford the configured interval. */
+  effectiveIntervalSeconds?: number;
+  stretched?: boolean;
 }
 
 export interface AnalyticsRow {

@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "대상이 실행되는 동안 polyemesis는 송출 중인 각 연결 계정에 시청자 수를 묻습니다. YouTube 조회는 채팅 할당량을 사용합니다.",
   "set.analyticsInterval": "집계 간격(초)",
   "set.analyticsIntervalNote": "30~900. YouTube 집계 1회에 할당량 3단위가 듭니다.",
-  "set.analyticsRetention": "보고서 보관 기간(일)"
+  "set.analyticsRetention": "보고서 보관 기간(일)",
+  "aud.totalWithPlayer": "전체 시청자(공개 플레이어 포함)",
+  "aud.partial": "일부만: 이번 집계에서 응답하지 않은 플랫폼이 있어 합계에서 빼고 그래프에도 그리지 않습니다.",
+  "aud.stretched": "YouTube 할당량 몫을 넘지 않도록 {seconds}초마다 집계합니다.",
+  "aud.reasonUnlinked": "이 대상은 붙여 넣은 스트림 키를 사용하므로 조회할 연결 계정이 없습니다.",
+  "aud.notConnected": "연결 안 됨"
 }

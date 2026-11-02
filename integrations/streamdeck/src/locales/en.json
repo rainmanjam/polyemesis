@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Show",
   "streamdeck.pi.viewersTotal": "Total, every platform",
   "streamdeck.pi.viewersHint": "The audience across every platform, sampled while a destination is running. A count a platform does not report shows Not reported, never 0. Needs an admin token.",
-  "streamdeck.pi.viewersPlayer": "Public player"
+  "streamdeck.pi.viewersPlayer": "Public player",
+  "streamdeck.viewers.partial": "Partial"
 }

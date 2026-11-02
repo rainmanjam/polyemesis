@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Mentre una destinazione è attiva, polyemesis chiede a ogni account collegato verso cui trasmette il numero di spettatori. Le letture di YouTube usano la quota della chat.",
   "set.analyticsInterval": "Campiona ogni (secondi)",
   "set.analyticsIntervalNote": "Da 30 a 900. Ogni campione YouTube costa 3 unità di quota.",
-  "set.analyticsRetention": "Conserva i report (giorni)"
+  "set.analyticsRetention": "Conserva i report (giorni)",
+  "aud.totalWithPlayer": "Spettatori totali, player pubblico incluso",
+  "aud.partial": "Parziale: una piattaforma non ha risposto a questo campione, quindi il totale la esclude e non viene tracciato.",
+  "aud.stretched": "Campionamento ogni {seconds} s per restare nella quota YouTube riservata.",
+  "aud.reasonUnlinked": "Questa destinazione usa una chiave di streaming incollata, quindi non c'è un account collegato da interrogare.",
+  "aud.notConnected": "non collegato"
 }

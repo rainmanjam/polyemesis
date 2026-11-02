@@ -17,6 +17,7 @@ const REASON: Record<string, TranslationKey> = {
   hidden: "aud.reasonHidden",
   quota: "aud.reasonQuota",
   error: "aud.reasonError",
+  unlinked: "aud.reasonUnlinked",
 };
 
 /** The cross-platform audience (Wave 4 #4): the total, each platform's count
@@ -78,11 +79,16 @@ function OnAir({ live }: { live: AnalyticsLive }) {
   const t = useT();
   const rows = orderReadings(live.readings);
   const path = sparkPath(live.points, 200, 32);
+  // The player's count is in the total, once: say so, so a total that never
+  // reads "not reported" while the player runs is not a surprise.
+  const withPlayer = live.readings.some((r) => r.platform === PLAYER);
   return (
     <>
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex flex-col">
-          <span className="text-xs text-muted-foreground">{t("aud.total")}</span>
+          <span className="text-xs text-muted-foreground">
+            {withPlayer ? t("aud.totalWithPlayer") : t("aud.total")}
+          </span>
           {typeof live.total === "number" ? (
             <span className="text-2xl font-semibold tabular-nums text-foreground" data-testid="audience-total">
               {live.total.toLocaleString()}
@@ -95,6 +101,11 @@ function OnAir({ live }: { live: AnalyticsLive }) {
           <span className="text-xs text-muted-foreground">
             {t("aud.reportedOf", { n: live.reported, of: live.readings.length })}
           </span>
+          {live.partial && (
+            <span className="text-xs text-warn" data-testid="audience-partial">
+              {t("aud.partial")}
+            </span>
+          )}
         </div>
         {path && (
           <svg
@@ -126,6 +137,11 @@ function OnAir({ live }: { live: AnalyticsLive }) {
       {live.at && (
         <p className="text-xs text-muted-foreground">{t("aud.sampledAt", { time: clockTime(live.at) })}</p>
       )}
+      {live.stretched && live.effectiveIntervalSeconds && (
+        <p className="text-xs text-muted-foreground" data-testid="audience-stretched">
+          {t("aud.stretched", { seconds: live.effectiveIntervalSeconds })}
+        </p>
+      )}
     </>
   );
 }
@@ -143,7 +159,7 @@ function ReadingRow({ r }: { r: AnalyticsReading }) {
       </span>
       {count === null ? (
         <span className="text-muted-foreground" title={reason ? t(reason) : undefined}>
-          {t("aud.notReported")}
+          {r.reason === "unlinked" ? t("aud.notConnected") : t("aud.notReported")}
         </span>
       ) : (
         <span className="tabular-nums text-foreground">{count.toLocaleString()}</span>

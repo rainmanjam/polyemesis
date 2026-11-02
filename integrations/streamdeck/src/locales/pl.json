@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Pokaż",
   "streamdeck.pi.viewersTotal": "Łącznie, wszystkie platformy",
   "streamdeck.pi.viewersHint": "Widownia na wszystkich platformach, mierzona, gdy działa cel. Liczba, której platforma nie podaje, wyświetla się jako Nie zgłoszono, nigdy jako 0. Wymaga tokenu administratora.",
-  "streamdeck.pi.viewersPlayer": "Odtwarzacz publiczny"
+  "streamdeck.pi.viewersPlayer": "Odtwarzacz publiczny",
+  "streamdeck.viewers.partial": "Częściowo"
 }

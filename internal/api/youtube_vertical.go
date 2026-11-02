@@ -307,21 +307,11 @@ func (s *Server) verticalChargeOK(accountRef string) bool {
 	if s.verticalChargeQuota != nil {
 		return s.verticalChargeQuota(chat.QuotaCostListLiveStreams)
 	}
-	if s.chat == nil {
-		return true
-	}
-	a, ok := s.chat.Adapter(db.PlatformYouTube, accountRef)
-	if !ok {
-		return true
-	}
-	// An interface, not the concrete *chat.YouTubeAdapter: the hub hands back whatever it
-	// attached, and a wrapped adapter that still paces must be charged too. A type assertion on
-	// the concrete type would fail silently and charge nothing.
-	c, ok := a.(quotaChargeable)
-	if !ok {
-		return true
-	}
-	return c.ChargeQuota(chat.QuotaCostListLiveStreams)
+	// ALWAYS CHARGED, to the Google client's one shared allowance (PR #950
+	// review, #1): with no chat adapter attached this used to answer true and
+	// spend nothing, so a read made with chat off was counted against nothing.
+	_ = accountRef
+	return s.ytQuota().Charge(chat.QuotaCostListLiveStreams)
 }
 
 // quotaChargeable is what the vertical read needs from a chat adapter that paces against a
@@ -397,7 +387,8 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	health, err := vp.VerticalStreamHealth(ctx, acct.AccessToken, pair.VerticalStreamID)
+	// Charged above; the request meter must not count it again.
+	health, err := vp.VerticalStreamHealth(oauth.WithQuotaCharged(ctx), acct.AccessToken, pair.VerticalStreamID)
 	read := verticalHealthRead{at: now, health: health}
 	if err != nil {
 		read.err = alerts.Redact(err.Error())

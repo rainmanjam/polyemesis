@@ -68,6 +68,11 @@ type YouTubeConfig struct {
 	// reachable from a two-line edit. See QuotaUnits in quota.go.
 	QuotaUnits   QuotaUnits
 	QuotaReserve QuotaReserve
+	// Quota, when set, is the Google client's shared allowance (quota_pool.go):
+	// every adapter on one client ID draws on it, with the vertical read, the
+	// audience sampler and the request meter. QuotaUnits and QuotaReserve are
+	// then the pool's to apply, and only a test builds an adapter without one.
+	Quota *YouTubeQuota
 	// Backfill bounds the first poll's history.
 	Backfill time.Duration
 
@@ -117,7 +122,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 	// asks it.
 	return &YouTubeAdapter{
 		cfg:    cfg,
-		budget: newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now),
+		budget: adapterBudget(cfg),
 		chatID: cfg.LiveChatID,
 		health: Health{State: StateConnecting},
 	}, nil
@@ -699,4 +704,13 @@ func (y *YouTubeAdapter) SetQuota(units, reserve int) {
 		return
 	}
 	y.budget.setLimits(QuotaUnits(units), QuotaReserve(reserve))
+}
+
+// adapterBudget is the client's shared budget when one was handed in, and a
+// private one otherwise.
+func adapterBudget(cfg YouTubeConfig) *budget {
+	if cfg.Quota != nil {
+		return cfg.Quota.b
+	}
+	return newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now)
 }

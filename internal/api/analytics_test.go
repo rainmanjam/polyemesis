@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
+	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
@@ -32,6 +33,11 @@ type fakeLiveStats struct {
 	youtube string
 	// titleFor overrides a Twitch channel's stream title, by token.
 	titleFor map[string]string
+	// ytEnded makes the video report an actualEndTime; ytQuota makes
+	// videos.list answer quotaExceeded; twitchRetry makes /streams answer 429
+	// with this Retry-After (seconds).
+	ytEnded, ytQuota bool
+	twitchRetry      int
 }
 
 func newFakeLiveStats(t *testing.T) *fakeLiveStats {
@@ -44,6 +50,7 @@ func newFakeLiveStats(t *testing.T) *fakeLiveStats {
 		count, live := f.twitch[tok]
 		yt := f.youtube
 		title, titled := f.titleFor[tok]
+		ended, quota, retry := f.ytEnded, f.ytQuota, f.twitchRetry
 		f.mu.Unlock()
 		if !titled {
 			title = "Twitch title " + tok
@@ -54,6 +61,11 @@ func newFakeLiveStats(t *testing.T) *fakeLiveStats {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{
 				"id": "uid-" + tok, "login": "login-" + tok, "display_name": "Chan " + tok}}})
 		case "/streams":
+			if retry > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(retry))
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
 			if !live {
 				_, _ = w.Write([]byte(`{"data":[]}`))
 				return
@@ -66,11 +78,19 @@ func newFakeLiveStats(t *testing.T) *fakeLiveStats {
 		case "/channels":
 			_, _ = w.Write([]byte(`{"items":[{"id":"yt-chan","snippet":{"title":"YT channel"}}]}`))
 		case "/liveBroadcasts":
-			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"channelId":"yt-chan","title":"YouTube title"}}]}`))
+			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"channelId":"tube-ref","title":"YouTube title"}}]}`))
 		case "/videos":
+			if quota {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"errors":[{"reason":"quotaExceeded"}]}}`))
+				return
+			}
 			d := map[string]any{}
 			if yt != "" {
 				d["concurrentViewers"] = yt
+			}
+			if ended {
+				d["actualEndTime"] = "2026-11-01T20:00:00Z"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"liveStreamingDetails": d}}})
 		default:
@@ -98,23 +118,20 @@ type analyticsFixture struct {
 	sign    func(*http.Request)
 	now     time.Time
 	running map[int64]bool
-	charged []int
-	allowYT bool
 	dest    map[string]int64
 }
+
+// ytUsed is what the shared YouTube allowance has spent today.
+func (f *analyticsFixture) ytUsed() int { return f.s.ytQuota().Status().Used }
 
 func newAnalyticsFixture(t *testing.T) *analyticsFixture {
 	t.Helper()
 	fake := newFakeLiveStats(t)
 	s, h, store := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(fake.srv.URL))})
 	f := &analyticsFixture{s: s, h: h, store: store, fake: fake, now: time.Unix(1_800_000_000, 0),
-		running: map[int64]bool{}, allowYT: true, dest: map[string]int64{}}
+		running: map[int64]bool{}, dest: map[string]int64{}}
 	s.analyticsNow = func() time.Time { return f.now }
 	s.analyticsRunning = func() map[int64]bool { return f.running }
-	s.analyticsChargeQuota = func(_ string, cost int) bool {
-		f.charged = append(f.charged, cost)
-		return f.allowYT
-	}
 	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformYouTube} {
 		if err := store.PutPlatformCreds(s.box, p, "cid", "client-pass"); err != nil {
 			t.Fatalf("creds: %v", err)
@@ -207,8 +224,14 @@ func TestAnalyticsLiveSumsOnlyReportedCountsFromTheRealProviders(t *testing.T) {
 	if _, asked := byName["idle"]; asked {
 		t.Fatal("an account with no running destination was sampled")
 	}
-	if len(f.charged) != 1 || f.charged[0] != youTubeStatsQuotaCost || youTubeStatsQuotaCost != 3 {
-		t.Fatalf("YouTube charged %v, want one charge of 3 units (channels + liveBroadcasts + videos)", f.charged)
+	// The real shared allowance, with no chat attached (#1, #16): the first
+	// tick finds the live video (1) and reads it (1); channels.list is never
+	// called (#3).
+	if used := f.ytUsed(); used != 2 {
+		t.Fatalf("YouTube allowance used %d, want 2 (liveBroadcasts.list + videos.list)", used)
+	}
+	if f.fake.hit("/channels") != 0 {
+		t.Fatal("channels.list was called; the account ref already holds the channel id")
 	}
 
 	// The raw body has no viewers key for the hidden row: the wire says what
@@ -246,9 +269,13 @@ func TestAnalyticsLiveSumsOnlyReportedCountsFromTheRealProviders(t *testing.T) {
 func TestAnalyticsChargesYouTubeToThePacerAndRespectsARefusal(t *testing.T) {
 	f := newAnalyticsFixture(t)
 	f.fake.youtube = "30"
-	f.allowYT = false
 	f.account(t, db.PlatformYouTube, "tube", "tok-y")
 	f.running[f.dest["tube"]] = true
+	// The shared allowance is spent down to its send reserve by somebody
+	// else -- chat, a title push -- and there is no chat adapter at all.
+	q := f.s.ytQuota()
+	st := q.Status()
+	q.Spend(st.Limit - 200)
 
 	f.tick(t)
 	for _, p := range []string{"/channels", "/liveBroadcasts", "/videos"} {
@@ -433,5 +460,194 @@ func TestAudienceStateForMQTTLeavesUnreportedPlatformsNil(t *testing.T) {
 	}
 	if !st.At.Equal(f.now) {
 		t.Fatalf("at = %v, want the tick %v", st.At, f.now)
+	}
+}
+
+// TestAnalyticsReadsTheCachedVideoForOneUnitATick (#3): after the lookup,
+// every tick is one videos.list against the remembered id.
+func TestAnalyticsReadsTheCachedVideoForOneUnitATick(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	f.fake.youtube = "30"
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	f.running[f.dest["tube"]] = true
+	for i := 0; i < 3; i++ {
+		f.tick(t)
+		f.now = f.now.Add(time.Minute)
+	}
+	if lb, v := f.fake.hit("/liveBroadcasts"), f.fake.hit("/videos"); lb != 1 || v != 3 {
+		t.Fatalf("liveBroadcasts=%d videos=%d, want one lookup and one read a tick", lb, v)
+	}
+	if used := f.ytUsed(); used != 4 {
+		t.Fatalf("allowance used %d, want 4 (2 + 1 + 1)", used)
+	}
+	// The broadcast ends: the id is dropped and looked up again.
+	f.fake.mu.Lock()
+	f.fake.ytEnded = true
+	f.fake.mu.Unlock()
+	f.tick(t)
+	if f.fake.hit("/liveBroadcasts") != 2 {
+		t.Fatal("an ended video was not looked up again")
+	}
+}
+
+// TestAnalyticsQuotaExceededPausesTheSharedAllowance (#5): YouTube's own
+// quotaExceeded is "quota", never "hidden", and stops every spender.
+func TestAnalyticsQuotaExceededPausesTheSharedAllowance(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	f.fake.ytQuota = true
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	f.running[f.dest["tube"]] = true
+	f.tick(t)
+	var live analytics.Live
+	f.get(t, "/api/v1/analytics/live", &live)
+	if len(live.Readings) != 1 || live.Readings[0].Reason != analytics.ReasonQuota || !live.Partial {
+		t.Fatalf("readings = %+v, want quota (not hidden) and a partial tick", live.Readings)
+	}
+	if f.s.ytQuota().Afford(1) {
+		t.Fatal("quotaExceeded did not pause the shared allowance")
+	}
+}
+
+// TestAnalyticsShareStretchesTheInterval (#2): analytics is held to its share
+// of the allowance; when the configured interval cannot be afforded until the
+// reset, the interval is stretched and the live view says so.
+func TestAnalyticsShareStretchesTheInterval(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	f.fake.youtube = "30"
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	f.running[f.dest["tube"]] = true
+	// A 1,000-unit project: a 150-unit share, nearly all of it spent.
+	f.s.ytQuotaPool.SetLimits(1000, 0)
+	q := f.s.ytQuota()
+	for q.ShareLeft(analyticsQuotaTag, analyticsQuotaShare) > 3 {
+		if !q.ChargeShare(analyticsQuotaTag, analyticsQuotaShare, 1) {
+			t.Fatal("could not spend the share down")
+		}
+	}
+	f.tick(t)
+	var live analytics.Live
+	f.get(t, "/api/v1/analytics/live", &live)
+	if !live.Stretched || live.EffectiveIntervalSeconds <= live.IntervalSeconds {
+		t.Fatalf("interval %d effective %d stretched %v, want a stretched wait",
+			live.IntervalSeconds, live.EffectiveIntervalSeconds, live.Stretched)
+	}
+}
+
+// TestAnalyticsTwitchRateLimitBacksOff (#4): a 429 and its Retry-After keep
+// the sampler off that account until it passes.
+func TestAnalyticsTwitchRateLimitBacksOff(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	n := 5
+	f.fake.twitch["tok-a"] = &n
+	f.fake.twitchRetry = 150
+	f.account(t, db.PlatformTwitch, "shown", "tok-a")
+	f.running[f.dest["shown"]] = true
+	f.tick(t)
+	first := f.fake.hit("/streams")
+	f.fake.mu.Lock()
+	f.fake.twitchRetry = 0
+	f.fake.mu.Unlock()
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	if f.fake.hit("/streams") != first {
+		t.Fatal("asked Twitch again inside its Retry-After")
+	}
+	f.now = f.now.Add(2 * time.Minute)
+	f.tick(t)
+	if f.fake.hit("/streams") != first+1 {
+		t.Fatal("did not ask Twitch again after the Retry-After")
+	}
+}
+
+// TestAnalyticsReadsTheVerticalHalfThroughItsHorizontalAccount (#9): a
+// running vertical half has no account of its own; it is the paired
+// horizontal's broadcast, read once.
+func TestAnalyticsReadsTheVerticalHalfThroughItsHorizontalAccount(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	f.fake.youtube = "30"
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	vert, err := f.store.CreateDestination(&db.Destination{
+		Name: "tube vertical", Kind: db.DestRTMP, Platform: db.PlatformYouTube,
+		URL: "rtmp://ingest.example/app", StreamKey: "key-vertical",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.CreateYouTubeVerticalPair(f.dest["tube"], vert.ID, "vertical-stream-id"); err != nil {
+		t.Fatal(err)
+	}
+	f.running[vert.ID] = true
+	f.tick(t)
+	var live analytics.Live
+	f.get(t, "/api/v1/analytics/live", &live)
+	if len(live.Readings) != 1 || live.Readings[0].Name != "tube" || live.Total == nil || *live.Total != 30 {
+		t.Fatalf("readings = %+v, want the horizontal account read once", live.Readings)
+	}
+	f.running[f.dest["tube"]] = true
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	f.get(t, "/api/v1/analytics/live", &live)
+	if len(live.Readings) != 1 {
+		t.Fatalf("both halves running: %d readings, want one per broadcast", len(live.Readings))
+	}
+}
+
+// TestAnalyticsShowsAPastedKeyDestinationAsUnlinked (owner question 2).
+func TestAnalyticsShowsAPastedKeyDestinationAsUnlinked(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	d, err := f.store.CreateDestination(&db.Destination{
+		Name: "Kick by key", Kind: db.DestRTMP, Platform: db.PlatformKick,
+		URL: "rtmp://ingest.example/app", StreamKey: "key-pasted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.running[d.ID] = true
+	f.tick(t)
+	var live analytics.Live
+	f.get(t, "/api/v1/analytics/live", &live)
+	if len(live.Readings) != 1 || live.Readings[0].Reason != analytics.ReasonUnlinked ||
+		live.Readings[0].Name != "Kick by key" || live.Readings[0].Platform != "kick" {
+		t.Fatalf("readings = %+v, want the pasted-key destination shown as not connected", live.Readings)
+	}
+}
+
+// TestTheVerticalReadAlwaysChargesTheSharedAllowance (#1): with no chat
+// attached, the vertical status read still spends from, and is refused by,
+// the shared allowance.
+func TestTheVerticalReadAlwaysChargesTheSharedAllowance(t *testing.T) {
+	s, _, store := testServer(t, config.Config{})
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "client-pass"); err != nil {
+		t.Fatal(err)
+	}
+	q := s.ytQuota()
+	if !s.verticalChargeOK("ref") || q.Status().Used != 1 {
+		t.Fatalf("used = %d, want the read charged with no chat attached", q.Status().Used)
+	}
+	q.Pause()
+	if s.verticalChargeOK("ref") {
+		t.Fatal("the vertical read went ahead on a spent allowance")
+	}
+}
+
+// TestAPartialTickHasNoTotalOnTheScrapeOrMQTT (#6).
+func TestAPartialTickHasNoTotalOnTheScrapeOrMQTT(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	n := 7
+	f.fake.twitch["tok-a"] = &n
+	f.fake.ytQuota = true
+	f.account(t, db.PlatformTwitch, "shown", "tok-a")
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	f.running[f.dest["shown"]], f.running[f.dest["tube"]] = true, true
+	f.tick(t)
+	body := metrics.Render(metrics.Snapshot{Audience: f.s.audienceMetrics()})
+	if strings.Contains(body, "\npolyemesis_audience_viewers ") {
+		t.Fatal("a partial tick's total was published")
+	}
+	if !strings.Contains(body, `polyemesis_platform_viewers{platform="twitch"} 7`) {
+		t.Fatal("the platform that did report is missing")
+	}
+	if st := f.s.AudienceState(); st.Total != nil || st.Twitch == nil {
+		t.Fatalf("MQTT = %+v, want no total and Twitch's 7", st)
 	}
 }

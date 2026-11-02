@@ -198,6 +198,17 @@ type fakeSource struct {
 	allows  map[string]int
 	player  *int
 	qoe     PlayerQoE
+	// interval, when set, is the source's pacing of the configured interval.
+	interval func(time.Duration) time.Duration
+}
+
+func (f *fakeSource) Interval(configured time.Duration, _ []Target) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.interval != nil {
+		return f.interval(configured)
+	}
+	return configured
 }
 
 func (f *fakeSource) OnAir() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.onAir }
@@ -242,11 +253,18 @@ type memStore struct {
 	streams []*memStream
 	samples map[int64][]Sample
 	pruned  []time.Time
+	// failClose and failRecord make the next N closes or records fail.
+	failClose, failRecord int
+	// fullReads counts AnalyticsSamples calls; recentTicks the tick counts asked of AnalyticsRecentSamples.
+	fullReads   int
+	recentTicks []int
+	leads       []time.Duration
 }
 
 func newMem() *memStore { return &memStore{samples: map[int64][]Sample{}} }
 
-func (m *memStore) OpenAnalyticsStream(at time.Time, q *PlayerQoE) (int64, error) {
+func (m *memStore) OpenAnalyticsStream(at time.Time, q *PlayerQoE, lead time.Duration) (int64, error) {
+	m.leads = append(m.leads, lead)
 	st := &memStream{id: int64(len(m.streams) + 1), start: at, open: true, qoeStart: q}
 	m.streams = append(m.streams, st)
 	return st.id, nil
@@ -260,6 +278,10 @@ func (m *memStore) OpenAnalyticsStreamState() (OpenState, bool, error) {
 	return OpenState{}, false, nil
 }
 func (m *memStore) RecordAnalyticsTick(id int64, at time.Time, rs []Reading, title string, q *PlayerQoE) error {
+	if m.failRecord > 0 {
+		m.failRecord--
+		return errors.New("disk full")
+	}
 	st := m.streams[id-1]
 	st.last = at
 	if st.title == "" {
@@ -267,16 +289,37 @@ func (m *memStore) RecordAnalyticsTick(id int64, at time.Time, rs []Reading, tit
 	}
 	st.qoeEnd = q
 	for _, r := range rs {
-		m.samples[id] = append(m.samples[id], Sample{At: at, Platform: r.Platform, Account: r.Account, Viewers: r.Viewers})
+		m.samples[id] = append(m.samples[id], Sample{At: at, Platform: r.Platform, Account: r.Account, Viewers: r.Viewers, Reason: r.Reason})
 	}
 	return nil
 }
 func (m *memStore) CloseAnalyticsStream(id int64, at time.Time) error {
+	if m.failClose > 0 {
+		m.failClose--
+		return errors.New("database is locked")
+	}
 	st := m.streams[id-1]
 	st.open, st.end = false, at
 	return nil
 }
-func (m *memStore) AnalyticsSamples(id int64) ([]Sample, error) { return m.samples[id], nil }
+func (m *memStore) AnalyticsSamples(id int64) ([]Sample, error) {
+	m.fullReads++
+	return m.samples[id], nil
+}
+func (m *memStore) AnalyticsRecentSamples(id int64, ticks int) ([]Sample, error) {
+	m.recentTicks = append(m.recentTicks, ticks)
+	all := m.samples[id]
+	seen := 0
+	for i := len(all) - 1; i >= 0; i-- {
+		if i == len(all)-1 || !all[i].At.Equal(all[i+1].At) {
+			seen++
+			if seen > ticks {
+				return all[i+1:], nil
+			}
+		}
+	}
+	return all, nil
+}
 func (m *memStore) PruneAnalytics(cutoff time.Time) (int, error) {
 	m.pruned = append(m.pruned, cutoff)
 	return 0, nil
@@ -430,7 +473,7 @@ func TestSamplerClosesAStreamOnlyAfterTheGrace(t *testing.T) {
 func TestSamplerResumesAFreshStreamAndClosesAStaleOne(t *testing.T) {
 	store := newMem()
 	t0 := time.Unix(1_800_000_000, 0)
-	id, _ := store.OpenAnalyticsStream(t0, &PlayerQoE{Sessions: 3})
+	id, _ := store.OpenAnalyticsStream(t0, &PlayerQoE{Sessions: 3}, 0)
 	_ = store.RecordAnalyticsTick(id, t0, []Reading{{Platform: "kick", Viewers: ip(4)}}, "", nil)
 
 	src := newFake()
@@ -450,7 +493,7 @@ func TestSamplerResumesAFreshStreamAndClosesAStaleOne(t *testing.T) {
 
 	// A process that comes back long after: the old stream ends at its last tick.
 	store2 := newMem()
-	id2, _ := store2.OpenAnalyticsStream(t0, nil)
+	id2, _ := store2.OpenAnalyticsStream(t0, nil, 0)
 	_ = store2.RecordAnalyticsTick(id2, t0.Add(time.Minute), nil, "", nil)
 	c2 := &clock{t: t0.Add(time.Hour)}
 	s2 := New(src, store2, enabled(time.Minute), c2.now, nil)
@@ -556,5 +599,288 @@ func TestLiveBeforeTheFirstTickSaysWhetherSamplingIsOn(t *testing.T) {
 	l := s.Live()
 	if !l.Enabled || l.OnAir || l.IntervalSeconds != 120 || l.At != nil {
 		t.Fatalf("before the first tick = %+v, want enabled, off air, interval 120, no tick", l)
+	}
+}
+
+// ---------------------------------------------------------- review round
+
+// TestAPartialTickIsAGapNotADip (#6): a tick at which a platform failed --
+// offline while its destination runs, refused by the quota pacer, or an
+// error -- is not an audience that dropped. It is left out of the peak and
+// the average, and the sparkline has a gap there.
+func TestAPartialTickIsAGapNotADip(t *testing.T) {
+	t0 := time.Unix(1_800_000_000, 0)
+	s := Summarise([]Sample{
+		{At: t0, Platform: "youtube", Viewers: ip(100)},
+		{At: t0, Platform: "twitch", Viewers: ip(10)},
+		{At: t0.Add(time.Minute), Platform: "youtube", Reason: ReasonQuota},
+		{At: t0.Add(time.Minute), Platform: "twitch", Viewers: ip(12)},
+		{At: t0.Add(2 * time.Minute), Platform: "youtube", Viewers: ip(80)},
+		{At: t0.Add(2 * time.Minute), Platform: "twitch", Viewers: ip(14)},
+	})
+	if s.AverageTotal == nil || *s.AverageTotal != 102 {
+		t.Fatalf("average total = %v, want 102 ((110+94)/2, the partial tick left out)", s.AverageTotal)
+	}
+	if p := s.Points[1]; p.Total != nil || !p.Partial {
+		t.Fatalf("partial tick point = %+v, want a gap marked partial", p)
+	}
+	// A hidden count is a steady fact, not a failure: that tick is complete.
+	h := Summarise([]Sample{
+		{At: t0, Platform: "youtube", Reason: ReasonHidden},
+		{At: t0, Platform: "twitch", Viewers: ip(5)},
+	})
+	if h.Points[0].Partial || h.Points[0].Total == nil || *h.Points[0].Total != 5 {
+		t.Fatalf("hidden-count tick = %+v, want complete with total 5", h.Points[0])
+	}
+	// The per-platform rows still count the platforms that reported.
+	if tw := s.Rows[0]; tw.Platform != "twitch" || *tw.Peak != 14 || tw.Reported != 3 {
+		t.Fatalf("twitch row = %+v", tw)
+	}
+}
+
+func TestLiveSaysAPartialTickIsPartial(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{{Platform: "youtube", AccountID: 1, Account: "yt"}, {Platform: "twitch", AccountID: 2, Account: "tw"}}
+	src.errs["yt"] = ErrQuota
+	src.stats["tw"] = Stats{Live: true, Viewers: ip(3)}
+	s := New(src, newMem(), enabled(time.Minute), (&clock{t: time.Unix(1_800_000_000, 0)}).now, nil)
+	s.Tick(context.Background())
+	l := s.Live()
+	if !l.Partial || l.Readings[1].Reason != ReasonQuota {
+		t.Fatalf("live = %+v, want partial with YouTube refused by the quota", l)
+	}
+	if len(l.Points) != 1 || l.Points[0].Total != nil {
+		t.Fatalf("points = %+v, want a gap", l.Points)
+	}
+}
+
+// TestAFailedCloseIsRetried (#10): a close that fails leaves the stream open
+// in memory too, so the next tick tries again instead of orphaning the row.
+func TestAFailedCloseIsRetried(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	src.onAir = false
+	store.failClose = 1
+	c.step(CloseGrace)
+	s.Tick(context.Background())
+	if !store.streams[0].open {
+		t.Fatal("the store reports the close failed, yet nothing is open")
+	}
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if store.streams[0].open {
+		t.Fatal("a failed close was not retried")
+	}
+	src.onAir = true
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if len(store.streams) != 2 {
+		t.Fatalf("%d streams, want the retried close then one new stream", len(store.streams))
+	}
+}
+
+// TestAnOpenStreamRollsOverEveryDay (#11): a 24/7 broadcast is split into
+// day-long streams, so retention can prune it.
+func TestAnOpenStreamRollsOverEveryDay(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	c.step(RolloverAfter - time.Minute)
+	s.Tick(context.Background())
+	last := c.t
+	if len(store.streams) != 1 {
+		t.Fatalf("rolled over early: %d streams", len(store.streams))
+	}
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if len(store.streams) != 2 || store.streams[0].open || !store.streams[0].end.Equal(last) || !store.streams[1].open {
+		t.Fatalf("after a day: %d streams, first open=%v end=%v", len(store.streams), store.streams[0].open, store.streams[0].end)
+	}
+}
+
+// TestResumeLoadsOnlyTheRecentTicks (#12): resuming reads the last sparkline's
+// worth of ticks, never the whole stream.
+func TestResumeLoadsOnlyTheRecentTicks(t *testing.T) {
+	store := newMem()
+	t0 := time.Unix(1_800_000_000, 0)
+	id, _ := store.OpenAnalyticsStream(t0, nil, 0)
+	for i := 0; i < 300; i++ {
+		_ = store.RecordAnalyticsTick(id, t0.Add(time.Duration(i)*time.Minute), []Reading{{Platform: "kick", Viewers: ip(i)}}, "", nil)
+	}
+	src := newFake()
+	src.onAir = true
+	c := &clock{t: t0.Add(300 * time.Minute)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	if store.fullReads != 0 {
+		t.Fatalf("resume read the whole stream %d times", store.fullReads)
+	}
+	if len(store.recentTicks) != 1 || store.recentTicks[0] != sparkPoints {
+		t.Fatalf("recent reads = %v, want one of %d ticks", store.recentTicks, sparkPoints)
+	}
+	if n := len(s.Live().Points); n != sparkPoints {
+		t.Fatalf("sparkline has %d points, want %d", n, sparkPoints)
+	}
+}
+
+// TestAFailedRecordDoesNotAdvanceTheStream (#13): memory follows the store.
+func TestAFailedRecordDoesNotAdvanceTheStream(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	first := c.t
+	store.failRecord = 1
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if n := len(s.Live().Points); n != 1 {
+		t.Fatalf("%d points after a failed write, want 1", n)
+	}
+	// Off air now: the grace counts from the last tick that was stored.
+	src.onAir = false
+	c.t = first.Add(CloseGrace)
+	s.Tick(context.Background())
+	if store.streams[0].open || !store.streams[0].end.Equal(first) {
+		t.Fatalf("closed=%v at %v, want closed at the last stored tick %v", !store.streams[0].open, store.streams[0].end, first)
+	}
+}
+
+// TestABackedOffTargetIsNotAskedUntilItsRetryAfter (#4).
+func TestABackedOffTargetIsNotAskedUntilItsRetryAfter(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{{Platform: "twitch", AccountID: 1, Account: "tw"}}
+	src.errs["tw"] = &RetryAfterError{After: 3 * time.Minute}
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, newMem(), enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	delete(src.errs, "tw")
+	src.stats["tw"] = Stats{Live: true, Viewers: ip(4)}
+	for i := 0; i < 2; i++ {
+		c.step(time.Minute)
+		s.Tick(context.Background())
+	}
+	if src.reads["tw"] != 1 {
+		t.Fatalf("read %d times inside the platform's Retry-After, want 1", src.reads["tw"])
+	}
+	if r := s.Live().Readings[0]; r.Reason != ReasonError || r.Viewers != nil {
+		t.Fatalf("backed-off reading = %+v", r)
+	}
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if src.reads["tw"] != 2 || s.Live().Total == nil {
+		t.Fatalf("after the Retry-After: reads=%d total=%v", src.reads["tw"], s.Live().Total)
+	}
+}
+
+// An error with no Retry-After backs off exponentially, capped.
+func TestAnErroringTargetBacksOff(t *testing.T) {
+	if d := backoffFor(1, nil); d != time.Duration(0) {
+		t.Fatalf("first failure backoff = %v, want none (ask again next tick)", d)
+	}
+	if d := backoffFor(3, nil); d != 2*time.Minute {
+		t.Fatalf("third failure backoff = %v, want 2m", d)
+	}
+	if d := backoffFor(30, nil); d != maxBackoff {
+		t.Fatalf("backoff = %v, want capped at %v", d, maxBackoff)
+	}
+	if d := backoffFor(1, &RetryAfterError{After: 7 * time.Minute}); d != 7*time.Minute {
+		t.Fatalf("Retry-After backoff = %v", d)
+	}
+}
+
+// TestAnUnlinkedDestinationIsShownNotAsked (owner question 2): a running
+// destination with a pasted key has no account to ask; it is a row that says
+// so, never a read, and does not make the tick partial.
+func TestAnUnlinkedDestinationIsShownNotAsked(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{{Platform: "kick", Name: "Kick (pasted key)", Unlinked: true}, {Platform: "twitch", AccountID: 2, Account: "tw"}}
+	src.stats["tw"] = Stats{Live: true, Viewers: ip(6)}
+	s := New(src, newMem(), enabled(time.Minute), (&clock{t: time.Unix(1_800_000_000, 0)}).now, nil)
+	s.Tick(context.Background())
+	l := s.Live()
+	if src.allows[""]+src.reads[""] != 0 {
+		t.Fatal("an unlinked destination was asked")
+	}
+	if l.Readings[0].Reason != ReasonUnlinked || l.Partial || l.Total == nil || *l.Total != 6 {
+		t.Fatalf("live = %+v", l)
+	}
+}
+
+// TestAStretchedIntervalIsReported (#2): when the source paces the interval
+// for quota, the live view says so and the wait uses it.
+func TestAStretchedIntervalIsReported(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.interval = func(time.Duration) time.Duration { return 3 * time.Minute }
+	s := New(src, newMem(), enabled(time.Minute), (&clock{t: time.Unix(1_800_000_000, 0)}).now, nil)
+	s.Tick(context.Background())
+	l := s.Live()
+	if l.IntervalSeconds != 60 || l.EffectiveIntervalSeconds != 180 || !l.Stretched {
+		t.Fatalf("live = interval %d effective %d stretched %v", l.IntervalSeconds, l.EffectiveIntervalSeconds, l.Stretched)
+	}
+	if w := s.nextWait(); w != 3*time.Minute {
+		t.Fatalf("next wait = %v, want the stretched 3m", w)
+	}
+}
+
+// TestWakeAppliesALoweredIntervalNow (#15).
+func TestWakeAppliesALoweredIntervalNow(t *testing.T) {
+	src := newFake()
+	interval := time.Hour
+	var mu sync.Mutex
+	cfg := func() Config { mu.Lock(); defer mu.Unlock(); return Config{Enabled: true, Interval: interval} }
+	store := newMem()
+	s := New(src, store, cfg, nil, nil)
+	s.firstWait = time.Millisecond
+	ticks := make(chan struct{}, 10)
+	s.onTick = func() { ticks <- struct{}{} }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	<-ticks
+	mu.Lock()
+	interval = 20 * time.Millisecond
+	mu.Unlock()
+	s.Wake()
+	select {
+	case <-ticks:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a lowered interval waited out the old hour")
+	}
+}
+
+func TestOpenPassesTheChatLeadOfOneInterval(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	store := newMem()
+	s := New(src, store, enabled(90*time.Second), (&clock{t: time.Unix(1_800_000_000, 0)}).now, nil)
+	s.Tick(context.Background())
+	if len(store.leads) != 1 || store.leads[0] != 90*time.Second {
+		t.Fatalf("leads = %v, want one interval (chat between go-live and the first tick)", store.leads)
+	}
+}
+
+func TestCSVNeutralisesAFormulaBehindWhitespace(t *testing.T) {
+	for _, in := range []string{" =1+1", "\n@SUM(A1)", "\t\t-2+3", "  +cmd"} {
+		if got := neutralise(in); got[0] != '\'' {
+			t.Errorf("neutralise(%q) = %q, want it marked as text", in, got)
+		}
+	}
+	for _, in := range []string{"plain", "a=b", "Twitch 4"} {
+		if got := neutralise(in); got != in {
+			t.Errorf("neutralise(%q) = %q, want it unchanged", in, got)
+		}
 	}
 }

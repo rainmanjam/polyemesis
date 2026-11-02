@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "配信先が動作している間、polyemesis は配信先の各接続アカウントに視聴者数を問い合わせます。YouTube の読み取りはチャットのクォータを使います。",
   "set.analyticsInterval": "計測間隔(秒)",
   "set.analyticsIntervalNote": "30〜900。YouTube の計測は 1 回につき 3 クォータ単位を使います。",
-  "set.analyticsRetention": "レポートの保存期間(日)"
+  "set.analyticsRetention": "レポートの保存期間(日)",
+  "aud.totalWithPlayer": "合計視聴者数(公開プレーヤーを含む)",
+  "aud.partial": "一部のみ:この計測でプラットフォームが応答しなかったため、合計から外しグラフにも描きません。",
+  "aud.stretched": "YouTube クォータの割り当て内に収めるため {seconds} 秒ごとに計測しています。",
+  "aud.reasonUnlinked": "この配信先は貼り付けたストリームキーを使っているため、問い合わせる接続アカウントがありません。",
+  "aud.notConnected": "未接続"
 }

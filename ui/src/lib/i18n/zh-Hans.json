@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "有推流目标运行时,polyemesis 会向其推流的每个已连接账号查询观众人数。YouTube 查询使用聊天配额。",
   "set.analyticsInterval": "采样间隔(秒)",
   "set.analyticsIntervalNote": "30 到 900。每次 YouTube 采样消耗 3 个配额单位。",
-  "set.analyticsRetention": "报告保留天数"
+  "set.analyticsRetention": "报告保留天数",
+  "aud.totalWithPlayer": "观众总数(含公共播放器)",
+  "aud.partial": "不完整:本次采样有平台未响应,因此总数不含它,也不绘制。",
+  "aud.stretched": "为不超出 YouTube 配额份额,每 {seconds} 秒采样一次。",
+  "aud.reasonUnlinked": "此推流目标使用粘贴的推流密钥,没有可查询的已连接账号。",
+  "aud.notConnected": "未连接"
 }

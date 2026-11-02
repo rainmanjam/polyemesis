@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Mostra",
   "streamdeck.pi.viewersTotal": "Totale, tutte le piattaforme",
   "streamdeck.pi.viewersHint": "Il pubblico su tutte le piattaforme, campionato mentre una destinazione è attiva. Un numero che una piattaforma non comunica appare come Non comunicato, mai 0. Serve un token amministratore.",
-  "streamdeck.pi.viewersPlayer": "Player pubblico"
+  "streamdeck.pi.viewersPlayer": "Player pubblico",
+  "streamdeck.viewers.partial": "Parziale"
 }

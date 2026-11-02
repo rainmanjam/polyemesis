@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Показувати",
   "streamdeck.pi.viewersTotal": "Усього, усі платформи",
   "streamdeck.pi.viewersHint": "Аудиторія всіх платформ, заміряється, поки працює напрямок. Число, яке платформа не повідомляє, показується як «Немає даних», а не 0. Потрібен токен адміністратора.",
-  "streamdeck.pi.viewersPlayer": "Публічний плеєр"
+  "streamdeck.pi.viewersPlayer": "Публічний плеєр",
+  "streamdeck.viewers.partial": "Неповні"
 }

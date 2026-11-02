@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Selama ada tujuan yang berjalan, polyemesis menanyakan jumlah penonton ke setiap akun terhubung yang menjadi tujuan streaming. Pembacaan YouTube memakai kuota obrolan.",
   "set.analyticsInterval": "Catat setiap (detik)",
   "set.analyticsIntervalNote": "30 sampai 900. Tiap sampel YouTube memakan 3 unit kuota.",
-  "set.analyticsRetention": "Simpan laporan (hari)"
+  "set.analyticsRetention": "Simpan laporan (hari)",
+  "aud.totalWithPlayer": "Total penonton, termasuk pemutar publik",
+  "aud.partial": "Sebagian: satu platform tidak menjawab pada sampel ini, jadi total tidak menyertakannya dan tidak digambar.",
+  "aud.stretched": "Dicatat setiap {seconds} detik agar tetap dalam jatah kuota YouTube.",
+  "aud.reasonUnlinked": "Tujuan ini memakai kunci stream yang ditempel, jadi tidak ada akun terhubung yang bisa ditanya.",
+  "aud.notConnected": "tidak terhubung"
 }

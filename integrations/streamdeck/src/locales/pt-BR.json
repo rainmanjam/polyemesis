@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Mostrar",
   "streamdeck.pi.viewersTotal": "Total, todas as plataformas",
   "streamdeck.pi.viewersHint": "O público de todas as plataformas, amostrado enquanto um destino está ativo. Uma contagem que a plataforma não informa aparece como Não informado, nunca 0. Precisa de um token de administrador.",
-  "streamdeck.pi.viewersPlayer": "Player público"
+  "streamdeck.pi.viewersPlayer": "Player público",
+  "streamdeck.viewers.partial": "Parcial"
 }

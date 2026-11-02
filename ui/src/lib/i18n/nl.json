@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Zolang een bestemming loopt, vraagt polyemesis elk verbonden account waarnaar het streamt om een kijkersaantal. YouTube-verzoeken gebruiken het chatquotum.",
   "set.analyticsInterval": "Meet elke (seconden)",
   "set.analyticsIntervalNote": "30 tot 900. Elke YouTube-meting kost 3 quotumeenheden.",
-  "set.analyticsRetention": "Rapporten bewaren (dagen)"
+  "set.analyticsRetention": "Rapporten bewaren (dagen)",
+  "aud.totalWithPlayer": "Totaal kijkers, inclusief de openbare speler",
+  "aud.partial": "Gedeeltelijk: een platform antwoordde niet bij deze meting, dus het totaal laat het weg en wordt niet getekend.",
+  "aud.stretched": "Meet elke {seconds} s om binnen het YouTube-quotumdeel te blijven.",
+  "aud.reasonUnlinked": "Deze bestemming gebruikt een geplakte streamsleutel, dus er is geen verbonden account om te vragen.",
+  "aud.notConnected": "niet verbonden"
 }

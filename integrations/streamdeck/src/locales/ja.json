@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "表示",
   "streamdeck.pi.viewersTotal": "合計(全プラットフォーム)",
   "streamdeck.pi.viewersHint": "配信先が動作している間に計測した全プラットフォームの視聴者数です。プラットフォームが報告しない人数は 0 ではなく「未報告」と表示します。管理者トークンが必要です。",
-  "streamdeck.pi.viewersPlayer": "公開プレーヤー"
+  "streamdeck.pi.viewersPlayer": "公開プレーヤー",
+  "streamdeck.viewers.partial": "一部のみ"
 }

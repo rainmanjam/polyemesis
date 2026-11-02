@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Tonen",
   "streamdeck.pi.viewersTotal": "Totaal, alle platforms",
   "streamdeck.pi.viewersHint": "Het publiek op alle platforms, gemeten zolang een bestemming loopt. Een aantal dat een platform niet meldt, staat er als Niet gemeld, nooit als 0. Vereist een beheerderstoken.",
-  "streamdeck.pi.viewersPlayer": "Openbare speler"
+  "streamdeck.pi.viewersPlayer": "Openbare speler",
+  "streamdeck.viewers.partial": "Gedeeltelijk"
 }

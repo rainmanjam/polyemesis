@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Solange ein Ziel läuft, fragt polyemesis jedes verbundene Konto, an das es streamt, nach der Zuschauerzahl. YouTube-Abfragen nutzen das Chat-Kontingent.",
   "set.analyticsInterval": "Erfassen alle (Sekunden)",
   "set.analyticsIntervalNote": "30 bis 900. Jede YouTube-Messung kostet 3 Kontingenteinheiten.",
-  "set.analyticsRetention": "Berichte behalten (Tage)"
+  "set.analyticsRetention": "Berichte behalten (Tage)",
+  "aud.totalWithPlayer": "Zuschauer gesamt, inklusive öffentlichem Player",
+  "aud.partial": "Unvollständig: Eine Plattform hat bei dieser Messung nicht geantwortet, daher fehlt sie in der Summe und wird nicht gezeichnet.",
+  "aud.stretched": "Messung alle {seconds} s, um im YouTube-Kontingentanteil zu bleiben.",
+  "aud.reasonUnlinked": "Dieses Ziel nutzt einen eingefügten Stream-Schlüssel, daher gibt es kein verbundenes Konto zum Abfragen.",
+  "aud.notConnected": "nicht verbunden"
 }

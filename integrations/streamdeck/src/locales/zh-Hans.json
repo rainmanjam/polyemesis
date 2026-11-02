@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "显示",
   "streamdeck.pi.viewersTotal": "总计(所有平台)",
   "streamdeck.pi.viewersHint": "在有推流目标运行时统计的所有平台观众。平台未报告的人数显示为“未报告”,而不是 0。需要管理员令牌。",
-  "streamdeck.pi.viewersPlayer": "公共播放器"
+  "streamdeck.pi.viewersPlayer": "公共播放器",
+  "streamdeck.viewers.partial": "不完整"
 }

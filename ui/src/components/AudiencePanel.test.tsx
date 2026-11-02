@@ -74,6 +74,26 @@ describe("AudiencePanel", () => {
     await waitFor(() => expect(screen.getByText(translate("en", "aud.disabled"))).toBeTruthy());
   });
 
+  it("labels the total as including the public player, and says when a tick is partial or stretched", async () => {
+    vi.spyOn(api.analytics, "live").mockResolvedValue(
+      live({ partial: true, stretched: true, effectiveIntervalSeconds: 240 }),
+    );
+    render(<AudiencePanel />);
+    await waitFor(() => expect(screen.getByText(translate("en", "aud.totalWithPlayer"))).toBeTruthy());
+    expect(screen.getByTestId("audience-partial").textContent).toBe(translate("en", "aud.partial"));
+    expect(screen.getByTestId("audience-stretched").textContent).toBe(translate("en", "aud.stretched", { seconds: 240 }));
+  });
+
+  it("shows a pasted-key destination as not connected rather than leaving it out", async () => {
+    vi.spyOn(api.analytics, "live").mockResolvedValue(
+      live({ readings: [{ platform: "kick", name: "Kick by key", live: false, reason: "unlinked" }], total: undefined, reported: 0 }),
+    );
+    render(<AudiencePanel />);
+    const row = await screen.findByTestId("audience-row-kick");
+    expect(within(row).getByText(translate("en", "aud.notConnected"))).toBeTruthy();
+    expect(screen.queryByText(translate("en", "aud.totalWithPlayer"))).toBeNull();
+  });
+
   it("survives a refused read", async () => {
     vi.spyOn(api.analytics, "live").mockRejectedValue(new Error("403"));
     render(<AudiencePanel />);

@@ -116,5 +116,6 @@
   "streamdeck.pi.viewersPlatform": "Göster",
   "streamdeck.pi.viewersTotal": "Toplam, tüm platformlar",
   "streamdeck.pi.viewersHint": "Bir hedef çalışırken ölçülen, tüm platformlardaki izleyiciler. Bir platformun bildirmediği sayı 0 değil Bildirilmedi olarak görünür. Yönetici belirteci gerekir.",
-  "streamdeck.pi.viewersPlayer": "Herkese açık oynatıcı"
+  "streamdeck.pi.viewersPlayer": "Herkese açık oynatıcı",
+  "streamdeck.viewers.partial": "Kısmi"
 }

@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Tant qu'une destination tourne, polyemesis demande à chaque compte connecté vers lequel il diffuse son nombre de spectateurs. Les requêtes YouTube utilisent le quota du chat.",
   "set.analyticsInterval": "Échantillonner toutes les (secondes)",
   "set.analyticsIntervalNote": "De 30 à 900. Chaque mesure YouTube coûte 3 unités de quota.",
-  "set.analyticsRetention": "Conserver les rapports (jours)"
+  "set.analyticsRetention": "Conserver les rapports (jours)",
+  "aud.totalWithPlayer": "Spectateurs au total, lecteur public compris",
+  "aud.partial": "Partiel : une plateforme n'a pas répondu à cette mesure, le total la laisse de côté et n'est pas tracé.",
+  "aud.stretched": "Mesure toutes les {seconds} s pour rester dans la part du quota YouTube.",
+  "aud.reasonUnlinked": "Cette destination utilise une clé de diffusion collée : il n'y a aucun compte connecté à interroger.",
+  "aud.notConnected": "non connecté"
 }

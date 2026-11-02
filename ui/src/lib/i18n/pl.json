@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Gdy działa jakiś cel, polyemesis pyta każde połączone konto, na które nadaje, o liczbę widzów. Odczyty YouTube korzystają z limitu czatu.",
   "set.analyticsInterval": "Mierz co (sekund)",
   "set.analyticsIntervalNote": "Od 30 do 900. Każdy pomiar YouTube kosztuje 3 jednostki limitu.",
-  "set.analyticsRetention": "Przechowuj raporty (dni)"
+  "set.analyticsRetention": "Przechowuj raporty (dni)",
+  "aud.totalWithPlayer": "Łącznie widzów, z odtwarzaczem publicznym",
+  "aud.partial": "Częściowo: jedna platforma nie odpowiedziała przy tym pomiarze, więc suma ją pomija i nie jest rysowana.",
+  "aud.stretched": "Pomiar co {seconds} s, aby zmieścić się w części limitu YouTube.",
+  "aud.reasonUnlinked": "Ten cel używa wklejonego klucza transmisji, więc nie ma połączonego konta do zapytania.",
+  "aud.notConnected": "nie połączono"
 }

@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "Bir hedef çalışırken polyemesis, yayın yaptığı her bağlı hesaba izleyici sayısını sorar. YouTube okumaları sohbet kotasını kullanır.",
   "set.analyticsInterval": "Ölçüm aralığı (saniye)",
   "set.analyticsIntervalNote": "30 ile 900 arası. Her YouTube ölçümü 3 kota birimi harcar.",
-  "set.analyticsRetention": "Raporları sakla (gün)"
+  "set.analyticsRetention": "Raporları sakla (gün)",
+  "aud.totalWithPlayer": "Toplam izleyici, herkese açık oynatıcı dahil",
+  "aud.partial": "Kısmi: bu ölçümde bir platform yanıt vermedi, bu yüzden toplam onu dışarıda bırakır ve çizilmez.",
+  "aud.stretched": "YouTube kota payı içinde kalmak için her {seconds} saniyede ölçülüyor.",
+  "aud.reasonUnlinked": "Bu hedef yapıştırılmış bir yayın anahtarı kullanıyor, bu yüzden sorulacak bağlı hesap yok.",
+  "aud.notConnected": "bağlı değil"
 }

@@ -63,6 +63,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.viewers.offAir",
   "streamdeck.viewers.off",
   "streamdeck.viewers.player",
+  "streamdeck.viewers.partial",
   "streamdeck.failover.primary",
   "streamdeck.failover.backup",
   "streamdeck.failover.playlist",

@@ -3671,5 +3671,10 @@
   "set.analyticsDesc": "While a destination is running, polyemesis asks each connected account it streams to for a viewer count. YouTube reads use the chat quota.",
   "set.analyticsInterval": "Sample every (seconds)",
   "set.analyticsIntervalNote": "30 to 900. Each YouTube sample costs 3 quota units.",
-  "set.analyticsRetention": "Keep reports (days)"
+  "set.analyticsRetention": "Keep reports (days)",
+  "aud.totalWithPlayer": "Total viewers, including the public player",
+  "aud.partial": "Partial: a platform did not answer this sample, so the total leaves it out and is not graphed.",
+  "aud.stretched": "Sampling every {seconds} s to stay inside the YouTube quota share.",
+  "aud.reasonUnlinked": "This destination uses a pasted stream key, so there is no connected account to ask.",
+  "aud.notConnected": "not connected"
 }
