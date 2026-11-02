@@ -303,6 +303,11 @@ type Request struct {
 	// Title is written into the clip's metadata, and names it in an exported
 	// EDL. Optional.
 	Title string `json:"title,omitempty"`
+
+	// Vertical, when set, makes this a 9:16 short: every frame re-encoded
+	// through a layout and optional burned captions, written as an MP4. See
+	// vertical.go. Nil is every clip this package cut before it existed.
+	Vertical *Vertical `json:"vertical,omitempty"`
 }
 
 // MaxClipDuration is a sanity ceiling, not a policy: a cut longer than this is
@@ -339,7 +344,13 @@ func (r Request) Validate() error {
 	if !ValidMode(r.Mode) {
 		return fmt.Errorf("%w: unknown mode %q", ErrInvalidRequest, r.Mode)
 	}
-	return r.Audio.validate()
+	if err := r.Audio.validate(); err != nil {
+		return err
+	}
+	if r.Vertical != nil {
+		return r.Vertical.validate(r)
+	}
+	return nil
 }
 
 func (a AudioSelection) validate() error {

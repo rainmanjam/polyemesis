@@ -287,3 +287,15 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+// FilterPath is filterPath for callers outside this package: a filesystem path
+// rendered for use INSIDE a filter argument, slashes converted and escaped at
+// both levels a filtergraph unescapes. Exported so a second graph builder (the
+// clipper's vertical export) uses the SAME escaping the overlay does rather
+// than re-deriving it -- the Windows failure filterPath documents is what a
+// re-derivation would reintroduce.
+func FilterPath(p string) string { return filterPath(p) }
+
+// EscapeFilterArg is escapeLavfiArg for callers outside this package. See there
+// for why one level of escaping is not enough.
+func EscapeFilterArg(v string) string { return escapeLavfiArg(v) }

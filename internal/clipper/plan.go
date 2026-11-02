@@ -79,6 +79,9 @@ type Plan struct {
 	// Warnings are everything the caller should be told but that does not stop
 	// the cut: a moved in-point, a gap in the recording, a degraded mode.
 	Warnings []string `json:"warnings,omitempty"`
+
+	// Vertical is the 9:16 export this plan renders, nil for an ordinary cut.
+	Vertical *Vertical `json:"vertical,omitempty"`
 }
 
 // Duration is how long the clip will be.
@@ -104,6 +107,10 @@ func (p Plan) LosslessFraction() float64 {
 
 // Describe is the one-sentence summary to put on a confirm dialog.
 func (p Plan) Describe() string {
+	if p.Vertical != nil {
+		return fmt.Sprintf("Vertical 9:16 short (%s layout), %s from %s, every frame re-encoded, "+
+			"starting exactly where you asked.", p.Vertical.Layout, round(p.Duration()), plural(len(p.Sources), "segment"))
+	}
 	what := "Lossless copy"
 	if p.ReEncodes() {
 		what = fmt.Sprintf("Precise cut (re-encodes the first %s)", round(p.HeadDuration))
@@ -154,7 +161,13 @@ func PlanCut(tl Timeline, kf Keyframes, req Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	p.snap(kf)
+	if req.Vertical != nil {
+		// No snap: every frame is encoded, so there is no keyframe to start
+		// on, and the captions are timed against the requested in-point.
+		p.planVertical(req.Vertical)
+	} else {
+		p.snap(kf)
+	}
 	if err := p.resolveSources(tl); err != nil {
 		return Plan{}, err
 	}
