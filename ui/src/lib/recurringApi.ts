@@ -5,9 +5,10 @@
    - the thumbnail is a raw image body. autoApi JSON-encodes every body and
      forces application/json, and the server checks image/png or image/jpeg
      against the bytes' magic numbers, so this module sends the real type.
-   - the rollover routes are programme-scoped (requireSource), so every call
-     that reaches a destination carries ?source= from the destination's own
-     sourceId. A multi-programme install refuses the call without it.
+   The rollover routes take no ?source=. The server resolves the programme
+   from the destination row itself, which is always current; a programme
+   named by the client could only be a stale copy of it, and requireSource
+   checks only that an engine exists, so it would be ignored anyway.
 
    Errors are the same ApiError autoApi throws, so a caller branches on
    `status`, and the server's sentence stays the message.
@@ -24,10 +25,6 @@ export const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
 
 /** The picture types the server accepts for a thumbnail. */
 export const THUMBNAIL_TYPES = ["image/png", "image/jpeg"] as const;
-
-function sourceParam(sourceId: number | null | undefined): string {
-  return sourceId == null ? "" : `?source=${encodeURIComponent(String(sourceId))}`;
-}
 
 /** Loads a schedule's template, or null when the schedule has none. A 404 is the normal case for a
  *  schedule nobody has templated; every other failure is thrown. */
@@ -97,25 +94,21 @@ export function retitleOccurrence(id: number, title: string): Promise<{ id: numb
   return autoApi.post<{ id: number; title: string }>(`/recurring/occurrences/${id}/title`, { title });
 }
 
-export function getRollover(destinationId: number, sourceId: number | null | undefined): Promise<RolloverView> {
-  return autoApi.get<RolloverView>(`/destinations/${destinationId}/rollover${sourceParam(sourceId)}`);
+export function getRollover(destinationId: number): Promise<RolloverView> {
+  return autoApi.get<RolloverView>(`/destinations/${destinationId}/rollover`);
 }
 
 export function saveRollover(
   destinationId: number,
-  sourceId: number | null | undefined,
   body: Pick<RolloverSettings, "enabled" | "marginMinutes" | "quietStart" | "quietEnd" | "quietZone" | "obsScene" | "chatNotice">,
 ): Promise<RolloverView> {
-  return autoApi.put<RolloverView>(`/destinations/${destinationId}/rollover${sourceParam(sourceId)}`, body);
+  return autoApi.put<RolloverView>(`/destinations/${destinationId}/rollover`, body);
 }
 
 /** Runs a rollover now. The call is synchronous: a 200 means the rollover finished, a 502 means the
  *  platform answered and refused, and a 409 means the destination was not in a state to roll over. */
-export function runRollover(
-  destinationId: number,
-  sourceId: number | null | undefined,
-): Promise<{ status: string }> {
-  return autoApi.post<{ status: string }>(`/destinations/${destinationId}/rollover/run${sourceParam(sourceId)}`);
+export function runRollover(destinationId: number): Promise<{ status: string }> {
+  return autoApi.post<{ status: string }>(`/destinations/${destinationId}/rollover/run`);
 }
 
 /** The CSRF token from the cookie, as autoApi reads it. Kept as a copy: autoApi does not export it. */

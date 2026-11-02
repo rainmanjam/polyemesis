@@ -9,7 +9,7 @@ import { RolloverPanel } from "./RolloverPanel";
 import type { DestStatus, RolloverView } from "@/lib/types";
 
 /* #19's two actions on the destination card: saving the rollover settings, and rolling over now. A save must send
- * the settings the form shows, to the destination's own programme; a manual run goes through the confirmation and
+ * the settings the form shows, to that destination; a manual run goes through the confirmation and
  * each way the server can answer is told apart, because "the platform refused and the old broadcast is still
  * running" and "this destination is gone" call for different things from the operator. */
 
@@ -29,7 +29,7 @@ afterEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
 });
 
-const dest = { id: 7, name: "YouTube main", platform: "youtube", enabled: true, sourceId: 3 } as unknown as DestStatus;
+const dest = { id: 7, name: "YouTube main", platform: "youtube", enabled: true } as unknown as DestStatus;
 
 function view(over: Partial<RolloverView> = {}): RolloverView {
   return {
@@ -57,7 +57,7 @@ async function confirmRun() {
 }
 
 describe("RolloverPanel settings", () => {
-  it("saves exactly the settings the form shows, to the destination's programme", async () => {
+  it("saves exactly the settings the form shows, to that destination", async () => {
     await openPanel();
     mocks.saveRollover.mockResolvedValue(view({ settings: { destinationId: 7, enabled: true, marginMinutes: 45, chatNotice: true } }));
 
@@ -72,7 +72,7 @@ describe("RolloverPanel settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save rollover settings" }));
 
     await waitFor(() => expect(mocks.saveRollover).toHaveBeenCalledTimes(1));
-    expect(mocks.saveRollover).toHaveBeenCalledWith(7, 3, {
+    expect(mocks.saveRollover).toHaveBeenCalledWith(7, {
       enabled: true,
       marginMinutes: 45,
       quietStart: "01:00",
@@ -105,7 +105,7 @@ describe("RolloverPanel roll over now", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Roll over now" }));
 
-    await waitFor(() => expect(mocks.runRollover).toHaveBeenCalledWith(7, 3));
+    await waitFor(() => expect(mocks.runRollover).toHaveBeenCalledWith(7));
     expect((await screen.findByRole("status")).textContent).toBe("Rolled over. The new broadcast is in place.");
   });
 

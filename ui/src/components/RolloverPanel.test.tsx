@@ -27,7 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const dest = { id: 7, name: "Twitch main", platform: "twitch", enabled: true, sourceId: 3 } as unknown as DestStatus;
+const dest = { id: 7, name: "Twitch main", platform: "twitch", enabled: true } as unknown as DestStatus;
 
 function view(over: Partial<RolloverView>): RolloverView {
   return {
@@ -48,21 +48,22 @@ function view(over: Partial<RolloverView>): RolloverView {
 }
 
 describe("RolloverPanel's read", () => {
-  /* ONE READ, AT MOUNT, NAMING THE PROGRAMME THE CARD ALREADY HAS.
+  /* ONE READ, AT MOUNT, AND NOTHING BEFORE IT.
    * The panel used to resolve the programme with its own GET /destinations/{id} and only then read the rollover.
    * That second hop went out a round trip after the card mounted, so a row deleted in between answered it 404 --
-   * a console error on the card, caught intermittently by the browser suite. The hop was also reading
-   * `sourceId` off the top level of an envelope that carries it under `destination`, so it always came back null.
-   * The status row the card is drawn from carries `sourceId` itself. */
-  it("reads the rollover once at mount with the card's own programme, and asks for nothing else", async () => {
+   * a console error on the card, caught intermittently by the browser suite. The rollover routes take their
+   * programme from the destination row on the server, so the panel has nothing to look up. */
+  it("reads the rollover once at mount, and asks for nothing else", async () => {
     const network = vi.fn();
     vi.stubGlobal("fetch", network);
     mocks.getRollover.mockResolvedValue(view({}));
 
-    render(<RolloverPanel dest={dest} />);
+    // The status row carries a programme; it must NOT reach the call. A snapshot's sourceId can be stale, and the
+    // server acts on the destination's current programme regardless.
+    render(<RolloverPanel dest={{ ...dest, sourceId: 3 } as unknown as DestStatus} />);
 
     await waitFor(() => expect(mocks.getRollover).toHaveBeenCalledTimes(1));
-    expect(mocks.getRollover).toHaveBeenCalledWith(7, 3);
+    expect(mocks.getRollover.mock.calls[0]).toEqual([7]);
     expect(network, "the panel made a request of its own besides the rollover read").not.toHaveBeenCalled();
   });
 });
@@ -77,17 +78,15 @@ describe("RolloverPanel countdown", () => {
     await waitFor(() => expect(screen.getByText(/until the platform's limit/)).toBeTruthy());
     expect(screen.getByText(/^[12]h \d\dm until the platform's limit$/)).toBeTruthy();
     expect(screen.getByText(/Reported by a secondary source/)).toBeTruthy();
-    expect(mocks.getRollover).toHaveBeenCalledWith(7, 3);
+    expect(mocks.getRollover).toHaveBeenCalledWith(7);
   });
 
   it("waits for the platform's start when delivering with no cutoff yet", async () => {
     mocks.getRollover.mockResolvedValue(view({ cutoffAt: undefined }));
 
-    // A row carrying no programme (omitempty on the wire) reads with no ?source rather than not at all.
-    render(<RolloverPanel dest={{ ...dest, sourceId: undefined }} />);
+    render(<RolloverPanel dest={dest} />);
 
     await waitFor(() => expect(screen.getByText(/Waiting for the platform/)).toBeTruthy());
-    expect(mocks.getRollover).toHaveBeenCalledWith(7, null);
   });
 
   it("shows no number for an unverified cap, only the reason", async () => {

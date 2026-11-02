@@ -66,22 +66,20 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [runOpen, setRunOpen] = useState(false);
-  // The programme the destination carries, read off the status row the card is drawn from. It is NOT fetched:
-  // a lookup of its own put a second round trip between the card mounting and the rollover read, and a row
-  // deleted inside that gap answered the read 404 (the browser suite's intermittent console error). The field
-  // is omitempty on the wire, so "no programme" arrives as undefined and is sent as no ?source at all.
-  const sourceId = dest.sourceId ?? null;
-
+  // ONE READ, AT MOUNT. The panel used to look up the destination's programme with its own GET first, which put
+  // a round trip between the card mounting and the rollover read; a row deleted inside that gap answered the
+  // read 404 (the browser suite's intermittent console error). The rollover routes need no programme from the
+  // client -- the server takes it from the destination row -- so there is nothing to look up.
   const load = useCallback(async () => {
     try {
-      const v = await getRollover(dest.id, sourceId);
+      const v = await getRollover(dest.id);
       setView(v);
       setNow(new Date());
       setForm((cur) => cur ?? formFrom(v.settings));
     } catch (err) {
       setNotice({ tone: "bad", text: messageOf(err) });
     }
-  }, [dest.id, sourceId]);
+  }, [dest.id]);
 
   useEffect(() => {
     void load();
@@ -110,7 +108,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
     setBusy(true);
     setNotice(null);
     try {
-      const v = await saveRollover(dest.id, sourceId, {
+      const v = await saveRollover(dest.id, {
         enabled: form.enabled,
         marginMinutes: form.marginMinutes,
         quietStart: form.quietStart,
@@ -132,7 +130,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
     setBusy(true);
     setNotice(null);
     try {
-      await runRollover(dest.id, sourceId);
+      await runRollover(dest.id);
       setNotice({ tone: "ok", text: t("wave3.rollover.runDone") });
     } catch (err) {
       const c = classifyRun(err);

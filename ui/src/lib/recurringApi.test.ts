@@ -109,14 +109,16 @@ describe("listOccurrences", () => {
 });
 
 describe("rollover calls", () => {
-  it("name the destination's programme, and leave it off when the destination has none", async () => {
+  // No ?source=: the server acts on the destination's CURRENT programme, read from its row. A programme named by
+  // the client is a copy from a status snapshot that can be stale, and the rollover handlers ignore it.
+  it("carry no programme of their own, because the server takes it from the destination row", async () => {
     const calls = stubFetch(200, { status: "rolled over" });
-    await getRollover(7, 3);
-    await saveRollover(7, 3, { enabled: true, marginMinutes: 30, chatNotice: false });
-    await runRollover(7, null);
+    await getRollover(7);
+    await saveRollover(7, { enabled: true, marginMinutes: 30, chatNotice: false });
+    await runRollover(7);
     expect(calls.map((c) => `${c.init.method ?? "GET"} ${c.url}`)).toEqual([
-      "GET /api/v1/destinations/7/rollover?source=3",
-      "PUT /api/v1/destinations/7/rollover?source=3",
+      "GET /api/v1/destinations/7/rollover",
+      "PUT /api/v1/destinations/7/rollover",
       "POST /api/v1/destinations/7/rollover/run",
     ]);
   });
