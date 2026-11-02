@@ -730,7 +730,7 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	// collide, and so a file found later still says where it came from.
 	stamp := fmt.Sprintf("%06d", body.InMS/1000)
 	if body.Vertical != nil {
-		return freeExportName(s.clipExportDir(), name+"-"+stamp+suffix, ext)
+		return freeExportName(s.clipExportDir(), name+"-"+stamp+suffix, ext, s.activeExportPaths())
 	}
 	return filepath.Join(s.clipExportDir(), name+"-"+stamp+suffix+ext)
 }
@@ -1098,11 +1098,25 @@ func verticalNameTag(v *clipVerticalBody) string {
 // replace the one already made. Checked through an os.Root on the exports
 // directory: the names are this server's own, and the check cannot reach
 // outside it whatever they contain.
-func freeExportName(dir, base, ext string) string {
+//
+// taken holds the paths active export jobs will write: a name is RESERVED from
+// the moment its job is queued, not from the moment its file appears, so the
+// same short submitted twice before either runs gets two names.
+func freeExportName(dir, base, ext string, taken map[string]bool) string {
 	first := filepath.Join(dir, base+ext)
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		// No exports directory yet means nothing to collide with.
+		// No exports directory yet: nothing on disk, but a queued job may
+		// already hold the name.
+		for i := 1; i <= 1000; i++ {
+			p := first
+			if i > 1 {
+				p = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, i, ext))
+			}
+			if !taken[p] {
+				return p
+			}
+		}
 		return first
 	}
 	defer root.Close()
@@ -1111,9 +1125,27 @@ func freeExportName(dir, base, ext string) string {
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d%s", base, i, ext)
 		}
-		if _, err := root.Stat(name); errors.Is(err, os.ErrNotExist) {
+		if _, err := root.Stat(name); errors.Is(err, os.ErrNotExist) && !taken[filepath.Join(dir, name)] {
 			return filepath.Join(dir, name)
 		}
 	}
 	return first
+}
+
+// activeExportPaths is every output path a queued, deferred or running clip
+// export will write.
+func (s *Server) activeExportPaths() map[string]bool {
+	out := map[string]bool{}
+	list, err := s.store.ListJobs(jobs.Filter{Kinds: []jobs.Kind{clipper.JobKind},
+		States: []jobs.State{jobs.StateQueued, jobs.StateDeferred, jobs.StateRunning}})
+	if err != nil {
+		return out
+	}
+	for _, j := range list {
+		var p clipper.JobParams
+		if json.Unmarshal(j.Params, &p) == nil && p.Request.OutPath != "" {
+			out[p.Request.OutPath] = true
+		}
+	}
+	return out
 }

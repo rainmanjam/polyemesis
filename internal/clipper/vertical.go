@@ -853,8 +853,18 @@ func firstUndrawable(s string) (rune, bool) {
 // restart has to be mapped through the files rather than by subtraction.
 func (p Plan) playback(t time.Duration) time.Duration {
 	if !p.Concat {
-		return t - p.In
+		// One file, seeked on the input to the in-point: the clock is the
+		// position in that file, from the in-point. Through the file rather
+		// than by subtraction, so an out-point in a gap after it cannot run
+		// the clock past the picture.
+		return p.played(t) - p.played(p.In)
 	}
+	return p.played(t)
+}
+
+// played is how far into the files, laid back to back, timeline position t
+// falls. A gap takes no time.
+func (p Plan) played(t time.Duration) time.Duration {
 	var played time.Duration
 	for _, s := range p.Sources {
 		if t < s.Start {
@@ -866,6 +876,21 @@ func (p Plan) playback(t time.Duration) time.Duration {
 		played += s.Duration
 	}
 	return played
+}
+
+// startOnPicture moves an in-point that falls in a gap -- after a recorder
+// stopped and before it resumed -- to where the picture resumes. Seeking a
+// file to a negative offset clamps to its start, so the short would begin at
+// the resume point anyway; the plan has to agree, or its length and every
+// caption are off by the gap.
+func (p *Plan) startOnPicture() {
+	if len(p.Sources) == 0 || p.In >= p.Sources[0].Start {
+		return
+	}
+	p.warn("the in-point %s is in a gap in the recording; the short starts where the recording resumes, at %s",
+		round(p.In), round(p.Sources[0].Start))
+	p.In = p.Sources[0].Start
+	p.HeadSeek = 0
 }
 
 // planVertical is PlanCut's branch for a vertical export: no keyframe snap,

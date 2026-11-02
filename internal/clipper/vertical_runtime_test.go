@@ -177,3 +177,31 @@ func TestAShortsJobResultSaysItIsVertical(t *testing.T) {
 		t.Error("a straight cut claims to be vertical")
 	}
 }
+
+// A SHORT NEVER REPLACES A FILE. Two jobs that ended up with one name, or an
+// export that finds a file already there, fail rather than overwrite what the
+// first one made. (A straight cut keeps its old behaviour.)
+//
+// MUTATION: publish with os.Rename. Observed: FAIL, the first short replaced.
+func TestAShortNeverReplacesAnExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "short.mp4")
+	if err := os.WriteFile(out, []byte("the first short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := New(testLog(), "ffmpeg", "ffprobe", WithProber(stubProber{}), WithRunner(func(_ context.Context, _ string, args []string) ([]byte, error) {
+		return nil, os.WriteFile(args[len(args)-1], []byte("the second short"), 0o644)
+	}))
+	tl, _ := NewTimeline([]Segment{{Path: filepath.Join(dir, "src.mkv"), Duration: time.Minute}})
+	_, err := c.Cut(context.Background(), tl, Request{In: time.Second, Out: 5 * time.Second, OutPath: out,
+		Mode: ModePrecise, Vertical: &Vertical{Layout: LayoutBlur}}, nil)
+	if !errors.Is(err, ErrOutputExists) {
+		t.Errorf("Cut = %v, want ErrOutputExists", err)
+	}
+	if b, _ := os.ReadFile(out); string(b) != "the first short" {
+		t.Errorf("the existing short was replaced: %q", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".clip-*")); len(left) != 0 {
+		t.Errorf("work directories left behind: %v", left)
+	}
+}

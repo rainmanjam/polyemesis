@@ -616,3 +616,33 @@ func TestAnEmptyStyleHasTheDefaultOutline(t *testing.T) {
 		t.Errorf("outline -1 still drew one: %s", f[0])
 	}
 }
+
+// AN IN-POINT IN THE GAP. Files 0..12 s and 20..32 s, a short of 13..24 s: the
+// picture starts where the recording resumes, at 20 s, so the short is 4 s
+// and a caption spoken at 21 s is 1 s in. The plan says the start moved.
+//
+// MUTATION: the seek clamped to the file's start with In left at 13 s.
+// Observed: FAIL, -t 11.000000 and the caption at 8 s.
+func TestAnInPointInsideAGapStartsWhereTheRecordingResumes(t *testing.T) {
+	tl, err := NewTimeline([]Segment{
+		{Path: "/rec/a.mkv", Start: 0, Duration: 12 * time.Second},
+		{Path: "/rec/b.mkv", Start: 20 * time.Second, Duration: 12 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: captioned(Cue{StartMS: 21_000, EndMS: 22_000, Text: "resumed"})}
+	p := mustPlan(t, tl, gop(100, 2*time.Second), verticalReq(13*time.Second, 24*time.Second, v))
+	c := onlyCommand(t, p)
+	assertArgPair(t, c.Args, "-t", "4.000000")
+	if g := graphOf(t, c); !strings.Contains(g, "1.000") || strings.Contains(g, "8.000") {
+		t.Errorf("the caption is not 1 s into the picture:\n%s", g)
+	}
+	moved := false
+	for _, w := range p.Warnings {
+		moved = moved || strings.Contains(w, "resumes")
+	}
+	if !moved || p.In != 20*time.Second {
+		t.Errorf("In=%s warnings=%v, want the start moved to 20s and said so", p.In, p.Warnings)
+	}
+}

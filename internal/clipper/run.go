@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -161,7 +162,14 @@ func (c *Cutter) Execute(ctx context.Context, p Plan, progress ProgressFunc) (Re
 	if err != nil {
 		return Result{}, fmt.Errorf("clipper: FFmpeg reported success but wrote no clip: %w", err)
 	}
-	if err := os.Rename(staged.OutPath, p.OutPath); err != nil {
+	if p.Vertical != nil {
+		// A short is published without replacing anything: two jobs that
+		// were handed one name must not have the second silently overwrite
+		// the first. (A straight cut keeps its long-standing replace.)
+		if err := publishNoReplace(staged.OutPath, p.OutPath); err != nil {
+			return Result{}, err
+		}
+	} else if err := os.Rename(staged.OutPath, p.OutPath); err != nil {
 		return Result{}, fmt.Errorf("clipper: publish %s: %w", p.OutPath, err)
 	}
 	report(progress, 1, "done")
@@ -230,3 +238,29 @@ func WithNice(nice func(name string, args []string) (string, []string)) Option {
 // names none: half the machine, at least one. A short is a full-frame encode,
 // and a broadcast going out at the same time needs the other half.
 func VerticalThreads() int { return max(1, runtime.NumCPU()/2) }
+
+// ErrOutputExists is a short whose file name is already taken on disk.
+var ErrOutputExists = errors.New("clipper: the output file already exists; nothing was replaced")
+
+// publishNoReplace moves src to dst only if dst does not exist. A hard link is
+// the atomic form -- it fails with EEXIST rather than replacing -- and the
+// staged file is in the same directory, so the link never crosses a device.
+// Where the filesystem has no hard links the check-then-rename fallback has a
+// window, but the export names are already reserved at submit, so it is the
+// last line of defence rather than the only one.
+func publishNoReplace(src, dst string) error {
+	err := os.Link(src, dst)
+	if err == nil {
+		return os.Remove(src)
+	}
+	if errors.Is(err, fs.ErrExist) {
+		return ErrOutputExists
+	}
+	if _, serr := os.Lstat(dst); serr == nil {
+		return ErrOutputExists
+	}
+	if rerr := os.Rename(src, dst); rerr != nil {
+		return fmt.Errorf("clipper: publish %s: %w", dst, rerr)
+	}
+	return nil
+}

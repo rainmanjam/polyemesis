@@ -441,3 +441,25 @@ func TestARealCaptionedShortFromADirectoryWithGraphMetacharacters(t *testing.T) 
 		t.Errorf("the caption drew %d px from a hostile directory", lit)
 	}
 }
+
+// The gap-start case rendered: the short is the 4 s of picture after the
+// recording resumes, and the caption is lit 1 s in.
+func TestARealVerticalExportStartingInAGap(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
+	verticalFixture(t, bin, a)
+	verticalFixture(t, bin, b)
+	tl, err := NewTimeline([]Segment{{Path: a, Start: 0, Duration: 12 * time.Second}, {Path: b, Start: 20 * time.Second, Duration: 12 * time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "gapstart.mp4")
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5}
+	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: 13 * time.Second, Out: 24 * time.Second,
+		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
+		t.Fatalf("Cut: %v", err)
+	}
+	rep, _ := probeShort(t, ffprobe, out)
+	assertShort(t, rep, 4*time.Second)
+}

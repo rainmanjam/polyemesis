@@ -614,3 +614,28 @@ func TestATemplateIsValidatedWhole(t *testing.T) {
 		"vertical": map[string]any{"layout": "blur", "captions": map[string]any{"enabled": false, "style": map[string]any{"color": "#ffcc00"}}}},
 		http.StatusOK)
 }
+
+// THE NAME IS RESERVED AT SUBMIT. The same short submitted twice before either
+// job has run used to get one name -- nothing was on disk yet to collide with
+// -- so the second render overwrote the first. A name an active export job
+// already holds is taken.
+//
+// MUTATION: only the disk is consulted. Observed: FAIL, one path for both.
+func TestTheSameShortQueuedTwiceGetsTwoNames(t *testing.T) {
+	h, sign, srv, rec := highlightFixture(t)
+	body := map[string]any{"inMs": 10_000, "outMs": 40_000, "title": "twice", "vertical": map[string]any{"layout": "center"}}
+	paths := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		var job struct {
+			ID int64 `json:"id"`
+		}
+		decodeInto(t, send(t, h, sign, http.MethodPost, recPath(rec, "/export"), body, http.StatusAccepted), &job)
+		j, _ := srv.store.GetJob(job.ID)
+		var p clipper.JobParams
+		_ = json.Unmarshal(j.Params, &p)
+		paths[p.Request.OutPath] = true
+	}
+	if len(paths) != 2 {
+		t.Errorf("two queued shorts share a path: %v", paths)
+	}
+}
