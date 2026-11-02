@@ -3,6 +3,7 @@ package playout
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -86,12 +87,15 @@ func TestTheOriginCachePolicy(t *testing.T) {
 		{"dash manifest", "/playout/hd/" + DASHManifest, "public, max-age=1", "no-store"},
 		// HLS segment names are numbered from the wall clock (args.go), so a
 		// name is never reused: immutable.
-		{"hls segment", "/playout/hd/seg_00000.ts", "public, max-age=31536000, immutable", "private, max-age=31536000, immutable"},
+		// never reused: a browser keeps it a year, a shared cache only for the
+		// seekable window (here 4s x 6 segments) and never as immutable, so
+		// withdrawing publication reaches a CDN edge within that window.
+		{"hls segment", "/playout/hd/seg_00000.ts", "public, max-age=31536000, s-maxage=24", "private, max-age=31536000, immutable"},
 		// DASH init and chunk names still restart with the muxer.
 		{"dash init segment", "/playout/hd/init-0.m4s", "public, max-age=4", "private, max-age=4"},
 		{"captions", "/playout/captions.vtt", "public, max-age=4", "private, max-age=4"},
 	}
-	_, handler := servedHarness(t, func(s *db.PlayoutSettings) { s.SegmentSeconds = 4 })
+	_, handler := servedHarness(t, func(s *db.PlayoutSettings) { s.SegmentSeconds = 4; s.PlaylistSegments = 6; s.DVRWindowSeconds = 0 })
 	for _, tc := range tests {
 		for _, scope := range []struct {
 			name string
@@ -333,5 +337,25 @@ func TestHandlerToleratesBeingMountedWithoutATrailingSlash(t *testing.T) {
 	handler := h.Handler("/playout")
 	if w := get(t, handler, "/playout/hd/"+MediaPlaylist, "10.0.0.1"); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestASharedCacheIsBoundedByTheSeekableWindow(t *testing.T) {
+	cases := []struct {
+		s    db.PlayoutSettings
+		want int
+	}{
+		{db.PlayoutSettings{SegmentSeconds: 4, PlaylistSegments: 6}, 24},
+		{db.PlayoutSettings{SegmentSeconds: 4, PlaylistSegments: 6, DVRWindowSeconds: 3600}, 3600},
+		{db.PlayoutSettings{SegmentSeconds: 2}, 2},
+	}
+	for _, tc := range cases {
+		if got := sharedWindow(tc.s); got != tc.want {
+			t.Errorf("sharedWindow(%+v) = %d, want %d", tc.s, got, tc.want)
+		}
+		cc := cacheControl(".ts", maxSegmentAge(tc.s), sharedWindow(tc.s), true)
+		if strings.Contains(cc, "immutable") || !strings.Contains(cc, "s-maxage="+strconv.Itoa(tc.want)) {
+			t.Errorf("shared segment %q", cc)
+		}
 	}
 }

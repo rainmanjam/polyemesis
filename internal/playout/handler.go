@@ -104,7 +104,7 @@ func (m *Manager) Handler(prefix string) http.Handler {
 		}
 
 		w.Header().Set("Content-Type", ctype)
-		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), SharedCacheable(r.Context())))
+		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
 		m.setETag(w, rel)
 
 		m.observe(r, rel, ext)
@@ -134,23 +134,40 @@ func SharedCacheable(ctx context.Context) bool {
 // immutableAge is a year, the conventional ceiling for an immutable asset.
 const immutableAge = 365 * 24 * 3600
 
+// sharedWindow bounds how long a shared cache may keep an open stream's
+// segment: the seekable window (the DVR window, or the live playlist), and
+// never less than one segment. A segment older than that is listed by no
+// playlist, so nothing legitimate asks for it -- and after the operator
+// unpublishes or turns protection on, this is the longest a CDN edge can go on
+// serving what it already holds.
+func sharedWindow(s db.PlayoutSettings) int {
+	seg := maxSegmentAge(s)
+	w := seg * s.PlaylistSegments
+	if s.DVRWindowSeconds > w {
+		w = s.DVRWindowSeconds
+	}
+	if w < seg {
+		w = seg
+	}
+	return w
+}
+
 // cacheControl is the origin's whole caching policy, in one place.
 //
 //   - Playlists change every segment. An open stream's playlist may be held
 //     for one second, which collapses a CDN's viewers onto one origin fetch per
 //     second per POP; a gated stream's is never stored.
 //   - HLS .ts segments are numbered from the wall clock (args.go), so a name is
-//     never reused and the bytes behind it never change: immutable.
+//     never reused and the bytes behind it never change. A browser may keep one
+//     for a year. A SHARED cache may keep it only for the seekable window
+//     (s-maxage) and it is not marked immutable there: publication can be
+//     withdrawn, and an edge must stop serving within that window when it is.
 //   - DASH chunks, init segments and captions still restart their names when
 //     a muxer does, so they keep the one-segment cache they always had.
 //
 // shared=false (a token, a session, or no decision at all) makes every
 // cacheable answer private: a browser may keep it, a CDN must not.
-func cacheControl(ext string, segmentAge int, shared bool) string {
-	scope := "private"
-	if shared {
-		scope = "public"
-	}
+func cacheControl(ext string, segmentAge, window int, shared bool) string {
 	switch {
 	case manifestExts[ext]:
 		if shared {
@@ -158,9 +175,14 @@ func cacheControl(ext string, segmentAge int, shared bool) string {
 		}
 		return "no-store"
 	case ext == ".ts":
-		return scope + ", max-age=" + strconv.Itoa(immutableAge) + ", immutable"
+		if shared {
+			return "public, max-age=" + strconv.Itoa(immutableAge) + ", s-maxage=" + strconv.Itoa(window)
+		}
+		return "private, max-age=" + strconv.Itoa(immutableAge) + ", immutable"
+	case shared:
+		return "public, max-age=" + strconv.Itoa(segmentAge)
 	default:
-		return scope + ", max-age=" + strconv.Itoa(segmentAge)
+		return "private, max-age=" + strconv.Itoa(segmentAge)
 	}
 }
 
