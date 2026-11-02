@@ -243,12 +243,24 @@ func TestStatusReportsFillWhileBufferingAndTimeLeftWhileDraining(t *testing.T) {
 	// delay any more. Stopping at a quarter of the delay keeps the status read
 	// below well inside it however slow the sender is.
 	sent := sendWithin(t, l, 1500, delay/4)
-	st := l.Status()
-	// The premise, checked rather than assumed: Releasing is only wrong while
-	// the first datagram is not yet due.
-	if since := time.Since(sent[0]); since >= delay {
-		t.Fatalf("the status was read %v after the first datagram, past its %v delay, so "+
-			"this line was never inside its delay to report on", since, delay)
+	// A UDP write only queues the datagram; wait for the LINE to hold at least
+	// two of them, and assert on that same snapshot. The premise is checked
+	// after each read rather than assumed: Releasing is only wrong while the
+	// first datagram is not yet due, and the earliest it may go is its delay
+	// less releaseSlack -- counted from when it was sent, which is no later
+	// than when the line received it.
+	var st Status
+	for {
+		st = l.Status()
+		if since := time.Since(sent[0]); since >= delay-releaseSlack {
+			t.Fatalf("the status was read %v after the first datagram, past the earliest "+
+				"it may be released (%v), so this line was never observed inside its delay "+
+				"(last status %+v)", since, delay-releaseSlack, st)
+		}
+		if st.Packets >= 2 && st.Span > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if st.Releasing {
 		t.Fatal("a line still inside its delay says it is releasing")
