@@ -134,6 +134,29 @@ func TestAFailedEncodesErrorIsItsReasonWithoutCaptionChatter(t *testing.T) {
 	if got := ffmpegFailure(only); strings.Contains(got, "0x4F60") || !strings.Contains(got, "caption renderer") {
 		t.Errorf("an all-renderer failure reads %q", got)
 	}
+	// The subtitles filter's OWN failures are kept -- they name a file or
+	// libass, never a caption -- beside the glyph lines that are not.
+	mixed := "[Parsed_subtitles_0 @ 0x1] fontselect: failed to find any fallback with glyph 0x4F60 for font: (Inter, 700, 0)\n" +
+		"[Parsed_subtitles_0 @ 0x1] Could not initialize libass.\n" +
+		"[Parsed_subtitles_0 @ 0x1] Unable to open /w/.clip-1/captions.ass\n" +
+		"[AVFilterGraph @ 0x2] Error initializing filters"
+	got := ffmpegFailure(mixed)
+	if !strings.Contains(got, "Could not initialize libass.") || !strings.Contains(got, "Unable to open /w/.clip-1/captions.ass") {
+		t.Errorf("the subtitles filter's own failure was dropped: %q", got)
+	}
+	if strings.Contains(got, "glyph") || strings.Contains(got, "0x4F60") {
+		t.Errorf("a glyph line survived: %q", got)
+	}
+	// A wrapped error's first line keeps its own prefix while the filter's
+	// chatter on it goes; a known failure that mentions a glyph is not kept.
+	wrapped := "exit status 8: [Parsed_subtitles_0 @ 0x1] fontselect: failed to find any fallback with glyph 0x4F60\n" +
+		"[Parsed_subtitles_0 @ 0x1] Unable to open font for glyph 0x597D\n" +
+		"Conversion failed!"
+	got = ffmpegFailure(wrapped)
+	if !strings.HasPrefix(got, "exit status 8:") || !strings.HasSuffix(got, "Conversion failed!") ||
+		strings.Contains(got, "0x4F60") || strings.Contains(got, "0x597D") {
+		t.Errorf("a wrapped failure reads %q", got)
+	}
 	long := strings.Repeat("Last message repeated\n", 100) + "Conversion failed!"
 	if got := ffmpegFailure(long); len(got) > failureLimit+3 || !strings.HasSuffix(got, "Conversion failed!") {
 		t.Errorf("a long failure is not its tail: %d bytes, %q", len(got), got[max(0, len(got)-40):])

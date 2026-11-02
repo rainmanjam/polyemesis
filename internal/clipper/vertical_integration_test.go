@@ -816,3 +816,55 @@ func TestARealFailedCaptionedEncodeSaysWhyWithoutLibassChatter(t *testing.T) {
 		}
 	}
 }
+
+// A REAL CAPTION RENDERER FAILURE SAYS WHY. When the subtitles filter itself
+// cannot start -- here its script is gone by the time FFmpeg runs -- its own
+// reason ("Unable to open ...captions.ass") is in the error; it names a file
+// this server wrote, not anything that was said.
+//
+// MUTATION: every subtitles-filter line dropped. Observed: FAIL, only
+// "Error initializing filters".
+func TestARealCaptionRendererFailureSaysWhy(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	if !hasLibass(t, bin) {
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	verticalFixture(t, bin, src)
+	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
+	if err := ffmpeg.EnsureFonts(fonts); err != nil {
+		t.Fatal(err)
+	}
+	font, _ := ffmpeg.FontPath(fonts, DefaultCaptionFont)
+	tl, _ := NewTimeline([]Segment{{Path: src, Duration: 12 * time.Second}})
+	// The runner removes the script the step wrote, then runs FFmpeg for real.
+	run := func(ctx context.Context, name string, args []string) ([]byte, error) {
+		for i, a := range args {
+			if a == "-/filter_complex" && i+1 < len(args) {
+				scripts, _ := filepath.Glob(filepath.Join(filepath.Dir(args[i+1]), "*.ass"))
+				for _, s := range scripts {
+					if err := os.Remove(s); err != nil {
+						t.Errorf("remove the script: %v", err)
+					}
+				}
+			}
+		}
+		return runCommand(ctx, name, args)
+	}
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{Cues: []Cue{
+		{StartMS: 100, EndMS: 3900, Text: "你好世界 GG"}}, FontFile: font, Burn: true}}
+	_, err := New(testLog(), bin, ffprobe, WithRunner(run)).Cut(context.Background(), tl, Request{In: 0, Out: 4 * time.Second,
+		OutPath: filepath.Join(dir, "f.mp4"), Mode: ModePrecise, Vertical: &v}, nil)
+	if err == nil {
+		t.Fatal("an encode with no caption script succeeded")
+	}
+	if !strings.Contains(err.Error(), "Unable to open") || !strings.Contains(err.Error(), ".ass") {
+		t.Errorf("the renderer's reason is not in the error: %q", err)
+	}
+	for _, leak := range []string{"glyph", "fontselect", "你", "GG"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("the error carries %q: %q", leak, err)
+		}
+	}
+}

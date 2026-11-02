@@ -236,17 +236,27 @@ func ffmpegFailure(out string) string {
 	var keep []string
 	dropped := false
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if captionChatter(line) {
+		// A wrapped error's first line is "exit status N: " and then FFmpeg's
+		// first line: what comes before the filter's prefix is ours, and is
+		// kept whatever the line goes on to say.
+		head, tail := "", line
+		if i := strings.Index(line, "[Parsed_subtitles"); i > 0 {
+			head, tail = line[:i], line[i:]
+		}
+		if captionChatter(tail) {
 			dropped = true
+			if head = strings.TrimSpace(head); head != "" {
+				keep = append(keep, head)
+			}
 			continue
 		}
 		keep = append(keep, line)
 	}
 	msg := strings.TrimSpace(strings.Join(keep, "\n"))
-	if msg == "" && dropped {
+	if dropped && (msg == "" || !strings.Contains(msg, "\n") && strings.HasSuffix(msg, ":")) {
 		// Everything FFmpeg said came from the caption renderer: say that
 		// much, and nothing it named.
-		return "the caption renderer failed (its messages name caption text and are not shown)"
+		return strings.TrimSpace(msg + " the caption renderer failed (its messages name caption text and are not shown)")
 	}
 	if len(msg) > failureLimit {
 		msg = "..." + msg[len(msg)-failureLimit:]
@@ -258,10 +268,48 @@ func ffmpegFailure(out string) string {
 }
 
 // captionChatter is a line of FFmpeg output that comes from the caption
-// renderer, or names a glyph -- either can carry what was said.
+// renderer, or names a glyph -- either can carry what was said -- unless it is
+// one of the subtitles filter's own failures, which say why it could not run.
 func captionChatter(line string) bool {
+	if subtitlesFailure(line) {
+		return false
+	}
 	return strings.Contains(line, "[Parsed_subtitles") || strings.Contains(line, "fontselect") ||
 		strings.Contains(line, "glyph 0x") || strings.Contains(line, "libass")
+}
+
+// subtitlesFailures are the messages FFmpeg's subtitles filter itself logs
+// when it cannot start (libavfilter/vf_subtitles.c). They name libass, a
+// codec or a FILE -- the script this server wrote -- and never a caption, so
+// they are kept: without them a failed short says only "Error initializing
+// filters". Everything else from the filter is libass talking, and is not.
+var subtitlesFailures = []string{
+	"Could not initialize libass",
+	"Could not create a libass track",
+	"Unable to open ",
+	"Unable to locate subtitle stream",
+	"Failed to find subtitle codec",
+	"Could not open subtitle codec",
+	"Only text based subtitles are currently supported",
+}
+
+// subtitlesFailure reports whether line is the subtitles filter's own
+// failure: one of subtitlesFailures, straight after the filter's prefix, and
+// with nothing about fonts or glyphs in it.
+func subtitlesFailure(line string) bool {
+	_, msg, ok := strings.Cut(line, "] ")
+	if !ok || !strings.HasPrefix(line, "[Parsed_subtitles") {
+		return false
+	}
+	if strings.Contains(msg, "glyph") || strings.Contains(msg, "font") {
+		return false
+	}
+	for _, f := range subtitlesFailures {
+		if strings.HasPrefix(msg, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // scrubbed is a step's error with the caption renderer's chatter taken out of

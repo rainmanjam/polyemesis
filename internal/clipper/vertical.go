@@ -1039,7 +1039,7 @@ func (p *Plan) planVertical(v *Vertical) {
 // A gap takes no time in the short, so it neither counts as re-encoded nor
 // toward the 60 s guard.
 func (p *Plan) measureVertical() {
-	p.HeadDuration = p.played(p.Out) - p.played(p.In)
+	p.HeadDuration = p.Duration()
 	if p.HeadDuration > ShortMaxDuration {
 		p.warn("this short is %s long; YouTube Shorts, Reels and TikTok's short format expect "+
 			"%s or less, and a longer upload may be published as a regular video", round(p.HeadDuration), ShortMaxDuration)

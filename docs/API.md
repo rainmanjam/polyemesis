@@ -1381,8 +1381,9 @@ time on DIFFERENT tracks instead of drawing them over each other. On one
 track a line ends where the next begins, so a transcriber's few-millisecond
 overlaps do not make the next line jump. Each caption's paragraph direction
 comes from its own text, so a Hebrew or Arabic sentence ends -- punctuation
-included -- at the left. A failed short's job error is FFmpeg's own reason,
-without libass's lines, which name caption characters. `style.font` names a font FILE
+included -- at the left. A failed short's job error is FFmpeg's own reason --
+including the subtitles filter's own failure, such as "Unable to open" its
+script -- without libass's font and glyph lines, which name caption characters. `style.font` names a font FILE
 already in the fonts directory (`<data>/fonts`); its own family and weight are
 what libass is asked for. libass looks in that directory first and then, for
 any glyph the chosen font lacks, at every font **installed on the machine**

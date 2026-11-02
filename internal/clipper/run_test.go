@@ -423,3 +423,33 @@ func TestAShortWhoseNameIsTakenIsNotRetried(t *testing.T) {
 		t.Errorf("the earlier short was replaced")
 	}
 }
+
+// A SHORT'S JOB SAYS HOW LONG IT IS. Across a gap the job's result and its
+// description give the picture's length, not the span's: 75 s selected over a
+// 20 s gap is a 55 s short.
+//
+// MUTATION: Duration() Out-In for a short. Observed: FAIL, 75 seconds.
+func TestAShortsJobReportsThePicturesLength(t *testing.T) {
+	dir := t.TempDir()
+	c := newTestCutter(t, &fakeFFmpeg{}, gop(60, 2*time.Second))
+	rep := &fakeReporter{}
+	job := jobFor(t, JobParams{
+		Segments: []Segment{{Path: "/rec/a.mkv", Duration: 30 * time.Second},
+			{Path: "/rec/b.mkv", Start: 50 * time.Second, Duration: 60 * time.Second}},
+		Request: verticalReq(0, 75*time.Second, Vertical{Layout: LayoutCenter, Focus: 0.5},
+			func(r *Request) { r.OutPath = filepath.Join(dir, "short.mp4") }),
+	})
+	if err := NewWorker(c, nil).Run(context.Background(), job, rep); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	res, ok := rep.result.(JobResult)
+	if !ok {
+		t.Fatalf("result = %T", rep.result)
+	}
+	if res.Seconds != 55 {
+		t.Errorf("the job says %.3f s, want the 55 s of picture", res.Seconds)
+	}
+	if !rep.has("55s from 2 segments") {
+		t.Errorf("the job's description: %v", rep.lines)
+	}
+}

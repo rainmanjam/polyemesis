@@ -215,6 +215,8 @@ func TestTheSixtySecondGuardWarnsWithoutBlocking(t *testing.T) {
 //
 // MUTATION: HeadDuration and the guard taken from Out-In. Observed: FAIL,
 // 80s re-encoded and a false 60 s warning for 50 s of picture.
+// MUTATION: Duration() Out-In for a short. Observed: FAIL, 1m20s and 0.375
+// copied.
 func TestAShortsLengthIsItsPictureNotItsSpan(t *testing.T) {
 	v := Vertical{Layout: LayoutCenter, Focus: 0.5}
 	for name, tc := range map[string]struct {
@@ -237,6 +239,17 @@ func TestAShortsLengthIsItsPictureNotItsSpan(t *testing.T) {
 		}
 		if p.HeadDuration != tc.playable {
 			t.Errorf("%s: re-encodes %s, want the %s of picture", name, p.HeadDuration, tc.playable)
+		}
+		// The short IS that long, everywhere it is reported: its duration,
+		// the confirm sentence -- and none of it is copied.
+		if p.Duration() != tc.playable {
+			t.Errorf("%s: Duration %s, want the %s of picture", name, p.Duration(), tc.playable)
+		}
+		if f := p.LosslessFraction(); f != 0 {
+			t.Errorf("%s: %.3f of a short reported copied; every frame is encoded", name, f)
+		}
+		if d := p.Describe(); !strings.Contains(d, round(tc.playable).String()) {
+			t.Errorf("%s: described as %q, want %s", name, d, round(tc.playable))
 		}
 		for _, w := range p.Warnings {
 			if strings.Contains(w, "Shorts") {
@@ -771,4 +784,16 @@ func TestTheCaptionStyleTakesItsDirectionFromTheText(t *testing.T) {
 		}
 	}
 	t.Fatalf("no caption style in\n%s", ass)
+}
+
+// A short copies nothing, whatever its re-encode bookkeeping says: the 9:16
+// picture is made, frame by frame, so LosslessFraction is 0 by rule rather
+// than by arithmetic.
+//
+// MUTATION: no vertical rule in LosslessFraction. Observed: FAIL, 1.000.
+func TestAShortIsNeverReportedAsCopied(t *testing.T) {
+	p := Plan{In: 0, Out: 10 * time.Second, Vertical: &Vertical{Layout: LayoutCenter, Focus: 0.5}}
+	if f := p.LosslessFraction(); f != 0 {
+		t.Errorf("a short reported %.3f copied", f)
+	}
 }

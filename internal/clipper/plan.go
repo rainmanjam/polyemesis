@@ -85,7 +85,15 @@ type Plan struct {
 }
 
 // Duration is how long the clip will be.
-func (p Plan) Duration() time.Duration { return p.Out - p.In }
+//
+// A short is as long as the picture it contains: a gap in the recording takes
+// no time in it (see Plan.played), so its duration is what plays, not the span.
+func (p Plan) Duration() time.Duration {
+	if p.Vertical != nil && len(p.Sources) > 0 {
+		return p.played(p.Out) - p.played(p.In)
+	}
+	return p.Out - p.In
+}
 
 // ReEncodes reports whether any video will be re-encoded. A false answer is the
 // promise that the clip's pictures are the source's, bit for bit.
@@ -95,6 +103,10 @@ func (p Plan) ReEncodes() bool { return p.HeadDuration > 0 }
 // 0..1. It is what makes the precise mode's cost legible: 0.98 means a
 // ten-second clip paid for a fifth of a second of encoding.
 func (p Plan) LosslessFraction() float64 {
+	if p.Vertical != nil {
+		// Every frame of a short is encoded.
+		return 0
+	}
 	d := p.Duration()
 	if d <= 0 {
 		return 0
