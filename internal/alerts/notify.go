@@ -179,6 +179,19 @@ type Notifier struct {
 	// what it costs a test to break it.
 	co *coalescer
 
+	// flushKick is how an exported Flush reaches co once Run has started: it
+	// records the latest requested time in flushAt and kicks the run loop,
+	// which does the pass on its own goroutine. Flush never waits for that
+	// pass, so it cannot deadlock against Run -- not from a delivery during
+	// shutdown, and not from a rule source running on Run's own goroutine.
+	// runMu guards running, the switch between that and doing the pass inline;
+	// Flush holds it across an inline pass so Run cannot start mid-pass.
+	flushKick chan struct{}
+	flushMu   sync.Mutex
+	flushAt   time.Time
+	runMu     sync.Mutex
+	running   bool
+
 	mu        sync.Mutex
 	stats     Stats
 	cache     []Rule
@@ -205,6 +218,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		send:       make(chan Delivery, defaultSendDepth),
 		record:     make(chan Event, defaultRecordDepth),
 		co:         newCoalescer(),
+		flushKick:  make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
 	n.sleep = sleepCtx
@@ -264,6 +278,11 @@ func (n *Notifier) SetTap(fn func(Event)) {
 // which coalesces, and one sender, which is the only thing that ever waits on
 // the network.
 func (n *Notifier) Run(ctx context.Context) {
+	// From here on co belongs to this goroutine; Flush must ask, not touch.
+	n.runMu.Lock()
+	n.running = true
+	n.runMu.Unlock()
+
 	var wg sync.WaitGroup
 	if n.recorder != nil {
 		// Detached on purpose: a sink wedged on a slow write must not hold
@@ -321,6 +340,12 @@ func (n *Notifier) Run(ctx context.Context) {
 			}
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
+		case <-n.flushKick:
+			// Also serves any request queued before Run started: its kick
+			// is still in the buffer.
+			if at := n.takeFlush(); !at.IsZero() {
+				n.flush(n.currentRules(), at)
+			}
 		}
 	}
 }
@@ -360,7 +385,70 @@ func (n *Notifier) flush(rules []Rule, now time.Time) {
 }
 
 // Flush is the test and shutdown entry point into one coalescing pass.
-func (n *Notifier) Flush(now time.Time) { n.flush(n.currentRules(), now) }
+//
+// co is single-goroutine (see coalescer), so Flush never walks it beside a
+// live Run. Every call first records a request (the latest requested time
+// wins) and kicks the run loop. Once Run has started that is all it does: the
+// run loop serves the request on its own goroutine and Flush returns without
+// waiting. Waiting would deadlock whenever the caller is something Run is
+// itself waiting on (a delivery during the shutdown drain) or is Run's own
+// goroutine (a rule source read during a pass). After Run has stopped the
+// request is simply never served.
+//
+// Before Run starts there is no run loop, so whoever holds runMu serves the
+// queue inline, synchronously, until it is empty -- the caller can read
+// n.send straight after. TryLock rather than Lock: if runMu is held, either
+// another inline pass is in progress -- possibly this goroutine's own, when a
+// rule source calls Flush from inside it -- or Run is starting, and either
+// way the holder serves this request. After unlocking, the holder looks once
+// more, so a request that lost the TryLock race in that last moment is not
+// stranded.
+func (n *Notifier) Flush(now time.Time) {
+	n.requestFlush(now)
+	for n.runMu.TryLock() {
+		if n.running {
+			n.runMu.Unlock()
+			return
+		}
+		at := n.takeFlush()
+		if !at.IsZero() {
+			n.flush(n.currentRules(), at)
+		}
+		n.runMu.Unlock()
+		if !n.flushPending() {
+			return
+		}
+	}
+}
+
+// requestFlush records a request for a pass at now and kicks the run loop.
+func (n *Notifier) requestFlush(now time.Time) {
+	n.flushMu.Lock()
+	if now.After(n.flushAt) {
+		n.flushAt = now
+	}
+	n.flushMu.Unlock()
+	select {
+	case n.flushKick <- struct{}{}:
+	default:
+		// A kick is already pending; it will read the flushAt set above.
+	}
+}
+
+// takeFlush claims the pending request, if any; zero means none.
+func (n *Notifier) takeFlush() time.Time {
+	n.flushMu.Lock()
+	defer n.flushMu.Unlock()
+	at := n.flushAt
+	n.flushAt = time.Time{}
+	return at
+}
+
+func (n *Notifier) flushPending() bool {
+	n.flushMu.Lock()
+	defer n.flushMu.Unlock()
+	return !n.flushAt.IsZero()
+}
 
 // Test delivers one synthetic event to a single rule immediately, skipping the
 // queue, the subscription filter and the debounce.
