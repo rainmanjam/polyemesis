@@ -174,7 +174,15 @@ func runScript(t *testing.T, srvURL, token string) string {
 	select {
 	case <-ready:
 	case err := <-exited:
-		t.Fatalf("python exited before the interpreter was ready: %v\n%s", err, output())
+		// Both can be ready by the time this select runs -- a descheduled
+		// test on a loaded runner, a script that finished quickly -- and
+		// select then picks at random. The marker decides, not the race.
+		select {
+		case <-ready:
+			exited <- err // phase two reads it
+		default:
+			t.Fatalf("python exited before the interpreter was ready: %v\n%s", err, output())
+		}
 	case <-startup:
 		kill()
 		t.Fatalf("python did not come up before the test binary's deadline left room "+
