@@ -350,3 +350,18 @@ describe("the announcement bar", () => {
     expect(bar).toMatch(/href="\/download"/);
   });
 });
+
+/* THE FEATURES PAGE'S SCREENSHOTS AND SECTION HEADS (2026-11 design review). */
+describe("the features page sections", () => {
+  const features = pages("features.astro");
+
+  it("eager-loads the first capture and paints a placeholder under the lazy ones", () => {
+    expect(features).toMatch(/loading=\{i === 0 \? "eager" : "lazy"\}/);
+    expect(features).toMatch(/style=\{i === 0 \? undefined : placeholder\.get\(s\.shot\)\}/);
+    expect(features).toMatch(/style=\{placeholder\.get\(s\.setup\.shot\)\}/);
+  });
+
+  it("does not repeat each section's title in an eyebrow above it", () => {
+    expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
+  });
+});

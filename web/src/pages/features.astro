@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import Lightbox from "../components/Lightbox.astro";
 import { Picture, getImage } from "astro:assets";
 import type { ImageMetadata } from "astro";
+import { lqipStyle } from "../lib/lqip";
 
 /* THE SCREENSHOTS MOVED OUT OF public/ TO GET RESPONSIVE VARIANTS AT ALL.
  *
@@ -268,6 +269,14 @@ for (const name of new Set(sections.flatMap((s) => [s.shot, ...("setup" in s && 
   );
 }
 
+/* A placeholder per distinct capture, painted under each lazy screenshot so a
+ * reader scrolling ahead of the network sees the screen's layout rather than an
+ * empty frame. See lib/lqip.ts. */
+const placeholder = new Map<string, string>();
+for (const name of fullShot.keys()) {
+  placeholder.set(name, await lqipStyle(shotOf(name)));
+}
+
 /* THE ROOMS, AS DATA (S6). Each has the same shape: what it is, and a small
  * table of which track goes where. The tables are the picture; the prose only
  * says why the room exists. Track numbers are the source's own, per room, so
@@ -376,8 +385,11 @@ const rooms = [
           ]}
         >
           <div class:list={["lg:sticky lg:top-20", i % 2 === 1 && "lg:order-last"]}>
-            <p class="eyebrow">{s.eyebrow}</p>
-            <h2 class="mt-3 text-balance text-2xl font-medium sm:text-3xl">{s.title}</h2>
+            {/* NO EYEBROW OVER THE TITLE (2026-11 design review). It repeated
+                the h2 in smaller capitals ("Failover" over "When the encoder
+                dies, the destinations stay up"). `eyebrow` stays in the data:
+                it is the short label the section index above links by. */}
+            <h2 class="text-balance text-2xl font-medium sm:text-3xl">{s.title}</h2>
             <div class="mt-4 space-y-3">
               {s.body.map((p) => (
                 <p class="text-pretty leading-relaxed text-muted">{p}</p>
@@ -419,9 +431,11 @@ const rooms = [
                 widths={SHOT_WIDTHS}
                 sizes={SHOT_SIZES}
                 alt={s.alt}
-                loading="lazy"
+                loading={i === 0 ? "eager" : "lazy"}
+                fetchpriority={i === 0 ? "high" : undefined}
                 decoding="async"
                 class="w-full rounded-token border border-line"
+                style={i === 0 ? undefined : placeholder.get(s.shot)}
                 pictureAttributes={{ class: "block" }}
               />
             </button>
@@ -460,6 +474,7 @@ const rooms = [
                     loading="lazy"
                     decoding="async"
                     class="w-full rounded-token border border-dashed border-line"
+                    style={placeholder.get(s.setup.shot)}
                     pictureAttributes={{ class: "block" }}
                   />
                 </button>
@@ -521,7 +536,7 @@ const rooms = [
               {r.note && <p class="mt-3 text-sm text-subtle">{r.note}</p>}
               {r.link && (
                 <p class="mt-2 text-sm">
-                  <a href={r.link.href} class="text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
+                  <a href={r.link.href} class="tap text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
                 </p>
               )}
             </article>
@@ -569,7 +584,7 @@ const rooms = [
           <div>
             <h3 class="text-sm font-medium text-fg">{x.h}</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted">{x.p}</p>
-            <a href={x.href} class="mt-2 inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs →</a>
+            <a href={x.href} class="tap mt-2 inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs →</a>
           </div>
         ))}
       </div>

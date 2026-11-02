@@ -39,10 +39,10 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         sentence around it and removing it would cost a reader something real;
         here it decorates a link that is already unmistakably a link. */}
     <p class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-      <a href="/docs/quickstart" class="text-fg transition-colors hover:text-primary-bright hover:underline"
+      <a href="/docs/quickstart" class="tap text-fg transition-colors hover:text-primary-bright hover:underline"
         >Quickstart — from install to a first stream →</a
       >
-      <a href="/docs/install" class="text-fg transition-colors hover:text-primary-bright hover:underline"
+      <a href="/docs/install" class="tap text-fg transition-colors hover:text-primary-bright hover:underline"
         >Install guide — per-platform, service files, GPU images →</a
       >
     </p>
@@ -75,9 +75,17 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
   -v polyemesis-data:/data \\
   rainmanjam/polyemesis:latest`}
       />
-      <p class="mt-3 font-mono text-[11px] text-subtle">
-        UI on :8080 · SRT ingest on :6000/udp · RTMP ingest on :1935
-      </p>
+      {/* A DEFINITION LIST, NOT A DOT-SEPARATED LINE (2026-11 design review).
+          Three ports are three facts a reader looks up one at a time, usually
+          while writing a firewall rule, so each gets its own row. */}
+      <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
+        <dt class="text-subtle">UI</dt>
+        <dd class="font-mono text-fg">:8080</dd>
+        <dt class="text-subtle">SRT ingest</dt>
+        <dd class="font-mono text-fg">:6000/udp</dd>
+        <dt class="text-subtle">RTMP ingest</dt>
+        <dd class="font-mono text-fg">:1935</dd>
+      </dl>
       <p class="mt-2 text-[11px] leading-relaxed text-subtle">
         Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
         and omitting the suffix is the classic reason an ingest silently

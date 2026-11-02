@@ -515,7 +515,7 @@ const selectors = [
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
             {s.href && (
               <p class="mt-4">
-                <a href={s.href} class="text-sm text-primary-bright underline-offset-4 hover:underline">
+                <a href={s.href} class="tap text-sm text-primary-bright underline-offset-4 hover:underline">
                   Full comparison against {s.name} →
                 </a>
               </p>
@@ -626,11 +626,11 @@ const selectors = [
       <a href="/docs/comparison" class="btn btn-ghost">This page, with its sources</a>
     </div>
     <p class="mt-5 text-sm text-subtle">
-      <a href="/#matrix" class="underline decoration-line underline-offset-4 hover:text-fg"
+      <a href="/#matrix" class="tap underline decoration-line underline-offset-4 hover:text-fg"
         >Try the routing matrix</a
       >
       ·
-      <a href="/download" class="underline decoration-line underline-offset-4 hover:text-fg"
+      <a href="/download" class="tap underline decoration-line underline-offset-4 hover:text-fg"
         >Install options</a
       >
     </p>

@@ -541,6 +541,9 @@
   }
   .announce a {
     font-weight: 500;
+    /* The same 24px hit area as .tap, for the one link in the bar. */
+    padding-block: 0.3125rem;
+    margin-block: -0.3125rem;
     text-decoration: underline;
     /* Far enough off the baseline that the descender in "p" does not sit on the
        rule, matching .doc-prose a — the same fix for the same reason. */
@@ -583,6 +586,19 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--color-muted);
+  }
+
+  /* A 24px HIT AREA FOR A STANDALONE TEXT LINK, without moving anything
+     (WCAG 2.5.8; 2026-11 design review). A 13-14px link on its own line was
+     15-18px tall: "Docs" under each item on /features, the links under the
+     home CTA. Padding grows the box the pointer hits; the equal negative
+     margin takes the same space back, so the layout is pixel-identical. On an
+     inline link the margin does nothing and the padding already does not
+     affect the line, so the same two declarations serve both. Links inside a
+     sentence are exempt from 2.5.8 and do not need it. */
+  .tap {
+    padding-block: 0.3125rem;
+    margin-block: -0.3125rem;
   }
 
   .btn {
