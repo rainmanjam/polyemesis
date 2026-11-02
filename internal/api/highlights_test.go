@@ -223,8 +223,21 @@ func TestAVerticalExportCarriesTheLayoutAndTheTranscriptsCaptions(t *testing.T) 
 		t.Errorf("out %q mode %q", params.Request.OutPath, params.Request.Mode)
 	}
 	c := v.Captions
-	if c == nil || len(c.Cues) != 1 || c.Cues[0].StartMS != 12_000 || c.Cues[0].Text != "hello there" || !c.Style.Uppercase {
-		t.Fatalf("captions %+v (want only track 0's line inside 10s..40s)", c)
+	if c == nil || len(c.Cues) != 0 || len(c.Tracks) != 1 || !c.Style.Uppercase {
+		t.Fatalf("job captions %+v (want track 0, the style, and no words)", c)
+	}
+	// The words the worker will draw, gathered the way it gathers them.
+	tl, err := srv.clipTimeline(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned, err := srv.clipVertical(tl, clipRequestBody{InMS: 10_000, OutMS: 40_000, AudioMode: "tracks", Tracks: []int{0},
+		Vertical: &clipVerticalBody{Layout: "blur", Captions: &clipCaptions{Enabled: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cues := planned.Captions.Cues; len(cues) != 1 || cues[0].StartMS != 12_000 || cues[0].Text != "hello there" {
+		t.Fatalf("cues %+v (want only track 0's line inside 10s..40s, on the timeline)", cues)
 	}
 	if filepath.Dir(c.FontFile) != mustAbs(t, srv.cfg.FontsDir()) || filepath.Base(c.FontFile) != clipper.DefaultCaptionFont {
 		t.Errorf("font %q is not the fonts directory's %s", c.FontFile, clipper.DefaultCaptionFont)
@@ -325,5 +338,120 @@ func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	}
 	if out, err := c(context.Background(), "s", "u"); err != nil || out != `{"scores":[]}` || got != "fake-model" {
 		t.Errorf("Complete through the connector = %q, %v (model %q)", out, err, got)
+	}
+}
+
+// THE WORDS DO NOT TRAVEL IN THE JOB. A read token may list jobs, and a job's
+// params are part of what it is shown -- so a captioned short's params carry the
+// caption TRACKS and style, never the transcript text, which the worker reads
+// from the store when it runs. Otherwise /jobs would hand a read token the
+// words /clipper/.../transcript refuses it.
+//
+// MUTATION: submitClipExport keeps the cues. Observed: FAIL, "hello there" in
+// the params and in the read token's /jobs/{id}.
+func TestACaptionedShortsJobCarriesNoTranscriptText(t *testing.T) {
+	h, sign, srv, rec := highlightFixture(t)
+	read := createScopedToken(t, h, sign, "jobs-reader", db.ScopeRead)
+	var job struct {
+		ID int64 `json:"id"`
+	}
+	decodeInto(t, send(t, h, sign, http.MethodPost, recPath(rec, "/export"), map[string]any{
+		"inMs": 10_000, "outMs": 40_000, "audioMode": "tracks", "tracks": []int{0},
+		"vertical": map[string]any{"layout": "blur", "captions": map[string]any{"enabled": true}},
+	}, http.StatusAccepted), &job)
+	j, err := srv.store.GetJob(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(j.Params), "hello there") {
+		t.Errorf("the job's params carry transcript text: %s", j.Params)
+	}
+	var params clipper.JobParams
+	if err := json.Unmarshal(j.Params, &params); err != nil {
+		t.Fatal(err)
+	}
+	c := params.Request.Vertical.Captions
+	if c == nil || len(c.Cues) != 0 || len(c.Tracks) != 1 || c.Tracks[0] != 0 {
+		t.Errorf("captions in the job %+v, want tracks [0] and no cues", c)
+	}
+	for _, s := range params.Segments {
+		if s.RecordingID != rec {
+			t.Errorf("segment %+v does not name its recording, so the worker cannot find its transcript", s)
+		}
+	}
+	code, body := rawBodyOf(t, h, bearer(read), "/api/v1/jobs/"+strconv.FormatInt(job.ID, 10))
+	if strings.Contains(body, "hello there") {
+		t.Errorf("a read token's /jobs/{id} (%d) carries transcript text", code)
+	}
+}
+
+// The refusals: ids that are not ids, a recording that is not there, a server
+// with no job queue, a template that is not there -- each is the status the
+// rest of the clipper answers with, and none queues anything.
+func TestHighlightAndTemplateRoutesRefuseWhatTheyCannotDo(t *testing.T) {
+	h, sign, srv, rec := highlightFixture(t)
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/clipper/recordings/x/highlights/scan"},
+		{http.MethodGet, "/api/v1/clipper/recordings/x/highlights"},
+		{http.MethodPost, "/api/v1/clipper/highlights/x/accept"},
+		{http.MethodPost, "/api/v1/clipper/highlights/x/dismiss"},
+		{http.MethodDelete, "/api/v1/clipper/templates/x"},
+	} {
+		send(t, h, sign, c.method, c.path, nil, http.StatusBadRequest)
+	}
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/recordings/999999/highlights/scan", nil, http.StatusNotFound)
+	send(t, h, sign, http.MethodGet, "/api/v1/clipper/recordings/999999/highlights", nil, http.StatusNotFound)
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/highlights/999999/dismiss", nil, http.StatusNotFound)
+
+	// Explicit in and out on an accept win over the suggestion's.
+	id := plantHighlight(t, srv.store, rec, 10_000, 40_000)
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/highlights/"+strconv.FormatInt(id, 10)+"/accept",
+		map[string]any{"inMs": 12_000, "outMs": 20_000}, http.StatusAccepted)
+	clips := jobsOfKind(t, srv.store, clipper.JobKind)
+	var params clipper.JobParams
+	if len(clips) != 1 || json.Unmarshal(clips[0].Params, &params) != nil || params.Request.In != 12*time.Second {
+		t.Errorf("an accept with its own span: %+v", params.Request)
+	}
+
+	// The transcript panel reads through the same rebase captions use.
+	var tr clipTranscriptView
+	decodeInto(t, send(t, h, sign, http.MethodGet, recPath(rec, "/transcript"), nil, http.StatusOK), &tr)
+	if len(tr.Segments) != 3 || tr.Segments[0].StartMS != 12_000 || len(tr.Tracks) != 2 {
+		t.Errorf("transcript view %+v", tr)
+	}
+
+	// No queue: the scan and the accept say so rather than half-working.
+	srv.jobq = nil
+	send(t, h, sign, http.MethodPost, recPath(rec, "/highlights/scan"), nil, http.StatusServiceUnavailable)
+	id2 := plantHighlight(t, srv.store, rec, 100_000, 130_000)
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/highlights/"+strconv.FormatInt(id2, 10)+"/accept", nil, http.StatusServiceUnavailable)
+	if got, _ := srv.store.GetHighlight(id2); got.State != db.HighlightPending {
+		t.Errorf("an accept with no queue changed the suggestion to %q", got.State)
+	}
+}
+
+// A template saved again by name replaces the first; a name too long is
+// refused; a stored body this build cannot read is left out of the list
+// rather than failing it.
+func TestClipTemplatesReplaceByNameAndSurviveAnUnreadableRow(t *testing.T) {
+	h, sign, srv, _ := highlightFixture(t)
+	body := func(layout string) map[string]any {
+		return map[string]any{"name": "Mine", "vertical": map[string]any{"layout": layout}}
+	}
+	var a, b clipTemplateView
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/clipper/templates", body("blur"), http.StatusOK), &a)
+	decodeInto(t, send(t, h, sign, http.MethodPost, "/api/v1/clipper/templates", body("center"), http.StatusOK), &b)
+	if a.ID != b.ID || b.Vertical.Layout != "center" {
+		t.Errorf("saving by the same name replaced nothing: %+v then %+v", a, b)
+	}
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/templates",
+		map[string]any{"name": strings.Repeat("n", 61), "vertical": map[string]any{"layout": "blur"}}, http.StatusBadRequest)
+	if _, err := srv.store.PutClipTemplate("Broken", []byte(`not json`)); err != nil {
+		t.Fatal(err)
+	}
+	var list clipTemplatesView
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/clipper/templates", nil, http.StatusOK), &list)
+	if len(list.Templates) != 1 || list.Templates[0].Name != "Mine" {
+		t.Errorf("templates %+v", list.Templates)
 	}
 }

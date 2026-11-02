@@ -61,8 +61,26 @@ type JobResult struct {
 // knows both.
 type Resolver func(ctx context.Context, target string) (Timeline, error)
 
+// WorkerOption customises NewWorker.
+type WorkerOption func(*workerConfig)
+
+type workerConfig struct {
+	transcript TranscriptSource
+}
+
+// WithTranscript lets the worker caption a vertical export. A job carries the
+// caption tracks and style but never the words -- see Captions.Tracks -- so
+// without a source a captioned short is rendered without captions, and says so.
+func WithTranscript(src TranscriptSource) WorkerOption {
+	return func(c *workerConfig) { c.transcript = src }
+}
+
 // NewWorker adapts a Cutter to the job queue.
-func NewWorker(c *Cutter, resolve Resolver) jobs.Worker {
+func NewWorker(c *Cutter, resolve Resolver, opts ...WorkerOption) jobs.Worker {
+	var cfg workerConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return jobs.WorkerFunc(func(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 		params, err := parseJobParams(job)
 		if err != nil {
@@ -72,6 +90,7 @@ func NewWorker(c *Cutter, resolve Resolver) jobs.Worker {
 		if err != nil {
 			return jobs.Permanent(err)
 		}
+		params.Request.Vertical = captionsAtRunTime(params.Request, tl, cfg.transcript, rep)
 		plan, err := planForJob(ctx, c, tl, params.Request)
 		if err != nil {
 			return err
@@ -174,4 +193,28 @@ func permanentPlanError(err error) bool {
 		errors.Is(err, ErrOutOfRange) ||
 		errors.Is(err, ErrNoSegments) ||
 		errors.Is(err, ErrNoWorkDir)
+}
+
+// captionsAtRunTime fills a captioned short's cues from the transcript store.
+// A transcript that cannot be read costs the captions, not the short: the job
+// log says so and the render goes ahead.
+func captionsAtRunTime(req Request, tl Timeline, src TranscriptSource, rep jobs.Reporter) *Vertical {
+	v := req.Vertical
+	if v == nil || v.Captions == nil || len(v.Captions.Cues) > 0 {
+		return v
+	}
+	if src == nil {
+		rep.Logf("captions were asked for but this worker has no transcript source; rendering without them")
+		return v
+	}
+	cues, err := CaptionCues(tl.Segments(), src, req.In, req.Out, v.Captions.Tracks)
+	if err != nil {
+		rep.Logf("the transcript could not be read (%v); rendering without captions", err)
+		return v
+	}
+	out := *v
+	c := *v.Captions
+	c.Cues = cues
+	out.Captions = &c
+	return &out
 }

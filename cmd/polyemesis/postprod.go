@@ -181,7 +181,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 
 	cutter := clipper.New(log, tools.FFmpeg, tools.FFprobe)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
-	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve)))
+	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve, clipper.WithTranscript(api.ClipTranscriptSource(store)))))
 
 	// Highlight scans (Wave 4 #5a). Niced like every other derived-media
 	// child: measuring loudness decodes the whole recording's audio. The

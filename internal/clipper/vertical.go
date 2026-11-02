@@ -6,6 +6,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -132,8 +133,14 @@ type Vertical struct {
 type Captions struct {
 	// Cues are in TIMELINE milliseconds -- the same coordinates as Request.In
 	// -- so a cue and the clip are rebased by one subtraction, in one place.
-	Cues  []Cue        `json:"cues"`
+	Cues  []Cue        `json:"cues,omitempty"`
 	Style CaptionStyle `json:"style"`
+	// Tracks limits the captions to these audio tracks' transcripts; empty
+	// means every track. It is what a JOB carries instead of Cues: a job's
+	// params are readable by any token that may list jobs, and the words of
+	// a transcript are not, so the worker reads them from the store when it
+	// runs. See CaptionCues and WithTranscript.
+	Tracks []int `json:"tracks,omitempty"`
 
 	// FontFile is the absolute path of the font to draw with. The SERVER sets
 	// it, from its own fonts directory; it is never taken from a request body.
@@ -751,4 +758,72 @@ func (p *Plan) planVertical(v *Vertical) {
 		p.warn("this FFmpeg cannot draw text (it was built without libfreetype), so the captions " +
 			"were not burned in; the short is otherwise complete")
 	}
+}
+
+// ------------------------------------------------------- captions at run time
+
+// TranscriptLine is one transcribed line in its OWN recording's milliseconds.
+type TranscriptLine struct {
+	Track   int
+	StartMS int64
+	EndMS   int64
+	Text    string
+}
+
+// TranscriptSource reads one recording's transcript. A recording with none
+// answers nil, nil.
+type TranscriptSource func(recordingID int64) ([]TranscriptLine, error)
+
+// CaptionCues is the captions a short of [in, out) carries: every segment's
+// transcript rebased onto the timeline (the segment's Start plus the line's own
+// milliseconds -- the same rebase the editor's transcript panel draws with),
+// kept when it overlaps the clip and, when tracks is non-empty, when it was
+// spoken on one of them.
+//
+// The ONE place a short's words are gathered, at plan time by the API and at
+// run time by the worker, so the preview and the render cannot disagree about
+// what is captioned.
+func CaptionCues(segs []Segment, src TranscriptSource, in, out time.Duration, tracks []int) ([]Cue, error) {
+	only := map[int]bool{}
+	for _, t := range tracks {
+		only[t] = true
+	}
+	var cues []Cue
+	seen := map[int64]bool{}
+	for _, seg := range segs {
+		if seg.RecordingID == 0 || seen[seg.RecordingID] || src == nil {
+			continue
+		}
+		seen[seg.RecordingID] = true
+		lines, err := src(seg.RecordingID)
+		if err != nil {
+			return nil, err
+		}
+		base := seg.Start.Milliseconds()
+		for _, l := range lines {
+			start, end := base+l.StartMS, base+l.EndMS
+			if end <= in.Milliseconds() || start >= out.Milliseconds() {
+				continue
+			}
+			if len(only) > 0 && !only[l.Track] {
+				continue
+			}
+			cues = append(cues, Cue{StartMS: start, EndMS: end, Text: l.Text})
+		}
+	}
+	sort.SliceStable(cues, func(i, j int) bool { return cues[i].StartMS < cues[j].StartMS })
+	return cues, nil
+}
+
+// WithoutCues is a copy of v whose captions carry no words, for storing in a
+// job: what a job's params hold is readable by any token allowed to list jobs.
+func (v *Vertical) WithoutCues() *Vertical {
+	if v == nil || v.Captions == nil {
+		return v
+	}
+	out := *v
+	c := *v.Captions
+	c.Cues = nil
+	out.Captions = &c
+	return &out
 }

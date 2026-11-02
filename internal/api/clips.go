@@ -403,9 +403,10 @@ func (t clipTimeline) timeline() (clipper.Timeline, error) {
 			continue
 		}
 		segs = append(segs, clipper.Segment{
-			Path:     p.path,
-			Start:    time.Duration(p.startMS) * time.Millisecond,
-			Duration: time.Duration(p.rec.DurationMS) * time.Millisecond,
+			RecordingID: p.rec.ID,
+			Path:        p.path,
+			Start:       time.Duration(p.startMS) * time.Millisecond,
+			Duration:    time.Duration(p.rec.DurationMS) * time.Millisecond,
 		})
 	}
 	if len(segs) == 0 {
@@ -874,7 +875,9 @@ func (s *Server) submitClipExport(plan clipper.Plan, tl clipTimeline) (*jobs.Job
 			OutPath:      plan.OutPath,
 			Title:        plan.Title,
 			VideoEncoder: plan.VideoEncoder,
-			Vertical:     plan.Vertical,
+			// The words stay out of the job: its params are readable by any
+			// token that may list jobs. The worker reads them at run time.
+			Vertical: plan.Vertical.WithoutCues(),
 		},
 		// The segments travel with the job so a re-index between submission and
 		// execution cannot change what gets cut out from under the user.

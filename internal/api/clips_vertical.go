@@ -75,30 +75,24 @@ func (s *Server) clipVertical(tl clipTimeline, body clipRequestBody) (*clipper.V
 	if err != nil {
 		return nil, err
 	}
-	segs, err := s.clipTranscriptSegments(tl)
+	var tracks []int
+	if strings.TrimSpace(body.AudioMode) == string(clipper.AudioTracks) {
+		// Captions follow the tracks the short carries: a clip of one
+		// speaker is not captioned with the other's words.
+		tracks = append(tracks, body.Tracks...)
+	}
+	cut, err := tl.timeline()
 	if err != nil {
 		return nil, err
 	}
-	only := map[int]bool{}
-	if strings.TrimSpace(body.AudioMode) == string(clipper.AudioTracks) {
-		for _, t := range body.Tracks {
-			only[t] = true
-		}
-	}
-	cues := []clipper.Cue{}
-	for _, seg := range segs {
-		if seg.EndMS <= body.InMS || seg.StartMS >= body.OutMS {
-			continue
-		}
-		if len(only) > 0 && !only[seg.Track] {
-			// Captions follow the tracks the short carries: a clip of one
-			// speaker is not captioned with the other's words.
-			continue
-		}
-		cues = append(cues, clipper.Cue{StartMS: seg.StartMS, EndMS: seg.EndMS, Text: seg.Text})
+	cues, err := clipper.CaptionCues(cut.Segments(), ClipTranscriptSource(s.store),
+		time.Duration(body.InMS)*time.Millisecond, time.Duration(body.OutMS)*time.Millisecond, tracks)
+	if err != nil {
+		return nil, err
 	}
 	v.Captions = &clipper.Captions{
 		Cues:     cues,
+		Tracks:   tracks,
 		Style:    style,
 		FontFile: font,
 		DrawText: s.tools().HasFilter("drawtext"),
@@ -246,4 +240,25 @@ func (s *Server) handleDeleteClipTemplate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ClipTranscriptSource reads a recording's transcript as caption lines. Exported
+// because the clip worker, wired in cmd/polyemesis, reads the words at run time
+// through the same adapter the editor plans with.
+func ClipTranscriptSource(store *db.DB) clipper.TranscriptSource {
+	return func(recordingID int64) ([]clipper.TranscriptLine, error) {
+		tr, err := store.GetTranscript(recordingID)
+		if errors.Is(err, db.ErrNotFound) || (err == nil && tr == nil) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		merged := tr.Merged()
+		out := make([]clipper.TranscriptLine, 0, len(merged))
+		for _, seg := range merged {
+			out = append(out, clipper.TranscriptLine{Track: seg.Track, StartMS: seg.StartMS, EndMS: seg.EndMS, Text: seg.Text})
+		}
+		return out, nil
+	}
 }

@@ -147,6 +147,10 @@ func containerFor(path string) Container {
 // addressable as one continuous timeline.
 type Segment struct {
 	Path string `json:"path"`
+	// RecordingID is the index row this file is, when the caller knows it.
+	// Optional: the cut never needs it. A captioned short does, to read the
+	// transcript at run time rather than carry its words in the job.
+	RecordingID int64 `json:"recordingId,omitempty"`
 	// Start is where this file begins on the timeline, i.e. the offset a caller
 	// would scrub to in order to see its first frame.
 	Start time.Duration `json:"start"`
