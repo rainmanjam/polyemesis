@@ -11,9 +11,9 @@ package api
 //
 //  2. STARTS ARE PACED AND STOPS ARE NOT. Nothing else in the tree can notice
 //     if the gap between starts disappears -- the routes keep working, keep
-//     answering, and keep passing every other test in this package. So the
-//     elapsed time is measured. It is the slowest assertion here and it is the
-//     one worth paying for.
+//     answering, and keep passing every other test in this package. So a start's
+//     elapsed time is measured, and the gaps each walk leaves are counted. It
+//     is the slowest assertion here and it is the one worth paying for.
 //
 // Neither assertion knows a platform number, and neither should ever be made to:
 // bulkStartPacing is a pacing choice about this box, not a ceiling anybody
@@ -21,10 +21,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -174,8 +176,20 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 		}
 	}
 
+	// Every gap a bulk walk leaves goes through bulkPause; count them, and
+	// still take each one for real so the start floor below measures the
+	// production interval.
+	var gaps atomic.Int32
+	realPause := bulkPause
+	bulkPause = func(ctx context.Context) bool {
+		gaps.Add(1)
+		return realPause(ctx)
+	}
+	t.Cleanup(func() { bulkPause = realPause })
+
 	timed := func(path string) time.Duration {
 		t.Helper()
+		gaps.Store(0)
 		r := jsonRequest(t, http.MethodPost, path, bulkConfirmBodyFor(path))
 		sign(r)
 		started := time.Now()
@@ -215,17 +229,29 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 			"published ceiling, so the fix is to restore the gap and not to add a cap.",
 			n, got, want, n)
 	}
+	// And the floor was paid for in gaps, not in slow reconciles: on a loaded
+	// box three unpaced starts can take three seconds on their own.
+	if got := gaps.Load(); got != n-1 {
+		t.Errorf("start-all left %d pacing gaps between %d destinations, want %d (one "+
+			"before every start but the first)", got, n, n-1)
+	}
 
 	// Tearing down is local: a stop signals a child this box owns and waits for
 	// it, and doing that n times reaches nobody else's server. A gap here would
 	// be pure delay in front of an operator who has decided to come off air.
-	// Also literal. Bounded against the constant, this passed while the constant
-	// was 20ms and the stops were taking longer than a real pacing interval.
-	const stopCeiling = 1500 * time.Millisecond
-	if got := timed("/api/v1/destinations/stop-all"); got >= stopCeiling {
-		t.Errorf("stopping %d destinations took %v, which is at least one pacing "+
-			"interval (%v). Stops are deliberately not paced -- there is nothing for a "+
-			"gap to spread out.", n, got, stopCeiling)
+	//
+	// COUNTED, NOT TIMED. This was a wall-clock ceiling of 1.5s, and a
+	// windows-latest runner crossed it at 4.2s with no gap taken at all: three
+	// rows written to a pure-Go SQLite that runs ~40x slower there and three
+	// full reconciles, on a runner where the whole package took 447s. The time
+	// a stop takes is not the property; whether stop-all waits between rows is.
+	// Zero gaps is exact and does not move with the speed of the box -- and,
+	// unlike a ceiling derived from bulkStartPacing, it does not shrink when the
+	// interval does.
+	timed("/api/v1/destinations/stop-all")
+	if got := gaps.Load(); got != 0 {
+		t.Errorf("stop-all left %d pacing gaps between %d destinations, want 0. Stops "+
+			"are deliberately not paced -- there is nothing for a gap to spread out.", got, n)
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
@@ -306,10 +305,7 @@ func (a obsActions) Start(ctx context.Context, cfg obsbridge.Config) []obsbridge
 	out := make([]obsbridge.Outcome, 0, len(cfg.Destinations))
 	for i, id := range cfg.Destinations {
 		if i > 0 {
-			select {
-			case <-ctx.Done():
-			case <-time.After(bulkStartPacing):
-			}
+			bulkPause(ctx)
 		}
 		if ctx.Err() != nil {
 			for _, rest := range cfg.Destinations[i:] {

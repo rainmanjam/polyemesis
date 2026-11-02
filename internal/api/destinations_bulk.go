@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -112,6 +113,27 @@ var bulkStartPacing = 2 * time.Second
 // is what withBulkPacing does.
 //
 // Never written outside a test. The one production value is above.
+
+// bulkPause waits out one pacing gap, and reports false if ctx ended first. It
+// is the ONLY way a bulk walk -- start-all here, the OBS bridge's start in
+// obs.go -- leaves a gap, so a test that counts its calls is counting gaps.
+//
+// A var for that reason and no other: the stop half of the pacing decision
+// ("stops are not paced") used to be asserted as a wall-clock ceiling on
+// stop-all, and stop-all's honest cost on a loaded Windows runner -- three rows
+// written to a pure-Go SQLite and three full reconciles -- crossed it with no
+// gap taken at all. Counting the gaps asks the question directly and does not
+// care how slow the box is. Never written outside a test.
+var bulkPause = func(ctx context.Context) bool {
+	t := time.NewTimer(bulkStartPacing)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
 
 // bulkOutcome is what happened to one destination. See bulkDestResult.
 type bulkOutcome string
@@ -289,23 +311,19 @@ func (s *Server) bulkSetDestinationsEnabled(w http.ResponseWriter, r *http.Reque
 		//
 		// The gap goes BEFORE each start except the first, so pressing the
 		// button on a single-destination install costs nothing.
-		if enabled && i > 0 {
-			select {
-			case <-r.Context().Done():
-				// The caller is gone. Everything from here was NOT touched,
-				// and says so.
-				for _, rest := range rows[i:] {
-					results = append(results, bulkDestResult{
-						ID: rest.ID, Name: rest.Name, Platform: rest.Platform,
-						Outcome: bulkSkipped,
-						Message: "the request was cancelled before this destination was reached, " +
-							"so it was left exactly as it was",
-					})
-				}
-				writeJSON(w, http.StatusOK, bulkBody(enabled, results))
-				return
-			case <-time.After(bulkStartPacing):
+		if enabled && i > 0 && !bulkPause(r.Context()) {
+			// The caller is gone. Everything from here was NOT touched, and
+			// says so.
+			for _, rest := range rows[i:] {
+				results = append(results, bulkDestResult{
+					ID: rest.ID, Name: rest.Name, Platform: rest.Platform,
+					Outcome: bulkSkipped,
+					Message: "the request was cancelled before this destination was reached, " +
+						"so it was left exactly as it was",
+				})
 			}
+			writeJSON(w, http.StatusOK, bulkBody(enabled, results))
+			return
 		}
 		results = append(results, s.bulkOne(row, enabled))
 	}

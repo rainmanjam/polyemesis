@@ -1,6 +1,7 @@
 package obsbridge_test
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -56,7 +57,8 @@ sys.path.insert(0, sys.argv[1])
 sys.path.insert(0, sys.argv[2])
 import obspython
 import polyemesis_obs as s
-settings = {"server": sys.argv[3], "token": sys.argv[4]}
+print("` + driverReady + `", flush=True)
+settings ={"server": sys.argv[3], "token": sys.argv[4]}
 s.script_defaults(settings)
 s.script_update(settings)
 props = s.script_properties()
@@ -101,20 +103,84 @@ func runScript(t *testing.T, srvURL, token string) string {
 	// caller's environment and user site-packages.
 	cmd := exec.Command(py, "-I", "-B", driver, stubDir, scriptDir, srvURL, token)
 	cmd.Dir = t.TempDir()
-	done := make(chan struct{})
-	var out []byte
-	go func() { out, err = cmd.CombinedOutput(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(60 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatal("the script did not finish")
-	}
+	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		t.Fatalf("the script failed: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	return string(out)
+	cmd.Stderr = cmd.Stdout // one *os.File, so both streams interleave in order
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("python3 did not start: %v", err)
+	}
+
+	var (
+		mu  sync.Mutex
+		out strings.Builder
+	)
+	output := func() string { mu.Lock(); defer mu.Unlock(); return out.String() }
+	ready := make(chan struct{})
+	exited := make(chan error, 1)
+	go func() {
+		sc := bufio.NewScanner(pipe)
+		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+		seen := false
+		for sc.Scan() {
+			mu.Lock()
+			out.WriteString(sc.Text() + "\n")
+			mu.Unlock()
+			if !seen && sc.Text() == driverReady {
+				seen = true
+				close(ready)
+			}
+		}
+		// Wait only after the pipe is drained; see exec.Cmd.StdoutPipe.
+		exited <- cmd.Wait()
+	}()
+	// kill stops the child and waits for it, so nothing is still writing
+	// output (or err) while the failure below reads it.
+	kill := func() { _ = cmd.Process.Kill(); <-exited }
+
+	// PHASE ONE: THE INTERPRETER COMES UP. No wall clock of this test's own,
+	// and that is deliberate. Starting CPython and importing urllib, ssl and
+	// json is not the script's behaviour; it is the runner's disk and CPU. On
+	// windows-latest it normally costs a few seconds, and on one runner whose
+	// internal/db and internal/api packages ran 10-15x slow it cost more than
+	// the whole 60s this test used to give the script -- both tests in the
+	// package timed out together, and the driver's own join(20) shows the
+	// script itself had not even been reached. What bounds this phase is the
+	// test binary's -timeout; the margin is so this test kills its child and
+	// says where it was, rather than leaving a goroutine dump and an orphan.
+	var startup <-chan time.Time
+	if dl, ok := t.Deadline(); ok {
+		startup = time.After(time.Until(dl) - 30*time.Second)
+	}
+	select {
+	case <-ready:
+	case err := <-exited:
+		t.Fatalf("python exited before the script was loaded: %v\n%s", err, output())
+	case <-startup:
+		kill()
+		t.Fatalf("python did not finish importing the script before the test binary's "+
+			"deadline\n%s", output())
+	}
+
+	// PHASE TWO: THE SCRIPT ITSELF, from loaded to finished, and this is the
+	// 60s that has always been here, unchanged. A script that hangs in its
+	// callback, its worker or its unload still fails on it.
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Fatalf("the script failed: %v\n%s", err, output())
+		}
+	case <-time.After(60 * time.Second):
+		kill()
+		t.Fatalf("the script did not finish within 60s of being loaded\n%s", output())
+	}
+	return output()
 }
+
+// driverReady is the line scriptDriver prints once python is up and the script
+// is imported, which is where the script's own time starts.
+const driverReady = "polyemesis-test: script imported"
 
 func TestTheOBSScriptPostsTheThreeFactsWithItsToken(t *testing.T) {
 	var (

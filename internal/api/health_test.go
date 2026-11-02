@@ -120,7 +120,20 @@ func TestHealthAnswers503WhenSourcesAreConfiguredAndNoEngineRuns(t *testing.T) {
 // live programme over a full recording volume would make this endpoint cause
 // the outage it exists to detect. It is reported and it is not fatal.
 func TestAFullRecordingVolumeIsReportedWithoutTakingTheServerDown(t *testing.T) {
-	srv, h, _, _ := engineServer(t, defaultTools(), Options{})
+	// THE FLOOR GOES IN THE SETTINGS, BEFORE THE ENGINE STARTS. The engine's
+	// own recording manager sweeps once the moment it starts, and that sweep
+	// ends in CheckFreeSpace on the engine's settings. With the stored floor
+	// left at its 5 GB default, a halt injected here was undone whenever that
+	// startup sweep landed after it -- halted, and more than 5 GB free, is
+	// exactly the "space recovered, resume" case -- and health then read "ok"
+	// with no checks at all. On a fast machine the sweep nearly always landed
+	// first; on a windows-latest runner, where its SQLite scan is ~40x slower,
+	// it did not. With the same floor stored, every sweep the engine runs, at
+	// startup or on its 30s tick, reaches the verdict this test injects.
+	const floorGB = 1 << 40 // a floor no volume can clear
+	srv, h, _, _ := engineServerWithSettings(t, defaultTools(), Options{}, func(st *db.Settings) {
+		st.Recording.MinFreeGB = floorGB
+	})
 
 	engines := srv.mgr.Engines()
 	if len(engines) == 0 {
@@ -133,7 +146,19 @@ func TestAFullRecordingVolumeIsReportedWithoutTakingTheServerDown(t *testing.T) 
 		t.Fatal("engineServer built no engine, so there is no recorder to halt " +
 			"and this test cannot exercise the full-volume path")
 	}
-	engines[0].Recordings().CheckFreeSpace(db.RecordingSettings{MinFreeGB: 1 << 40})
+	rec := engines[0].Recordings()
+	if got := engines[0].Settings().Recording.MinFreeGB; got != floorGB {
+		t.Fatalf("the engine started with a %v GB floor, not the %v GB one stored for it, so "+
+			"its own sweep can still lift the halt below", got, float64(floorGB))
+	}
+	// Halt now rather than wait for the startup sweep to do it: the verdict is
+	// the same either way, and this way the test does not depend on when that
+	// sweep runs.
+	rec.CheckFreeSpace(engines[0].Settings().Recording)
+	if !rec.Storage().Halted {
+		t.Fatalf("the recording manager did not halt on a %v GB floor, so the state under "+
+			"test was never reached", float64(floorGB))
+	}
 
 	code, raw, body := getHealth(t, h)
 	if code != http.StatusOK {
