@@ -391,6 +391,12 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Wave 4 #4: cross-platform analytics -- streams, viewer samples and
+	// chat tallies. New tables only; see analytics.go.
+	if err := d.MigrateWave4Analytics(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest

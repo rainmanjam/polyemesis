@@ -1187,6 +1187,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// The public player's viewers and QoE. Nil without a playout manager, and
 	// then the families are omitted rather than published as zeros.
 	snap.Playout = s.playoutMetrics()
+	snap.Audience = s.audienceMetrics()
 
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{
@@ -2049,6 +2050,13 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	logtz.Set(displayLocation(settings.Display.TimeZone))
 	ApplyChatRetention(s.chat, settings.Chat)
 	ApplyYouTubeQuota(s.chat, settings.Chat)
+	// The shared allowance the sampler, the vertical read and the request
+	// meter draw on, and the sampler's own interval: both applied now, not at
+	// the next tick (PR #950 review, #2 and #15).
+	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
+	if s.audience != nil {
+		s.audience.Wake()
+	}
 	// Same argument for automod: a matrix that stores, returns 200 and keeps
 	// deciding on the old cells is the silent no-op this file already warns
 	// about twice. Rebuilding the engine here is also what recompiles a changed

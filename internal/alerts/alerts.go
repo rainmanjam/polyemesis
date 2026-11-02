@@ -185,6 +185,10 @@ const (
 	// say so while it was only a sentence inside a down. It closes with the
 	// down's destination.recovered when Retry brings the destination back.
 	TypeDestinationHeld Type = "destination.held"
+	// TypeOffloadStuck is offload giving up on a file until an operator presses
+	// Retry now: the same fact as the webhook and the events stream's
+	// offload.stuck, one name on every surface.
+	TypeOffloadStuck Type = "offload.stuck"
 	// TypeDelayDumped fires when an operator dumps part of a broadcast
 	// delay's buffer: programme that was on its way to the air was withheld
 	// on purpose, and that destination's delay is shorter until it next
@@ -251,7 +255,9 @@ func AllTypes() []Type {
 		// The seventh, and a destination event after an audit one, which is
 		// the convention working as stated rather than an accident.
 		TypeDestinationHeld,
-		// The eighth, an audit event, appended like every row before it.
+		// The eighth append: offload stopped retrying a file.
+		TypeOffloadStuck,
+		// The ninth, an audit event, appended like every row before it.
 		TypeDelayDumped,
 	}
 }

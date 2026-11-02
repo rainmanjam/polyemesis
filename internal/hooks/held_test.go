@@ -128,9 +128,11 @@ func TestFailoverSwitchedIsSubscribableAndAppendedLast(t *testing.T) {
 	if !KnownTrigger(TriggerFailoverSwitched) {
 		t.Fatal("failover.switched cannot be subscribed to")
 	}
+	// offload.stuck was appended after it, so it is second from the end: no
+	// row before it moved.
 	all := AllTriggers()
-	if all[len(all)-1] != TriggerFailoverSwitched {
-		t.Errorf("AllTriggers ends with %q, want failover.switched appended last", all[len(all)-1])
+	if all[len(all)-2] != TriggerFailoverSwitched || all[len(all)-1] != TriggerOffloadStuck {
+		t.Errorf("AllTriggers ends with %q, %q; want failover.switched then offload.stuck", all[len(all)-2], all[len(all)-1])
 	}
 	if TriggerFailoverSwitched != "failover.switched" {
 		t.Errorf("the trigger is %q; the alert and the events stream already call this failover.switched", TriggerFailoverSwitched)

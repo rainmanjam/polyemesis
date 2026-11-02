@@ -129,6 +129,12 @@ const (
 	// The same switch is the alert failover.switched and the events stream's
 	// failover.switched; one fact, one name, on every surface.
 	TriggerFailoverSwitched Trigger = "failover.switched"
+	// TriggerOffloadStuck fires when offload stops retrying a file on its own:
+	// too many consecutive failures, or an error waiting cannot cure (a
+	// refused credential, a missing bucket). Nothing moves until Retry now.
+	// Sent once per item, on the transition. Reason names the target, the
+	// file and the last error.
+	TriggerOffloadStuck Trigger = "offload.stuck"
 	// TriggerTest is what the test button sends. Never subscribable: a test
 	// that a subscription filter swallows teaches the operator that their
 	// endpoint is broken when it is not.
@@ -164,6 +170,9 @@ func AllTriggers() []Trigger {
 		// failover off never sends it; one with failover on and an empty
 		// Triggers list starts receiving every switch on upgrade.
 		TriggerFailoverSwitched,
+		// APPENDED, a fifth time, for the same two reasons. An install with no
+		// storage target never sends it.
+		TriggerOffloadStuck,
 	}
 }
 

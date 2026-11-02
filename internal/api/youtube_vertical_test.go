@@ -548,8 +548,8 @@ func TestPairedStatusPayloadLinksTheTwoHalves(t *testing.T) {
 }
 
 // TestVerticalStatusReadIsRefusedByTheRealYouTubeAdapterWhenItsBudgetIsSpent pins that the
-// status read reaches the quota pacer on the hub, not only the seam. A real chat adapter is
-// attached to the server's own hub with a one-unit allowance. Its discovery loop spends that unit
+// status read reaches the quota pacer chat paces against, not only the seam. A real chat adapter is
+// attached to the server's own hub, drawing on a one-unit shared allowance. Its discovery loop spends that unit
 // before the chat token is even used, so the budget is spent by the time the status read runs. The
 // read must then be refused, and YouTube must see no liveStreams read at all. Without the charge
 // the read would go out, and this test would fail.
@@ -564,9 +564,13 @@ func TestVerticalStatusReadIsRefusedByTheRealYouTubeAdapterWhenItsBudgetIsSpent(
 		t.Fatalf("read the account: %v", err)
 	}
 	noChatToken := func(context.Context) (string, error) { return "", errors.New("no chat token in this test") }
+	// The adapter draws on the Google client's shared allowance (PR #950
+	// review), here a one-unit one, which is the budget the status read is
+	// charged to as well.
+	s.ytQuotaShared.SetLimits(1, 0)
 	yt, err := chat.NewYouTube(chat.YouTubeConfig{
 		AccountRef: acct.AccountRef, Channel: acct.AccountName, Token: noChatToken,
-		APIBase: fake.srv.URL, QuotaUnits: 1, QuotaReserve: 0,
+		APIBase: fake.srv.URL, Quota: s.ytQuota(),
 		Sleep: func(ctx context.Context, _ time.Duration) bool { <-ctx.Done(); return false },
 	})
 	if err != nil {

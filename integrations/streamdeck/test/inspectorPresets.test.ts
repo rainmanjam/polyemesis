@@ -69,7 +69,10 @@ function loadInspector(action: string) {
     "block-track", "trackDestination", "track", "err-track", "block-issues", "issues", "issues-empty",
     "block-poll", "pollQuestion", "pollOptions", "pollDuration",
     "hint-dump-all", "block-cut", "cutTail", "block-dump", "dumpSeconds",
+    "block-viewers", "viewersPlatform",
   ];
+  // viewersPlatform is a <select> whose options are static HTML, which this fake does not parse, so it is
+  // modelled as a field that keeps any value.
   const selects = ["presetId", "trackDestination", "track"];
   const els = Object.fromEntries(ids.map((id) => [id, element(id, selects.includes(id))]));
   const sent: unknown[] = [];
@@ -181,6 +184,29 @@ describe("inspector poll fields", () => {
     els.pollOptions!.value = "Dust\n\n Mirage \nNuke";
     change("pollOptions");
     expect(settingsSent(sent).at(-1)).toEqual({ pollQuestion: "Next map?", pollOptions: ["Dust", "Mirage", "Nuke"], pollDuration: 60 });
+  });
+});
+
+describe("inspector viewers picker", () => {
+  const VIEWERS = "com.polyemesis.streamdeck.viewers";
+
+  it("shows the platform picker and no programme field on the viewers key, and only there", () => {
+    const v = loadInspector(VIEWERS);
+    expect(v.els["block-viewers"]!.hidden).toBe(false);
+    expect(v.els["block-source"]!.hidden).toBe(true);
+    expect(loadInspector("com.polyemesis.streamdeck.poll").els["block-viewers"]!.hidden).toBe(true);
+  });
+
+  it("shows the saved platform, saves a chosen one, and saves nothing for the total", () => {
+    const { els, sent, receive, change } = loadInspector(VIEWERS);
+    receive("didReceiveSettings", { settings: { viewersPlatform: "kick" } });
+    expect(els.viewersPlatform!.value).toBe("kick");
+    els.viewersPlatform!.value = "player";
+    change("viewersPlatform");
+    expect(settingsSent(sent).at(-1)).toEqual({ viewersPlatform: "player" });
+    els.viewersPlatform!.value = "";
+    change("viewersPlatform");
+    expect(settingsSent(sent).at(-1)).toEqual({});
   });
 });
 

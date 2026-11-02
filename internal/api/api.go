@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
@@ -40,6 +41,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
+	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/recording"
@@ -395,10 +397,25 @@ type Server struct {
 	// The zero value is ready; see youtube_vertical.go.
 	verticalHealth verticalHealthPacer
 	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
-	// the engine answers liveness, the wall clock answers time, and the chat budget is charged.
+	// the engine answers liveness, the wall clock answers time, and the shared YouTube allowance is
+	// charged.
 	verticalHalfLive    func(ids ...int64) bool
 	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
+	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning
+	// and analyticsNow are its test seams (analyticsNow is the YouTube quota's clock too); nil in
+	// production. See analytics.go.
+	audience         *analytics.Sampler
+	analyticsRunning func() map[int64]bool
+	analyticsNow     func() time.Time
+	// ytQuotaShared is the install's one YouTube allowance, bound to the
+	// configured Google client and drawn on by chat, the vertical read, the
+	// sampler and the oauth request meter.
+	// ytVideos is each YouTube account's live video, remembered by the
+	// sampler so a tick is one videos.list. See analytics.go.
+	ytQuotaShared *chat.YouTubeQuota
+	ytVideosMu    sync.Mutex
+	ytVideos      map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -542,6 +559,8 @@ type Server struct {
 	// hooks page, listing stored hooks and reporting that nothing is delivering
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
+	// offload is nil when the service is not wired (most tests).
+	offload *offload.Service
 
 	// stream is the real-time events hub behind GET /events. Optional: nil
 	// answers 503 there, and every publish through it is nil-safe.
@@ -750,6 +769,10 @@ type Options struct {
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
+	// Offload copies finished recordings to S3-compatible storage targets.
+	// Optional: without it the storage routes still store targets, the
+	// fetch route answers 503 and nothing is uploaded.
+	Offload *offload.Service
 
 	// Stream is the real-time events hub (GET /events). Optional.
 	Stream *eventstream.Hub
@@ -801,6 +824,7 @@ func New(o Options) *Server {
 			return automod.NewBudget()
 		}(),
 		hooks:       o.Hooks,
+		offload:     o.Offload,
 		stream:      o.Stream,
 		overlayGate: o.OverlayGate,
 		obs:         o.OBS,
@@ -868,7 +892,23 @@ func New(o Options) *Server {
 		// lifecycleCoordinator.airing.
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
+	cs := db.DefaultSettings().Chat
+	if s.store != nil {
+		cs = s.youtubeQuota()
+	}
+	units, reserve := youtubeQuotaPair(cs)
+	// The quota's clock is the sampler's test seam when one is set, so a test
+	// fixes the time of day instead of racing Pacific midnight (R13).
+	s.ytQuotaShared = chat.NewYouTubeQuota(units, reserve, func() time.Time {
+		if s.analyticsNow != nil {
+			return s.analyticsNow()
+		}
+		return time.Now()
+	})
+	s.bindYouTubeClient()
+	s.ytVideos = map[int64]ytLiveVideo{}
 	if o.DB != nil {
+		s.audience = s.newAudienceSampler()
 		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
 			tokenFor:    s.tokenFor,
 			restart:     s.restartDestinationForRollover,
@@ -1278,6 +1318,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
 				r.Post("/automod/test", s.handleAutomodTest)
+				r.Post("/storage/targets/test", s.handleTestStorageTarget)
 			})
 
 			// The read half of media. POST /media and DELETE /media/{name} are
@@ -1374,6 +1415,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// it through and a plain <video src> can reach it — which it has
 			// to, because a media element attaches no headers of its own.
 			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
+			r.Post("/library/recordings/{id}/offload/retry", s.handleRetryRecordingOffload)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a
 			// recording already on disk. Deliberately NOT under /clips, which
@@ -1410,6 +1452,18 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// it behind requireCSRF with the rest of the state-changing group.
 			r.Post("/hooks/{id}/test", s.handleTestHook)
 			r.Get("/hooks/{id}/deliveries", s.handleHookDeliveries)
+
+			// S3-compatible storage targets for recording offload. See
+			// storage.go. The secret is write-only; a read token gets the
+			// read-safe view. The Test route is in the session-only group with
+			// /automod/test, because it unseals the secret and sends it out.
+			r.Get("/storage/targets", s.handleListStorageTargets)
+			r.Post("/storage/targets", s.handleCreateStorageTarget)
+			r.Get("/storage/targets/{id}", s.handleGetStorageTarget)
+			r.Put("/storage/targets/{id}", s.handleUpdateStorageTarget)
+			r.Delete("/storage/targets/{id}", s.handleDeleteStorageTarget)
+			// Retry now: failed and stuck items go back in the queue.
+			r.Post("/storage/targets/{id}/retry", s.handleRetryStorageTarget)
 
 			// Scheduling. /runs is what the last sweep did, which is where a
 			// skipped occurrence gets explained.
@@ -1503,6 +1557,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
+			// Cross-platform analytics (Wave 4 #4): the live audience picture
+			// and the per-stream reports. Reads of what the sampler stored --
+			// none calls a platform -- and every one is denied to a read
+			// token; see analytics.go and readScopeDeniedPatterns.
+			r.Get("/analytics/live", s.handleAnalyticsLive)
+			r.Get("/analytics/streams", s.handleAnalyticsStreams)
+			r.Get("/analytics/streams/{id}", s.handleAnalyticsStream)
 
 			// Facebook's broadcast surface, scoped to a DESTINATION rather
 			// than an account: one account can hold several broadcasts, and
@@ -2180,6 +2241,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	// UX Council A48: automod's review list carries each flagged message's
 	// text, which is the scrollback again under another name.
 	"/api/v1/chat/flags": true,
+	// Wave 4 #4: cross-platform analytics is admin-only. The reports name the
+	// stream's top chatters -- who spoke, a cut of the scrollback -- and every
+	// analytics read names the operator's connected channels. The scrape gives
+	// a read-scoped dashboard the counts without either.
+	"/api/v1/analytics/live":         true,
+	"/api/v1/analytics/streams":      true,
+	"/api/v1/analytics/streams/{id}": true,
 }
 
 // obsScopePatterns is everything an "obs" token may reach: one route, keyed by

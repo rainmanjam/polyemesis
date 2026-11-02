@@ -64,4 +64,9 @@ export const LIMITS = {
    *  minutes of chasing one dead endpoint, because the backoff behind it
    *  climbs to a 30s ceiling. */
   alertRetryAttempts: { min: 1, max: 10 } as Bound,
+
+  /** The audience sampler (Wave 4 #4): seconds between samples while on air,
+   *  and days a finished stream's report is kept. internal/analytics. */
+  analyticsIntervalSeconds: { min: 30, max: 900 } as Bound,
+  analyticsRetentionDays: { min: 1, max: 3650 } as Bound,
 } as const;

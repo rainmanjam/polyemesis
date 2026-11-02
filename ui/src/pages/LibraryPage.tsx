@@ -49,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/AppLayout";
 import { api, ApiError } from "@/lib/api";
 import { MediaUploads } from "@/components/MediaUploads";
+import { OffloadBadge } from "@/components/OffloadStatus";
 import { bytes, shortDuration, timestamp } from "@/lib/format";
 import { CaptionExportLinks } from "@/components/CaptionExportLinks";
 import { cn } from "@/lib/utils";
@@ -946,6 +947,7 @@ function RecordingList({
                   {j.state === "running" ? ` ${Math.round(j.progress * 100)}%` : ""}
                 </Badge>
               ))}
+              <OffloadBadge recordingId={r.id} offload={r.offload} onChanged={onChanged} />
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">

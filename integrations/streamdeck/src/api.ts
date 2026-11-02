@@ -13,6 +13,7 @@ import type {
   StopImpact,
   TrackLevel,
   TrackLevelResult,
+  ViewersLive,
 } from "./model.js";
 import { MAX_GAIN } from "./trackLevel.js";
 
@@ -185,6 +186,29 @@ export class PolyemesisClient {
       state: c.state,
       total: typeof c.total === "number" ? c.total : 0,
       endsAt: c.endsAt,
+    };
+  }
+
+  /**
+   * The cross-platform viewer count (Wave 4 #4). Needs an admin token: the server refuses a read token with
+   * 403, because the answer names the operator's connected channels. A count a platform did not report is
+   * left absent, never read as 0.
+   */
+  async analyticsLive(): Promise<ViewersLive> {
+    const body = await this.call<Record<string, unknown>>("GET", "/analytics/live");
+    if (!body || typeof body !== "object" || typeof body.onAir !== "boolean") {
+      throw new ApiError("malformed", 200, "the audience was not the expected shape");
+    }
+    const count = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+    const readings = Array.isArray(body.readings) ? body.readings : [];
+    return {
+      enabled: body.enabled === true,
+      onAir: body.onAir,
+      total: count(body.total),
+      partial: body.partial === true,
+      readings: readings
+        .filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && typeof (r as { platform?: unknown }).platform === "string")
+        .map((r) => ({ platform: r.platform as string, viewers: count(r.viewers) })),
     };
   }
 

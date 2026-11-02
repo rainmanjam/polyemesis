@@ -30,6 +30,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/logtz"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
+	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
@@ -340,7 +341,9 @@ func run(h *hooks) error {
 	// operator switches it on: the runner watches the stored settings, so
 	// enabling it does not need a restart. Nothing in the streaming path can
 	// block on or fail because of a broker.
-	stopMQTT := startMQTT(ctx, log, store, box, eng, version)
+	// Filled in once the API server (which owns the analytics sampler) exists.
+	mqttAudience := &mqttAudienceFeed{}
+	stopMQTT := startMQTT(ctx, log, store, box, eng, version, mqttAudience)
 	defer func() {
 		// Its own bounded context, because this runs after ctx is cancelled and
 		// a clean `offline` is exactly what must still get out. Without it the
@@ -405,6 +408,13 @@ func run(h *hooks) error {
 	go hookd.Run(ctx)
 	eng.SetHooks(hookd)
 
+	// S3-compatible offload of finished recordings. Started unconditionally
+	// and inert until an operator adds a storage target; it re-reads the
+	// targets every pass. State changes ride the existing recordings event,
+	// so the Library refreshes without a catalogue entry of its own.
+	offloader := offload.New(log, store, box, eng.Recordings(), func() { bus.Publish(events.TypeRecordings, nil) })
+	go offloader.Run(ctx)
+
 	// The real-time events API (GET /api/v1/events). One hub for the whole
 	// process, like the webhook dispatcher and for the same reason: an event id
 	// and a replay ring belong to the install, not to one programme. Engines
@@ -456,6 +466,7 @@ func run(h *hooks) error {
 		AutomodBudget:          automodBudget,
 		AutomodSecondaryBudget: automodSecondaryBudget,
 		Hooks:                  hookd,
+		Offload:                offloader,
 		Stream:                 streamHub,
 		OverlayGate:            overlayGate,
 		OBS:                    obsBridge,
@@ -469,6 +480,17 @@ func run(h *hooks) error {
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
+	// FIRST, before any loop below can call YouTube: every YouTube Data API
+	// call internal/oauth makes -- title push, compliance, the lifecycle and
+	// its startup reconciliation, preannounce, recurring, rollover -- is
+	// charged to the configured client's one shared allowance (bound in
+	// api.New), the one chat paces against. A startup sweep that ran first
+	// would spend quota nobody counted. TestTheQuotaMeterIsInstalledBefore-
+	// AnyLoopCanCallYouTube holds the order.
+	api.InstallYouTubeMeter(srv)
+	// A stuck offload item is raised on the alert, webhook and events-stream
+	// paths the server owns, which exist only now.
+	offloader.SetStuckHook(srv.OffloadStuck)
 	// After api.New, which is what installs the server as the bridge's
 	// Actions: a fact OBS reports before that would be recorded and acted on
 	// by nothing.
@@ -500,6 +522,11 @@ func run(h *hooks) error {
 	// Planned rollover (#19): the sweep that replaces a live broadcast before its platform cap, and the OBS scene
 	// trigger it listens to. See internal/api/rollover.go.
 	go srv.RolloverLoop(ctx)
+	// Cross-platform analytics (Wave 4 #4): samples each connected account's
+	// viewer count while a destination is running. Asks nothing off air, and
+	// charges YouTube reads to the chat quota pacer. See internal/api/analytics.go.
+	go srv.AnalyticsLoop(ctx)
+	mqttAudience.set(srv.AudienceState)
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())

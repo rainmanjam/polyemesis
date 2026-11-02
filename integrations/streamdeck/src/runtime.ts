@@ -16,10 +16,12 @@ import type {
   StopImpact,
   TrackLevel,
   TrackLevelResult,
+  ViewersLive,
 } from "./model.js";
 import { clip, inspectorLines, KEY_STATE, stateFor, stopTitle, titleFor } from "./render.js";
 import { barFor, formatDb, gainForDb, gainToDb, stepDb } from "./trackLevel.js";
 import { nodeTransport } from "./transport.js";
+import { viewersFace, viewersFeedback } from "./viewers.js";
 
 // The plugin's brain. It owns pairing, the status cache, admin gating and what
 // each key does on press. It knows nothing about the Stream Deck SDK: a
@@ -43,7 +45,9 @@ export type SurfaceKind =
   | "trackMute"
   | "trackGain"
   | "poll"
-  | "dump";
+  | "dump"
+  /** The cross-platform viewer count (Wave 4 #4). A key and a dial: the same action on either. */
+  | "viewers";
 
 /**
  * Kinds that confirm by a held press. A stop ends broadcasts for good; a preset can restart destinations;
@@ -204,6 +208,9 @@ export class Runtime {
   /** The running chat poll: null when none runs, undefined until read. */
   private pollState: PollSummary | null | undefined;
   private pollError: ApiError | undefined;
+  /** The audience sampler's last answer, read each tick while a viewers key or dial is on the deck. */
+  private viewersState: ViewersLive | undefined;
+  private viewersError: ApiError | undefined;
   private recordingError: ApiError | undefined;
   /** Preset id to name, from the install's list. Undefined until a read succeeds. */
   private presetNames: Map<string, string> | undefined;
@@ -260,6 +267,8 @@ export class Runtime {
     this.recordingError = undefined;
     this.pollState = undefined;
     this.pollError = undefined;
+    this.viewersState = undefined;
+    this.viewersError = undefined;
     this.presetNames = undefined;
     this.presetRefused.clear();
     this.destLevels = undefined;
@@ -363,6 +372,7 @@ export class Runtime {
       await this.refreshStatuses();
       if (this.hasKind("record")) await this.refreshRecording();
       if (this.hasKind("poll")) await this.refreshPoll();
+      if (this.hasKind("viewers")) await this.refreshViewers();
       if (this.hasKind("preset")) await this.loadPresetNames();
       if (LEVEL_KINDS.some((k) => this.hasKind(k))) await this.refreshLevels();
       await this.paintAll();
@@ -396,6 +406,26 @@ export class Runtime {
       this.pollState = undefined;
       const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
       this.pollError = apiErr;
+      if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
+        this.connection = undefined;
+        this.connectionError = apiErr;
+      }
+    }
+  }
+
+  /**
+   * The viewer count: install-wide, one read of the sampler's last tick (the server asks no platform for
+   * it). A read token is refused with 403; that is kept and painted as needs-admin, not as a fault.
+   */
+  private async refreshViewers(): Promise<void> {
+    try {
+      this.viewersState = await this.client!.analyticsLive();
+      this.viewersError = undefined;
+    } catch (err) {
+      // The old count is not evidence of the present: a key must not keep showing it.
+      this.viewersState = undefined;
+      const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
+      this.viewersError = apiErr;
       if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
         this.connection = undefined;
         this.connectionError = apiErr;
@@ -466,7 +496,7 @@ export class Runtime {
     const scopes = new Set<string>();
     // Install-wide and preset keys do not read a programme's status. Their own reads answer for them.
     for (const s of this.surfaces.values()) {
-      if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || LEVEL_KINDS.includes(s.kind)) continue;
+      if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || s.kind === "viewers" || LEVEL_KINDS.includes(s.kind)) continue;
       scopes.add(scopeKey(s.settings.sourceId));
     }
     for (const key of scopes) {
@@ -538,6 +568,7 @@ export class Runtime {
         await this.paintGainDial(s);
         continue;
       }
+      if (s.kind === "viewers") await this.paintViewersDial(s);
       await this.paintFace(s, this.faceFor(s));
     }
   }
@@ -548,6 +579,7 @@ export class Runtime {
     if (this.connectionError || !this.connection) return this.unavailableFace();
     if (s.kind === "record") return this.recordFace();
     if (s.kind === "poll") return this.pollFace(s);
+    if (s.kind === "viewers") return this.viewersKeyFace(s);
     if (s.kind === "preset") return this.presetFace(s);
     if (s.kind === "trackMute") return this.trackMuteFace(s);
     const key = scopeKey(s.settings.sourceId);
@@ -705,6 +737,36 @@ export class Runtime {
     if (!pollSpecOf(s)) return { tone: "unbound", label: "streamdeck.poll.notSet" };
     const face = this.adminGated("streamdeck.poll.start");
     return face.tone === "idle" ? { ...face, detail: s.settings.pollQuestion } : face;
+  }
+
+  /**
+   * The viewers key: the total, or one platform's count, from the sampler. "Not reported" when nothing
+   * reported -- never 0 -- and needs-admin on a read token, which the server refuses this read.
+   */
+  private viewersKeyFace(s: Surface): KeyFace {
+    if (this.viewersError?.kind === "forbidden") return { tone: "needsAdmin", label: "streamdeck.auth.needsAdmin" };
+    if (this.viewersError || !this.viewersState) return this.unavailableFace(this.viewersError);
+    return viewersFace(this.viewersState, s.settings.viewersPlatform, this.locale);
+  }
+
+  /**
+   * The viewers dial's touch strip. A key's adapter ignores feedback and a dial's ignores states and titles,
+   * so the runtime paints both on a viewers surface and each device takes its half. Sent only on a change.
+   */
+  private async paintViewersDial(s: Surface): Promise<void> {
+    const title = t(this.locale, "streamdeck.viewers.total");
+    const word = (key: StreamDeckKey) => ({ title, value: t(this.locale, key), indicator: 0 });
+    let payload: { title: string; value: string; indicator: number };
+    if (!this.client) payload = word("streamdeck.auth.notPaired");
+    else if (this.viewersError?.kind === "forbidden") payload = word("streamdeck.auth.needsAdmin");
+    else if (this.connectionError || !this.connection || this.viewersError || !this.viewersState) {
+      const err = this.viewersError ?? this.connectionError;
+      payload = word(err ? authKeyFor(err) : "streamdeck.auth.unreachable");
+    } else payload = viewersFeedback(this.viewersState, s.settings.viewersPlatform, this.locale);
+    const signature = JSON.stringify(payload);
+    if (this.lastMeterPaint.get(s.id) === signature) return;
+    this.lastMeterPaint.set(s.id, signature);
+    await s.setFeedback(payload);
   }
 
   /** The preset key: unbound, no ingest after a refused apply, needs admin, or ready to hold. */

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -77,6 +78,11 @@ type mqttRunner struct {
 	version string
 	started time.Time
 
+	// audience is the analytics sampler's viewer picture, nil until the API
+	// server exists (it is built after this runner starts) and for a test that
+	// does not set it. See mqttAudienceFeed.
+	audience *mqttAudienceFeed
+
 	mu     sync.Mutex
 	client *mqtt.Client
 	cancel context.CancelFunc
@@ -91,10 +97,11 @@ type mqttRunner struct {
 // It never returns an error, and never blocks on the broker. A publisher that
 // refused to start because the broker was rebooting would take the rest of
 // polyemesis with it, and the entire design assumes the link comes and goes.
-func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets.Box, eng *engine.Manager, version string) func(context.Context) {
+func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets.Box, eng *engine.Manager, version string,
+	audience *mqttAudienceFeed) func(context.Context) {
 	r := &mqttRunner{
 		log: log, store: store, box: box, engines: managerEngines(eng),
-		version: version, started: time.Now(),
+		version: version, started: time.Now(), audience: audience,
 	}
 	go r.watch(ctx)
 	return r.stop
@@ -311,6 +318,8 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 		},
 	}
 
+	snap.Storage = r.storageStates(now)
+
 	for _, e := range engines {
 		st := e.Status()
 		src := mqtt.SourceState{
@@ -406,5 +415,81 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 		item.State = src
 		snap.Sources = append(snap.Sources, item)
 	}
+	snap.Audience = r.audience.state()
 	return snap
+}
+
+// mqttAudienceFeed hands the analytics sampler's picture to the MQTT runner.
+//
+// A holder rather than a function argument because of construction order: the
+// runner starts before the API server that owns the sampler is built, and the
+// feed is filled in once it is. Until then -- and on a runner a test built
+// without one -- the snapshot carries no audience and nothing is published
+// for it.
+type mqttAudienceFeed struct {
+	fn atomic.Pointer[func() *mqtt.AudienceState]
+}
+
+func (f *mqttAudienceFeed) set(fn func() *mqtt.AudienceState) {
+	if f != nil {
+		f.fn.Store(&fn)
+	}
+}
+
+func (f *mqttAudienceFeed) state() *mqtt.AudienceState {
+	if f == nil {
+		return nil
+	}
+	fn := f.fn.Load()
+	if fn == nil {
+		// A feed that is coming but not set yet: an empty, off-air picture
+		// rather than nil. Discovery is published once per connection, and a
+		// nil here on the first connect would leave the viewer sensors out
+		// until the next reconnect.
+		return &mqtt.AudienceState{At: time.Now()}
+	}
+	return (*fn)()
+}
+
+// storageStates counts each offload target's uploads by state for telemetry.
+// A store that cannot answer leaves the section out for this tick rather than
+// publishing zeros that would read as "nothing stuck".
+func (r *mqttRunner) storageStates(now time.Time) []mqtt.StorageState {
+	if r.store == nil {
+		return nil
+	}
+	targets, err := r.store.ListStorageTargets(nil)
+	if err != nil {
+		r.log.Warn("mqtt: storage targets unavailable", "err", err)
+		return nil
+	}
+	items, err := r.store.ListOffloadItems()
+	if err != nil {
+		r.log.Warn("mqtt: offload state unavailable", "err", err)
+		return nil
+	}
+	out := make([]mqtt.StorageState, 0, len(targets))
+	for _, t := range targets {
+		// Keyed by ID, not by name: two targets may share a name, and their
+		// retained topics and Home Assistant entities must not collide. The
+		// name stays the friendly name.
+		st := mqtt.StorageState{ID: t.ID, Name: t.Name, Slug: mqtt.StorageSlug(t.ID), Enabled: t.Enabled, At: now}
+		for _, it := range items {
+			if it.TargetID != t.ID {
+				continue
+			}
+			switch it.State {
+			case db.OffloadStuck:
+				st.Stuck++
+			case db.OffloadFailed:
+				st.Failed++
+			case db.OffloadVerified:
+				st.Verified++
+			default:
+				st.Pending++
+			}
+		}
+		out = append(out, st)
+	}
+	return out
 }

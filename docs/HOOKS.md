@@ -38,6 +38,7 @@ script needed.
 | `rollover.failed` | a planned rollover stopped. The old broadcast is still on air unless `reason` says it could not be ended; no ingest was touched | none |
 | `destination.held` | polyemesis stopped retrying a destination after repeated quick rejections; nothing happens until Retry | none; after the `down` if the destination was live |
 | `failover.switched` | a programme's source selector put a different source on air (primary, backup, playlist or slate). `reason` says why; a switch caused by a degraded link starts `degraded: ` and names what was measured | none |
+| `offload.stuck` | offload stopped retrying a file on a storage target after too many consecutive failures, or at once on an error waiting cannot cure (a refused credential, a missing bucket); nothing moves until Retry now. `reason` names the target, the file and the last error | none |
 
 "Delivering" is read from FFmpeg's own progress report: the destination's
 output time has to advance between two sweeps, two seconds apart. A destination

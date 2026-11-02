@@ -12,6 +12,9 @@ import type {
   CaptionExportSource,
   RenditionConcern,
   AccountStats,
+  AnalyticsLive,
+  AnalyticsReport,
+  AnalyticsStream,
   AcmePreflight,
   ApiToken,
   TokenScope,
@@ -112,6 +115,10 @@ import type {
   HookTestResult,
   HookCreated,
   HookTrigger,
+  StorageTarget,
+  StorageTargetBody,
+  StorageTargetList,
+  StorageTestResult,
   VersionInfo,
   UpgradePlan,
   UpgradeResult,
@@ -1523,6 +1530,15 @@ export const api = {
    *  zero when the platform declined to say; see AccountStats. */
   accountStats: (id: number) =>
     get<AccountStats>(`/platforms/accounts/${id}/stats`),
+  /** Cross-platform analytics (Wave 4 #4). Admin-only: a read token is
+   *  refused. None of these calls a platform; they read what the sampler kept. */
+  analytics: {
+    live: () => get<AnalyticsLive>("/analytics/live"),
+    streams: () => get<{ streams: AnalyticsStream[] }>("/analytics/streams"),
+    report: (id: number) => get<AnalyticsReport>(`/analytics/streams/${id}`),
+    /** A download link, not XHR: the browser saves the file. */
+    csvUrl: (id: number) => `${BASE}/analytics/streams/${id}?format=csv`,
+  },
   /** A full-page navigation, not XHR: the platform's consent screen owns the tab. */
   connectUrl: (platform: string) => `${BASE}/oauth/${platform}/start`,
 
@@ -1541,6 +1557,20 @@ export const api = {
       ),
     deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
   },
+
+  storage: {
+    list: () => get<StorageTargetList>("/storage/targets"),
+    create: (body: StorageTargetBody) => post<StorageTarget>("/storage/targets", body),
+    update: (id: number, body: StorageTargetBody) => put<StorageTarget>(`/storage/targets/${id}`, body),
+    remove: (id: number) => del<{ status: string }>(`/storage/targets/${id}`),
+    /** Session-only: put, get and delete a small object; reports the failed step. */
+    test: (body: StorageTargetBody) => post<StorageTestResult>("/storage/targets/test", body),
+    /** Retry now: every failed or stuck item on the target. */
+    retry: (id: number) => post<{ retried: number }>(`/storage/targets/${id}/retry`, {}),
+  },
+  /** Retry now for one recording's failed or stuck uploads, on every target. */
+  retryRecordingOffload: (id: number) =>
+    post<{ retried: number }>(`/library/recordings/${id}/offload/retry`, {}),
 };
 
 /** What the install says about a token: see GET /auth/connection. */

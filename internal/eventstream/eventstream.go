@@ -80,6 +80,7 @@ const (
 	TypeBroadcastFault        Type = Type(hooks.TriggerBroadcastFault)
 	TypeRecordingStarted      Type = "recording.started"
 	TypeRecordingStopped      Type = "recording.stopped"
+	TypeOffloadStuck          Type = Type(hooks.TriggerOffloadStuck)
 	TypeChatMessage           Type = "chat.message"
 	TypeChatRetract           Type = "chat.retract"
 	TypeChatModeration        Type = "chat.moderation"
@@ -174,6 +175,7 @@ var catalogue = []Spec{
 	// Recording.
 	{TypeRecordingStarted, TopicRecording, Granted, "A programme's recorder started writing.", nil},
 	{TypeRecordingStopped, TopicRecording, Granted, "A programme's recorder stopped writing; reason says why.", nil},
+	{TypeOffloadStuck, TopicRecording, Granted, "Offload stopped retrying a file on a storage target; nothing moves until Retry now. reason names the target, the file and the last error.", nil},
 
 	// Chat is content a viewer wrote, under their name, and a moderation action
 	// names the viewer it was taken against. A read token is refused the REST

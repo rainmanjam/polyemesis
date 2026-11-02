@@ -313,29 +313,33 @@ var leafSensitivity = map[string]sensitivity{
 	"settings.listeners.srtlaPort":            sPublic,
 	"settings.chatCommands.enabled":           sPublic,
 	"settings.chatCommands.sourceId":          sPublic,
-	"settings.ingest.srt.passphrase":          sSecret,
-	"settings.listeners.rtmpPort":             sPublic,
-	"settings.listeners.srtPort":              sPublic,
-	"settings.logging.maxFileMb":              sPublic,
-	"settings.logging.maxFiles":               sPublic,
-	"settings.logging.persistProcessLogs":     sPublic,
-	"settings.meters.enabled":                 sPublic,
-	"settings.meters.intervalMs":              sPublic,
-	"settings.mqtt.brokerUrl":                 sMasked,
-	"settings.mqtt.clientId":                  sPublic,
-	"settings.mqtt.discovery":                 sPublic,
-	"settings.mqtt.enabled":                   sPublic,
-	"settings.mqtt.hasPassword":               sPublic,
-	"settings.mqtt.instance":                  sPublic,
-	"settings.mqtt.intervalSeconds":           sPublic,
-	"settings.mqtt.keepAliveSeconds":          sPublic,
-	"settings.mqtt.prefix":                    sPublic,
-	"settings.mqtt.tlsSkipVerify":             sPublic,
-	"settings.mqtt.username":                  sPublic,
-	"settings.playout.allowCrossOrigin":       sPublic,
-	"settings.playout.audioKbps":              sPublic,
-	"settings.playout.dvrWindowSeconds":       sPublic,
-	"settings.playout.enabled":                sPublic,
+	// Wave 4 #4: the audience sampler's switch and two numbers.
+	"settings.analytics.enabled":          sPublic,
+	"settings.analytics.intervalSeconds":  sPublic,
+	"settings.analytics.retentionDays":    sPublic,
+	"settings.ingest.srt.passphrase":      sSecret,
+	"settings.listeners.rtmpPort":         sPublic,
+	"settings.listeners.srtPort":          sPublic,
+	"settings.logging.maxFileMb":          sPublic,
+	"settings.logging.maxFiles":           sPublic,
+	"settings.logging.persistProcessLogs": sPublic,
+	"settings.meters.enabled":             sPublic,
+	"settings.meters.intervalMs":          sPublic,
+	"settings.mqtt.brokerUrl":             sMasked,
+	"settings.mqtt.clientId":              sPublic,
+	"settings.mqtt.discovery":             sPublic,
+	"settings.mqtt.enabled":               sPublic,
+	"settings.mqtt.hasPassword":           sPublic,
+	"settings.mqtt.instance":              sPublic,
+	"settings.mqtt.intervalSeconds":       sPublic,
+	"settings.mqtt.keepAliveSeconds":      sPublic,
+	"settings.mqtt.prefix":                sPublic,
+	"settings.mqtt.tlsSkipVerify":         sPublic,
+	"settings.mqtt.username":              sPublic,
+	"settings.playout.allowCrossOrigin":   sPublic,
+	"settings.playout.audioKbps":          sPublic,
+	"settings.playout.dvrWindowSeconds":   sPublic,
+	"settings.playout.enabled":            sPublic,
 	// A source id, not a credential: it names which programme the public page
 	// serves and the console shows the same fact on every source row.
 	"settings.playout.sourceId":                    sPublic,
@@ -419,6 +423,26 @@ var leafSensitivity = map[string]sensitivity{
 	"source.prevTokenUntil":                        sPublic,
 	"source.token":                                 sSecret,
 	"source.updatedAt":                             sPublic,
+	"storageTarget.id":                             sPublic,
+	"storageTarget.name":                           sPublic,
+	"storageTarget.provider":                       sPublic,
+	"storageTarget.endpoint":                       sPublic, // validateStorageTarget refuses userinfo, so the URL carries no credential
+	"storageTarget.bucket":                         sPublic,
+	"storageTarget.region":                         sPublic,
+	"storageTarget.prefixTemplate":                 sPublic,
+	"storageTarget.pathStyle":                      sPublic,
+	"storageTarget.accessKeyId":                    sSecret, // names the cloud account; the secret itself is json:"-" and never a leaf
+	"storageTarget.hasSecret":                      sPublic,
+	"storageTarget.secretUnreadable":               sPublic,
+	"storageTarget.offloadStems":                   sPublic,
+	"storageTarget.offloadTranscripts":             sPublic,
+	"storageTarget.offloadClips":                   sPublic,
+	"storageTarget.verifyDownload":                 sPublic,
+	"storageTarget.allowPrivateTarget":             sPublic,
+	"storageTarget.enabled":                        sPublic,
+	"storageTarget.maxAttempts":                    sPublic,
+	"storageTarget.createdAt":                      sPublic,
+	"storageTarget.updatedAt":                      sPublic,
 }
 
 // TestEveryStoredLeafIsClassified is the ratchet.
@@ -430,9 +454,10 @@ var leafSensitivity = map[string]sensitivity{
 func TestEveryStoredLeafIsClassified(t *testing.T) {
 	found := map[string]bool{}
 	for prefix, rt := range map[string]reflect.Type{
-		"settings":    reflect.TypeOf(db.Settings{}),
-		"destination": reflect.TypeOf(db.Destination{}),
-		"source":      reflect.TypeOf(db.Source{}),
+		"settings":      reflect.TypeOf(db.Settings{}),
+		"destination":   reflect.TypeOf(db.Destination{}),
+		"source":        reflect.TypeOf(db.Source{}),
+		"storageTarget": reflect.TypeOf(db.StorageTarget{}),
 	} {
 		leafWalk(t, rt, prefix, func(path string) {
 			found[path] = true
@@ -476,6 +501,8 @@ func TestReadSafeViewsScrubEverySecretLeaf(t *testing.T) {
 			func(v any) any { return readSafeDestination(v.(db.Destination)) }},
 		{"source", func() any { return db.Source{} },
 			func(v any) any { return readSafeSource(v.(db.Source)) }},
+		{"storageTarget", func() any { return db.StorageTarget{} },
+			func(v any) any { return readSafeStorageTarget(v.(db.StorageTarget)) }},
 	}
 
 	// One sentinel per public leaf, distinct from the credential one, so a
@@ -649,6 +676,11 @@ func TestScrubbingIsNotAWholesaleWipe(t *testing.T) {
 			name:  "source",
 			build: func() any { return populated[db.Source](t) },
 			scrub: func(v any) any { return readSafeSource(v.(db.Source)) },
+		},
+		{
+			name:  "storageTarget",
+			build: func() any { return populated[db.StorageTarget](t) },
+			scrub: func(v any) any { return readSafeStorageTarget(v.(db.StorageTarget)) },
 		},
 	}
 

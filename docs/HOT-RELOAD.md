@@ -26,14 +26,14 @@ stale; the table cannot.**
 
 | Class | What it means | Fields |
 |---|---|---|
-| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 116 |
+| `live` | Applied to whatever is already running. No process replaced, no viewer or platform connection dropped | 119 |
 | `respawn` | Baked into a child's argv. The named signature notices and the child is replaced | 51 |
 | `rebind` | A bound socket. Stopped and rebound; every publisher on it reconnects | 2 |
 | `on_demand` | Read at the moment it is needed. Nothing holds a copy, so nothing has to be applied | 10 |
 | `next_start` | Stored now, acted on at the next process start | **0** |
 
 Most of what an operator can change already applies without touching a process.
-The 51 are the ones that reach an FFmpeg argv. The five classes hold 179 fields
+The 51 are the ones that reach an FFmpeg argv. The five classes hold 182 fields
 between them, and `reload.go` is the authority for every number on this page.
 
 ### Applied live — nothing is replaced
@@ -50,6 +50,7 @@ between them, and `reload.go` is the authority for every number on this page.
 | `playout.{maxDiskMb,sessionIdleSeconds,maxSessions}` | Pushed into the playout manager before any variant is touched |
 | `chat.*`, `automod.*`, `alerts.*`, `mqtt.*` | Applied out of band by the settings handler |
 | `postProd.*` | Pushed into the jobs governor by the jobs policy endpoint; retention is re-read by the purge sweep |
+| `analytics.*` | Re-read by the audience sampler at every tick; a changed interval sets the next wait |
 
 ### Read on demand — nothing holds a copy
 

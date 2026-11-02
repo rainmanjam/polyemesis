@@ -93,6 +93,10 @@ func (t *Topics) Status() string { return t.join("status") }
 // State is the host-level snapshot.
 func (t *Topics) State() string { return t.join("state") }
 
+// Audience is the cross-platform viewer count. Install-wide, beside state:
+// chat and its audience belong to the install, not to one programme.
+func (t *Topics) Audience() string { return t.join("audience") }
+
 // Source is one programme's state topic.
 func (t *Topics) Source(source string) string {
 	return t.join("source", source, "state")
@@ -114,6 +118,11 @@ func (t *Topics) Dest(source, dest string) string {
 // Rendition is one shared encode's state topic.
 func (t *Topics) Rendition(source, rend string) string {
 	return t.join("source", source, "rendition", rend, "state")
+}
+
+// Storage is one offload storage target's state topic.
+func (t *Topics) Storage(target string) string {
+	return t.join("storage", target, "state")
 }
 
 // All is the wildcard matching everything under this instance. Used by the

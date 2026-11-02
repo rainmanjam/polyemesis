@@ -105,8 +105,10 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["delay-dump", "destination", "failover", "go-live", "meter", "poll", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
+      ["delay-dump", "destination", "failover", "go-live", "meter", "poll", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute", "viewers"],
     );
+    // The viewers action (Wave 4 #4) is one action for a key and a dial.
+    expect(manifest.Actions.find((a) => a.UUID.endsWith(".viewers"))!.Controllers).toEqual(["Keypad", "Encoder"]);
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".track-gain"))!.Controllers).toEqual(["Encoder"]);
   });
@@ -153,6 +155,7 @@ describe("translations are used", () => {
       "src/plugin.ts",
       "src/config.ts",
       "src/runtime.ts",
+      "src/viewers.ts",
       "com.polyemesis.streamdeck.sdPlugin/ui/pi.html",
       "com.polyemesis.streamdeck.sdPlugin/ui/pi.js",
     ]

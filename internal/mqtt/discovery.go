@@ -115,6 +115,24 @@ func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
 		Icon:          "mdi:broadcast",
 	})
 
+	if snap.Audience != nil {
+		addAudience(add, t.topics.Audience())
+	}
+
+	// One sensor per offload storage target: its stuck uploads, the count
+	// that needs a person.
+	for _, st := range snap.Storage {
+		add("storage_"+st.Slug+"_stuck", haComponent{
+			Platform:      "sensor",
+			Name:          st.Name + " stuck uploads",
+			StateTopic:    t.topics.Storage(st.Slug),
+			ValueTemplate: "{{ value_json.stuck }}",
+			StateClass:    "measurement",
+			EntityCat:     "diagnostic",
+			Icon:          "mdi:cloud-alert",
+		})
+	}
+
 	for _, s := range snap.Sources {
 		src := s.State.Slug
 		topic := t.topics.Source(src)
@@ -167,4 +185,34 @@ func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
 		return err
 	}
 	return t.pub.Publish(ctx, t.topics.Discovery(), QoS, true, body)
+}
+
+// audienceEntities is the fixed set of viewer sensors: one per platform
+// polyemesis reads a count from, the public player, and the total. Fixed
+// rather than derived from the snapshot because discovery is published once
+// per connection, and a platform that first reports mid-stream must already
+// have its entity.
+var audienceEntities = []struct{ key, name, field string }{
+	{"viewers_total", "Viewers", "total"},
+	{"viewers_youtube", "YouTube viewers", "youtube"},
+	{"viewers_twitch", "Twitch viewers", "twitch"},
+	{"viewers_kick", "Kick viewers", "kick"},
+	{"viewers_player", "Public player viewers", "player"},
+}
+
+// addAudience adds the viewer sensors. The value template answers None for an
+// absent key, which Home Assistant shows as "unknown": a count that was not
+// reported must not default to 0 here any more than anywhere else.
+func addAudience(add func(string, haComponent), topic string) {
+	for _, e := range audienceEntities {
+		add(e.key, haComponent{
+			Platform:      "sensor",
+			Name:          e.name,
+			StateTopic:    topic,
+			ValueTemplate: "{{ value_json." + e.field + " if value_json." + e.field + " is defined else None }}",
+			UnitOfMeas:    "viewers",
+			StateClass:    "measurement",
+			Icon:          "mdi:account-group",
+		})
+	}
 }

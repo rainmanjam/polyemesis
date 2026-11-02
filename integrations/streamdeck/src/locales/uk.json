@@ -128,5 +128,15 @@
   "streamdeck.pi.issues": "Поточні проблеми",
   "streamdeck.pi.noIssues": "Для цього призначення нічого не повідомлено.",
   "streamdeck.issue.verticalHalfFailed": "Вертикальна частина: збій",
-  "streamdeck.issue.verticalHalfDown": "Вертикальну частину зупинено"
+  "streamdeck.issue.verticalHalfDown": "Вертикальну частину зупинено",
+  "streamdeck.viewers.total": "Глядачі",
+  "streamdeck.viewers.notReported": "Немає даних",
+  "streamdeck.viewers.offAir": "Не в ефірі",
+  "streamdeck.viewers.off": "Аналітику вимкнено",
+  "streamdeck.viewers.player": "Плеєр",
+  "streamdeck.pi.viewersPlatform": "Показувати",
+  "streamdeck.pi.viewersTotal": "Усього, усі платформи",
+  "streamdeck.pi.viewersHint": "Аудиторія всіх платформ, заміряється, поки працює напрямок. Число, яке платформа не повідомляє, показується як «Немає даних», а не 0. Потрібен токен адміністратора.",
+  "streamdeck.pi.viewersPlayer": "Публічний плеєр",
+  "streamdeck.viewers.partial": "Неповні"
 }

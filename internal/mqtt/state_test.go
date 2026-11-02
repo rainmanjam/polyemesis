@@ -40,10 +40,18 @@ var approvedFields = map[string][]string{
 		"id", "name", "slug", "consumers", "running", "width", "height",
 		"fps", "codec", "encoder", "bitrateKbps", "error", "at",
 	},
+	// Wave 4 #4: counts only. No account name, no channel id, no chatter.
+	"AudienceState": {
+		"onAir", "total", "reported", "youtube", "twitch", "kick", "player", "at",
+	},
+	// Counts and a name only: never the endpoint, bucket or access key id.
+	"StorageState": {
+		"id", "name", "slug", "enabled", "stuck", "failed", "pending", "verified", "at",
+	},
 }
 
 func TestPayloadsCarryOnlyApprovedFields(t *testing.T) {
-	types := []any{HostState{}, SourceState{}, DestState{}, RenditionState{}}
+	types := []any{HostState{}, SourceState{}, DestState{}, RenditionState{}, AudienceState{}, StorageState{}}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)
 		want := map[string]bool{}
@@ -84,7 +92,7 @@ func TestNoPayloadFieldIsNamedLikeACredential(t *testing.T) {
 		"url", "key", "token", "secret", "password", "passphrase",
 		"credential", "auth", "streamkey", "ingest",
 	}
-	for _, v := range []any{HostState{}, SourceState{}, DestState{}, RenditionState{}} {
+	for _, v := range []any{HostState{}, SourceState{}, DestState{}, RenditionState{}, AudienceState{}} {
 		rt := reflect.TypeOf(v)
 		for i := range rt.NumField() {
 			name, _, _ := strings.Cut(rt.Field(i).Tag.Get("json"), ",")

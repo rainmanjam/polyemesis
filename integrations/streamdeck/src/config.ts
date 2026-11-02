@@ -44,6 +44,21 @@ export interface KeySettings {
    * whole 1 to 900 rather than reading it as absent, because absent is the larger dump.
    */
   dumpSeconds?: number;
+  /**
+   * The viewers key's platform (Wave 4 #4): one of VIEWER_PLATFORMS, or absent for the total across every
+   * platform. Anything else is dropped, so a stale value shows the total rather than a platform that is gone.
+   */
+  viewersPlatform?: ViewerPlatform;
+}
+
+/** The platforms a viewers key may show alone. "player" is the install's own public player. */
+export const VIEWER_PLATFORMS = ["youtube", "twitch", "kick", "player"] as const;
+export type ViewerPlatform = (typeof VIEWER_PLATFORMS)[number];
+
+export function viewerPlatform(raw: unknown): ViewerPlatform | undefined {
+  return typeof raw === "string" && (VIEWER_PLATFORMS as readonly string[]).includes(raw)
+    ? (raw as ViewerPlatform)
+    : undefined;
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -131,5 +146,6 @@ export function keySettings(raw: Record<string, unknown> | undefined): KeySettin
     // True or absent, never false: an unticked box is the plain stop.
     cutTail: raw?.cutTail === true ? true : undefined,
     dumpSeconds: dumpSeconds(raw?.dumpSeconds),
+    viewersPlatform: viewerPlatform(raw?.viewersPlatform),
   };
 }

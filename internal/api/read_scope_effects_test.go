@@ -90,6 +90,14 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"everything one viewer has said"},
 		{http.MethodGet, "/api/v1/chat/flags", nil,
 			"automod's review list carries each flagged message's text, under its author's name"},
+
+		// Wave 4 #4: cross-platform analytics is admin-only.
+		{http.MethodGet, "/api/v1/analytics/live", nil,
+			"the live audience rows name the operator's connected channels"},
+		{http.MethodGet, "/api/v1/analytics/streams", nil,
+			"the stream list carries each broadcast's title"},
+		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
+			"the report names the stream's top chatters"},
 	}
 
 	// EVERY denied pattern must appear above. The deny list is subtractive, so

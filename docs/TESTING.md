@@ -426,6 +426,38 @@ Against the host binary. These thirteen are the `acceptance` matrix in
 ./scripts/acceptance-mqtt.sh         # retained telemetry, against a real broker
 ```
 
+### S3 offload (local only)
+
+```bash
+./scripts/acceptance-s3.sh           # offload against a real S3-compatible server (RustFS)
+```
+
+**Run it before merging any change to offload** -- `internal/objstore` or
+`internal/offload` -- and
+paste its output into the pull request. It is excluded from CI on purpose: the
+tests carry the `s3integration` build tag, so `go test ./...` (and `make
+check`, and every CI job) never compiles them, and no CI job or required check
+runs the script.
+
+The script starts RustFS 1.0.4 in Docker, pinned by digest
+(`docker.io/rustfs/rustfs` or the `quay.io/rustfs/rustfs` mirror with
+`POLYEMESIS_RUSTFS_REGISTRY=quay.io`), waits until its S3 API answers, and runs
+seven cases: the SigV4 round trip with a key that needs escaping, the server
+refusing a body that is not the signed digest, a wrong secret refused and never
+echoed, multipart with its composite ETag and abort, a mirror
+upload verified with the local file untouched, a multipart upload resumed across
+a restart, and the Test button.
+Without an endpoint the tests fail rather than skip, so a green run is a run
+that reached the server.
+
+The tests are generic. To run them against any other S3-compatible server,
+export `POLYEMESIS_S3_ENDPOINT`, `POLYEMESIS_S3_ACCESS_KEY`,
+`POLYEMESIS_S3_SECRET_KEY` and, as needed, `POLYEMESIS_S3_BUCKET`,
+`POLYEMESIS_S3_REGION`, `POLYEMESIS_S3_PATH_STYLE=0` and
+`POLYEMESIS_S3_CREATE_BUCKET=1`, then run the script (it uses that server
+instead of starting RustFS) or the `go test -tags s3integration -run Live`
+line inside it.
+
 And one that is deliberately not in the matrix:
 
 ```bash

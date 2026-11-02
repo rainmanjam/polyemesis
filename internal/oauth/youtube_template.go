@@ -133,7 +133,7 @@ func requestRaw(ctx context.Context, method, endpoint, accessToken, contentType 
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}

@@ -128,5 +128,15 @@
   "streamdeck.pi.issues": "Masalah saat ini",
   "streamdeck.pi.noIssues": "Tidak ada laporan untuk tujuan ini.",
   "streamdeck.issue.verticalHalfFailed": "Bagian vertikal gagal",
-  "streamdeck.issue.verticalHalfDown": "Bagian vertikal berhenti"
+  "streamdeck.issue.verticalHalfDown": "Bagian vertikal berhenti",
+  "streamdeck.viewers.total": "Penonton",
+  "streamdeck.viewers.notReported": "Tidak dilaporkan",
+  "streamdeck.viewers.offAir": "Tidak mengudara",
+  "streamdeck.viewers.off": "Analitik mati",
+  "streamdeck.viewers.player": "Pemutar",
+  "streamdeck.pi.viewersPlatform": "Tampilkan",
+  "streamdeck.pi.viewersTotal": "Total, semua platform",
+  "streamdeck.pi.viewersHint": "Penonton di semua platform, dicatat selama ada tujuan yang berjalan. Jumlah yang tidak dilaporkan platform tampil sebagai Tidak dilaporkan, bukan 0. Perlu token admin.",
+  "streamdeck.pi.viewersPlayer": "Pemutar publik",
+  "streamdeck.viewers.partial": "Sebagian"
 }

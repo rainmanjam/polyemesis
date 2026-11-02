@@ -60,6 +60,9 @@ type libraryRecording struct {
 	// row can show "transcribing, 40%" instead of an inert button the user
 	// presses a second time.
 	ActiveJobs []jobView `json:"activeJobs,omitempty"`
+	// Offload is this recording's upload state per storage target, absent
+	// when no target has seen it.
+	Offload *recordingOffload `json:"offload,omitempty"`
 }
 
 // librarySession is one broadcast, as the primary unit of the page.
@@ -188,8 +191,11 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("library: recording metadata unavailable", "err", err)
 		meta = map[int64]db.RecordingMeta{}
 	}
+	offIdx := s.loadOffloadIndex()
 	for _, rec := range ungrouped {
-		out.Ungrouped = append(out.Ungrouped, s.recordingView(rec, dir, meta, transcribed, sessionOf, nil))
+		v := s.recordingView(rec, dir, meta, transcribed, sessionOf, nil)
+		v.Offload = offIdx.view(rec.Filename)
+		out.Ungrouped = append(out.Ungrouped, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -320,10 +326,12 @@ func (s *Server) expand(recs []db.Recording) []libraryRecording {
 		names[rec.ID] = rec.Filename
 	}
 
+	offIdx := s.loadOffloadIndex()
 	out := make([]libraryRecording, 0, len(recs))
 	for _, rec := range recs {
-		out = append(out, s.recordingView(rec, dir, meta, transcribed, sessionOf,
-			s.activeJobsFor(rec.ID, names)))
+		v := s.recordingView(rec, dir, meta, transcribed, sessionOf, s.activeJobsFor(rec.ID, names))
+		v.Offload = offIdx.view(rec.Filename)
+		out = append(out, v)
 	}
 	return out
 }

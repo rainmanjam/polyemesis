@@ -128,5 +128,15 @@
   "streamdeck.pi.issues": "Problemi attuali",
   "streamdeck.pi.noIssues": "Nessuna segnalazione per questa destinazione.",
   "streamdeck.issue.verticalHalfFailed": "Metà verticale in errore",
-  "streamdeck.issue.verticalHalfDown": "Metà verticale ferma"
+  "streamdeck.issue.verticalHalfDown": "Metà verticale ferma",
+  "streamdeck.viewers.total": "Spettatori",
+  "streamdeck.viewers.notReported": "Non comunicato",
+  "streamdeck.viewers.offAir": "Fuori onda",
+  "streamdeck.viewers.off": "Analisi disattivata",
+  "streamdeck.viewers.player": "Player",
+  "streamdeck.pi.viewersPlatform": "Mostra",
+  "streamdeck.pi.viewersTotal": "Totale, tutte le piattaforme",
+  "streamdeck.pi.viewersHint": "Il pubblico su tutte le piattaforme, campionato mentre una destinazione è attiva. Un numero che una piattaforma non comunica appare come Non comunicato, mai 0. Serve un token amministratore.",
+  "streamdeck.pi.viewersPlayer": "Player pubblico",
+  "streamdeck.viewers.partial": "Parziale"
 }

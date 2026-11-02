@@ -83,6 +83,20 @@
     <p class="hint" data-i18n="streamdeck.pi.pollHint"></p>
   </section>
 
+  <!-- The viewers key or dial (Wave 4 #4): the total, or one platform. Platform
+       names are brands and stay as written; the rest comes from strings.js. -->
+  <section class="block" id="block-viewers" hidden>
+    <label for="viewersPlatform" data-i18n="streamdeck.pi.viewersPlatform">Show</label>
+    <select id="viewersPlatform">
+      <option value="" data-i18n="streamdeck.pi.viewersTotal">Total, every platform</option>
+      <option value="youtube">YouTube</option>
+      <option value="twitch">Twitch</option>
+      <option value="kick">Kick</option>
+      <option value="player" data-i18n="streamdeck.pi.viewersPlayer">Public player</option>
+    </select>
+    <p class="hint" data-i18n="streamdeck.pi.viewersHint"></p>
+  </section>
+
   <!-- A destination key shows one issue and a "+N" badge; a key cannot be
        hovered, so every current issue is listed here. Filled by pi.js with
        textContent only: the lines carry server words. -->

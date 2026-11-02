@@ -1,6 +1,9 @@
 package mqtt
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // The payloads published on the retained topics.
 //
@@ -139,3 +142,45 @@ type RenditionState struct {
 	Error       string    `json:"error,omitempty"`
 	At          time.Time `json:"at"`
 }
+
+// AudienceState is the cross-platform viewer picture (Wave 4 #4), published on
+// one install-wide topic.
+//
+// A COUNT THAT WAS NOT REPORTED IS ABSENT, NOT 0. Each platform field is a
+// pointer and omitempty: a hidden YouTube count or a Kick streamer who opted
+// out leaves the key out, and the Home Assistant entity reads "unknown" rather
+// than graphing an audience of none. Total is the sum of what did report,
+// absent when nothing did. The public player is its own field and is counted
+// in Total once.
+//
+// One field per platform rather than a map, because a map would let a new key
+// reach a retained topic without passing approvedFields.
+type AudienceState struct {
+	OnAir    bool      `json:"onAir"`
+	Total    *int      `json:"total,omitempty"`
+	Reported int       `json:"reported"`
+	YouTube  *int      `json:"youtube,omitempty"`
+	Twitch   *int      `json:"twitch,omitempty"`
+	Kick     *int      `json:"kick,omitempty"`
+	Player   *int      `json:"player,omitempty"`
+	At       time.Time `json:"at"`
+}
+
+// StorageState is one offload storage target: how many of its uploads are in
+// each state. Stuck is the number an operator acts on -- uploads offload has
+// stopped retrying until somebody presses Retry now.
+type StorageState struct {
+	ID       int64     `json:"id"`
+	Name     string    `json:"name"`
+	Slug     string    `json:"slug"`
+	Enabled  bool      `json:"enabled"`
+	Stuck    int       `json:"stuck"`
+	Failed   int       `json:"failed"`
+	Pending  int       `json:"pending"`
+	Verified int       `json:"verified"`
+	At       time.Time `json:"at"`
+}
+
+// StorageSlug is a storage target's topic segment: its ID, because target
+// names are not unique.
+func StorageSlug(id int64) string { return "target-" + strconv.FormatInt(id, 10) }

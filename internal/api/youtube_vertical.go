@@ -300,34 +300,14 @@ func (s *Server) verticalHalfIsLive(ids ...int64) bool {
 	return false
 }
 
-// verticalChargeOK spends one unit of the YouTube allowance for a read made on the operator's
-// behalf, through the same budget the chat poll uses. It answers true when no chat connection
-// paces against an allowance, because then there is no budget to protect.
-func (s *Server) verticalChargeOK(accountRef string) bool {
+// verticalChargeOK spends one unit of the install's YouTube allowance for a read made on the
+// operator's behalf -- the same allowance the chat poll paces against -- and reports whether it
+// fitted above the send reserve. Always charged, chat or no chat (PR #950 review, #1).
+func (s *Server) verticalChargeOK() bool {
 	if s.verticalChargeQuota != nil {
 		return s.verticalChargeQuota(chat.QuotaCostListLiveStreams)
 	}
-	if s.chat == nil {
-		return true
-	}
-	a, ok := s.chat.Adapter(db.PlatformYouTube, accountRef)
-	if !ok {
-		return true
-	}
-	// An interface, not the concrete *chat.YouTubeAdapter: the hub hands back whatever it
-	// attached, and a wrapped adapter that still paces must be charged too. A type assertion on
-	// the concrete type would fail silently and charge nothing.
-	c, ok := a.(quotaChargeable)
-	if !ok {
-		return true
-	}
-	return c.ChargeQuota(chat.QuotaCostListLiveStreams)
-}
-
-// quotaChargeable is what the vertical read needs from a chat adapter that paces against a
-// YouTube allowance. chat.YouTubeAdapter satisfies it; an adapter that does not pace does not.
-type quotaChargeable interface {
-	ChargeQuota(cost int) bool
+	return s.ytQuota().Charge(chat.QuotaCostListLiveStreams)
 }
 
 // handleYouTubeVerticalStatus reads the vertical half's health by stream id. It is paced and
@@ -390,14 +370,15 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	if !s.verticalChargeOK(acct.AccountRef) {
+	if !s.verticalChargeOK() {
 		// Refused before the call, so nothing reached YouTube. Not remembered: the next request
 		// after the budget frees up should read. The sub-row says why in words, not a bare error.
 		view.HealthError = "the YouTube quota is nearly spent; the vertical status is paused until it resets"
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	health, err := vp.VerticalStreamHealth(ctx, acct.AccessToken, pair.VerticalStreamID)
+	// Charged above; the request meter must not count it again.
+	health, err := vp.VerticalStreamHealth(oauth.WithQuotaCharged(ctx), acct.AccessToken, pair.VerticalStreamID)
 	read := verticalHealthRead{at: now, health: health}
 	if err != nil {
 		read.err = alerts.Redact(err.Error())

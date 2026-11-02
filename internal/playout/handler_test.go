@@ -3,8 +3,12 @@ package playout
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -71,26 +75,75 @@ func TestHandlerServesOnlyMediaAndManifestFiles(t *testing.T) {
 	}
 }
 
-func TestHandlerNeverCachesAPlaylistAndOnlyBrieflyCachesASegment(t *testing.T) {
+// TestTheOriginCachePolicy pins Cache-Control for every kind of file, for an
+// open stream (shared caches allowed) and for everything else (a token, a
+// session, or no decision at all -- which must fail closed to private).
+func TestTheOriginCachePolicy(t *testing.T) {
 	tests := []struct {
-		name string
-		path string
-		want string
+		name         string
+		path         string
+		open, closed string
 	}{
-		{"a playlist is rewritten every segment", "/playout/hd/" + MediaPlaylist, "no-store"},
-		{"a manifest is rewritten every segment", "/playout/hd/" + DASHManifest, "no-store"},
-		// Segment names restart at zero when a muxer does, so a long cache
-		// would serve one run's bytes under the next run's URL.
-		{"a segment is cached for one segment", "/playout/hd/seg_00000.ts", "public, max-age=4"},
+		// The playlist moves every segment: one second in a CDN for an open
+		// stream, never stored for a gated one.
+		{"media playlist", "/playout/hd/" + MediaPlaylist, "public, max-age=1", "no-store"},
+		{"dash manifest", "/playout/hd/" + DASHManifest, "public, max-age=1", "no-store"},
+		// HLS segment names are numbered from the wall clock (args.go), so a
+		// name is never reused: immutable.
+		// never reused: a browser keeps it a year, a shared cache only for the
+		// seekable window (here 4s x 6 segments) and never as immutable, so
+		// withdrawing publication reaches a CDN edge within that window.
+		{"hls segment", "/playout/hd/seg_00000.ts", "public, max-age=31536000, s-maxage=24", "private, max-age=31536000, immutable"},
+		// DASH init and chunk names still restart with the muxer.
+		{"dash init segment", "/playout/hd/init-0.m4s", "public, max-age=4", "private, max-age=4"},
+		{"captions", "/playout/captions.vtt", "public, max-age=4", "private, max-age=4"},
 	}
-	_, handler := servedHarness(t, func(s *db.PlayoutSettings) { s.SegmentSeconds = 4 })
+	_, handler := servedHarness(t, func(s *db.PlayoutSettings) { s.SegmentSeconds = 4; s.PlaylistSegments = 6; s.DVRWindowSeconds = 0 })
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			w := get(t, handler, tc.path, "10.0.0.1")
-			if got := w.Header().Get("Cache-Control"); got != tc.want {
-				t.Fatalf("cache-control = %q, want %q", got, tc.want)
-			}
-		})
+		for _, scope := range []struct {
+			name string
+			ctx  func(*http.Request) *http.Request
+			want string
+		}{
+			{"open stream", func(r *http.Request) *http.Request { return r.WithContext(WithSharedCache(r.Context(), true)) }, tc.open},
+			{"gated stream", func(r *http.Request) *http.Request { return r.WithContext(WithSharedCache(r.Context(), false)) }, tc.closed},
+			{"no decision", func(r *http.Request) *http.Request { return r }, tc.closed},
+		} {
+			t.Run(tc.name+"/"+scope.name, func(t *testing.T) {
+				r := scope.ctx(httptest.NewRequest(http.MethodGet, tc.path, nil))
+				r.RemoteAddr = "10.0.0.1:1"
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != http.StatusOK {
+					t.Fatalf("status %d", w.Code)
+				}
+				if got := w.Header().Get("Cache-Control"); got != scope.want {
+					t.Fatalf("cache-control = %q, want %q", got, scope.want)
+				}
+			})
+		}
+	}
+}
+
+// Every served file carries a strong validator, and a revalidation with it
+// is a 304 with no body -- what lets a CDN or player refresh a playlist
+// cheaply.
+func TestServedFilesCarryAnETagAndRevalidateTo304(t *testing.T) {
+	_, handler := servedHarness(t, nil)
+	for _, p := range []string{"/playout/hd/seg_00000.ts", "/playout/hd/" + MediaPlaylist} {
+		w := get(t, handler, p, "10.0.0.1")
+		etag := w.Header().Get("ETag")
+		if !strings.HasPrefix(etag, `"`) || len(etag) < 5 {
+			t.Fatalf("%s: etag %q", p, etag)
+		}
+		r := httptest.NewRequest(http.MethodGet, p, nil)
+		r.RemoteAddr = "10.0.0.1:1"
+		r.Header.Set("If-None-Match", etag)
+		w2 := httptest.NewRecorder()
+		handler.ServeHTTP(w2, r)
+		if w2.Code != http.StatusNotModified || w2.Body.Len() != 0 {
+			t.Fatalf("%s: revalidation %d with %d bytes", p, w2.Code, w2.Body.Len())
+		}
 	}
 }
 
@@ -287,5 +340,103 @@ func TestHandlerToleratesBeingMountedWithoutATrailingSlash(t *testing.T) {
 	handler := h.Handler("/playout")
 	if w := get(t, handler, "/playout/hd/"+MediaPlaylist, "10.0.0.1"); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestASharedCacheIsBoundedByTheSeekableWindow(t *testing.T) {
+	cases := []struct {
+		s    db.PlayoutSettings
+		want int
+	}{
+		{db.PlayoutSettings{SegmentSeconds: 4, PlaylistSegments: 6}, 24},
+		{db.PlayoutSettings{SegmentSeconds: 4, PlaylistSegments: 6, DVRWindowSeconds: 3600}, 3600},
+		{db.PlayoutSettings{SegmentSeconds: 2}, 2},
+	}
+	for _, tc := range cases {
+		if got := sharedWindow(tc.s); got != tc.want {
+			t.Errorf("sharedWindow(%+v) = %d, want %d", tc.s, got, tc.want)
+		}
+		cc := cacheControl(".ts", maxSegmentAge(tc.s), sharedWindow(tc.s), true)
+		if strings.Contains(cc, "immutable") || !strings.Contains(cc, "s-maxage="+strconv.Itoa(tc.want)) {
+			t.Errorf("shared segment %q", cc)
+		}
+	}
+}
+
+// Review #18: every refusal from the media handler is no-store -- a missing
+// file, an unserved type, playout switched off.
+func TestEveryRefusalFromTheMediaHandlerIsNoStore(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	for _, p := range []string{"/playout/hd/seg_99999.ts", "/playout/hd/secrets.txt", "/playout/nothing/index.m3u8"} {
+		w := get(t, handler, p, "10.0.0.1")
+		if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d %q", p, w.Code, w.Header().Get("Cache-Control"))
+		}
+	}
+	off := h.Settings()
+	off.Enabled = false
+	if err := h.Reconcile(off, h.resolve); err != nil {
+		t.Fatal(err)
+	}
+	if w := get(t, handler, "/playout/hd/seg_00000.ts", "10.0.0.1"); w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("disabled: %d %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+}
+
+// Review #19: a playlist rewritten to the same length within one mtime tick
+// gets a new ETag, so a revalidation is never answered 304 for changed text.
+func TestAPlaylistETagFollowsItsContentNotItsMtime(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	path := filepath.Join(h.dir, "hd", MediaPlaylist)
+	at := time.Unix(1_800_000_000, 0)
+	write := func(body string) string {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(path, at, at)
+		return get(t, handler, "/playout/hd/"+MediaPlaylist, "10.0.0.1").Header().Get("ETag")
+	}
+	a := write("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:1\n")
+	b := write("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:2\n")
+	if a == "" || a == b {
+		t.Fatalf("same-length, same-mtime rewrite kept ETag %q", a)
+	}
+}
+
+// Sonar S2083/S6549: nothing outside the playout directory is ever read,
+// hashed or served -- not by "..", not by an encoded traversal, not by a
+// leading slash, not through a symlink that points out -- and every such
+// request is the same 404 with no-store as a file that does not exist.
+func TestNothingOutsideThePlayoutDirectoryIsReadOrDisclosed(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	outside := filepath.Join(filepath.Dir(h.dir), "outside-secret.m3u8")
+	if err := os.WriteFile(outside, []byte("#EXTM3U\n# outside the root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(h.dir, "hd", "link.m3u8")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"/playout/../outside-secret.m3u8",
+		"/playout/hd/../../outside-secret.m3u8",
+		"/playout/hd/..%2f..%2foutside-secret.m3u8",
+		"/playout/%2e%2e/outside-secret.m3u8",
+		"/playout//" + strings.TrimPrefix(outside, "/"),
+		"/playout/hd/link.m3u8",
+	} {
+		w := get(t, handler, p, "10.0.0.1")
+		if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" ||
+			w.Header().Get("ETag") != "" || strings.Contains(w.Body.String(), "outside the root") {
+			t.Errorf("%s: %d cc=%q etag=%q body=%q", p, w.Code, w.Header().Get("Cache-Control"), w.Header().Get("ETag"), w.Body.String())
+		}
+	}
+	// And a real file inside still serves, with Range.
+	r := httptest.NewRequest(http.MethodGet, "/playout/hd/seg_00000.ts", nil)
+	r.RemoteAddr = "10.0.0.1:1"
+	r.Header.Set("Range", "bytes=0-9")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusPartialContent || w.Body.Len() != 10 {
+		t.Fatalf("range inside the root: %d %d bytes", w.Code, w.Body.Len())
 	}
 }

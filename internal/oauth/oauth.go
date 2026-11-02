@@ -629,7 +629,7 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 		req.Header.Set(k, v)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -637,13 +637,13 @@ func getJSON(ctx context.Context, endpoint, accessToken string, headers map[stri
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return fmt.Errorf("the platform rejected the access token (401); reconnect the account")
+		return newStatusError(resp, body, "the platform rejected the access token (401); reconnect the account")
 	}
 	if resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("the platform refused the request (403): %s", snippet(body))
+		return newStatusError(resp, body, fmt.Sprintf("the platform refused the request (403): %s", snippet(body)))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body))
+		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
 	return json.Unmarshal(body, out)
 }
@@ -663,14 +663,14 @@ func postJSON(ctx context.Context, endpoint, accessToken string, payload any, he
 		req.Header.Set(k, v)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body))
+		return newStatusError(resp, body, fmt.Sprintf("%s returned %d: %s", endpoint, resp.StatusCode, snippet(body)))
 	}
 	if out == nil {
 		return nil
