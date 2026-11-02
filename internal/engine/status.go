@@ -116,6 +116,9 @@ type DestStatus struct {
 	// the row has one, so a stopped card can still say "Delayed 30 s".
 	Delay        *DelayStatus `json:"delay,omitempty"`
 	DelaySeconds int          `json:"delaySeconds,omitempty"`
+	// DelayDumpSeconds is the destination's default dump (see
+	// db.Destination), so the card's Dump dialog can start from it.
+	DelayDumpSeconds int `json:"delayDumpSeconds,omitempty"`
 	// RenditionID is the shared encode this destination reads, nil for
 	// passthrough. RenditionName is its label, empty for passthrough, so the
 	// dashboard can group destinations under the encode they share.
@@ -518,6 +521,8 @@ func (e *Engine) Status() Status {
 				RenditionID:  row.RenditionID,
 				SourceID:     row.SourceID,
 				DelaySeconds: row.DelaySeconds,
+
+				DelayDumpSeconds: row.DelayDumpSeconds,
 			}
 			if row.RenditionID != nil {
 				ds.RenditionName = names[*row.RenditionID]
@@ -677,7 +682,7 @@ func (e *Engine) Status() Status {
 		}
 		st.Destinations = append(st.Destinations, DestStatus{
 			ID: id, Name: dr.row.Name, Kind: dr.row.Kind, Platform: dr.row.Platform,
-			SourceID: dr.row.SourceID, DelaySeconds: dr.row.DelaySeconds,
+			SourceID: dr.row.SourceID, DelaySeconds: dr.row.DelaySeconds, DelayDumpSeconds: dr.row.DelayDumpSeconds,
 			Summary: dr.compiled.Summary, Process: procStatus(dr.proc),
 			BackupProcess: procStatus(dr.backup), Delay: delayStatusOf(dr.delay),
 			Warnings: []string{"this destination was deleted while its delayed tail was " +

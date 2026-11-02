@@ -25,7 +25,10 @@
 //
 // So RAM never exceeds MemBudget + 2*SegmentBytes (the sealed segments, the
 // tail being filled, and one head read back from disk), and disk never exceeds
-// DiskBudget. Both are asserted by the tests, not just claimed here.
+// DiskBudget. Both are asserted by the tests, not just claimed here. While a
+// dump waits for its resume keyframe, the audio held for the resume adds at
+// most another 2*SegmentBytes across all PIDs, plus one PES per PID under
+// trimHoldLimit (splice.go, audioCacheBudget).
 //
 // # Overflow keeps the delay, not the data
 //
@@ -93,6 +96,10 @@ type segment struct {
 	// dropped or unreadable segment is still counted exactly.
 	packets int64
 	bytes   int64
+	// pushedPackets and pushedBytes are everything ever appended, read or not:
+	// a cut point records them, so a dump knows exactly what it removes.
+	pushedPackets int64
+	pushedBytes   int64
 }
 
 // Buffer is the segment queue. Safe for one pusher and one popper at once.
@@ -108,6 +115,24 @@ type Buffer struct {
 	failed error // the last spill error, for the status line
 	// dropped mirrors stats.DroppedPackets for Dropped's lock-free read.
 	dropped atomic.Uint64
+
+	// THE DUMP (splice.go). shift is the programme time dumped so far: data
+	// arriving now is stamped now-shift, so it is released delay-shift later.
+	shift time.Duration
+	// lastAt is the stamp of the newest record, which no later one precedes.
+	lastAt int64
+	// lastDumpAt is the stamp at the last splice: "since the last dump point".
+	lastDumpAt int64
+	ts         tsState
+	marks      []*mark
+	scratch    []byte
+	ob         []byte
+	// lastNow is the latest time Push or Pop was given: the clock Stats
+	// asks Dump's question on.
+	lastNow time.Time
+	// gopEst is the last GOP measured from cut points.
+	gopEst  time.Duration
+	resumed atomic.Pointer[DumpTicket]
 }
 
 // Stats is a snapshot of the buffer.
@@ -130,6 +155,13 @@ type Stats struct {
 	// the bounds tests assert against.
 	PeakMemBytes  int64 `json:"peakMemBytes"`
 	PeakDiskBytes int64 `json:"peakDiskBytes"`
+	// Dumped is the programme time dumped so far: the delay the audience has
+	// is Delay less this.
+	Dumped time.Duration `json:"dumped"`
+	// Dumping is true while a dump waits for its resume keyframe.
+	Dumping bool `json:"dumping"`
+	// Spliceable is true when the stream has a keyframe a dump could cut at.
+	Spliceable bool `json:"spliceable"`
 }
 
 // NewBuffer makes an empty buffer. epoch anchors the stored arrival times.
@@ -145,7 +177,9 @@ func NewBuffer(delay time.Duration, lim Limits, epoch time.Time) (*Buffer, error
 	if lim.DiskBudget > 0 && lim.Dir == "" {
 		return nil, errors.New("delayline: a disk budget needs a spill directory")
 	}
-	return &Buffer{delay: delay, lim: lim, epoch: epoch}, nil
+	b := &Buffer{delay: delay, lim: lim, epoch: epoch}
+	b.ts = newTSState()
+	return b, nil
 }
 
 // Delay is what the buffer holds data back by.
@@ -159,11 +193,28 @@ func (b *Buffer) Push(now time.Time, pkt []byte) error {
 	if len(pkt) > maxDatagram {
 		return ErrTooLarge
 	}
-	at := int64(now.Sub(b.epoch))
-	need := recordHeader + len(pkt)
-
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.sawLocked(now)
+	if tsAligned(pkt) {
+		b.pushTSLocked(now, pkt)
+		return nil
+	}
+	// Not whole TS packets. Buffered as it came -- unless a splice is waiting
+	// or has happened: then it cannot be rewritten to match what is around it,
+	// and it is dropped rather than put a stale timestamp on the air. On a TS
+	// relay such a datagram is damage anyway.
+	if b.ts.resync || b.ts.offset != 0 || len(b.ts.rw) > 0 {
+		return nil
+	}
+	b.appendLocked(b.atLocked(now), pkt)
+	return nil
+}
+
+// appendLocked stores one record and says where: its segment, its offset in
+// it, and the segment's pushed counts before it.
+func (b *Buffer) appendLocked(at int64, pkt []byte) (seg *segment, off int, pushedPackets, pushedBytes int64) {
+	need := recordHeader + len(pkt)
 	if b.tail != nil && len(b.tail.data)+need > cap(b.tail.data) {
 		b.sealLocked()
 	}
@@ -172,6 +223,8 @@ func (b *Buffer) Push(now time.Time, pkt []byte) error {
 		b.queue = append(b.queue, b.tail)
 		b.stats.MemBytes += int64(cap(b.tail.data))
 	}
+	seg, off = b.tail, len(b.tail.data)
+	pushedPackets, pushedBytes = seg.pushedPackets, seg.pushedBytes
 	var hdr [recordHeader]byte
 	binary.BigEndian.PutUint64(hdr[:8], uint64(at))
 	binary.BigEndian.PutUint16(hdr[8:], uint16(len(pkt)))
@@ -181,10 +234,13 @@ func (b *Buffer) Push(now time.Time, pkt []byte) error {
 	b.tail.size = int64(len(b.tail.data))
 	b.tail.packets++
 	b.tail.bytes += int64(len(pkt))
+	b.tail.pushedPackets++
+	b.tail.pushedBytes += int64(len(pkt))
 	b.stats.Packets++
 	b.stats.Bytes += int64(len(pkt))
+	b.lastAt = at
 	b.peaksLocked()
-	return nil
+	return seg, off, pushedPackets, pushedBytes
 }
 
 // sealLocked closes the tail and decides where it lives.
@@ -296,6 +352,7 @@ func (b *Buffer) Pop(now time.Time, out [][]byte) [][]byte {
 	limit := int64(now.Sub(b.epoch) - b.delay)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.sawLocked(now)
 	for len(b.queue) > 0 {
 		h := b.queue[0]
 		if h.first > limit {
@@ -375,6 +432,12 @@ func (b *Buffer) Stats() Stats {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	st := b.stats
+	st.Dumped = b.shift
+	st.Dumping = b.ts.resync
+	// Dump's own rule: a cut point at least the margin plus one GOP behind
+	// the head. The newest is the one to ask about -- marks are in order --
+	// and it is never behind the last dump point, so a default dump agrees.
+	st.Spliceable = b.spliceableLocked()
 	if len(b.queue) > 0 {
 		newest := b.queue[len(b.queue)-1].last
 		st.Span = time.Duration(newest - b.queue[0].first)
@@ -419,6 +482,14 @@ func (b *Buffer) Discard() {
 	}
 	b.queue = nil
 	b.tail = nil
+	b.marks = nil
+	b.ts.cand = nil
+	b.abandonDumpLocked()
+	b.ts.resync, b.ts.holding, b.ts.held, b.ts.splice = false, false, nil, nil
+	clear(b.ts.split)
+	clear(b.ts.pending)
+	b.ts.waiting = nil
+	b.ts.audio, b.ts.audioBytes = nil, 0
 	b.stats.MemBytes = 0
 	b.stats.DiskBytes = 0
 	b.stats.Packets = 0

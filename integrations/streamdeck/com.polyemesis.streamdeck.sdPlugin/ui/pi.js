@@ -21,6 +21,8 @@
   const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
   const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
   const isPollAction = () => actionType === "com.polyemesis.streamdeck.poll";
+  const isDumpAction = () => actionType === "com.polyemesis.streamdeck.delay-dump";
+  const isStopOneAction = () => actionType === "com.polyemesis.streamdeck.stop-destination";
   const isViewersAction = () => actionType === "com.polyemesis.streamdeck.viewers";
 
   const $ = (id) => document.getElementById(id);
@@ -77,6 +79,14 @@
     const track = savedTrack === "" ? Number.NaN : Number(savedTrack);
     if (isTrackAction() && Number.isSafeInteger(track) && track >= 0) payload.track = track;
     if ($("presetId").value) payload.presetId = $("presetId").value;
+    // Saved only when ticked: an unticked box is the plain stop, and the plugin reads absent as that.
+    if (isStopOneAction() && $("cutTail").checked) payload.cutTail = true;
+    if (isDumpAction()) {
+      // Empty is "since the last dump point". Anything typed is saved as typed text, so the key can refuse
+      // a value that is not a whole 1 to 900 instead of reading it as empty, which would dump more.
+      const seconds = $("dumpSeconds").value.trim();
+      if (seconds !== "") payload.dumpSeconds = seconds;
+    }
     savedPresetId = $("presetId").value;
     if (isPollAction()) {
       // The poll key's poll: what it posts into every chat when pressed. The plugin drops blank
@@ -220,6 +230,9 @@
     if (typeof settings.pollQuestion === "string") $("pollQuestion").value = settings.pollQuestion;
     if (Array.isArray(settings.pollOptions)) $("pollOptions").value = settings.pollOptions.join("\n");
     if (typeof settings.pollDuration === "number") $("pollDuration").value = String(settings.pollDuration);
+    $("cutTail").checked = settings.cutTail === true;
+    const seconds = settings.dumpSeconds;
+    $("dumpSeconds").value = typeof seconds === "number" || typeof seconds === "string" ? String(seconds) : "";
     $("viewersPlatform").value = typeof settings.viewersPlatform === "string" ? settings.viewersPlatform : "";
     if (isTrackAction()) {
       savedDestinationId = typeof settings.destinationId === "number" ? String(settings.destinationId) : "";
@@ -300,7 +313,12 @@
     pluginUUID = uuid;
     actionType = action.action;
     actionContext = action.context;
-    $("block-destination").hidden = actionType !== "com.polyemesis.streamdeck.destination" && actionType !== "com.polyemesis.streamdeck.stop-destination";
+    $("block-destination").hidden =
+      actionType !== "com.polyemesis.streamdeck.destination" && !isStopOneAction() && !isDumpAction();
+    // The dump key's destination may be left empty: it then dumps every delayed destination of the programme.
+    $("hint-dump-all").hidden = !isDumpAction();
+    $("block-cut").hidden = !isStopOneAction();
+    $("block-dump").hidden = !isDumpAction();
     $("block-track").hidden = !isTrackAction();
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
@@ -324,6 +342,8 @@
     fields.forEach((f) => $(f).addEventListener("change", saveGlobal));
     $("sourceId").addEventListener("change", onSourceChange);
     $("destinationId").addEventListener("change", saveAction);
+    $("cutTail").addEventListener("change", saveAction);
+    $("dumpSeconds").addEventListener("change", saveAction);
     $("trackDestination").addEventListener("change", onDestinationChange);
     $("track").addEventListener("change", onTrackChange);
     $("presetId").addEventListener("change", saveAction);
