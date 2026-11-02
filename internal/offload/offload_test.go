@@ -232,6 +232,7 @@ type fixture struct {
 	svc   *Service
 	now   time.Time
 	mems  map[int64]*memStore
+	n     int
 	logs  *bytes.Buffer
 }
 
@@ -260,10 +261,11 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-func (f *fixture) target(mode string, keep int) int64 {
+func (f *fixture) target() int64 {
 	f.t.Helper()
-	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "t" + mode, Provider: "minio", Endpoint: "http://h.test",
-		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: mode, KeepLocalHours: keep, Enabled: true})
+	f.n++
+	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "t" + strconv.Itoa(f.n), Provider: "minio",
+		Endpoint: "http://h.test", Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -319,7 +321,7 @@ func (f *fixture) local(name string) bool {
 
 func TestMirrorUploadsAFinishedSegmentVerifiesItAndKeepsTheLocalFile(t *testing.T) {
 	f := newFixture(t)
-	id := f.target(db.OffloadMirror, 0)
+	id := f.target()
 	old := f.segment(5*time.Hour, "old segment", true)
 	f.segment(time.Minute, "newest, still being written", true)
 	f.svc.Pass(context.Background())
@@ -341,7 +343,7 @@ func TestMirrorUploadsAFinishedSegmentVerifiesItAndKeepsTheLocalFile(t *testing.
 
 func TestTheFileBeingWrittenIsNeverUploaded(t *testing.T) {
 	f := newFixture(t)
-	id := f.target(db.OffloadMirror, 0)
+	id := f.target()
 	f.segment(10*time.Hour, "finished", true)
 	unmeasured := f.segment(5*time.Hour, "not yet probed", false)
 	newest := f.segment(3*time.Hour, "newest by start time", true)
@@ -370,7 +372,7 @@ func TestAChecksumMismatchIsAFailureAndNeverEvicts(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			id := f.target(db.OffloadMove, 0)
+			id := f.target()
 			tc.set(f.mems[id])
 			name := f.segment(5*time.Hour, "precious footage", true)
 			f.segment(time.Minute, "newest", true)
@@ -385,7 +387,7 @@ func TestAChecksumMismatchIsAFailureAndNeverEvicts(t *testing.T) {
 			if !it.NextAttemptAt.After(f.now) {
 				t.Fatal("no retry was scheduled")
 			}
-			if !f.local(name) || it.Evicted {
+			if !f.local(name) {
 				t.Fatal("a recording whose upload did not verify was deleted")
 			}
 		})
@@ -395,7 +397,7 @@ func TestAChecksumMismatchIsAFailureAndNeverEvicts(t *testing.T) {
 func TestADownloadVerifyCatchesAStoreThatLiesInHead(t *testing.T) {
 	f := newFixture(t)
 	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "dl", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
-		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMove, VerifyDownload: true, Enabled: true})
+		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, VerifyDownload: true, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,193 +426,11 @@ func (n nonMD5ETag) Head(ctx context.Context, key string) (objstore.ObjectInfo, 
 	return info, err
 }
 
-func TestMoveModeDeletesTheLocalFileOnlyAfterAVerifiedUpload(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 0)
-	f.mems[id].putErr = &objstore.Error{Op: "PutObject", StatusCode: 503}
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-
-	f.svc.Pass(context.Background())
-	if !f.local(name) {
-		t.Fatal("deleted before any upload succeeded")
-	}
-	it, _ := f.item(id, name)
-	if it.State != db.OffloadFailed || it.Attempts != 1 {
-		t.Fatalf("%+v", it)
-	}
-
-	// Not retried before its backoff elapses.
-	f.mems[id].putErr = nil
-	f.svc.Pass(context.Background())
-	if f.mems[id].puts != 1 {
-		t.Fatalf("retried before the backoff: %d puts", f.mems[id].puts)
-	}
-
-	f.now = f.now.Add(2 * time.Hour)
-	f.svc.Pass(context.Background())
-	it, _ = f.item(id, name)
-	if it.State != db.OffloadVerified || !it.Evicted {
-		t.Fatalf("after retry %+v", it)
-	}
-	if f.local(name) {
-		t.Fatal("verified move-mode upload left the local file")
-	}
-	// The Library row survives the next scan.
-	if _, err := f.rec.Scan(); err != nil {
-		t.Fatal(err)
-	}
-	recs, _ := f.store.ListRecordings()
-	found := false
-	for _, r := range recs {
-		found = found || r.Filename == name
-	}
-	if !found {
-		t.Fatal("the evicted recording dropped out of the index")
-	}
-}
-
-func TestMoveModeKeepsTheLastNHoursLocal(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 6)
-	young := f.segment(4*time.Hour, "young", true)
-	old := f.segment(9*time.Hour, "old", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	for _, n := range []string{young, old} {
-		if it, _ := f.item(id, n); it.State != db.OffloadVerified {
-			t.Fatalf("%s not verified: %+v", n, it)
-		}
-	}
-	if !f.local(young) {
-		t.Error("a segment inside keepLocalHours was evicted")
-	}
-	if f.local(old) {
-		t.Error("a segment past keepLocalHours stayed local")
-	}
-}
-
-func TestMoveWaitsForEveryEnabledTarget(t *testing.T) {
-	f := newFixture(t)
-	f.target(db.OffloadMove, 0)
-	mirror := f.target(db.OffloadMirror, 0)
-	f.mems[mirror].putErr = &objstore.Error{Op: "PutObject", StatusCode: 500}
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	if !f.local(name) {
-		t.Fatal("evicted while one enabled target had no verified copy")
-	}
-}
-
-func TestAMissingRemoteCopyAtEvictionTimeKeepsTheFile(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 6)
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background()) // uploads, inside keep window
-	it, _ := f.item(id, name)
-	if it.State != db.OffloadVerified || !f.local(name) {
-		t.Fatalf("setup: %+v", it)
-	}
-	// Someone emptied the bucket; then the keep window passes.
-	f.mems[id].objs = map[string][]byte{}
-	f.now = f.now.Add(2 * time.Hour)
-	f.svc.Pass(context.Background())
-	if !f.local(name) {
-		t.Fatal("evicted although the remote copy was gone")
-	}
-}
-
-func TestFetchBackRestoresTheVerifiedBytesAndPinsThemLocal(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 0)
-	name := f.segment(5*time.Hour, "footage to clip", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	if f.local(name) || !f.svc.Evicted(name) {
-		t.Fatal("setup: not evicted")
-	}
-	if err := f.svc.FetchNow(context.Background(), name); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(f.dir, name))
-	if err != nil || string(b) != "footage to clip" {
-		t.Fatalf("fetched %q %v", b, err)
-	}
-	if f.svc.Evicted(name) {
-		t.Fatal("still marked evicted after fetch")
-	}
-	// Pinned: the next pass does not evict it again straight away -- and,
-	// once it has settled, does not upload the same bytes all over again.
-	puts := f.mems[id].puts
-	f.now = f.now.Add(SettleWindow + time.Minute)
-	f.svc.Pass(context.Background())
-	if !f.local(name) {
-		t.Fatal("re-evicted a freshly fetched recording")
-	}
-	if f.mems[id].puts != puts {
-		t.Fatal("a fetched-back recording was uploaded again although its bytes are the verified ones")
-	}
-	it, _ := f.item(id, name)
-	if it.FetchedAt.IsZero() {
-		t.Fatal("fetch time not recorded")
-	}
-}
-
-func TestFetchBackRefusesACorruptCopy(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 0)
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	it, _ := f.item(id, name)
-	f.mems[id].objs[it.Key] = []byte("tampered")
-	err := f.svc.FetchNow(context.Background(), name)
-	if !errors.Is(err, ErrChecksumMismatch) {
-		t.Fatalf("err %v, want checksum mismatch", err)
-	}
-	if f.local(name) {
-		t.Fatal("a corrupt fetch was renamed into place")
-	}
-	entries, _ := os.ReadDir(f.dir)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".offload-fetch-") {
-			t.Fatalf("temporary file %s left behind", e.Name())
-		}
-	}
-}
-
-func TestFetchIsAsyncAndReportsDone(t *testing.T) {
-	f := newFixture(t)
-	f.target(db.OffloadMove, 0)
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	done := make(chan struct{}, 1)
-	f.svc.onChange = func() { done <- struct{}{} }
-	st, err := f.svc.Fetch(name)
-	if err != nil || st.State != FetchFetching {
-		t.Fatalf("%+v %v", st, err)
-	}
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("fetch never finished")
-	}
-	if st, _ := f.svc.FetchStatus(name); st.State != FetchDone {
-		t.Fatalf("%+v", st)
-	}
-	if _, err := f.svc.Fetch(name); !errors.Is(err, ErrNotEvicted) {
-		t.Fatalf("fetch of a local file: %v", err)
-	}
-}
-
 func TestExtrasFollowThePerTargetToggles(t *testing.T) {
 	f := newFixture(t)
-	plain := f.target(db.OffloadMirror, 0)
+	plain := f.target()
 	all, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "all", Provider: "r2", Endpoint: "http://h.test", Bucket: "b",
-		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true,
+		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true,
 		OffloadStems: true, OffloadTranscripts: true, OffloadClips: true})
 	f.mems[all] = newMem()
 	name := f.segment(5*time.Hour, "master", true)
@@ -650,7 +470,7 @@ func TestCredentialsNeverReachLogsOrStoredErrors(t *testing.T) {
 	defer srv.Close()
 	f := newFixture(t)
 	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "real", Provider: "minio", Endpoint: srv.URL, Bucket: "b",
-		PathStyle: true, AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMove, Enabled: true,
+		PathStyle: true, AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true,
 		AllowPrivateTarget: true})
 	if err != nil {
 		t.Fatal(err)
@@ -674,7 +494,7 @@ func TestCredentialsNeverReachLogsOrStoredErrors(t *testing.T) {
 		}
 	}
 	if !f.local(name) {
-		t.Fatal("refused upload evicted the file")
+		t.Fatal("a refused upload touched the local file")
 	}
 }
 
@@ -725,40 +545,6 @@ func TestPrefixTemplates(t *testing.T) {
 	for _, bad := range []string{"/abs", "a/../b", "{nope}", "a b", "{kind", "x}"} {
 		if ValidatePrefixTemplate(bad) == nil {
 			t.Errorf("%q accepted", bad)
-		}
-	}
-}
-
-func TestEvictableRule(t *testing.T) {
-	now := time.Now()
-	v := db.OffloadItem{State: db.OffloadVerified, SHA256: "x", Bytes: 10, VerifiedAt: now.Add(-time.Hour)}
-	if !Evictable(v, 10, now.Add(-2*time.Hour), now) {
-		t.Fatal("a verified, unchanged item is evictable")
-	}
-	cases := map[string]func(db.OffloadItem) (db.OffloadItem, int64, time.Time){
-		"failed": func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) {
-			i.State = db.OffloadFailed
-			return i, 10, now.Add(-2 * time.Hour)
-		},
-		"uploading": func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) {
-			i.State = db.OffloadUploading
-			return i, 10, now.Add(-2 * time.Hour)
-		},
-		"size changed":  func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) { return i, 11, now.Add(-2 * time.Hour) },
-		"touched after": func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) { return i, 10, now },
-		"no digest": func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) {
-			i.SHA256 = ""
-			return i, 10, now.Add(-2 * time.Hour)
-		},
-		"recently fetched": func(i db.OffloadItem) (db.OffloadItem, int64, time.Time) {
-			i.FetchedAt = now.Add(-time.Hour)
-			return i, 10, now.Add(-2 * time.Hour)
-		},
-	}
-	for name, mut := range cases {
-		it, size, mt := mut(v)
-		if Evictable(it, size, mt, now) {
-			t.Errorf("%s: evictable", name)
 		}
 	}
 }

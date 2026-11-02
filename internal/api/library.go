@@ -821,11 +821,6 @@ func (s *Server) handleSubmitRecordingJob(w http.ResponseWriter, r *http.Request
 		writeStoreError(w, err)
 		return
 	}
-	// Every job kind reads the master from disk; an offloaded one has to be
-	// fetched back first, and the 409 says so instead of a job that fails.
-	if s.refuseOffloaded(w, rec.Filename) {
-		return
-	}
 	var req submitRequest
 	if !decodeJSON(w, r, &req) {
 		return

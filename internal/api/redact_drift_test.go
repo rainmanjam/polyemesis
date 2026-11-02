@@ -429,8 +429,6 @@ var leafSensitivity = map[string]sensitivity{
 	"storageTarget.accessKeyId":                    sSecret, // names the cloud account; the secret itself is json:"-" and never a leaf
 	"storageTarget.hasSecret":                      sPublic,
 	"storageTarget.secretUnreadable":               sPublic,
-	"storageTarget.mode":                           sPublic,
-	"storageTarget.keepLocalHours":                 sPublic,
 	"storageTarget.offloadStems":                   sPublic,
 	"storageTarget.offloadTranscripts":             sPublic,
 	"storageTarget.offloadClips":                   sPublic,

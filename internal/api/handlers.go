@@ -3376,14 +3376,6 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
-	if s.refuseOffloaded(w, rec.Filename) {
-		return
-	}
-	// Pinned while it is being sent, so move mode cannot take it off the disk
-	// mid-download.
-	if s.offload != nil {
-		defer s.offload.Pin(rec.Filename)()
-	}
 	// Resolve confines the path to the recordings directory; the filename
 	// originates from a database row and is never trusted as a path.
 	path, err := s.recordings().Resolve(rec.Filename)

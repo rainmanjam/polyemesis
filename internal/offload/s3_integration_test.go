@@ -1,7 +1,7 @@
 //go:build s3integration
 
-// Offload end to end against a real S3-compatible server: upload, verify,
-// evict, multipart resume across a restart, fetch back, and the Test button's
+// Offload end to end against a real S3-compatible server: mirror upload and
+// verify, a multipart upload resumed across a restart, and the Test button's
 // three steps. Built only with -tags s3integration and configured by the same
 // environment as internal/objstore's live tests (endpoint, keys, bucket,
 // region, path style, create-bucket); scripts/acceptance-s3.sh runs it against
@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +31,7 @@ func envOr(name, def string) string {
 // liveTarget saves a target for the configured server. bucket overrides the
 // configured bucket (the Test case's missing-bucket check); "" uses it. Each
 // test's objects live under a prefix named for the test.
-func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.StorageTarget {
+func liveTarget(t *testing.T, f *fixture, bucket string) db.StorageTarget {
 	t.Helper()
 	ep, ak, sk := os.Getenv("POLYEMESIS_S3_ENDPOINT"), os.Getenv("POLYEMESIS_S3_ACCESS_KEY"), os.Getenv("POLYEMESIS_S3_SECRET_KEY")
 	if ep == "" || ak == "" || sk == "" {
@@ -44,7 +43,7 @@ func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.Storage
 	region := envOr("POLYEMESIS_S3_REGION", "us-east-1")
 	pathStyle := os.Getenv("POLYEMESIS_S3_PATH_STYLE") != "0"
 	tg := db.StorageTarget{Name: "live", Provider: db.StorageProviderS3, Endpoint: ep, Bucket: bucket,
-		Region: region, PathStyle: pathStyle, AccessKeyID: ak, SecretAccessKey: sk, Mode: mode, Enabled: true,
+		Region: region, PathStyle: pathStyle, AccessKeyID: ak, SecretAccessKey: sk, Enabled: true,
 		AllowPrivateTarget: true, VerifyDownload: true, PrefixTemplate: "offload/" + t.Name() + "/{kind}/{yyyy}"}
 	if os.Getenv("POLYEMESIS_S3_CREATE_BUCKET") == "1" {
 		c, err := objstore.New(objstore.Config{Endpoint: ep, Bucket: bucket, Region: region, PathStyle: pathStyle,
@@ -67,33 +66,40 @@ func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.Storage
 	return tg
 }
 
-func TestLiveMoveModeUploadsVerifiesEvictsAndFetchesBack(t *testing.T) {
+func TestLiveMirrorUploadsVerifiesAndKeepsTheLocalFile(t *testing.T) {
 	f := newFixture(t)
 	f.svc.newClient = NewClient
-	tg := liveTarget(t, f, "", db.OffloadMove)
-	name := f.segment(5*time.Hour, "real footage bytes for the live suite", true)
+	tg := liveTarget(t, f, "")
+	body := "real footage bytes for the live suite"
+	name := f.segment(5*time.Hour, body, true)
 	f.segment(time.Minute, "newest", true)
 
 	f.svc.Pass(context.Background())
 	it, ok := f.item(tg.ID, name)
-	if !ok || it.State != db.OffloadVerified || !it.Evicted {
+	if !ok || it.State != db.OffloadVerified {
 		t.Fatalf("item %+v", it)
 	}
-	if f.local(name) {
-		t.Fatal("not evicted after a verified upload")
+	if !f.local(name) {
+		t.Fatal("mirror mode removed the local file")
 	}
-	if err := f.svc.FetchNow(context.Background(), name); err != nil {
+	c, err := NewClient(tg)
+	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(f.dir, name))
-	if err != nil || string(b) != "real footage bytes for the live suite" {
-		t.Fatalf("fetched %q %v", b, err)
+	rc, _, err := c.Get(context.Background(), it.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != body {
+		t.Fatalf("stored %q", got)
 	}
 }
 
 func TestLiveProbeRunsPutGetDelete(t *testing.T) {
 	f := newFixture(t)
-	tg := liveTarget(t, f, "", db.OffloadMirror)
+	tg := liveTarget(t, f, "")
 	res := Probe(context.Background(), tg, nil)
 	if !res.OK || len(res.Steps) != 3 {
 		t.Fatalf("%+v", res)
@@ -120,9 +126,9 @@ func (p *partFailer) UploadPart(ctx context.Context, key, id string, n int, body
 	return p.Client.UploadPart(ctx, key, id, n, body, size, sh, mb)
 }
 
-func TestLiveMultipartResumesAcrossARestartAndFetchesBack(t *testing.T) {
+func TestLiveMultipartResumesAcrossARestartAndVerifies(t *testing.T) {
 	f := newFixture(t)
-	tg := liveTarget(t, f, "", db.OffloadMove)
+	tg := liveTarget(t, f, "")
 	real, err := NewClient(tg)
 	if err != nil {
 		t.Fatal(err)
@@ -142,14 +148,16 @@ func TestLiveMultipartResumesAcrossARestartAndFetchesBack(t *testing.T) {
 	next.Recover(context.Background())
 	next.Pass(context.Background())
 	it, _ := f.item(tg.ID, name)
-	if it.State != db.OffloadVerified || !it.Evicted || f.local(name) {
-		t.Fatalf("after resume %+v", it)
+	if it.State != db.OffloadVerified || !f.local(name) {
+		t.Fatalf("after resume %+v local=%v", it, f.local(name))
 	}
-	if err := next.FetchNow(context.Background(), name); err != nil {
+	rc, _, err := real.Get(context.Background(), it.Key)
+	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(f.dir, name))
-	if err != nil || string(b) != body {
-		t.Fatalf("fetched %d bytes, %v", len(b), err)
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != body {
+		t.Fatalf("stored %d bytes, want %d", len(got), len(body))
 	}
 }

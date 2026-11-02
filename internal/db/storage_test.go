@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStorageTargetSecretIsSealedAndRoundTrips(t *testing.T) {
@@ -12,7 +13,7 @@ func TestStorageTargetSecretIsSealedAndRoundTrips(t *testing.T) {
 	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"))
 	const plain = "fake-secret-value-not-real"
 	id, err := d.CreateStorageTarget(box, StorageTarget{Name: "m", Provider: StorageProviderMinIO, Endpoint: "http://h", Bucket: "b",
-		AccessKeyID: "fake-access-key", SecretAccessKey: plain, Mode: OffloadMirror, Enabled: true})
+		AccessKeyID: "fake-access-key", SecretAccessKey: plain, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,40 +50,60 @@ func TestStorageTargetWithoutABoxCannotStoreASecret(t *testing.T) {
 	}
 }
 
-func TestATargetHoldingTheOnlyCopyRefusesDeletion(t *testing.T) {
+func TestDeletingATargetDropsItsRowsAndItsMultipartProgress(t *testing.T) {
 	box := testBox(t)
 	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"))
-	a, _ := d.CreateStorageTarget(box, StorageTarget{Name: "a", Endpoint: "http://h", Bucket: "b", Mode: OffloadMove, Enabled: true})
-	b, _ := d.CreateStorageTarget(box, StorageTarget{Name: "b", Endpoint: "http://h", Bucket: "c", Mode: OffloadMirror, Enabled: true})
-	if err := d.PutOffloadItem(OffloadItem{TargetID: a, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadVerified, Evicted: true}); err != nil {
+	a, _ := d.CreateStorageTarget(box, StorageTarget{Name: "a", Endpoint: "http://h", Bucket: "b", Enabled: true})
+	_ = d.PutOffloadItem(OffloadItem{TargetID: a, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadVerified})
+	_ = d.PutOffloadMultipart(OffloadMultipart{TargetID: a, RelPath: "big.mkv", Key: "k2", UploadID: "u", PartSize: 1, Bytes: 2, SHA256: "x"})
+	if err := d.DeleteStorageTarget(a); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.DeleteStorageTarget(a, nil); !errors.Is(err, ErrStorageTargetHoldsOnlyCopies) || !errors.Is(err, ErrStateConflict) {
-		t.Fatalf("delete of the only copy: %v", err)
+	if its, _ := d.ListOffloadItems(); len(its) != 0 {
+		t.Fatalf("rows left: %+v", its)
 	}
-	// Once another target holds a verified copy, the first may go.
-	_ = d.PutOffloadItem(OffloadItem{TargetID: b, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadVerified, Evicted: true})
-	if err := d.DeleteStorageTarget(a, nil); err != nil {
-		t.Fatal(err)
+	if mps, _ := d.ListOffloadMultipart(0); len(mps) != 0 {
+		t.Fatalf("multipart left: %+v", mps)
 	}
-	if ev, _ := d.EvictedRecordings(); !ev["rec.mkv"] {
-		t.Fatal("evicted state lost with the other target")
-	}
-	if err := d.DeleteStorageTarget(a, nil); !errors.Is(err, ErrNotFound) {
+	if err := d.DeleteStorageTarget(a); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
 	}
 }
 
-// Review #8: the offload schema is stamped past 1, the version every earlier
-// release accepts, so a rollback to one of them refuses this database instead
-// of scanning it and dropping the rows of recordings moved to a bucket.
-func TestTheOffloadSchemaIsStampedSoAnOlderBinaryRefusesIt(t *testing.T) {
+// A write an upload makes lands only while the target's binding generation
+// is the one its pass started with: a move resets the rows, and the stale
+// upload's "verified" for the old bucket is refused, not written over them.
+func TestAnUploadResultFromBeforeAMoveIsRefused(t *testing.T) {
+	box := testBox(t)
 	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"))
-	var v int
-	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+	id, _ := d.CreateStorageTarget(box, StorageTarget{Name: "a", Endpoint: "http://h", Bucket: "old", Enabled: true,
+		AccessKeyID: "fake-access-key", SecretAccessKey: "fake-secret-value-not-real"})
+	tg, _ := d.GetStorageTarget(box, id)
+	gen := tg.BindingGen
+	it := OffloadItem{TargetID: id, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadUploading}
+	if err := d.PutOffloadItemIfBinding(it, gen); err != nil {
+		t.Fatalf("same generation: %v", err)
+	}
+	tg.Bucket, tg.SecretAccessKey = "new", ""
+	if err := d.RebindStorageTarget(box, tg); err != nil {
 		t.Fatal(err)
 	}
-	if v < 2 {
-		t.Fatalf("user_version %d: a 0.9.x binary (which accepts 1) would open this database and drop evicted rows", v)
+	it.State, it.VerifiedAt = OffloadVerified, time.Now()
+	if err := d.PutOffloadItemIfBinding(it, gen); !errors.Is(err, ErrBindingChanged) {
+		t.Fatalf("stale write: %v", err)
+	}
+	rows, _ := d.OffloadItemsFor("rec.mkv")
+	if len(rows) != 1 || rows[0].State != OffloadPending {
+		t.Fatalf("the move's reset was overwritten: %+v", rows)
+	}
+	// Deleted target: nothing written, no orphan row.
+	if err := d.DeleteStorageTarget(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PutOffloadItemIfBinding(it, gen+1); !errors.Is(err, ErrBindingChanged) {
+		t.Fatalf("write for a deleted target: %v", err)
+	}
+	if its, _ := d.ListOffloadItems(); len(its) != 0 {
+		t.Fatalf("orphan row written: %+v", its)
 	}
 }

@@ -750,7 +750,8 @@ CREATE TABLE IF NOT EXISTS caption_ingest (
     updated_at      INTEGER NOT NULL
 );
 
--- S3-compatible storage targets for recording offload (Wave 4 #10). The secret
+-- S3-compatible storage targets for recording offload (Wave 4 #10), mirror
+-- mode: finished files are copied, never moved or deleted locally. The secret
 -- access key is sealed in its own column and never leaves this table in a read:
 -- StorageTarget.SecretAccessKey is json:"-" and the API reports only hasSecret.
 CREATE TABLE IF NOT EXISTS storage_targets (
@@ -764,8 +765,6 @@ CREATE TABLE IF NOT EXISTS storage_targets (
     path_style           INTEGER NOT NULL DEFAULT 0,
     access_key_id        TEXT    NOT NULL DEFAULT '',
     secret_enc           BLOB,                            -- secretbox sealed
-    mode                 TEXT    NOT NULL DEFAULT 'mirror', -- mirror | move
-    keep_local_hours     INTEGER NOT NULL DEFAULT 24,
     offload_stems        INTEGER NOT NULL DEFAULT 0,
     offload_transcripts  INTEGER NOT NULL DEFAULT 0,
     offload_clips        INTEGER NOT NULL DEFAULT 0,
@@ -773,15 +772,13 @@ CREATE TABLE IF NOT EXISTS storage_targets (
     allow_private_target INTEGER NOT NULL DEFAULT 0,
     enabled              INTEGER NOT NULL DEFAULT 1,
     max_attempts         INTEGER NOT NULL DEFAULT 8,     -- consecutive failures before an item is stuck
+    binding_gen          INTEGER NOT NULL DEFAULT 0,     -- bumped when the target moves to another address
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL
 );
 
 -- One row per (target, file): the offload state of a finished recording segment,
 -- stem, transcript or clip. rel_path is relative to the recordings directory.
--- evicted = 1 means move mode deleted the local copy after the upload was
--- verified; the object under object_key is then the only copy, which is why a
--- target holding evicted rows refuses deletion.
 CREATE TABLE IF NOT EXISTS offload_items (
     target_id       INTEGER NOT NULL REFERENCES storage_targets(id),
     rel_path        TEXT    NOT NULL,
@@ -794,8 +791,6 @@ CREATE TABLE IF NOT EXISTS offload_items (
     next_attempt_at INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT    NOT NULL DEFAULT '',
     verified_at     INTEGER NOT NULL DEFAULT 0,
-    evicted         INTEGER NOT NULL DEFAULT 0,
-    fetched_at      INTEGER NOT NULL DEFAULT 0,
     updated_at      INTEGER NOT NULL,
     PRIMARY KEY (target_id, rel_path)
 );

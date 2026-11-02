@@ -151,7 +151,7 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	if _, err := store.CreateStorageTarget(storageFixtureBox(t), db.StorageTarget{Name: "archive", Provider: db.StorageProviderS3,
 		Endpoint: "https://s3.example", Bucket: "archive-9f3a", Region: "us-east-1",
 		AccessKeyID: sentinelStorageKeyID, SecretAccessKey: storageSecretPlant,
-		Mode: db.OffloadMirror, Enabled: true}); err != nil {
+		Enabled: true}); err != nil {
 		t.Fatalf("plant storage target: %v", err)
 	}
 

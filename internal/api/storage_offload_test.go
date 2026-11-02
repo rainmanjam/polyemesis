@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -84,11 +83,10 @@ func (m *apiMemBucket) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-// TestAnOffloadedRecordingIsFetchedBackBeforeTheClipperOpensIt is the
-// end-to-end answer to "how does the clipper wait": 409 "offloaded" naming
-// the file, POST .../fetch answers 202, the recordings event fires when the
-// file lands, and the same clipper route then opens it.
-func TestAnOffloadedRecordingIsFetchedBackBeforeTheClipperOpensIt(t *testing.T) {
+// TestTheLibraryShowsEachRecordingsUploadState drives a mirror upload through
+// the real service and reads it back from the Library: per target, with its
+// state and the target's name. The local file is untouched.
+func TestTheLibraryShowsEachRecordingsUploadState(t *testing.T) {
 	h, store, sign := sourceServer(t)
 	s := serverUnderTest(t, h)
 	dir := s.recordings().Dir()
@@ -113,124 +111,49 @@ func TestAnOffloadedRecordingIsFetchedBackBeforeTheClipperOpensIt(t *testing.T) 
 	}
 	old := mk(5*time.Hour, "an hour of footage")
 	mk(time.Minute, "the segment being written")
-	recs, _ := store.ListRecordings()
-	var id int64
-	for _, r := range recs {
-		if r.Filename == old.Filename {
-			id = r.ID
-		}
-	}
 
 	bucket := &apiMemBucket{objs: map[string][]byte{}, meta: map[string]map[string]string{}}
-	changed := make(chan struct{}, 8)
-	s.offload = offload.New(slog.New(slog.NewTextHandler(io.Discard, nil)), store, s.box, s.recordings(),
-		func() { changed <- struct{}{} },
+	s.offload = offload.New(slog.New(slog.NewTextHandler(io.Discard, nil)), store, s.box, s.recordings(), nil,
 		offload.WithClientFactory(func(db.StorageTarget) (offload.Client, error) { return bucket, nil }))
 	t.Cleanup(func() { s.offload = nil })
 
 	rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets", map[string]any{
 		"name": "archive", "provider": "s3", "endpoint": "https://s3.example", "bucket": "media-archive",
-		"accessKeyId": "fake-access-key", "secretAccessKey": "fake-secret-value-not-real",
-		"mode": "move", "keepLocalHours": 0})
+		"accessKeyId": "fake-access-key", "secretAccessKey": "fake-secret-value-not-real"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create target: %d %s", rec.Code, rec.Body.String())
 	}
-	// Saving the target kicks a pass of its own; Pass is single-flight, so
-	// drive it until the eviction is observed rather than once.
 	for start := time.Now(); ; {
 		s.offload.Pass(context.Background())
-		if _, err := os.Stat(filepath.Join(dir, old.Filename)); os.IsNotExist(err) {
+		its, _ := store.OffloadItemsFor(old.Filename)
+		if len(its) == 1 && its[0].State == db.OffloadVerified {
 			break
 		}
 		if time.Since(start) > 10*time.Second {
-			t.Fatal("never evicted")
+			t.Fatalf("never verified: %+v", its)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-
-	// The Library shows where it went.
-	lib := storageBody(t, h, sign, "/api/v1/library")
+	if _, err := os.Stat(filepath.Join(dir, old.Filename)); err != nil {
+		t.Fatalf("mirror mode touched the local file: %v", err)
+	}
 	var view struct {
 		Ungrouped []struct {
 			Filename string            `json:"filename"`
 			Offload  *recordingOffload `json:"offload"`
 		} `json:"ungrouped"`
 	}
-	if err := json.Unmarshal([]byte(lib), &view); err != nil {
+	if err := json.Unmarshal([]byte(storageBody(t, h, sign, "/api/v1/library")), &view); err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, r := range view.Ungrouped {
 		if r.Filename == old.Filename {
-			found = true
-			if r.Offload == nil || !r.Offload.Evicted || len(r.Offload.Targets) != 1 ||
-				r.Offload.Targets[0].State != db.OffloadVerified || r.Offload.Targets[0].TargetName != "archive" {
+			if r.Offload == nil || len(r.Offload.Targets) != 1 || r.Offload.Targets[0].State != db.OffloadVerified ||
+				r.Offload.Targets[0].TargetName != "archive" {
 				t.Fatalf("library offload view %+v", r.Offload)
 			}
+			return
 		}
 	}
-	if !found {
-		t.Fatalf("evicted recording missing from the library: %s", lib)
-	}
-
-	// The route the clip editor polls while it waits says the same.
-	var one struct {
-		Recording struct {
-			Offload *recordingOffload `json:"offload"`
-		} `json:"recording"`
-	}
-	if err := json.Unmarshal([]byte(storageBody(t, h, sign, fmt.Sprintf("/api/v1/library/recordings/%d", id))), &one); err != nil ||
-		one.Recording.Offload == nil || !one.Recording.Offload.Evicted {
-		t.Fatalf("GET /library/recordings/{id} does not report the eviction: %+v %v", one.Recording.Offload, err)
-	}
-
-	clip := fmt.Sprintf("/api/v1/clipper/recordings/%d", id)
-	code, body := rawBodyOf(t, h, sign, clip)
-	if code != http.StatusConflict {
-		t.Fatalf("clipper on an offloaded recording: %d %s", code, body)
-	}
-	var refusal struct {
-		Code      string   `json:"code"`
-		Offloaded []string `json:"offloaded"`
-	}
-	_ = json.Unmarshal([]byte(body), &refusal)
-	if refusal.Code != "offloaded" || len(refusal.Offloaded) != 1 || refusal.Offloaded[0] != old.Filename {
-		t.Fatalf("refusal %s", body)
-	}
-	// The download route refuses the same way (the job route does too, but
-	// this fixture runs no job queue, so it answers 503 before reaching it).
-	if code, body := rawBodyOf(t, h, sign, fmt.Sprintf("/api/v1/recordings/%d/download", id)); code != http.StatusConflict {
-		t.Fatalf("download of an offloaded recording: %d %s", code, body)
-	}
-
-	if rec := doJSON(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/library/recordings/%d/fetch", id), map[string]any{}); rec.Code != http.StatusAccepted {
-		t.Fatalf("fetch: %d %s", rec.Code, rec.Body.String())
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if st, ok := s.offload.FetchStatus(old.Filename); ok && st.State != offload.FetchFetching {
-			if st.State != offload.FetchDone {
-				t.Fatalf("fetch %+v", st)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fetch never reported back")
-		}
-		select {
-		case <-changed:
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	b, err := os.ReadFile(filepath.Join(dir, old.Filename))
-	if err != nil || string(b) != "an hour of footage" {
-		t.Fatalf("fetched %q %v", b, err)
-	}
-	if code, body := rawBodyOf(t, h, sign, clip); code == http.StatusConflict {
-		t.Fatalf("clipper still refuses after the fetch: %s", body)
-	}
-	// Already local: a second fetch is a conflict, not a re-download.
-	if rec := doJSON(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/library/recordings/%d/fetch", id), map[string]any{}); rec.Code != http.StatusConflict {
-		t.Fatalf("second fetch: %d", rec.Code)
-	}
+	t.Fatal("recording missing from the library")
 }

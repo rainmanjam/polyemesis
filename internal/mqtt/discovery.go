@@ -115,6 +115,20 @@ func (t *Telemetry) PublishDiscovery(ctx context.Context, snap Snapshot) error {
 		Icon:          "mdi:broadcast",
 	})
 
+	// One sensor per offload storage target: its stuck uploads, the count
+	// that needs a person.
+	for _, st := range snap.Storage {
+		add("storage_"+st.Slug+"_stuck", haComponent{
+			Platform:      "sensor",
+			Name:          st.Name + " stuck uploads",
+			StateTopic:    t.topics.Storage(st.Slug),
+			ValueTemplate: "{{ value_json.stuck }}",
+			StateClass:    "measurement",
+			EntityCat:     "diagnostic",
+			Icon:          "mdi:cloud-alert",
+		})
+	}
+
 	for _, s := range snap.Sources {
 		src := s.State.Slug
 		topic := t.topics.Source(src)

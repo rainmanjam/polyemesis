@@ -1,13 +1,9 @@
 package offload
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +18,7 @@ import (
 func TestConsecutiveFailuresMakeAnItemStuckOnceAndRetryNowFreesIt(t *testing.T) {
 	f := newFixture(t)
 	id, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "flaky", Provider: "s3", Endpoint: "http://h.test",
-		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, MaxAttempts: 3})
+		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true, MaxAttempts: 3})
 	m := newMem()
 	f.mems[id] = m
 	m.putErr = &objstore.Error{Op: "PutObject", StatusCode: 503}
@@ -59,7 +55,7 @@ func TestConsecutiveFailuresMakeAnItemStuckOnceAndRetryNowFreesIt(t *testing.T) 
 
 func TestARefusedCredentialIsStuckAtOnce(t *testing.T) {
 	f := newFixture(t)
-	id := f.target(db.OffloadMirror, 0)
+	id := f.target()
 	f.mems[id].putErr = &objstore.Error{Op: "PutObject", StatusCode: 403, Code: "AccessDenied"}
 	raised := 0
 	f.svc.SetStuckHook(func(StuckEvent) { raised++ })
@@ -91,7 +87,7 @@ func bigBody(n int) string {
 func TestALargeFileGoesUpInPartsAndVerifiesTheCompositeETag(t *testing.T) {
 	f := newFixture(t)
 	f.svc.mpThreshold, f.svc.partSize, f.svc.partBackoff = 100, 40, time.Millisecond
-	id := f.target(db.OffloadMove, 0)
+	id := f.target()
 	m := f.mems[id]
 	m.partErrs[2] = 2 // part 2 fails twice, then lands: retried with backoff
 	body := bigBody(130)
@@ -99,7 +95,7 @@ func TestALargeFileGoesUpInPartsAndVerifiesTheCompositeETag(t *testing.T) {
 	f.segment(time.Minute, "newest", true)
 	f.svc.Pass(context.Background())
 	it, _ := f.item(id, name)
-	if it.State != db.OffloadVerified || !it.Evicted {
+	if it.State != db.OffloadVerified || !f.local(name) {
 		t.Fatalf("%+v", it)
 	}
 	if string(m.objs[it.Key]) != body || !strings.HasSuffix(m.etags[it.Key], "-4") {
@@ -116,7 +112,7 @@ func TestALargeFileGoesUpInPartsAndVerifiesTheCompositeETag(t *testing.T) {
 func TestAMultipartObjectWhoseBytesDifferIsNotVerified(t *testing.T) {
 	f := newFixture(t)
 	f.svc.mpThreshold, f.svc.partSize, f.svc.partBackoff = 100, 40, time.Millisecond
-	id := f.target(db.OffloadMove, 0)
+	id := f.target()
 	f.mems[id].corrupt = true
 	name := f.segment(5*time.Hour, bigBody(130), true)
 	f.segment(time.Minute, "newest", true)
@@ -136,7 +132,7 @@ func TestAMultipartObjectWhoseBytesDifferIsNotVerified(t *testing.T) {
 func TestAMultipartUploadResumesAcrossARestart(t *testing.T) {
 	f := newFixture(t)
 	f.svc.mpThreshold, f.svc.partSize, f.svc.partTries, f.svc.partBackoff = 100, 40, 1, time.Millisecond
-	id := f.target(db.OffloadMirror, 0)
+	id := f.target()
 	m := f.mems[id]
 	m.partErrs[3] = 1
 	name := f.segment(5*time.Hour, bigBody(130), true)
@@ -172,7 +168,7 @@ func TestGivingUpAbortsTheMultipartUpload(t *testing.T) {
 	f := newFixture(t)
 	f.svc.mpThreshold, f.svc.partSize, f.svc.partTries = 100, 40, 1
 	id, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "x", Provider: "s3", Endpoint: "http://h.test",
-		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, MaxAttempts: 1})
+		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true, MaxAttempts: 1})
 	m := newMem()
 	f.mems[id] = m
 	m.partErrs[2] = 99
@@ -189,7 +185,7 @@ func TestGivingUpAbortsTheMultipartUpload(t *testing.T) {
 
 func TestAbortTargetAndTheStartupSweepAbandonOrphans(t *testing.T) {
 	f := newFixture(t)
-	id := f.target(db.OffloadMirror, 0)
+	id := f.target()
 	m := f.mems[id]
 	tg, _ := f.store.GetStorageTarget(f.svc.box, id)
 	// An orphan: its file is gone.
@@ -208,64 +204,6 @@ func TestAbortTargetAndTheStartupSweepAbandonOrphans(t *testing.T) {
 }
 
 // ---- 3. fetch-back retries, resumed by Range ----
-
-func TestFetchBackResumesFromTheBytesAlreadyReceived(t *testing.T) {
-	f := newFixture(t)
-	f.svc.fetchBackoff = time.Millisecond
-	id := f.target(db.OffloadMove, 0)
-	m := f.mems[id]
-	body := bigBody(90)
-	name := f.segment(5*time.Hour, body, true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	m.getCuts = []int64{30, 25} // two dropped connections
-	if err := f.svc.FetchNow(context.Background(), name); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(filepath.Join(f.dir, name)); string(b) != body {
-		t.Fatalf("fetched %d bytes, not the original", len(b))
-	}
-	if len(m.getOffsets) != 3 || m.getOffsets[0] != 0 || m.getOffsets[1] != 30 || m.getOffsets[2] != 55 {
-		t.Fatalf("offsets %v; each retry must resume where the last stopped", m.getOffsets)
-	}
-}
-
-func TestFetchBackGivesUpAfterThreeAttemptsAndLeavesNothing(t *testing.T) {
-	f := newFixture(t)
-	f.svc.fetchBackoff = time.Millisecond
-	id := f.target(db.OffloadMove, 0)
-	m := f.mems[id]
-	name := f.segment(5*time.Hour, bigBody(90), true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	m.getCuts = []int64{10, 10, 10, 10}
-	err := f.svc.FetchNow(context.Background(), name)
-	if err == nil || len(m.getOffsets) != 3 {
-		t.Fatalf("err %v after %d attempts", err, len(m.getOffsets))
-	}
-	if f.local(name) {
-		t.Fatal("a failed fetch landed")
-	}
-	noTempFiles(t, f.dir)
-	// The async path reports it, and a second request may try again.
-	done := make(chan struct{}, 4)
-	f.svc.onChange = func() { done <- struct{}{} }
-	m.getCuts = []int64{10, 10, 10}
-	m.getOffsets = nil
-	_, _ = f.svc.Fetch(name)
-	<-done
-	if st, _ := f.svc.FetchStatus(name); st.State != FetchFailed || st.Error == "" {
-		t.Fatalf("%+v", st)
-	}
-	m.getCuts = nil
-	if st, err := f.svc.Fetch(name); err != nil || st.State != FetchFetching {
-		t.Fatalf("retry after failure: %+v %v", st, err)
-	}
-	<-done
-	if !f.local(name) {
-		t.Fatal("retry did not fetch")
-	}
-}
 
 // ---- 4. restart safety ----
 
@@ -286,84 +224,4 @@ func (b *blockingStore) Put(ctx context.Context, key string, body io.ReadSeeker,
 type slowBody struct {
 	ctx  context.Context
 	sent bool
-}
-
-func (s *slowBody) Read(p []byte) (int, error) {
-	if !s.sent {
-		s.sent = true
-		return copy(p, "partial"), nil
-	}
-	<-s.ctx.Done()
-	return 0, s.ctx.Err()
-}
-func (s *slowBody) Close() error { return nil }
-
-func (b *blockingStore) GetFrom(ctx context.Context, key string, off int64) (io.ReadCloser, objstore.ObjectInfo, bool, error) {
-	_, info, _, err := b.memStore.GetFrom(ctx, key, off)
-	b.once.Do(func() { close(b.started) })
-	return &slowBody{ctx: ctx}, info, false, err
-}
-
-func TestAnUploadCutOffByShutdownComesBackRetryable(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 0)
-	bs := &blockingStore{memStore: f.mems[id], started: make(chan struct{})}
-	f.svc.newClient = func(db.StorageTarget) (Client, error) { return bs, nil }
-	name := f.segment(5*time.Hour, "footage", true)
-	f.segment(time.Minute, "newest", true)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { f.svc.Pass(ctx); close(done) }()
-	<-bs.started
-	cancel()
-	<-done
-	it, _ := f.item(id, name)
-	if it.State != db.OffloadFailed || it.Attempts != 0 || !it.NextAttemptAt.IsZero() || !f.local(name) {
-		t.Fatalf("after shutdown mid-upload: %+v local=%v", it, f.local(name))
-	}
-
-	// A process that died without even that write leaves "uploading"; the
-	// next one's startup recovery makes it retryable and the pass sends it.
-	it.State = db.OffloadUploading
-	_ = f.store.PutOffloadItem(it)
-	next := New(slog.New(slog.NewTextHandler(io.Discard, nil)), f.store, f.svc.box, f.rec, nil,
-		WithClock(func() time.Time { return f.now }),
-		WithClientFactory(func(db.StorageTarget) (Client, error) { return f.mems[id], nil }))
-	next.Recover(context.Background())
-	if it, _ := f.item(id, name); it.State != db.OffloadFailed || !it.NextAttemptAt.IsZero() {
-		t.Fatalf("recovered %+v", it)
-	}
-	next.Pass(context.Background())
-	if it, _ := f.item(id, name); it.State != db.OffloadVerified {
-		t.Fatalf("after recovery pass %+v", it)
-	}
-}
-
-func TestAFetchCutOffByShutdownNeverWritesTheFinalPath(t *testing.T) {
-	f := newFixture(t)
-	id := f.target(db.OffloadMove, 0)
-	name := f.segment(5*time.Hour, "footage to clip", true)
-	f.segment(time.Minute, "newest", true)
-	f.svc.Pass(context.Background())
-	bs := &blockingStore{memStore: f.mems[id], started: make(chan struct{})}
-	f.svc.newClient = func(db.StorageTarget) (Client, error) { return bs, nil }
-	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- f.svc.FetchNow(ctx, name) }()
-	<-bs.started
-	cancel()
-	if err := <-errc; !errors.Is(err, context.Canceled) {
-		t.Fatalf("err %v", err)
-	}
-	if f.local(name) {
-		t.Fatal("a cancelled fetch left a file under the final name")
-	}
-	noTempFiles(t, f.dir)
-	if !f.svc.Evicted(name) {
-		t.Fatal("a cancelled fetch cleared the evicted mark")
-	}
-	// A temp file a killed process left behind is swept at startup.
-	_ = os.WriteFile(filepath.Join(f.dir, ".offload-fetch-123"), bytes.Repeat([]byte("x"), 10), 0o644)
-	f.svc.Recover(context.Background())
-	noTempFiles(t, f.dir)
 }

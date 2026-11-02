@@ -82,7 +82,7 @@ func TestStorageTargetCRUDValidatesAndRefusesPrivateEndpoints(t *testing.T) {
 	h, _, sign := sourceServer(t)
 	body := map[string]any{"name": "r2", "provider": "r2", "endpoint": "https://acct.r2.example",
 		"bucket": "media-archive", "region": "auto", "accessKeyId": "fake-access-key",
-		"secretAccessKey": "fake-secret-value-not-real", "mode": "move", "keepLocalHours": 12}
+		"secretAccessKey": "fake-secret-value-not-real"}
 	rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
@@ -91,19 +91,17 @@ func TestStorageTargetCRUDValidatesAndRefusesPrivateEndpoints(t *testing.T) {
 		t.Fatal("create response echoes the secret")
 	}
 	var created struct {
-		ID        int64  `json:"id"`
-		Mode      string `json:"mode"`
-		HasSecret bool   `json:"hasSecret"`
+		ID        int64 `json:"id"`
+		HasSecret bool  `json:"hasSecret"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	if created.ID == 0 || created.Mode != "move" || !created.HasSecret {
+	if created.ID == 0 || !created.HasSecret {
 		t.Fatalf("%+v", created)
 	}
 	for name, mut := range map[string]func(map[string]any){
 		"private literal ip": func(b map[string]any) { b["endpoint"] = "http://10.0.0.5:9000" },
 		"userinfo":           func(b map[string]any) { b["endpoint"] = "https://user:pw@s3.example" },
 		"bad bucket":         func(b map[string]any) { b["bucket"] = "UPPER" },
-		"bad mode":           func(b map[string]any) { b["mode"] = "sync" },
 		"bad template":       func(b map[string]any) { b["prefixTemplate"] = "../escape" },
 		"no secret":          func(b map[string]any) { delete(b, "secretAccessKey") },
 	} {

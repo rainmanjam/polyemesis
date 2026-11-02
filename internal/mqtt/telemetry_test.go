@@ -85,6 +85,9 @@ func sampleSnapshot() Snapshot {
 				{ID: 3, Name: "720p", Slug: Slug("720p"), Consumers: 1, Running: true, At: at},
 			},
 		}},
+		Storage: []StorageState{
+			{ID: 2, Name: "Archive (R2)", Slug: Slug("Archive (R2)"), Enabled: true, Stuck: 3, Failed: 1, Verified: 40, At: at},
+		},
 	}
 }
 
@@ -119,6 +122,7 @@ func TestTelemetryPublishesTheDocumentedTopics(t *testing.T) {
 		"polyemesis/studio/source/cam-1-" + hashOf("Cam 1") + "/rendition/720p/state",
 		"polyemesis/studio/source/cam-1-" + hashOf("Cam 1") + "/state",
 		"polyemesis/studio/state",
+		"polyemesis/studio/storage/archive-r2-" + hashOf("Archive (R2)") + "/state",
 	}
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

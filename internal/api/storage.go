@@ -1,7 +1,8 @@
 package api
 
 // Storage targets and offload (Wave 4 #10): S3-compatible buckets finished
-// recordings are copied to, and in move mode moved to.
+// recordings are copied to. Mirror mode only: no local file is moved or
+// deleted.
 //
 // The secret access key goes in once, on create or update, is sealed by the
 // database's secret box and is never returned: StorageTarget.SecretAccessKey
@@ -24,7 +25,6 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
-	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/offload"
 )
@@ -34,8 +34,6 @@ import (
 type storageTargetView struct {
 	db.StorageTarget
 	Counts map[string]int `json:"counts"`
-	// Evicted counts recordings whose only copy is this target's.
-	Evicted int `json:"evicted"`
 }
 
 // storageTargetRequest is PATCH-shaped: a nil field keeps the stored value.
@@ -52,8 +50,6 @@ type storageTargetRequest struct {
 	PathStyle          *bool   `json:"pathStyle"`
 	AccessKeyID        *string `json:"accessKeyId"`
 	SecretAccessKey    *string `json:"secretAccessKey"`
-	Mode               *string `json:"mode"`
-	KeepLocalHours     *int    `json:"keepLocalHours"`
 	OffloadStems       *bool   `json:"offloadStems"`
 	OffloadTranscripts *bool   `json:"offloadTranscripts"`
 	OffloadClips       *bool   `json:"offloadClips"`
@@ -81,7 +77,6 @@ func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
 	str(&t.Region, q.Region)
 	str(&t.PrefixTemplate, q.PrefixTemplate)
 	str(&t.AccessKeyID, q.AccessKeyID)
-	str(&t.Mode, q.Mode)
 	bl(&t.PathStyle, q.PathStyle)
 	bl(&t.OffloadStems, q.OffloadStems)
 	bl(&t.OffloadTranscripts, q.OffloadTranscripts)
@@ -89,9 +84,6 @@ func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
 	bl(&t.VerifyDownload, q.VerifyDownload)
 	bl(&t.AllowPrivateTarget, q.AllowPrivateTarget)
 	bl(&t.Enabled, q.Enabled)
-	if q.KeepLocalHours != nil {
-		t.KeepLocalHours = *q.KeepLocalHours
-	}
 	if q.MaxAttempts != nil {
 		t.MaxAttempts = *q.MaxAttempts
 	}
@@ -136,12 +128,6 @@ func validateStorageTarget(t db.StorageTarget) error {
 	if err := offload.ValidatePrefixTemplate(t.PrefixTemplate); err != nil {
 		return err
 	}
-	if t.Mode != db.OffloadMirror && t.Mode != db.OffloadMove {
-		return errors.New("mode must be mirror or move")
-	}
-	if t.KeepLocalHours < 0 || t.KeepLocalHours > 24*365 {
-		return errors.New("keepLocalHours must be between 0 and 8760")
-	}
 	if t.MaxAttempts < 1 || t.MaxAttempts > 100 {
 		return errors.New("maxAttempts must be between 1 and 100")
 	}
@@ -183,27 +169,12 @@ func secretBindingChanged(saved, next db.StorageTarget) bool {
 
 // locationChanged reports whether an edit changes WHERE the target's objects
 // live -- a different service, bucket, region, account or addressing. Such an
-// edit is refused while the target holds evicted recordings, and otherwise
-// sends every one of its files back to be uploaded at the new address.
+// edit sends every one of the target's files back to be uploaded at the new
+// address, and an upload still running against the old one cannot write its
+// result (db.RebindStorageTarget advances the binding generation).
 func locationChanged(saved, next db.StorageTarget) bool {
 	return normalEndpoint(saved.Endpoint) != normalEndpoint(next.Endpoint) || saved.Bucket != next.Bucket ||
 		saved.Region != next.Region || saved.PathStyle != next.PathStyle || saved.AccessKeyID != next.AccessKeyID
-}
-
-// untrustedTargets are the targets whose copies cannot be fetched from here:
-// their secret is missing or will not open on this machine.
-func (s *Server) untrustedTargets() []int64 {
-	targets, err := s.store.ListStorageTargets(s.box)
-	if err != nil {
-		return nil
-	}
-	var out []int64
-	for _, t := range targets {
-		if !t.HasSecret || t.SecretUnreadable {
-			out = append(out, t.ID)
-		}
-	}
-	return out
 }
 
 // readSafeStorageTarget is the read-scope view: no secret (never marshalled
@@ -231,9 +202,6 @@ func (s *Server) storageTargetViews(r *http.Request, targets []db.StorageTarget)
 				continue
 			}
 			v.Counts[it.State]++
-			if it.Evicted {
-				v.Evicted++
-			}
 		}
 		out = append(out, v)
 	}
@@ -271,7 +239,7 @@ func (s *Server) handleCreateStorageTarget(w http.ResponseWriter, r *http.Reques
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	t := req.applyTo(db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, KeepLocalHours: 24, Enabled: true,
+	t := req.applyTo(db.StorageTarget{Provider: db.StorageProviderS3, Enabled: true,
 		MaxAttempts: db.DefaultOffloadMaxAttempts})
 	if req.SecretAccessKey != nil {
 		t.SecretAccessKey = strings.TrimSpace(*req.SecretAccessKey)
@@ -364,18 +332,12 @@ func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Reques
 		writeStoreError(w, err)
 		return
 	}
-	// Refused before anything is aborted, so a 409 changes nothing.
-	untrusted := s.untrustedTargets()
-	if err := s.store.StorageTargetDeletable(id, untrusted); err != nil {
-		writeStoreError(w, err)
-		return
-	}
 	// Abandon its multipart uploads on the service while its credentials
 	// can still be read; after the delete nothing could.
 	if s.offload != nil {
 		s.offload.AbortTarget(r.Context(), t)
 	}
-	if err := s.store.DeleteStorageTarget(id, untrusted); err != nil {
+	if err := s.store.DeleteStorageTarget(id); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -391,7 +353,7 @@ func (s *Server) handleTestStorageTarget(w http.ResponseWriter, r *http.Request)
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	base := db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, Enabled: true,
+	base := db.StorageTarget{Provider: db.StorageProviderS3, Enabled: true,
 		MaxAttempts: db.DefaultOffloadMaxAttempts}
 	var saved *db.StorageTarget
 	if req.ID != nil {
@@ -436,58 +398,10 @@ func (s *Server) kickOffload() {
 	}
 }
 
-// offloadInUse is the job-queue half of eviction's in-use check: a queued or
-// running job about any recording of this one's session -- a transcription,
-// a proxy, a clip export cutting across the session -- keeps every file of
-// the session on disk until it is done.
-func (s *Server) offloadInUse(name string) bool {
-	if s.jobq == nil {
-		return false
-	}
-	list, err := s.jobq.List(jobs.Active())
-	if err != nil || len(list) == 0 {
-		return err != nil // a queue that cannot answer is treated as busy
-	}
-	busy := map[int64]bool{}
-	for _, j := range list {
-		if id, ok := jobs.ParseRecordingTarget(j.Target); ok {
-			busy[id] = true
-		}
-	}
-	if len(busy) == 0 {
-		return false
-	}
-	recs, err := s.store.ListRecordings()
-	if err != nil {
-		return true
-	}
-	for _, r := range recs {
-		if r.Filename != name {
-			continue
-		}
-		if busy[r.ID] {
-			return true
-		}
-		if sess, err := s.store.SessionForRecording(r.ID); err == nil && sess != nil {
-			members, _ := s.store.SessionRecordings(sess.ID)
-			for _, m := range members {
-				if busy[m.ID] {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // ---- Library integration ----
 
 // recordingOffload is one recording's offload state, per target.
 type recordingOffload struct {
-	// Evicted means move mode removed the local copy; the clipper and the
-	// post-production jobs fetch it back first.
-	Evicted bool                 `json:"evicted"`
-	Fetch   *offload.FetchState  `json:"fetch,omitempty"`
 	Targets []recordingOffloadOn `json:"targets"`
 }
 
@@ -504,11 +418,10 @@ type recordingOffloadOn struct {
 type offloadIndex struct {
 	byRel map[string][]db.OffloadItem
 	names map[int64]string
-	svc   *offload.Service
 }
 
 func (s *Server) loadOffloadIndex() offloadIndex {
-	idx := offloadIndex{byRel: map[string][]db.OffloadItem{}, names: map[int64]string{}, svc: s.offload}
+	idx := offloadIndex{byRel: map[string][]db.OffloadItem{}, names: map[int64]string{}}
 	items, err := s.store.ListOffloadItems()
 	if err != nil {
 		s.log.Warn("library: offload state unavailable", "err", err)
@@ -534,97 +447,10 @@ func (idx offloadIndex) view(filename string) *recordingOffload {
 	}
 	v := &recordingOffload{Targets: make([]recordingOffloadOn, 0, len(its))}
 	for _, it := range its {
-		v.Evicted = v.Evicted || it.Evicted
 		v.Targets = append(v.Targets, recordingOffloadOn{TargetID: it.TargetID, TargetName: idx.names[it.TargetID],
 			State: it.State, Attempts: it.Attempts, LastError: it.LastError, VerifiedAt: it.VerifiedAt})
 	}
-	if idx.svc != nil {
-		if st, ok := idx.svc.FetchStatus(filename); ok {
-			v.Fetch = &st
-		}
-	}
 	return v
-}
-
-// errRecordingOffloaded is what every path that needs a recording's bytes
-// answers when move mode has the only copy in a bucket. The answer is a 409
-// with code "offloaded" and the files to fetch; POST
-// /library/recordings/{id}/fetch brings them back.
-type errRecordingOffloaded struct{ files []string }
-
-func (e errRecordingOffloaded) Error() string {
-	return fmt.Sprintf("%d of this recording's files are in offload storage; fetch them back to use them", len(e.files))
-}
-
-func (s *Server) writeOffloaded(w http.ResponseWriter, e errRecordingOffloaded) {
-	states := map[string]offload.FetchState{}
-	if s.offload != nil {
-		for _, f := range e.files {
-			if st, ok := s.offload.FetchStatus(f); ok {
-				states[f] = st
-			}
-		}
-	}
-	writeJSON(w, http.StatusConflict, map[string]any{
-		"error": e.Error(), "code": "offloaded", "offloaded": e.files, "fetch": states,
-	})
-}
-
-// refuseOffloaded answers 409 "offloaded" for a single recording whose local
-// copy was moved, and reports whether it did.
-func (s *Server) refuseOffloaded(w http.ResponseWriter, filename string) bool {
-	if s.offload == nil || !s.offload.Evicted(filename) {
-		return false
-	}
-	s.writeOffloaded(w, errRecordingOffloaded{files: []string{filename}})
-	return true
-}
-
-// handleFetchRecording starts bringing a recording -- and every other
-// offloaded segment of its session, which is what the clipper scrubs
-// across -- back to local disk. It answers 202 immediately; the recordings
-// event fires as each fetch finishes, and the clipper retries then.
-func (s *Server) handleFetchRecording(w http.ResponseWriter, r *http.Request) {
-	id, err := idParam(r, "id")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	if s.offload == nil {
-		writeError(w, http.StatusServiceUnavailable, "offload is not running")
-		return
-	}
-	rec, err := s.store.GetRecording(id)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	files := []string{rec.Filename}
-	if sess, err := s.store.SessionForRecording(id); err == nil && sess != nil {
-		if members, err := s.store.SessionRecordings(sess.ID); err == nil {
-			files = files[:0]
-			for _, m := range members {
-				files = append(files, m.Filename)
-			}
-		}
-	}
-	started := map[string]offload.FetchState{}
-	for _, f := range files {
-		st, err := s.offload.Fetch(f)
-		if errors.Is(err, offload.ErrNotEvicted) {
-			continue
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		started[f] = st
-	}
-	if len(started) == 0 {
-		writeError(w, http.StatusConflict, "this recording is already on local disk")
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"fetch": started})
 }
 
 // handleRetryStorageTarget is the target card's Retry now: every failed or

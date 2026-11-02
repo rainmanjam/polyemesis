@@ -351,17 +351,8 @@ func (m *Manager) Scan() (bool, error) {
 	}
 	m.unprobeableMu.Unlock()
 
-	// A segment move-mode offload deleted after verifying its upload is gone
-	// from disk ON PURPOSE: the object store holds it and the clipper fetches
-	// it back on demand. Dropping its row here would make an offloaded
-	// recording vanish from the Library the first scan after it was moved.
-	evicted, err := m.store.EvictedRecordings()
-	if err != nil {
-		m.log.Warn("read offload state; keeping every missing row this scan", "err", err)
-		return changed, nil
-	}
 	for _, r := range indexed {
-		if !onDisk[r.Filename] && !evicted[r.Filename] {
+		if !onDisk[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
 				m.log.Warn("drop missing recording from index", "file", r.Filename, "err", err)
 				continue
@@ -503,20 +494,6 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// Offloaded-and-evicted rows hold no local bytes, so they neither age out
-	// of the local budget nor count against its size cap. Their lifetime in
-	// the bucket is the bucket's lifecycle rule, not this sweep.
-	if evicted, eerr := m.store.EvictedRecordings(); eerr != nil {
-		return false, eerr
-	} else if len(evicted) > 0 {
-		local := recs[:0]
-		for _, r := range recs {
-			if !evicted[r.Filename] {
-				local = append(local, r)
-			}
-		}
-		recs = local
-	}
 	if len(recs) == 0 {
 		return false, nil
 	}
@@ -547,22 +524,13 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	// a human naming one file that started days ago is owed the deletion, and
 	// refusing it for ever is how an archive stops being manageable.
 	live[newestSegmentName(recs)] = true
-	// A recording fetched back from offload storage stays put for the fetch
-	// pin, whatever retention says: a clip may be being cut from it.
-	if pinned, perr := m.store.OffloadPinnedRecordings(time.Now().Add(-db.OffloadFetchPin)); perr != nil {
-		return false, perr
-	} else {
-		for name := range pinned {
-			live[name] = true
-		}
-	}
 
 	if s.MaxAgeHours > 0 {
 		cutoff := time.Now().Add(-time.Duration(s.MaxAgeHours) * time.Hour)
 		remaining := recs[:0]
 		for _, r := range recs {
 			if !live[r.Filename] && r.StartedAt.Before(cutoff) {
-				if m.retire(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
+				if m.delete(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
 					deleted = true
 					continue
 				}
@@ -595,7 +563,7 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 			if live[recs[i].Filename] {
 				continue
 			}
-			if !m.retire(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
+			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
 				continue
 			}
 			total -= recs[i].Bytes
@@ -739,7 +707,7 @@ func liveSegments(recs []db.Recording, window time.Duration, now time.Time) map[
 // LiveSet names the segments a recorder may still be writing: every segment
 // that started within one segment length plus slack, and the newest one
 // unconditionally. It is the same inference Sweep protects with, exported so
-// offload never uploads (or evicts) a file retention would not touch either.
+// offload never uploads a file retention would not touch either.
 func LiveSet(recs []db.Recording, segmentSeconds int, now time.Time) map[string]bool {
 	live := liveSegments(recs, liveWindow(segmentSeconds), now)
 	if n := newestSegmentName(recs); n != "" {
@@ -812,31 +780,6 @@ func creditStems(stems []stemSize, cutoff time.Time) int64 {
 		stems[i].bytes = 0
 	}
 	return freed
-}
-
-// retire is what retention does to a recording it has decided to take off the
-// local disk. A recording every enabled storage target holds a verified copy
-// of, with a move-mode target among them, is EVICTED -- the file goes, the row
-// and its offload state stay, and it can be fetched back -- rather than
-// deleted, which would leave the only copy in a bucket nothing points at.
-// Everything else is deleted exactly as before.
-func (m *Manager) retire(r db.Recording, reason string) bool {
-	unlock := m.store.LockEviction()
-	defer unlock()
-	if err := m.store.BeginEvict(r.Filename, nil); err == nil {
-		path, rerr := m.Resolve(r.Filename)
-		if rerr == nil {
-			rerr = os.Remove(path)
-		}
-		if rerr != nil && !os.IsNotExist(rerr) {
-			m.log.Warn("evict recording for retention", "file", r.Filename, "err", rerr)
-			_ = m.store.UndoEvict(r.Filename)
-			return false
-		}
-		m.log.Info("recording moved to offload storage by retention policy", "file", r.Filename, "reason", reason)
-		return true
-	}
-	return m.delete(r, reason)
 }
 
 func (m *Manager) delete(r db.Recording, reason string) bool {
@@ -955,13 +898,6 @@ func (m *Manager) Delete(id int64) error {
 	}
 	if err := m.store.DeleteRecording(id); err != nil {
 		return err
-	}
-	// An operator deleting a recording deletes its offload state too: rows
-	// left behind would keep a storage target undeletable ("holds the only
-	// copy") for a recording that no longer exists. The object in the bucket
-	// is left to the bucket's lifecycle rule, as everywhere else.
-	if err := m.store.DeleteOffloadItemsFor(r.Filename); err != nil {
-		m.log.Warn("drop offload state of a deleted recording", "file", r.Filename, "err", err)
 	}
 	m.removeDerived(r.Filename)
 	// The session this belonged to may now be empty, and its span is wrong

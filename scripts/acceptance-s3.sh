@@ -5,8 +5,9 @@
 # s3integration-tagged Go tests in internal/objstore (SigV4 round trip, the
 # server refusing a body that is not the signed digest, a wrong secret refused
 # and never echoed, multipart with its composite ETag, a ranged GET, abort) and
-# internal/offload (move mode: upload, verify, evict, fetch back; a multipart
-# upload resumed across a restart; the Test button's put/get/delete). Unit CI
+# internal/offload (mirror mode: upload and verify, the local file untouched;
+# a multipart upload resumed across a restart; the Test button's
+# put/get/delete). Unit CI
 # never needs Docker: those files only build with -tags s3integration, and
 # they FAIL rather than skip without an endpoint, so a run that reached the
 # server is the only green this prints.
@@ -98,9 +99,9 @@ grep -E '^(=== RUN|--- |ok|FAIL|panic)' "$out" || true
 
 # A mistyped -run exits 0 having run nothing; insist on the cases by name.
 for want in TestLiveRoundTripWithAKeyThatNeedsEscaping TestLiveServerRefusesABodyThatIsNotTheSignedDigest \
-	TestLiveWrongSecretIsRefusedAndNeverEchoed TestLiveMoveModeUploadsVerifiesEvictsAndFetchesBack \
+	TestLiveWrongSecretIsRefusedAndNeverEchoed TestLiveMirrorUploadsVerifiesAndKeepsTheLocalFile \
 	TestLiveProbeRunsPutGetDelete TestLiveMultipartAndRangedGet \
-	TestLiveMultipartResumesAcrossARestartAndFetchesBack; do
+	TestLiveMultipartResumesAcrossARestartAndVerifies; do
 	if ! grep -q -- "--- PASS: $want " "$out"; then
 		echo "FAIL: $want did not pass" >&2
 		status=1

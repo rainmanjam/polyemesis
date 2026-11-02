@@ -21,16 +21,6 @@ const (
 	StorageProviderWasabi = "wasabi"
 )
 
-// Offload modes.
-const (
-	// OffloadMirror copies finished files and leaves local retention exactly
-	// as it was.
-	OffloadMirror = "mirror"
-	// OffloadMove additionally deletes a local recording once every enabled
-	// target has verified it and it is older than KeepLocalHours.
-	OffloadMove = "move"
-)
-
 // Offload item states.
 const (
 	OffloadPending   = "pending"
@@ -55,15 +45,16 @@ const (
 	OffloadKindClip       = "clip"
 )
 
-// StorageTarget is one S3-compatible bucket finished media is offloaded to.
+// StorageTarget is one S3-compatible bucket finished media is copied to.
+// Offload is MIRROR ONLY: it copies, and never deletes or moves a local file.
 //
 // SecretAccessKey is json:"-": it is written once on create or update, sealed
 // with the install's secret box (passed explicitly, like the hook and platform
 // credentials -- a handful of methods with a handful of callers), and never
 // marshalled in any response. There is no plaintext fallback: without a box
-// the secret is refused, not stored. The
-// page is told HasSecret instead. AccessKeyID is not a secret on its own but
-// names the account, so the read-safe view blanks it.
+// the secret is refused, not stored. The page is told HasSecret instead.
+// AccessKeyID is not a secret on its own but names the account, so the
+// read-safe view blanks it.
 type StorageTarget struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`
@@ -82,19 +73,22 @@ type StorageTarget struct {
 	HasSecret       bool   `json:"hasSecret"`
 	// SecretUnreadable is set when a sealed secret exists but this machine's
 	// key cannot open it (a restored database without its key file).
-	SecretUnreadable   bool   `json:"secretUnreadable,omitempty"`
-	Mode               string `json:"mode"`
-	KeepLocalHours     int    `json:"keepLocalHours"`
-	OffloadStems       bool   `json:"offloadStems"`
-	OffloadTranscripts bool   `json:"offloadTranscripts"`
-	OffloadClips       bool   `json:"offloadClips"`
-	VerifyDownload     bool   `json:"verifyDownload"`
-	AllowPrivateTarget bool   `json:"allowPrivateTarget"`
-	Enabled            bool   `json:"enabled"`
+	SecretUnreadable   bool `json:"secretUnreadable,omitempty"`
+	OffloadStems       bool `json:"offloadStems"`
+	OffloadTranscripts bool `json:"offloadTranscripts"`
+	OffloadClips       bool `json:"offloadClips"`
+	VerifyDownload     bool `json:"verifyDownload"`
+	AllowPrivateTarget bool `json:"allowPrivateTarget"`
+	Enabled            bool `json:"enabled"`
 	// MaxAttempts is how many consecutive failures make an item stuck.
-	MaxAttempts int       `json:"maxAttempts"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	MaxAttempts int `json:"maxAttempts"`
+	// BindingGen counts the times the target was moved to another address
+	// (RebindStorageTarget). An upload captures it when its pass starts and
+	// may write its result only while it is unchanged, so an upload to the
+	// OLD address can never mark a row verified for the new one.
+	BindingGen int64     `json:"-"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 // DefaultOffloadPrefix is the key prefix a target with no template uses.
@@ -113,29 +107,25 @@ type OffloadItem struct {
 	NextAttemptAt time.Time `json:"nextAttemptAt,omitzero"`
 	LastError     string    `json:"lastError,omitempty"`
 	VerifiedAt    time.Time `json:"verifiedAt,omitzero"`
-	// Evicted means move mode deleted the local copy; the object is the only
-	// copy until it is fetched back.
-	Evicted   bool      `json:"evicted"`
-	FetchedAt time.Time `json:"fetchedAt,omitzero"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
-// ErrStorageTargetHoldsOnlyCopies refuses deleting a target that still holds
-// the only copy of an evicted recording.
-var ErrStorageTargetHoldsOnlyCopies = fmt.Errorf("%w: this target holds the only copy of evicted recordings; fetch them back or disable the target instead", ErrStateConflict)
+// ErrBindingChanged refuses an item write from a pass that started before the
+// target was moved to another address.
+var ErrBindingChanged = errors.New("the storage target moved while this upload ran; its result belongs to the old address")
 
 const storageTargetCols = `id, name, provider, endpoint, bucket, region, prefix_template, path_style,
-	access_key_id, secret_enc, mode, keep_local_hours, offload_stems, offload_transcripts,
-	offload_clips, verify_download, allow_private_target, enabled, max_attempts, created_at, updated_at`
+	access_key_id, secret_enc, offload_stems, offload_transcripts,
+	offload_clips, verify_download, allow_private_target, enabled, max_attempts, binding_gen, created_at, updated_at`
 
 func scanStorageTarget(box *secrets.Box, row interface{ Scan(...any) error }) (StorageTarget, error) {
 	var t StorageTarget
 	var enc []byte
 	var created, updated int64
 	err := row.Scan(&t.ID, &t.Name, &t.Provider, &t.Endpoint, &t.Bucket, &t.Region, &t.PrefixTemplate,
-		&t.PathStyle, &t.AccessKeyID, &enc, &t.Mode, &t.KeepLocalHours, &t.OffloadStems,
+		&t.PathStyle, &t.AccessKeyID, &enc, &t.OffloadStems,
 		&t.OffloadTranscripts, &t.OffloadClips, &t.VerifyDownload, &t.AllowPrivateTarget, &t.Enabled,
-		&t.MaxAttempts, &created, &updated)
+		&t.MaxAttempts, &t.BindingGen, &created, &updated)
 	if err != nil {
 		return t, err
 	}
@@ -201,11 +191,11 @@ func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, erro
 	}
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO storage_targets (name, provider, endpoint, bucket, region,
-		prefix_template, path_style, access_key_id, secret_enc, mode, keep_local_hours, offload_stems,
+		prefix_template, path_style, access_key_id, secret_enc, offload_stems,
 		offload_transcripts, offload_clips, verify_download, allow_private_target, enabled, max_attempts, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.Name, t.Provider, t.Endpoint, t.Bucket, t.Region, t.PrefixTemplate, t.PathStyle, t.AccessKeyID,
-		enc, t.Mode, t.KeepLocalHours, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
+		enc, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
 		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, maxAttemptsOr(t.MaxAttempts), now, now)
 	if err != nil {
 		return 0, err
@@ -215,9 +205,10 @@ func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, erro
 
 // UpdateStorageTarget rewrites every field of t. An empty SecretAccessKey
 // leaves the stored secret as it was, so a form that never displays the
-// secret can still be saved.
+// secret can still be saved. An edit that changes where objects live goes
+// through RebindStorageTarget instead.
 func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
-	q, args, err := updateTargetQuery(box, t)
+	q, args, err := updateTargetQuery(box, t, false)
 	if err != nil {
 		return err
 	}
@@ -231,13 +222,16 @@ func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
 	return nil
 }
 
-func updateTargetQuery(box *secrets.Box, t StorageTarget) (string, []any, error) {
+func updateTargetQuery(box *secrets.Box, t StorageTarget, rebind bool) (string, []any, error) {
 	q := `UPDATE storage_targets SET name=?, provider=?, endpoint=?, bucket=?, region=?, prefix_template=?,
-		path_style=?, access_key_id=?, mode=?, keep_local_hours=?, offload_stems=?, offload_transcripts=?,
+		path_style=?, access_key_id=?, offload_stems=?, offload_transcripts=?,
 		offload_clips=?, verify_download=?, allow_private_target=?, enabled=?, max_attempts=?, updated_at=?`
 	args := []any{t.Name, t.Provider, t.Endpoint, t.Bucket, t.Region, t.PrefixTemplate, t.PathStyle,
-		t.AccessKeyID, t.Mode, t.KeepLocalHours, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
+		t.AccessKeyID, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
 		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, maxAttemptsOr(t.MaxAttempts), time.Now().Unix()}
+	if rebind {
+		q += `, binding_gen = binding_gen + 1`
+	}
 	if t.SecretAccessKey != "" {
 		enc, err := sealTargetSecret(box, t.SecretAccessKey)
 		if err != nil {
@@ -280,55 +274,15 @@ func (d *DB) RetryOffloadItems(target int64, rel string) (int64, error) {
 	return res.RowsAffected()
 }
 
-// onlyCopies counts the evicted files whose only usable copy is on the
-// target: no OTHER target that is still trusted holds a verified row. A
-// target whose secret cannot be opened on this machine is not trusted -- its
-// copy cannot be fetched -- so its rows do not count as somewhere else.
-func onlyCopies(q interface {
-	QueryRow(string, ...any) *sql.Row
-}, id int64, untrusted []int64) (int, error) {
-	query := `SELECT COUNT(*) FROM offload_items i WHERE i.target_id = ? AND i.evicted = 1
-		AND NOT EXISTS (SELECT 1 FROM offload_items o WHERE o.rel_path = i.rel_path AND o.target_id != i.target_id
-			AND o.state = 'verified'`
-	args := []any{id}
-	for _, u := range untrusted {
-		query += ` AND o.target_id != ?`
-		args = append(args, u)
-	}
-	query += `)`
-	var n int
-	err := q.QueryRow(query, args...).Scan(&n)
-	return n, err
-}
-
-// StorageTargetDeletable answers DeleteStorageTarget's refusal without
-// deleting, so the caller can abort the target's multipart uploads first.
-func (d *DB) StorageTargetDeletable(id int64, untrusted []int64) error {
-	n, err := onlyCopies(d.sql, id, untrusted)
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		return ErrStorageTargetHoldsOnlyCopies
-	}
-	return nil
-}
-
-// DeleteStorageTarget removes a target and its item rows, unless it holds the
-// only usable copy of an evicted file.
-func (d *DB) DeleteStorageTarget(id int64, untrusted []int64) error {
+// DeleteStorageTarget removes a target, its item rows and its multipart
+// progress. Mirror mode never deletes a local file, so there is no copy a
+// target can be the only holder of; objects already in the bucket stay there.
+func (d *DB) DeleteStorageTarget(id int64) error {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	n, err := onlyCopies(tx, id, untrusted)
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		return ErrStorageTargetHoldsOnlyCopies
-	}
 	for _, q := range []string{
 		`DELETE FROM offload_multipart WHERE target_id = ?`,
 		`DELETE FROM offload_items WHERE target_id = ?`,
@@ -347,30 +301,19 @@ func (d *DB) DeleteStorageTarget(id int64, untrusted []int64) error {
 	return tx.Commit()
 }
 
-// ErrStorageTargetRebindHoldsCopies refuses moving a target to another
-// endpoint, bucket, account or addressing while it holds evicted files: their
-// objects are at the old address.
-var ErrStorageTargetRebindHoldsCopies = fmt.Errorf("%w: recordings moved to this target are stored at its current address; fetch them back before changing the endpoint, bucket, region, access key or addressing", ErrStateConflict)
-
 // RebindStorageTarget is UpdateStorageTarget for an edit that changes WHERE
-// objects live. In one transaction it refuses while any of the target's rows
-// is evicted, then saves, puts every row back to pending -- nothing is
-// verified at the new address yet -- and drops multipart progress made at the
-// old one. The transaction is what keeps an eviction from slipping in between.
+// objects live (endpoint, bucket, region, access key, addressing). In one
+// transaction it saves, advances the target's binding generation -- so an
+// upload still running against the old address can no longer write its
+// result -- puts every row back to pending, since nothing is verified at the
+// new address yet, and drops multipart progress made at the old one.
 func (d *DB) RebindStorageTarget(box *secrets.Box, t StorageTarget) error {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var held int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM offload_items WHERE target_id = ? AND evicted = 1`, t.ID).Scan(&held); err != nil {
-		return err
-	}
-	if held > 0 {
-		return ErrStorageTargetRebindHoldsCopies
-	}
-	q, args, err := updateTargetQuery(box, t)
+	q, args, err := updateTargetQuery(box, t, true)
 	if err != nil {
 		return err
 	}
@@ -393,19 +336,18 @@ func (d *DB) RebindStorageTarget(box *secrets.Box, t StorageTarget) error {
 }
 
 const offloadItemCols = `target_id, rel_path, kind, object_key, bytes, sha256, state, attempts,
-	next_attempt_at, last_error, verified_at, evicted, fetched_at, updated_at`
+	next_attempt_at, last_error, verified_at, updated_at`
 
 func scanOffloadItem(row interface{ Scan(...any) error }) (OffloadItem, error) {
 	var it OffloadItem
-	var next, verified, fetched, updated int64
+	var next, verified, updated int64
 	err := row.Scan(&it.TargetID, &it.RelPath, &it.Kind, &it.Key, &it.Bytes, &it.SHA256, &it.State,
-		&it.Attempts, &next, &it.LastError, &verified, &it.Evicted, &fetched, &updated)
+		&it.Attempts, &next, &it.LastError, &verified, &updated)
 	if err != nil {
 		return it, err
 	}
 	it.NextAttemptAt = offloadTime(next)
 	it.VerifiedAt = offloadTime(verified)
-	it.FetchedAt = offloadTime(fetched)
 	it.UpdatedAt = time.Unix(updated, 0).UTC()
 	return it, nil
 }
@@ -460,21 +402,45 @@ func (d *DB) OffloadItemsFor(relPath string) ([]OffloadItem, error) {
 	return out, rows.Err()
 }
 
+const upsertItem = `INSERT INTO offload_items (` + offloadItemCols + `)
+	SELECT ?,?,?,?,?,?,?,?,?,?,?,? %s
+	ON CONFLICT(target_id, rel_path) DO UPDATE SET kind=excluded.kind, object_key=excluded.object_key,
+		bytes=excluded.bytes, sha256=excluded.sha256, state=excluded.state, attempts=excluded.attempts,
+		next_attempt_at=excluded.next_attempt_at, last_error=excluded.last_error,
+		verified_at=excluded.verified_at, updated_at=excluded.updated_at`
+
+func itemArgs(it OffloadItem) []any {
+	return []any{it.TargetID, it.RelPath, it.Kind, it.Key, it.Bytes, it.SHA256, it.State, it.Attempts,
+		zeroOrUnix(it.NextAttemptAt), it.LastError, zeroOrUnix(it.VerifiedAt), time.Now().Unix()}
+}
+
 // PutOffloadItem inserts or replaces one item row.
 func (d *DB) PutOffloadItem(it OffloadItem) error {
 	if it.TargetID == 0 || strings.TrimSpace(it.RelPath) == "" {
 		return errors.New("offload item needs a target and a path")
 	}
-	_, err := d.sql.Exec(`INSERT INTO offload_items (`+offloadItemCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(target_id, rel_path) DO UPDATE SET kind=excluded.kind, object_key=excluded.object_key,
-			bytes=excluded.bytes, sha256=excluded.sha256, state=excluded.state, attempts=excluded.attempts,
-			next_attempt_at=excluded.next_attempt_at, last_error=excluded.last_error,
-			verified_at=excluded.verified_at, evicted=excluded.evicted, fetched_at=excluded.fetched_at,
-			updated_at=excluded.updated_at`,
-		it.TargetID, it.RelPath, it.Kind, it.Key, it.Bytes, it.SHA256, it.State, it.Attempts,
-		zeroOrUnix(it.NextAttemptAt), it.LastError, zeroOrUnix(it.VerifiedAt), it.Evicted,
-		zeroOrUnix(it.FetchedAt), time.Now().Unix())
+	_, err := d.sql.Exec(fmt.Sprintf(upsertItem, "WHERE true"), itemArgs(it)...)
 	return err
+}
+
+// PutOffloadItemIfBinding is PutOffloadItem for a write an upload makes: it
+// lands only while the target still exists at binding generation gen, the
+// one the upload's pass started with. A target moved (or deleted) since gets
+// ErrBindingChanged and its row is left exactly as the move left it.
+func (d *DB) PutOffloadItemIfBinding(it OffloadItem, gen int64) error {
+	if it.TargetID == 0 || strings.TrimSpace(it.RelPath) == "" {
+		return errors.New("offload item needs a target and a path")
+	}
+	res, err := d.sql.Exec(fmt.Sprintf(upsertItem,
+		"WHERE (SELECT binding_gen FROM storage_targets WHERE id = ?) = ?"),
+		append(itemArgs(it), it.TargetID, gen)...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrBindingChanged
+	}
+	return nil
 }
 
 // OffloadKeyHolder returns the file that owns key on target, "" when none.
@@ -492,24 +458,4 @@ func (d *DB) OffloadKeyHolder(target int64, key string) (string, error) {
 func (d *DB) DeleteOffloadItemsFor(relPath string) error {
 	_, err := d.sql.Exec(`DELETE FROM offload_items WHERE rel_path = ?`, relPath)
 	return err
-}
-
-// EvictedRecordings returns the recording file names whose local copy move
-// mode deleted. recording.Manager keeps their index rows although the file is
-// gone from disk.
-func (d *DB) EvictedRecordings() (map[string]bool, error) {
-	rows, err := d.sql.Query(`SELECT DISTINCT rel_path FROM offload_items WHERE evicted = 1 AND kind = ?`, OffloadKindRecording)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return nil, err
-		}
-		out[p] = true
-	}
-	return out, rows.Err()
 }

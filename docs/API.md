@@ -1187,7 +1187,6 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `PUT` | `/library/recordings/{id}/speaker` |
 | `POST` | `/library/recordings/{id}/jobs/{kind}` |
 | `GET` | `/library/recordings/{id}/media/{file}` |
-| `POST` | `/library/recordings/{id}/fetch` |
 | `POST` | `/library/recordings/{id}/offload/retry` |
 | `GET` | `/clipper/recordings/{id}`, `/keyframes`, `/transcript` |
 | `POST` | `/clipper/recordings/{id}/plan`, `/export` |
@@ -1196,18 +1195,10 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
 
-**A recording that move-mode offload moved to a bucket answers `409` with
-`"code": "offloaded"`** on every route that needs its bytes: the clipper routes,
-`POST /library/recordings/{id}/jobs/{kind}` and `GET /recordings/{id}/download`.
-The body names the files (`offloaded`) and any fetch already running (`fetch`).
-`POST /library/recordings/{id}/fetch` starts bringing the recording back -- with
-every other offloaded segment of its session, because the clipper scrubs the
-whole session -- and answers `202` at once. Each fetched file is checked against
-the size and SHA-256 recorded at upload before it is renamed into place; the
-`recordings` event fires as each lands, and the caller retries then. A fetched
-recording stays local for 24 hours before move mode may evict it again. The
-Library item's `offload` field carries the per-target state. See
-[STORAGE.md](STORAGE.md).
+**Each Library recording carries an `offload` field** when a storage target has
+seen it: one entry per target with its `state` (`pending`, `uploading`,
+`verified`, `failed`, `stuck`), `attempts` and `lastError`. Offload copies and
+never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
 
 **`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
 Absent, it deletes the whole transcript; present, it deletes one track's, so a
@@ -1348,7 +1339,8 @@ answer later is refused then. See [HOOKS.md](HOOKS.md#private-and-lan-endpoints-
 ### Storage targets (offload)
 
 S3-compatible buckets (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) that
-finished recordings are copied to, and in `move` mode moved to. See
+finished recordings are copied to. Mirror mode only: the local file is never
+moved or deleted. See
 [STORAGE.md](STORAGE.md).
 
 | Method | Path |
@@ -1372,16 +1364,16 @@ it, and answers `{"ok", "steps": [{"step": "put"|"get"|"delete", "ok", "error",
 "skipped"}], "failedStep"}`.
 
 **A literal private address is `400`** unless `"allowPrivateTarget": true`, and
-the same netguard check runs again at dial time, as for webhooks. **`DELETE` is
-`409`** while the target holds the only copy of an evicted recording; otherwise
-the target's unfinished multipart uploads are aborted on the service first.
+the same netguard check runs again at dial time, as for webhooks. **`DELETE`**
+aborts the target's unfinished multipart uploads on the service first; objects
+already in the bucket stay there.
 
 **Updating a target is an admin call, like webhooks and the automod key**:
-an `admin` token may change any field, including `mode`; a `read` token may
-not. The Test route alone is session-only. A `PUT` that changes `endpoint`,
-`bucket`, `region`, `accessKeyId` or `pathStyle` is `409` while the target holds
-moved recordings and otherwise resets every file on the target to be uploaded
-again.
+an `admin` token may change any field; a `read` token may not. The Test route
+alone is session-only. A `PUT` that changes `endpoint`, `bucket`, `region`,
+`accessKeyId` or `pathStyle` resets every file on the target to be uploaded
+again at the new address, and an upload still running against the old one
+cannot record its result.
 
 **A saved secret is used only for the address it was saved for.** A `PUT` or a
 Test that changes `endpoint`, `bucket`, `pathStyle` or `allowPrivateTarget` without a

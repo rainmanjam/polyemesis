@@ -325,10 +325,6 @@ func assertFreshInstallRefusal(t *testing.T, pair, path string, body []byte) boo
 // noSourceRefusalSites next door is one: there is no `-update-coverage` that
 // can regenerate it, so an entry is a sentence somebody wrote on purpose.
 var freshInstallSubsystemRefusals = map[string]string{
-	"POST /api/v1/library/recordings/{id}/fetch": "the offload service is not wired into this fixture " +
-		"(Options.Offload is nil), so the route answers 503 at once. That is about the BUILD, not a " +
-		"source: main wires offload unconditionally, and a fetch needs a storage target, not a " +
-		"programme. Driven with a service by storage_offload_test.go.",
 	"GET /api/v1/polls": "the poll engine is not wired into this fixture (Options.Polls is nil), so the " +
 		"route answers 503 at once. That is about the BUILD, not a source: main wires the " +
 		"engine unconditionally, and a poll needs chat, not a programme. Driven with an " +

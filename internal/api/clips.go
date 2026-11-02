@@ -342,7 +342,6 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 	// start and they run forwards; otherwise the files go end to end, which is
 	// what clipper.NewTimeline does with an all-zero set.
 	offsets, ok := clipOffsets(recs)
-	var offloaded []string
 	for i, rec := range recs {
 		if rec.DurationMS <= 0 {
 			// Not measured yet. A zero-length segment contributes no frames and
@@ -355,8 +354,6 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 		}
 		if path, err := s.recordings().Resolve(rec.Filename); err == nil && fileExists(path) {
 			p.path = path
-		} else if s.offload != nil && s.offload.Evicted(rec.Filename) {
-			offloaded = append(offloaded, rec.Filename)
 		}
 		out.parts = append(out.parts, p)
 	}
@@ -369,14 +366,6 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 	}
 	if len(out.parts) == 0 {
 		return clipTimeline{}, errClipNotMeasured
-	}
-	// Move-mode offload has some of the session's segments in a bucket. The
-	// editor scrubs the whole session, so it does not open on a timeline with
-	// holes: every clip route answers 409 "offloaded" naming the files, the
-	// page calls POST /library/recordings/{id}/fetch, and it retries when the
-	// recordings event reports them local again.
-	if len(offloaded) > 0 {
-		return out, errRecordingOffloaded{files: offloaded}
 	}
 	return out, nil
 }
@@ -438,10 +427,6 @@ func (s *Server) writeClipError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
-	case errors.As(err, new(errRecordingOffloaded)):
-		var off errRecordingOffloaded
-		errors.As(err, &off)
-		s.writeOffloaded(w, off)
 	case errors.Is(err, errClipNotMeasured), errors.Is(err, errClipFilesMissing):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, clipper.ErrInvalidRequest),

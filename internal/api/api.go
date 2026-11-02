@@ -880,10 +880,6 @@ func New(o Options) *Server {
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
 	}
-	// Eviction asks the job queue whether a recording is about to be read.
-	if s.offload != nil {
-		s.offload.SetInUse(s.offloadInUse)
-	}
 	return s
 }
 
@@ -1365,10 +1361,6 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// it through and a plain <video src> can reach it — which it has
 			// to, because a media element attaches no headers of its own.
 			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
-			// Move-mode offload: bring a recording (and its session's other
-			// offloaded segments) back to local disk. 202 at once; the
-			// recordings event says when each file has landed.
-			r.Post("/library/recordings/{id}/fetch", s.handleFetchRecording)
 			r.Post("/library/recordings/{id}/offload/retry", s.handleRetryRecordingOffload)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a

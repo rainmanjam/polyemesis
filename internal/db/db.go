@@ -90,13 +90,6 @@ type DB struct {
 	// scanDestination is that place.
 	box *secrets.Box
 
-	// evictMu serialises every step that sets or clears the evicted mark
-	// together with the file operation it stands for -- move mode's unlink,
-	// retention's unlink, the repair of an interrupted eviction, fetch-back's
-	// link -- across the offload service and the recording managers, which run
-	// on goroutines of their own. See LockEviction.
-	evictMu sync.Mutex
-
 	// settingsMu serialises READ-MODIFY-WRITE callers of the settings
 	// singleton, and nothing else.
 	//
@@ -477,13 +470,7 @@ func Open(path string, opts ...Option) (*DB, error) {
 //
 // 1 is the seal-at-rest schema: destinations.stream_key_enc and
 // backup_stream_key_enc exist, and backfillDestinationStreamKeys has run.
-//
-// 2 is offload (Wave 4 #10): a recording moved to a storage target keeps its
-// row while its file is gone from disk, recorded in offload_items. An older
-// binary's scan treats every missing file as deleted and drops its row -- the
-// only pointer to the copy in the bucket -- so an older binary must not open a
-// database this one has written.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 1
 
 // refuseNewerSchema refuses to open a database stamped with a schema version
 // newer than this binary's.
@@ -553,7 +540,7 @@ func (d *DB) MigrateSchemaVersion() error {
 	// TestSchemaVersionStampIsIdempotent read user_version back and compare it
 	// against currentSchemaVersion, and both fail if this literal stops agreeing
 	// with the const -- verified by bumping the const and watching them go red.
-	if _, err := d.sql.Exec(`PRAGMA user_version = 2`); err != nil {
+	if _, err := d.sql.Exec(`PRAGMA user_version = 1`); err != nil {
 		return fmt.Errorf("stamp schema version %d: %w", currentSchemaVersion, err)
 	}
 	return nil

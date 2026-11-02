@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -187,11 +186,8 @@ func (s *Service) AbortTarget(ctx context.Context, t db.StorageTarget) {
 
 // Recover is restart safety, run once before the first pass:
 //   - an item a previous process left "uploading" is failed and due at once;
-//   - a fetch-back temp file is removed (the final name is only ever written
-//     by a rename after the whole file verified, so nothing half-written can
-//     sit under it);
-//   - a multipart upload that will not be resumed -- its item stuck, verified,
-//     evicted or gone, or its file gone -- is aborted on the service.
+//   - a multipart upload that will not be resumed -- its item stuck, verified
+//     or gone, or its file gone -- is aborted on the service.
 //
 // A multipart upload whose item is still pending or failed is kept: the next
 // pass resumes it from the parts already sent.
@@ -202,13 +198,6 @@ func (s *Service) Recover(ctx context.Context) {
 		s.log.Info("offload: uploads interrupted by a restart will be retried", "items", n)
 	}
 	dir := s.rec.Dir()
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".offload-fetch-") {
-				_ = os.Remove(filepath.Join(dir, e.Name()))
-			}
-		}
-	}
 	rows, err := s.store.ListOffloadMultipart(0)
 	if err != nil {
 		return
@@ -218,7 +207,7 @@ func (s *Service) Recover(ctx context.Context) {
 		keep := false
 		if its, err := s.store.OffloadItemsFor(mp.RelPath); err == nil {
 			for _, it := range its {
-				if it.TargetID == mp.TargetID && !it.Evicted &&
+				if it.TargetID == mp.TargetID &&
 					(it.State == db.OffloadPending || it.State == db.OffloadFailed || it.State == db.OffloadUploading) {
 					keep = true
 				}
