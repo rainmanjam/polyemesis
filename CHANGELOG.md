@@ -46,8 +46,9 @@ its first tagged release.
   on every file. See docs/STORAGE.md and docs/CDN.md. In all 15 languages.
 - **Highlight suggestions in the clip editor (Wave 4 #5a).** *Find highlights* queues a
   `highlights.scan` job that looks for chat bursts over the stream's own baseline and loudness
-  peaks (EBU R128, measured from the recording), and, if you tick it, has the model configured in
-  Automod score the transcript excerpts in one call. Results land in a review queue with each
+  peaks (EBU R128, measured from the recording), and, if you tick it and switch on **Use AI for
+  highlight scoring** in Automod settings (off by default), has the Automod model's provider score
+  the transcript excerpts in one call. Results land in a review queue with each
   suggestion's span, score, the signals that fired and the words spoken; you accept (an ordinary
   clip export, with the editor's settings) or dismiss. Nothing is clipped until you accept, and a
   rescan does not offer a moment you already decided again. In all 15 languages.
@@ -55,7 +56,9 @@ its first tagged release.
   TikTok and Reels: centre crop with a pan, face cam stacked over gameplay (a box you draw on a
   still of the frame), or the whole frame over a blurred copy. Captions are burned in from the
   transcript with the bundled font, in a style you choose, and layouts can be saved as templates.
-  A short over 60 seconds exports with a warning rather than being refused. In all 15 languages.
+  A short over 60 seconds exports with a warning rather than being refused. Clip encodes run
+  under the job governor's priority wrapper so they yield to a live broadcast, and the playout
+  offline card does not offer a 9:16 short. In all 15 languages.
 - **X go-live announcement: once per show by default (#3, PROVISIONAL).** An X destination has a
   **Go-live announcement** setting in the X console (`xGoLiveTweet`): *on the first go-live of a
   show only* (the default), *on every go-live*, or *never*. A show lasts while the destination is

@@ -1353,30 +1353,56 @@ never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
 
 **Vertical shorts.** `/plan` and `/export` take an optional `vertical` object,
 and with it the export is a 9:16 short: 1080x1920 H.264 (yuv420p) with one
-stereo AAC track, in MP4, named `…-vertical.mp4`. `layout` is `center` (a 9:16
-crop; `focus` 0..1 pans it, default 0.5), `stacked` (`face` is the face-cam box
-and `game` the gameplay box, each `{x, y, w, h}` as fractions of the source
-frame; `faceShare` 0.2..0.6 is the face panel's share of the height, default
-0.4; `faceBottom` puts it under the gameplay) or `blur` (the whole frame fitted
-across the width over a blurred copy of itself). `captions: {enabled, style}`
-burns the transcript over the clip's span into the picture -- the words come
-from the stored transcript, never from the request, and follow the chosen
-tracks; `style.font` must be a font already in the fonts directory. Every
-frame is re-encoded, so the in-point is exact whatever `mode` says. A short
-longer than 60 seconds is planned and exported with a warning, not refused.
-Without FFmpeg's `drawtext` filter the short is made without captions and the
-plan says so.
+stereo AAC track, in MP4. Its file name carries the layout and a digest of its
+settings (`…-vertical-stacked-1a2b3c4d.mp4`), and a name already on disk gets
+`-2`, `-3`, so shorts of one span in different layouts are separate files.
+`layout` is `center` (a 9:16 crop; `focus` 0..1 pans it, default 0.5),
+`stacked` (`face` is the face-cam box and `game` the gameplay box, each
+`{x, y, w, h}` as fractions of the source frame; `faceShare` 0.2..0.6 is the
+face panel's share of the height, default 0.4; `faceBottom` puts it under the
+gameplay) or `blur` (the whole frame fitted across the width over a blurred
+copy of itself). Crops are never smaller than 2 px or odd, whatever the source.
+`captions: {enabled, style}` burns the transcript over the clip's span into
+the picture: the words come from the stored transcript, never from the
+request, and follow the chosen tracks; captions spoken at the same time are
+stacked; a recording with a gap keeps each caption on its own picture, and the
+short is the length of the picture it contains. `style.font` must be a font
+already in the fonts directory; the bundled Inter draws Latin, Greek and
+Cyrillic, and the plan warns, naming a character, when a caption needs a font
+it does not have (add one to the fonts directory and choose it). An empty
+`style.outline` is the default 6 px; `-1` is none. At most 600 caption lines
+are drawn per short, with a warning for the rest. Every frame is re-encoded,
+so the in-point is exact whatever `mode` says; the encode runs under the job
+governor's priority wrapper and, unless the request caps it, on half the
+machine's threads, so it yields to a live broadcast. A short longer than 60
+seconds is planned and exported with a warning, not refused. Without FFmpeg's
+`drawtext` filter the short is made without captions and the plan says so.
+The job stores the caption tracks, style and font NAME -- never the words,
+the font's path or the server's capabilities, because `/jobs` is readable by
+a read token -- and the worker resolves them when it runs. A finished short's
+job result carries `"vertical": true`; the playout offline card refuses one.
 
 **Highlights.** `POST /clipper/recordings/{id}/highlights/scan` (body
-`{"useModel": bool}`, optional) queues a `highlights.scan` job, folded into one
-already queued for the same recording. It measures loudness, lines chat up with
-the recording, and stores suggestions; it cuts nothing. With `useModel` the
-Automod primary model (OpenAI-compatible protocol only) scores the transcript
-excerpts in one call, on a budget of its own; it fails open.
-`GET /clipper/recordings/{id}/highlights` is the review queue: each suggestion's
-`startMs`/`endMs`, `score`, the `signals` that fired (`chat`, `loudness`,
-`model`, each with `peak` and `baseline`), its `excerpt` and `state`
+`{"useModel": bool}`, optional) queues a `highlights.scan` job. It measures
+loudness, lines chat up with the recording, and stores suggestions; it cuts
+nothing. A session (a stream recorded as several files) has one review queue
+and one scan, whichever of its files the request names. A scan already queued
+for it absorbs the request; one that asks for scoring upgrades a queued plain
+scan, and gets a scan of its own if the plain one is already running. Chat is
+counted once per message across files whose clocks overlap. `chat_messages`
+records no programme, so on an install with two programmes live at once, the
+other programme's chat can count towards this recording's bursts.
+With `useModel` the scan scores the transcript excerpts in one call, through
+the Automod PRIMARY model's provider (OpenAI-compatible protocol only), when
+**Use AI for highlight scoring** (`automod.highlightScoring`, off by default)
+is switched on; the Automod model block itself need not be. It spends a budget
+of its own, fails open, and reports `unavailable` when no suggestion has any
+transcript. `GET /clipper/recordings/{id}/highlights` is the review queue: each
+suggestion's `startMs`/`endMs`, `score`, the `signals` that fired (`chat`,
+`loudness`, `model`, each with `peak` and `baseline`), its `excerpt` and `state`
 (`pending`, `accepted`, `dismissed`), plus `modelAvailable` and `modelReason`.
+Suggestions never overlap and never list a signal outside their span. A rescan
+does not offer a moment again that is mostly inside one already decided.
 `POST /clipper/highlights/{id}/accept` takes the `/export` body -- in and out
 default to the suggestion's -- and queues exactly the export the editor would;
 a second accept, or one after a dismiss, is `409`. `…/dismiss` decides it the
@@ -1385,8 +1411,9 @@ other way and queues nothing.
 **Templates.** `GET /clipper/templates` lists saved `{id, name, vertical}`
 templates beside `layouts`, `fonts`, `drawText`, `maxShortSeconds` and
 `defaultStyle`. `POST` saves `{name, vertical}`, replacing one of the same name
-(1 to 60 characters, at most 100 templates); `DELETE /clipper/templates/{id}`
-removes one.
+(1 to 60 characters, at most 100 templates); the whole template is validated,
+caption style included even when captions are off in it, and a font it names
+must be in the fonts directory. `DELETE /clipper/templates/{id}` removes one.
 
 **`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
 Absent, it deletes the whole transcript; present, it deletes one track's, so a
