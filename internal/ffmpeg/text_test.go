@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -78,7 +79,7 @@ func TestDrawtextEscapesAColonInThePathAndAwkwardText(t *testing.T) {
 	// `\\:`, not `\:`. A filtergraph is unescaped TWICE, so a single backslash
 	// is eaten by the first pass and the colon arrives bare at the second.
 	// Measured against the real parser -- see escapeLavfiArg for the table, and
-	// TestAFontPathContainingAColonOpens for the end-to-end proof. Asserting
+	// TestFilterArgumentsSurviveTheRealParser for the end-to-end proof. Asserting
 	// the single-escaped form here is what let the Windows break through.
 	if !strings.Contains(got, `my\\:fonts`) {
 		t.Errorf("the colon was not escaped for BOTH unescape passes: %s", got)
@@ -86,7 +87,10 @@ func TestDrawtextEscapesAColonInThePathAndAwkwardText(t *testing.T) {
 	if !strings.Contains(got, `12\\:30`) {
 		t.Errorf("a colon in the text was not escaped for both passes: %s", got)
 	}
-	if !strings.Contains(got, `\\'`) {
+	// `\\\'`: the option level makes it `\'`, and the graph level escapes
+	// BOTH of those characters. The doubled `\\'` this used to accept leaves the
+	// graph pass a bare quote, which swallows the rest of the chain.
+	if !strings.Contains(got, `Tom\\\'s`) {
 		t.Errorf("an apostrophe in the text was not escaped for both passes: %s", got)
 	}
 }
@@ -294,13 +298,24 @@ func TestDrawtextGraphRunsAndDoesNotExpandAPercentSign(t *testing.T) {
 	t.Logf("plain=%d withPercent=%d boxed=%d", plain, pct, boxed)
 }
 
-// The escaping, proven against the real parser rather than against a string.
+// The escaping, proven against the real parser rather than against a string,
+// on every path and value the LIVE encode puts inside a filter argument: the
+// fonts directory (the overlay text and the caption burn-in both draw with a
+// font from it), the caption file the captioner rewrites under the data
+// directory, the overlay text itself, and a whole rendition argv built by
+// RenditionArgs with all of them at once.
 //
 // A colon is legal in a POSIX filename, which is what makes the Windows
 // drive-letter hazard reproducible here: if the escaping is wrong, FFmpeg fails
-// to parse the graph exactly as it did on the Windows runner. Without this the
-// only place the bug could be caught was CI.
-func TestAFontPathContainingAColonOpens(t *testing.T) {
+// to parse the graph exactly as it did on the Windows runner. The same holds for
+// ' , [ ] ;, which the old one-replacer escaper doubled and FFmpeg then split
+// the graph on ("No option name near ...", "Trailing garbage after a filter",
+// exit 234). Without this the only place the bug could be caught was a user's
+// data directory.
+//
+// MUTATION: drop any one character from either level of escapeLavfiArg and a
+// subtest here names the directory that no longer opens.
+func TestFilterArgumentsSurviveTheRealParser(t *testing.T) {
 	bin, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("ffmpeg is not installed")
@@ -314,28 +329,89 @@ func TestAFontPathContainingAColonOpens(t *testing.T) {
 		t.Skip("a colon cannot appear in a Windows path component")
 	}
 
-	// A directory whose NAME contains a colon, holding a real font.
-	dir := filepath.Join(t.TempDir(), "my:fonts")
-	if err := EnsureFonts(dir); err != nil {
-		t.Fatalf("EnsureFonts into a colon path: %v", err)
-	}
-	font, err := FontPath(dir, DefaultFont)
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range hostileNames {
+		t.Run(name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), name)
+			fonts := filepath.Join(dataDir, FontsDirName)
+			if err := EnsureFonts(fonts); err != nil {
+				t.Fatalf("EnsureFonts into %q: %v", fonts, err)
+			}
+			font, err := FontPath(fonts, DefaultFont)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := frameSize{W: 480, H: 120}
+
+			t.Run("fonts directory", func(t *testing.T) {
+				png := renderDrawtext(t, bin, &TextSpec{Text: "OK", FontFile: font, SizePct: 0.5, Color: "white"}, frame)
+				if n := nonBlackPixels(t, bin, png); n < 100 {
+					t.Errorf("the graph parsed but drew %d pixels; the font did not load", n)
+				}
+			})
+
+			t.Run("caption file", func(t *testing.T) {
+				// The shape internal/captions.BurnPath gives it.
+				burn := writeFile(t, filepath.Join(dataDir, "captions", "burn-source-1.txt"), "CAPTION")
+				png := renderDrawtext(t, bin, &TextSpec{TextFile: burn, FontFile: font, SizePct: 0.4, Color: "white"}, frame)
+				if n := nonBlackPixels(t, bin, png); n < 100 {
+					t.Errorf("the caption file parsed but drew %d pixels; it was not read", n)
+				}
+			})
+
+			// The value case has an exact oracle: drawtext's textfile is read
+			// raw, with no filtergraph escaping in the way, so text=V must draw
+			// precisely the frame that a file containing V draws. A value that
+			// arrives mangled -- a backslash lost, a quote swallowed -- draws
+			// different pixels even when the graph still parses.
+			t.Run("overlay text", func(t *testing.T) {
+				value := "Tom" + name + "Show"
+				viaText := renderDrawtext(t, bin, &TextSpec{Text: value, FontFile: font, SizePct: 0.3, Color: "white"}, frame)
+				raw := writeFile(t, filepath.Join(t.TempDir(), "raw.txt"), value)
+				viaFile := renderDrawtext(t, bin, &TextSpec{TextFile: raw, FontFile: font, SizePct: 0.3, Color: "white"}, frame)
+				if a, b := grayFrame(t, bin, viaText), grayFrame(t, bin, viaFile); !bytes.Equal(a, b) {
+					t.Errorf("text=%q drew a different frame from a file holding the same bytes; "+
+						"the value was changed on its way through the filtergraph", value)
+				}
+			})
+
+			t.Run("whole rendition", func(t *testing.T) {
+				runLiveRendition(t, bin, dataDir, font)
+			})
+		})
 	}
 
-	out := filepath.Join(t.TempDir(), "f.png")
-	graph := "color=c=black:s=320x120:d=1," + drawtextFilter(&TextSpec{
-		Text: "OK", FontFile: font, SizePct: 0.5, Color: "white",
-	}, frameSize{W: 320, H: 120})
-	b, err := exec.Command(bin, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", graph, "-frames:v", "1", "-y", out).CombinedOutput()
-	if err != nil {
-		t.Fatalf("FFmpeg rejected a font path containing a colon: %v\ngraph: %s\n%s", err, graph, b)
-	}
-	if n := nonBlackPixels(t, bin, out); n < 100 {
-		t.Errorf("the graph parsed but drew %d pixels; the font did not load", n)
-	}
+	// Boundary whitespace in the overlay text. FFmpeg's tokenizer trims
+	// unescaped leading and trailing whitespace at BOTH levels, so " LIVE "
+	// used to draw as "LIVE" -- shifted left, with no error. The oracle is the
+	// same as above: a textfile is read raw, and it must also differ from the
+	// trimmed text, or the comparison proves nothing.
+	t.Run("boundary whitespace in the overlay text", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), FontsDirName)
+		if err := EnsureFonts(dir); err != nil {
+			t.Fatal(err)
+		}
+		font, err := FontPath(dir, DefaultFont)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame := frameSize{W: 480, H: 120}
+		draw := func(spec *TextSpec) []byte {
+			spec.FontFile, spec.SizePct, spec.Color = font, 0.3, "white"
+			return grayFrame(t, bin, renderDrawtext(t, bin, spec, frame))
+		}
+		for _, v := range []string{"  LIVE", "LIVE  ", "  LIVE  "} {
+			viaText := draw(&TextSpec{Text: v})
+			viaFile := draw(&TextSpec{TextFile: writeFile(t, filepath.Join(t.TempDir(), "raw.txt"), v)})
+			trimmed := draw(&TextSpec{Text: "LIVE"})
+			if !bytes.Equal(viaText, viaFile) {
+				t.Errorf("text=%q drew a different frame from a file holding the same bytes; "+
+					"its boundary whitespace was trimmed on the way through the filtergraph", v)
+			}
+			if strings.HasPrefix(v, " ") && bytes.Equal(viaFile, trimmed) {
+				t.Errorf("%q and %q draw the same frame, so this case cannot see a trim", v, "LIVE")
+			}
+		}
+	})
 }
 
 // A font written by EnsureFonts must survive the round trip into a real
