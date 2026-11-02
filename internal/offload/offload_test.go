@@ -362,7 +362,7 @@ func TestTheFileBeingWrittenIsNeverUploaded(t *testing.T) {
 	}
 }
 
-func TestAChecksumMismatchIsAFailureAndNeverEvicts(t *testing.T) {
+func TestAChecksumMismatchIsAFailureAndIsRetried(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		set  func(*memStore)

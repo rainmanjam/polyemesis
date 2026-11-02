@@ -432,8 +432,8 @@ Against the host binary. These thirteen are the `acceptance` matrix in
 ./scripts/acceptance-s3.sh           # offload against a real S3-compatible server (RustFS)
 ```
 
-**Run it before merging any change to offload** -- `internal/objstore`,
-`internal/offload`, or retention's eviction path in `internal/recording` -- and
+**Run it before merging any change to offload** -- `internal/objstore` or
+`internal/offload` -- and
 paste its output into the pull request. It is excluded from CI on purpose: the
 tests carry the `s3integration` build tag, so `go test ./...` (and `make
 check`, and every CI job) never compiles them, and no CI job or required check
@@ -444,8 +444,9 @@ The script starts RustFS 1.0.4 in Docker, pinned by digest
 `POLYEMESIS_RUSTFS_REGISTRY=quay.io`), waits until its S3 API answers, and runs
 seven cases: the SigV4 round trip with a key that needs escaping, the server
 refusing a body that is not the signed digest, a wrong secret refused and never
-echoed, multipart with its composite ETag plus a ranged GET and abort, move mode
-end to end, a multipart upload resumed across a restart, and the Test button.
+echoed, multipart with its composite ETag plus a ranged GET and abort, a mirror
+upload verified with the local file untouched, a multipart upload resumed across
+a restart, and the Test button.
 Without an endpoint the tests fail rather than skip, so a green run is a run
 that reached the server.
 

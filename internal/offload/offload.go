@@ -361,8 +361,8 @@ func (s *Service) passOnce(ctx context.Context) {
 				}
 				it.Key = key
 				// One object, one file. A key another file already owns on
-				// this target is never written: in move mode that object may
-				// be the only copy of the other file.
+				// this target is never written: it holds the other file's
+				// bytes.
 				if holder, herr := s.store.OffloadKeyHolder(t.ID, key); herr != nil || (holder != "" && holder != cand.rel) {
 					byKey[itemKey(t.ID, cand.rel)] = s.keyConflict(t, it, holder, herr)
 					changed = true
@@ -526,8 +526,7 @@ func hashFile(f *os.File) (string, string, int64, error) {
 }
 
 // ErrChecksumMismatch is a verification that found different bytes than were
-// sent. It is never treated as success, and an item carrying it is never
-// evicted.
+// sent. It is never treated as success.
 var ErrChecksumMismatch = errors.New("checksum mismatch after upload")
 
 var hexMD5 = regexp.MustCompile(`^[0-9a-f]{32}$`)

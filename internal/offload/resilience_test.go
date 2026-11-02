@@ -203,7 +203,6 @@ func TestAbortTargetAndTheStartupSweepAbandonOrphans(t *testing.T) {
 	}
 }
 
-// ---- 3. fetch-back retries, resumed by Range ----
 
 // ---- 4. restart safety ----
 

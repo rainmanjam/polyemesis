@@ -68,8 +68,7 @@ whether the tree is dirty before it does anything, and `make check BRANCH=my-bra
 *refuses* to run unless that is the branch you are actually on. A green run on
 the wrong branch looks exactly like a green run on the right one.
 
-**Changing offload (`internal/objstore`, `internal/offload`, or the recording
-retention and eviction paths)?** Run `./scripts/acceptance-s3.sh` before the
+**Changing offload (`internal/objstore` or `internal/offload`)?** Run `./scripts/acceptance-s3.sh` before the
 pull request is merged and paste its result into it. It is the only test that
 talks to a real S3-compatible server, it needs Docker, and it runs locally only:
 CI never builds it (see [docs/TESTING.md](docs/TESTING.md#s3-offload-local-only)).
