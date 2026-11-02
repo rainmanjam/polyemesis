@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -713,8 +714,9 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	suffix := ""
 	if body.Vertical != nil {
 		// A short is always an MP4, and is named apart from a straight cut of
-		// the same span so exporting both keeps both.
-		ext, suffix = ".mp4", "-vertical"
+		// the same span -- and from a short of the same span in another
+		// layout or style -- so exporting each keeps each.
+		ext, suffix = ".mp4", "-vertical-"+verticalNameTag(body.Vertical)
 	}
 	base := strings.TrimSuffix(tl.anchor.Filename, filepath.Ext(tl.anchor.Filename))
 	name := safeClipName(body.Title)
@@ -727,6 +729,9 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	// The in-point is part of the name so two clips out of one recording never
 	// collide, and so a file found later still says where it came from.
 	stamp := fmt.Sprintf("%06d", body.InMS/1000)
+	if body.Vertical != nil {
+		return freeExportName(s.clipExportDir(), name+"-"+stamp+suffix, ext)
+	}
 	return filepath.Join(s.clipExportDir(), name+"-"+stamp+suffix+ext)
 }
 
@@ -1072,4 +1077,43 @@ func clipQueryMS(r *http.Request, name string, fallback int64) int64 {
 		return fallback
 	}
 	return v
+}
+
+// verticalNameTag names a short's settings in its file name: the layout, and a
+// digest of everything else, so two shorts of one span in different layouts or
+// styles are two files rather than one overwriting the other.
+func verticalNameTag(v *clipVerticalBody) string {
+	layout := safeClipName(v.Layout)
+	if layout == "" {
+		layout = "short"
+	}
+	raw, _ := json.Marshal(v)
+	h := fnv.New32a()
+	_, _ = h.Write(raw)
+	return fmt.Sprintf("%s-%08x", layout, h.Sum32())
+}
+
+// freeExportName is base+ext in dir, or base-2+ext, base-3+ext ... -- the first
+// that is not already on disk, so exporting the same short again does not
+// replace the one already made. Checked through an os.Root on the exports
+// directory: the names are this server's own, and the check cannot reach
+// outside it whatever they contain.
+func freeExportName(dir, base, ext string) string {
+	first := filepath.Join(dir, base+ext)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		// No exports directory yet means nothing to collide with.
+		return first
+	}
+	defer root.Close()
+	for i := 1; i <= 1000; i++ {
+		name := base + ext
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d%s", base, i, ext)
+		}
+		if _, err := root.Stat(name); errors.Is(err, os.ErrNotExist) {
+			return filepath.Join(dir, name)
+		}
+	}
+	return first
 }

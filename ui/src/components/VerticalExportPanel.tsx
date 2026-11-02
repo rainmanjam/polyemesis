@@ -214,7 +214,12 @@ export function VerticalExportPanel({
                 <div
                   ref={picker}
                   data-testid="face-picker"
-                  className="relative aspect-video w-full touch-none select-none overflow-hidden rounded-md border border-border bg-black"
+                  // The picker takes the FRAME's shape, so the image fills it
+                  // exactly: a letterboxed portrait or 4:3 frame would make
+                  // pointer fractions of the box differ from fractions of the
+                  // source, and the server would crop a box nobody drew.
+                  style={{ aspectRatio: String(srcAspect) }}
+                  className="relative w-full touch-none select-none overflow-hidden rounded-md border border-border bg-black"
                   onPointerDown={(e) => {
                     drag.current = at(e);
                     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -227,7 +232,11 @@ export function VerticalExportPanel({
                     drag.current = null;
                   }}
                 >
-                  {(frame ?? poster) && <img src={frame ?? poster} alt="" className="h-full w-full object-contain" draggable={false} />}
+                  {(frame ?? poster) && <img src={frame ?? poster} alt="" className="h-full w-full" draggable={false}
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      if (img.naturalWidth > 0 && img.naturalHeight > 0) setSrcAspect(img.naturalWidth / img.naturalHeight);
+                    }} />}
                   <div
                     role="img"
                     tabIndex={0}

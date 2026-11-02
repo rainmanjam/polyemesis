@@ -6,7 +6,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 vi.mock("@/lib/api", () => ({
   api: {
     listJobs: () =>
-      Promise.resolve({ jobs: [{ id: 7, result: { path: "/data/clips/exports/teaser.mp4" } }], stats: {}, paused: false }),
+      Promise.resolve({
+        jobs: [
+          { id: 7, result: { path: "/data/clips/exports/teaser.mp4" } },
+          { id: 8, result: { path: "/data/clips/exports/teaser-vertical-center-0a1b2c3d.mp4", vertical: true } },
+        ],
+        stats: {},
+        paused: false,
+      }),
   },
 }));
 
@@ -29,6 +36,9 @@ describe("OfflineCardSettings", () => {
     );
     const clip = (await screen.findByLabelText("Looping clip")) as HTMLSelectElement;
     await waitFor(() => expect(screen.getByRole("option", { name: "#7 teaser.mp4" })).toBeTruthy());
+    // A 9:16 short is not offered: the card plays in the 16:9 player.
+    // MUTATION: the picker keeps vertical exports. Observed: FAIL.
+    expect(screen.queryByRole("option", { name: /vertical/ })).toBeNull();
     fireEvent.change(clip, { target: { value: "7" } });
     fireEvent.change(screen.getByLabelText("Latest VOD link"), { target: { value: "https://example.com/v" } });
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Back Sunday" } });

@@ -167,4 +167,33 @@ describe("VerticalExportPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /save as a template/i }));
     await waitFor(() => expect(api.post).toHaveBeenCalled());
   });
+
+  // A PORTRAIT FRAME IS NOT LETTERBOXED. The picker takes the frame's own shape
+  // from the image, so where the operator drags is where the box is on the
+  // source, and the box is locked to the panel using the SOURCE's aspect.
+  //
+  // MUTATION: the picker stays 16:9 and ignores the image's shape. Observed:
+  // FAIL, the box's height is computed for a 16:9 source.
+  it("takes the frame's shape from the image, so a portrait drag lands where it was drawn", () => {
+    const spec = { ...defaultVerticalSpec(), layout: "stacked" as const };
+    const onChange = vi.fn();
+    render(
+      <VerticalExportPanel enabled onEnabledChange={vi.fn()} spec={spec} onChange={onChange} options={OPTIONS}
+        onTemplatesChanged={() => undefined} hasTranscript durationMs={1000}
+        videoRef={createRef<HTMLVideoElement>()} poster="/portrait.jpg" />,
+    );
+    const img = document.querySelector("img") as HTMLImageElement;
+    Object.defineProperty(img, "naturalWidth", { value: 1080 });
+    Object.defineProperty(img, "naturalHeight", { value: 1920 });
+    fireEvent.load(img);
+    const picker = screen.getByTestId("face-picker");
+    expect(parseFloat(picker.style.aspectRatio)).toBeCloseTo(1080 / 1920, 6);
+    picker.getBoundingClientRect = () => ({ left: 0, top: 0, width: 450, height: 800, right: 450, bottom: 800, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.pointerDown(picker, { clientX: 270, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(picker, { clientX: 405, clientY: 400, pointerId: 1 });
+    const face = (onChange.mock.calls[0][0] as VerticalSpec).face;
+    expect(face.x).toBeCloseTo(0.6, 6);
+    expect(face.w).toBeCloseTo(0.3, 6);
+    expect(((face.w * 1080) / (face.h * 1920))).toBeCloseTo(1080 / 768, 4);
+  });
 });

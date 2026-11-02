@@ -219,7 +219,7 @@ func TestAVerticalExportCarriesTheLayoutAndTheTranscriptsCaptions(t *testing.T) 
 	if v == nil || v.Layout != clipper.LayoutStacked || v.Face.X != 0.7 || v.Focus != 0.5 {
 		t.Fatalf("vertical %+v", v)
 	}
-	if !strings.HasSuffix(params.Request.OutPath, "-vertical.mp4") || params.Request.Mode != clipper.ModePrecise {
+	if base := filepath.Base(params.Request.OutPath); !strings.Contains(base, "-vertical-stacked-") || !strings.HasSuffix(base, ".mp4") || params.Request.Mode != clipper.ModePrecise {
 		t.Errorf("out %q mode %q", params.Request.OutPath, params.Request.Mode)
 	}
 	c := v.Captions
@@ -517,5 +517,43 @@ func TestASessionHasOneReviewQueueWhicheverFileIsOpened(t *testing.T) {
 		if len(v.Suggestions) != 1 {
 			t.Errorf("opened from recording %d, the queue shows %d suggestions, want the session's 1", id, len(v.Suggestions))
 		}
+	}
+}
+
+// TWO SHORTS OF ONE MOMENT ARE TWO FILES. A centre crop and a stacked layout of
+// the same span used to share a name, so the second overwrote the first (or,
+// on Windows, failed to publish). The name now carries the layout and a digest
+// of the short's settings, and a name already taken on disk gets a suffix.
+//
+// MUTATION: the vertical name ignores the layout and settings. Observed: FAIL,
+// one path for both.
+// MUTATION: no suffix for a name already on disk. Observed: FAIL, same path.
+func TestShortsOfTheSameSpanDoNotShareAFile(t *testing.T) {
+	h, sign, srv, rec := highlightFixture(t)
+	export := func(vertical map[string]any) string {
+		var job struct {
+			ID int64 `json:"id"`
+		}
+		decodeInto(t, send(t, h, sign, http.MethodPost, recPath(rec, "/export"),
+			map[string]any{"inMs": 10_000, "outMs": 40_000, "title": "same", "vertical": vertical}, http.StatusAccepted), &job)
+		j, _ := srv.store.GetJob(job.ID)
+		var p clipper.JobParams
+		_ = json.Unmarshal(j.Params, &p)
+		return p.Request.OutPath
+	}
+	center := export(map[string]any{"layout": "center"})
+	stacked := export(map[string]any{"layout": "stacked", "face": map[string]any{"x": 0.7, "y": 0.05, "w": 0.25, "h": 0.3}})
+	if center == stacked || !strings.Contains(filepath.Base(center), "center") || !strings.Contains(filepath.Base(stacked), "stacked") {
+		t.Errorf("two layouts of one span: %q and %q", center, stacked)
+	}
+	if err := os.MkdirAll(filepath.Dir(center), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(center, []byte("an earlier short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	again := export(map[string]any{"layout": "center"})
+	if again == center || filepath.Dir(again) != filepath.Dir(center) {
+		t.Errorf("a name already on disk was reused: %q", again)
 	}
 }

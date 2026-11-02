@@ -52,6 +52,9 @@ type JobResult struct {
 	Sources     int      `json:"sources"`
 	EDLPath     string   `json:"edlPath,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
+	// Vertical marks a 9:16 short, so a picker that wants a landscape clip --
+	// the playout offline card -- can leave it out.
+	Vertical bool `json:"vertical,omitempty"`
 }
 
 // Resolver turns a job's Target into the segments to cut from.
@@ -160,6 +163,7 @@ func jobResult(plan Plan, res Result, params JobParams, rep jobs.Reporter) JobRe
 		ReEncodedMS: plan.HeadDuration.Milliseconds(),
 		Sources:     len(plan.Sources),
 		Warnings:    plan.Warnings,
+		Vertical:    plan.Vertical != nil,
 	}
 	if params.EDLPath == "" {
 		return out

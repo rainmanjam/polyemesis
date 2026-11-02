@@ -165,3 +165,15 @@ func TestTheCutterRunsItsChildrenThroughTheNiceWrapper(t *testing.T) {
 		t.Errorf("a vertical export's threads = %d, want the default cap %d", res.Plan.HeadThreads, VerticalThreads())
 	}
 }
+
+// A finished short says so in its job result, which is how the offline-card
+// picker and the playout server tell it from a landscape export.
+func TestAShortsJobResultSaysItIsVertical(t *testing.T) {
+	v := Plan{Vertical: &Vertical{Layout: LayoutBlur}, Sources: []Segment{{Path: "/a"}}}
+	if r := jobResult(v, Result{Path: "/x.mp4"}, JobParams{}, &workerReporter{}); !r.Vertical {
+		t.Error("a short's job result does not say it is vertical")
+	}
+	if r := jobResult(Plan{Sources: []Segment{{Path: "/a"}}}, Result{Path: "/x.mkv"}, JobParams{}, &workerReporter{}); r.Vertical {
+		t.Error("a straight cut claims to be vertical")
+	}
+}
