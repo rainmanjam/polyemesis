@@ -313,3 +313,78 @@ func TestTheRealEncoderSweepDumpsWithoutADiscontinuityInTheDestinationRemux(t *t
 		})
 	}
 }
+
+// craAfterIDR encodes HEVC that has IDR keyframes for its first `closed`
+// seconds and only CRA keyframes (x265's open GOP) after -- a failover to an
+// open-GOP source -- joined by FFmpeg's concat demuxer into one MPEG-TS with a
+// continuous timeline.
+func craAfterIDR(t *testing.T, ffmpeg string, closed, open int) []byte {
+	t.Helper()
+	dir := t.TempDir()
+	part := func(name string, seconds int, openGOP string) {
+		args := []string{"-hide_banner", "-loglevel", "error", "-y",
+			"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30",
+			"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+			"-t", strconv.Itoa(seconds), "-pix_fmt", "yuv420p",
+			"-c:v", "libx265", "-preset", "ultrafast", "-x265-params",
+			"keyint=60:min-keyint=60:scenecut=0:bframes=3:log-level=error:open-gop=" + openGOP,
+			"-c:a", "aac", "-f", "mpegts", filepath.Join(dir, name)}
+		if msg, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+			t.Fatalf("encoding %s: %v\n%s", name, err, msg)
+		}
+	}
+	part("a.ts", closed, "0")
+	part("b.ts", open, "1")
+	list := filepath.Join(dir, "list.txt")
+	if err := os.WriteFile(list, []byte("file a.ts\nfile b.ts\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "src.ts")
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-i", list,
+		"-c", "copy", "-f", "mpegts", out)
+	if msg, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("joining: %v\n%s", err, msg)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// R-d WITH A REAL DECODER. The cut is at an IDR; after it the source sends
+// only CRA keyframes, so the dump recovers at a CRA. FFmpeg's HEVC decoder
+// must decode the result with no error -- the CRA rewritten to BLA, its RASL
+// pictures (which reference what was dumped) gone -- and the destination's
+// remux must log nothing.
+func TestARecoveryAtARealHEVCCRADecodesCleanly(t *testing.T) {
+	ffmpeg := testenv.FFmpegBinary(t, "ffmpeg", "ffmpeg is needed to encode and decode the CRA recovery")
+	ffprobe := testenv.FFmpegBinary(t, "ffprobe", "ffprobe is needed to read the CRA recovery's timestamps")
+	src := craAfterIDR(t, ffmpeg, 20, 30)
+	r := newRig(t, 14*time.Second, memLimits(), pcrStream(t, src))
+	r.run(23 * time.Second)
+	tk, err := r.b.Dump(r.epoch.Add(23*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+	r.run(60 * time.Second)
+	res := tk.Result()
+	if !res.Complete || !res.Recovery {
+		t.Fatalf("result %+v: want a dump completed by recovery at a CRA", res)
+	}
+	out := filepath.Join(t.TempDir(), "dumped.ts")
+	if err := os.WriteFile(out, r.out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if msg := decodeErrors(t, ffmpeg, out); msg != "" {
+		t.Fatalf("FFmpeg's decoder reported errors on the recovered stream:\n%s", msg)
+	}
+	log, fv, fa := remuxClean(t, ffmpeg, ffprobe, out)
+	for _, bad := range []string{"discontinuity", "Non-monotonic", "backward", "corrupt", "Invalid"} {
+		if strings.Contains(log, bad) {
+			t.Fatalf("the destination remux logged %q:\n%s", bad, log)
+		}
+	}
+	checkMonotonic(t, "flv video", fv, 2*34)
+	checkMonotonic(t, "flv audio", fa, 2*22)
+}

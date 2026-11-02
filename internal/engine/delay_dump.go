@@ -21,9 +21,11 @@ import (
 // restarts it, because a restart takes the platform off the air for the whole
 // delay.
 //
-// Captions follow the shorter delay: a dump changes the caption intent's
-// delay for the destination, which cancels every cue still queued for it --
-// including the cues for the words that were dumped.
+// Captions follow the shorter delay. The queued cues are re-timed by
+// CueRouter.Dump: those for programme still in the buffer keep their time,
+// those for the dumped words are cancelled, later ones move to the shorter
+// delay. The caption intent then carries the shorter delay as well, so its
+// SetTargets changes nothing.
 
 // ErrNotDelayed refuses a dump on a destination with no running delay line.
 var ErrNotDelayed = errors.New("this destination has no broadcast delay running")
@@ -98,6 +100,7 @@ func (e *Engine) onDelayDumped(row *db.Destination, dd *destDelay, res delayline
 		"configuredSeconds":   row.OutputDelaySeconds(),
 		"restoresOnNextStart": true,
 		"recovery":            res.Recovery,
+		"forced":              res.Forced,
 	})
 	// Captions: the queued cues are re-timed first -- kept programme keeps
 	// its cues, the dumped words lose theirs, later cues move to the shorter

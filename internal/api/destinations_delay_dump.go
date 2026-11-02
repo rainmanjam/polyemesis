@@ -108,6 +108,7 @@ func dumpBody(row *db.Destination, res delayline.DumpResult) map[string]any {
 		"configuredSeconds":   row.OutputDelaySeconds(),
 		"restoresOnNextStart": true,
 		"recovery":            res.Recovery,
+		"forced":              res.Forced,
 	}
 }
 
@@ -291,6 +292,10 @@ func auditDelayDumped(row *db.Destination, res delayline.DumpResult, address str
 		text = fmt.Sprintf("A dump cut at least %.1f s of programme from %s's broadcast delay, which will not "+
 			"air there, and the destination was stopped or restarted before the stream resumed.",
 			res.Dumped.Seconds(), row.Name)
+	case res.Forced:
+		status = "forced"
+		text += " No keyframe came after the cut, so the stream resumed at the live edge: the platform" +
+			" showed a broken picture until the source's next keyframe."
 	case !res.Complete:
 		status = "provisional"
 		text += " Provisional: the stream resumes at the next keyframe, and a final record follows."
@@ -319,8 +324,8 @@ func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Durat
 		pending   *delayline.DumpResult
 	)
 	followUp := func(out delayline.DumpResult) {
-		if finalSeen && out.Complete {
-			return // the record written at acceptance was already final
+		if finalSeen {
+			return // the record written at acceptance was already the outcome
 		}
 		s.publishAudit(auditDelayDumped(row, out, addr))
 	}
@@ -339,7 +344,8 @@ func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Durat
 	}
 	s.publishAudit(auditDelayDumped(row, res, addr))
 	mu.Lock()
-	accepted, finalSeen = true, res.Complete
+	// Final or aborted at acceptance: that record is the dump's one outcome.
+	accepted, finalSeen = true, res.Complete || res.Aborted
 	out := pending
 	mu.Unlock()
 	if out != nil {

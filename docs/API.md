@@ -987,7 +987,8 @@ The delay stays shorter by `dumpedSeconds` until the destination next starts.
 `clamped` is `true` when less could be dropped than asked, because a dump
 never leaves less than 2 s plus one GOP of delay. `recovery` is `true` when no
 IDR keyframe came for three GOPs and the stream resumed at another
-random-access picture. `complete` is `false` in the
+random-access picture, and `forced` when no random-access picture came at all
+and it resumed at the live edge. `complete` is `false` in the
 rare case the next keyframe had not arrived when the answer was written. The
 dump still completes, and the `destination.delay` event with reason `dumped`
 carries the final figures. `409` when there is nothing to dump: the

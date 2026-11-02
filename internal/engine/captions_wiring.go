@@ -120,9 +120,10 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 	in.sig = intentSig(in)
 	// What the route uses is the delay the audience has: less anything
 	// dumped from the running line, because after a dump the pictures reach
-	// the audience that much sooner, and so must the words. The route's
-	// SetTargets cancels every cue queued at the old delay, which includes
-	// the cues for the words that were dumped.
+	// the audience that much sooner, and so must the words. onDelayDumped
+	// re-times the queued cues first (CueRouter.Dump: kept programme keeps
+	// its cues, the dumped words lose theirs), so by the time this delay
+	// reaches SetTargets the route already has it and cancels nothing.
 	for i := range in.targets {
 		in.targets[i].Delay -= e.delayDumped(in.targets[i].ID)
 	}

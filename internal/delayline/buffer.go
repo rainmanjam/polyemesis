@@ -25,7 +25,10 @@
 //
 // So RAM never exceeds MemBudget + 2*SegmentBytes (the sealed segments, the
 // tail being filled, and one head read back from disk), and disk never exceeds
-// DiskBudget. Both are asserted by the tests, not just claimed here.
+// DiskBudget. Both are asserted by the tests, not just claimed here. While a
+// dump waits for its resume keyframe, the audio held for the resume adds at
+// most another 2*SegmentBytes across all PIDs, plus one PES per PID under
+// trimHoldLimit (splice.go, audioCacheBudget).
 //
 // # Overflow keeps the delay, not the data
 //
@@ -124,6 +127,9 @@ type Buffer struct {
 	marks      []*mark
 	scratch    []byte
 	ob         []byte
+	// lastNow is the latest time Push or Pop was given: the clock Stats
+	// asks Dump's question on.
+	lastNow time.Time
 	// gopEst is the last GOP measured from cut points.
 	gopEst  time.Duration
 	resumed atomic.Pointer[DumpTicket]
@@ -189,6 +195,7 @@ func (b *Buffer) Push(now time.Time, pkt []byte) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.sawLocked(now)
 	if tsAligned(pkt) {
 		b.pushTSLocked(now, pkt)
 		return nil
@@ -345,6 +352,7 @@ func (b *Buffer) Pop(now time.Time, out [][]byte) [][]byte {
 	limit := int64(now.Sub(b.epoch) - b.delay)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.sawLocked(now)
 	for len(b.queue) > 0 {
 		h := b.queue[0]
 		if h.first > limit {
@@ -480,7 +488,8 @@ func (b *Buffer) Discard() {
 	b.ts.resync, b.ts.holding, b.ts.held, b.ts.splice = false, false, nil, nil
 	clear(b.ts.split)
 	clear(b.ts.pending)
-	b.ts.audio = nil
+	b.ts.waiting = nil
+	b.ts.audio, b.ts.audioBytes = nil, 0
 	b.stats.MemBytes = 0
 	b.stats.DiskBytes = 0
 	b.stats.Packets = 0

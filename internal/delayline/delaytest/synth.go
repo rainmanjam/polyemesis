@@ -59,6 +59,19 @@ type Synth struct {
 	// picture: decoded after it and shown before it. Its slice carries
 	// LeadingIndex plus the key's number.
 	Leading bool
+	// SplitVideoHeaders puts only twelve bytes of each picture's PES in its
+	// first packet, so the PTS and DTS run into the second.
+	SplitVideoHeaders bool
+	// AudioUnbounded writes every audio PES with PES_packet_length 0.
+	AudioUnbounded bool
+	// NoKeysFrom, when set, makes every picture from that number on a plain
+	// one: no key picture, no random-access flag -- a source with nothing a
+	// decoder can start from.
+	NoKeysFrom int
+	// LeadingType is the leading picture's NAL type (HEVCRADL when 0; 8 or 9
+	// for RASL) and LeadingFrom the first key picture that has one.
+	LeadingType byte
+	LeadingFrom int
 	// QuietPID lists a third elementary stream (a data PID, as captions or
 	// metadata ride on) that sends one PES with a PTS at the start and
 	// nothing after.
@@ -89,7 +102,7 @@ func (g *Synth) nalType(n int) byte {
 			return t
 		}
 	}
-	if n%g.GOP == 0 {
+	if n%g.GOP == 0 && (g.NoKeysFrom == 0 || n < g.NoKeysFrom) {
 		return g.KeyType
 	}
 	if g.HEVC {
@@ -216,7 +229,7 @@ func (g *Synth) picture(n int) []byte {
 	if g.HEVC {
 		es = []byte{0, 0, 0, 1, 0x46, 0x01, 0x50}
 	}
-	key := n%g.GOP == 0
+	key := n%g.GOP == 0 && (g.NoKeysFrom == 0 || n < g.NoKeysFrom)
 	if key {
 		if g.HEVC {
 			es = append(es, 0, 0, 0, 1, 0x40, 0x01, 0xAA, 0, 0, 0, 1, 0x42, 0x01, 0xAA, 0, 0, 0, 1, 0x44, 0x01, 0xAA)
@@ -239,6 +252,10 @@ func (g *Synth) picture(n int) []byte {
 	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	putTS(hdr[9:], 3, (pts+FrameTicks)&tsMask) // a B-frame-shaped stream: PTS one frame after DTS
 	putTS(hdr[14:], 1, pts)
+	if g.SplitVideoHeaders {
+		g.firstRoom = 12
+		defer func() { g.firstRoom = 0 }()
+	}
 	return g.packetize(VideoPID, append(hdr, es...), pts, key)
 }
 
@@ -254,6 +271,9 @@ func (g *Synth) audioFrame(m int) []byte {
 	hdr := []byte{0, 0, 1, 0xC0, 0, 0, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
 	n := len(es) + 8
 	hdr[4], hdr[5] = byte(n>>8), byte(n)
+	if g.AudioUnbounded {
+		hdr[4], hdr[5] = 0, 0
+	}
 	putTS(hdr[9:], 2, pts)
 	if g.SplitAudioHeaders {
 		g.firstRoom = 10
@@ -299,7 +319,11 @@ func (g *Synth) at(ticks int64) int64 {
 // key's, PTS half a frame before the key's.
 func (g *Synth) leading(n int) []byte {
 	es := []byte{0, 0, 0, 1, 0x46, 0x01, 0x50}
-	es = append(es, g.nal(HEVCRADL)...)
+	lt := g.LeadingType
+	if lt == 0 {
+		lt = HEVCRADL
+	}
+	es = append(es, g.nal(lt)...)
 	var idx [4]byte
 	binary.BigEndian.PutUint32(idx[:], uint32(LeadingIndex+n))
 	es = append(es, idx[:]...)
@@ -355,7 +379,7 @@ func (g *Synth) Mux(dur time.Duration) *Stream {
 				}
 			}
 			add(g.picture(v), vt)
-			if g.Leading && g.HEVC && v%g.GOP == 0 {
+			if g.Leading && g.HEVC && v%g.GOP == 0 && (g.LeadingFrom == 0 || v >= g.LeadingFrom) {
 				add(g.leading(v), vt)
 			}
 			v++

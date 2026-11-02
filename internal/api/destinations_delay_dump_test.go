@@ -30,6 +30,9 @@ type fakeDumper struct {
 	// abort: the line is cut before the resume -- the callback reports an
 	// aborted dump after the answer.
 	abort bool
+	// abortedNow: the line is cut while the dump waits, so the answer itself
+	// is the aborted result -- and the callback reports it too.
+	abortedNow bool
 }
 
 func (f *fakeDumper) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
@@ -40,8 +43,16 @@ func (f *fakeDumper) DumpDelay(id int64, want time.Duration, done func(delayline
 	}
 	f.dumped = append(f.dumped, id)
 	f.want = append(f.want, want)
-	late, abort := f.late, f.abort
+	late, abort, abortedNow := f.late, f.abort, f.abortedNow
 	f.mu.Unlock()
+	if abortedNow {
+		res := delayline.DumpResult{Requested: want, Dumped: 4 * time.Second, Before: 30 * time.Second,
+			After: 26 * time.Second, Aborted: true}
+		if done != nil {
+			go done(res)
+		}
+		return res, nil
+	}
 	if abort {
 		if done != nil {
 			go func() {
@@ -322,11 +333,13 @@ func TestEveryDumpLeavesAnAuditRecordAndTheOutcomeFollows(t *testing.T) {
 		{"on time", false, false, []string{"final"}},
 		{"late", true, false, []string{"provisional", "final"}},
 		{"stopped before the resume", false, true, []string{"provisional", "aborted"}},
+		{"stopped while the answer waited", false, false, []string{"aborted"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, h, _, sign := managerServer(t, defaultTools())
 			row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
-			s.delayDumper = &fakeDumper{dumpable: map[int64]bool{row.ID: true}, late: tc.late, abort: tc.abort}
+			s.delayDumper = &fakeDumper{dumpable: map[int64]bool{row.ID: true}, late: tc.late, abort: tc.abort,
+				abortedNow: tc.name == "stopped while the answer waited"}
 			var mu sync.Mutex
 			var got []string
 			s.auditSink = func(ev alerts.Event) {

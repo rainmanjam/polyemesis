@@ -60,6 +60,7 @@ package delayline
 import (
 	"errors"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -132,6 +133,14 @@ type pidOut struct {
 	ptsSeen bool
 	// remaining is the bytes a bounded PES on this PID still has to come.
 	remaining int
+	// openUnbounded: the PES on this PID has no length, so it is open until
+	// the next start on the PID.
+	openUnbounded bool
+	// dts is the last DTS sent (PTS when the PES has none), and dtsStep the
+	// last step between two: what a resume's DTS must come after.
+	dts     int64
+	dtsSeen bool
+	dtsStep int64
 	// maxPTS is the latest PTS sent on the PID: with reordered video, the
 	// last picture SHOWN, which the next one must come after.
 	maxPTS  int64
@@ -164,6 +173,14 @@ type mark struct {
 	out []pidSnap
 	// safe: no audio PES was open here, so cutting here splits none.
 	safe bool
+	// waitPIDs are audio PIDs whose unbounded PES was open at the cut point.
+	// It becomes a cut point only once each has started its next PES before
+	// any continuation of the open one arrives -- then that PES ended here.
+	waitPIDs []uint16
+
+	// shift is the buffer's shift when the cut point was stamped: its wall
+	// arrival is epoch + at + shift, whatever has been dumped since.
+	shift time.Duration
 
 	positioned bool
 	key        bool
@@ -247,6 +264,9 @@ type pidRewrite struct {
 	// start at trimEnd, where the kept audio ends.
 	trimming bool
 	trimEnd  int64
+	// trimDrop: the PES being passed is from the dumped window and goes,
+	// continuation packets included, up to the next start.
+	trimDrop bool
 	hold     []byte
 	holdWant int
 	holdGot  int
@@ -284,6 +304,8 @@ type tsState struct {
 
 	cand *mark
 	cls  classifier
+	// waiting is cut points held back by an open unbounded audio PES.
+	waiting []*mark
 
 	// The dump waiting for its resume.
 	resync  bool
@@ -295,11 +317,21 @@ type tsState struct {
 	held    []byte
 	holding bool
 	heldPTS int64
+	heldDTS int64
 	heldRAP bool
+	// forcing: past the force deadline with no random-access picture, the
+	// resume takes the next PES start that has a timestamp.
+	forcing bool
+	// heldNeedHdr: the held candidate's PES header runs into its next packet.
+	heldNeedHdr bool
+	// resumeFloor is the splice's output PTS: a PID new since the cut is
+	// cut against it.
+	resumeFloor int64
 	// audio is the audio that arrived during the resync, kept per PID: the
 	// part of it after the cut's audio end belongs to the resumed programme,
 	// and is sent first so the audio carries on without a hole.
-	audio map[uint16]*audioCache
+	audio      map[uint16]*audioCache
+	audioBytes int
 }
 
 // audioCache is one PID's recent complete PESs, and the one being read.
@@ -308,8 +340,11 @@ type audioCache struct {
 	partial []byte
 	want    int
 	got     int
-	// doneBytes is the bytes in done; budget is its ceiling.
+	// doneBytes is the bytes in done. total is the bytes in done across
+	// every PID's cache, shared, and budget its ceiling: one bound for the
+	// whole resync, not one per PID.
 	doneBytes int
+	total     *int
 	budget    int
 	// skipping: the PES being read went over trimHoldLimit and is dropped
 	// up to the next start.
@@ -354,9 +389,11 @@ func (c *audioCache) finish() {
 	if len(c.partial) > 0 && (c.want == 0 || c.got >= c.want) {
 		c.done = append(c.done, append([]byte(nil), c.partial...))
 		c.doneBytes += len(c.partial)
+		*c.total += len(c.partial)
 		// Oldest out, past either the count or the byte budget.
-		for len(c.done) > 0 && (len(c.done) > recentAudioPES || c.doneBytes > c.budget) {
+		for len(c.done) > 0 && (len(c.done) > recentAudioPES || *c.total > c.budget) {
 			c.doneBytes -= len(c.done[0])
+			*c.total -= len(c.done[0])
 			c.done = c.done[1:]
 		}
 	}
@@ -418,22 +455,46 @@ func (ts *tsState) isVideo(pid uint16) bool {
 // snapshot is the output state of the PAT, PMT and elementary-stream PIDs.
 // Only those: a cut point must not carry every PID the stream ever had.
 func (ts *tsState) snapshot() []pidSnap {
-	out := make([]pidSnap, 0, len(ts.es)+2)
+	out := make([]pidSnap, 0, len(ts.es)+4)
+	seen := map[uint16]bool{}
 	add := func(pid uint16) {
-		if o, ok := ts.out[pid]; ok && len(out) < maxSnapPIDs {
+		if o, ok := ts.out[pid]; ok && !seen[pid] && len(out) < maxSnapPIDs {
+			seen[pid] = true
 			out = append(out, pidSnap{pid: pid, pidOut: o})
 		}
 	}
-	// The PAT, the PMT and the service information (SDT, EIT, ...) on the
-	// PIDs below 0x20: all continue across a splice.
+	// In priority order, so a cap never drops what a splice most needs and
+	// the choice is the same every time: the PAT, the PMT and the service
+	// information below 0x20; the video; the other elementary streams by PID;
+	// then any other PID carried (ATSC PSIP, private data) by PID.
 	for pid := uint16(0); pid < 0x20; pid++ {
 		add(pid)
 	}
 	if ts.havePMT {
 		add(ts.pmtPID)
 	}
+	if ts.codec != codecNone {
+		add(ts.videoPID)
+	}
+	add2 := func(pids []uint16) {
+		slices.Sort(pids)
+		for _, pid := range pids {
+			add(pid)
+		}
+	}
+	es := make([]uint16, 0, len(ts.es))
 	for pid := range ts.es {
-		add(pid)
+		es = append(es, pid)
+	}
+	add2(es)
+	if len(out) < maxSnapPIDs {
+		rest := make([]uint16, 0, len(ts.out))
+		for pid := range ts.out {
+			if !seen[pid] && pid != tsNullPID {
+				rest = append(rest, pid)
+			}
+		}
+		add2(rest)
 	}
 	return out
 }
@@ -515,6 +576,9 @@ func (ts *tsState) post(q pkt) []pkt {
 		// A PID that appeared after the splice: whatever it carried before
 		// its first start belongs to nothing the output has.
 		r = &pidRewrite{renumber: true, awaitStart: true}
+		if !ts.isVideo(pid) {
+			r.trimming, r.trimEnd = true, ts.resumeFloor
+		}
 		ts.rw[pid] = r
 	}
 	// Payload only: an adaptation-only packet (a PCR on a PID of its own)
@@ -566,6 +630,7 @@ func (ts *tsState) post(q pkt) []pkt {
 func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 	var out []pkt
 	if pktPUSI(q.b) && pktHasPayload(q.b) {
+		r.trimDrop = false
 		if len(r.hold) > 0 {
 			out = ts.finishTrim(pid, r)
 			if !r.trimming {
@@ -576,6 +641,17 @@ func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 			r.trimming = false
 			return append(out, q)
 		}
+		// Only audio that can be cut at a frame is held for it. Anything
+		// else -- subtitles, metadata, an unknown codec -- is decided now by
+		// its timestamp, so an unbounded PES is never held waiting.
+		if !framedAudio(ts.es[pid], payloadOf(q.b)[q.h.esStart():]) {
+			if !ptsAfter(r.trimEnd, wrap(q.h.pts()+1920)) {
+				r.trimming = false
+				return append(out, q)
+			}
+			r.trimDrop = true
+			return out
+		}
 		r.hold = append(r.hold[:0], q.b...)
 		r.holdWant = q.h.length
 		r.holdGot = len(payloadOf(q.b)) - 6
@@ -583,6 +659,9 @@ func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 			out = append(out, ts.finishTrim(pid, r)...)
 		}
 		return out
+	}
+	if r.trimDrop && pktHasPayload(q.b) {
+		return nil
 	}
 	if len(r.hold) == 0 || !pktHasPayload(q.b) {
 		return []pkt{q}
@@ -597,6 +676,19 @@ func (ts *tsState) trim(pid uint16, r *pidRewrite, q pkt) []pkt {
 		return ts.finishTrim(pid, r)
 	}
 	return nil
+}
+
+// framedAudio reports whether a PES of stream type st, whose elementary
+// stream starts with es, is audio the trim can cut at a frame: AAC in ADTS,
+// or Opus with its TS control header.
+func framedAudio(st byte, es []byte) bool {
+	switch st {
+	case 0x0F:
+		return true
+	case 0x06:
+		return len(es) >= 2 && es[0] == 0x7F && es[1]&0xE0 == 0xE0
+	}
+	return false
 }
 
 // releaseHeld hands back a held PES unchanged.
@@ -731,6 +823,10 @@ type DumpResult struct {
 	// Recovery is true when no IDR picture came for several GOPs and the
 	// stream resumed at another random-access picture instead.
 	Recovery bool `json:"recovery,omitempty"`
+	// Forced is true when no random-access picture came at all before the
+	// force deadline, and the stream resumed at the live edge regardless:
+	// the platform sees a picture break until the next keyframe.
+	Forced bool `json:"forced,omitempty"`
 	// Aborted is true when the line was cut (Stop now, a restart, a stop's
 	// drain ending, shutdown) before the resume: the cut had already removed
 	// programme, and the stream never resumed in this line.
@@ -764,7 +860,7 @@ func (b *Buffer) pushTSLocked(now time.Time, pkt []byte) {
 		for _, c := range b.ts.audio {
 			lead = append(lead, c.take()...)
 		}
-		b.ts.audio = nil
+		b.ts.audio, b.ts.audioBytes = nil, 0
 		held := append(lead, b.ts.held...)
 		b.ts.held = nil
 		b.normalLocked(b.atLocked(now), held)
@@ -788,7 +884,7 @@ func (b *Buffer) normalLocked(at int64, data []byte) {
 			if c := ts.cand; c != nil && !c.positioned {
 				c.seg, c.off, c.at, c.positioned = seg, off, at, true
 				c.pushedPackets, c.pushedBytes = before, bytesBefore
-				b.maybeAddMarkLocked()
+				b.addMarkLocked(ts.cand)
 			}
 			rest = rest[n:]
 		}
@@ -823,7 +919,12 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 		b.ob = ob
 		flush()
 		ob = b.ob[:0]
-		c := &mark{prevAt: b.lastAt, safe: ts.audioComplete(), out: ts.snapshot()}
+		c := &mark{prevAt: b.lastAt, safe: ts.audioComplete(), out: ts.snapshot(), shift: b.shift}
+		for pid := range ts.es {
+			if !ts.isVideo(pid) && ts.out[pid].openUnbounded {
+				c.waitPIDs = append(c.waitPIDs, pid)
+			}
+		}
 		if q.h.hasPTS {
 			c.pts = q.h.pts()
 		} else {
@@ -848,6 +949,18 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 			if !o.maxSeen || ptsAfter(o.pts, o.maxPTS) {
 				o.maxPTS, o.maxSeen = o.pts, true
 			}
+			if video {
+				d := o.pts
+				if q.h.hasDTS {
+					d = q.h.dts()
+				}
+				if o.dtsSeen {
+					if step := wrap(d - o.dts); step > 0 && step < 90000 {
+						o.dtsStep = step
+					}
+				}
+				o.dts, o.dtsSeen = d, true
+			}
 			if !video {
 				for _, s := range ts.pending[pid] {
 					s.end, s.endKnown = o.pts, true
@@ -856,6 +969,7 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 			}
 		}
 		o.remaining = 0
+		o.openUnbounded = !video && q.h.length == 0
 		if q.h.length > 0 {
 			o.remaining = max(0, q.h.length-(len(payloadOf(p))-6))
 		}
@@ -863,6 +977,9 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 		o.remaining = max(0, o.remaining-len(payloadOf(p)))
 	}
 	ts.out[pid] = o
+	if !video && pktHasPayload(p) && (len(ts.waiting) > 0 || (ts.cand != nil && len(ts.cand.waitPIDs) > 0)) {
+		b.settleWaitingLocked(pid, pesStart)
+	}
 	if video && ts.cand != nil && !ts.cand.classified {
 		es := payloadOf(p)
 		if pesStart {
@@ -870,17 +987,63 @@ func (b *Buffer) commitLocked(q pkt, ob []byte, flush func()) []byte {
 		}
 		if len(es) > 0 && ts.cls.feed(es) {
 			ts.cand.classified, ts.cand.key = true, ts.cls.key
-			b.maybeAddMarkLocked()
+			b.addMarkLocked(ts.cand)
 		}
 	}
 	return append(ob, p...)
 }
 
-// maybeAddMarkLocked records the open candidate as a cut point once it is
-// placed in the buffer, known to be an IDR picture, and splits no audio PES.
-func (b *Buffer) maybeAddMarkLocked() {
-	c := b.ts.cand
+// settleWaitingLocked follows an audio PID's packet for the cut points
+// waiting on its unbounded PES: a start settles it, a continuation means the
+// PES ran across the keyframe and the cut point is not safe.
+func (b *Buffer) settleWaitingLocked(pid uint16, start bool) {
+	ts := &b.ts
+	// The open candidate, before it is placed or classified, is settled the
+	// same way: the continuation can come in its first packets.
+	if c := ts.cand; c != nil && !c.added && !slices.Contains(ts.waiting, c) {
+		if i := slices.Index(c.waitPIDs, pid); i >= 0 {
+			if start {
+				c.waitPIDs = slices.Delete(c.waitPIDs, i, i+1)
+				b.addMarkLocked(c)
+			} else {
+				c.safe = false
+			}
+		}
+	}
+	keep := ts.waiting[:0]
+	for _, m := range ts.waiting {
+		i := slices.Index(m.waitPIDs, pid)
+		if i < 0 {
+			keep = append(keep, m)
+			continue
+		}
+		if !start {
+			m.safe = false
+			continue
+		}
+		m.waitPIDs = slices.Delete(m.waitPIDs, i, i+1)
+		if len(m.waitPIDs) > 0 {
+			keep = append(keep, m)
+			continue
+		}
+		b.addMarkLocked(m)
+	}
+	ts.waiting = keep
+}
+
+// addMarkLocked records a candidate as a cut point once it is placed in the
+// buffer, known to be an IDR picture, and splits no audio PES.
+func (b *Buffer) addMarkLocked(c *mark) {
 	if c == nil || c.added || !c.positioned || !c.classified || !c.key || !c.safe {
+		return
+	}
+	if len(c.waitPIDs) > 0 {
+		if !slices.Contains(b.ts.waiting, c) {
+			if len(b.ts.waiting) >= 8 {
+				b.ts.waiting = b.ts.waiting[1:]
+			}
+			b.ts.waiting = append(b.ts.waiting, c)
+		}
 		return
 	}
 	c.added = true
@@ -965,6 +1128,13 @@ func (b *Buffer) gopLocked() time.Duration {
 	return defaultGOP
 }
 
+// sawLocked advances the buffer's idea of now.
+func (b *Buffer) sawLocked(now time.Time) {
+	if now.After(b.lastNow) {
+		b.lastNow = now
+	}
+}
+
 // markLiveLocked reports whether a cut point is still in the buffer, unreleased.
 func (b *Buffer) markLiveLocked(m *mark) bool {
 	for i, s := range b.queue {
@@ -981,7 +1151,9 @@ func (b *Buffer) spliceableLocked() bool {
 	if b.ts.codec == codecNone || b.ts.resync || len(b.queue) == 0 {
 		return false
 	}
-	lo := b.queue[0].first + int64(DumpMargin+2*b.gopLocked())
+	// Dump's anchor: the later of the release horizon and the head.
+	horizon := int64(b.lastNow.Sub(b.epoch)) - int64(b.delay)
+	lo := max(horizon, b.queue[0].first) + int64(DumpMargin+2*b.gopLocked())
 	for i := len(b.marks) - 1; i >= 0; i-- {
 		if b.markLiveLocked(b.marks[i]) {
 			return b.marks[i].at >= lo
@@ -1066,13 +1238,14 @@ func (b *Buffer) DumpWith(now time.Time, want, margin time.Duration, done func(D
 	// Provisional until the resume: what has been cut so far.
 	cut := time.Duration(vnow - pick.at)
 	t.result = DumpResult{Requested: want, Clamped: clamped, Before: before, Dumped: cut, After: before - cut,
-		CutFrom: b.epoch.Add(time.Duration(pick.at) + b.shift)}
+		CutFrom: b.epoch.Add(time.Duration(pick.at) + pick.shift)}
 	ts.resync, ts.splice, ts.ticket = true, pick, t
 	ts.margin, ts.gop, ts.dumpAt = margin, gop, now
-	ts.holding, ts.held, ts.audio = false, nil, nil
+	ts.holding, ts.held, ts.audio, ts.audioBytes = false, nil, nil, 0
 	ts.cand = nil
 	clear(ts.split)
 	clear(ts.pending)
+	ts.waiting = nil
 	clear(ts.out)
 	for _, s := range pick.out {
 		ts.out[s.pid] = s.pidOut
@@ -1161,29 +1334,59 @@ func (b *Buffer) removeSegmentLocked(s *segment) {
 // holds the PES's packets so far, rest the datagram's unread remainder.
 func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed bool) {
 	ts := &b.ts
+	// THE FORCE DEADLINE. No random-access picture at all -- an audio-only
+	// failover, a codec this cannot classify, H.264 without the flag -- would
+	// leave the dump waiting for ever with the destination dark. Past twice
+	// the recovery wait the resume takes the next PES start that carries a
+	// timestamp, on any stream. The platform sees a picture break until the
+	// source's next keyframe; that is said in the result.
+	force := now.Sub(ts.dumpAt) >= 2*max(minRecoveryWait, recoveryGOPs*ts.gop)
 	for off := 0; off < len(work); off += tsPacketSize {
 		p := work[off : off+tsPacketSize]
 		ts.observePSI(p)
 		pid := pktPID(p)
 		video := ts.isVideo(pid)
+		if _, isES := ts.es[pid]; force && !ts.holding && pktPUSI(p) && (isES || video) {
+			if h, complete := parsePES(p, nil); complete && h.ok && h.hasPTS {
+				ts.held = append(ts.held[:0], p...)
+				ts.holding, ts.heldPTS, ts.heldDTS, ts.forcing = true, h.pts(), h.pts(), true
+				if h.hasDTS {
+					ts.heldDTS = h.dts()
+				}
+				if b.decideResumeLocked(now) {
+					return work[off+tsPacketSize:], true
+				}
+			}
+		}
 		if _, isES := ts.es[pid]; isES && !video && !ts.holding {
 			if ts.audio == nil {
 				ts.audio = map[uint16]*audioCache{}
 			}
 			c := ts.audio[pid]
 			if c == nil {
-				c = &audioCache{budget: audioCacheBudget(b.lim)}
+				c = &audioCache{budget: audioCacheBudget(b.lim), total: &ts.audioBytes}
 				ts.audio[pid] = c
 			}
 			c.push(p)
 		}
 		if video && pktPUSI(p) {
-			ts.holding, ts.held = false, ts.held[:0]
+			ts.holding, ts.held, ts.heldNeedHdr = false, ts.held[:0], false
 			h, complete := parsePES(p, nil)
-			if !complete || !h.ok || !h.hasPTS {
+			if !complete {
+				// The header runs into the next video packet: hold this one
+				// and read it there, as the normal path does.
+				ts.holding, ts.heldNeedHdr, ts.heldRAP = true, true, pktRandomAccess(p)
+				ts.held = append(ts.held, p...)
+				continue
+			}
+			if !h.ok || !h.hasPTS {
 				continue
 			}
 			ts.holding, ts.heldPTS, ts.heldRAP = true, h.pts(), pktRandomAccess(p)
+			ts.heldDTS = ts.heldPTS
+			if h.hasDTS {
+				ts.heldDTS = h.dts()
+			}
 			ts.cls.reset(ts.codec)
 			ts.held = append(ts.held, p...)
 			if es := payloadOf(p)[h.esStart():]; len(es) > 0 && ts.cls.feed(es) {
@@ -1201,7 +1404,31 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			ts.holding, ts.held = false, ts.held[:0]
 			continue
 		}
-		if video {
+		if video && ts.heldNeedHdr && pktHasPayload(p) {
+			ts.heldNeedHdr = false
+			first := ts.held[:tsPacketSize]
+			h, _ := parsePES(first, p)
+			if !h.ok || !h.hasPTS {
+				ts.holding, ts.held = false, ts.held[:0]
+				continue
+			}
+			ts.heldPTS, ts.heldDTS = h.pts(), h.pts()
+			if h.hasDTS {
+				ts.heldDTS = h.dts()
+			}
+			ts.cls.reset(ts.codec)
+			es := payloadOf(p)
+			if skip := h.hdrLen - len(h.parts[0]); skip > 0 {
+				es = es[min(skip, len(es)):]
+			}
+			if len(es) > 0 && ts.cls.feed(es) {
+				if b.decideResumeLocked(now) {
+					return work[off+tsPacketSize:], true
+				}
+			}
+			continue
+		}
+		if video && !ts.heldNeedHdr {
 			if es := payloadOf(p); len(es) > 0 && ts.cls.feed(es) {
 				if b.decideResumeLocked(now) {
 					return work[off+tsPacketSize:], true
@@ -1218,14 +1445,42 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 func (b *Buffer) decideResumeLocked(now time.Time) bool {
 	ts := &b.ts
 	recovery := now.Sub(ts.dumpAt) >= max(minRecoveryWait, recoveryGOPs*ts.gop)
-	if !ts.cls.key && !(recovery && (ts.heldRAP || ts.cls.irap)) {
+	if !ts.forcing && !ts.cls.key && !(recovery && (ts.heldRAP || ts.cls.irap)) {
 		ts.holding, ts.held = false, ts.held[:0]
 		return false
+	}
+	forced := ts.forcing
+	recovered := !ts.cls.key && !forced
+	// RECOVERY AT AN HEVC CRA (or BLA): the picture is rewritten to
+	// BLA_N_LP, so a decoder starts afresh rather than expecting the pictures
+	// before it; its leading pictures are all dropped below.
+	if recovered && ts.codec == codecHEVC && ts.cls.irap {
+		rewriteFirstVCL(ts.held, ts.videoPID, func(h byte) byte {
+			return h&0x81 | 18<<1
+		})
 	}
 	prevOffset := ts.offset
 	m := ts.splice
 	// The resume picture takes the cut picture's place on both clocks.
 	ts.offset = wrap(ts.heldPTS - m.pts)
+	// ...unless its DTS would then not come after the last picture kept: a
+	// GOP with deeper reordering (an open-GOP CRA, whose leading pictures
+	// are shown before it and decoded after) puts the DTS further before the
+	// PTS. Then the DTS decides, one frame after the last kept, and the
+	// pictures are shown that much later -- a short hold, not a decode-order
+	// step a remux would have to repair.
+	for _, sn := range m.out {
+		if sn.pid != ts.videoPID || !sn.dtsSeen {
+			continue
+		}
+		step := sn.dtsStep
+		if step <= 0 {
+			step = 3000
+		}
+		if !ptsAfter(wrap(ts.heldDTS-ts.offset), sn.dts) {
+			ts.offset = wrap(ts.heldDTS - sn.dts - step)
+		}
+	}
 	before := b.shift
 	b.shift = now.Sub(b.epoch) - time.Duration(m.at)
 	// THE FLOOR HOLDS HOWEVER LATE THE RESUME IS. The cut left room for one
@@ -1249,19 +1504,32 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 			ts.rw[pid] = &pidRewrite{renumber: true, awaitStart: true}
 		}
 	}
-	// Audio: trimmed to start where the kept audio ends.
+	// EVERY NON-VIDEO ELEMENTARY STREAM is cut by timestamp against the
+	// splice: what is from the dumped window never airs, whether or not the
+	// PID sent anything before the cut. Audio that was flowing to the cut
+	// starts where the kept audio ends, to the frame; a PID whose last PES is
+	// older than a second before the cut (subtitles, metadata) is cut at the
+	// splice itself.
+	ts.resumeFloor = m.pts
+	ends := map[uint16]int64{}
 	for _, s := range m.out {
-		if ts.isVideo(s.pid) || !s.ptsSeen {
+		if s.ptsSeen {
+			end := s.pts
+			if s.endKnown {
+				end = s.end
+			}
+			ends[s.pid] = end
+		}
+	}
+	for pid := range ts.es {
+		if ts.isVideo(pid) {
 			continue
 		}
-		if _, isES := ts.es[s.pid]; !isES {
-			continue
+		end, ok := ends[pid]
+		if !ok || ptsAfter(wrap(m.pts-90000), end) {
+			end = m.pts
 		}
-		end := s.pts
-		if s.endKnown {
-			end = s.end
-		}
-		r := ts.rw[s.pid]
+		r := ts.rw[pid]
 		r.trimming, r.trimEnd = true, end
 	}
 	// Video: drop only pictures that would be SHOWN at or before the last
@@ -1277,14 +1545,14 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 		}
 		floor := wrap(m.pts - 1)
 		for _, s := range m.out {
-			if s.pid == ts.videoPID && s.maxSeen {
+			if s.pid == ts.videoPID && s.maxSeen && !recovered && !forced {
 				floor = s.maxPTS
 			}
 		}
 		r.gated, r.floor, r.sticky, r.left = true, floor, true, gateLimit
 	}
 	ts.spliced = true
-	ts.resync, ts.holding, ts.splice = false, false, nil
+	ts.resync, ts.holding, ts.splice, ts.forcing = false, false, nil, false
 	if t := ts.ticket; t != nil {
 		// The programme skipped: the cut picture to the resume picture.
 		t.result.Dumped = time.Duration(wrap(ts.offset-prevOffset)) * time.Second / 90000
@@ -1294,7 +1562,8 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 		t.result.After = b.delay - b.shift
 		t.result.Clamped = t.result.Requested > 0 && t.result.Dumped < t.result.Requested
 		t.result.Complete = true
-		t.result.Recovery = !ts.cls.key
+		t.result.Recovery = recovered
+		t.result.Forced = forced
 		t.result.CutTo = now
 		close(t.done)
 		t.fireLocked()
@@ -1339,6 +1608,8 @@ func (t *DumpTicket) Result() DumpResult {
 func truncateFile(path string, n int64) error { return os.Truncate(path, n) }
 func removeFile(path string) error            { return os.Remove(path) }
 
-// audioCacheBudget is the most complete audio the resync keeps per PID: two
-// spill segments, so it scales with the buffer's own granularity.
+// audioCacheBudget is the most complete audio the resync keeps, across every
+// PID: two spill segments, so it scales with the buffer's own granularity.
+// It is the one RAM the buffer holds outside MemBudget + 2*SegmentBytes, and
+// only while a dump waits for its keyframe; see the package comment.
 func audioCacheBudget(lim Limits) int { return 2 * lim.SegmentBytes }

@@ -99,8 +99,16 @@ does.
 - **No keyframe after the cut.** If no IDR keyframe arrives for three GOPs
   (at least 6 s), for example after a failover to a source sending open-GOP
   video, the stream resumes at the next random-access picture instead, and
-  the pictures that depend on the dumped part are dropped. The answer says
-  `"recovery": true`. The platform receives every picture whole, with no
+  the pictures that depend on the dumped part are dropped. An HEVC CRA is
+  rewritten to BLA, so decoders start afresh there. The answer says
+  `"recovery": true`.
+- **No random-access picture at all.** If nothing a decoder can start from
+  arrives for twice that wait (an audio-only failover, a codec polyemesis
+  cannot read), the dump stops waiting and resumes at the live edge. The
+  platform then shows a broken picture until the source's next keyframe. The
+  answer says `"forced": true`.
+- **Subtitles and data streams** are cut by their timestamps too: nothing from
+  the dumped window airs on any stream. The platform receives every picture whole, with no
   corrupt frames, and its timestamps run on without a jump or a gap. The audio
   carries on the same way.
 - **Captions** follow the shorter delay. Captions for programme still in the

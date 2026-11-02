@@ -269,7 +269,8 @@ delayed programme reached the platform.
   `data.requestedSeconds` what was asked for (0 for "since the last dump"), and
   `data.clamped` is `true` when the safety margin allowed less, and
   `data.recovery` is `true` when no IDR keyframe came and the stream resumed
-  at another random-access picture.
+  at another random-access picture, and `data.forced` when nothing a decoder
+  can start from came at all and it resumed at the live edge.
 
 ```json
 {"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,

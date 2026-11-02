@@ -1251,12 +1251,23 @@ func TestACutPointDoesNotGrowWithPIDChurn(t *testing.T) {
 	r.run(40 * time.Second)
 	r.b.mu.Lock()
 	defer r.b.mu.Unlock()
-	if len(r.b.ts.out) < 30 {
-		t.Fatalf("the fixture brought only %d PIDs", len(r.b.ts.out))
+	if len(r.b.ts.out) <= maxSnapPIDs {
+		t.Fatalf("the fixture brought only %d PIDs, not more than the %d cap", len(r.b.ts.out), maxSnapPIDs)
 	}
 	for _, m := range r.b.marks {
-		if len(m.out) > 4 {
-			t.Fatalf("a cut point remembers %d PIDs; the PAT, PMT, video and audio are 4", len(m.out))
+		if len(m.out) > maxSnapPIDs {
+			t.Fatalf("a cut point remembers %d PIDs, over the %d cap", len(m.out), maxSnapPIDs)
+		}
+		// Priority order: the PAT, the PMT, the video and the audio are
+		// always there, whatever else the stream brought.
+		have := map[uint16]bool{}
+		for _, sn := range m.out {
+			have[sn.pid] = true
+		}
+		for _, pid := range []uint16{0, delaytest.PMTPID, delaytest.VideoPID, delaytest.AudioPID} {
+			if !have[pid] {
+				t.Fatalf("a cut point lost PID %#x to PID churn", pid)
+			}
 		}
 	}
 }
