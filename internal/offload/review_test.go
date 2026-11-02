@@ -355,3 +355,26 @@ func TestFetchBackNeverReplacesAFileThatAppeared(t *testing.T) {
 	}
 	noTempFiles(t, f.dir)
 }
+
+// Review #25: the stale-mark repair looks at the file again under the
+// eviction lock. Retention removing the file after the candidate snapshot
+// must not have its mark cleared -- the bucket copy would be orphaned.
+func TestTheRepairDoesNotClearTheMarkOfAFileRemovedSinceTheSnapshot(t *testing.T) {
+	f, id, name := movedFixture(t)
+	tg, _ := f.store.GetStorageTarget(f.svc.box, id)
+	tg.KeepLocalHours, tg.SecretAccessKey = 1000, ""
+	_ = f.store.UpdateStorageTarget(f.svc.box, tg)
+	if err := f.store.BeginEvict(name, nil); err != nil { // the stale mark the snapshot sees
+		t.Fatal(err)
+	}
+	f.svc.beforeRepair = func() {
+		// retention's unlink lands between the snapshot and the repair
+		unlock := f.store.LockEviction()
+		_ = os.Remove(filepath.Join(f.dir, name))
+		unlock()
+	}
+	f.svc.Pass(context.Background())
+	if f.local(name) || !f.svc.Evicted(name) {
+		t.Fatalf("local=%v evicted=%v: the mark of a removed file was cleared", f.local(name), f.svc.Evicted(name))
+	}
+}

@@ -104,6 +104,9 @@ type Service struct {
 
 	stuckMu sync.Mutex
 	onStuck func(StuckEvent)
+	// beforeRepair is a test seam: it runs between the candidate snapshot and
+	// the stale-mark repair, where a concurrent eviction can land.
+	beforeRepair func()
 
 	// pins are files something is reading right now (a download, a clip
 	// export, a queued or running job): eviction leaves them alone.
@@ -330,13 +333,21 @@ func (s *Service) passOnce(ctx context.Context) {
 	// A file that is on disk and marked evicted is an eviction interrupted
 	// between the mark and the unlink: the file is still here, so the mark
 	// is wrong. Clear it; the next eviction goes through the gate again.
+	//
+	// The candidate list is a snapshot, so the file is looked at AGAIN, under
+	// the eviction lock, immediately before the mark is cleared: retention or
+	// another evictor may have removed it since, and clearing the mark on a
+	// file that is gone would orphan the bucket copy.
+	if s.beforeRepair != nil {
+		s.beforeRepair()
+	}
 	for _, cand := range cands {
 		if cand.kind != db.OffloadKindRecording {
 			continue
 		}
 		for _, t := range targets {
 			if it, ok := byKey[itemKey(t.ID, cand.rel)]; ok && it.Evicted {
-				if s.store.UndoEvict(cand.rel) == nil {
+				if s.repairStaleMark(cand) {
 					for _, tt := range targets {
 						if x, ok := byKey[itemKey(tt.ID, cand.rel)]; ok {
 							x.Evicted = false
@@ -959,6 +970,21 @@ func (s *Service) evict(ctx context.Context, targets []db.StorageTarget, clients
 	return changed
 }
 
+// repairStaleMark clears the evicted mark of a file that is still on disk,
+// checking that it is under the eviction lock.
+func (s *Service) repairStaleMark(cand candidate) bool {
+	unlock := s.store.LockEviction()
+	defer unlock()
+	path, err := s.rec.Resolve(cand.rel)
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	return s.store.UndoEvict(cand.rel) == nil
+}
+
 // evictOne marks the file evicted -- through db.BeginEvict, the transaction
 // that re-reads every enabled target's row and refuses unless the set the
 // caller just checked is still exactly the enabled set and every row is still
@@ -969,6 +995,8 @@ func (s *Service) evict(ctx context.Context, targets []db.StorageTarget, clients
 // local AND marked evicted, which Pass repairs by clearing the mark. The other
 // order would leave a missing file nothing points at.
 func (s *Service) evictOne(cand candidate, checked []int64) bool {
+	unlock := s.store.LockEviction()
+	defer unlock()
 	if err := s.store.BeginEvict(cand.rel, checked); err != nil {
 		return false
 	}

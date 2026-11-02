@@ -72,3 +72,17 @@ func TestATargetHoldingTheOnlyCopyRefusesDeletion(t *testing.T) {
 		t.Fatalf("second delete: %v", err)
 	}
 }
+
+// Review #8: the offload schema is stamped past 1, the version every earlier
+// release accepts, so a rollback to one of them refuses this database instead
+// of scanning it and dropping the rows of recordings moved to a bucket.
+func TestTheOffloadSchemaIsStampedSoAnOlderBinaryRefusesIt(t *testing.T) {
+	d := keyDB(t, filepath.Join(t.TempDir(), "polyemesis.db"))
+	var v int
+	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v < 2 {
+		t.Fatalf("user_version %d: a 0.9.x binary (which accepts 1) would open this database and drop evicted rows", v)
+	}
+}

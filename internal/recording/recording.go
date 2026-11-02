@@ -821,6 +821,8 @@ func creditStems(stems []stemSize, cutoff time.Time) int64 {
 // deleted, which would leave the only copy in a bucket nothing points at.
 // Everything else is deleted exactly as before.
 func (m *Manager) retire(r db.Recording, reason string) bool {
+	unlock := m.store.LockEviction()
+	defer unlock()
 	if err := m.store.BeginEvict(r.Filename, nil); err == nil {
 		path, rerr := m.Resolve(r.Filename)
 		if rerr == nil {

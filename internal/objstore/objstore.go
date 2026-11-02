@@ -459,8 +459,18 @@ func (c *Client) doQ(ctx context.Context, op, method, key string, query url.Valu
 		return nil, err
 	}
 	// Keep the path exactly as it was signed; net/http would otherwise
-	// re-escape characters S3 and SigV4 treat differently.
-	req.URL.Opaque = "//" + u.Host + canonPath
+	// re-escape characters S3 and SigV4 treat differently. RawPath, not
+	// Opaque: an Opaque of "//host/path" makes net/http write an ABSOLUTE-form
+	// request target on HTTP/1.1 (TestTheRequestTargetIsOriginForm...), which
+	// some proxies and servers refuse.
+	plain, perr := url.PathUnescape(canonPath)
+	if perr != nil {
+		return nil, fmt.Errorf("objstore: %s: %w", op, perr)
+	}
+	req.URL.Path, req.URL.RawPath = plain, canonPath
+	if req.URL.EscapedPath() != canonPath {
+		return nil, fmt.Errorf("objstore: %s: the key cannot be sent exactly as signed", op)
+	}
 	// Encoded exactly as the signature's canonical query encodes it.
 	req.URL.RawQuery = canonicalQuery(query)
 	if body != nil {

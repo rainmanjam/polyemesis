@@ -209,3 +209,12 @@ func (d *DB) UndoEvict(rel string) error {
 	_, err := d.sql.Exec(`UPDATE offload_items SET evicted = 0, updated_at = ? WHERE rel_path = ?`, time.Now().Unix(), rel)
 	return err
 }
+
+// LockEviction holds the eviction lock until the returned func is called. The
+// mark and the file it describes change together under it: nothing can
+// remove a file between another step's check that it exists and its clearing
+// of the mark.
+func (d *DB) LockEviction() func() {
+	d.evictMu.Lock()
+	return d.evictMu.Unlock
+}

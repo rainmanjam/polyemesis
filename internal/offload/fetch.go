@@ -237,6 +237,9 @@ func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, fin
 	// check and the rename would have its file overwritten. A hard link fails
 	// with EEXIST if the name exists, atomically; the temporary name is then
 	// removed by the deferred cleanup.
+	// Under the eviction lock: only the link, never the transfer.
+	unlock := s.store.LockEviction()
+	defer unlock()
 	if err := os.Link(tmpName, final); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return errors.New("a local file already exists under this name")

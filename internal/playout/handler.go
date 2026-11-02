@@ -2,6 +2,8 @@ package playout
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"os"
@@ -91,7 +93,7 @@ func (m *Manager) Handler(prefix string) http.Handler {
 			return
 		}
 		if !s.Enabled {
-			http.NotFound(w, r)
+			notFound(w, r)
 			return
 		}
 
@@ -99,13 +101,22 @@ func (m *Manager) Handler(prefix string) http.Handler {
 		ext := strings.ToLower(path.Ext(rel))
 		ctype, ok := servedTypes[ext]
 		if !ok {
-			http.NotFound(w, r)
+			notFound(w, r)
+			return
+		}
+		// Existence first, so a missing file's 404 carries no-store rather than
+		// the caching headers a present one would get -- http.FileServer's own
+		// error path drops them, and a CDN would otherwise be free to hold the
+		// 404 of a segment that is about to be written.
+		fi, err := os.Stat(filepath.Join(m.dir, filepath.FromSlash(rel)))
+		if err != nil || !fi.Mode().IsRegular() {
+			notFound(w, r)
 			return
 		}
 
 		w.Header().Set("Content-Type", ctype)
 		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
-		m.setETag(w, rel)
+		m.setETag(w, rel, ext, fi)
 
 		m.observe(r, rel, ext)
 		stripped.ServeHTTP(w, r)
@@ -189,12 +200,29 @@ func cacheControl(ext string, segmentAge, window int, shared bool) string {
 // setETag gives every served file a strong validator from its size and
 // modification time, set before http.FileServer runs so that its
 // conditional-request handling answers If-None-Match with a 304.
-func (m *Manager) setETag(w http.ResponseWriter, rel string) {
-	fi, err := os.Stat(filepath.Join(m.dir, filepath.FromSlash(rel)))
-	if err != nil || !fi.Mode().IsRegular() {
+//
+// A playlist's validator is a hash of its CONTENT: it is rewritten in place
+// every segment, often to the same length, and a filesystem whose mtime is
+// coarser than the rewrite would otherwise hand a 304 for a changed playlist.
+// Segments are written once under a name never reused, so size and mtime are
+// exact for them.
+func (m *Manager) setETag(w http.ResponseWriter, rel, ext string, fi os.FileInfo) {
+	if manifestExts[ext] {
+		b, err := os.ReadFile(filepath.Join(m.dir, filepath.FromSlash(rel)))
+		if err != nil {
+			return
+		}
+		sum := sha256.Sum256(b)
+		w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
 		return
 	}
 	w.Header().Set("ETag", `"`+strconv.FormatInt(fi.Size(), 16)+"-"+strconv.FormatInt(fi.ModTime().UnixNano(), 16)+`"`)
+}
+
+// notFound is every refusal this handler gives: never stored by anything.
+func notFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.NotFound(w, r)
 }
 
 // observe records the request against the viewer table.

@@ -3,9 +3,12 @@ package playout
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 )
@@ -357,5 +360,45 @@ func TestASharedCacheIsBoundedByTheSeekableWindow(t *testing.T) {
 		if strings.Contains(cc, "immutable") || !strings.Contains(cc, "s-maxage="+strconv.Itoa(tc.want)) {
 			t.Errorf("shared segment %q", cc)
 		}
+	}
+}
+
+// Review #18: every refusal from the media handler is no-store -- a missing
+// file, an unserved type, playout switched off.
+func TestEveryRefusalFromTheMediaHandlerIsNoStore(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	for _, p := range []string{"/playout/hd/seg_99999.ts", "/playout/hd/secrets.txt", "/playout/nothing/index.m3u8"} {
+		w := get(t, handler, p, "10.0.0.1")
+		if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d %q", p, w.Code, w.Header().Get("Cache-Control"))
+		}
+	}
+	off := h.Settings()
+	off.Enabled = false
+	if err := h.Reconcile(off, h.resolve); err != nil {
+		t.Fatal(err)
+	}
+	if w := get(t, handler, "/playout/hd/seg_00000.ts", "10.0.0.1"); w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("disabled: %d %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+}
+
+// Review #19: a playlist rewritten to the same length within one mtime tick
+// gets a new ETag, so a revalidation is never answered 304 for changed text.
+func TestAPlaylistETagFollowsItsContentNotItsMtime(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	path := filepath.Join(h.dir, "hd", MediaPlaylist)
+	at := time.Unix(1_800_000_000, 0)
+	write := func(body string) string {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(path, at, at)
+		return get(t, handler, "/playout/hd/"+MediaPlaylist, "10.0.0.1").Header().Get("ETag")
+	}
+	a := write("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:1\n")
+	b := write("#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:2\n")
+	if a == "" || a == b {
+		t.Fatalf("same-length, same-mtime rewrite kept ETag %q", a)
 	}
 }
