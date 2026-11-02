@@ -220,12 +220,20 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
 
       # Everything below this line was missing, and its absence made this
       # workflow measure nothing at all: the suites bail on their own preflight
@@ -239,7 +247,8 @@ jobs:
       # dependency, this one needs it too, or the rate measured here stops
       # describing the thing CI actually runs.
       - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -289,6 +298,12 @@ jobs:
           sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       # The suites run the real binary with the UI embedded, so it has to be
       # the real build rather than `go build ./cmd/...`.
@@ -399,6 +414,8 @@ jobs:
           name: flake-logs-${{ matrix.suite }}
           path: /tmp/*.log
           if-no-files-found: ignore
+          # Read by whoever dispatched the measurement; nothing downloads it.
+          retention-days: 7
 
   # THE GO MODE. Issue #206: the acceptance mode above cannot execute a Go
   # package test and cannot leave ubuntu, so for #172 (a -race flake in a Go
@@ -454,7 +471,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
 
       # bash on all three, so the loop is written once. GitHub's Windows images
       # ship it; the alternative is a PowerShell copy of this script that would
@@ -665,3 +685,5 @@ jobs:
           name: flake-logs-go-${{ matrix.os }}
           path: gotest-*.log
           if-no-files-found: ignore
+          # Read by whoever dispatched the measurement; nothing downloads it.
+          retention-days: 7

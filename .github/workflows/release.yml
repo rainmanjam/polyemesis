@@ -510,6 +510,13 @@ jobs:
       # that Docker actually runs on. linux/amd64 covers Intel/AMD servers and
       # Windows via WSL2; linux/arm64 covers Apple Silicon, Graviton/Ampere and
       # the Raspberry Pi 4/5.
+      #
+      # LAYER CACHE: READ EVERYWHERE, WRITTEN ON MAIN ONLY (all three builds).
+      # A tag run's cache is scoped to the tag's ref, which no later run can
+      # restore, and mode=max over two architectures is the largest thing this
+      # repository puts in the cache. The weekly scheduled dry run builds the
+      # same three Dockerfiles on main, and a tag run reads that through the
+      # default-branch fallback. CONTRIBUTING.md, "CI caches and artifacts".
       - name: Build and push (default, multi-arch)
         id: build_default
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -521,7 +528,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       # The GPU images are linux/amd64 only, and that is not an oversight:
       # Dockerfile.vaapi's driver stack (intel-media-va-driver) is an amd64
@@ -544,7 +551,7 @@ jobs:
           tags: ${{ env.TAGS_CUDA }}
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       - name: Build and push (Intel/AMD VA-API)
         id: build_vaapi
@@ -558,7 +565,7 @@ jobs:
           tags: ${{ env.TAGS_VAAPI }}
           push: ${{ env.PUBLISH == 'true' }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
 
       # PROVENANCE FOR EACH PUSHED DIGEST. One attestation per image, keyed by
       # the manifest digest buildx pushed. That digest is the same on Docker Hub
@@ -707,14 +714,24 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           # Both projects this job runs npm ci in: the embedded web UI and the
           # Stream Deck plugin.
           cache-dependency-path: |
+            ui/package-lock.json
+            integrations/streamdeck/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: |
             ui/package-lock.json
             integrations/streamdeck/package-lock.json
 
@@ -926,6 +943,9 @@ jobs:
           name: sbom-dry-run
           path: dist/polyemesis-sbom.*.json
           if-no-files-found: error
+          # Read by a person, not a job: the weekly dry run's SBOM is replaced
+          # by next week's, so a week is the whole of its useful life.
+          retention-days: 7
 
       # THE RELEASE BODY IS THE FIRST THING AN OPERATOR READS, and it used to be
       # `generate_release_notes: true` alone -- a list of merged PR titles and

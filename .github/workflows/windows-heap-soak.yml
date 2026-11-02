@@ -78,7 +78,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
 
       - name: Record the runner image
         # The image was the leading hypothesis for the 2026-08-17 onset and was
@@ -181,5 +184,7 @@ jobs:
         with:
           name: windows-heap-soak-logs
           path: iter-*.log
-          retention-days: 30
+          # Read by whoever dispatched the soak; nothing downloads it. A dump
+          # worth keeping longer belongs attached to its issue, not here.
+          retention-days: 7
           if-no-files-found: warn

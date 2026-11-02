@@ -138,7 +138,10 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v6.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && steps.gate.outputs.ready == 'true'
+        uses: ./.github/actions/restore-go-cache
 
       - name: Go coverage for the scanner
         if: steps.gate.outputs.ready == 'true'
@@ -151,8 +154,13 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6.0.0
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && steps.gate.outputs.ready == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
 
       # THE UI'S COVERAGE, WHICH SONAR MEASURED AS ZERO AND WHICH IS NOT ZERO.
       #

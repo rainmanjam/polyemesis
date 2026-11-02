@@ -93,8 +93,13 @@ updates:
         update-types: ["version-update:semver-major"]
 
   # The actions are pinned by major tag; this is what notices a v7 -> v8.
+  # The two composite actions under .github/actions pin actions/cache/restore
+  # too; listing them keeps their pin moving with the workflows' instead of
+  # being left behind on the next actions/cache bump.
   - package-ecosystem: github-actions
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule: { interval: weekly, day: monday }
 
   # Base images. The FFmpeg pin inside them is deliberate and NOT managed here
