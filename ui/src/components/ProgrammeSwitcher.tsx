@@ -49,9 +49,9 @@ export function ProgrammeSwitcher() {
         // —…" at 10rem with 400px of empty header beside it, and on a
         // multi-programme install the scope is the one thing an operator must
         // not misread. Grows to its content up to 18rem on desktop; on a
-        // phone it keeps to 9rem and shows the name's short part, with every
+        // phone it keeps to 10.5rem and shows the name's short part, with every
         // full name in the open menu.
-        className="h-7 w-auto min-w-0 max-w-[9rem] text-sm sm:max-w-[18rem] [&>span]:truncate"
+        className="h-7 w-auto min-w-0 max-w-[10.5rem] shrink-0 text-sm sm:max-w-[18rem] [&>span]:truncate"
       >
         <SelectValue placeholder={t("chrome.programme")}>
           {current && (
