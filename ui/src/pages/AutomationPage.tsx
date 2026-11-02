@@ -194,6 +194,7 @@ const EVENT_LABELS: Record<string, TranslationKey> = {
   "debug.exported": "auto.evDebugExported",
   "alerts.rule_changed": "auto.evAlertRuleChanged",
   "mcp.action": "auto.evMCPAction",
+  "delay.dumped": "auto.evDelayDumped",
   "destination.held": "auto.destinationHeld",
 };
 

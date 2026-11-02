@@ -64,13 +64,13 @@ never reaches that platform, and the destination stays on the air. Viewers skip
 forward a few seconds. The delay is shorter by what was dumped.
 
 Press **Dump** in the delay panel on the destination's card. Choose
-**Everything since the last dump** or a number of seconds, and confirm. The
-dialog shows the delay before and after. The card then says, for example,
-"Dumped 11.4 s, delay now 18.6 s". On a Stream Deck, hold the **Dump** key.
+**Everything since the last dump point** or a number of seconds, and confirm.
+The dialog shows the delay now and about what it will be after. The card then
+says, for example, "Dumped 11.4 s — delay now 18.6 s." On a Stream Deck, hold the **Dump** key.
 **Dump all** on the deck, or `POST /destinations/delay/dump-all`, dumps every
 delayed destination of the programme at once.
 
-- **Everything since the last dump** is the default: it drops everything that
+- **Everything since the last dump point** is the default: it drops everything that
   arrived since the last dump, or since the destination started, down to the
   safety margin.
 - **A number of seconds** drops at least that much of the newest programme.

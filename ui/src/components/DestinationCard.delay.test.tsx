@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { DestinationCard } from "./DestinationCard";
-import type { DelayStatus, DestStatus } from "@/lib/types";
+import { asDestinationId, type DelayDumpResult, type DelayStatus, type DestStatus } from "@/lib/types";
 
 /* #11 on the destination card. A delayed destination says so; one filling its
  * delay shows how far it has got; one that was STOPPED and is still airing its
@@ -34,20 +34,35 @@ const delay = (over: Partial<DelayStatus>): DelayStatus => ({
   phase: "on-air",
   fill: 1,
   bufferedSeconds: 30,
+  effectiveSeconds: 30,
+  dumpable: true,
   memBytes: 0,
   diskBytes: 0,
   ...over,
 });
 
-function draw(over: Partial<DestStatus>, onStopNow?: () => void) {
+function draw(
+  over: Partial<DestStatus>,
+  onStopNow?: () => void,
+  onDump?: (seconds?: number) => Promise<DelayDumpResult>,
+) {
+  return render(card(over, onStopNow, onDump));
+}
+
+function card(
+  over: Partial<DestStatus>,
+  onStopNow?: () => void,
+  onDump?: (seconds?: number) => Promise<DelayDumpResult>,
+) {
   const noop = () => {};
-  return render(
+  return (
     <MemoryRouter>
       <DestinationCard
         dest={dest(over)}
         onStart={noop}
         onStop={noop}
         onStopNow={onStopNow}
+        onDump={onDump}
         onRestart={noop}
         onEdit={noop}
         onDelete={noop}
@@ -57,7 +72,7 @@ function draw(over: Partial<DestStatus>, onStopNow?: () => void) {
         canMoveEarlier={false}
         canMoveLater={false}
       />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -93,5 +108,141 @@ describe("the destination card shows its broadcast delay", () => {
     draw({ delaySeconds: 0, delay: null });
     expect(screen.queryByTestId("delay-badge")).toBeNull();
     expect(screen.queryByTestId("delay-stop-now")).toBeNull();
+  });
+});
+
+const answer = (over: Partial<DelayDumpResult> = {}): DelayDumpResult => ({
+  id: asDestinationId(1),
+  name: "YouTube main",
+  complete: true,
+  requestedSeconds: 0,
+  dumpedSeconds: 11.4,
+  clamped: false,
+  delayBeforeSeconds: 30,
+  delayAfterSeconds: 18.6,
+  configuredSeconds: 30,
+  restoresOnNextStart: true,
+  ...over,
+});
+
+/* Dump: drop the newest part of the buffer while staying on the air. The delay
+ * stays shorter until the destination next starts, so the card says how long
+ * the audience's delay is NOW, and the dump is confirmed before it is sent. */
+describe("dumping a delayed destination", () => {
+  const dialog = () => within(screen.getByRole("dialog"));
+  const openDump = () => fireEvent.click(screen.getByTestId("delay-dump"));
+  const confirm = () => fireEvent.click(dialog().getByRole("button", { name: "Dump" }));
+
+  it("shows the effective delay once some of it has been dumped", () => {
+    draw({ delay: delay({ effectiveSeconds: 18, dumpedSeconds: 12 }) });
+    expect(screen.getByTestId("delay-badge").textContent).toContain("Delayed 18 of 30 s");
+    expect(screen.getByTestId("delay-restores").textContent).toContain("full 30 s delay returns");
+  });
+
+  it("says nothing about restoring when nothing has been dumped", () => {
+    draw({ delay: delay({}) }, undefined, vi.fn());
+    expect(screen.queryByTestId("delay-restores")).toBeNull();
+  });
+
+  it("offers Dump only while the delayed destination is on the air", () => {
+    const dump = vi.fn();
+    draw({ delay: delay({ phase: "buffering", fill: 0.4, bufferedSeconds: 12 }) }, undefined, dump);
+    expect(screen.queryByTestId("delay-dump")).toBeNull();
+    cleanup();
+    draw({ enabled: false, delay: delay({ phase: "draining", drainRemainingSeconds: 5 }) }, undefined, dump);
+    expect(screen.queryByTestId("delay-dump")).toBeNull();
+    cleanup();
+    draw({ delay: delay({}) }, undefined, dump);
+    expect(screen.getByTestId("delay-dump").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("disables Dump when there is nothing to cut at, or a dump is in flight", () => {
+    draw({ delay: delay({ dumpable: false }) }, undefined, vi.fn());
+    expect(screen.getByTestId("delay-dump").hasAttribute("disabled")).toBe(true);
+    cleanup();
+    draw({ delay: delay({ dumping: true }) }, undefined, vi.fn());
+    expect(screen.getByTestId("delay-dump").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("asks first: nothing is sent until the dump is confirmed", () => {
+    const dump = vi.fn(async () => answer());
+    draw({ delay: delay({}) }, undefined, dump);
+    openDump();
+    expect(dump).not.toHaveBeenCalled();
+    expect(dialog().getByTestId("delay-dump-before").textContent).toContain("30 s");
+    fireEvent.click(dialog().getByRole("button", { name: "Cancel" }));
+    expect(dump).not.toHaveBeenCalled();
+  });
+
+  it("dumps everything since the last dump point by default, with no seconds", async () => {
+    const dump = vi.fn(async () => answer());
+    draw({ delay: delay({}) }, undefined, dump);
+    openDump();
+    expect(dialog().getByTestId("delay-dump-after").textContent).toContain("2 s");
+    confirm();
+    await waitFor(() => expect(dump).toHaveBeenCalledTimes(1));
+    expect(dump).toHaveBeenCalledWith(undefined);
+  });
+
+  it("dumps a number of seconds when one is chosen, and estimates what is left", async () => {
+    const dump = vi.fn(async () => answer({ requestedSeconds: 12 }));
+    draw({ delay: delay({}) }, undefined, dump);
+    openDump();
+    fireEvent.click(dialog().getByTestId("delay-dump-mode-seconds"));
+    fireEvent.change(dialog().getByTestId("delay-dump-seconds"), { target: { value: "12" } });
+    expect(dialog().getByTestId("delay-dump-after").textContent).toContain("18 s");
+    confirm();
+    await waitFor(() => expect(dump).toHaveBeenCalledTimes(1));
+    expect(dump).toHaveBeenCalledWith(12);
+  });
+
+  it("never estimates less than 2 s left", () => {
+    draw({ delay: delay({ effectiveSeconds: 8 }) }, undefined, vi.fn());
+    openDump();
+    fireEvent.click(dialog().getByTestId("delay-dump-mode-seconds"));
+    expect(dialog().getByTestId("delay-dump-after").textContent).toContain("about 2 s");
+  });
+
+  it("reports the server's figures, not the estimate", async () => {
+    draw({ delay: delay({}) }, undefined, async () => answer());
+    openDump();
+    confirm();
+    const done = await screen.findByTestId("delay-dump-result");
+    expect(done.textContent).toContain("Dumped 11.4 s");
+    expect(done.textContent).toContain("delay now 18.6 s");
+    expect(done.textContent).not.toContain("Less than asked");
+  });
+
+  it("says when less could be dropped than asked", async () => {
+    draw({ delay: delay({}) }, undefined, async () =>
+      answer({ clamped: true, dumpedSeconds: 4.2, delayAfterSeconds: 25.8 }),
+    );
+    openDump();
+    confirm();
+    const done = await screen.findByTestId("delay-dump-result");
+    expect(done.textContent).toContain("Dumped 4.2 s");
+    expect(done.textContent).toContain("Less than asked");
+  });
+
+  it("forgets a dump's figures once the destination has stopped and started again", async () => {
+    const dump = async () => answer();
+    const { rerender } = draw({ delay: delay({}) }, undefined, dump);
+    openDump();
+    confirm();
+    await screen.findByTestId("delay-dump-result");
+    rerender(card({ enabled: false, delay: delay({ phase: "draining", drainRemainingSeconds: 5 }) }, undefined, dump));
+    rerender(card({ delay: delay({}) }, undefined, dump));
+    expect(screen.getByTestId("delay-badge").textContent).toContain("Delayed 30 s");
+    expect(screen.queryByTestId("delay-dump-result")).toBeNull();
+  });
+
+  it("shows the server's reason when there is nothing to dump", async () => {
+    draw({ delay: delay({}) }, undefined, async () => {
+      throw new Error("nothing to dump yet");
+    });
+    openDump();
+    confirm();
+    const failed = await screen.findByTestId("delay-dump-result");
+    expect(failed.textContent).toContain("nothing to dump yet");
   });
 });

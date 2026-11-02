@@ -28,6 +28,8 @@ import type {
   BroadcastEnd,
   YouTubeVerticalView,
   BulkDestReport,
+  DelayDumpAllReport,
+  DelayDumpResult,
   ChatMessage,
   ChatModerationResult,
   ChatOverview,
@@ -802,6 +804,13 @@ export const api = {
     ),
   restartDestination: (id: DestinationId) =>
     post<{ status: string }>(`/destinations/${id}/restart`),
+  /** The broadcast delay's Dump: drops the newest part of the buffer and keeps
+   *  the destination on the air. `seconds` drops at least that much; omitted
+   *  (or 0) drops everything since the last dump point, so no body is sent.
+   *  The delay stays shorter until the destination next starts. 409, with the
+   *  server's reason as the message, when there is nothing to dump. */
+  dumpDestinationDelay: (id: DestinationId, seconds?: number) =>
+    post<DelayDumpResult>(`/destinations/${id}/delay/dump`, seconds ? { seconds } : undefined),
   /** Live per-track mute or gain (I4). Writes the STORED live mix and
    *  reconciles, so a level-only change reaches the running FFmpeg without a
    *  restart. `applied` says which happened and `reason` why. 409 for an
@@ -842,6 +851,14 @@ export const api = {
    *  a caller that never showed one is exactly who the refusal is for. */
   stopAllDestinations: () =>
     post<BulkDestReport>("/destinations/stop-all", { confirm: true }),
+  /** Dump the delay of every enabled, delayed destination of one programme.
+   *  Carries `confirm` for the reason stop-all does: the server refuses it
+   *  without one. Undelayed destinations are not listed in the answer. */
+  dumpAllDelays: (sourceId?: number | null, seconds?: number) =>
+    post<DelayDumpAllReport>(`/destinations/delay/dump-all${sourceQuery(sourceId)}`, {
+      confirm: true,
+      ...(seconds ? { seconds } : {}),
+    }),
   /** What a stop-all would end right now: the server's count, from each row's recorded phase.
    *  The Stop dialog shows this and nothing local, so the dialog and the stop agree. Read-only. */
   stopImpact: () =>
