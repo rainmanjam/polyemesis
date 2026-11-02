@@ -379,6 +379,13 @@ type Sanctioner interface {
 	ClearChatSanction(p db.Platform, account, userID string) error
 }
 
+// The API reads sanctions straight off *db.DB and answers an explicit "none"
+// when it finds no row. If the store the Hub is given ever stopped satisfying
+// Sanctioner, no ban would be recorded and every banned viewer would read as
+// "none" -- disabling Lift ban for exactly the people it is for. This makes
+// that drift a compile error rather than a silent one.
+var _ Sanctioner = (*db.DB)(nil)
+
 // ToDB converts a message for storage. Exported because the API layer replays
 // history out of the database and needs the round trip to be one obvious pair
 // of functions rather than two divergent ones.
