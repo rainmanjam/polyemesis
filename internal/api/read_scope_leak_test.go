@@ -48,6 +48,12 @@ const (
 	sentinelPlayoutToken  = "SENTINEL-playout-watch-token-9f3a"
 	sentinelAutomodKey    = "SENTINEL-automod-endpoint-apikey-9f3a"
 	sentinelExpertArgs    = "SENTINEL-expert-argv-streamkey-9f3a"
+	// The storage target's access key id: shown to an admin, blanked for a
+	// read token. Its secret access key is NOT a sweep sentinel, for the same
+	// reason the OBS password is not: no body carries it, admin included, so
+	// it could never be witnessed. TestTheStorageSecretAppearsInNoResponse is
+	// its leak test.
+	sentinelStorageKeyID = "SENTINEL-storage-access-key-id-9f3a"
 )
 
 // destFileName is a file destination's filename, and it is here as a
@@ -70,6 +76,7 @@ func allSentinels() []string {
 		sentinelMQTTPwd, sentinelDestKey, sentinelDestBackupKey,
 		sentinelIcecastPwd, sentinelPlayoutToken,
 		sentinelAutomodKey, sentinelExpertArgs,
+		sentinelStorageKeyID,
 	}
 }
 
@@ -137,6 +144,15 @@ func plantedServer(t *testing.T) (http.Handler, *db.DB, func(*http.Request)) {
 	st.Automod.Model.Endpoint = "https://llm.example/v1/chat/completions?api_key=" + sentinelAutomodKey
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("plant settings credentials: %v", err)
+	}
+
+	// One storage target, so GET /storage/targets and /storage/targets/1 are
+	// swept over a populated body rather than an empty list.
+	if _, err := store.CreateStorageTarget(storageFixtureBox(t), db.StorageTarget{Name: "archive", Provider: db.StorageProviderS3,
+		Endpoint: "https://s3.example", Bucket: "archive-9f3a", Region: "us-east-1",
+		AccessKeyID: sentinelStorageKeyID, SecretAccessKey: storageSecretPlant,
+		Mode: db.OffloadMirror, Enabled: true}); err != nil {
+		t.Fatalf("plant storage target: %v", err)
 	}
 
 	dest, err := store.CreateDestination(&db.Destination{
@@ -502,6 +518,10 @@ func leakRoutes() []string {
 		// never see it; TestTheOBSWebsocketPasswordAppearsInNoResponseLogEvent
 		// AuditOrMetric is its leak test.
 		"/api/v1/obs",
+		// Storage targets for offload: the access key id is blanked for a read
+		// token, the secret is never in any body.
+		"/api/v1/storage/targets",
+		"/api/v1/storage/targets/1",
 		"/api/v1/status",
 		"/api/v1/source",
 		"/api/v1/destinations",

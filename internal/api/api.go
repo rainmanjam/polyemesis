@@ -40,6 +40,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/obsbridge"
+	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/recording"
@@ -537,6 +538,8 @@ type Server struct {
 	// hooks page, listing stored hooks and reporting that nothing is delivering
 	// -- which is the difference an operator needs to see.
 	hooks *hooks.Dispatcher
+	// offload is nil when the service is not wired (most tests).
+	offload *offload.Service
 
 	// stream is the real-time events hub behind GET /events. Optional: nil
 	// answers 503 there, and every publish through it is nil-safe.
@@ -741,6 +744,10 @@ type Options struct {
 
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
+	// Offload copies finished recordings to S3-compatible storage targets.
+	// Optional: without it the storage routes still store targets, the
+	// fetch route answers 503 and nothing is uploaded.
+	Offload *offload.Service
 
 	// Stream is the real-time events hub (GET /events). Optional.
 	Stream *eventstream.Hub
@@ -792,6 +799,7 @@ func New(o Options) *Server {
 			return automod.NewBudget()
 		}(),
 		hooks:       o.Hooks,
+		offload:     o.Offload,
 		stream:      o.Stream,
 		overlayGate: o.OverlayGate,
 		obs:         o.OBS,
@@ -1256,6 +1264,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireSession)
 				r.Post("/automod/test", s.handleAutomodTest)
+				r.Post("/storage/targets/test", s.handleTestStorageTarget)
 			})
 
 			// The read half of media. POST /media and DELETE /media/{name} are
@@ -1352,6 +1361,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// it through and a plain <video src> can reach it — which it has
 			// to, because a media element attaches no headers of its own.
 			r.Get("/library/recordings/{id}/media/{file}", s.handleLibraryMedia)
+			// Move-mode offload: bring a recording (and its session's other
+			// offloaded segments) back to local disk. 202 at once; the
+			// recordings event says when each file has landed.
+			r.Post("/library/recordings/{id}/fetch", s.handleFetchRecording)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a
 			// recording already on disk. Deliberately NOT under /clips, which
@@ -1388,6 +1401,16 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// it behind requireCSRF with the rest of the state-changing group.
 			r.Post("/hooks/{id}/test", s.handleTestHook)
 			r.Get("/hooks/{id}/deliveries", s.handleHookDeliveries)
+
+			// S3-compatible storage targets for recording offload. See
+			// storage.go. The secret is write-only; a read token gets the
+			// read-safe view. The Test route is in the session-only group with
+			// /automod/test, because it unseals the secret and sends it out.
+			r.Get("/storage/targets", s.handleListStorageTargets)
+			r.Post("/storage/targets", s.handleCreateStorageTarget)
+			r.Get("/storage/targets/{id}", s.handleGetStorageTarget)
+			r.Put("/storage/targets/{id}", s.handleUpdateStorageTarget)
+			r.Delete("/storage/targets/{id}", s.handleDeleteStorageTarget)
 
 			// Scheduling. /runs is what the last sweep did, which is where a
 			// skipped occurrence gets explained.

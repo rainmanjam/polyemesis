@@ -14,7 +14,7 @@ import (
 // the way move-mode offload leaves it.
 func evict(t *testing.T, store *db.DB, dir, name string) {
 	t.Helper()
-	id, err := store.CreateStorageTarget(db.StorageTarget{Name: "t", Provider: "minio", Endpoint: "http://h", Bucket: "b",
+	id, err := store.CreateStorageTarget(nil, db.StorageTarget{Name: "t", Provider: "minio", Endpoint: "http://h", Bucket: "b",
 		Mode: db.OffloadMove, Enabled: true})
 	if err != nil {
 		t.Fatal(err)

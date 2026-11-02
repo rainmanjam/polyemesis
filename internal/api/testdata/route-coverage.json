@@ -2,8 +2,8 @@
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 60,
   "counterpartlessExcusedCeiling": 32,
-  "differentialFloor": 8,
-  "sentinelWitnessFloor": 24,
+  "differentialFloor": 10,
+  "sentinelWitnessFloor": 26,
   "nonGetDifferentialFloor": 20,
   "unstableCeiling": 4,
   "inertCeiling": 6,
@@ -12,16 +12,16 @@
   "guardedFloor": 29,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 279,
-    "swept": 75,
+    "methodPatternPairs": 286,
+    "swept": 77,
     "excused": 60,
-    "denied": 144,
+    "denied": 149,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
   },
   "partition": {
-    "differential": 8,
+    "differential": 10,
     "invariant": 61,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
@@ -685,6 +685,12 @@
     {
       "method": "PUT",
       "pattern": "/api/v1/library/recordings/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/library/recordings/{id}/fetch",
       "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
@@ -1370,6 +1376,42 @@
       "method": "GET",
       "pattern": "/api/v1/status",
       "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/storage/targets",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/storage/targets",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/storage/targets/test",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/storage/targets/{id}",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/storage/targets/{id}",
+      "coverage": "swept",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "PUT",
+      "pattern": "/api/v1/storage/targets/{id}",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -2148,6 +2190,28 @@
       "path": "/api/v1/status",
       "pattern": "GET /api/v1/status",
       "class": "invariant"
+    },
+    {
+      "path": "/api/v1/storage/targets",
+      "pattern": "GET /api/v1/storage/targets",
+      "class": "differential",
+      "pointers": [
+        "/targets/0/accessKeyId"
+      ],
+      "sentinels": [
+        "SENTINEL-storage-access-key-id-9f3a"
+      ]
+    },
+    {
+      "path": "/api/v1/storage/targets/1",
+      "pattern": "GET /api/v1/storage/targets/{id}",
+      "class": "differential",
+      "pointers": [
+        "/accessKeyId"
+      ],
+      "sentinels": [
+        "SENTINEL-storage-access-key-id-9f3a"
+      ]
     },
     {
       "path": "/api/v1/system",

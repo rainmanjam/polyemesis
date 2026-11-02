@@ -34,11 +34,11 @@ func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.Storage
 	if err := c.MakeBucket(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	id, err := f.store.CreateStorageTarget(tg)
+	id, err := f.store.CreateStorageTarget(f.svc.box, tg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tg, err = f.store.GetStorageTarget(id)
+	tg, err = f.store.GetStorageTarget(f.svc.box, id)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3376,6 +3376,9 @@ func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request)
 		writeStoreError(w, err)
 		return
 	}
+	if s.refuseOffloaded(w, rec.Filename) {
+		return
+	}
 	// Resolve confines the path to the recordings directory; the filename
 	// originates from a database row and is never trusted as a path.
 	path, err := s.recordings().Resolve(rec.Filename)

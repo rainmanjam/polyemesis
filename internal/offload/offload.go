@@ -45,6 +45,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/objstore"
 	"github.com/rainmanjam/polyemesis/internal/recording"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -84,6 +85,7 @@ const (
 type Service struct {
 	log      *slog.Logger
 	store    *db.DB
+	box      *secrets.Box
 	rec      Recordings
 	onChange func()
 
@@ -111,8 +113,8 @@ func WithClock(fn func() time.Time) Option { return func(s *Service) { s.now = f
 
 // New builds a Service. onChange is called whenever an item's state moves,
 // so the Library refreshes over the recordings event.
-func New(log *slog.Logger, store *db.DB, rec Recordings, onChange func(), opts ...Option) *Service {
-	s := &Service{log: log, store: store, rec: rec, onChange: onChange, now: time.Now,
+func New(log *slog.Logger, store *db.DB, box *secrets.Box, rec Recordings, onChange func(), opts ...Option) *Service {
+	s := &Service{log: log, store: store, box: box, rec: rec, onChange: onChange, now: time.Now,
 		newClient: NewClient, fetches: map[string]*FetchState{}, baseCtx: context.Background()}
 	s.segSecs = func() int {
 		st, err := store.GetSettings()
@@ -213,7 +215,7 @@ func (s *Service) Pass(ctx context.Context) {
 		return
 	}
 	defer s.passMu.Unlock()
-	targets, err := s.store.ListStorageTargets()
+	targets, err := s.store.ListStorageTargets(s.box)
 	if err != nil {
 		s.log.Warn("offload: list targets", "err", err)
 		return

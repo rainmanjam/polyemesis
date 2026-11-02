@@ -125,13 +125,13 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := dbtest.Open(t, db.WithSecretBox(box))
+	store := dbtest.Open(t)
 	dir := t.TempDir()
 	logs := &bytes.Buffer{}
 	log := slog.New(slog.NewTextHandler(logs, nil))
 	f := &fixture{t: t, store: store, dir: dir, now: time.Now(), mems: map[int64]*memStore{}, logs: logs}
 	f.rec = recording.New(log, store, dir, nil)
-	f.svc = New(log, store, f.rec, nil,
+	f.svc = New(log, store, box, f.rec, nil,
 		WithClock(func() time.Time { return f.now }),
 		WithClientFactory(func(tg db.StorageTarget) (Client, error) {
 			m, ok := f.mems[tg.ID]
@@ -146,7 +146,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) target(mode string, keep int) int64 {
 	f.t.Helper()
-	id, err := f.store.CreateStorageTarget(db.StorageTarget{Name: "t" + mode, Provider: "minio", Endpoint: "http://h.test",
+	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "t" + mode, Provider: "minio", Endpoint: "http://h.test",
 		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: mode, KeepLocalHours: keep, Enabled: true})
 	if err != nil {
 		f.t.Fatal(err)
@@ -278,7 +278,7 @@ func TestAChecksumMismatchIsAFailureAndNeverEvicts(t *testing.T) {
 
 func TestADownloadVerifyCatchesAStoreThatLiesInHead(t *testing.T) {
 	f := newFixture(t)
-	id, err := f.store.CreateStorageTarget(db.StorageTarget{Name: "dl", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "dl", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
 		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMove, VerifyDownload: true, Enabled: true})
 	if err != nil {
 		t.Fatal(err)
@@ -487,7 +487,7 @@ func TestFetchIsAsyncAndReportsDone(t *testing.T) {
 func TestExtrasFollowThePerTargetToggles(t *testing.T) {
 	f := newFixture(t)
 	plain := f.target(db.OffloadMirror, 0)
-	all, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "all", Provider: "r2", Endpoint: "http://h.test", Bucket: "b",
+	all, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "all", Provider: "r2", Endpoint: "http://h.test", Bucket: "b",
 		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true,
 		OffloadStems: true, OffloadTranscripts: true, OffloadClips: true})
 	f.mems[all] = newMem()
@@ -527,7 +527,7 @@ func TestCredentialsNeverReachLogsOrStoredErrors(t *testing.T) {
 	}))
 	defer srv.Close()
 	f := newFixture(t)
-	id, err := f.store.CreateStorageTarget(db.StorageTarget{Name: "real", Provider: "minio", Endpoint: srv.URL, Bucket: "b",
+	id, err := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "real", Provider: "minio", Endpoint: srv.URL, Bucket: "b",
 		PathStyle: true, AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMove, Enabled: true,
 		AllowPrivateTarget: true})
 	if err != nil {
@@ -541,7 +541,7 @@ func TestCredentialsNeverReachLogsOrStoredErrors(t *testing.T) {
 	if it.State != db.OffloadFailed || !strings.Contains(it.LastError, "InvalidAccessKeyId") {
 		t.Fatalf("%+v", it)
 	}
-	tg, _ := f.store.GetStorageTarget(id)
+	tg, _ := f.store.GetStorageTarget(f.svc.box, id)
 	res := Probe(context.Background(), tg, nil)
 	if res.OK || res.FailedStep != "put" {
 		t.Fatalf("probe %+v", res)

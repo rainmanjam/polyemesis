@@ -108,7 +108,7 @@ func TestFetchBackRefusesAMismatchedContentLengthBeforeReading(t *testing.T) {
 // keys, and both objects survive with their own bytes.
 func TestTwoFilesSharingABasenameNeverShareAnObject(t *testing.T) {
 	f := newFixture(t)
-	id, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "c", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+	id, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "c", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
 		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, OffloadClips: true,
 		PrefixTemplate: "flat/{kind}"})
 	f.mems[id] = newMem()
@@ -183,7 +183,7 @@ func TestAKeyAnotherFileOwnsIsRefusedNotOverwritten(t *testing.T) {
 // reason; it does not stop the files after it.
 func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
 	f := newFixture(t)
-	id, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "c", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+	id, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "c", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
 		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, OffloadClips: true})
 	f.mems[id] = newMem()
 	_ = os.MkdirAll(filepath.Join(f.dir, "clips"), 0o755)
@@ -211,7 +211,7 @@ func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
 func TestABadTemplateSkipsOnlyItsTarget(t *testing.T) {
 	f := newFixture(t)
 	good := f.target(db.OffloadMirror, 0)
-	bad, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "bad", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+	bad, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "bad", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
 		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, PrefixTemplate: "{nope}"})
 	f.mems[bad] = newMem()
 	name := f.segment(5*time.Hour, "footage", true)

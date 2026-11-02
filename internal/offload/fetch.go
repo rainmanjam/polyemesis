@@ -107,7 +107,7 @@ func (s *Service) FetchNow(ctx context.Context, name string) error {
 		if it.State != db.OffloadVerified || it.SHA256 == "" {
 			continue
 		}
-		t, err := s.store.GetStorageTarget(it.TargetID)
+		t, err := s.store.GetStorageTarget(s.box, it.TargetID)
 		if err != nil || !t.HasSecret || t.SecretUnreadable {
 			lastErr = fmt.Errorf("target %d unavailable", it.TargetID)
 			continue

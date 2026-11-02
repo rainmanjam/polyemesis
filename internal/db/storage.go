@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 )
 
 // Storage target providers. They differ only in defaults the UI pre-fills
@@ -48,7 +50,10 @@ const (
 // StorageTarget is one S3-compatible bucket finished media is offloaded to.
 //
 // SecretAccessKey is json:"-": it is written once on create or update, sealed
-// with the database's secret box, and never marshalled in any response. The
+// with the install's secret box (passed explicitly, like the hook and platform
+// credentials -- a handful of methods with a handful of callers), and never
+// marshalled in any response. There is no plaintext fallback: without a box
+// the secret is refused, not stored. The
 // page is told HasSecret instead. AccessKeyID is not a secret on its own but
 // names the account, so the read-safe view blanks it.
 type StorageTarget struct {
@@ -113,7 +118,7 @@ const storageTargetCols = `id, name, provider, endpoint, bucket, region, prefix_
 	access_key_id, secret_enc, mode, keep_local_hours, offload_stems, offload_transcripts,
 	offload_clips, verify_download, allow_private_target, enabled, created_at, updated_at`
 
-func (d *DB) scanStorageTarget(row interface{ Scan(...any) error }) (StorageTarget, error) {
+func scanStorageTarget(box *secrets.Box, row interface{ Scan(...any) error }) (StorageTarget, error) {
 	var t StorageTarget
 	var enc []byte
 	var created, updated int64
@@ -128,9 +133,9 @@ func (d *DB) scanStorageTarget(row interface{ Scan(...any) error }) (StorageTarg
 	t.UpdatedAt = time.Unix(updated, 0).UTC()
 	if len(enc) > 0 {
 		t.HasSecret = true
-		if d.box == nil {
+		if box == nil {
 			t.SecretUnreadable = true
-		} else if plain, oerr := d.box.Open(enc); oerr != nil {
+		} else if plain, oerr := box.Open(enc); oerr != nil {
 			// Not a row failure: the target still lists, says why it cannot
 			// upload, and is cured by re-entering the secret.
 			t.SecretUnreadable = true
@@ -142,7 +147,7 @@ func (d *DB) scanStorageTarget(row interface{ Scan(...any) error }) (StorageTarg
 }
 
 // ListStorageTargets returns every target, oldest first.
-func (d *DB) ListStorageTargets() ([]StorageTarget, error) {
+func (d *DB) ListStorageTargets(box *secrets.Box) ([]StorageTarget, error) {
 	rows, err := d.sql.Query(`SELECT ` + storageTargetCols + ` FROM storage_targets ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -150,7 +155,7 @@ func (d *DB) ListStorageTargets() ([]StorageTarget, error) {
 	defer rows.Close()
 	out := []StorageTarget{}
 	for rows.Next() {
-		t, err := d.scanStorageTarget(rows)
+		t, err := scanStorageTarget(box, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -160,27 +165,27 @@ func (d *DB) ListStorageTargets() ([]StorageTarget, error) {
 }
 
 // GetStorageTarget returns one target or ErrNotFound.
-func (d *DB) GetStorageTarget(id int64) (StorageTarget, error) {
-	t, err := d.scanStorageTarget(d.sql.QueryRow(`SELECT `+storageTargetCols+` FROM storage_targets WHERE id = ?`, id))
+func (d *DB) GetStorageTarget(box *secrets.Box, id int64) (StorageTarget, error) {
+	t, err := scanStorageTarget(box, d.sql.QueryRow(`SELECT `+storageTargetCols+` FROM storage_targets WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return t, ErrNotFound
 	}
 	return t, err
 }
 
-func (d *DB) sealTargetSecret(secret string) ([]byte, error) {
-	if d.box == nil {
+func sealTargetSecret(box *secrets.Box, secret string) ([]byte, error) {
+	if box == nil {
 		return nil, fmt.Errorf("no secret key is configured, so the storage credential cannot be stored sealed")
 	}
-	return d.box.Seal(secret)
+	return box.Seal(secret)
 }
 
 // CreateStorageTarget inserts t, sealing t.SecretAccessKey, and returns its id.
-func (d *DB) CreateStorageTarget(t StorageTarget) (int64, error) {
+func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, error) {
 	var enc []byte
 	if t.SecretAccessKey != "" {
 		var err error
-		if enc, err = d.sealTargetSecret(t.SecretAccessKey); err != nil {
+		if enc, err = sealTargetSecret(box, t.SecretAccessKey); err != nil {
 			return 0, err
 		}
 	}
@@ -201,7 +206,7 @@ func (d *DB) CreateStorageTarget(t StorageTarget) (int64, error) {
 // UpdateStorageTarget rewrites every field of t. An empty SecretAccessKey
 // leaves the stored secret as it was, so a form that never displays the
 // secret can still be saved.
-func (d *DB) UpdateStorageTarget(t StorageTarget) error {
+func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
 	q := `UPDATE storage_targets SET name=?, provider=?, endpoint=?, bucket=?, region=?, prefix_template=?,
 		path_style=?, access_key_id=?, mode=?, keep_local_hours=?, offload_stems=?, offload_transcripts=?,
 		offload_clips=?, verify_download=?, allow_private_target=?, enabled=?, updated_at=?`
@@ -209,7 +214,7 @@ func (d *DB) UpdateStorageTarget(t StorageTarget) error {
 		t.AccessKeyID, t.Mode, t.KeepLocalHours, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
 		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, time.Now().Unix()}
 	if t.SecretAccessKey != "" {
-		enc, err := d.sealTargetSecret(t.SecretAccessKey)
+		enc, err := sealTargetSecret(box, t.SecretAccessKey)
 		if err != nil {
 			return err
 		}
