@@ -203,7 +203,6 @@ func TestAbortTargetAndTheStartupSweepAbandonOrphans(t *testing.T) {
 	}
 }
 
-
 // ---- 4. restart safety ----
 
 // blockingStore holds Put and GetFrom open until the context ends, the way a
