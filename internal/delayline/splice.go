@@ -749,7 +749,10 @@ func (b *Buffer) Dump(now time.Time, want, margin time.Duration) (*DumpTicket, e
 		return nil, err
 	}
 	t := &DumpTicket{b: b, done: make(chan struct{})}
-	t.result = DumpResult{Requested: want, Clamped: clamped, Before: before}
+	// Provisional until the resume: what has been cut so far. The wait for
+	// the resume keyframe adds to it.
+	cut := time.Duration(vnow - pick.at)
+	t.result = DumpResult{Requested: want, Clamped: clamped, Before: before, Dumped: cut, After: before - cut}
 	ts := &b.ts
 	ts.resync, ts.splice, ts.ticket = true, pick, t
 	ts.holding, ts.held = false, nil

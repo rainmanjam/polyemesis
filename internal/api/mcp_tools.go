@@ -392,6 +392,10 @@ var (
 		"type":        "boolean",
 		"description": "Must be true to act. Without it nothing happens and the tool answers with what the action would end.",
 	}
+	schemaDumpSeconds = map[string]any{
+		"type": "number", "minimum": 0, "maximum": 900,
+		"description": "Drop at least this many seconds of the newest programme. 0 or absent: everything since the last dump.",
+	}
 	schemaStopNow = map[string]any{
 		"type": "boolean",
 		"description": "Stop now: cut a broadcast delay's buffered tail instead of letting it air. " +
@@ -480,7 +484,8 @@ func destHealth(d any) map[string]any {
 	// STILL ON THE AIR, which only this says -- and stop_destination with
 	// now:true is how an agent cuts it.
 	if dl, ok := d.(map[string]any)["delay"].(map[string]any); ok {
-		h["delay"] = pick(dl, "seconds", "phase", "fill", "bufferedSeconds", "drainRemainingSeconds", "droppedBytes", "problem")
+		h["delay"] = pick(dl, "seconds", "phase", "fill", "bufferedSeconds", "drainRemainingSeconds", "droppedBytes", "problem",
+			"effectiveSeconds", "dumpedSeconds", "dumping", "dumpable")
 	}
 	if p, ok := d.(map[string]any)["process"]; ok && p != nil {
 		h["process"] = pick(p, "state", "restarts", "uptimeSec", "lastError", "nextRetryIn", "stalled", "stalledSec")
@@ -1025,6 +1030,94 @@ func mcpCatalogue() []mcpTool {
 			},
 		},
 		{
+			name: "dump_destination_delay", title: "Dump a destination's broadcast delay", tier: mcpWrite, destructive: true, stopping: true,
+			confirms: "every call: the dumped programme never airs, and the delay stays shorter until the destination next starts",
+			description: "Drop the newest part of one delayed destination's buffer and keep it on the air, so what was just said or shown " +
+				"never reaches that platform. seconds drops at least that much of the newest programme; without it, everything since the " +
+				"last dump. Never leaves less than 2 s plus one GOP of delay. The delay stays shorter until the destination next starts. " +
+				"Needs confirm:true; without it, answers with the destination's delay now.",
+			props:    map[string]any{"destinationId": schemaDestID, "source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm},
+			required: []string{"destinationId"},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					DestinationID int64    `json:"destinationId"`
+					Source        *int64   `json:"source"`
+					Seconds       *float64 `json:"seconds"`
+					Confirm       bool     `json:"confirm"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				if err := checkID("destinationId", a.DestinationID); err != nil {
+					return nil, err
+				}
+				q, err := sourceQuery(a.Source)
+				if err != nil {
+					return nil, err
+				}
+				c.target = fmt.Sprintf("destination %d", a.DestinationID)
+				if !a.Confirm {
+					delays, err := c.delays(a.Source, a.DestinationID)
+					if err != nil {
+						return nil, err
+					}
+					return c.refusal("Not done: a dump drops the newest part of this destination's broadcast delay, which "+
+						"then never airs, and its delay stays shorter until it next starts. Show the user this delay, then "+
+						"call dump_destination_delay again with confirm:true.", map[string]any{"delay": delays})
+				}
+				body := map[string]any{}
+				if a.Seconds != nil {
+					body["seconds"] = *a.Seconds
+				}
+				v, err := c.call(http.MethodPost, mcpDestPath(a.DestinationID, "/delay/dump"), q, body)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
+			name: "dump_all_delays", title: "Dump every broadcast delay", tier: mcpWrite, destructive: true, stopping: true,
+			confirms: "every call",
+			description: "Dump every delayed destination of a programme at once: the newest part of each buffer is dropped and never airs, " +
+				"and each stays on the air with a shorter delay until it next starts. seconds as in dump_destination_delay. Undelayed " +
+				"destinations are not touched. Needs confirm:true; without it, answers with every delayed destination's delay now.",
+			props: map[string]any{"source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm},
+			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
+				var a struct {
+					Source  *int64   `json:"source"`
+					Seconds *float64 `json:"seconds"`
+					Confirm bool     `json:"confirm"`
+				}
+				if err := decodeArgs(raw, &a); err != nil {
+					return nil, err
+				}
+				q, err := sourceQuery(a.Source)
+				if err != nil {
+					return nil, err
+				}
+				c.target = "every delayed destination"
+				if !a.Confirm {
+					delays, err := c.delays(a.Source, 0)
+					if err != nil {
+						return nil, err
+					}
+					return c.refusal("Not done: this dumps every delayed destination. Show the user these delays, then "+
+						"call dump_all_delays again with confirm:true.", map[string]any{"delays": delays})
+				}
+				// The REST route's own confirmation, passed only after the agent's.
+				body := map[string]any{"confirm": true}
+				if a.Seconds != nil {
+					body["seconds"] = *a.Seconds
+				}
+				v, err := c.call(http.MethodPost, "/destinations/delay/dump-all", q, body)
+				if err != nil {
+					return nil, err
+				}
+				return c.result(v, false)
+			},
+		},
+		{
 			name: "set_track_level", title: "Mute or set gain", tier: mcpWrite, idempotent: true,
 			description: "Mute, unmute or set the gain of one ingest track in one destination's live mix. Applied live where possible.",
 			props: map[string]any{
@@ -1360,6 +1453,29 @@ func (c *mcpCtx) destAction(raw json.RawMessage, suffix string, needsConfirm boo
 		return c.result(map[string]any{"stopImpact": impact, "result": v}, false)
 	}
 	return c.result(v, false)
+}
+
+// delays is each delayed destination's delay object from GET /status, by
+// id: what a dump would act on. One destination when id is not 0.
+func (c *mcpCtx) delays(src *int64, id int64) (map[string]any, error) {
+	q, err := sourceQuery(src)
+	if err != nil {
+		return nil, err
+	}
+	st, err := c.call(http.MethodGet, "/status", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{}
+	for did, h := range healthByID(st) {
+		if id != 0 && did != id {
+			continue
+		}
+		if dl, ok := h["delay"]; ok {
+			out[strconv.FormatInt(did, 10)] = map[string]any{"name": h["name"], "delay": dl}
+		}
+	}
+	return out, nil
 }
 
 // getDestination is GET /destinations/{id}, unwrapped: the route answers

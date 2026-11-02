@@ -185,6 +185,13 @@ const (
 	// say so while it was only a sentence inside a down. It closes with the
 	// down's destination.recovered when Retry brings the destination back.
 	TypeDestinationHeld Type = "destination.held"
+	// TypeDelayDumped fires when an operator dumps part of a broadcast
+	// delay's buffer: programme that was on its way to the air was withheld
+	// on purpose, and that destination's delay is shorter until it next
+	// starts. Warning, because it is a deliberate act that changes what an
+	// audience saw -- the same kind of record a clip is, in the other
+	// direction. It names the destination and the amount, never the content.
+	TypeDelayDumped Type = "delay.dumped"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -244,6 +251,8 @@ func AllTypes() []Type {
 		// The seventh, and a destination event after an audit one, which is
 		// the convention working as stated rather than an accident.
 		TypeDestinationHeld,
+		// The eighth, an audit event, appended like every row before it.
+		TypeDelayDumped,
 	}
 }
 

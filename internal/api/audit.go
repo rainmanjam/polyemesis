@@ -83,6 +83,8 @@ const (
 	fieldForced    = "Forced past a live broadcast"
 	fieldRuleName  = "Rule"
 	fieldChange    = "Change"
+	// The destination a dump took programme from.
+	fieldDestination = "Destination"
 )
 
 // clientIP is the address the request came from, resolved the same way the
