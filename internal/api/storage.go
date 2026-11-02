@@ -21,7 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/eventstream"
+	"github.com/rainmanjam/polyemesis/internal/hooks"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/offload"
 )
@@ -57,6 +60,7 @@ type storageTargetRequest struct {
 	VerifyDownload     *bool   `json:"verifyDownload"`
 	AllowPrivateTarget *bool   `json:"allowPrivateTarget"`
 	Enabled            *bool   `json:"enabled"`
+	MaxAttempts        *int    `json:"maxAttempts"`
 }
 
 func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
@@ -87,6 +91,9 @@ func (q storageTargetRequest) applyTo(t db.StorageTarget) db.StorageTarget {
 	bl(&t.Enabled, q.Enabled)
 	if q.KeepLocalHours != nil {
 		t.KeepLocalHours = *q.KeepLocalHours
+	}
+	if q.MaxAttempts != nil {
+		t.MaxAttempts = *q.MaxAttempts
 	}
 	t.Endpoint = strings.TrimSuffix(t.Endpoint, "/")
 	return t
@@ -134,6 +141,9 @@ func validateStorageTarget(t db.StorageTarget) error {
 	}
 	if t.KeepLocalHours < 0 || t.KeepLocalHours > 24*365 {
 		return errors.New("keepLocalHours must be between 0 and 8760")
+	}
+	if t.MaxAttempts < 1 || t.MaxAttempts > 100 {
+		return errors.New("maxAttempts must be between 1 and 100")
 	}
 	if t.AccessKeyID == "" || len(t.AccessKeyID) > 128 {
 		return errors.New("access key id is required")
@@ -235,7 +245,8 @@ func (s *Server) handleCreateStorageTarget(w http.ResponseWriter, r *http.Reques
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	t := req.applyTo(db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, KeepLocalHours: 24, Enabled: true})
+	t := req.applyTo(db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, KeepLocalHours: 24, Enabled: true,
+		MaxAttempts: db.DefaultOffloadMaxAttempts})
 	if req.SecretAccessKey != nil {
 		t.SecretAccessKey = strings.TrimSpace(*req.SecretAccessKey)
 	}
@@ -311,6 +322,21 @@ func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	t, err := s.store.GetStorageTarget(s.box, id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// Refused before anything is aborted, so a 409 changes nothing.
+	if err := s.store.StorageTargetDeletable(id); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	// Abandon its multipart uploads on the service while its credentials
+	// can still be read; after the delete nothing could.
+	if s.offload != nil {
+		s.offload.AbortTarget(r.Context(), t)
+	}
 	if err := s.store.DeleteStorageTarget(id); err != nil {
 		writeStoreError(w, err)
 		return
@@ -327,7 +353,8 @@ func (s *Server) handleTestStorageTarget(w http.ResponseWriter, r *http.Request)
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	base := db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, Enabled: true}
+	base := db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, Enabled: true,
+		MaxAttempts: db.DefaultOffloadMaxAttempts}
 	var saved *db.StorageTarget
 	if req.ID != nil {
 		row, err := s.store.GetStorageTarget(s.box, *req.ID)
@@ -522,4 +549,74 @@ func (s *Server) handleFetchRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"fetch": started})
+}
+
+// handleRetryStorageTarget is the target card's Retry now: every failed or
+// stuck item on the target goes back in the queue with its attempts reset.
+func (s *Server) handleRetryStorageTarget(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if _, err := s.store.GetStorageTarget(s.box, id); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.retryOffload(w, id, "")
+}
+
+// handleRetryRecordingOffload is the Library item's Retry now: the
+// recording's failed or stuck items, on every target.
+func (s *Server) handleRetryRecordingOffload(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	rec, err := s.store.GetRecording(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	s.retryOffload(w, 0, rec.Filename)
+}
+
+func (s *Server) retryOffload(w http.ResponseWriter, target int64, rel string) {
+	var n int64
+	var err error
+	if s.offload != nil {
+		n, err = s.offload.Retry(target, rel)
+	} else {
+		n, err = s.store.RetryOffloadItems(target, rel)
+	}
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"retried": n})
+}
+
+// OffloadStuck fans one stuck item out to every surface a failure is raised
+// on: the alert notifier (and through it the events stream's alert row), the
+// lifecycle webhook offload.stuck, and the events stream's offload.stuck.
+// MQTT carries telemetry snapshots, not events, so there is no MQTT message.
+func (s *Server) OffloadStuck(ev offload.StuckEvent) {
+	reason := fmt.Sprintf("%s: %s gave up after %d attempt(s): %s", ev.TargetName, ev.RelPath, ev.Attempts, ev.Error)
+	s.publishAudit(alerts.Event{
+		Type:     alerts.TypeOffloadStuck,
+		Severity: alerts.SeverityWarning,
+		// Keyed by target, so a bucket that refuses everything coalesces into
+		// one message rather than one per file.
+		Key:   fmt.Sprintf("offload.stuck:%d", ev.TargetID),
+		Title: fmt.Sprintf("%s: offload stopped retrying %s", ev.TargetName, ev.RelPath),
+		Text:  "Nothing more is uploaded for this file until Retry now. The local copy is untouched. " + ev.Error,
+	}.WithField("target", ev.TargetName).WithField("file", ev.RelPath))
+	hev := hooks.Event{Trigger: hooks.TriggerOffloadStuck, Reason: reason, At: time.Now()}
+	if s.hooks != nil {
+		s.hooks.Publish(hev)
+	}
+	if s.stream != nil {
+		s.stream.Publish(eventstream.FromHook(hev))
+	}
 }

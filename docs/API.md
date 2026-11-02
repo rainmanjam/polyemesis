@@ -1188,6 +1188,7 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `POST` | `/library/recordings/{id}/jobs/{kind}` |
 | `GET` | `/library/recordings/{id}/media/{file}` |
 | `POST` | `/library/recordings/{id}/fetch` |
+| `POST` | `/library/recordings/{id}/offload/retry` |
 | `GET` | `/clipper/recordings/{id}`, `/keyframes`, `/transcript` |
 | `POST` | `/clipper/recordings/{id}/plan`, `/export` |
 | `GET` | `/clipper/jobs/{id}/download` |
@@ -1355,6 +1356,7 @@ finished recordings are copied to, and in `move` mode moved to. See
 | `GET` `POST` | `/storage/targets` |
 | `GET` `PUT` `DELETE` | `/storage/targets/{id}` |
 | `POST` | `/storage/targets/test` |
+| `POST` | `/storage/targets/{id}/retry` |
 
 **The secret access key is write-only.** It is sent as `secretAccessKey` on
 `POST` or `PUT`, sealed with the install's secret key, and never returned:
@@ -1371,7 +1373,21 @@ it, and answers `{"ok", "steps": [{"step": "put"|"get"|"delete", "ok", "error",
 
 **A literal private address is `400`** unless `"allowPrivateTarget": true`, and
 the same netguard check runs again at dial time, as for webhooks. **`DELETE` is
-`409`** while the target holds the only copy of an evicted recording.
+`409`** while the target holds the only copy of an evicted recording; otherwise
+the target's unfinished multipart uploads are aborted on the service first.
+
+**A saved secret is used only for the address it was saved for.** A `PUT` or a
+Test that changes `endpoint`, `bucket` or `allowPrivateTarget` without a
+`secretAccessKey` is `400` with `"code": "secret_required"`.
+
+**Stuck items.** After `maxAttempts` consecutive failures (default 8, 1-100 per
+target), or at once on an error waiting cannot cure (a refused credential, a
+missing bucket, a key the file cannot have), an item is `stuck`: it is not
+retried again on its own, and `offload.stuck` is raised as an alert, a webhook
+and an events-stream event. `POST /storage/targets/{id}/retry` (every failed or
+stuck item on the target) and `POST /library/recordings/{id}/offload/retry`
+(one recording, every target) put them back with their attempts reset, and
+answer `{"retried": n}`.
 
 ### Alerts and schedules
 

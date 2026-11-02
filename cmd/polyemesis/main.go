@@ -478,6 +478,9 @@ func run(h *hooks) error {
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
+	// A stuck offload item is raised on the alert, webhook and events-stream
+	// paths the server owns, which exist only now.
+	offloader.SetStuckHook(srv.OffloadStuck)
 	// After api.New, which is what installs the server as the bridge's
 	// Actions: a fact OBS reports before that would be recorded and acted on
 	// by nothing.

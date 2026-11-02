@@ -68,13 +68,13 @@ func TestTheStorageSecretAppearsInNoResponse(t *testing.T) {
 	}
 
 	// Saving without a secret keeps it; the update response carries none.
-	rec := doJSON(t, h, sign, http.MethodPut, "/api/v1/storage/targets/1", map[string]any{"bucket": "archive-two"})
+	rec := doJSON(t, h, sign, http.MethodPut, "/api/v1/storage/targets/1", map[string]any{"name": "archive-two"})
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), storageSecretPlant) {
 		t.Fatalf("update: %d %s", rec.Code, rec.Body.String())
 	}
 	tg, err := store.GetStorageTarget(storageFixtureBox(t), 1)
-	if err != nil || tg.SecretAccessKey != storageSecretPlant || tg.Bucket != "archive-two" {
-		t.Fatalf("stored %+v %v", tg.Bucket, err)
+	if err != nil || tg.SecretAccessKey != storageSecretPlant || tg.Name != "archive-two" {
+		t.Fatalf("stored %+v %v", tg.Name, err)
 	}
 }
 

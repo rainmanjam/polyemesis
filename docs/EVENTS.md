@@ -176,6 +176,7 @@ real producer, to actually be emitted.
 | `broadcast.fault` | broadcast | yes | A platform refused to move a broadcast; the stream itself is unaffected. |
 | `recording.started` | recording | yes | A programme's recorder started writing. |
 | `recording.stopped` | recording | yes | A programme's recorder stopped writing; reason says why. |
+| `offload.stuck` | recording | yes | Offload stopped retrying a file on a storage target; nothing moves until Retry now. reason names the target, the file and the last error. |
 | `chat.message` | chat | no | A chat message arrived from any connected platform. |
 | `chat.retract` | chat | no | Chat messages that were delivered are gone: deleted, hidden, or swept by a ban. |
 | `chat.moderation` | chat | no | A moderation action was taken, by an operator or by automod. |

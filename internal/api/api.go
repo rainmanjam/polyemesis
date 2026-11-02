@@ -1365,6 +1365,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// offloaded segments) back to local disk. 202 at once; the
 			// recordings event says when each file has landed.
 			r.Post("/library/recordings/{id}/fetch", s.handleFetchRecording)
+			r.Post("/library/recordings/{id}/offload/retry", s.handleRetryRecordingOffload)
 
 			// The clip editor: keyframe-accurate lossless cuts out of a
 			// recording already on disk. Deliberately NOT under /clips, which
@@ -1411,6 +1412,8 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/storage/targets/{id}", s.handleGetStorageTarget)
 			r.Put("/storage/targets/{id}", s.handleUpdateStorageTarget)
 			r.Delete("/storage/targets/{id}", s.handleDeleteStorageTarget)
+			// Retry now: failed and stuck items go back in the queue.
+			r.Post("/storage/targets/{id}/retry", s.handleRetryStorageTarget)
 
 			// Scheduling. /runs is what the last sweep did, which is where a
 			// skipped occurrence gets explained.

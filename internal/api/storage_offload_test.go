@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -58,6 +59,23 @@ func (m *apiMemBucket) Get(_ context.Context, key string) (io.ReadCloser, objsto
 	}
 	return io.NopCloser(bytes.NewReader(b)), objstore.ObjectInfo{Size: int64(len(b))}, nil
 }
+
+func (m *apiMemBucket) GetFrom(ctx context.Context, key string, _ int64) (io.ReadCloser, objstore.ObjectInfo, bool, error) {
+	b, info, err := m.Get(ctx, key)
+	return b, info, false, err
+}
+
+// Multipart is not reached: the files here are far below the threshold.
+func (m *apiMemBucket) CreateMultipart(context.Context, string, map[string]string) (string, error) {
+	return "", errors.New("not used")
+}
+func (m *apiMemBucket) UploadPart(context.Context, string, string, int, io.ReadSeeker, int64, string, string) (string, error) {
+	return "", errors.New("not used")
+}
+func (m *apiMemBucket) CompleteMultipart(context.Context, string, string, []objstore.Part) (string, error) {
+	return "", errors.New("not used")
+}
+func (m *apiMemBucket) AbortMultipart(context.Context, string, string) error { return nil }
 
 func (m *apiMemBucket) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
