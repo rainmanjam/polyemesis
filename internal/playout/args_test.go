@@ -225,3 +225,12 @@ func hasArg(args []string, want string) bool {
 	}
 	return false
 }
+
+// A restarted muxer must never reuse a segment name, or the origin's
+// "immutable" would hand a cache one run's bytes under the next run's URL.
+func TestHLSSegmentsAreNumberedFromTheWallClock(t *testing.T) {
+	args := VariantArgs(VariantSpec{Name: "hd", RelayURL: "srt://127.0.0.1:1", Dir: t.TempDir()})
+	if got := argValue(args, "-hls_start_number_source"); got != "epoch_us" {
+		t.Fatalf("-hls_start_number_source = %q, want epoch_us", got)
+	}
+}

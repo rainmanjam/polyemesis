@@ -185,6 +185,10 @@ const (
 	// say so while it was only a sentence inside a down. It closes with the
 	// down's destination.recovered when Retry brings the destination back.
 	TypeDestinationHeld Type = "destination.held"
+	// TypeOffloadStuck is offload giving up on a file until an operator presses
+	// Retry now: the same fact as the webhook and the events stream's
+	// offload.stuck, one name on every surface.
+	TypeOffloadStuck Type = "offload.stuck"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -244,6 +248,8 @@ func AllTypes() []Type {
 		// The seventh, and a destination event after an audit one, which is
 		// the convention working as stated rather than an accident.
 		TypeDestinationHeld,
+		// The eighth append: offload stopped retrying a file.
+		TypeOffloadStuck,
 	}
 }
 

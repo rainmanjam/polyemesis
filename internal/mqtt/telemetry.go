@@ -19,6 +19,8 @@ import (
 type Snapshot struct {
 	Host    HostState
 	Sources []SourceSnapshot
+	// Storage is one entry per offload storage target.
+	Storage []StorageState
 }
 
 // SourceSnapshot is one programme and everything beneath it.
@@ -134,6 +136,10 @@ func (t *Telemetry) Publish(ctx context.Context, snap Snapshot) error {
 		for _, r := range s.Renditions {
 			send(t.topics.Rendition(src, r.Slug), r)
 		}
+	}
+
+	for _, st := range snap.Storage {
+		send(t.topics.Storage(st.Slug), st)
 	}
 
 	errs = append(errs, t.sweep(ctx, seen)...)

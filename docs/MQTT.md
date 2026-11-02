@@ -137,6 +137,7 @@ polyemesis/<instance>/state                               host JSON
 polyemesis/<instance>/source/<slug>/state                 per-source JSON
 polyemesis/<instance>/source/<slug>/dest/<slug>/state     per-destination JSON
 polyemesis/<instance>/source/<slug>/rendition/<slug>/state per-rendition JSON
+polyemesis/<instance>/storage/<slug>/state                per offload storage target JSON
 homeassistant/device/<instance>/config                    HA discovery
 ```
 
@@ -328,6 +329,18 @@ A rendition with `consumers: 0` has no process by design, so it reports
 `running: false` and must not be alerted on as a failure. Check `consumers`
 before you check `running`.
 
+### Storage target
+
+`storage/<slug>/state` counts one offload storage target's uploads by state:
+
+```json
+{"id": 2, "name": "Archive (R2)", "slug": "archive-r2-1b2c3d4e", "enabled": true,
+ "stuck": 3, "failed": 1, "pending": 0, "verified": 40, "at": "2026-11-01T12:00:00Z"}
+```
+
+`stuck` is the one to alert on: those uploads are not retried until an
+operator presses Retry now. The topic is cleared when the target is deleted.
+
 ## Home Assistant
 
 With discovery on, polyemesis publishes one **device** payload describing every
@@ -339,6 +352,9 @@ You get, per install:
 - **Sources live** and **Destinations up** — counts
 - per source: a **live** binary sensor and a **bitrate** sensor
 - per destination: a **running** binary sensor
+- per offload storage target: a **stuck uploads** sensor (diagnostic) -- uploads
+  offload has stopped retrying until somebody presses Retry now; see
+  [STORAGE.md](STORAGE.md)
 
 Every entity's availability is wired to the same `status` topic the will message
 writes, so when polyemesis stops they all go `unavailable` together instead of

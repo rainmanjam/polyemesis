@@ -81,18 +81,23 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	// The seventh, destination.held, is a destination event appended after an
 	// audit event: the convention above, applied once more.
 	held := []Type{TypeDestinationHeld}
+	// The eighth, offload.stuck (Wave 4 #10), after it.
+	offload := []Type{TypeOffloadStuck}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held) {
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held)+len(offload) {
 		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + "+
-			"%d lifecycle + %d diagnostics + %d rule audit + %d held",
+			"%d lifecycle + %d diagnostics + %d rule audit + %d held + %d offload",
 			len(all), len(operational), len(auditTypes), len(health), len(lifecycle),
-			len(diagnostics), len(ruleAudit), len(held))
+			len(diagnostics), len(ruleAudit), len(held), len(offload))
 	}
-	if all[len(all)-2] != TypeMCPAction {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeMCPAction)
+	if all[len(all)-3] != TypeMCPAction {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-3, all[len(all)-3], TypeMCPAction)
 	}
-	if last := all[len(all)-1]; last != TypeDestinationHeld {
-		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeDestinationHeld)
+	if all[len(all)-2] != TypeDestinationHeld {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeDestinationHeld)
+	}
+	if last := all[len(all)-1]; last != TypeOffloadStuck {
+		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeOffloadStuck)
 	}
 	for i, want := range operational {
 		if all[i] != want {

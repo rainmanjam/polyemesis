@@ -40,10 +40,14 @@ var approvedFields = map[string][]string{
 		"id", "name", "slug", "consumers", "running", "width", "height",
 		"fps", "codec", "encoder", "bitrateKbps", "error", "at",
 	},
+	// Counts and a name only: never the endpoint, bucket or access key id.
+	"StorageState": {
+		"id", "name", "slug", "enabled", "stuck", "failed", "pending", "verified", "at",
+	},
 }
 
 func TestPayloadsCarryOnlyApprovedFields(t *testing.T) {
-	types := []any{HostState{}, SourceState{}, DestState{}, RenditionState{}}
+	types := []any{HostState{}, SourceState{}, DestState{}, RenditionState{}, StorageState{}}
 	for _, v := range types {
 		rt := reflect.TypeOf(v)
 		want := map[string]bool{}

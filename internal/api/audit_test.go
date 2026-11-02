@@ -127,6 +127,12 @@ func TestEveryAuditEventIsCoveredByTheRedactionTest(t *testing.T) {
 		// -- and asserts the same three encodings.
 		case alerts.TypeBroadcastFault:
 			continue
+		// offload.stuck is operational and raised here, for broadcast.fault's
+		// reason: it carries a coalescing Key, which an audit event must not.
+		// TestAnOffloadStuckAlertNeverCarriesASecret plants a secret in its one
+		// field this process did not write -- the service's error text.
+		case alerts.TypeOffloadStuck:
+			continue
 		}
 		if !seen[ty] {
 			t.Errorf("%s is subscribable but has no entry in everyAuditEvent, so nothing checks it for leaks", ty)

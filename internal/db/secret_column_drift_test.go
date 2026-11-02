@@ -51,6 +51,12 @@ func TestNoNewSecretColumnEscapesSealing(t *testing.T) {
 			"plaintext: it is pasted into OBS inside a URL and Copy OBS URL has to " +
 			"read it back; it reaches nothing but the overlay's own config and " +
 			"display stream (schema.sql, chat_overlays comment)",
+		"storage_targets.access_key_id": "the public half of an S3 credential pair -- an " +
+			"identifier, not a secret; the secret half is sealed in storage_targets.secret_enc. " +
+			"It names the account, so the read-scope view blanks it (readSafeStorageTarget)",
+		"offload_items.object_key": "an S3 object KEY in the path sense -- where a " +
+			"recording was stored in the bucket -- not a credential",
+		"offload_multipart.object_key": "the same object path, for an upload in progress",
 	}
 
 	cols, encSiblings := loadSecretColumnCandidates(t, secretName)

@@ -48,6 +48,7 @@ const TRIGGER_LABELS: Record<string, TranslationKey> = {
   "broadcast.fault": "hooks.triggerBroadcastFault",
   "destination.held": "hooks.triggerDestinationHeld",
   "failover.switched": "hooks.triggerFailoverSwitched",
+  "offload.stuck": "hooks.triggerOffloadStuck",
 };
 
 const errText = (err: unknown, fallback: string) =>

@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { StorageTargetsCard } from "@/components/StorageTargetsCard";
 import { toast } from "sonner";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { useConfirm } from "@/hooks/useConfirm";
@@ -658,6 +659,7 @@ export function RecordingsPage() {
               </CardContent>
             </Card>
           )}
+          <StorageTargetsCard />
         </div>
       </div>
 
