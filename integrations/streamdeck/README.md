@@ -118,22 +118,43 @@ npm run coverage  # the same tests with lcov, read by SonarCloud
 npm run typecheck # tsc --noEmit
 npm run build     # bundles src/plugin.ts into com.polyemesis.streamdeck.sdPlugin/bin
                   # and writes ui/strings.js from the catalogs
+npm run validate  # Elgato's validator (@elgato/cli) on the built folder
+npm run pack      # validates again and writes dist/com.polyemesis.streamdeck.streamDeckPlugin
 node scripts/icons.mjs   # redraws every icon under com.polyemesis.streamdeck.sdPlugin/imgs
 ```
+
+CI runs validate and pack on every pull request and uploads the
+`.streamDeckPlugin` as a workflow artifact. Each release attaches it, listed in
+`SHA256SUMS`, with the manifest Version set from the tag: v0.12.3 packs as
+0.12.3.0, so the Version committed in `manifest.json` is a development
+placeholder. `.sdignore` in the plugin folder keeps OS clutter out of the package.
+
+Before a release that changes the plugin, run the owner's
+[hardware check](../../docs/STREAMDECK-HARDWARE-CHECK.md) on a real Stream Deck
+and Stream Deck+.
 
 The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, and
 the PNGs are committed. Each key action has eleven faces at 72 and 144 px, one per
 state in `KEY_STATE` order (`src/render.ts`): a tile in the state colour with the
-action's glyph in the corner, clear of the title. Held uses the UI's accent
-(`--primary`). Five states draw a status mark instead of the action glyph, so they
+action's glyph in the corner, clear of the title. The tile colours are in
+`scripts/keyPalette.mjs`, and so is each state's title colour. The plugin sets
+only the title's text (`setTitle`). Stream Deck draws it in the `TitleColor` the
+manifest gives the key's current state, and every key state sets one. Titles are
+white, except on warn: that tile is the UI's bright `--warn` amber, with a
+near-black title (`--background`) and a dark corner glyph. Live, held and restarted
+take the hues of `--live`, `--primary` and a burnt orange, darkened so a white title
+reads at 4.5:1 or better everywhere on the tile. `test/keyContrast.test.ts` checks
+that every manifest `TitleColor` matches the palette, and that every state colour
+and every committed face gives its own title 4.5:1. Five states draw a status mark instead of the action glyph, so they
 can never be mistaken for another state: **HALTED: DISK** (a drive, on crimson; only
 the Record key uses it), **Needs admin token** (a padlock, on violet), and three
 that only the Mute track key uses: **MUTED** (a crossed speaker, on red),
 **Applied by restart** (a circular arrow, on orange) and **Not available** (a barred
 circle, on grey). Every key action has every face, so the state indices line up
 across actions. The action icons are white monochrome glyphs on transparent at 20
-and 40 px, the category icon the same at 28 and 56 px. The plugin icon (256 and
-512 px) is the emblem in the UI's `--primary-bright` on its dark ground. Both dials
+and 40 px. The category icon is the polyemesis bars mark from
+`web/public/favicon.svg` in white on transparent at 28 and 56 px, and the plugin
+icon (256 and 512 px) is the same mark in its own colours on its dark tile. Both dials
 use the built-in `$B1` layout, so there is no encoder background image.
 
 Strings live in `src/locales/*.json`, in the same fifteen locales the UI ships.

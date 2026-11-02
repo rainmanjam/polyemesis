@@ -34,6 +34,7 @@ deliberately does not do, and how to get it running. These are the details.
 | [FAQ.md](FAQ.md) | The questions that come up first |
 | [UPGRADING.md](UPGRADING.md) | Migrations, rollback, version-specific notes |
 | [RELEASE-RUNBOOK.md](RELEASE-RUNBOOK.md) | Cutting a release: rehearse it, what each gate refuses, and why a published release is not a deployed one |
+| [STREAMDECK-HARDWARE-CHECK.md](STREAMDECK-HARDWARE-CHECK.md) | Before a release that changes the Stream Deck plugin: install the packaged file on a real Stream Deck and Stream Deck+ and check every action |
 
 ## Understanding it
 

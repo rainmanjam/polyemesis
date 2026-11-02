@@ -1,0 +1,11 @@
+export type Rgb = [number, number, number];
+export function oklch(L: number, C: number, hDeg: number): Rgb;
+export function luminance(rgb: readonly number[]): number;
+export function contrast(a: readonly number[], b: readonly number[]): number;
+export const TITLE_WHITE: Rgb;
+export const TITLE_DARK: Rgb;
+export function hex(rgb: readonly number[]): string;
+export const SHADE_TOP: number;
+export const SHADE_SLOPE: number;
+export const KEY_COLOURS: Record<string, Rgb>;
+export const TITLE_COLOURS: Record<string, Rgb>;
