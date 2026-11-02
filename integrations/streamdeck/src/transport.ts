@@ -3,6 +3,7 @@ import https from "node:https";
 import tls from "node:tls";
 import { TransportError, type Transport, type TransportRequest, type TransportResponse } from "./api.js";
 
+/** The default wait for an answer. A request can ask for longer (the dump calls do: see DUMP_TIMEOUT_MS). */
 const TIMEOUT_MS = 5000;
 
 // Certificate failures that mean "this is a certificate we do not trust", as
@@ -21,7 +22,7 @@ export function nodeTransport(caPem?: string): Transport {
       return new Promise((resolve, reject) => {
         const request = (req.url.protocol === "https:" ? https : http).request(
           req.url,
-          { method: req.method, headers: req.headers, ca, timeout: TIMEOUT_MS, rejectUnauthorized: true },
+          { method: req.method, headers: req.headers, ca, timeout: req.timeoutMs ?? TIMEOUT_MS, rejectUnauthorized: true },
           (res) => {
             const chunks: Buffer[] = [];
             res.on("data", (c: Buffer) => chunks.push(c));

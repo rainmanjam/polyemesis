@@ -9,13 +9,13 @@
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
   "shapeFloor": 29,
-  "guardedFloor": 29,
+  "guardedFloor": 31,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 292,
+    "methodPatternPairs": 294,
     "swept": 79,
     "excused": 60,
-    "denied": 153,
+    "denied": 155,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -377,6 +377,12 @@
       "zeroSource": "guarded"
     },
     {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/delay/dump-all",
+      "coverage": "denied-by-method",
+      "zeroSource": "guarded"
+    },
+    {
       "method": "PUT",
       "pattern": "/api/v1/destinations/order",
       "coverage": "denied-by-method",
@@ -416,6 +422,12 @@
       "method": "PUT",
       "pattern": "/api/v1/destinations/{id}",
       "coverage": "denied-differential",
+      "zeroSource": "guarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/destinations/{id}/delay/dump",
+      "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
     {

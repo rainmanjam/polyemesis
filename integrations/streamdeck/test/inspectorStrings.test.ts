@@ -22,10 +22,11 @@ describe("inspector strings", () => {
     // 25 inspector labels (including the preset picker, its placeholder and missing-preset mark, the
     // install-wide note, the track controls' destination and track pickers with their placeholders,
     // load error, not-listed mark and live-or-restart hint, and the destination key's issue list heading
-    // and its empty line), the poll key's 4 (question, options, duration and hint), 6 connection
-    // messages and 4 config errors, and the viewers key's 4 (its picker, the total option, the player
-    // option and the hint).
-    expect(enKeys).toHaveLength(43);
+    // and its empty line), the poll key's 4 (question, options, duration and hint), the broadcast delay's 5
+    // (the stop key's cut-tail box and its hint, the dump key's seconds, its hint and the dump-all note),
+    // 6 connection messages and 4 config errors, and the viewers key's 4 (its picker, the total option,
+    // the player option and the hint).
+    expect(enKeys).toHaveLength(48);
     for (const [locale, strings] of Object.entries(all)) {
       expect(Object.keys(strings).sort(), locale).toEqual(enKeys);
     }

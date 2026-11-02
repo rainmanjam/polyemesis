@@ -167,7 +167,7 @@ real producer, to actually be emitted.
 | `rollover.started` | destination | yes | A planned rollover began: a replacement broadcast is being created for a live one. reason says which trigger fired. |
 | `rollover.completed` | destination | yes | A planned rollover finished: the replacement is live and the destination points at it. Connecting Twitch is a reconnect; reason says which. |
 | `rollover.failed` | destination | yes | A planned rollover stopped. The old broadcast is still on air unless reason says it could not be ended; no ingest was touched. |
-| `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer. |
+| `destination.delay` | destination | yes | A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, dropping, or dumped; data carries the delay and the buffer, and a dump says what it took. |
 | `ingest.published` | ingest | yes | Data started arriving on a programme's ingest. |
 | `ingest.disconnected` | ingest | yes | Nothing has arrived on a programme's ingest for the disconnect window. |
 | `failover.switched` | failover | yes | A programme switched between its primary, backup and slate sources. |
@@ -263,13 +263,26 @@ delayed programme reached the platform.
 - `dropping`: the buffer ran out of room and is dropping data to keep the
   delay. `error` says why (disk budget, free-space floor). Sent at most once a
   minute.
+- `dumped`: an operator [dumped](BROADCAST-DELAY.md#dump) the newest part of the
+  buffer and the stream has resumed at the next keyframe. The destination is
+  still on the air. `data.dumpSeconds` is what this dump took,
+  `data.delayBeforeSeconds` and `data.delayAfterSeconds` the delay either side,
+  `data.requestedSeconds` what was asked for (0 for "since the last dump"), and
+  `data.clamped` is `true` when the safety margin allowed less, and
+  `data.recovery` is `true` when no IDR keyframe came and the stream resumed
+  at another random-access picture, and `data.forced` when nothing a decoder
+  can start from came at all and it resumed at the live edge.
 
 ```json
 {"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,
- "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0}
+ "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0,
+ "effectiveSeconds": 30}
 ```
 
-`drainRemainingSeconds` and `droppedBytes` appear only when non-zero.
+`seconds` is always the configured delay. `effectiveSeconds` is the delay the
+audience has now, which a dump shortens until the destination next starts, and
+`dumpedSeconds` is the total dumped since then. `drainRemainingSeconds`,
+`droppedBytes` and `dumpedSeconds` appear only when non-zero.
 
 ### Ingest and failover
 

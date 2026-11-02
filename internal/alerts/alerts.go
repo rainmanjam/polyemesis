@@ -189,6 +189,13 @@ const (
 	// Retry now: the same fact as the webhook and the events stream's
 	// offload.stuck, one name on every surface.
 	TypeOffloadStuck Type = "offload.stuck"
+	// TypeDelayDumped fires when an operator dumps part of a broadcast
+	// delay's buffer: programme that was on its way to the air was withheld
+	// on purpose, and that destination's delay is shorter until it next
+	// starts. Warning, because it is a deliberate act that changes what an
+	// audience saw -- the same kind of record a clip is, in the other
+	// direction. It names the destination and the amount, never the content.
+	TypeDelayDumped Type = "delay.dumped"
 	// TypeTest is what the "send a test message" button raises. It is never
 	// coalesced and never filtered, because a test that a rule quietly swallows
 	// teaches the operator nothing.
@@ -250,6 +257,8 @@ func AllTypes() []Type {
 		TypeDestinationHeld,
 		// The eighth append: offload stopped retrying a file.
 		TypeOffloadStuck,
+		// The ninth, an audit event, appended like every row before it.
+		TypeDelayDumped,
 	}
 }
 

@@ -177,3 +177,19 @@ describe("classify", () => {
     });
   });
 });
+
+describe("PolyemesisClient: programmes", () => {
+  it("lists the install's programmes from GET /sources, unscoped", async () => {
+    const { transport, sent } = fakeTransport([ok([{ id: 7, name: "Main" }, { id: 9, name: "Second" }])]);
+    const list = await new PolyemesisClient(BASE, "t", transport).sources();
+    expect(list).toEqual([{ id: 7 }, { id: 9 }]);
+    expect(sent[0]!.method).toBe("GET");
+    expect(sent[0]!.url.pathname).toBe("/api/v1/sources");
+    expect(sent[0]!.url.search).toBe("");
+  });
+
+  it("refuses an answer that is not a list, so a key cannot read it as no programmes", async () => {
+    const { transport } = fakeTransport([ok({ sources: [] })]);
+    await expect(new PolyemesisClient(BASE, "t", transport).sources()).rejects.toMatchObject({ kind: "malformed" });
+  });
+});

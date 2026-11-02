@@ -559,6 +559,8 @@ func renderDestinationReasons(d *doc, sorted []Destination, ident func(Destinati
 // DestDelay is one destination's broadcast delay on the scrape.
 type DestDelay struct {
 	Seconds int
+	// EffectiveSeconds is the delay the audience has after any dump.
+	EffectiveSeconds float64
 	// Fill is the share of the delay the buffer holds, 0 to 1.
 	Fill         float64
 	MemBytes     int64
@@ -576,6 +578,11 @@ func renderDelay(d *doc, sorted []Destination, ident func(Destination) []label) 
 		"The destination's configured broadcast delay; 0 when it has none.")
 	for _, dest := range sorted {
 		d.sample("polyemesis_destination_delay_seconds", float64(dest.Delay.Seconds), ident(dest)...)
+	}
+	d.family("polyemesis_destination_delay_effective_seconds", "gauge",
+		"The broadcast delay the audience has now: the configured delay less anything dumped.")
+	for _, dest := range sorted {
+		d.sample("polyemesis_destination_delay_effective_seconds", dest.Delay.EffectiveSeconds, ident(dest)...)
 	}
 	d.family("polyemesis_destination_delay_buffer_fill", "gauge",
 		"How much of the broadcast delay the buffer holds, 0 to 1; 1 while on air.")

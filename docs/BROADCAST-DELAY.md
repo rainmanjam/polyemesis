@@ -57,6 +57,108 @@ If you start a destination again while its tail is still airing, the tail is
 cut first, so only one copy ever publishes to the platform. This holds even
 if the same destination now belongs to another programme.
 
+## Dump
+
+**Dump** drops the newest part of the buffer, so something that just happened
+never reaches that platform, and the destination stays on the air. Viewers skip
+forward a few seconds. The delay is shorter by what was dumped.
+
+Press **Dump** in the delay panel on the destination's card. Choose
+**Everything since the last dump point** or a number of seconds, and confirm.
+The dialog shows the delay now and about what it will be after. The card then
+says, for example, "Dumped 11.4 s — delay now 18.6 s." On a Stream Deck, hold
+the **Dump delay** key. Left without a destination, that key dumps every delayed
+destination of its programme at once, as `POST /destinations/delay/dump-all`
+does.
+
+- **Everything since the last dump point** is the default: it drops everything that
+  arrived since the last dump, or since the destination started, down to the
+  safety margin.
+- **A number of seconds** drops at least that much of the newest programme.
+- **The safety margin.** A dump never leaves less than 2 s plus one GOP of
+  delay. The cut itself leaves room for one more GOP, which is the wait for
+  the next keyframe, so an ordinary dump never comes near that floor. If you
+  ask for more than that allows, it dumps as much as it can and says so
+  ("clamped"). If the feed stalls while a dump waits for its keyframe, the
+  delay still never drops below 2 s plus one GOP.
+- **Seconds are programme time.** "10 seconds" means the newest 10 s of
+  programme by its timestamps. A stall in the feed just before the dump does
+  not count towards it.
+- **A default per destination.** **Dump default (seconds)** in the
+  destination's advanced settings (`delayDumpSeconds` over the API) is what a
+  dump with no seconds of its own uses: the card's dialog starts from it, and
+  so does a Stream Deck key with its seconds left empty. 0 is "everything
+  since the last dump point".
+- **It cuts at keyframes.** The cut is at the start of a keyframe in the buffer,
+  and the stream resumes at the next keyframe that arrives. So a dump takes a
+  little more than you asked for: up to about two GOPs more (usually up to 4 s),
+  one for rounding the cut back to a keyframe and one for waiting for the next.
+  Asking for 5 s with 2 s GOPs typically dumps 7 to 8 s. A dump takes up to one
+  GOP to finish. The audio is cut at a frame boundary on both sides, so it
+  carries on without an overlap or a hole.
+- **No keyframe after the cut.** If no IDR keyframe arrives for three GOPs
+  (at least 6 s), for example after a failover to a source sending open-GOP
+  video, the stream resumes at the next random-access picture instead, and
+  the pictures that depend on the dumped part are dropped. An HEVC CRA is
+  rewritten to BLA, so decoders start afresh there. The answer says
+  `"recovery": true`.
+- **No random-access picture at all.** If nothing a decoder can start from
+  arrives for twice that wait (an audio-only failover, a codec polyemesis
+  cannot read), the dump stops waiting and resumes at the live edge. The
+  platform then shows a broken picture until the source's next keyframe. The
+  answer says `"forced": true`.
+- **Subtitles and data streams** are cut by their timestamps too: nothing from
+  the dumped window airs on any stream. A stream that first appears in the
+  minute after the dump is cut the same way. The platform receives every picture whole, with no
+  corrupt frames, and its timestamps run on without a jump or a gap. The audio
+  carries on the same way.
+- **Captions** follow the shorter delay. Captions for programme still in the
+  buffer keep their time, captions for the dumped words are dropped, and
+  later captions move to the shorter delay. One thing a dump cannot reach:
+  CEA-608/708 captions your encoder embeds in the video itself. A pop-on
+  caption loaded just before the cut may appear after it.
+- **Not while filling or draining.** A destination that is still filling its
+  delay, or that was stopped and is airing its tail, cannot be dumped. Use
+  **Cut now** for a tail.
+- **Every dump raises the `delay.dumped` alert** and the `destination.delay`
+  event with reason `dumped`.
+
+Dump needs H.264 or HEVC video with IDR keyframes. Every mainstream encoder sends
+those by default. An encoder set to an open GOP (x264 `open-gop`, x265 by
+default) sends keyframes a dump cannot cut at safely, and dump then says
+there is nothing it can cut at.
+
+### The delay stays shorter until the destination next starts
+
+After a dump the destination keeps its shorter delay. The full delay comes back
+the next time the destination starts and fills its buffer from empty, for
+example at the start of the next show. The card shows both figures meanwhile:
+"Delayed 18 of 30 s". polyemesis does not restore the delay by itself, and
+restarting the destination to restore it is not a good idea: a restart takes
+the platform off the air for the whole delay while the buffer fills again.
+
+Why it cannot simply grow back. The video is copied, never re-encoded, so
+there is no way to stretch the stream back to its old length. The only way to
+win the seconds back on the air is to send the platform a hold, a slate or a
+frozen picture, for that long. We tested both ways to do that without an
+encoder per destination:
+
+- **A pre-encoded slate.** It reaches the platform as a mid-stream change of the
+  video's parameters. The platform set up its decoder from the encoder's own
+  parameters when the stream started. In our test the programme was H.264 Main
+  from a hardware encoder and the slate was H.264 High, and the RTMP stream
+  header still said Main. FFmpeg decodes that without complaint. Whether each
+  platform's ingest and players do cannot be checked without live streams, and
+  a slate that matches every encoder exactly would need an encoder for each
+  destination.
+- **Repeating the last keyframe** as a freeze matches the codec by construction.
+  It means rewriting H.264 picture headers, sending a variable frame rate that
+  platforms flag, and making matching silent audio for copied-audio
+  destinations.
+
+Neither can be made safe for every platform without encoding. So the delay
+stays shorter until the next start.
+
 ## When the source changes
 
 - **Failover** between primary, backup and slate passes through the buffer.
@@ -96,15 +198,23 @@ left behind by a crash are deleted when polyemesis next starts.
 
 - **Status:** `delaySeconds` and a `delay` object on each destination in
   `GET /api/v1/status`. The `delay` object holds the phase, fill, buffered
-  seconds, drain time left, RAM and disk bytes, and dropped bytes.
+  seconds, drain time left, RAM and disk bytes, and dropped bytes. It also holds
+  `effectiveSeconds` (the delay after any dump), `dumpedSeconds` and
+  `dumpable`.
 - **Events:** `destination.delay` on `GET /api/v1/events`. See
   [EVENTS.md](EVENTS.md). `destination.level` carries `delaySeconds`: a level
   change reaches the process at once and viewers hear it after the delay.
-- **Metrics:** `polyemesis_destination_delay_seconds`, `_delay_buffer_fill`,
+- **Metrics:** `polyemesis_destination_delay_seconds`, `_delay_effective_seconds`, `_delay_buffer_fill`,
   `_delay_buffer_bytes{tier}`, `_delay_dropped_bytes_total` and
   `_delay_draining`. See [MONITORING.md](MONITORING.md).
 - **MCP:** `get_status`, `list_destinations` and `get_destination` show the
-  delay. `stop_destination` takes `now: true`. See [MCP.md](MCP.md).
+  delay. `stop_destination` takes `now: true`. `dump_destination_delay` and
+  `dump_all_delays` dump, with confirmation. See [MCP.md](MCP.md).
+- **Stream Deck:** the **Stop destination** key has a **Cut the delayed tail**
+  option, and the **Dump delay** key dumps one destination or every delayed one. Both
+  need the 1.5 s hold. See the [Stream Deck README](../integrations/streamdeck/README.md).
+- **API:** `POST /destinations/{id}/delay/dump` and
+  `POST /destinations/delay/dump-all`. See [API.md](API.md).
 
 ## Live captions
 

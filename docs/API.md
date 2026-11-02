@@ -867,8 +867,10 @@ far end refuses silently. Refusal stays with `Validate`; `warnings` is advice.
 | `PUT` | `/destinations/order` |
 | `GET` | `/destinations/stop-impact` |
 | `POST` | `/destinations/start-all`, `/stop-all` |
+| `POST` | `/destinations/delay/dump-all` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}` |
 | `POST` | `/destinations/{id}/start`, `/stop`, `/restart` |
+| `POST` | `/destinations/{id}/delay/dump` |
 | `POST` | `/destinations/{id}/refresh-key` |
 | `GET` `PUT` `DELETE` | `/destinations/{id}/expert` |
 | `POST` | `/destinations/{id}/expert/preview`, `/dry-run` |
@@ -966,6 +968,46 @@ and there is no tail to drain ([CAPTIONS.md](CAPTIONS.md)).
 it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
 (below), and a dialog in the console is a confirmation a script or a replayed
 request never sees. `start-all` takes no body.
+
+**Dump ([BROADCAST-DELAY.md](BROADCAST-DELAY.md#dump)).**
+`POST /destinations/{id}/delay/dump` drops the newest part of a delayed
+destination's buffer and keeps it on the air. That programme never airs there.
+The body is optional: `{"seconds": 10}` drops at least the newest 10 s of
+programme, `"seconds": 0` drops everything since the last dump point, and no
+`seconds` uses the destination's `delayDumpSeconds` (0 to 900, 0 meaning
+"since the last dump point"). With `?source=<id>`, a destination on another
+programme is a `404`. The cut is
+at a keyframe, so a little more than asked for goes. `seconds` is 0 to 900;
+anything else, or an unknown field, is `400`. The answer:
+
+```json
+{"id": 7, "name": "Twitch", "complete": true, "requestedSeconds": 10,
+ "dumpedSeconds": 11.4, "clamped": false, "delayBeforeSeconds": 30,
+ "delayAfterSeconds": 18.6, "configuredSeconds": 30, "restoresOnNextStart": true}
+```
+
+The delay stays shorter by `dumpedSeconds` until the destination next starts.
+`clamped` is `true` when less could be dropped than asked, because a dump
+never leaves less than 2 s plus one GOP of delay. `recovery` is `true` when no
+IDR keyframe came for three GOPs and the stream resumed at another
+random-access picture, and `forced` when no random-access picture came at all
+and it resumed at the live edge. `complete` is `false` in the
+rare case the next keyframe had not arrived when the answer was written. The
+dump still completes, and the `destination.delay` event with reason `dumped`
+carries the final figures. `409` when there is nothing to dump: the
+destination has no delay, it is still filling or airing its tail, the buffer
+holds no keyframe outside the margin, a dump is already waiting for its
+keyframe, or the stream has no IDR keyframes (an open-GOP encoder setting).
+`POST /destinations/delay/dump-all` dumps every enabled, delayed destination of
+the programme named by `?source=`, or of the install without it, like
+`stop-all`. It needs `{"confirm": true}` and takes the same optional `seconds`.
+On an install with more than one programme and no `?source=`, it also needs
+`"allProgrammes": true`, and answers `400` without it. It answers
+`{"action": "dump", "results": [...]}` with one row per delayed
+destination: the fields above plus `"outcome": "dumped"`, or `"skipped"` or
+`"failed"` with a `message`. Undelayed destinations are not listed. Both routes
+need an admin token. Each dump raises the `delay.dumped` audit alert
+([MONITORING.md](MONITORING.md)).
 
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts

@@ -288,6 +288,10 @@ export interface Destination {
   /** Broadcast delay in seconds, 0 to 900 (#11). Absent or 0 is off. Changing
    *  it while live restarts this destination. */
   delaySeconds?: number;
+  /** How much a Dump drops when the request names no seconds, 0 to 900.
+   *  Absent or 0 is "everything since the last dump point". A request that
+   *  names seconds, 0 included, overrides it. Only meaningful with a delay. */
+  delayDumpSeconds?: number;
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;
@@ -861,11 +865,53 @@ export interface DelayStatus {
   /** 0 to 1: how much of the delay the buffer holds. */
   fill: number;
   bufferedSeconds: number;
+  /** The delay the audience has NOW: `seconds` (the configured delay) minus
+   *  everything dumped this run. Equal to `seconds` until a dump. */
+  effectiveSeconds: number;
+  /** Total dumped this run; omitted when nothing has been. The delay stays
+   *  this much shorter until the destination next starts. */
+  dumpedSeconds?: number;
+  /** A dump has been asked for and is waiting for its resume keyframe. */
+  dumping?: boolean;
+  /** A dump can be asked for now: on the air, with a keyframe to cut at. */
+  dumpable: boolean;
   drainRemainingSeconds?: number;
   memBytes: number;
   diskBytes: number;
   droppedBytes?: number;
   problem?: string;
+}
+
+/** The answer to POST /destinations/{id}/delay/dump. */
+export interface DelayDumpResult {
+  id: DestinationId;
+  name: string;
+  /** False in the rare case the resume keyframe had not arrived when the
+   *  answer was written; the dump still completes. */
+  complete: boolean;
+  requestedSeconds: number;
+  dumpedSeconds: number;
+  /** Less could be dropped than asked: a dump never leaves less than 2 s plus
+   *  one GOP of delay. */
+  clamped: boolean;
+  delayBeforeSeconds: number;
+  delayAfterSeconds: number;
+  configuredSeconds: number;
+  restoresOnNextStart: true;
+}
+
+/** One row of POST /destinations/delay/dump-all. A skipped or failed row
+ *  carries a `message` and may lack the dump figures. */
+export interface DelayDumpAllResult extends Partial<Omit<DelayDumpResult, "id" | "name">> {
+  id: DestinationId;
+  name: string;
+  outcome: "dumped" | "skipped" | "failed";
+  message?: string;
+}
+
+export interface DelayDumpAllReport {
+  action: "dump";
+  results: DelayDumpAllResult[];
 }
 
 export interface DestStatus {
@@ -876,6 +922,10 @@ export interface DestStatus {
   enabled: boolean;
   /** The configured broadcast delay, whenever the row has one. */
   delaySeconds?: number;
+  /** The row's Dump default (Destination.delayDumpSeconds), so the card's
+   *  Dump dialog can preselect it. Absent or 0 is "everything since the last
+   *  dump point". */
+  delayDumpSeconds?: number;
   /** The live buffer, while there is one. A draining destination is disabled
    *  and still on the air; this is the only field that says so. */
   delay?: DelayStatus | null;

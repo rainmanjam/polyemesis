@@ -55,6 +55,15 @@ describe("destinationFace: the broadcast delay", () => {
     expect(titleFor(face, "en").split("\n").at(-1)).toBe("Delay 30s");
   });
 
+  it("shows the shorter delay a dump left running, against the configured delay", () => {
+    const face = destinationFace(
+      base({ delay: { seconds: 30, phase: "on-air", effectiveSeconds: 18.4, dumpedSeconds: 11.6, dumpable: true } }),
+      undefined,
+      null,
+    );
+    expect(titleFor(face, "en").split("\n").at(-1)).toBe("Delay 18/30s");
+  });
+
   it("adds no marker to a destination with no delay", () => {
     const face = destinationFace(base({ delaySeconds: undefined }), undefined, null);
     expect(face.delaySeconds).toBeUndefined();

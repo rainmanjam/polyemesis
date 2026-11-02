@@ -147,6 +147,20 @@ const GLYPH = {
   "stop-all": inRoundRect(0.26, 0.26, 0.74, 0.74, 0.06),
   // Stop destination: a stop square with a dot marking a single target.
   "stop-destination": any(inRoundRect(0.22, 0.3, 0.6, 0.68, 0.05), inCircle(0.76, 0.3, 0.1)),
+  // Dump delay: a skip-ahead mark, two triangles and a bar, for jumping past the buffered programme.
+  "delay-dump": any(
+    inTriangle([
+      [0.14, 0.26],
+      [0.14, 0.74],
+      [0.44, 0.5],
+    ]),
+    inTriangle([
+      [0.44, 0.26],
+      [0.44, 0.74],
+      [0.74, 0.5],
+    ]),
+    inRoundRect(0.76, 0.26, 0.86, 0.74, 0.03),
+  ),
   // Failover: two opposing arrows.
   failover: any(
     inCapsule(0.22, 0.36, 0.7, 0.36, 0.08),
@@ -330,7 +344,7 @@ function write(rel, size, paint) {
 // barred circle), so those states are faces of their own and never the generic error or warn
 // tile. Only the record key ever shows halted, and only the track mute key shows the last
 // three; every key has every face so the state indices line up across actions.
-const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute", "poll", "viewers"];
+const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "delay-dump", "record", "preset", "failover", "track-mute", "poll", "viewers"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
 // The badge is drawn most of the way toward the state's TITLE colour, so on the bright

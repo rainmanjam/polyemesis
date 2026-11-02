@@ -693,6 +693,7 @@ server itself, and they answer one question: *was that me?*
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
 | `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
 | `mcp.action` | `warning` for a stop, `info` otherwise | an AI assistant connected over [MCP](MCP.md) used a write tool; names the tool, the API token, the target and the outcome. See [MCP.md](MCP.md#the-audit-trail) |
+| `delay.dumped` | `warning` | part of a destination's [broadcast delay](BROADCAST-DELAY.md#dump) was dumped: that programme never aired there. Names the destination, how much was dumped and the delay left, and is written as soon as a dump is accepted. Its `Dump` field is `final` when the stream had already resumed, and `provisional` otherwise, followed by a second record with the final figures or `aborted` if the destination was stopped or restarted first. Never the content |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
 rather than five. (Deleting an alert rule is `critical` too; it is covered
@@ -916,6 +917,9 @@ A destination with a broadcast delay ([BROADCAST-DELAY.md](BROADCAST-DELAY.md))
 adds these, labelled `id` and `name`. A destination with no delay reports 0:
 
 - `polyemesis_destination_delay_seconds`: the configured delay.
+- `polyemesis_destination_delay_effective_seconds`: the delay the audience has
+  now. It is the configured delay less anything [dumped](BROADCAST-DELAY.md#dump),
+  and returns to it when the destination next starts.
 - `polyemesis_destination_delay_buffer_fill`: how much of the delay the buffer
   holds, 0 to 1. It is 1 while on air.
 - `polyemesis_destination_delay_buffer_bytes{tier}`: bytes held, with `tier`

@@ -114,7 +114,19 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 	in.on = len(in.targets) > 0 || len(in.burns) > 0
 	sort.Strings(in.burns)
 	sort.Slice(in.targets, func(i, j int) bool { return in.targets[i].ID < in.targets[j].ID })
+	// The signature is taken from the CONFIGURED delays: it stands for what
+	// the operator saved, and a change in it re-arms the captioner. A dump is
+	// not a save, so it must not re-arm anything.
 	in.sig = intentSig(in)
+	// What the route uses is the delay the audience has: less anything
+	// dumped from the running line, because after a dump the pictures reach
+	// the audience that much sooner, and so must the words. onDelayDumped
+	// re-times the queued cues first (CueRouter.Dump: kept programme keeps
+	// its cues, the dumped words lose theirs), so by the time this delay
+	// reaches SetTargets the route already has it and cancels nothing.
+	for i := range in.targets {
+		in.targets[i].Delay -= e.delayDumped(in.targets[i].ID)
+	}
 	return in, nil
 }
 
