@@ -311,7 +311,7 @@ func (l *Line) Close() {
 var ErrNotOnAir = errors.New("delayline: the delayed feed is not on the air")
 
 // MaxDumpWait bounds how long Dump waits for the resume keyframe.
-const MaxDumpWait = maxGOPAllowance + 2*time.Second
+const MaxDumpWait = 12 * time.Second
 
 // Dump drops the newest want of the buffer -- 0 for everything since the last
 // dump point -- and waits, up to a GOP and a little more, for the stream to

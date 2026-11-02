@@ -123,7 +123,10 @@ type Buffer struct {
 	ts         tsState
 	marks      []*mark
 	scratch    []byte
-	resumed    atomic.Pointer[DumpTicket]
+	ob         []byte
+	// gopEst is the last GOP measured from cut points.
+	gopEst  time.Duration
+	resumed atomic.Pointer[DumpTicket]
 }
 
 // Stats is a snapshot of the buffer.
@@ -169,8 +172,7 @@ func NewBuffer(delay time.Duration, lim Limits, epoch time.Time) (*Buffer, error
 		return nil, errors.New("delayline: a disk budget needs a spill directory")
 	}
 	b := &Buffer{delay: delay, lim: lim, epoch: epoch}
-	b.ts.out = map[uint16]pidOut{}
-	b.ts.rw = map[uint16]*pidRewrite{}
+	b.ts = newTSState()
 	return b, nil
 }
 
@@ -427,9 +429,7 @@ func (b *Buffer) Stats() Stats {
 	// Dump's own rule: a cut point at least the margin plus one GOP behind
 	// the head. The newest is the one to ask about -- marks are in order --
 	// and it is never behind the last dump point, so a default dump agrees.
-	st.Spliceable = b.ts.codec != codecNone && !b.ts.resync && len(b.marks) > 0 &&
-		len(b.queue) > 0 &&
-		b.marks[len(b.marks)-1].at >= b.queue[0].first+int64(DumpMargin+b.gopLocked())
+	st.Spliceable = b.spliceableLocked()
 	if len(b.queue) > 0 {
 		newest := b.queue[len(b.queue)-1].last
 		st.Span = time.Duration(newest - b.queue[0].first)
@@ -476,7 +476,10 @@ func (b *Buffer) Discard() {
 	b.tail = nil
 	b.marks = nil
 	b.ts.cand = nil
+	b.abandonDumpLocked()
 	b.ts.resync, b.ts.holding, b.ts.held, b.ts.splice = false, false, nil, nil
+	clear(b.ts.split)
+	clear(b.ts.pending)
 	b.stats.MemBytes = 0
 	b.stats.DiskBytes = 0
 	b.stats.Packets = 0

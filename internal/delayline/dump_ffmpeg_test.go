@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,9 +144,9 @@ func TestADumpedLibx264StreamDecodesCleanlyAndRemuxesToFLVWithMonotonicTimestamp
 	src := tsFixture(t, ffmpeg, 30)
 	dir := t.TempDir()
 
-	r := newRig(t, 8*time.Second, memLimits(), pcrStream(t, src))
-	r.run(14 * time.Second)
-	ticket, err := r.b.Dump(r.epoch.Add(14*time.Second), 3*time.Second, DumpMargin)
+	r := newRig(t, 12*time.Second, memLimits(), pcrStream(t, src))
+	r.run(18 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 3*time.Second, DumpMargin)
 	if err != nil {
 		t.Fatalf("Dump on libx264 output: %v", err)
 	}
@@ -216,5 +217,99 @@ func TestADumpRefusesLibx264OpenGOPWhoseKeyframesAreNotIDR(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNoCutPoint) && !errors.Is(err, ErrNotSpliceable) {
 		t.Fatalf("unexpected refusal: %v", err)
+	}
+}
+
+// remuxClean runs the destination's own remux (video copied, audio
+// re-encoded, FLV) over a dumped stream and returns what FFmpeg said at
+// warning level, and the FLV's packets.
+func remuxClean(t *testing.T, ffmpeg, ffprobe, ts string) (string, []probePacket, []probePacket) {
+	t.Helper()
+	flv := ts + ".flv"
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-v", "warning", "-y",
+		"-dts_delta_threshold", "31536000", "-i", ts,
+		"-map", "0:v:0", "-c:v", "copy", "-map", "0:a:0", "-c:a", "aac", "-f", "flv", flv)
+	msg, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the destination remux failed: %v\n%s", err, msg)
+	}
+	v, a := probePackets(t, ffprobe, flv)
+	return string(bytes.TrimSpace(msg)), v, a
+}
+
+// THE REAL-ENCODER SWEEP. GOP sizes that do and do not divide the audio
+// framing, three audio bitrates, x264 with B-frames, HEVC with RADL pictures,
+// and Opus: each dumped mid-stream and put through the destination's own FLV
+// remux. FFmpeg's mpegts muxer groups several audio frames per PES, so the
+// first audio after a resume overlaps the last audio kept unless it is cut at
+// a frame boundary -- and an overlap makes the remux log a timestamp
+// discontinuity and shift its whole input, video included.
+//
+// Mutation: never set r.trimming in decideResumeLocked. Observed: remux logs
+// "timestamp discontinuity" and "Non-monotonic DTS" on most cases.
+func TestTheRealEncoderSweepDumpsWithoutADiscontinuityInTheDestinationRemux(t *testing.T) {
+	ffmpeg := testenv.FFmpegBinary(t, "ffmpeg", "ffmpeg is needed to encode and remux the sweep")
+	ffprobe := testenv.FFmpegBinary(t, "ffprobe", "ffprobe is needed to read the sweep's timestamps")
+	type source struct {
+		name string
+		args []string
+	}
+	var sources []source
+	for _, gop := range []int{37, 47, 53, 60, 61} {
+		for _, kbps := range []string{"96k", "128k", "192k"} {
+			g := strconv.Itoa(gop)
+			sources = append(sources, source{"x264-g" + g + "-a" + kbps, []string{
+				"-c:v", "libx264", "-preset", "ultrafast", "-bf", "2", "-g", g, "-keyint_min", g,
+				"-sc_threshold", "0", "-c:a", "aac", "-b:a", kbps}})
+		}
+	}
+	sources = append(sources,
+		source{"hevc-radl2", []string{"-c:v", "libx265", "-preset", "ultrafast", "-x265-params",
+			"keyint=60:min-keyint=60:scenecut=0:open-gop=0:bframes=3:radl=2:log-level=error", "-c:a", "aac"}},
+		source{"x264-bf2-opus", []string{"-c:v", "libx264", "-preset", "ultrafast", "-bf", "2", "-g", "60",
+			"-keyint_min", "60", "-sc_threshold", "0", "-c:a", "libopus"}},
+	)
+	for _, src := range sources {
+		t.Run(src.name, func(t *testing.T) {
+			dir := t.TempDir()
+			in := filepath.Join(dir, "src.ts")
+			args := []string{"-hide_banner", "-loglevel", "error", "-y",
+				"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30",
+				"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+				"-t", "30", "-pix_fmt", "yuv420p"}
+			args = append(append(args, src.args...), "-f", "mpegts", in)
+			if msg, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+				t.Fatalf("encoding: %v\n%s", err, msg)
+			}
+			raw, err := os.ReadFile(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := newRig(t, 12*time.Second, memLimits(), pcrStream(t, raw))
+			r.run(18 * time.Second)
+			ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 3*time.Second, DumpMargin)
+			if err != nil {
+				t.Fatalf("Dump: %v", err)
+			}
+			r.run(40 * time.Second)
+			if res := ticket.Result(); !res.Complete || res.Dumped < 3*time.Second {
+				t.Fatalf("result %+v", res)
+			}
+			out := filepath.Join(dir, "dumped.ts")
+			if err := os.WriteFile(out, r.out, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if msg := decodeErrors(t, ffmpeg, out); msg != "" {
+				t.Errorf("decode errors:\n%s", msg)
+			}
+			log, fv, fa := remuxClean(t, ffmpeg, ffprobe, out)
+			for _, bad := range []string{"discontinuity", "Non-monotonic", "backward", "corrupt", "Invalid"} {
+				if strings.Contains(log, bad) {
+					t.Fatalf("the destination remux logged %q:\n%s", bad, log)
+				}
+			}
+			checkMonotonic(t, "flv video", fv, 2*34)
+			checkMonotonic(t, "flv audio", fa, 2*22)
+		})
 	}
 }

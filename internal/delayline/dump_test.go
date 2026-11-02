@@ -102,8 +102,20 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 			return
 		}
 		u := o.u
+		// The PES header is parsed from the reassembled PES, so one that runs
+		// into a second packet reads the same as one that does not.
+		pes := o.es
+		if len(pes) < 9 || pes[0] != 0 || pes[1] != 0 || pes[2] != 1 || len(pes) < 9+int(pes[8]) {
+			t.Fatalf("a PES start without a PES header on PID %#x", u.pid)
+		}
+		if pes[7]&0x80 != 0 {
+			u.pts = readTS(pes[9:])
+		}
+		if pes[7]&0xC0 == 0xC0 {
+			u.dts = readTS(pes[14:])
+		}
 		// The picture's number follows its slice NAL header.
-		es := o.es
+		es := pes[9+int(pes[8]):]
 		u.esLen = len(es)
 		for i := 0; i+3 < len(es); i++ {
 			if es[i] != 0 || es[i+1] != 0 || es[i+2] != 1 {
@@ -160,18 +172,8 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 		}
 		if pktPUSI(p) {
 			finish(cur[pid])
-			ptsAt, dtsAt, esAt, ok := pesFields(p)
-			if !ok {
-				t.Fatalf("a PES start without a PES header on PID %#x", pid)
-			}
 			o := &open{u: esUnit{pid: pid, pts: -1, dts: -1, release: outAt[i/tsPacketSize]}}
-			if ptsAt >= 0 {
-				o.u.pts = readTS(p[ptsAt:])
-			}
-			if dtsAt >= 0 {
-				o.u.dts = readTS(p[dtsAt:])
-			}
-			o.es = append(o.es, p[esAt:]...)
+			o.es = append(o.es, p[payloadStart(p):]...)
 			cur[pid] = o
 			continue
 		}
@@ -605,10 +607,12 @@ func TestADiscardWhileADumpWaitsForItsKeyframeLeavesAUsableBuffer(t *testing.T) 
 	if st := r.b.Stats(); st.Packets != 0 || st.Dumping {
 		t.Fatalf("after Discard: %d packets held, dumping %t", st.Packets, st.Dumping)
 	}
+	// Done closes, so a waiter is not left to its timeout, and the result
+	// says the dump never completed.
 	select {
 	case <-ticket.Done():
-		t.Fatal("a discarded dump reports that it resumed")
 	default:
+		t.Fatal("a discarded dump left its waiter waiting")
 	}
 	if ticket.Result().Complete {
 		t.Fatal("a discarded dump reports itself complete")
@@ -647,8 +651,9 @@ func TestADumpWhoseResumeIsLateStillLeavesTheMargin(t *testing.T) {
 	if !res.Complete {
 		t.Fatal("did not resume once the input came back")
 	}
-	if res.After < DumpMargin {
-		t.Fatalf("a resume 20 s late left %s of delay, under the %s margin", res.After, DumpMargin)
+	// The floor is the margin PLUS one GOP (2 s here), however late.
+	if res.After < DumpMargin+2*time.Second {
+		t.Fatalf("a resume 20 s late left %s of delay, under the %s margin plus one GOP", res.After, DumpMargin)
 	}
 	rep := readOut(t, r.out, r.outAt, false)
 	last := rep.video[len(rep.video)-1]
@@ -783,50 +788,67 @@ func TestAResumeDropsTheRestOfAPESThatBeganBeforeIt(t *testing.T) {
 	}
 }
 
-// A leading picture after the resume keyframe (HEVC RADL: decoded after it,
-// shown before it) would be shown before the picture the splice put in the
-// cut picture's place -- a presentation timestamp from the dumped side.
+// LEADING PICTURES AFTER THE RESUME. An HEVC RADL picture after the resume
+// keyframe is decoded after it and shown before it. Shown in the slot the cut
+// keyframe's own leading picture left -- the normal case -- it is kept: it
+// fills that slot, and dropping it leaves a hole and a DTS step. Shown at or
+// before the last picture kept, it would step presentation backwards, and is
+// dropped.
 //
-// Mutation: drop `r.sticky = true` for video in decideResumeLocked.
-func TestAResumeDropsALeadingPictureShownBeforeTheResumeKeyframe(t *testing.T) {
-	g := delaytest.New(60)
-	g.HEVC, g.KeyType, g.Leading = true, delaytest.HEVCIDRWRADL, true
-	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
-	r.run(15 * time.Second)
-	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.run(40 * time.Second)
-	if !ticket.Result().Complete {
-		t.Fatal("did not resume")
-	}
-	rep := readOut(t, r.out, r.outAt, true)
-	var regular []esUnit
-	leadingKept := 0
-	for i, v := range rep.video {
-		if v.index < delaytest.LeadingIndex {
-			regular = append(regular, v)
-			continue
-		}
-		leadingKept++
-		if i > 0 && v.index != delaytest.LeadingIndex+rep.video[i-1].index {
-			t.Fatalf("leading picture of key #%d follows picture #%d: it belongs to the dumped side",
-				v.index-delaytest.LeadingIndex, rep.video[i-1].index)
-		}
-	}
-	at := spliceAt(t, regular)
-	if at < 0 {
-		t.Fatal("nothing was dumped")
-	}
-	k2 := regular[at].index
-	for _, v := range rep.video {
-		if v.index == delaytest.LeadingIndex+k2 {
-			t.Fatalf("the resume keyframe #%d's leading picture was kept: it is shown before the splice", k2)
-		}
-	}
-	if leadingKept == 0 {
-		t.Fatal("no leading picture survived anywhere: the fixture or the gate is wrong")
+// Mutation: drop `r.sticky = true` for video in decideResumeLocked (the
+// overlapping one is then kept), or gate on wrap(m.pts-1) again (the fitting
+// one is then dropped).
+func TestAResumeKeepsLeadingPicturesThatFitAndDropsOnesThatOverlap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before int64
+		kept   bool
+	}{
+		{"fits", 0, true},
+		{"overlaps", 2 * delaytest.FrameTicks, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := delaytest.New(60)
+			g.HEVC, g.KeyType, g.Leading, g.LeadingBefore = true, delaytest.HEVCIDRWRADL, true, tc.before
+			r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+			r.run(18 * time.Second)
+			ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.run(40 * time.Second)
+			if !ticket.Result().Complete {
+				t.Fatal("did not resume")
+			}
+			rep := readOut(t, r.out, r.outAt, true)
+			var regular []esUnit
+			for _, v := range rep.video {
+				if v.index < delaytest.LeadingIndex {
+					regular = append(regular, v)
+				}
+			}
+			at := spliceAt(t, regular)
+			if at < 0 {
+				t.Fatal("nothing was dumped")
+			}
+			k2, lastKept := regular[at], regular[at-1]
+			kept := false
+			for _, v := range rep.video {
+				if v.index == delaytest.LeadingIndex+k2.index {
+					kept = true
+					if !ptsAfter(v.pts, lastKept.pts) {
+						t.Fatalf("leading picture of #%d shown at %d, not after the last kept picture's %d",
+							k2.index, v.pts, lastKept.pts)
+					}
+				}
+			}
+			if kept != tc.kept {
+				t.Fatalf("the resume keyframe #%d's leading picture kept=%t, want %t", k2.index, kept, tc.kept)
+			}
+			if rep.ccBreaks != 0 {
+				t.Errorf("%d continuity breaks: a dropped picture must not leave a counter gap", rep.ccBreaks)
+			}
+		})
 	}
 }
 
@@ -950,4 +972,303 @@ func TestAClockThatStepsBackAfterAResumeDoesNotStopTheVideo(t *testing.T) {
 		}
 	}
 	t.Fatalf("no picture after #%d was released: a backward clock step after the resume stopped the video", resumedBy)
+}
+
+// moveAfterKey moves the last packet of the audio PES just before the video
+// key picture at `at` to just after that picture's first packet: an audio PES
+// straddling the keyframe, as a muxer that interleaves at packet level writes.
+func moveAfterKey(t *testing.T, s *delaytest.Stream, at time.Duration) {
+	t.Helper()
+	k := -1
+	for i, p := range s.Pkts {
+		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && s.Times[i] == at {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		t.Fatalf("no picture at %s in the fixture", at)
+	}
+	tail := -1
+	for i := k - 1; i >= 0; i-- {
+		if pktPID(s.Pkts[i]) == delaytest.AudioPID {
+			tail = i
+			break
+		}
+	}
+	if tail < 0 || pktPUSI(s.Pkts[tail]) {
+		t.Fatal("the audio frame before the keyframe is not a multi-packet PES")
+	}
+	moved, mt := s.Pkts[tail], s.Times[k]
+	pkts := append(append(append([][]byte{}, s.Pkts[:tail]...), s.Pkts[tail+1:k+1]...), moved)
+	times := append(append(append([]time.Duration{}, s.Times[:tail]...), s.Times[tail+1:k+1]...), mt)
+	s.Pkts = append(pkts, s.Pkts[k+1:]...)
+	s.Times = append(times, s.Times[k+1:]...)
+}
+
+// AN AUDIO PES OPEN AT A KEYFRAME MAKES IT NO CUT POINT. Cut there, the kept
+// audio would end in half a PES: an AAC or Opus frame with its tail missing.
+//
+// Mutation: drop `|| !c.safe` in maybeAddMarkLocked.
+func TestAKeyframeWithAnAudioPESOpenAcrossItIsNotACutPoint(t *testing.T) {
+	g := delaytest.New(60)
+	s := g.Mux(40 * time.Second)
+	// Every keyframe from 8 s to 16 s straddles an audio PES.
+	for at := 8 * time.Second; at <= 16*time.Second; at += 2 * time.Second {
+		moveAfterKey(t, s, at)
+	}
+	r := newRig(t, 12*time.Second, memLimits(), s)
+	r.run(20 * time.Second)
+	for _, m := range r.b.marks {
+		if at := m.at; at >= int64(8*time.Second) && at <= int64(16*time.Second)+int64(time.Millisecond) {
+			t.Fatalf("a keyframe at %s, with an audio PES open across it, is a cut point", time.Duration(at))
+		}
+	}
+	ticket, err := r.b.Dump(r.epoch.Add(20*time.Second), time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	for _, a := range rep.audio {
+		if a.esLen != 400 {
+			t.Fatalf("audio frame #%d left with %d bytes, want 400: the cut split it", a.index, a.esLen)
+		}
+	}
+}
+
+// A PES HEADER SPLIT ACROSS TWO PACKETS still has its PTS rewritten. Every
+// audio PES here carries only ten bytes in its first packet, so its PTS is in
+// the second; unrewritten, the audio after a dump would jump back to the
+// programme time before it.
+//
+// Mutation: in prepare, treat an incomplete header as complete.
+func TestAPESHeaderSplitAcrossPacketsIsStillRewritten(t *testing.T) {
+	g := delaytest.New(60)
+	g.SplitAudioHeaders = true
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(18 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 3*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	if len(rep.audio) < 100 {
+		t.Fatalf("only %d audio frames read back", len(rep.audio))
+	}
+	for i := 1; i < len(rep.audio); i++ {
+		step := wrap(rep.audio[i].pts - rep.audio[i-1].pts)
+		if step <= 0 || step > 2*delaytest.AudioTicks {
+			t.Fatalf("audio PTS steps %d ticks at frame #%d: a split header was not rewritten", step, rep.audio[i].index)
+		}
+	}
+	if rep.ccBreaks != 0 {
+		t.Errorf("%d continuity breaks", rep.ccBreaks)
+	}
+}
+
+// A STALL BEFORE A DUMP IS NOT PROGRAMME. The feed stops for 4 s, comes back,
+// and a 3 s dump is asked for: it must drop at least 3 s of programme -- by the
+// pictures' timestamps -- not 3 s of wall clock that was mostly the stall.
+//
+// Mutation: choose the cut by arrival time (vnow - want) again.
+func TestAStallBeforeADumpDoesNotCountAsProgramme(t *testing.T) {
+	g := delaytest.New(30)
+	s := g.Mux(60 * time.Second)
+	for i, at := range s.Times {
+		if at >= 14*time.Second {
+			s.Times[i] = at + 4*time.Second
+		}
+	}
+	r := newRig(t, 15*time.Second, memLimits(), s)
+	r.run(19500 * time.Millisecond) // 1.5 s of programme since the stall ended
+	ticket, err := r.b.Dump(r.epoch.Add(19500*time.Millisecond), 3*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(60 * time.Second)
+	res := ticket.Result()
+	if !res.Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	at := spliceAt(t, rep.video)
+	if at < 0 {
+		t.Fatal("nothing was dumped")
+	}
+	// The programme the dump removed, counted in pictures.
+	dropped := delaytest.Ticks(int64((rep.video[at].index - rep.video[at-1].index - 1) * delaytest.FrameTicks))
+	// The newest 3 s of PROGRAMME at the dump: pictures up to 15.5 s.
+	newest := int(15500*time.Millisecond*30/time.Second) - 1
+	firstDropped := rep.video[at-1].index + 1
+	if dropped < 3*time.Second || firstDropped > newest-89 {
+		t.Fatalf("dropped %s of programme from picture #%d; a 3 s dump must cover the newest 3 s (from #%d)",
+			dropped, firstDropped, newest-89)
+	}
+}
+
+// NO IDR AFTER THE CUT -- a failover to an open-GOP source -- must not leave
+// the destination dark and the dump pending for good. After a few GOPs the
+// resume takes a random-access picture, and drops its leading pictures.
+//
+// Mutation: drop the recovery case in decideResumeLocked.
+func TestADumpWithNoIDRAfterTheCutRecoversAtARandomAccessPicture(t *testing.T) {
+	g := delaytest.New(30)
+	g.Override = func(n int) (byte, bool) {
+		if n >= 16*30 && n%30 == 0 {
+			return delaytest.H264NonIDR, true // RAI-flagged I pictures, no IDR
+		}
+		return 0, false
+	}
+	r := newRig(t, 15*time.Second, memLimits(), g.Mux(60*time.Second))
+	r.run(20 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(20*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(60 * time.Second)
+	res := ticket.Result()
+	if !res.Complete || !res.Recovery {
+		t.Fatalf("result %+v: want a dump completed by recovery", res)
+	}
+	if st := r.b.Stats(); st.Dumping || st.Packets == 0 {
+		t.Fatalf("after recovery: dumping %t, %d packets held", st.Dumping, st.Packets)
+	}
+}
+
+// The GOP is remembered through a dump: a cut that leaves fewer than two cut
+// points must not fall back to the 2 s default on a 1 s-GOP stream.
+func TestTheGOPIsRememberedThroughADump(t *testing.T) {
+	g := delaytest.New(30)
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(30*time.Second))
+	r.run(15 * time.Second)
+	if _, err := r.b.Dump(r.epoch.Add(15*time.Second), 0, DumpMargin); err != nil {
+		t.Fatal(err)
+	}
+	r.b.mu.Lock()
+	gop, marks := r.b.gopLocked(), len(r.b.marks)
+	r.b.mu.Unlock()
+	if marks >= 2 {
+		t.Logf("%d cut points left; the fallback is not reached", marks)
+	}
+	if gop != time.Second {
+		t.Fatalf("GOP %s after a dump on a 1 s-GOP stream", gop)
+	}
+}
+
+// The resume picture's cut point records the record before it correctly: the
+// last record in the buffer before it, which is what a later cut there sets
+// the segment's end to.
+func TestTheResumeKeyframesCutPointKnowsTheRecordBeforeIt(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(18 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(21 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+	var k2 *mark
+	for _, m := range r.b.marks {
+		if m.at == r.b.lastDumpAt {
+			k2 = m
+		}
+	}
+	if k2 == nil || k2.seg.data == nil || k2.off == 0 {
+		t.Fatal("the fixture's resume cut point is not inside a RAM segment")
+	}
+	want := int64(-1)
+	for off := 0; off < k2.off; {
+		want = int64(binary.BigEndian.Uint64(k2.seg.data[off:]))
+		off += recordHeader + int(binary.BigEndian.Uint16(k2.seg.data[off+8:]))
+	}
+	if k2.prevAt != want {
+		t.Fatalf("the resume keyframe's prevAt is %s; the record before it arrived at %s",
+			time.Duration(k2.prevAt), time.Duration(want))
+	}
+}
+
+// A cut point whose segment the buffer had to drop is not offered.
+func TestSpliceableIgnoresACutPointInADroppedSegment(t *testing.T) {
+	g := delaytest.New(60)
+	g.PictureBytes = 40000
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(20 * time.Second)
+	r.b.mu.Lock()
+	for i := len(r.b.marks) - 1; i >= 0; i-- {
+		r.b.dropLocked(r.b.marks[i].seg)
+	}
+	r.b.mu.Unlock()
+	if r.b.Stats().Spliceable {
+		t.Fatal("spliceable with every cut point's segment dropped")
+	}
+}
+
+// A CUT POINT REMEMBERS ONLY WHAT A SPLICE NEEDS: the PIDs of the PAT, PMT and
+// service information. A stream that keeps bringing new PIDs must not grow
+// every one of a thousand cut points.
+//
+// Mutation: snapshot every PID in ts.out.
+func TestACutPointDoesNotGrowWithPIDChurn(t *testing.T) {
+	g := delaytest.New(30)
+	g.ChurnPIDs = true
+	r := newRig(t, 30*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(40 * time.Second)
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+	if len(r.b.ts.out) < 30 {
+		t.Fatalf("the fixture brought only %d PIDs", len(r.b.ts.out))
+	}
+	for _, m := range r.b.marks {
+		if len(m.out) > 4 {
+			t.Fatalf("a cut point remembers %d PIDs; the PAT, PMT, video and audio are 4", len(m.out))
+		}
+	}
+}
+
+// THE FLOOR IS MARGIN PLUS ONE GOP, AND AN ON-TIME RESUME NEVER TOUCHES IT.
+// Swept across where in a 1.5 s GOP the dump is pressed: the biggest dump
+// there is always leaves at least the margin plus one GOP, and the resume
+// keyframe still goes out in the cut keyframe's slot -- no gap on the wire.
+// A cut that left only one GOP of room would make the resume wait eat into
+// the floor, and the cap that holds the floor would then leave a gap.
+//
+// Mutation: cut at lo = horizon + margin + ONE gop.
+func TestTheBiggestDumpLeavesTheMarginPlusAGOPWithoutAGapWhereverItIsPressed(t *testing.T) {
+	const gop = 45 // 1.5 s
+	for at := 16 * time.Second; at < 17500*time.Millisecond; at += 100 * time.Millisecond {
+		g := delaytest.New(gop)
+		r := newRig(t, 11300*time.Millisecond, memLimits(), g.Mux(30*time.Second))
+		r.run(at)
+		ticket, err := r.b.Dump(r.epoch.Add(at), 0, DumpMargin)
+		if err != nil {
+			t.Fatalf("at %s: %v", at, err)
+		}
+		r.run(30 * time.Second)
+		res := ticket.Result()
+		if !res.Complete {
+			t.Fatalf("at %s: did not resume", at)
+		}
+		if res.After < DumpMargin+1500*time.Millisecond-time.Millisecond {
+			t.Fatalf("at %s: %s of delay left, under the margin plus one GOP", at, res.After)
+		}
+		rep := readOut(t, r.out, r.outAt, false)
+		for i := 1; i < len(rep.video); i++ {
+			if gap := rep.video[i].release - rep.video[i-1].release; gap > 100*time.Millisecond {
+				t.Fatalf("dump at %s: a %s gap on the wire at picture #%d", at, gap, rep.video[i].index)
+			}
+		}
+	}
 }

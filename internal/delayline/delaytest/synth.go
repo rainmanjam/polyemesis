@@ -59,7 +59,19 @@ type Synth struct {
 	// picture: decoded after it and shown before it. Its slice carries
 	// LeadingIndex plus the key's number.
 	Leading bool
-	cc      map[uint16]uint8
+	// SplitAudioHeaders puts only ten bytes of each audio PES in its first
+	// packet, so the PES header -- PTS included -- runs into the second.
+	SplitAudioHeaders bool
+	// ChurnPIDs sends, before every key picture, one PES on a PID never seen
+	// before and never in the PMT.
+	ChurnPIDs bool
+	churn     uint16
+	firstRoom int
+	// LeadingBefore is how long before its key a leading picture is shown,
+	// in ticks: half a frame when 0, which is the slot the key's own leading
+	// picture fills. More than a frame overlaps the picture before the key.
+	LeadingBefore int64
+	cc            map[uint16]uint8
 }
 
 // New is a Synth with GOP pictures per GOP and IDR key pictures.
@@ -121,6 +133,9 @@ func (g *Synth) packetize(pid uint16, payload []byte, pcr int64, rai bool) []byt
 		n := len(payload)
 		if n > room {
 			n = room
+		}
+		if first && g.firstRoom > 0 && n > g.firstRoom {
+			n = g.firstRoom
 		}
 		if n < room {
 			// Stuff through the adaptation field.
@@ -232,6 +247,10 @@ func (g *Synth) audioFrame(m int) []byte {
 	n := len(es) + 8
 	hdr[4], hdr[5] = byte(n>>8), byte(n)
 	putTS(hdr[9:], 2, pts)
+	if g.SplitAudioHeaders {
+		g.firstRoom = 10
+		defer func() { g.firstRoom = 0 }()
+	}
 	return g.packetize(AudioPID, append(hdr, es...), -1, false)
 }
 
@@ -277,7 +296,11 @@ func (g *Synth) leading(n int) []byte {
 		es = append(es, 0xAB)
 	}
 	dts := (g.origin() + int64(n*FrameTicks) + FrameTicks/2) & tsMask
-	pts := (g.origin() + int64(n*FrameTicks) + FrameTicks/2) & tsMask
+	before := g.LeadingBefore
+	if before == 0 {
+		before = FrameTicks / 2
+	}
+	pts := (g.origin() + int64(n*FrameTicks) + FrameTicks - before) & tsMask
 	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	putTS(hdr[9:], 3, pts)
 	putTS(hdr[14:], 1, dts)
@@ -308,6 +331,12 @@ func (g *Synth) Mux(dur time.Duration) *Stream {
 		if vt <= at {
 			if v%g.GOP == 0 {
 				add(g.psi(), vt)
+				if g.ChurnPIDs {
+					g.churn++
+					hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
+					putTS(hdr[9:], 2, g.at(int64(v*FrameTicks)))
+					add(g.packetize(0x300+g.churn, hdr, -1, false), vt)
+				}
 			}
 			add(g.picture(v), vt)
 			if g.Leading && g.HEVC && v%g.GOP == 0 {
