@@ -10,6 +10,22 @@ its first tagged release.
 
 ### Added
 
+- **Broadcast delay: Dump (#11).** A delayed destination that is on the air can drop the newest
+  part of its delay buffer, so what just happened never reaches that platform, and it stays on the
+  air. Choose everything since the last dump or a number of seconds, from the card's delay panel,
+  a Stream Deck **Dump delay** key (one destination or every delayed one, hold to confirm),
+  `POST /destinations/{id}/delay/dump`, `POST /destinations/delay/dump-all` (needs
+  `{"confirm": true}`), or the MCP tools `dump_destination_delay` and `dump_all_delays`. The cut and
+  the resume are at IDR keyframes and the timestamps run on unbroken, so the platform sees no
+  corrupt frame, no gap and no jump. A dump never leaves less than 2 s plus one GOP of delay. The
+  delay stays shorter until the destination next starts: the video is copied, so it cannot be
+  stretched back, and a slate or freeze to refill it is not safe on every platform without an
+  encoder per destination. The status payload's delay gains `effectiveSeconds`, `dumpedSeconds`
+  and `dumpable`, `destination.delay` gains the `dumped` reason, every dump raises the new
+  `delay.dumped` alert, and `polyemesis_destination_delay_effective_seconds` joins the metrics.
+  The Stream Deck **Stop destination** key gains a **Cut the delayed tail** option and shows the
+  tail left while it airs. In all 15 languages.
+
 - **S3-compatible offload of finished recordings, and a pull-CDN-ready player origin (Wave 4 #10).**
   Storage targets (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) on the Recordings page and
   under `/api/v1/storage/targets`: endpoint, bucket, region, a key-prefix template, path-style

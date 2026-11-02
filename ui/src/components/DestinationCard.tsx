@@ -44,7 +44,7 @@ import { Stat } from "@/components/signature/Stat";
 import { duration, kbps } from "@/lib/format";
 import { toneBadge, toneForState } from "@/lib/signal";
 import { reportingStreamCount } from "@/lib/stream-health";
-import type { DestStatus } from "@/lib/types";
+import type { DelayDumpResult, DestStatus } from "@/lib/types";
 import { useT, useTN, useStateLabel } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { destinationStatus } from "@/lib/status";
@@ -92,6 +92,7 @@ export function DestinationCard({
   onStart,
   onStop,
   onStopNow,
+  onDump,
   onRestart,
   onEdit,
   onDelete,
@@ -125,6 +126,11 @@ export function DestinationCard({
    *  tail, or cut a tail already draining. Optional: only a delayed
    *  destination is offered it. */
   onStopNow?: () => void;
+  /** The broadcast delay's Dump: drop the newest part of the buffer and stay
+   *  on the air. Resolves with the server's figures; the card's own confirm
+   *  dialog stands in front of it. Optional: only a delayed destination is
+   *  offered it. */
+  onDump?: (seconds?: number) => Promise<DelayDumpResult>;
   onRestart: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -508,7 +514,7 @@ export function DestinationCard({
             Amber rather than red for the same reason the field is not `error`:
             the row is fine and the stop was issued. It is the observation that
             is missing, not the destination. */}
-        <DelayPanel dest={dest} onCutNow={onStopNow} busy={busy} />
+        <DelayPanel dest={dest} onCutNow={onStopNow} onDump={onDump} busy={busy} />
         <RolloverPanel dest={dest} />
         {dest.stopWarning && (
           <div className="flex items-start gap-1.5 rounded border border-warn/30 bg-warn-dim px-2 py-1 text-sm text-warn">

@@ -291,6 +291,11 @@ type Destination struct {
 	// a buffer between the relay and itself, and every other consumer of the
 	// relay is untouched. See internal/delayline.
 	DelaySeconds int `json:"delaySeconds,omitempty"`
+	// DelayDumpSeconds is how much a Dump drops by default on this
+	// destination: the console's dialog and a Stream Deck key with no seconds
+	// of its own start from it, and a request may still say otherwise. 0 means
+	// "everything since the last dump point". See internal/delayline/splice.go.
+	DelayDumpSeconds int `json:"delayDumpSeconds,omitempty"`
 	// Audio is the output encoding choice. Its zero value is AAC stereo, which
 	// is what every destination emitted before it existed.
 	Audio AudioEncoding `json:"audio"`
@@ -918,6 +923,9 @@ func (d Destination) Validate() error {
 		add("delay must be between 0 and %d seconds (15 minutes), got %d",
 			MaxDestDelaySeconds, d.DelaySeconds)
 	}
+	if d.DelayDumpSeconds < 0 || d.DelayDumpSeconds > MaxDestDelaySeconds {
+		add("dump seconds must be between 0 and %d, got %d", MaxDestDelaySeconds, d.DelayDumpSeconds)
+	}
 	for _, p := range d.Audio.problems(d.Kind, d.Profile) {
 		add("%s", p)
 	}
@@ -1138,7 +1146,7 @@ func (d *DB) scanDestination(s interface{ Scan(...any) error }) (*Destination, e
 		&dst.Transport.NoDurationFilesize, &dst.Transport.MuxQueuePackets,
 		&dst.Transport.MuxQueueBytes, &dst.Transport.RWTimeoutSeconds,
 		&dst.Resilience.MinBackoffSeconds, &dst.Resilience.MaxBackoffSeconds,
-		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds,
+		&dst.Resilience.GiveUpAfter, &dst.DelaySeconds, &dst.DelayDumpSeconds,
 		&dst.Audio.Codec, &dst.Audio.Mono, &dst.Audio.Copy, &complianceJSON, &facebookJSON,
 		&lifecycleJSON,
 		&dst.Multitrack, &vodProfileRaw, &dst.CaptionMode, &dst.GoLiveTitle, &dst.XGoLiveTweet, &captionKeyHash,
@@ -1245,7 +1253,7 @@ const destColumns = `id, name, kind, platform, account_id, url,
 	enabled, audio_bitrate, profile, rendition_id, source_id,
 	extra_input_args, extra_output_args, expert_ack_reencode,
 	tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
-	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
+	rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 	au_codec, au_mono, au_copy, compliance, facebook,
 	lifecycle,
 	multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
@@ -1286,7 +1294,7 @@ const (
 		tr_no_duration_filesize=?, tr_mux_queue_packets=?, tr_mux_queue_bytes=?,
 		tr_rw_timeout_seconds=?,
 		rs_min_backoff_seconds=?, rs_max_backoff_seconds=?, rs_give_up_after=?,
-		delay_seconds=?,
+		delay_seconds=?, delay_dump_seconds=?,
 		au_codec=?, au_mono=?, au_copy=?, compliance=?, facebook=?,
 		multitrack=?, vod_profile=?, caption_mode=?, go_live_title=?, x_go_live_tweet=?,
 		updated_at=? WHERE id=?`
@@ -1583,11 +1591,11 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		 enabled, audio_bitrate, profile, rendition_id, source_id,
 		 extra_input_args, extra_output_args, expert_ack_reencode,
 		 tr_no_duration_filesize, tr_mux_queue_packets, tr_mux_queue_bytes, tr_rw_timeout_seconds,
-		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds,
+		 rs_min_backoff_seconds, rs_max_backoff_seconds, rs_give_up_after, delay_seconds, delay_dump_seconds,
 		 au_codec, au_mono, au_copy, compliance, facebook,
 		 multitrack, vod_profile, caption_mode, go_live_title, x_go_live_tweet,
 		 position, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		dst.Name, dst.Kind, dst.Platform, dst.AccountID, dst.URL,
 		keyPlain, keyEnc,
 		dst.BackupURL, backupPlain, backupEnc, dst.BackupIngestWanted,
@@ -1596,7 +1604,7 @@ func (d *DB) CreateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
-		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
+		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
 		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		dst.Position, now, now)
@@ -1697,7 +1705,7 @@ func (d *DB) UpdateDestination(dst *Destination) (*Destination, error) {
 		dst.Transport.NoDurationFilesize, dst.Transport.MuxQueuePackets,
 		dst.Transport.MuxQueueBytes, dst.Transport.RWTimeoutSeconds,
 		dst.Resilience.MinBackoffSeconds, dst.Resilience.MaxBackoffSeconds,
-		dst.Resilience.GiveUpAfter, dst.DelaySeconds,
+		dst.Resilience.GiveUpAfter, dst.DelaySeconds, dst.DelayDumpSeconds,
 		dst.Audio.Codec, dst.Audio.Mono, dst.Audio.Copy, string(compliance), string(facebook),
 		dst.Multitrack, vodProfile, captionModeStored(dst.CaptionMode), dst.GoLiveTitle, dst.XGoLiveTweet,
 		time.Now().Unix(), dst.ID,
@@ -2095,6 +2103,8 @@ func (d *DB) MigrateDestinationExpertArgs() error {
 		{"rs_give_up_after", `ALTER TABLE destinations ADD COLUMN rs_give_up_after INTEGER NOT NULL DEFAULT 0`},
 		// Broadcast delay (#11). 0 is off.
 		{"delay_seconds", `ALTER TABLE destinations ADD COLUMN delay_seconds INTEGER NOT NULL DEFAULT 0`},
+		// Dump's default for this destination (#11). 0 is "since the last dump".
+		{"delay_dump_seconds", `ALTER TABLE destinations ADD COLUMN delay_dump_seconds INTEGER NOT NULL DEFAULT 0`},
 		// Audio encoding. '' is AAC and 0 is stereo, which is what every
 		// destination emitted before these existed.
 		{"au_codec", `ALTER TABLE destinations ADD COLUMN au_codec TEXT NOT NULL DEFAULT ''`},

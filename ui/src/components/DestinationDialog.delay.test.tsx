@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 /* #11 in the editor: the broadcast delay is a number of seconds, 0 to 900, and
  * changing it on a destination that is on says BEFORE the save that the
  * destination restarts and refills -- a running buffer cannot be stretched. */
+
+const updateDestination = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -19,6 +21,7 @@ vi.mock("@/lib/api", async () => {
       listRenditions: () => Promise.resolve([]),
       listPlatformPresets: () => Promise.resolve([]),
       services: () => Promise.resolve({}),
+      updateDestination: (id: unknown, body: unknown) => updateDestination(id, body),
     },
   };
 });
@@ -76,5 +79,44 @@ describe("the broadcast delay in the destination editor", () => {
     expect(input.value).toBe("900");
     // A stopped destination restarts nothing, so there is nothing to warn about.
     expect(screen.queryByTestId("delay-restart-warning")).toBeNull();
+  });
+});
+
+/* The Dump's default (owner decision A): how much a Dump drops when the
+ * operator does not say. 0 is "everything since the last dump point". Only
+ * meaningful with a delay, so it sits beside the delay and goes with it. */
+describe("the dump default in the destination editor", () => {
+  beforeEach(() => updateDestination.mockReset().mockResolvedValue({ warnings: [] }));
+  afterEach(cleanup);
+
+  const save = async () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(updateDestination).toHaveBeenCalled());
+    return updateDestination.mock.calls[0][1] as Record<string, unknown>;
+  };
+
+  it("loads the stored default and saves a changed one", async () => {
+    open(stored({ enabled: false, delayDumpSeconds: 8 }));
+    const input = (await waitFor(() => document.getElementById("dest-delay-dump"))) as HTMLInputElement;
+    expect(input.value).toBe("8");
+    fireEvent.change(input, { target: { value: "12" } });
+    expect((await save()).delayDumpSeconds).toBe(12);
+  });
+
+  // The PUT is decoded over the stored row, so a 0 that is not sent is a
+  // default that is never cleared.
+  it("sends 0 when the default is cleared, and clamps to fifteen minutes", async () => {
+    open(stored({ enabled: false, delayDumpSeconds: 8 }));
+    const input = (await waitFor(() => document.getElementById("dest-delay-dump"))) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "5000" } });
+    expect(input.value).toBe("900");
+    fireEvent.change(input, { target: { value: "0" } });
+    expect((await save()).delayDumpSeconds).toBe(0);
+  });
+
+  it("is not offered without a broadcast delay", async () => {
+    open(stored({ enabled: false, delaySeconds: 0 }));
+    await waitFor(() => document.getElementById("dest-delay"));
+    expect(document.getElementById("dest-delay-dump")).toBeNull();
   });
 });

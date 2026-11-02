@@ -669,6 +669,10 @@ type Server struct {
 	// what, on which branch -- cannot be asserted at all. Removing all five
 	// call sites left the package green.
 	auditSink func(alerts.Event)
+	// delayDumper stands in for the manager on the dump routes, and is set
+	// only by tests, for auditSink's reason: this package has no engine, and
+	// without it a dump handler cannot be driven past its first refusal.
+	delayDumper delayDumper
 	// farewellSink diverts the delivery a deleted alert rule is sent, AFTER
 	// the enabled and subscription checks, for the reason auditSink exists:
 	// without it the only way to see that a rule was NOT sent its farewell is
@@ -1242,6 +1246,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// here.
 			r.With(s.requireSource).Post("/destinations/start-all", s.handleStartAllDestinations)
 			r.With(s.requireSource).Post("/destinations/stop-all", s.handleStopAllDestinations)
+			// Dump every delayed destination of a programme (#11 follow-up):
+			// confirm required, scoped by ?source= as stop-all is. See
+			// destinations_delay_dump.go.
+			r.With(s.requireSource).Post("/destinations/delay/dump-all", s.handleDumpAllDelays)
 			r.Get("/destinations/{id}", s.handleGetDestination)
 			r.With(s.requireSource).Put("/destinations/{id}", s.handleUpdateDestination)
 			r.With(s.requireSource).Delete("/destinations/{id}", s.handleDeleteDestination)
@@ -1252,6 +1260,10 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.With(s.requireSource).Post("/destinations/{id}/start", s.handleStartDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/stop", s.handleStopDestination)
 			r.With(s.requireSource).Post("/destinations/{id}/restart", s.handleRestartDestination)
+			// Dump the newest part of one destination's broadcast delay and stay
+			// on the air. The dumped programme never airs; the delay stays
+			// shorter until the destination next starts.
+			r.With(s.requireSource).Post("/destinations/{id}/delay/dump", s.handleDumpDestinationDelay)
 			r.With(s.requireSource).Post("/destinations/{id}/refresh-key", s.handleRefreshKey)
 
 			// YouTube paired vertical (#7): the 9:16 companion of a horizontal broadcast. See

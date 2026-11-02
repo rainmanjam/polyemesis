@@ -83,21 +83,26 @@ func TestAllTypesKeepsTheOperationalPickerOrderItAlreadyHad(t *testing.T) {
 	held := []Type{TypeDestinationHeld}
 	// The eighth, offload.stuck (Wave 4 #10), after it.
 	offload := []Type{TypeOffloadStuck}
+	// The ninth, delay.dumped, an audit event appended after that.
+	dumped := []Type{TypeDelayDumped}
 	all := AllTypes()
-	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held)+len(offload) {
+	if len(all) != len(operational)+len(auditTypes)+len(health)+len(lifecycle)+len(diagnostics)+len(ruleAudit)+len(held)+len(offload)+len(dumped) {
 		t.Fatalf("AllTypes has %d entries, want %d operational + %d audit + %d health + "+
-			"%d lifecycle + %d diagnostics + %d rule audit + %d held + %d offload",
+			"%d lifecycle + %d diagnostics + %d rule audit + %d held + %d offload + %d dumped",
 			len(all), len(operational), len(auditTypes), len(health), len(lifecycle),
-			len(diagnostics), len(ruleAudit), len(held), len(offload))
+			len(diagnostics), len(ruleAudit), len(held), len(offload), len(dumped))
 	}
-	if all[len(all)-3] != TypeMCPAction {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-3, all[len(all)-3], TypeMCPAction)
+	if all[len(all)-4] != TypeMCPAction {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-4, all[len(all)-4], TypeMCPAction)
 	}
-	if all[len(all)-2] != TypeDestinationHeld {
-		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeDestinationHeld)
+	if all[len(all)-3] != TypeDestinationHeld {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-3, all[len(all)-3], TypeDestinationHeld)
 	}
-	if last := all[len(all)-1]; last != TypeOffloadStuck {
-		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeOffloadStuck)
+	if all[len(all)-2] != TypeOffloadStuck {
+		t.Errorf("AllTypes()[%d] = %q, want %q; an existing picker row moved", len(all)-2, all[len(all)-2], TypeOffloadStuck)
+	}
+	if last := all[len(all)-1]; last != TypeDelayDumped {
+		t.Errorf("AllTypes ends with %q, want %q appended last", last, TypeDelayDumped)
 	}
 	for i, want := range operational {
 		if all[i] != want {

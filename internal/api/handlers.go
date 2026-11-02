@@ -1222,9 +1222,10 @@ func metricsDestination(d engine.DestStatus) metrics.Destination {
 		Platform: string(d.Platform),
 		Enabled:  d.Enabled,
 		SourceID: d.SourceID,
-		Delay:    metrics.DestDelay{Seconds: d.DelaySeconds},
+		Delay:    metrics.DestDelay{Seconds: d.DelaySeconds, EffectiveSeconds: float64(d.DelaySeconds)},
 	}
 	if dl := d.Delay; dl != nil {
+		md.Delay.EffectiveSeconds = dl.EffectiveSeconds
 		md.Delay.Fill = dl.Fill
 		md.Delay.MemBytes, md.Delay.DiskBytes = dl.MemBytes, dl.DiskBytes
 		md.Delay.DroppedBytes = dl.DroppedBytes

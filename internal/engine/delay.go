@@ -237,8 +237,9 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 			e.log.Warn("broadcast delay: dropping data to keep the delay", "dest", row.Name, "reason", msg)
 			e.streamDelay(row, dd, delayEventDropping, msg)
 		},
-		Out: hub.Deliver,
-		Log: e.log.With("dest", row.Name),
+		OnDumped: func(res delayline.DumpResult) { e.onDelayDumped(row, dd, res) },
+		Out:      hub.Deliver,
+		Log:      e.log.With("dest", row.Name),
 	}, port)
 	if err != nil {
 		e.releasePort(port)
@@ -481,6 +482,17 @@ type DelayStatus struct {
 	DroppedBytes uint64 `json:"droppedBytes,omitempty"`
 	// Problem is why something was dropped, when it was.
 	Problem string `json:"problem,omitempty"`
+	// EffectiveSeconds is the delay the audience has: Seconds less everything
+	// dumped. It is Seconds until a dump, and returns to it when the
+	// destination next starts. See delay_dump.go.
+	EffectiveSeconds float64 `json:"effectiveSeconds"`
+	// DumpedSeconds is the programme time dumped since this run started.
+	DumpedSeconds float64 `json:"dumpedSeconds,omitempty"`
+	// Dumping is true while a dump waits for its resume keyframe.
+	Dumping bool `json:"dumping,omitempty"`
+	// Dumpable is true when a dump can be asked for now: on the air, with a
+	// keyframe in the buffer to cut at.
+	Dumpable bool `json:"dumpable"`
 }
 
 // Delay phases.
@@ -504,6 +516,12 @@ const (
 // Nothing secret: the destination is named by id, name and platform as on
 // every destination event, and the data is the delay and buffer figures.
 func (e *Engine) streamDelay(row *db.Destination, dd *destDelay, reason, detail string) {
+	e.streamDelayWith(row, dd, reason, detail, nil)
+}
+
+// streamDelayWith is streamDelay with extra data fields, which a dump uses to
+// say what it did.
+func (e *Engine) streamDelayWith(row *db.Destination, dd *destDelay, reason, detail string, extra map[string]any) {
 	hub := e.Stream()
 	if hub == nil || row == nil {
 		return
@@ -521,7 +539,14 @@ func (e *Engine) streamDelay(row *db.Destination, dd *destDelay, reason, detail 
 			if st.DroppedBytes > 0 {
 				data["droppedBytes"] = st.DroppedBytes
 			}
+			data["effectiveSeconds"] = st.EffectiveSeconds
+			if st.DumpedSeconds > 0 {
+				data["dumpedSeconds"] = st.DumpedSeconds
+			}
 		}
+	}
+	for k, v := range extra {
+		data[k] = v
 	}
 	hub.Publish(eventstream.Envelope{
 		Type:        eventstream.TypeDestinationDelay,
@@ -546,6 +571,10 @@ func delayStatusOf(dd *destDelay) *DelayStatus {
 		DiskBytes:       s.DiskBytes,
 		DroppedBytes:    s.DroppedBytes,
 		Problem:         s.Err,
+
+		EffectiveSeconds: s.Effective.Seconds(),
+		DumpedSeconds:    s.Dumped.Seconds(),
+		Dumping:          s.Dumping,
 	}
 	switch {
 	case s.Draining:
@@ -553,6 +582,7 @@ func delayStatusOf(dd *destDelay) *DelayStatus {
 		out.DrainRemainingSeconds = s.DrainRemaining.Seconds()
 	case s.Releasing:
 		out.Phase = DelayOnAir
+		out.Dumpable = s.Spliceable && !s.Dumping
 	default:
 		out.Phase = DelayBuffering
 	}

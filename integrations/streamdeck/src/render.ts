@@ -44,7 +44,7 @@ export function titleFor(face: KeyFace, locale: string): string {
   if (face.reason) lines.push(`${clip(t(locale, face.reason, face.reasonVars), TITLE_MAX - badge.length)}${badge}`);
   if (face.detail) lines.push(clip(face.detail));
   if (face.warning) lines.push(clip(t(locale, face.warning)));
-  if (face.delaySeconds) lines.push(clip(t(locale, "streamdeck.delay.marker", { seconds: face.delaySeconds })));
+  if (face.delaySeconds) lines.push(clip(delayMarker(face.delaySeconds, face.delayEffectiveSeconds, locale)));
   return lines.join("\n");
 }
 
@@ -67,9 +67,24 @@ export function issueLines(face: KeyFace, locale: string): string[] {
   return lines;
 }
 
-/** A stop key's text: the hold instruction, then what a completed hold would end. */
-export function stopTitle(count: number | undefined, locale: string): string {
-  const hold = t(locale, "streamdeck.stop.hold");
+/** "Delay 30s", or "Delay 18/30s" while a dump has the delay running shorter than configured. */
+export function delayMarker(seconds: number, effective: number | undefined, locale: string): string {
+  if (effective !== undefined && effective < seconds) {
+    return t(locale, "streamdeck.delay.dumped", { effective, seconds });
+  }
+  return t(locale, "streamdeck.delay.marker", { seconds });
+}
+
+/**
+ * A stop key's text: the hold instruction, then what a completed hold would end. A stop key set to cut
+ * the delayed tail says "Hold to cut" instead, so the operator knows what the hold does.
+ */
+export function stopTitle(
+  count: number | undefined,
+  locale: string,
+  holdKey: "streamdeck.stop.hold" | "streamdeck.stop.holdCut" = "streamdeck.stop.hold",
+): string {
+  const hold = t(locale, holdKey);
   if (count === undefined) return [hold, t(locale, "streamdeck.stop.countFailed")].join("\n");
   const detail = count > 0 ? t(locale, "streamdeck.stop.youtube", { count }) : t(locale, "streamdeck.stop.noYoutube");
   return [hold, detail].join("\n");

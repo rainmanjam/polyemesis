@@ -144,7 +144,8 @@ var (
 	}
 	mcpWantContentTools = []string{"get_chat_user", "search_chat", "search_transcripts"}
 	mcpWantWriteTools   = []string{
-		"apply_routing_preset", "create_clip", "end_poll", "go_live", "retry_destination", "schedule_broadcast",
+		"apply_routing_preset", "create_clip", "dump_all_delays", "dump_destination_delay", "end_poll", "go_live",
+		"retry_destination", "schedule_broadcast",
 		"set_recording", "set_track_level", "start_destination", "start_poll", "stop_all_destinations",
 		"stop_destination", "switch_failover_source",
 	}
@@ -171,6 +172,8 @@ func mcpSampleArgs() map[string]map[string]any {
 		"retry_destination":      {"destinationId": 1, "confirm": true},
 		"go_live":                {"confirm": true},
 		"stop_all_destinations":  {"confirm": true},
+		"dump_destination_delay": {"destinationId": 1, "seconds": 5, "confirm": true},
+		"dump_all_delays":        {"seconds": 5, "confirm": true},
 		"set_track_level":        {"destinationId": 1, "track": 0, "muted": true},
 		"apply_routing_preset":   {"destinationId": 1, "preset": routing.Presets()[0].ID, "confirm": true},
 		"set_recording":          {"enabled": true},
@@ -387,6 +390,8 @@ func TestStopToolsAndGoLiveDoNothingWithoutConfirmAndAnswerWithTheImpact(t *test
 		{"stop_destination", map[string]any{"destinationId": 1}, `"youtubeBroadcasts"`},
 		{"stop_destination", map[string]any{"destinationId": 1, "confirm": false}, `"youtubeBroadcasts"`},
 		{"stop_all_destinations", nil, `"youtubeBroadcasts"`},
+		{"dump_destination_delay", map[string]any{"destinationId": 1}, `"delay"`},
+		{"dump_all_delays", map[string]any{"seconds": 5}, `"delays"`},
 		{"go_live", nil, `"destinations"`},
 		{"set_recording", map[string]any{"enabled": false}, `"recording"`},
 		{"schedule_broadcast", map[string]any{"name": "end", "action": "stop", "kind": "daily",

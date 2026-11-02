@@ -1586,6 +1586,22 @@ export function Dashboard() {
                     ? () => act(d.id, () => api.stopDestination(d.id, true), "cut the delayed destination")
                     : undefined
                 }
+                /* Not through `act`: the card shows the server's figures, or its
+                 * reason for refusing (409 "nothing to dump"), next to the
+                 * delay itself, so the answer and the error both go back to it.
+                 * The status poll brings the shorter delay onto the badge. */
+                onDump={
+                  d.delay
+                    ? async (seconds) => {
+                        setBusyId(d.id);
+                        try {
+                          return await api.dumpDestinationDelay(d.id, seconds);
+                        } finally {
+                          setBusyId(null);
+                        }
+                      }
+                    : undefined
+                }
                 onRestart={() =>
                   act(d.id, () => api.restartDestination(d.id), "restart the destination")
                 }

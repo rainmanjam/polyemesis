@@ -48,6 +48,9 @@ export interface KeyFace {
   /** The destination's broadcast delay in seconds (#11), for the marker line:
    *  a delayed key must not look like the live platform. */
   delaySeconds?: number;
+  /** The delay actually running, when a dump has made it shorter than delaySeconds: the marker then
+   *  reads effective/configured, so a key never claims more delay than the viewer has. */
+  delayEffectiveSeconds?: number;
   /** How many current issues the face does not show: the "+N" badge. */
   more?: number;
   /** Every current issue, most severe first. The face shows the first; the
@@ -163,6 +166,12 @@ export function destinationFace(
   // the live platform, whatever the face above it says.
   const seconds = dest.delay?.seconds ?? dest.delaySeconds ?? 0;
   if (seconds > 0) face.delaySeconds = seconds;
+  // After a dump the delay runs shorter until the next start: the marker says so ("Delay 18/30s").
+  const effective = dest.delay?.effectiveSeconds;
+  if (seconds > 0 && effective !== undefined && Math.round(effective) < Math.round(seconds)) {
+    face.delaySeconds = Math.round(seconds);
+    face.delayEffectiveSeconds = Math.round(effective);
+  }
   return face;
 }
 

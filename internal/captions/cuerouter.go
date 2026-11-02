@@ -61,6 +61,8 @@ type CueRouter struct {
 type routeTarget struct {
 	delay   time.Duration
 	pending map[*pendingCue]func() bool
+	// cues is what each pending delivery carries, so a dump can re-time it.
+	cues map[*pendingCue]transcribe.LiveCaption
 }
 
 // pendingCue identifies one scheduled delivery so a timer callback can find and
@@ -108,7 +110,8 @@ func (r *CueRouter) SetTargets(targets []CueTarget) {
 	}
 	for id, delay := range want {
 		if _, ok := r.targets[id]; !ok {
-			r.targets[id] = &routeTarget{delay: delay, pending: map[*pendingCue]func() bool{}}
+			r.targets[id] = &routeTarget{delay: delay, pending: map[*pendingCue]func() bool{},
+				cues: map[*pendingCue]transcribe.LiveCaption{}}
 		}
 	}
 }
@@ -148,11 +151,61 @@ func (r *CueRouter) schedule(id int64, rt *routeTarget, c transcribe.LiveCaption
 			return
 		}
 		delete(cur.pending, key)
+		delete(cur.cues, key)
 		if !r.closed {
 			r.deliver(id, c)
 		}
 	})
 	rt.pending[key] = stop
+	rt.cues[key] = c
+}
+
+// Dump re-times one destination's queued cues after part of its broadcast
+// delay was dumped: the programme that arrived in [from, to) never airs, and
+// what arrives after airs with the shorter delay.
+//
+//   - Cues spoken before from belong to programme still in the buffer, which
+//     airs on the old schedule: they keep their time.
+//   - Cues spoken in [from, to) are the dumped words: cancelled, so they
+//     never appear.
+//   - Cues spoken from to on are moved to the new delay.
+//
+// The target takes the new delay, so the SetTargets that follows with the
+// same delay cancels nothing. Without this a dump cleared every queued cue,
+// leaving the programme still in the buffer without captions.
+func (r *CueRouter) Dump(id int64, from, to time.Time, delay time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rt := r.targets[id]
+	if r.closed || rt == nil {
+		return
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	var move []transcribe.LiveCaption
+	for key, c := range rt.cues {
+		spoken := c.SpokenAt()
+		if spoken.Before(from) {
+			continue
+		}
+		if stop := rt.pending[key]; stop != nil {
+			stop()
+		}
+		delete(rt.pending, key)
+		delete(rt.cues, key)
+		if !spoken.Before(to) {
+			move = append(move, c)
+		}
+	}
+	rt.delay = delay
+	for _, c := range move {
+		if wait := ReleaseAt(c, delay).Sub(r.now()); wait > 0 {
+			r.schedule(id, rt, c, wait)
+		} else {
+			r.deliver(id, c)
+		}
+	}
 }
 
 // deliver hands one cue to the sink. The caller holds mu, so the sink must not
@@ -170,6 +223,7 @@ func cancelAll(rt *routeTarget) {
 			stop()
 		}
 		delete(rt.pending, k)
+		delete(rt.cues, k)
 	}
 }
 

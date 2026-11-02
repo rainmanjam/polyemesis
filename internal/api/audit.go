@@ -83,6 +83,11 @@ const (
 	fieldForced    = "Forced past a live broadcast"
 	fieldRuleName  = "Rule"
 	fieldChange    = "Change"
+	// The destination a dump took programme from.
+	fieldDestination = "Destination"
+	// Whether a dump's record is final, provisional (the stream had not yet
+	// resumed) or aborted (the line was cut before it did).
+	fieldDumpStatus = "Dump"
 )
 
 // clientIP is the address the request came from, resolved the same way the
