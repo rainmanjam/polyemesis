@@ -59,7 +59,7 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       Two install cards side by side at 768 gives each ~360px, which the
       commands fit now that they wrap. */}
   <section class="wrap grid gap-6 pb-16 md:grid-cols-2">
-    <div class="card p-6" data-reveal>
+    <div class="card p-6">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-lg font-medium">Docker</h2>
         <span class="chip">recommended</span>
@@ -87,7 +87,7 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       </p>
     </div>
 
-    <div class="card p-6" data-reveal>
+    <div class="card p-6">
       <h2 class="text-lg font-medium">Installer script</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted">
         Asks what you want, then sets up Docker or a static binary with a
@@ -118,7 +118,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       </p>
     </div>
 
-    <div class="card p-6" data-reveal>
+    <div class="card p-6">
       <h2 class="text-lg font-medium">Static binary</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted">
         The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg — and it
@@ -157,7 +157,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
         recipe that is nearly right is worse than none: `make build` is what
         embeds the UI, and a reader who runs `go build` instead gets a binary
         that starts and serves nothing. */}
-    <div class="card p-6" data-reveal>
+    <div class="card p-6">
       <h2 class="text-lg font-medium">Build from a clone</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted">
         Go 1.27.0+, Node 20.19+/22.12+ and FFmpeg. The UI is built and embedded
@@ -239,7 +239,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
         leave on the last row. The four above are alternatives — pick one — and
         this one is what everybody does next whichever they picked, so the card
         that reads differently is the one that IS different. */}
-    <div class="card p-6 md:col-span-2" data-reveal>
+    <div class="card p-6 md:col-span-2">
       <h2 class="text-lg font-medium">Then point OBS at it</h2>
       <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
         <li>
@@ -277,7 +277,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
     </div>
   </section>
 
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap max-w-3xl">
       <h2 class="text-2xl font-medium">What it needs from the machine</h2>
       <dl class="mt-6 divide-y divide-line border-y border-line">

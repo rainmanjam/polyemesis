@@ -214,38 +214,5 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
       <slot />
     </main>
     <Footer />
-
-    {/* Entry reveals, for browsers without scroll-driven animations. Where
-        `animation-timeline: view()` exists the CSS drives it and this never
-        runs — the check is the same @supports test, asked from script.
-
-        The elements start visible in the markup and are only hidden once this
-        script has confirmed it can bring them back. A reader with JavaScript
-        off, or one whose network drops this file, sees the whole page rather
-        than a column of blank space. */}
-    <script is:inline>
-      (() => {
-        const css = window.CSS;
-        if (css && css.supports && css.supports("animation-timeline", "view()")) return;
-        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-        const targets = document.querySelectorAll("[data-reveal]");
-        if (!targets.length || !("IntersectionObserver" in window)) return;
-
-        targets.forEach((el) => el.classList.add("reveal"));
-
-        const io = new IntersectionObserver(
-          (entries) => {
-            for (const e of entries) {
-              if (!e.isIntersecting) continue;
-              e.target.classList.add("shown");
-              io.unobserve(e.target); // reveal once; re-animating on scroll-back is nausea, not polish
-            }
-          },
-          { rootMargin: "0px 0px -8% 0px", threshold: 0.05 },
-        );
-        targets.forEach((el) => io.observe(el));
-      })();
-    </script>
   </body>
 </html>

@@ -74,24 +74,30 @@ const servedAt = (page) => "/" + page.replace(/\.html$/, "").replace(/(^|\/)inde
 const cssFiles = readdirSync(join(DIST, "_astro")).filter((f) => f.endsWith(".css"));
 const css = cssFiles.map((f) => readFileSync(join(DIST, "_astro", f), "utf8")).join("\n");
 
-// 1. animation-timeline must survive as its own declaration.
-const folded = /animation:[^;}]*\bview\(\)/.exec(css);
-if (folded) {
-  fail.push(
-    `animation-timeline was folded into an \`animation\` shorthand, which Chrome drops:\n` +
-    `      ${folded[0].slice(0, 90)}\n` +
-    `    Use the longhands so the minifier has no shorthand to merge into.`,
-  );
+/* 1. NO SCROLL REVEALS. These two checks used to guard the reveals themselves
+ *    (the timeline surviving minification, reduced motion switching it off).
+ *    The 2026-11 design review removed the reveals: a full-page capture, a
+ *    print or a link preview rendered every section below the hero as blank
+ *    space, and the motion carried nothing a reader needed. What is guarded
+ *    now is that they stay removed, because `data-reveal` on one section is
+ *    the realistic way they come back. */
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  if (/\bdata-reveal\b/.test(html)) {
+    fail.push(`${f}: carries \`data-reveal\` — scroll reveals were removed; content below the hero renders in place`);
+  }
 }
-if (!/animation-timeline:\s*view\(\)/.test(css)) {
-  fail.push("no `animation-timeline: view()` in the built CSS — scroll reveals are not shipping");
+if (/animation-timeline\s*:/.test(css) || /animation:[^;}]*\bview\(\)/.test(css)) {
+  fail.push("the built CSS drives an animation from a scroll timeline — scroll reveals were removed and must not come back");
 }
 
-// 2. Reduced motion must switch scroll-driven reveals OFF, not shorten them.
+// 2. Reduced motion must make the hero's entry cascade paint at once. `.rise`
+//    holds its `from` keyframe (opacity 0) through its delay because of
+//    `animation-fill-mode: both`, so zeroing duration alone is not enough.
 if (!/@media\s*\(prefers-reduced-motion/.test(css)) {
   fail.push("no prefers-reduced-motion block in the built CSS");
-} else if (!/animation-name:\s*none\s*!important/.test(css)) {
-  fail.push("reduced motion does not set `animation-name: none !important` — a scroll-driven reveal ignores animation-duration");
+} else if (!/animation-delay:\s*0s?\s*!important/.test(css)) {
+  fail.push("reduced motion does not set `animation-delay: 0s !important` — the hero cascade still staggers in for a reader who asked for less motion");
 }
 
 /* The two mobile-overflow fixes must still be IN the shipped CSS.
