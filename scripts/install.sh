@@ -1088,8 +1088,8 @@ caption_font_pkgs() {
 caption_font_cjk_size() {
   case "$1" in
     apt-get) echo "about 60 MB" ;;
-    dnf)     echo "about 130 MB" ;;
-    apk)     echo "about 95 MB" ;;
+    dnf)     echo "about 85 MB" ;;
+    apk)     echo "about 75 MB" ;;
     pacman)  echo "about 190 MB" ;;
     *)       echo "size unknown" ;;
   esac

@@ -193,7 +193,7 @@ Korean render out of the box:
 | Set | Covers | Download |
 |---|---|---|
 | fontconfig + DejaVu | Latin, Greek, Cyrillic, Arabic, Hebrew | about 3 MB |
-| Noto CJK (Sans) | Chinese, Japanese, Korean | about 60 MB (apt), 95 MB (apk), 130 MB (dnf), 190 MB (pacman) |
+| Noto CJK | Chinese, Japanese, Korean | about 60 MB (apt), 75 MB (apk), 85 MB (dnf), 190 MB (pacman) |
 
 The packages, by package manager:
 
