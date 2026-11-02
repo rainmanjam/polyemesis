@@ -235,6 +235,11 @@ func (s *Server) offlineClipPath(jobID int64) (string, error) {
 	if err := json.Unmarshal(job.Result, &res); err != nil || res.Path == "" {
 		return "", errors.New("that job produced no file")
 	}
+	if res.Vertical {
+		// The card plays in the 16:9 player, where a 9:16 short is a narrow
+		// strip between black bars.
+		return "", errors.New("that export is a 9:16 short; the offline card needs a landscape clip")
+	}
 	path, _, err := s.clipExportPath(res.Path)
 	if err != nil {
 		return "", err

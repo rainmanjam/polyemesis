@@ -29,6 +29,8 @@ func TestAPIDocRefusedRouteTableIsReadScopeDeniedPatterns(t *testing.T) {
 		23: "twenty-three",
 		24: "twenty-four",
 		25: "twenty-five",
+		26: "twenty-six",
+		27: "twenty-seven",
 	}
 	total := len(readScopeDeniedPatterns)
 	totalWord, ok := words[total]

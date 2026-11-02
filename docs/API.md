@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-three `GET`s among the twenty-five refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-five `GET`s among the twenty-seven refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +133,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-five routes are refused outright**, for three different reasons. Masking
+**Twenty-seven routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last sixteen are `403` because of what
+are `403` because of what they *do*. The last eighteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -166,6 +166,8 @@ are `403` because of what they *do*. The last sixteen are `403` because of what
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
+| `GET /clipper/recordings/{id}/highlights` | each highlight suggestion carries a transcript excerpt: the words again |
+| `GET /clipper/templates` | the operator's saved short layouts, with the fonts directory's listing and whether this FFmpeg can draw text |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
@@ -1335,6 +1337,11 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` | `/clipper/recordings/{id}`, `/keyframes`, `/transcript` |
 | `POST` | `/clipper/recordings/{id}/plan`, `/export` |
 | `GET` | `/clipper/jobs/{id}/download` |
+| `POST` | `/clipper/recordings/{id}/highlights/scan` |
+| `GET` | `/clipper/recordings/{id}/highlights` |
+| `POST` | `/clipper/highlights/{id}/accept`, `/clipper/highlights/{id}/dismiss` |
+| `GET` `POST` | `/clipper/templates` |
+| `DELETE` | `/clipper/templates/{id}` |
 
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
@@ -1343,6 +1350,107 @@ is refused, not served.
 seen it: one entry per target with its `state` (`pending`, `uploading`,
 `verified`, `failed`, `stuck`), `attempts` and `lastError`. Offload copies and
 never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
+
+**Vertical shorts.** `/plan` and `/export` take an optional `vertical` object,
+and with it the export is a 9:16 short: 1080x1920 H.264 (yuv420p) with one
+stereo AAC track, in MP4. Its file name carries the layout and a digest of its
+settings (`…-vertical-stacked-1a2b3c4d.mp4`), and a name already on disk or
+held by a queued export gets `-2`, `-3`, so shorts of one span in different
+layouts, or the same short queued twice, are separate files; a short is never
+published over an existing file.
+`layout` is `center` (a 9:16 crop; `focus` 0..1 pans it, default 0.5),
+`stacked` (`face` is the face-cam box and `game` the gameplay box, each
+`{x, y, w, h}` as fractions of the source frame; `faceShare` 0.2..0.6 is the
+face panel's share of the height, default 0.4; `faceBottom` puts it under the
+gameplay) or `blur` (the whole frame fitted across the width over a blurred
+copy of itself). Crops are never smaller than 2 px or odd, whatever the source:
+a box that would be smaller on a tiny master is rounded UP to 2 px rather than
+refused.
+`captions: {enabled, style}` burns the transcript over the clip's span into
+the picture: the words come from the stored transcript, never from the
+request, and follow the chosen tracks. A recording with a gap keeps each
+caption on its own picture, the short is the length of the picture it
+contains -- the re-encoded length and the 60-second warning are measured on
+that, not on the span -- and an in-point inside a gap moves to where the
+recording resumes (the plan says so).
+
+**Caption fonts.** Captions are an ASS subtitle script burned in by libass
+(FFmpeg's `subtitles` filter), which shapes right-to-left and complex scripts,
+wraps, keeps text inside the frame, and stacks captions spoken at the same
+time on DIFFERENT tracks instead of drawing them over each other. On one
+track a line ends where the next begins, so a transcriber's few-millisecond
+overlaps do not make the next line jump. Each caption's paragraph direction
+comes from its own text, so a Hebrew or Arabic sentence ends -- punctuation
+included -- at the left. A failed short's job error is FFmpeg's own reason --
+including the subtitles filter's own failure, such as "Unable to open" its
+script -- without libass's font and glyph lines, which name caption characters. `style.font` names a font FILE
+already in the fonts directory (`<data>/fonts`); its own family and weight are
+what libass is asked for. libass looks in that directory first and then, for
+any glyph the chosen font lacks, at every font **installed on the machine**
+through fontconfig -- so what a CJK, Arabic, Hebrew or emoji caption looks
+like depends on the fonts installed. The Docker images install fontconfig with
+DejaVu, which draws Arabic and Hebrew (shaped, right to left) and monochrome
+symbols; CJK is not in the default image (88 MiB) and is added with
+`--build-arg CAPTION_FONTS="fontconfig font-dejavu font-noto-cjk"` or by
+dropping a `.ttf`/`.otf` that has the glyphs into `<data>/fonts`. libass draws
+outline glyphs only, so a colour emoji font is never used: an emoji draws from
+a monochrome font that has it (DejaVu has some) or as a box. On a
+host install, `scripts/install.sh` (binary mode) installs fontconfig, DejaVu and
+Noto CJK for you (`--no-cjk-fonts` skips CJK; see INSTALL.md, "Caption
+fonts"); otherwise install fonts the usual way for the OS. The plan warns, naming
+the script (never a character of what was said), when captions need glyphs
+the bundled Inter does not have. An empty `style.outline` is the default
+6 px; `-1` is none. A short carries at most 2000 caption events, with a
+warning for the rest. Without libass (a Homebrew FFmpeg has none) the short is
+made without captions and the plan says so.
+
+**Load.** Every frame is re-encoded, so the in-point is exact whatever `mode`
+says. The encode and every probe it runs are started below normal priority --
+through `nice`/`ionice` on Linux and macOS, and in the `BELOW_NORMAL`
+priority class on Windows -- so a live broadcast's encoders win the CPU. The
+encoder's thread count is capped at half the cores unless the request sets
+one; that bounds how many cores a short occupies at once, not its share of a
+busy machine, which is what the priority is for. The job governor decides
+when an export STARTS; one already running is not paused if a broadcast
+begins. A short longer than 60 seconds is planned and exported with a
+warning, not refused.
+The job stores the caption tracks, style and font NAME -- never the words,
+the font's path or the server's capabilities, because `/jobs` is readable by
+a read token -- and the worker resolves them when it runs. A finished short's
+job result carries `"vertical": true`; the playout offline card refuses one.
+
+**Highlights.** `POST /clipper/recordings/{id}/highlights/scan` (body
+`{"useModel": bool}`, optional) queues a `highlights.scan` job. It measures
+loudness, lines chat up with the recording, and stores suggestions; it cuts
+nothing. A session (a stream recorded as several files) has one review queue
+and one scan, whichever of its files the request names. A scan already queued
+for it absorbs the request; one that asks for scoring upgrades a queued plain
+scan, and gets a scan of its own if the plain one is already running. Chat is
+counted once per message across files whose clocks overlap. `chat_messages`
+records no programme, so on an install with two programmes live at once, the
+other programme's chat can count towards this recording's bursts.
+With `useModel` the scan scores the transcript excerpts in one call, through
+the Automod PRIMARY model's provider (OpenAI-compatible protocol only), when
+**Use AI for highlight scoring** (`automod.highlightScoring`, off by default)
+is switched on; the Automod model block itself need not be. It spends a budget
+of its own, fails open, and reports `unavailable` when no suggestion has any
+transcript. `GET /clipper/recordings/{id}/highlights` is the review queue: each
+suggestion's `startMs`/`endMs`, `score`, the `signals` that fired (`chat`,
+`loudness`, `model`, each with `peak` and `baseline`), its `excerpt` and `state`
+(`pending`, `accepted`, `dismissed`), plus `modelAvailable` and `modelReason`.
+Suggestions never overlap and never list a signal outside their span. A rescan
+does not offer a moment again that is mostly inside one already decided.
+`POST /clipper/highlights/{id}/accept` takes the `/export` body -- in and out
+default to the suggestion's -- and queues exactly the export the editor would;
+a second accept, or one after a dismiss, is `409`. `…/dismiss` decides it the
+other way and queues nothing.
+
+**Templates.** `GET /clipper/templates` lists saved `{id, name, vertical}`
+templates beside `layouts`, `fonts`, `burnCaptions`, `maxShortSeconds` and
+`defaultStyle`. `POST` saves `{name, vertical}`, replacing one of the same name
+(1 to 60 characters, at most 100 templates); the whole template is validated,
+caption style included even when captions are off in it, and a font it names
+must be in the fonts directory. `DELETE /clipper/templates/{id}` removes one.
 
 **`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
 Absent, it deletes the whole transcript; present, it deletes one track's, so a

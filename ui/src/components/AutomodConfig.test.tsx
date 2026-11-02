@@ -353,3 +353,26 @@ describe("AutomodConfig: the API key", () => {
     expect(await screen.findByText(/could not be stored/)).toBeTruthy();
   });
 });
+
+describe("AutomodConfig: AI highlight scoring", () => {
+  beforeEach(() => {
+    stats.mockReset();
+    stats.mockResolvedValue(zeroStats() as never);
+  });
+  afterEach(cleanup);
+
+  // OWNER DECISION D: its own switch, off unless switched on, written to
+  // automod.highlightScoring and nowhere else.
+  //
+  // MUTATION: the switch writes model.enabled instead. Observed: FAIL.
+  it("is its own switch, off by default, and writes only its own leaf", async () => {
+    const onChange = show(automod());
+    await waitFor(() => expect(stats).toHaveBeenCalled());
+    const sw = screen.getByRole("switch", { name: "Use AI for highlight scoring" });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(sw);
+    const next = onChange.mock.calls.at(-1)?.[0] as Settings;
+    expect(next.automod?.highlightScoring).toBe(true);
+    expect(next.automod?.model.enabled).toBe(false);
+  });
+});

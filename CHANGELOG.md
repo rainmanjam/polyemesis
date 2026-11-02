@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Added
 
+- **The installer sets up caption fonts, CJK included.** In binary mode `install.sh` installs
+  fontconfig, DejaVu (Latin, Greek, Cyrillic, Arabic, Hebrew) and Noto CJK with the host's own
+  package manager (apt-get, dnf, apk or pacman) and runs `fc-cache -f`, so burned-in captions in
+  Chinese, Japanese and Korean render out of the box. The plan shows what it will install and the
+  download size (CJK is about 60 MB on apt, up to about 190 MB on pacman); `--no-cjk-fonts` leaves
+  CJK out and keeps the rest. Fonts already present are left alone, and a package that will not
+  install is a warning, never a failed install. The generated `update.sh` installs any that have
+  gone missing before it stops the service, keeping the install-time choice. See
+  docs/INSTALL.md, "Caption fonts".
+
 - **Broadcast delay: Dump (#11).** A delayed destination that is on the air can drop the newest
   part of its delay buffer, so what just happened never reaches that platform, and it stays on the
   air. Choose everything since the last dump or a number of seconds, from the card's delay panel,
@@ -44,6 +54,21 @@ its first tagged release.
   clock, a year in the browser and the seekable window at the edge; one-second playlists),
   `private`/`no-store` for anything token-gated or signed in and for every refusal, and an `ETag`
   on every file. See docs/STORAGE.md and docs/CDN.md. In all 15 languages.
+- **Highlight suggestions in the clip editor (Wave 4 #5a).** *Find highlights* queues a
+  `highlights.scan` job that looks for chat bursts over the stream's own baseline and loudness
+  peaks (EBU R128, measured from the recording), and, if you tick it and switch on **Use AI for
+  highlight scoring** in Automod settings (off by default), has the Automod model's provider score
+  the transcript excerpts in one call. Results land in a review queue with each
+  suggestion's span, score, the signals that fired and the words spoken; you accept (an ordinary
+  clip export, with the editor's settings) or dismiss. Nothing is clipped until you accept, and a
+  rescan does not offer a moment you already decided again. In all 15 languages.
+- **Vertical shorts (Wave 4 #5b).** The clip editor exports a 1080x1920 H.264/AAC MP4 for Shorts,
+  TikTok and Reels: centre crop with a pan, face cam stacked over gameplay (a box you draw on a
+  still of the frame), or the whole frame over a blurred copy. Captions are burned in from the
+  transcript with the bundled font, in a style you choose, and layouts can be saved as templates.
+  A short over 60 seconds exports with a warning rather than being refused. Clip encodes run
+  under the job governor's priority wrapper so they yield to a live broadcast, and the playout
+  offline card does not offer a 9:16 short. In all 15 languages.
 - **X go-live announcement: once per show by default (#3, PROVISIONAL).** An X destination has a
   **Go-live announcement** setting in the X console (`xGoLiveTweet`): *on the first go-live of a
   show only* (the default), *on every go-live*, or *never*. A show lasts while the destination is

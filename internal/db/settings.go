@@ -1782,6 +1782,13 @@ type AutomodSettings struct {
 	// single Action, TimeoutForBan and the per-category action table. The
 	// secondary is a second connection to ask, not a second policy.
 	Model AutomodModel `json:"model"`
+	// HighlightScoring lets the clip editor's highlight scan send transcript
+	// excerpts to the PRIMARY model's provider for scoring (Wave 4 #5). Its own
+	// switch, off by default: moderating chat and judging what was said on
+	// stream are separate consents, even over the same provider. The provider,
+	// key and hourly ceiling are the primary model's; the scan spends a budget
+	// of its own.
+	HighlightScoring bool `json:"highlightScoring,omitempty"`
 	// Secondary is the OpenAI-compatible fallback (by default), asked about a
 	// message only when the primary could not answer it. Its Instruction,
 	// Action, TimeoutForBan and CategoryActions are not read: the primary's
