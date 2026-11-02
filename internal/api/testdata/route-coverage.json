@@ -12,10 +12,10 @@
   "guardedFloor": 31,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 294,
+    "methodPatternPairs": 301,
     "swept": 79,
     "excused": 60,
-    "denied": 155,
+    "denied": 162,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -281,6 +281,18 @@
       "zeroSource": "unguarded"
     },
     {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/highlights/{id}/accept",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/highlights/{id}/dismiss",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
       "method": "GET",
       "pattern": "/api/v1/clipper/jobs/{id}/download",
       "coverage": "denied",
@@ -300,6 +312,18 @@
     },
     {
       "method": "GET",
+      "pattern": "/api/v1/clipper/recordings/{id}/highlights",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/recordings/{id}/highlights/scan",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}/keyframes",
       "coverage": "denied",
       "zeroSource": "unguarded"
@@ -314,6 +338,24 @@
       "method": "GET",
       "pattern": "/api/v1/clipper/recordings/{id}/transcript",
       "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/clipper/templates",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/clipper/templates",
+      "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "DELETE",
+      "pattern": "/api/v1/clipper/templates/{id}",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {
@@ -2466,6 +2508,16 @@
       "counterpart": ""
     },
     {
+      "route": "GET /api/v1/clipper/recordings/{id}/highlights",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "clipHighlights"
+    },
+    {
       "route": "GET /api/v1/clipper/recordings/{id}/keyframes",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2484,6 +2536,16 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/clipper/templates",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "clipTemplates"
     },
     {
       "route": "GET /api/v1/clips/{name}/download",

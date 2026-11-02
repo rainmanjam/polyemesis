@@ -10,14 +10,15 @@ import (
 	"strings"
 )
 
-// Text overlays need a font FILE, and the shipping image has none.
+// Text overlays need a font FILE, and cannot count on the host for one.
 //
-// This is not a theoretical concern. The Alpine image polyemesis ships carries
-// fontconfig and zero font files, so `drawtext=text=hi` fails outright with
-// "Cannot find a valid font for the family Sans". A build that relies on the
-// host having fonts works on a developer laptop and fails on every deployment,
-// which is the worst possible place to find out. ./scripts/test-in-docker.sh
-// exists to run the tests where that is true.
+// This is not a theoretical concern. The Alpine image polyemesis ships used to
+// carry fontconfig and zero font files, so `drawtext=text=hi` failed outright
+// with "Cannot find a valid font for the family Sans". It now carries DejaVu
+// as the CAPTIONS' fallback (the Dockerfile's CAPTION_FONTS, which a build may
+// set empty), and nothing else; a binary install has whatever the host has. A
+// build that relies on the host having fonts works on a developer laptop and
+// fails on some deployment, which is the worst possible place to find out.
 //
 // So the font is embedded in the binary and written to disk at startup.
 // drawtext takes a path, not bytes, and cannot read from an embed.FS.

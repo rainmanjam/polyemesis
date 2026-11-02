@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/playout"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
@@ -495,5 +496,34 @@ func TestResetPlayoutAnalyticsAlsoClearsBeaconRefusals(t *testing.T) {
 	}
 	if g := s.beaconGate(); g.invalid.Load() != 0 || g.limited.Load() != 0 {
 		t.Fatalf("refusals survived the reset: invalid=%d limited=%d", g.invalid.Load(), g.limited.Load())
+	}
+}
+
+// A 9:16 SHORT IS NOT AN OFFLINE CARD. The card plays in the 16:9 player; a
+// vertical export there is a narrow strip between black bars. Refused on save,
+// whatever the picker offered.
+//
+// MUTATION: offlineClipPath does not check Vertical. Observed: FAIL, 200.
+func TestAVerticalShortCannotBeTheOfflineClip(t *testing.T) {
+	s, h := playoutTestServer(t, enabledPlayout(true),
+		playoutPublish{Protection: PlayoutProtectToken, Token: testToken})
+	sign := login(t, h)
+	dir := s.clipExportDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mp4 := filepath.Join(dir, "short-vertical.mp4")
+	if err := os.WriteFile(mp4, []byte("stands in for a short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j := seedDoneClipExport(t, s.store, mp4)
+	raw, _ := json.Marshal(clipper.JobResult{Path: mp4, Mode: clipper.ModePrecise, Vertical: true})
+	if err := s.store.SetJobResult(j.ID, raw, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	r := jsonRequest(t, http.MethodPut, "/api/v1/playout/publish", map[string]any{"offlineClipJob": j.ID})
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "9:16") {
+		t.Errorf("a vertical short as the offline clip answered %d %s", w.Code, w.Body.String())
 	}
 }

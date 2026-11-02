@@ -62,12 +62,22 @@ func (p Plan) Commands(workDir string) ([]Command, error) {
 	if p.Duration() <= 0 {
 		return nil, ErrEmptyRange
 	}
-	needsWork := p.Concat || (p.HeadDuration > 0 && p.TailDuration > 0)
+	needsWork := p.Concat || (p.HeadDuration > 0 && p.TailDuration > 0) || p.Vertical != nil
 	if needsWork && workDir == "" {
 		return nil, ErrNoWorkDir
 	}
 
 	in := p.input(workDir)
+
+	if p.Vertical != nil {
+		// One full encode. Its graph and captions are sidecars, so it always
+		// needs the work directory -- checked above.
+		cmd, err := p.verticalCommand(in, workDir)
+		if err != nil {
+			return nil, err
+		}
+		return []Command{cmd}, nil
+	}
 
 	switch {
 	case p.HeadDuration <= 0:

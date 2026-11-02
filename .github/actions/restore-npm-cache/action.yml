@@ -1,0 +1,38 @@
+# RESTORE-ONLY twin of actions/setup-node's built-in npm cache.
+#
+# Same policy, and the same reason, as ../restore-go-cache: caches are saved on
+# refs/heads/main only, and setup-node has no restore-only mode -- `cache: npm`
+# saves on every miss. Off main, call setup-node with an empty `cache:` and then
+# this.
+#
+# THE KEY AND THE PATH ARE setup-node's, BYTE FOR BYTE (setup-node v7,
+# src/cache-restore.ts), or main's entry is never found:
+#
+#   key   node-cache-${RUNNER_OS}-${arch}-npm-${hashFiles(lockfile)}
+#   path  the literal output of `npm config get cache`
+#
+# arch is node's os.arch() (x64/arm64), which is runner.arch lowercased.
+# restore-keys lets a pull request that changes the lockfile start from main's
+# npm cache rather than an empty one.
+name: restore npm cache (read-only)
+description: Restore setup-node's main-branch npm cache without ever saving one.
+inputs:
+  lockfile:
+    description: The same value the job gives setup-node as cache-dependency-path.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: npm
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "dir=$(npm config get cache)"
+          echo "prefix=node-cache-${RUNNER_OS}-$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')-npm-"
+        } >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.npm.outputs.dir }}
+        key: ${{ steps.npm.outputs.prefix }}${{ hashFiles(inputs.lockfile) }}
+        restore-keys: ${{ steps.npm.outputs.prefix }}

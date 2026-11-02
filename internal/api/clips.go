@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -403,9 +405,10 @@ func (t clipTimeline) timeline() (clipper.Timeline, error) {
 			continue
 		}
 		segs = append(segs, clipper.Segment{
-			Path:     p.path,
-			Start:    time.Duration(p.startMS) * time.Millisecond,
-			Duration: time.Duration(p.rec.DurationMS) * time.Millisecond,
+			RecordingID: p.rec.ID,
+			Path:        p.path,
+			Start:       time.Duration(p.startMS) * time.Millisecond,
+			Duration:    time.Duration(p.rec.DurationMS) * time.Millisecond,
 		})
 	}
 	if len(segs) == 0 {
@@ -528,9 +531,22 @@ func (s *Server) clipProber() clipper.Prober {
 		bin = tools.FFprobe
 	}
 	// An empty Bin means "ffprobe, off PATH", which is the right answer on a
-	// machine where nothing was pinned.
-	return clipper.FFprobe{Bin: bin}
+	// machine where nothing was pinned. The probe runs under the governor's
+	// priority wrapper like every child an export starts: planning a cut while
+	// a broadcast is going out must not compete with it either.
+	return clipper.FFprobe{Bin: bin, Run: func(ctx context.Context, name string, args []string) ([]byte, error) {
+		if s.gov != nil {
+			name, args = s.gov.NiceCommand(name, args...)
+		}
+		return runProbe(ctx, name, args)
+	}}
 }
+
+// runProbe starts the editor's probe once clipProber has wrapped it. A seam so
+// a test can see the exact argv the governor produced -- the wrapper chain is
+// different on every OS (ionice then nice on Linux, nice on macOS, a creation
+// flag and no wrapper on Windows), so only the argv itself says it was used.
+var runProbe = clipper.RunLowPriority
 
 // ------------------------------------------------------------- plan and export
 
@@ -551,6 +567,10 @@ type clipRequestBody struct {
 	// Container is "mkv" or "mp4". MKV keeps every audio track; MP4 is what a
 	// social platform will accept.
 	Container string `json:"container,omitempty"`
+	// Vertical, when present, exports a 9:16 short instead of a straight cut
+	// (Wave 4 #5b). It forces MP4 and an exact in-point; see
+	// internal/clipper/vertical.go.
+	Vertical *clipVerticalBody `json:"vertical,omitempty"`
 }
 
 // clipPlanView is a resolved cut in the units a browser thinks in.
@@ -585,6 +605,8 @@ type clipPlanView struct {
 	OutName  string   `json:"outName"`
 	Describe string   `json:"describe"`
 	Warnings []string `json:"warnings,omitempty"`
+	// Vertical is true for a 9:16 short.
+	Vertical bool `json:"vertical,omitempty"`
 }
 
 func (s *Server) handleClipPlan(w http.ResponseWriter, r *http.Request) {
@@ -607,6 +629,13 @@ func (s *Server) planClip(w http.ResponseWriter, r *http.Request) (clipper.Plan,
 	if !decodeJSON(w, r, &body) {
 		return clipper.Plan{}, clipTimeline{}, false
 	}
+	return s.planClipBody(w, r, id, body)
+}
+
+// planClipBody is planClip once the body is in hand: the half an accepted
+// highlight shares, because its in and out points come from the suggestion
+// rather than from the editor.
+func (s *Server) planClipBody(w http.ResponseWriter, r *http.Request, id int64, body clipRequestBody) (clipper.Plan, clipTimeline, bool) {
 	tl, err := s.clipTimeline(id)
 	if err != nil {
 		s.writeClipError(w, err)
@@ -655,6 +684,17 @@ func (s *Server) clipRequest(tl clipTimeline, body clipRequestBody) (clipper.Req
 		Title:   clipTitle(body.Title),
 		OutPath: s.clipOutPath(tl, body),
 	}
+	if body.Vertical != nil {
+		v, err := s.clipVertical(tl, body)
+		if err != nil {
+			return clipper.Request{}, err
+		}
+		req.Vertical = v
+		// Every frame is encoded, so the mode the editor had selected is
+		// moot; precise is the one that describes what happens.
+		req.Mode = clipper.ModePrecise
+		mode = clipper.ModePrecise
+	}
 	if mode == clipper.ModePrecise {
 		// Only the leading partial GOP is re-encoded, so this names an encoder
 		// for a fraction of a second of video. HeadEncoder prefers x264 and
@@ -685,6 +725,13 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	if strings.EqualFold(strings.TrimPrefix(body.Container, "."), "mp4") {
 		ext = ".mp4"
 	}
+	suffix := ""
+	if body.Vertical != nil {
+		// A short is always an MP4, and is named apart from a straight cut of
+		// the same span -- and from a short of the same span in another
+		// layout or style -- so exporting each keeps each.
+		ext, suffix = ".mp4", "-vertical-"+verticalNameTag(body.Vertical)
+	}
 	base := strings.TrimSuffix(tl.anchor.Filename, filepath.Ext(tl.anchor.Filename))
 	name := safeClipName(body.Title)
 	if name == "" {
@@ -696,7 +743,10 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	// The in-point is part of the name so two clips out of one recording never
 	// collide, and so a file found later still says where it came from.
 	stamp := fmt.Sprintf("%06d", body.InMS/1000)
-	return filepath.Join(s.clipExportDir(), name+"-"+stamp+ext)
+	if body.Vertical != nil {
+		return freeExportName(s.clipExportDir(), name+"-"+stamp+suffix, ext, s.activeExportPaths())
+	}
+	return filepath.Join(s.clipExportDir(), name+"-"+stamp+suffix+ext)
 }
 
 func (s *Server) clipExportDir() string {
@@ -775,6 +825,7 @@ func clipPlanViewOf(p clipper.Plan) clipPlanView {
 		OutName:          filepath.Base(p.OutPath),
 		Describe:         p.Describe(),
 		Warnings:         p.Warnings,
+		Vertical:         p.Vertical != nil,
 	}
 	if view.Warnings == nil {
 		view.Warnings = []string{}
@@ -807,15 +858,42 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := os.MkdirAll(s.clipExportDir(), 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create the exports directory: "+err.Error())
-		return
-	}
-
-	cut, err := tl.timeline()
+	job, err := s.submitClipExport(plan, tl)
 	if err != nil {
 		s.writeClipError(w, err)
 		return
+	}
+	// The same jobView every other page reads, so the editor's progress panel
+	// and the jobs table cannot disagree about what a job is.
+	writeJSON(w, http.StatusAccepted, s.clipJobView(job))
+}
+
+// clipJobView renders a just-submitted job the way the jobs table does.
+func (s *Server) clipJobView(job *jobs.Job) any {
+	stats := s.jobq.Stats()
+	return s.view(*job, s.snapshot(), stats.Paused, stats.Running < s.concurrency(), s.recordingNames(), time.Now())
+}
+
+// submitClipExport queues a planned cut. Shared by the editor's Export and a
+// highlight's Accept, so an accepted suggestion becomes exactly the job the
+// editor would have made -- there is one way a clip gets queued.
+func (s *Server) submitClipExport(plan clipper.Plan, tl clipTimeline) (*jobs.Job, error) {
+	if err := os.MkdirAll(s.clipExportDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("could not create the exports directory: %w", err)
+	}
+	cut, err := tl.timeline()
+	if err != nil {
+		return nil, err
+	}
+	if plan.Vertical != nil {
+		// Choosing a free name and queueing the job that holds it are one
+		// step: the name the plan was given may have been taken since by a
+		// request planned at the same moment, which saw the same names free.
+		// Only this pick and the Submit run under the lock -- the plan, with
+		// its probe, does not.
+		s.exportNamesMu.Lock()
+		defer s.exportNamesMu.Unlock()
+		plan.OutPath = s.reserveShortName(plan.OutPath)
 	}
 	params, err := json.Marshal(clipper.JobParams{
 		Request: clipper.Request{
@@ -826,16 +904,17 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 			OutPath:      plan.OutPath,
 			Title:        plan.Title,
 			VideoEncoder: plan.VideoEncoder,
+			// The words stay out of the job: its params are readable by any
+			// token that may list jobs. The worker reads them at run time.
+			Vertical: plan.Vertical.ForJob(),
 		},
 		// The segments travel with the job so a re-index between submission and
 		// execution cannot change what gets cut out from under the user.
 		Segments: cut.Segments(),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, err
 	}
-
 	job, _, err := s.jobq.Submit(jobs.Job{
 		Kind:   clipper.JobKind,
 		Target: jobs.RecordingTarget(tl.anchor.ID),
@@ -846,15 +925,7 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 		// throw away the export somebody just asked for.
 		Priority: jobs.PriorityUser,
 	})
-	if err != nil {
-		s.writeClipError(w, err)
-		return
-	}
-	// The same jobView every other page reads, so the editor's progress panel
-	// and the jobs table cannot disagree about what a job is.
-	stats := s.jobq.Stats()
-	writeJSON(w, http.StatusAccepted, s.view(*job, s.snapshot(), stats.Paused,
-		stats.Running < s.concurrency(), s.recordingNames(), time.Now()))
+	return job, err
 }
 
 // ---------------------------------------------------------------- transcript
@@ -895,23 +966,48 @@ func (s *Server) handleClipTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := clipTranscriptView{Segments: []clipTranscriptSegment{}, Speakers: []string{}, Tracks: []int{}}
+	segs, err := s.clipTranscriptSegments(tl)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	view := clipTranscriptView{Segments: segs, Speakers: []string{}, Tracks: []int{}}
 	seenSpeaker := map[string]bool{}
 	seenTrack := map[int]bool{}
+	for _, seg := range segs {
+		if seg.Speaker != "" && !seenSpeaker[seg.Speaker] {
+			seenSpeaker[seg.Speaker] = true
+			view.Speakers = append(view.Speakers, seg.Speaker)
+		}
+		if !seenTrack[seg.Track] {
+			seenTrack[seg.Track] = true
+			view.Tracks = append(view.Tracks, seg.Track)
+		}
+	}
+	sort.Ints(view.Tracks)
+	writeJSON(w, http.StatusOK, view)
+}
+
+// clipTranscriptSegments is every transcribed line across the timeline, in
+// TIMELINE milliseconds (part.startMS + the segment's own), sorted. The one
+// place that rebasing happens: the transcript panel, burned captions and
+// highlight excerpts all read it, so none of them can disagree about when a
+// word was said.
+func (s *Server) clipTranscriptSegments(tl clipTimeline) ([]clipTranscriptSegment, error) {
+	out := []clipTranscriptSegment{}
 	for _, p := range tl.parts {
 		tr, err := s.store.GetTranscript(p.rec.ID)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				continue
 			}
-			writeStoreError(w, err)
-			return
+			return nil, err
 		}
 		if tr == nil {
 			continue
 		}
 		for _, seg := range tr.Merged() {
-			view.Segments = append(view.Segments, clipTranscriptSegment{
+			out = append(out, clipTranscriptSegment{
 				RecordingID: p.rec.ID,
 				Track:       seg.Track,
 				Speaker:     seg.Speaker,
@@ -919,24 +1015,15 @@ func (s *Server) handleClipTranscript(w http.ResponseWriter, r *http.Request) {
 				EndMS:       p.startMS + seg.EndMS,
 				Text:        seg.Text,
 			})
-			if seg.Speaker != "" && !seenSpeaker[seg.Speaker] {
-				seenSpeaker[seg.Speaker] = true
-				view.Speakers = append(view.Speakers, seg.Speaker)
-			}
-			if !seenTrack[seg.Track] {
-				seenTrack[seg.Track] = true
-				view.Tracks = append(view.Tracks, seg.Track)
-			}
 		}
 	}
-	sort.SliceStable(view.Segments, func(i, j int) bool {
-		if view.Segments[i].StartMS == view.Segments[j].StartMS {
-			return view.Segments[i].Track < view.Segments[j].Track
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].StartMS == out[j].StartMS {
+			return out[i].Track < out[j].Track
 		}
-		return view.Segments[i].StartMS < view.Segments[j].StartMS
+		return out[i].StartMS < out[j].StartMS
 	})
-	sort.Ints(view.Tracks)
-	writeJSON(w, http.StatusOK, view)
+	return out, nil
 }
 
 // handleDownloadClipExport hands over a finished clip.
@@ -1014,4 +1101,91 @@ func clipQueryMS(r *http.Request, name string, fallback int64) int64 {
 		return fallback
 	}
 	return v
+}
+
+// verticalNameTag names a short's settings in its file name: the layout, and a
+// digest of everything else, so two shorts of one span in different layouts or
+// styles are two files rather than one overwriting the other.
+func verticalNameTag(v *clipVerticalBody) string {
+	layout := safeClipName(v.Layout)
+	if layout == "" {
+		layout = "short"
+	}
+	raw, _ := json.Marshal(v)
+	h := fnv.New32a()
+	_, _ = h.Write(raw)
+	return fmt.Sprintf("%s-%08x", layout, h.Sum32())
+}
+
+// freeExportName is base+ext in dir, or base-2+ext, base-3+ext ... -- the first
+// that is not already on disk, so exporting the same short again does not
+// replace the one already made. Checked through an os.Root on the exports
+// directory: the names are this server's own, and the check cannot reach
+// outside it whatever they contain.
+//
+// taken holds the paths active export jobs will write: a name is RESERVED from
+// the moment its job is queued, not from the moment its file appears, so the
+// same short submitted twice before either runs gets two names.
+func freeExportName(dir, base, ext string, taken map[string]bool) string {
+	first := filepath.Join(dir, base+ext)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		// No exports directory yet: nothing on disk, but a queued job may
+		// already hold the name.
+		for i := 1; i <= 1000; i++ {
+			p := first
+			if i > 1 {
+				p = filepath.Join(dir, fmt.Sprintf("%s-%d%s", base, i, ext))
+			}
+			if !taken[p] {
+				return p
+			}
+		}
+		return first
+	}
+	defer root.Close()
+	for i := 1; i <= 1000; i++ {
+		name := base + ext
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d%s", base, i, ext)
+		}
+		if _, err := root.Stat(name); errors.Is(err, os.ErrNotExist) && !taken[filepath.Join(dir, name)] {
+			return filepath.Join(dir, name)
+		}
+	}
+	return first
+}
+
+// shortName splits a short's file name into the name clipOutPath built and
+// the "-N" freeExportName may have added: the name always ends in the
+// settings tag, "-<layout>-<8 hex digits>".
+var shortName = regexp.MustCompile(`^(.*-vertical-.+-[0-9a-f]{8})(?:-[0-9]+)?\.mp4$`)
+
+// reserveShortName is the free name for the short planned as path, checked
+// again against the disk and every active export -- under exportNamesMu, so
+// the answer still holds when the job is queued.
+func (s *Server) reserveShortName(path string) string {
+	m := shortName.FindStringSubmatch(filepath.Base(path))
+	if m == nil {
+		return path
+	}
+	return freeExportName(filepath.Dir(path), m[1], ".mp4", s.activeExportPaths())
+}
+
+// activeExportPaths is every output path a queued, deferred or running clip
+// export will write.
+func (s *Server) activeExportPaths() map[string]bool {
+	out := map[string]bool{}
+	list, err := s.store.ListJobs(jobs.Filter{Kinds: []jobs.Kind{clipper.JobKind},
+		States: []jobs.State{jobs.StateQueued, jobs.StateDeferred, jobs.StateRunning}})
+	if err != nil {
+		return out
+	}
+	for _, j := range list {
+		var p clipper.JobParams
+		if json.Unmarshal(j.Params, &p) == nil && p.Request.OutPath != "" {
+			out[p.Request.OutPath] = true
+		}
+	}
+	return out
 }

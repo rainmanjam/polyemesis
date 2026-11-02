@@ -155,6 +155,7 @@ ARG FFMPEG_SHA256=97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates tzdata wget curl xz-utils \
+      fontconfig fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/* \
  # curl, not wget, for the download: --proto/--proto-redir pin every hop of the
  # redirect chain to https (SonarCloud docker:S6506). wget stays for the

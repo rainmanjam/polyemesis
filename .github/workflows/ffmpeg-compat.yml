@@ -107,10 +107,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
 
       - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-${{ matrix.ffmpeg.asset }}
@@ -151,6 +155,21 @@ jobs:
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
           ffprobe -hide_banner -version | head -1
+          # CAPTION FALLBACK FONTS, as the shipping image and ci.yml's Linux
+          # jobs have them: BtbN's libass reads the system's fontconfig, and
+          # the clipper's caption tests fail on boxes where a font is missing.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       - name: FFmpeg-using packages
         run: |

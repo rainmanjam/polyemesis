@@ -1574,7 +1574,8 @@ export function OfflineCardSettings({
       .then((r) => {
         if (!live) return;
         setClips(
-          r.jobs.map((j) => {
+          // A 9:16 short is left out: the card plays in the 16:9 player.
+          r.jobs.filter((j) => (j.result as { vertical?: boolean } | undefined)?.vertical !== true).map((j) => {
             const path = (j.result as { path?: string } | undefined)?.path ?? "";
             return { id: j.id, label: `#${j.id} ${path.split(/[\\/]/).pop() ?? ""}`.trim() };
           }),

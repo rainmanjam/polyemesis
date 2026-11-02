@@ -180,10 +180,12 @@ func TestFontPathRefusesAnythingThatIsNotABareFontName(t *testing.T) {
 // actually matters and that no unit test can: that FFmpeg renders text with the
 // embedded font in an environment with NO SYSTEM FONTS.
 //
-// The shipping Alpine image is exactly that environment -- fontconfig installed
-// and nothing for it to find -- so `drawtext=text=hi` fails there with "Cannot
-// find a valid font for the family Sans" while working on any developer laptop.
-// Run it with ./scripts/test-in-docker.sh, which is that image.
+// A host with fontconfig and nothing for it to find -- what the shipping Alpine
+// image was before it gained DejaVu for captions, and still is when built with
+// CAPTION_FONTS empty -- fails `drawtext=text=hi` with "Cannot find a valid
+// font for the family Sans" while working on any developer laptop. The test
+// names its font file, so it holds whatever fonts the host has.
+// ./scripts/test-in-docker.sh runs it against the FFmpeg that ships.
 //
 // Measured by comparing PIXELS rather than by checking FFmpeg's exit code. A
 // drawtext that silently drew nothing exits 0, and asserting on the status
