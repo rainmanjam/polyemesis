@@ -323,8 +323,10 @@ func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Durat
 		finalSeen bool
 		pending   *delayline.DumpResult
 	)
-	followUp := func(out delayline.DumpResult) {
-		if finalSeen {
+	// final is finalSeen as read under mu: every access to the shared state
+	// is under the lock, the follow-up's included.
+	followUp := func(out delayline.DumpResult, final bool) {
+		if final {
 			return // the record written at acceptance was already the outcome
 		}
 		s.publishAudit(auditDelayDumped(row, out, addr))
@@ -336,8 +338,9 @@ func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Durat
 			mu.Unlock()
 			return
 		}
+		final := finalSeen
 		mu.Unlock()
-		followUp(out)
+		followUp(out, final)
 	})
 	if err != nil {
 		return res, err
@@ -346,10 +349,10 @@ func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Durat
 	mu.Lock()
 	// Final or aborted at acceptance: that record is the dump's one outcome.
 	accepted, finalSeen = true, res.Complete || res.Aborted
-	out := pending
+	out, final := pending, finalSeen
 	mu.Unlock()
 	if out != nil {
-		followUp(*out)
+		followUp(*out, final)
 	}
 	return res, nil
 }

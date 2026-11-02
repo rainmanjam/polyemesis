@@ -108,7 +108,8 @@ does.
   platform then shows a broken picture until the source's next keyframe. The
   answer says `"forced": true`.
 - **Subtitles and data streams** are cut by their timestamps too: nothing from
-  the dumped window airs on any stream. The platform receives every picture whole, with no
+  the dumped window airs on any stream. A stream that first appears in the
+  minute after the dump is cut the same way. The platform receives every picture whole, with no
   corrupt frames, and its timestamps run on without a jump or a gap. The audio
   carries on the same way.
 - **Captions** follow the shorter delay. Captions for programme still in the

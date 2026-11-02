@@ -322,11 +322,16 @@ type tsState struct {
 	// forcing: past the force deadline with no random-access picture, the
 	// resume takes the next PES start that has a timestamp.
 	forcing bool
-	// heldNeedHdr: the held candidate's PES header runs into its next packet.
+	// heldNeedHdr: the held candidate's PES header runs into its next packet,
+	// on heldPID.
 	heldNeedHdr bool
-	// resumeFloor is the splice's output PTS: a PID new since the cut is
-	// cut against it.
+	heldPID     uint16
+	// resumeFloor is the last splice's output PTS: a PID new since the cut
+	// is cut against it while floorLive, which ends once the video is more
+	// than floorWindow from it either way -- after that a 33-bit comparison
+	// with it means nothing.
 	resumeFloor int64
+	floorLive   bool
 	// audio is the audio that arrived during the resync, kept per PID: the
 	// part of it after the cut's audio end belongs to the resumed programme,
 	// and is sent first so the audio carries on without a hole.
@@ -401,7 +406,8 @@ func (c *audioCache) finish() {
 }
 
 // take returns the cached PESs, oldest first, with a bounded PES still being
-// read only if it is complete: an unbounded one may continue past the resume.
+// read only if it is complete. The resume calls finish first, which files an
+// unbounded PES still being read.
 func (c *audioCache) take() []byte {
 	var out []byte
 	for _, pes := range c.done {
@@ -568,15 +574,21 @@ func (ts *tsState) post(q pkt) []pkt {
 	if pid == tsNullPID {
 		return []pkt{q}
 	}
+	if ts.floorLive && ts.isVideo(pid) && q.h != nil && q.h.ok && q.h.hasPTS {
+		if d := wrap(q.h.pts() - ts.resumeFloor); d > floorWindow && d < 1<<33-floorWindow {
+			ts.floorLive = false
+		}
+	}
 	r := ts.rw[pid]
 	if r == nil {
 		if !ts.spliced {
 			return []pkt{q}
 		}
 		// A PID that appeared after the splice: whatever it carried before
-		// its first start belongs to nothing the output has.
+		// its first start belongs to nothing the output has. Near the splice
+		// its data may be from the dumped window, and is cut against it.
 		r = &pidRewrite{renumber: true, awaitStart: true}
-		if !ts.isVideo(pid) {
+		if !ts.isVideo(pid) && ts.floorLive {
 			r.trimming, r.trimEnd = true, ts.resumeFloor
 		}
 		ts.rw[pid] = r
@@ -858,6 +870,12 @@ func (b *Buffer) pushTSLocked(now time.Time, pkt []byte) {
 		// the kept audio ends; then the resume picture.
 		lead := append(append([]byte(nil), b.ts.patPkt...), b.ts.pmtPkt...)
 		for _, c := range b.ts.audio {
+			// The PES each PID was reading goes out too, on every resume
+			// path: an unbounded one is whole once its PID starts another
+			// (the forced resume can take that start itself), and one still
+			// open runs on into the resumed programme, its continuation
+			// following it.
+			c.finish()
 			lead = append(lead, c.take()...)
 		}
 		b.ts.audio, b.ts.audioBytes = nil, 0
@@ -1266,6 +1284,14 @@ func (b *Buffer) truncateLocked(m *mark) error {
 		return ErrNoCutPoint
 	}
 	s := m.seg
+	// A cut behind the read position would remove programme already
+	// released and count it again; Dump's margin keeps every cut past the
+	// head, so this only refuses what cannot be cut. A spilled segment is
+	// never part read (Pop loads it first), so its file offsets are the
+	// records' own.
+	if m.off < s.off || (s.data == nil && s.off != 0) {
+		return ErrNoCutPoint
+	}
 	// The one step that can fail goes first, so a failure changes nothing.
 	if s.data == nil && s.path != "" {
 		if err := truncateFile(s.path, int64(m.off)); err != nil {
@@ -1347,7 +1373,15 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 		pid := pktPID(p)
 		video := ts.isVideo(pid)
 		if _, isES := ts.es[pid]; force && !ts.holding && pktPUSI(p) && (isES || video) {
-			if h, complete := parsePES(p, nil); complete && h.ok && h.hasPTS {
+			h, complete := parsePES(p, nil)
+			if !complete {
+				// The header runs into this PID's next packet: hold the start
+				// and take it there.
+				ts.held = append(ts.held[:0], p...)
+				ts.holding, ts.heldNeedHdr, ts.heldPID, ts.forcing = true, true, pid, true
+				continue
+			}
+			if h.ok && h.hasPTS {
 				ts.held = append(ts.held[:0], p...)
 				ts.holding, ts.heldPTS, ts.heldDTS, ts.forcing = true, h.pts(), h.pts(), true
 				if h.hasDTS {
@@ -1375,7 +1409,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			if !complete {
 				// The header runs into the next video packet: hold this one
 				// and read it there, as the normal path does.
-				ts.holding, ts.heldNeedHdr, ts.heldRAP = true, true, pktRandomAccess(p)
+				ts.holding, ts.heldNeedHdr, ts.heldPID, ts.heldRAP = true, true, pid, pktRandomAccess(p)
 				ts.held = append(ts.held, p...)
 				continue
 			}
@@ -1404,17 +1438,24 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			ts.holding, ts.held = false, ts.held[:0]
 			continue
 		}
-		if video && ts.heldNeedHdr && pktHasPayload(p) {
+		if ts.heldNeedHdr && pid == ts.heldPID && pktHasPayload(p) {
 			ts.heldNeedHdr = false
 			first := ts.held[:tsPacketSize]
 			h, _ := parsePES(first, p)
 			if !h.ok || !h.hasPTS {
-				ts.holding, ts.held = false, ts.held[:0]
+				ts.holding, ts.held, ts.forcing = false, ts.held[:0], false
 				continue
 			}
 			ts.heldPTS, ts.heldDTS = h.pts(), h.pts()
 			if h.hasDTS {
 				ts.heldDTS = h.dts()
+			}
+			if ts.forcing {
+				// A forced resume takes any PES start: no picture to read.
+				if b.decideResumeLocked(now) {
+					return work[off+tsPacketSize:], true
+				}
+				continue
 			}
 			ts.cls.reset(ts.codec)
 			es := payloadOf(p)
@@ -1510,7 +1551,7 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 	// starts where the kept audio ends, to the frame; a PID whose last PES is
 	// older than a second before the cut (subtitles, metadata) is cut at the
 	// splice itself.
-	ts.resumeFloor = m.pts
+	ts.resumeFloor, ts.floorLive = m.pts, true
 	ends := map[uint16]int64{}
 	for _, s := range m.out {
 		if s.ptsSeen {
@@ -1607,6 +1648,11 @@ func (t *DumpTicket) Result() DumpResult {
 
 func truncateFile(path string, n int64) error { return os.Truncate(path, n) }
 func removeFile(path string) error            { return os.Remove(path) }
+
+// floorWindow is how long after a splice, in 90 kHz ticks of video, a PID
+// new since it is cut against it: data from the dumped window arrives within
+// the source's interleave, seconds after the resume, not a minute.
+const floorWindow = 60 * 90000
 
 // audioCacheBudget is the most complete audio the resync keeps, across every
 // PID: two spill segments, so it scales with the buffer's own granularity.

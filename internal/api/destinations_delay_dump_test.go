@@ -371,3 +371,63 @@ func TestEveryDumpLeavesAnAuditRecordAndTheOutcomeFollows(t *testing.T) {
 		})
 	}
 }
+
+// racingDumper answers provisional and reports the resume at the same moment,
+// from another goroutine: the completion and the acceptance race.
+type racingDumper struct{}
+
+func (racingDumper) DumpDelay(_ int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
+	go done(delayline.DumpResult{Requested: want, Dumped: 10 * time.Second, Before: 30 * time.Second,
+		After: 20 * time.Second, Complete: true})
+	return delayline.DumpResult{Requested: want, Dumped: 4 * time.Second, Before: 30 * time.Second,
+		After: 26 * time.Second}, nil
+}
+
+func (racingDumper) DelayDumpable(int64) bool { return true }
+
+// A6. THE COMPLETION RACING THE ACCEPTANCE shares nothing unguarded: under
+// -race, many dumps whose resume lands while the answer is being recorded
+// leave no data race, and each still writes its provisional record and then
+// its final one.
+//
+// Mutation: record finalSeen after releasing the lock.
+func TestADumpsCompletionRacingItsAcceptanceIsRaceFree(t *testing.T) {
+	s, _, _, _ := managerServer(t, defaultTools())
+	row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
+	var mu sync.Mutex
+	got := map[int][]string{}
+	run := 0
+	s.auditSink = func(ev alerts.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, f := range ev.Fields {
+			if f.Name == fieldDumpStatus {
+				got[run] = append(got[run], f.Value)
+			}
+		}
+	}
+	for i := 0; i < 200; i++ {
+		mu.Lock()
+		run = i
+		mu.Unlock()
+		if _, err := s.dumpAudited(racingDumper{}, row, 2*time.Second, "test"); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			mu.Lock()
+			n := len(got[i])
+			mu.Unlock()
+			if n >= 2 || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		mu.Lock()
+		rec := got[i]
+		mu.Unlock()
+		if !slices.Equal(rec, []string{"provisional", "final"}) {
+			t.Fatalf("dump %d audited %v, want [provisional final]", i, rec)
+		}
+	}
+}

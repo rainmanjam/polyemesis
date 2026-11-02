@@ -433,23 +433,36 @@ func packetizePES(pid uint16, pes []byte) []byte {
 
 // rewriteFirstVCL finds the first HEVC VCL NAL unit of the video PES held in
 // held (its packets, in order) and rewrites its first header byte with f,
-// across packet boundaries. It reports whether it found one.
+// across packet boundaries, the PES header included. It reports whether it
+// found one.
 func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 	var at []int // indices into held of the elementary-stream bytes, in order
+	hdr := -1    // PES header bytes still to pass; -1 before the PES start
 	for off := 0; off+tsPacketSize <= len(held) && len(at) < nalScanLimit; off += tsPacketSize {
 		p := held[off : off+tsPacketSize]
 		if pktPID(p) != vpid || !pktHasPayload(p) {
 			continue
 		}
-		start := payloadStart(p)
 		if pktPUSI(p) {
 			h, complete := parsePES(p, nil)
+			if !complete {
+				// The header runs into the next video packet: read it across
+				// the two, as the resync did.
+				h, complete = parsePES(p, nextPayloadPacket(held, off+tsPacketSize, vpid))
+			}
 			if !complete || !h.ok {
 				return false
 			}
-			start += h.esStart()
+			hdr = h.hdrLen
 		}
-		for i := off + start; i < off+tsPacketSize; i++ {
+		if hdr < 0 {
+			continue
+		}
+		for i := off + payloadStart(p); i < off+tsPacketSize; i++ {
+			if hdr > 0 {
+				hdr--
+				continue
+			}
 			at = append(at, i)
 		}
 	}
@@ -464,4 +477,15 @@ func rewriteFirstVCL(held []byte, vpid uint16, f func(byte) byte) bool {
 		}
 	}
 	return false
+}
+
+// nextPayloadPacket is the first packet of pid with a payload in held from
+// off on, or nil.
+func nextPayloadPacket(held []byte, off int, pid uint16) []byte {
+	for ; off+tsPacketSize <= len(held); off += tsPacketSize {
+		if p := held[off : off+tsPacketSize]; pktPID(p) == pid && pktHasPayload(p) {
+			return p
+		}
+	}
+	return nil
 }
