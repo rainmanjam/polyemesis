@@ -60,7 +60,10 @@ type Config struct {
 	// OnDrop is told when the buffer has started dropping for want of room,
 	// with the reason. At most once per DropReportEvery, from the pump.
 	OnDrop func(err error)
-	Log    *slog.Logger
+	// OnDumped is told when a dump has resumed at its keyframe, with what it
+	// did. From its own goroutine.
+	OnDumped func(DumpResult)
+	Log      *slog.Logger
 }
 
 // Status is a Line's state for the status page, events and metrics.
@@ -78,6 +81,8 @@ type Status struct {
 	DrainRemaining time.Duration `json:"drainRemaining"`
 	// Err is the last spill failure, which is why something was dropped.
 	Err string `json:"err,omitempty"`
+	// Effective is the delay the audience has: Delay less everything dumped.
+	Effective time.Duration `json:"effective"`
 }
 
 // Line is a Buffer fed from a UDP socket and drained on a clock.
@@ -180,6 +185,10 @@ func (l *Line) read() {
 		}
 		if err := l.buf.Push(time.Now(), pkt[:n]); err != nil {
 			continue
+		}
+		// A dump resumes on a push: the one that brought its keyframe.
+		if t := l.buf.takeResumed(); t != nil && l.cfg.OnDumped != nil {
+			go l.cfg.OnDumped(t.Result())
 		}
 		// Drops happen here, on the push that seals a segment with nowhere to
 		// go -- including while the line is still filling and the pump is
@@ -297,6 +306,42 @@ func (l *Line) Close() {
 	})
 }
 
+// ErrNotOnAir refuses a dump on a line that is not releasing: still filling,
+// or stopped and playing its tail out.
+var ErrNotOnAir = errors.New("delayline: the delayed feed is not on the air")
+
+// MaxDumpWait bounds how long Dump waits for the resume keyframe.
+const MaxDumpWait = maxGOPAllowance + 2*time.Second
+
+// Dump drops the newest want of the buffer -- 0 for everything since the last
+// dump point -- and waits, up to a GOP and a little more, for the stream to
+// resume at the next keyframe. The result says whether it did: Complete is
+// false when the wait ran out, and the resume then still happens, later.
+// See splice.go.
+func (l *Line) Dump(want time.Duration) (DumpResult, error) {
+	if !l.releasing.Load() || l.draining.Load() {
+		return DumpResult{}, ErrNotOnAir
+	}
+	t, err := l.buf.Dump(time.Now(), want, DumpMargin)
+	if err != nil {
+		return DumpResult{}, err
+	}
+	l.buf.mu.Lock()
+	wait := l.buf.gopLocked() + 2*time.Second
+	l.buf.mu.Unlock()
+	if wait > MaxDumpWait {
+		wait = MaxDumpWait
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-t.Done():
+	case <-timer.C:
+	case <-l.quit:
+	}
+	return t.Result(), nil
+}
+
 // Status is a snapshot.
 func (l *Line) Status() Status {
 	st := Status{
@@ -305,13 +350,16 @@ func (l *Line) Status() Status {
 		Releasing: l.releasing.Load(),
 		Draining:  l.draining.Load(),
 	}
-	if l.cfg.Delay > 0 {
-		st.Fill = float64(st.Span) / float64(l.cfg.Delay)
+	// Fill is measured against the delay the audience has, so a dumped line
+	// that is releasing still reads full.
+	st.Effective = l.cfg.Delay - st.Dumped
+	if st.Effective > 0 {
+		st.Fill = float64(st.Span) / float64(st.Effective)
 		if st.Releasing || st.Fill > 1 {
 			st.Fill = 1
 		}
 		if st.Draining {
-			st.Fill = float64(st.Span) / float64(l.cfg.Delay)
+			st.Fill = float64(st.Span) / float64(st.Effective)
 			if st.Fill > 1 {
 				st.Fill = 1
 			}
