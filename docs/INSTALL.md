@@ -185,10 +185,12 @@ replacement, instead of being assumed fine.
 
 ### Caption fonts
 
-Burned-in captions are drawn by FFmpeg's libass, which finds its fonts through
-fontconfig — so in binary mode they use the **host's** fonts. In binary mode
-the installer sets those up for you, and captions in Chinese, Japanese and
-Korean render out of the box:
+Burned-in captions on a vertical short are drawn by FFmpeg's libass: with the
+bundled Inter first, then, for any glyph Inter lacks, with the fonts
+**installed on the machine**, which libass finds through fontconfig (see
+`style.font` in [API.md](API.md)). In binary mode that machine is your host, so
+the installer sets those fonts up for you, and captions in Chinese, Japanese,
+Korean, Arabic and Hebrew render out of the box:
 
 | Set | Covers | Download |
 |---|---|---|
@@ -225,8 +227,12 @@ under the unit's sandboxing — starts with one already built.
   choice you installed with; `update.sh --no-cjk-fonts` declines CJK for that
   run. When the fonts are present it runs no package manager at all.
 - **Docker mode** installs nothing on the host: the container draws captions
-  with the image's own fonts, chosen by the Dockerfile's `CAPTION_FONTS`
-  build argument.
+  with the image's own fonts. Every image ships fontconfig and DejaVu; CJK is
+  opt-in at build time — `docker build --build-arg CAPTION_FONTS="fontconfig
+  font-dejavu font-noto-cjk" .` for the main image (88 MiB more), or add
+  `fonts-noto-cjk` to the package list in `Dockerfile.cuda` /
+  `Dockerfile.vaapi`. In any mode, a `.ttf`/`.otf` with the glyphs dropped
+  into `<data>/fonts` also works.
 
 The installer is Linux-only, so none of this applies on macOS, where the
 system fonts already cover CJK. If you install the binary by hand on Linux,
