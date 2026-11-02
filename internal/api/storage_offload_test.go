@@ -173,6 +173,17 @@ func TestAnOffloadedRecordingIsFetchedBackBeforeTheClipperOpensIt(t *testing.T) 
 		t.Fatalf("evicted recording missing from the library: %s", lib)
 	}
 
+	// The route the clip editor polls while it waits says the same.
+	var one struct {
+		Recording struct {
+			Offload *recordingOffload `json:"offload"`
+		} `json:"recording"`
+	}
+	if err := json.Unmarshal([]byte(storageBody(t, h, sign, fmt.Sprintf("/api/v1/library/recordings/%d", id))), &one); err != nil ||
+		one.Recording.Offload == nil || !one.Recording.Offload.Evicted {
+		t.Fatalf("GET /library/recordings/{id} does not report the eviction: %+v %v", one.Recording.Offload, err)
+	}
+
 	clip := fmt.Sprintf("/api/v1/clipper/recordings/%d", id)
 	code, body := rawBodyOf(t, h, sign, clip)
 	if code != http.StatusConflict {

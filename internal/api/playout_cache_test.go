@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestOnlyAnOpenStreamIsSharedCacheable drives the real gate: the open
@@ -69,5 +70,57 @@ func TestOnlyAnOpenStreamIsSharedCacheable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The poster follows the same rule as the media, and every refusal is
+// no-store so a cache-eligible CDN rule cannot hold a 401 or a pre-publish 404.
+func TestThePosterAndTheRefusalsFollowTheSharedCacheRule(t *testing.T) {
+	cases := []struct {
+		cfg, who, want string
+		code           int
+	}{
+		{"public open", "anonymous", "public, max-age=10", http.StatusOK},
+		{"public open", "session", "private, max-age=10", http.StatusOK},
+		{"public token", "query token", "private, max-age=10", http.StatusOK},
+		{"public token", "anonymous", "no-store", http.StatusNotFound},
+		{"private", "anonymous", "no-store", http.StatusNotFound},
+	}
+	principals := map[string]playoutPrincipal{}
+	for _, p := range playoutPrincipals() {
+		principals[p.name] = p
+	}
+	configs := map[string]playoutConfig{}
+	for _, c := range playoutConfigs() {
+		configs[c.name] = c
+	}
+	for _, tc := range cases {
+		t.Run(tc.cfg+"/"+tc.who, func(t *testing.T) {
+			c := configs[tc.cfg]
+			s, h, sign := playoutOriginServer(t, c.set, c.pub)
+			st := s.playoutStore()
+			st.mu.Lock()
+			st.poster, st.posterErr, st.posterAt = []byte("a poster"), nil, time.Now()
+			st.mu.Unlock()
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/playout/poster.jpg", nil)
+			r.RemoteAddr = "203.0.113.9:5555"
+			principals[tc.who].apply(t, h, sign, r)
+			w := do(t, h, r)
+			if w.Code != tc.code || w.Header().Get("Cache-Control") != tc.want {
+				t.Fatalf("poster %d %q, want %d %q", w.Code, w.Header().Get("Cache-Control"), tc.code, tc.want)
+			}
+		})
+	}
+	// The media origin's refusals.
+	for _, tc := range []struct{ cfg, who string }{{"public token", "anonymous"}, {"private", "anonymous"}} {
+		c := configs[tc.cfg]
+		_, h, sign := playoutOriginServer(t, c.set, c.pub)
+		r := httptest.NewRequest(http.MethodGet, "/playout/master.m3u8", nil)
+		r.RemoteAddr = "203.0.113.9:5555"
+		principals[tc.who].apply(t, h, sign, r)
+		w := do(t, h, r)
+		if w.Code < 400 || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s refusal %d Cache-Control %q", tc.cfg, w.Code, w.Header().Get("Cache-Control"))
+		}
 	}
 }

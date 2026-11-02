@@ -123,6 +123,20 @@ func (s *Service) FetchNow(ctx context.Context, name string) error {
 			s.log.Warn("offload fetch-back failed", "target", t.Name, "file", name, "err", err)
 			continue
 		}
+		// The rename gave the file a new mtime, which the next pass would
+		// read as "changed since it was verified" and send the whole file
+		// again. These are the verified bytes, so the mtime goes back to
+		// before the earliest verification.
+		settled := it.VerifiedAt
+		for _, other := range its {
+			if !other.VerifiedAt.IsZero() && other.VerifiedAt.Before(settled) {
+				settled = other.VerifiedAt
+			}
+		}
+		if !settled.IsZero() {
+			at := settled.Add(-time.Second)
+			_ = os.Chtimes(final, at, at)
+		}
 		now := s.now()
 		for _, all := range its {
 			all.Evicted = false

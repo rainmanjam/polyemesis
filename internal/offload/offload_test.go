@@ -538,10 +538,16 @@ func TestFetchBackRestoresTheVerifiedBytesAndPinsThemLocal(t *testing.T) {
 	if f.svc.Evicted(name) {
 		t.Fatal("still marked evicted after fetch")
 	}
-	// Pinned: the next pass does not evict it again straight away.
+	// Pinned: the next pass does not evict it again straight away -- and,
+	// once it has settled, does not upload the same bytes all over again.
+	puts := f.mems[id].puts
+	f.now = f.now.Add(SettleWindow + time.Minute)
 	f.svc.Pass(context.Background())
 	if !f.local(name) {
 		t.Fatal("re-evicted a freshly fetched recording")
+	}
+	if f.mems[id].puts != puts {
+		t.Fatal("a fetched-back recording was uploaded again although its bytes are the verified ones")
 	}
 	it, _ := f.item(id, name)
 	if it.FetchedAt.IsZero() {

@@ -20,6 +20,8 @@ next.
 | `*.m3u8`, `*.mpd` (playlists) | `public, max-age=1` | `no-store` |
 | `seg_*.ts` (HLS segments) | `public, max-age=31536000, s-maxage=<window>` | `private, max-age=31536000, immutable` |
 | `init-*.m4s`, `chunk-*.m4s`, `*.vtt` | `public, max-age=<segment seconds>` | `private, max-age=<segment seconds>` |
+| `/api/v1/playout/poster.jpg` | `public, max-age=10` | `private, max-age=10` |
+| a refusal (401, 404, 503) | `no-store` | `no-store` |
 
 `<window>` is the seekable window: the DVR window when one is set, otherwise
 the live playlist (segment length times playlist segments), and never less than
@@ -43,7 +45,7 @@ stream or switch it from open to token-gated:
 If that window matters, purge after unpublishing:
 
 - **Cloudflare:** *Caching → Configuration → Purge Cache → Custom Purge*, and
-  purge by prefix `https://<your-host>/playout/`, or *Purge Everything* for the
+  purge by prefix `<your-host>/playout/` (no scheme; every plan has prefix purge), or *Purge Everything* for the
   zone. The API equivalent is `POST /zones/<zone>/purge_cache` with
   `{"prefixes": ["<your-host>/playout/"]}`.
 - **Bunny:** the pull zone's *Purge* page, purging `https://<zone>.b-cdn.net/playout/*`,

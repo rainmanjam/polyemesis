@@ -646,10 +646,14 @@ func (s *Server) playoutHandler() http.Handler {
 			// /playout/ URL pasted into an address bar into a password prompt
 			// rather than a dead end.
 			w.Header().Set("WWW-Authenticate", `Basic realm="polyemesis playout", charset="UTF-8"`)
+			// Refusals are never stored: a CDN rule that makes /playout/
+			// cache-eligible must not hold a 401 or a pre-publish 404 at the edge.
+			w.Header().Set("Cache-Control", "no-store")
 			writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
 			return
 		default:
 			if !access.ok() {
+				w.Header().Set("Cache-Control", "no-store")
 				http.NotFound(w, r)
 				return
 			}
@@ -657,6 +661,7 @@ func (s *Server) playoutHandler() http.Handler {
 
 		h := resolve()
 		if h == nil {
+			w.Header().Set("Cache-Control", "no-store")
 			writeError(w, http.StatusServiceUnavailable, "playout is not running")
 			return
 		}
@@ -733,7 +738,9 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	// #155: `Cache-Control: public, max-age=10` on a response the gate below
 	// decides. See playoutVaryingResponse.
 	playoutVaryingResponse(w)
-	if !s.authorizePlayout(r).ok() {
+	access := s.authorizePlayout(r)
+	if !access.ok() {
+		w.Header().Set("Cache-Control", "no-store")
 		// Deliberately no basic-auth challenge: a poster is decoration, and a
 		// password prompt fired by an <img> tag on somebody's blog would be a
 		// hostile thing to do. The player page prompts, the poster just 404s.
@@ -766,7 +773,13 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(int(posterMaxAge.Seconds())))
+	// Shared caches only for an open stream, as on the media origin: a CDN that
+	// ignores Vary must not hand a token-gated stream's poster to a stranger.
+	scope := "private"
+	if access == playoutAllowOpen {
+		scope = "public"
+	}
+	w.Header().Set("Cache-Control", scope+", max-age="+strconv.Itoa(int(posterMaxAge.Seconds())))
 	if s.playoutSettings().AllowCrossOrigin {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
