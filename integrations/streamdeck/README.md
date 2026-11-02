@@ -136,16 +136,20 @@ and Stream Deck+.
 The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, and
 the PNGs are committed. Each key action has eleven faces at 72 and 144 px, one per
 state in `KEY_STATE` order (`src/render.ts`): a tile in the state colour with the
-action's glyph in the corner, clear of the title. Held uses the UI's accent
-(`--primary`). Five states draw a status mark instead of the action glyph, so they
+action's glyph in the corner, clear of the title. The tile colours are in
+`scripts/keyPalette.mjs`. Live, warn and held take the hues of the UI's `--live`,
+`--warn` and `--primary`, darkened so the white title reads at 4.5:1 or better
+everywhere on the tile; `test/keyContrast.test.ts` checks every state colour and
+every committed face against that. Five states draw a status mark instead of the action glyph, so they
 can never be mistaken for another state: **HALTED: DISK** (a drive, on crimson; only
 the Record key uses it), **Needs admin token** (a padlock, on violet), and three
 that only the Mute track key uses: **MUTED** (a crossed speaker, on red),
 **Applied by restart** (a circular arrow, on orange) and **Not available** (a barred
 circle, on grey). Every key action has every face, so the state indices line up
 across actions. The action icons are white monochrome glyphs on transparent at 20
-and 40 px, the category icon the same at 28 and 56 px. The plugin icon (256 and
-512 px) is the emblem in the UI's `--primary-bright` on its dark ground. Both dials
+and 40 px. The category icon is the polyemesis bars mark from
+`web/public/favicon.svg` in white on transparent at 28 and 56 px, and the plugin
+icon (256 and 512 px) is the same mark in its own colours on its dark tile. Both dials
 use the built-in `$B1` layout, so there is no encoder background image.
 
 Strings live in `src/locales/*.json`, in the same fifteen locales the UI ships.

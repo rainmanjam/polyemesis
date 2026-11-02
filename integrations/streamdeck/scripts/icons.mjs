@@ -9,64 +9,15 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
+import { KEY_COLOURS, SHADE_SLOPE, SHADE_TOP } from "./keyPalette.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "com.polyemesis.streamdeck.sdPlugin", "imgs");
 
 // ---- colour -------------------------------------------------------------
-
-/** OKLCH to sRGB 0..255, the colour space the UI's CSS variables are written in. */
-function oklch(L, C, hDeg) {
-  const h = (hDeg * Math.PI) / 180;
-  const a = C * Math.cos(h);
-  const b = C * Math.sin(h);
-  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
-  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
-  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
-  const l = l_ ** 3;
-  const m = m_ ** 3;
-  const s = s_ ** 3;
-  const lin = [
-    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-  ];
-  const gamma = (x) => {
-    const c = Math.min(1, Math.max(0, x));
-    return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
-  };
-  return lin.map((x) => Math.round(gamma(x) * 255));
-}
-
-/** The polyemesis accent fill: --primary in ui/src/index.css, the colour of every primary button. */
-const ACCENT = oklch(0.602, 0.1177, 263.2);
-/** The accent for marks drawn on a dark ground: --primary-bright in ui/src/index.css. */
-const ACCENT_BRIGHT = oklch(0.719, 0.109, 257.4);
-/** The UI's dark surface, the ground the bright accent is meant to sit on. */
-const GROUND = [28, 31, 38];
+//
+// The key face palette, the title colour and the tile's lighting live in
+// keyPalette.mjs, so test/keyContrast.test.ts checks the very values drawn here.
 const INK = [255, 255, 255];
-
-/** Key face colours by state, in the order KEY_STATE in src/render.ts defines them. */
-const KEY_COLOURS = {
-  idle: [58, 63, 71],
-  live: [31, 157, 85],
-  warn: [214, 158, 46],
-  error: [197, 48, 48],
-  // Held is the confirm-in-progress face: the app's own accent, as on its primary buttons.
-  held: ACCENT,
-  unbound: [45, 55, 72],
-  // HALTED: DISK. Crimson, not the error red, so it is told apart at a glance from "unreachable".
-  halted: [150, 36, 84],
-  // A write key on a read token. Muted violet: not a fault, not a state of the stream.
-  needsAdmin: [86, 74, 128],
-  // A muted track. The error red, because a muted track is silent on air; the crossed speaker
-  // (not the action glyph) is what tells it from "unreachable" at a glance.
-  muted: [197, 48, 48],
-  // A level that reached the output by a RESTART: the viewer saw a reconnect. Burnt orange, its
-  // own colour, so it is never read as the amber of an ordinary warning.
-  restarted: [190, 96, 26],
-  // The control cannot apply here (audio copy, a matrix mix). Grey: nothing is wrong with the stream.
-  unavailable: [74, 79, 90],
-};
 
 // ---- shapes, in unit coordinates (0..1 across the icon) -------------------
 
@@ -158,15 +109,23 @@ function keyTile(base) {
   const tile = inRoundRect(0.02, 0.02, 0.98, 0.98, 0.14);
   return (x, y) => {
     if (!tile(x, y)) return null;
-    const shade = 1.06 - 0.12 * y;
+    const shade = SHADE_TOP - SHADE_SLOPE * y;
     return base.map((c) => Math.min(255, Math.round(c * shade)));
   };
 }
 
-/** The plugin icon: the UI's dark ground with the emblem in the bright accent, as the app draws accent marks. */
-function brandTile(mark) {
-  const tile = inRoundRect(0, 0, 1, 1, 0.2);
-  return (x, y) => (tile(x, y) ? (mark(x, y) ? ACCENT_BRIGHT : GROUND) : null);
+/**
+ * The plugin icon: the polyemesis bars mark, web/public/favicon.svg, in its own
+ * colours on its own dark rounded tile, so the Stream Deck app shows the same mark
+ * as the browser tab and the site.
+ */
+function brandTile() {
+  const tile = inRoundRect(0, 0, 1, 1, FAVICON.radius);
+  return (x, y) => {
+    if (!tile(x, y)) return null;
+    const bar = FAVICON.bars.find((b) => b.shape(x, y));
+    return bar ? bar.colour : FAVICON.ground;
+  };
 }
 
 // ---- glyphs --------------------------------------------------------------
@@ -251,8 +210,29 @@ GLYPH["track-gain"] = any(
   inArc(0.5, 0.54, 0.4, 0.07, 225, 360),
 );
 
-// The category and plugin marks: a ring with a centre dot, the broadcast emblem.
-const EMBLEM = any(inRing(0.5, 0.5, 0.3, 0.12), inCircle(0.5, 0.5, 0.11));
+// THE POLYEMESIS MARK: five rounded bars, transcribed from web/public/favicon.svg
+// (viewBox 0 0 22 22, one rect per bar). Coordinates are divided by 22 into this
+// file's unit square. The plugin icon draws them in their colours on the
+// favicon's ground; the category icon, which the SDK requires monochrome #FFFFFF
+// on transparent, draws the same bars in white with no tile.
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const FAVICON_BARS = [
+  // x, y, width, height, fill -- as written in favicon.svg; every bar has rx = width / 2.
+  [2.5, 8, 2.5, 6, "#5b7fc7"],
+  [6.2, 4, 2.5, 14, "#5b7fc7"],
+  [9.9, 6.5, 2.5, 9, "#3ecf6d"],
+  [13.6, 2.5, 2.5, 17, "#3ecf6d"],
+  [17.3, 7, 2.5, 8, "#45b5d0"],
+];
+const FAVICON = {
+  ground: hex("#0b0d11"),
+  radius: 4 / 22,
+  bars: FAVICON_BARS.map(([x, y, w, h, fill]) => ({
+    shape: inRoundRect(x / 22, y / 22, (x + w) / 22, (y + h) / 22, w / 2 / 22),
+    colour: hex(fill),
+  })),
+};
+const BARS_MARK = any(...FAVICON.bars.map((b) => b.shape));
 
 // Status marks that replace the action glyph on some faces, so the face says the state, not the action.
 const STATUS_GLYPH = {
@@ -373,9 +353,9 @@ for (const [name, shape] of Object.entries(GLYPH)) {
   write(`actions/${name}@2x.png`, 40, glyph(shape));
 }
 
-write("category-icon.png", 28, glyph(EMBLEM));
-write("category-icon@2x.png", 56, glyph(EMBLEM));
-write("plugin-icon.png", 256, brandTile(EMBLEM));
-write("plugin-icon@2x.png", 512, brandTile(EMBLEM));
+write("category-icon.png", 28, glyph(BARS_MARK));
+write("category-icon@2x.png", 56, glyph(BARS_MARK));
+write("plugin-icon.png", 256, brandTile());
+write("plugin-icon@2x.png", 512, brandTile());
 
 console.log("wrote icons under", ROOT);

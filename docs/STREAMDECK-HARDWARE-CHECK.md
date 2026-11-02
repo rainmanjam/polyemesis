@@ -24,11 +24,11 @@ plugin version (Stream Deck app, **Preferences > Plugins**) next to the result.
 ## 1. Install
 
 - [ ] Stream Deck app 7.1 or later is running.
-- [ ] Double-click the file. The app offers to install **polyemesis**. Accept.
-- [ ] **Preferences > Plugins** lists polyemesis at the expected version: the
+- [ ] Double-click the file. The app offers to install **Polyemesis**. Accept.
+- [ ] **Preferences > Plugins** lists Polyemesis at the expected version: the
       release tag as x.y.z.0 (v0.12.3 is 0.12.3.0). A CI or local build shows the
       committed manifest's placeholder version instead.
-- [ ] The action list has a **polyemesis** category with its icon, holding all
+- [ ] The action list has a **Polyemesis** category with the white bars icon, holding all
       eleven actions: Destination, Go live, Stop all, Failover, Stop destination,
       Record, Routing preset, Chat poll, Mute track, Track gain, Meter.
 - [ ] Each action's icon in that list is a crisp white glyph, not a blank or a
