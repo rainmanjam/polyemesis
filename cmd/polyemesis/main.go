@@ -300,16 +300,10 @@ func run(h *hooks) error {
 	if err != nil {
 		return err
 	}
-	// Closed on the way out unless the background job tier was still running
-	// when the shutdown budget ran out: closing under it would pull the store
-	// from a worker mid-write, and the process is exiting either way, which
-	// releases the file regardless. See postProd.waitWithin.
-	keepStoreOpen := false
-	defer func() {
-		if !keepStoreOpen {
-			store.Close()
-		}
-	}()
+	// Closed on every way out, but only after the background job tier is down.
+	// See storeGuard.
+	guard := newStoreGuard(log, store.Close)
+	defer guard.close(engine.ShutdownBudget)
 	// One-shot, here rather than on internal/db's read path -- see
 	// migrateLegacyPlaylistFilePath's comment for why.
 	if err := migrateLegacyPlaylistFilePath(store, cfg.DataDir, log); err != nil {
@@ -345,24 +339,7 @@ func run(h *hooks) error {
 	// the API, which cannot be given a queue after its handlers are built.
 	h.progress("starting the background job queue")
 	pp := startPostProd(ctx, log, cfg, store, box, eng, tools)
-	// EVERY EXIT FROM HERE stops the tier before the store closes, not just the
-	// orderly shutdown at the bottom. Deferred after store.Close was, so it runs
-	// first; an error return (a failed listener, a failed startup report) would
-	// otherwise close the store under loops that had not even been cancelled.
-	// The orderly path does this itself, inside the shared budget, and marks it
-	// done.
-	ppStopped := false
-	defer func() {
-		if ppStopped {
-			return
-		}
-		cancel()
-		wctx, wcancel := context.WithTimeout(context.Background(), engine.ShutdownBudget)
-		defer wcancel()
-		if !pp.waitWithin(wctx) {
-			keepStoreOpen = true
-		}
-	}()
+	guard.attach(cancel, pp.waitWithin)
 
 	// Retained MQTT telemetry. Started unconditionally and inert until an
 	// operator switches it on: the runner watches the stored settings, so
@@ -629,6 +606,10 @@ func run(h *hooks) error {
 	select {
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// Cancel FIRST, so the job tier, the MQTT runner, the hub and the
+			// OBS bridge all start coming down while the engines stop, rather
+			// than each waiting its turn in the deferred closes afterwards.
+			cancel()
 			eng.Stop()
 			return fmt.Errorf("http server: %w", err)
 		}
@@ -684,12 +665,7 @@ func run(h *hooks) error {
 	// included -- before the deferred store.Close, which would otherwise leave
 	// a connection one of them is still querying on open past it. Drawn from
 	// the same budget, so it cannot extend the shutdown.
-	ppStopped = true
-	if !pp.waitWithin(shutdownCtx) {
-		keepStoreOpen = true
-		log.Warn("the background job queue had not stopped when the shutdown budget ran out; " +
-			"leaving the database for the process exit to close")
-	}
+	guard.stopTier(shutdownCtx)
 	warnIfShutdownOverran(shutdownCtx, log)
 	reportSurvivingChildren(log, childcensus.Live())
 	log.Info("goodbye")
