@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -46,9 +47,19 @@ type harness struct {
 // before Start, which is where tests shrink timeouts and limits.
 func newHarness(t *testing.T, tweak func(*Server)) *harness {
 	t.Helper()
-	up, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	h, err := tryHarness(t, tweak)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return h
+}
+
+// tryHarness is newHarness returning Start's error instead of failing.
+func tryHarness(t *testing.T, tweak func(*Server)) (*harness, error) {
+	t.Helper()
+	up, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		return nil, err
 	}
 	t.Cleanup(func() { up.Close() })
 	logs := &syncBuf{}
@@ -61,10 +72,10 @@ func newHarness(t *testing.T, tweak func(*Server)) *harness {
 		tweak(s)
 	}
 	if err := s.Start(); err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	t.Cleanup(s.Stop)
-	return &harness{t: t, srv: s, up: up, logs: logs}
+	return &harness{t: t, srv: s, up: up, logs: logs}, nil
 }
 
 // newLink is one simulated uplink: its own socket, so its own source port.
@@ -561,8 +572,40 @@ func TestStopIsIdempotentStartTwiceFailsAndABusyPortFailsStart(t *testing.T) {
 	}
 }
 
+// wildcardHarness starts the receiver on the dual-stack wildcard at an
+// EXPLICIT port, never ":0".
+//
+// On macOS an ephemeral bind to [::]:0 only checks the IPv6 table, so the
+// kernel can hand out a port some other socket already holds as 127.0.0.1:P
+// (another test package running in parallel, say). Datagrams to 127.0.0.1:P
+// then go to that more specific socket and the receiver never sees them -- no
+// retransmit helps, every one is misdelivered. An explicit-port wildcard bind
+// is checked against IPv4 holders and fails with EADDRINUSE instead, which is
+// also why a configured listen port is not exposed to this. So: take a port
+// the IPv4 table says is free, release it, bind ":P"; if something grabbed it
+// in between, the bind says so and another port is tried.
+func wildcardHarness(t *testing.T) *harness {
+	t.Helper()
+	var lastErr error
+	for range 20 {
+		probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := probe.LocalAddr().(*net.UDPAddr).Port
+		probe.Close()
+		h, err := tryHarness(t, func(s *Server) { s.cfg.Listen = net.JoinHostPort("", strconv.Itoa(port)) })
+		if err == nil {
+			return h
+		}
+		lastErr = err
+	}
+	t.Fatalf("no free dual-stack wildcard port in 20 tries: %v", lastErr)
+	return nil
+}
+
 func TestAWildcardListenServesIPv4SendersOnTheDualStackSocket(t *testing.T) {
-	h := newHarness(t, func(s *Server) { s.cfg.Listen = ":0" })
+	h := wildcardHarness(t)
 	port := h.srv.Addr().(*net.UDPAddr).Port
 	c, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 	if err != nil {
