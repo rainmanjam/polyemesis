@@ -220,6 +220,9 @@ export interface VideoStream {
   frameRate: number;
   bitrate: number;
   pixFmt: string;
+  /** ffprobe's profile name and level number; absent when unknown. */
+  profile?: string;
+  level?: number;
 }
 
 export interface SourceInfo {
@@ -1835,6 +1838,8 @@ export interface PlayoutVariantStatus {
   bandwidth: number;
   width?: number;
   height?: number;
+  /** The video codec the rung carries; absent when unknown. */
+  codec?: PlayoutCodec;
   /** Relative to the playout root; prefix with `/playout/`. */
   playlist: string;
   manifest?: string;
@@ -1854,6 +1859,69 @@ export interface PlayoutAnalytics {
   uncounted: number;
   idleSeconds: number;
   capacity: number;
+  /** What the public players reported about playback (QoE beacons). */
+  qoe: PlayoutQoESummary;
+}
+
+/** A rung's video codec, as the server names it. */
+export type PlayoutCodec = "h264" | "hevc" | "av1";
+
+// --- QoE beacons -----------------------------------------------------------
+//
+// THE BEACON CONTRACT, mirrored from internal/playout/qoe.go and documented in
+// docs/API.md ("QoE beacons"). TestUITypesCanNameEveryBeaconField fails when
+// a Go field has no name here. A field changes meaning only with a new `v`.
+
+export type BeaconKind = "start" | "heartbeat" | "end";
+
+/** A closed set of failure classes. Never a message: an hls.js error detail
+ *  carries the fragment URL, and that URL carries the playback token. */
+export type BeaconError =
+  | "network"
+  | "manifest"
+  | "media"
+  | "decode"
+  | "codec_unsupported"
+  | "other";
+
+/** One QoE beacon, schema version 1. Counters are cumulative for the session;
+ *  `errors` are the codes seen since the previous beacon. */
+export interface BeaconV1 {
+  v: 1;
+  /** Random per page load, 16-64 of [A-Za-z0-9_-]. */
+  sid: string;
+  seq: number;
+  kind: BeaconKind;
+  startupMs?: number;
+  rebufferCount: number;
+  rebufferMs: number;
+  variant?: string;
+  latencyMs?: number;
+  errors?: BeaconError[];
+}
+
+export interface PlayoutQoETotals {
+  beacons: number;
+  sessions: number;
+  startups: number;
+  startupMs: number;
+  rebuffers: number;
+  rebufferMs: number;
+  errors: Partial<Record<BeaconError, number>> | null;
+  /** Beacons that arrived with the session table full; nothing else from
+   *  them is counted. */
+  untracked: number;
+  /** Cumulative startup counts at or under each bound of 500, 1000, 2000,
+   *  3000, 5000 and 10000 ms, then +Inf (= startups). */
+  startupHistogram: number[] | null;
+  /** Sessions that reported at least one error, each counted once. */
+  sessionsWithErrors: number;
+}
+
+export interface PlayoutQoESummary extends PlayoutQoETotals {
+  active: number;
+  byVariant: Record<string, number> | null;
+  latencyMsMedian?: number;
 }
 
 export interface PlayoutUsage {
@@ -1894,6 +1962,10 @@ export interface PlayoutAdminView {
   token: string;
   title: string;
   description: string;
+  /** The offline card. `offlineClipJob` is a clip export job id, 0 for none. */
+  offlineMessage: string;
+  offlineClipJob: number;
+  vodUrl: string;
   urls: PlayoutUrls;
   /** True only when anyone on the internet holding the URL can watch. The
    *  page leads with this. */
@@ -1903,6 +1975,19 @@ export interface PlayoutAdminView {
   running: boolean;
 }
 
+/** One rung as the public player sees it. */
+export interface PlayoutPublicVariant {
+  name: string;
+  playlist: string;
+  width?: number;
+  height?: number;
+  codec?: PlayoutCodec;
+}
+
+/** Whether segments are arriving; `ended` is a broadcast that stopped within
+ *  the last 12 hours, distinct from `offline`. */
+export type PlayoutLiveState = "live" | "ended" | "offline";
+
 /** What the public player page is told. Never carries the token. */
 export interface PlayoutPublicView {
   enabled: boolean;
@@ -1910,8 +1995,12 @@ export interface PlayoutPublicView {
   description: string;
   master: string;
   poster: string;
-  variants: { name: string; playlist: string; width?: number; height?: number }[] | null;
+  variants: PlayoutPublicVariant[] | null;
   viewers: number;
+  state: PlayoutLiveState;
+  endedAt?: string;
+  nextStartAt?: string;
+  offline: { message?: string; clip?: string; vodUrl?: string };
 }
 
 export interface Recording {

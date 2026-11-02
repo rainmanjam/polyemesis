@@ -1184,6 +1184,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		snap.Alerts = &metrics.AlertDeliveries{Sent: st.Sent, Failed: st.Failed, LastSent: st.LastSent}
 	}
 
+	// The public player's viewers and QoE. Nil without a playout manager, and
+	// then the families are omitted rather than published as zeros.
+	snap.Playout = s.playoutMetrics()
+
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{
 		CPUPercent:     sys.CPUPercent,
