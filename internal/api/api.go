@@ -1416,6 +1416,17 @@ func (s *Server) registerRoutes(r chi.Router) {
 			r.Get("/clipper/recordings/{id}/transcript", s.handleClipTranscript)
 			r.Post("/clipper/recordings/{id}/plan", s.handleClipPlan)
 			r.Post("/clipper/recordings/{id}/export", s.handleClipExport)
+			// Highlight suggestions (Wave 4 #5a). The scan is a job that stores
+			// suggestions and cuts nothing; Accept is the only route here that
+			// creates a clip, through the same submit path as /export.
+			r.Post("/clipper/recordings/{id}/highlights/scan", s.handleScanHighlights)
+			r.Get("/clipper/recordings/{id}/highlights", s.handleListHighlights)
+			r.Post("/clipper/highlights/{id}/accept", s.handleAcceptHighlight)
+			r.Post("/clipper/highlights/{id}/dismiss", s.handleDismissHighlight)
+			// Saved vertical-export layouts and caption styles (Wave 4 #5b).
+			r.Get("/clipper/templates", s.handleListClipTemplates)
+			r.Post("/clipper/templates", s.handlePutClipTemplate)
+			r.Delete("/clipper/templates/{id}", s.handleDeleteClipTemplate)
 
 			// Alerting: webhook rules and the test button that is the only
 			// reason anybody believes a webhook works.
@@ -2236,6 +2247,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/analytics/live":         true,
 	"/api/v1/analytics/streams":      true,
 	"/api/v1/analytics/streams/{id}": true,
+	// Wave 4 #5a: each highlight suggestion carries a transcript excerpt --
+	// the words again, under another name.
+	"/api/v1/clipper/recordings/{id}/highlights": true,
+	// Wave 4 #5b: the template list also reports the fonts directory's
+	// listing and the FFmpeg build's text capability, which is the editor's
+	// business and not a read-only dashboard's.
+	"/api/v1/clipper/templates": true,
 }
 
 // obsScopePatterns is everything an "obs" token may reach: one route, keyed by

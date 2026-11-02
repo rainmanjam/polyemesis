@@ -1,20 +1,29 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/api"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/highlights"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 	"github.com/rainmanjam/polyemesis/internal/uploadverify"
@@ -48,7 +57,7 @@ type postProd struct {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 	settings, err := store.GetSettings()
 	if err != nil {
 		// Falling back to defaults rather than giving up: the stored policy is
@@ -93,7 +102,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// be applied to work that had already started.
 	q.SetAdmit(gov.MayStart)
 
-	registerProcessors(log, cfg, store, gov, q, tools, whisper, settings.PostProd)
+	registerProcessors(log, cfg, store, box, gov, q, tools, whisper, settings.PostProd)
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -136,7 +145,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 // missing. A processor that fails a job with "whisper.cpp is not installed"
 // tells an operator what to do; a button that silently does not exist tells
 // them the feature is broken. This is the fail-open rule applied to a queue.
-func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
+func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
 	reg := func(kind jobs.Kind, err error) {
 		if err != nil {
 			log.Error("cannot register a job kind", "kind", kind, "error", err)
@@ -173,6 +182,12 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *
 	cutter := clipper.New(log, tools.FFmpeg, tools.FFprobe)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
 	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve)))
+
+	// Highlight scans (Wave 4 #5a). Niced like every other derived-media
+	// child: measuring loudness decodes the whole recording's audio. The
+	// model, when a scan asks for it, is the Automod primary connector on a
+	// budget of its OWN, so a post-pass never spends live moderation's.
+	reg(highlights.JobKind, q.Register(highlights.JobKind, 1, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
 
 	// Playlist normalisation. THIS IS THE PRODUCER OF THE FILE THE PLAYLIST
 	// TIER REFUSES TO START WITHOUT: engine.playlistItemsReady requires a
@@ -446,4 +461,65 @@ func backfillSessions(log *slog.Logger, store *db.DB, settings db.Settings) {
 		log.Info("grouped existing recordings into sessions",
 			"sessions", res.Created, "recordings", res.Assigned, "extended", res.Extended)
 	}
+}
+
+// highlightDeps wires a highlight scan to the store, the niced FFmpeg, and the
+// operator's model.
+func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.Governor, tools *ffmpeg.Tools) highlights.Deps {
+	ffmpegBin := "ffmpeg"
+	if tools != nil && tools.FFmpeg != "" {
+		ffmpegBin = tools.FFmpeg
+	}
+	return highlights.Deps{
+		FFmpeg: ffmpegBin,
+		Run: func(ctx context.Context, name string, args []string) ([]byte, error) {
+			if gov != nil {
+				name, args = gov.NiceCommand(name, args...)
+			}
+			var stdout, stderr bytes.Buffer
+			cmd := exec.CommandContext(ctx, name, args...)
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err != nil {
+				return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(lastLine(stderr.String())))
+			}
+			return stdout.Bytes(), nil
+		},
+		ChatTimes: store.ChatTimesBetween,
+		Transcript: func(recordingID int64) ([]highlights.Line, error) {
+			tr, err := store.GetTranscript(recordingID)
+			if errors.Is(err, db.ErrNotFound) || tr == nil {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			var out []highlights.Line
+			for _, seg := range tr.Merged() {
+				out = append(out, highlights.Line{StartMS: seg.StartMS, EndMS: seg.EndMS, Text: seg.Text})
+			}
+			return out, nil
+		},
+		Save: func(recordingID int64, sugs []highlights.Suggestion) (int, error) {
+			rows := make([]db.Highlight, 0, len(sugs))
+			for _, sg := range sugs {
+				signals, err := json.Marshal(sg.Signals)
+				if err != nil {
+					return 0, err
+				}
+				rows = append(rows, db.Highlight{StartMS: sg.StartMS, EndMS: sg.EndMS, Score: sg.Score,
+					SignalScore: sg.SignalScore, ModelScore: sg.ModelScore, Signals: signals, Excerpt: sg.Excerpt})
+			}
+			return store.ReplacePendingHighlights(recordingID, rows)
+		},
+		Model: api.HighlightModel(store, box, automod.NewBudget(), log),
+	}
+}
+
+// lastLine is the tail of FFmpeg's stderr, which is where it says why.
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }

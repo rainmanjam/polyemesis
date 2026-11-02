@@ -551,6 +551,10 @@ type clipRequestBody struct {
 	// Container is "mkv" or "mp4". MKV keeps every audio track; MP4 is what a
 	// social platform will accept.
 	Container string `json:"container,omitempty"`
+	// Vertical, when present, exports a 9:16 short instead of a straight cut
+	// (Wave 4 #5b). It forces MP4 and an exact in-point; see
+	// internal/clipper/vertical.go.
+	Vertical *clipVerticalBody `json:"vertical,omitempty"`
 }
 
 // clipPlanView is a resolved cut in the units a browser thinks in.
@@ -585,6 +589,8 @@ type clipPlanView struct {
 	OutName  string   `json:"outName"`
 	Describe string   `json:"describe"`
 	Warnings []string `json:"warnings,omitempty"`
+	// Vertical is true for a 9:16 short.
+	Vertical bool `json:"vertical,omitempty"`
 }
 
 func (s *Server) handleClipPlan(w http.ResponseWriter, r *http.Request) {
@@ -607,6 +613,13 @@ func (s *Server) planClip(w http.ResponseWriter, r *http.Request) (clipper.Plan,
 	if !decodeJSON(w, r, &body) {
 		return clipper.Plan{}, clipTimeline{}, false
 	}
+	return s.planClipBody(w, r, id, body)
+}
+
+// planClipBody is planClip once the body is in hand: the half an accepted
+// highlight shares, because its in and out points come from the suggestion
+// rather than from the editor.
+func (s *Server) planClipBody(w http.ResponseWriter, r *http.Request, id int64, body clipRequestBody) (clipper.Plan, clipTimeline, bool) {
 	tl, err := s.clipTimeline(id)
 	if err != nil {
 		s.writeClipError(w, err)
@@ -655,6 +668,17 @@ func (s *Server) clipRequest(tl clipTimeline, body clipRequestBody) (clipper.Req
 		Title:   clipTitle(body.Title),
 		OutPath: s.clipOutPath(tl, body),
 	}
+	if body.Vertical != nil {
+		v, err := s.clipVertical(tl, body)
+		if err != nil {
+			return clipper.Request{}, err
+		}
+		req.Vertical = v
+		// Every frame is encoded, so the mode the editor had selected is
+		// moot; precise is the one that describes what happens.
+		req.Mode = clipper.ModePrecise
+		mode = clipper.ModePrecise
+	}
 	if mode == clipper.ModePrecise {
 		// Only the leading partial GOP is re-encoded, so this names an encoder
 		// for a fraction of a second of video. HeadEncoder prefers x264 and
@@ -685,6 +709,12 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	if strings.EqualFold(strings.TrimPrefix(body.Container, "."), "mp4") {
 		ext = ".mp4"
 	}
+	suffix := ""
+	if body.Vertical != nil {
+		// A short is always an MP4, and is named apart from a straight cut of
+		// the same span so exporting both keeps both.
+		ext, suffix = ".mp4", "-vertical"
+	}
 	base := strings.TrimSuffix(tl.anchor.Filename, filepath.Ext(tl.anchor.Filename))
 	name := safeClipName(body.Title)
 	if name == "" {
@@ -696,7 +726,7 @@ func (s *Server) clipOutPath(tl clipTimeline, body clipRequestBody) string {
 	// The in-point is part of the name so two clips out of one recording never
 	// collide, and so a file found later still says where it came from.
 	stamp := fmt.Sprintf("%06d", body.InMS/1000)
-	return filepath.Join(s.clipExportDir(), name+"-"+stamp+ext)
+	return filepath.Join(s.clipExportDir(), name+"-"+stamp+suffix+ext)
 }
 
 func (s *Server) clipExportDir() string {
@@ -775,6 +805,7 @@ func clipPlanViewOf(p clipper.Plan) clipPlanView {
 		OutName:          filepath.Base(p.OutPath),
 		Describe:         p.Describe(),
 		Warnings:         p.Warnings,
+		Vertical:         p.Vertical != nil,
 	}
 	if view.Warnings == nil {
 		view.Warnings = []string{}
@@ -807,15 +838,32 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := os.MkdirAll(s.clipExportDir(), 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create the exports directory: "+err.Error())
-		return
-	}
-
-	cut, err := tl.timeline()
+	job, err := s.submitClipExport(plan, tl)
 	if err != nil {
 		s.writeClipError(w, err)
 		return
+	}
+	// The same jobView every other page reads, so the editor's progress panel
+	// and the jobs table cannot disagree about what a job is.
+	writeJSON(w, http.StatusAccepted, s.clipJobView(job))
+}
+
+// clipJobView renders a just-submitted job the way the jobs table does.
+func (s *Server) clipJobView(job *jobs.Job) any {
+	stats := s.jobq.Stats()
+	return s.view(*job, s.snapshot(), stats.Paused, stats.Running < s.concurrency(), s.recordingNames(), time.Now())
+}
+
+// submitClipExport queues a planned cut. Shared by the editor's Export and a
+// highlight's Accept, so an accepted suggestion becomes exactly the job the
+// editor would have made -- there is one way a clip gets queued.
+func (s *Server) submitClipExport(plan clipper.Plan, tl clipTimeline) (*jobs.Job, error) {
+	if err := os.MkdirAll(s.clipExportDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("could not create the exports directory: %w", err)
+	}
+	cut, err := tl.timeline()
+	if err != nil {
+		return nil, err
 	}
 	params, err := json.Marshal(clipper.JobParams{
 		Request: clipper.Request{
@@ -826,16 +874,15 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 			OutPath:      plan.OutPath,
 			Title:        plan.Title,
 			VideoEncoder: plan.VideoEncoder,
+			Vertical:     plan.Vertical,
 		},
 		// The segments travel with the job so a re-index between submission and
 		// execution cannot change what gets cut out from under the user.
 		Segments: cut.Segments(),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, err
 	}
-
 	job, _, err := s.jobq.Submit(jobs.Job{
 		Kind:   clipper.JobKind,
 		Target: jobs.RecordingTarget(tl.anchor.ID),
@@ -846,15 +893,7 @@ func (s *Server) handleClipExport(w http.ResponseWriter, r *http.Request) {
 		// throw away the export somebody just asked for.
 		Priority: jobs.PriorityUser,
 	})
-	if err != nil {
-		s.writeClipError(w, err)
-		return
-	}
-	// The same jobView every other page reads, so the editor's progress panel
-	// and the jobs table cannot disagree about what a job is.
-	stats := s.jobq.Stats()
-	writeJSON(w, http.StatusAccepted, s.view(*job, s.snapshot(), stats.Paused,
-		stats.Running < s.concurrency(), s.recordingNames(), time.Now()))
+	return job, err
 }
 
 // ---------------------------------------------------------------- transcript
@@ -895,23 +934,48 @@ func (s *Server) handleClipTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := clipTranscriptView{Segments: []clipTranscriptSegment{}, Speakers: []string{}, Tracks: []int{}}
+	segs, err := s.clipTranscriptSegments(tl)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	view := clipTranscriptView{Segments: segs, Speakers: []string{}, Tracks: []int{}}
 	seenSpeaker := map[string]bool{}
 	seenTrack := map[int]bool{}
+	for _, seg := range segs {
+		if seg.Speaker != "" && !seenSpeaker[seg.Speaker] {
+			seenSpeaker[seg.Speaker] = true
+			view.Speakers = append(view.Speakers, seg.Speaker)
+		}
+		if !seenTrack[seg.Track] {
+			seenTrack[seg.Track] = true
+			view.Tracks = append(view.Tracks, seg.Track)
+		}
+	}
+	sort.Ints(view.Tracks)
+	writeJSON(w, http.StatusOK, view)
+}
+
+// clipTranscriptSegments is every transcribed line across the timeline, in
+// TIMELINE milliseconds (part.startMS + the segment's own), sorted. The one
+// place that rebasing happens: the transcript panel, burned captions and
+// highlight excerpts all read it, so none of them can disagree about when a
+// word was said.
+func (s *Server) clipTranscriptSegments(tl clipTimeline) ([]clipTranscriptSegment, error) {
+	out := []clipTranscriptSegment{}
 	for _, p := range tl.parts {
 		tr, err := s.store.GetTranscript(p.rec.ID)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				continue
 			}
-			writeStoreError(w, err)
-			return
+			return nil, err
 		}
 		if tr == nil {
 			continue
 		}
 		for _, seg := range tr.Merged() {
-			view.Segments = append(view.Segments, clipTranscriptSegment{
+			out = append(out, clipTranscriptSegment{
 				RecordingID: p.rec.ID,
 				Track:       seg.Track,
 				Speaker:     seg.Speaker,
@@ -919,24 +983,15 @@ func (s *Server) handleClipTranscript(w http.ResponseWriter, r *http.Request) {
 				EndMS:       p.startMS + seg.EndMS,
 				Text:        seg.Text,
 			})
-			if seg.Speaker != "" && !seenSpeaker[seg.Speaker] {
-				seenSpeaker[seg.Speaker] = true
-				view.Speakers = append(view.Speakers, seg.Speaker)
-			}
-			if !seenTrack[seg.Track] {
-				seenTrack[seg.Track] = true
-				view.Tracks = append(view.Tracks, seg.Track)
-			}
 		}
 	}
-	sort.SliceStable(view.Segments, func(i, j int) bool {
-		if view.Segments[i].StartMS == view.Segments[j].StartMS {
-			return view.Segments[i].Track < view.Segments[j].Track
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].StartMS == out[j].StartMS {
+			return out[i].Track < out[j].Track
 		}
-		return view.Segments[i].StartMS < view.Segments[j].StartMS
+		return out[i].StartMS < out[j].StartMS
 	})
-	sort.Ints(view.Tracks)
-	writeJSON(w, http.StatusOK, view)
+	return out, nil
 }
 
 // handleDownloadClipExport hands over a finished clip.

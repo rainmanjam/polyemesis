@@ -82,8 +82,7 @@ func scanDeps(t *testing.T) (Deps, *[]Suggestion, *[][]string) {
 		},
 		Transcript: func(rec int64) ([]Line, error) {
 			if rec == 1 {
-				return []Line{{StartMS: 99_000, EndMS: 102_000, Text: "oh no oh no"},
-					}, nil
+				return []Line{{StartMS: 99_000, EndMS: 102_000, Text: "oh no oh no"}}, nil
 			}
 			return []Line{{StartMS: 95_000, EndMS: 105_000, Text: "chat is losing it"}}, nil
 		},

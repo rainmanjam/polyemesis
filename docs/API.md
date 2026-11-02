@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-three `GET`s among the twenty-five refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-five `GET`s among the twenty-seven refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +133,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-five routes are refused outright**, for three different reasons. Masking
+**Twenty-seven routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last sixteen are `403` because of what
+are `403` because of what they *do*. The last eighteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -166,6 +166,8 @@ are `403` because of what they *do*. The last sixteen are `403` because of what
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
+| `GET /clipper/recordings/{id}/highlights` | each highlight suggestion carries a transcript excerpt: the words again |
+| `GET /clipper/templates` | the operator's saved short layouts, with the fonts directory's listing and whether this FFmpeg can draw text |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
@@ -1293,6 +1295,11 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` | `/clipper/recordings/{id}`, `/keyframes`, `/transcript` |
 | `POST` | `/clipper/recordings/{id}/plan`, `/export` |
 | `GET` | `/clipper/jobs/{id}/download` |
+| `POST` | `/clipper/recordings/{id}/highlights/scan` |
+| `GET` | `/clipper/recordings/{id}/highlights` |
+| `POST` | `/clipper/highlights/{id}/accept`, `/clipper/highlights/{id}/dismiss` |
+| `GET` `POST` | `/clipper/templates` |
+| `DELETE` | `/clipper/templates/{id}` |
 
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
@@ -1301,6 +1308,43 @@ is refused, not served.
 seen it: one entry per target with its `state` (`pending`, `uploading`,
 `verified`, `failed`, `stuck`), `attempts` and `lastError`. Offload copies and
 never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
+
+**Vertical shorts.** `/plan` and `/export` take an optional `vertical` object,
+and with it the export is a 9:16 short: 1080x1920 H.264 (yuv420p) with one
+stereo AAC track, in MP4, named `…-vertical.mp4`. `layout` is `center` (a 9:16
+crop; `focus` 0..1 pans it, default 0.5), `stacked` (`face` is the face-cam box
+and `game` the gameplay box, each `{x, y, w, h}` as fractions of the source
+frame; `faceShare` 0.2..0.6 is the face panel's share of the height, default
+0.4; `faceBottom` puts it under the gameplay) or `blur` (the whole frame fitted
+across the width over a blurred copy of itself). `captions: {enabled, style}`
+burns the transcript over the clip's span into the picture -- the words come
+from the stored transcript, never from the request, and follow the chosen
+tracks; `style.font` must be a font already in the fonts directory. Every
+frame is re-encoded, so the in-point is exact whatever `mode` says. A short
+longer than 60 seconds is planned and exported with a warning, not refused.
+Without FFmpeg's `drawtext` filter the short is made without captions and the
+plan says so.
+
+**Highlights.** `POST /clipper/recordings/{id}/highlights/scan` (body
+`{"useModel": bool}`, optional) queues a `highlights.scan` job, folded into one
+already queued for the same recording. It measures loudness, lines chat up with
+the recording, and stores suggestions; it cuts nothing. With `useModel` the
+Automod primary model (OpenAI-compatible protocol only) scores the transcript
+excerpts in one call, on a budget of its own; it fails open.
+`GET /clipper/recordings/{id}/highlights` is the review queue: each suggestion's
+`startMs`/`endMs`, `score`, the `signals` that fired (`chat`, `loudness`,
+`model`, each with `peak` and `baseline`), its `excerpt` and `state`
+(`pending`, `accepted`, `dismissed`), plus `modelAvailable` and `modelReason`.
+`POST /clipper/highlights/{id}/accept` takes the `/export` body -- in and out
+default to the suggestion's -- and queues exactly the export the editor would;
+a second accept, or one after a dismiss, is `409`. `…/dismiss` decides it the
+other way and queues nothing.
+
+**Templates.** `GET /clipper/templates` lists saved `{id, name, vertical}`
+templates beside `layouts`, `fonts`, `drawText`, `maxShortSeconds` and
+`defaultStyle`. `POST` saves `{name, vertical}`, replacing one of the same name
+(1 to 60 characters, at most 100 templates); `DELETE /clipper/templates/{id}`
+removes one.
 
 **`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
 Absent, it deletes the whole transcript; present, it deletes one track's, so a
