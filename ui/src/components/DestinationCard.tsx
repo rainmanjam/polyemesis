@@ -256,7 +256,10 @@ export function DestinationCard({
       // from a mouse click on another element, which is exactly the case
       // focus-visible suppresses, and a jump that lands with no ring is a jump
       // that does not say where it landed.
+      // The one exception to index.css's single :focus-visible rule, for that
+      // reason: [data-jump-target] draws the same 2px --ring outline on :focus.
       tabIndex={domId ? -1 : undefined}
+      data-jump-target=""
       className="overflow-hidden"
     >
       <CardContent className="flex flex-col gap-2.5 p-3">
@@ -284,7 +287,16 @@ export function DestinationCard({
                 is not read as a broadcast that ended. app-council A89: a
                 running card's badge carries a glyph, so live does not rest on
                 the fill colour alone. */}
-            <Badge data-testid="card-state-badge" variant={dest.enabled ? toneBadge[tone] : "outline"}>
+            {/* On air is the tally lamp (2026-11 review): solid --tally under its
+                own label, not the green that also means running and healthy. */}
+            <Badge
+              data-testid="card-state-badge"
+              variant={dest.enabled ? toneBadge[tone] : "outline"}
+              className={cn(
+                destinationStatus(dest.enabled, state, dest.delay?.phase).lamp &&
+                  "border-transparent bg-tally text-tally-foreground",
+              )}
+            >
               {dest.enabled && state === "running" && (
                 <Radio aria-hidden="true" data-badge-cue="on-air" className="h-3 w-3" />
               )}

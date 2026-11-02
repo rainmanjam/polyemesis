@@ -36,11 +36,12 @@ const state = vi.hoisted(() => ({
   destinationCalls: 0,
   failDestinations: false,
   cpuCeiling: 85,
+  system: null as unknown,
 }));
 
 vi.mock("@/hooks/useLiveData", () => ({
   useLiveData: () => ({
-    system: null,
+    system: state.system,
     bitrate: [],
     logs: [],
     status: null,
@@ -89,6 +90,7 @@ afterEach(() => {
   state.destinationCalls = 0;
   state.failDestinations = false;
   state.cpuCeiling = 85;
+  state.system = null;
 });
 
 const proc = (name: string, pstate: string) => ({
@@ -186,6 +188,40 @@ describe("MonitoringPage: process state uses the shared status pill (A73)", () =
     render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
 
     await waitFor(() => expect(document.querySelector('[data-tone="bad"]')).not.toBeNull());
+  });
+});
+
+describe("MonitoringPage: the verdict reads the whole page (2026-11 review, row 6)", () => {
+  const host = (cpuPercent: number) => ({
+    cpuPercent, procCpuPercent: 1, memUsedBytes: 1, memTotalBytes: 2, memPercent: 40, procMemBytes: 1, numCpu: 8,
+  });
+  const allRunning = () =>
+    Array.from({ length: 12 }, (_, i) => proc(`p${i}`, "running"));
+
+  it("does not say all running above a CPU warning", async () => {
+    state.processes = allRunning();
+    state.system = host(91);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
+    expect(
+      await screen.findByText(translate("en", "mon.verdictCpuHigh", { pct: 91, limit: 85 })),
+    ).toBeTruthy();
+    expect(screen.queryByText(translate("en", "mon.verdictAllRunning", { count: 12 }))).toBeNull();
+  });
+
+  it("says all running when nothing on the page warns", async () => {
+    state.processes = allRunning();
+    state.system = host(30);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
+    expect(await screen.findByText(translate("en", "mon.verdictAllRunning", { count: 12 }))).toBeTruthy();
+  });
+
+  it("still warns when no process is running at all", async () => {
+    state.processes = [];
+    state.system = host(91);
+    render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
+    expect(
+      await screen.findByText(translate("en", "mon.verdictCpuHigh", { pct: 91, limit: 85 })),
+    ).toBeTruthy();
   });
 });
 

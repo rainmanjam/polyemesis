@@ -78,6 +78,24 @@ describe("AuthScreen: server identity and connection", () => {
     expect(container.textContent).not.toContain("damaged");
   });
 
+  // Only /health's own 503 means "answered and unwell". A 502/504 is a proxy
+  // whose backend is gone, a 404 is the wrong host: none of them is this
+  // server answering.
+  it("reads any other HTTP failure (a proxy's 502, a wrong host's 404) as not reachable", async () => {
+    for (const status of [502, 404]) {
+      health = () => Promise.reject(new ApiError(status, "bad gateway"));
+      const { unmount } = render(<AuthScreen mode="login" onDone={() => {}} />);
+      await waitFor(() => expect(screen.getByText(en("auth.connDown"))).toBeTruthy());
+      unmount();
+    }
+  });
+
+  it("announces the connection state politely, as a status", async () => {
+    render(<AuthScreen mode="login" onDone={() => {}} />);
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status.textContent).toContain(en("auth.connOk")));
+  });
+
   it("reads a network failure as not reachable", async () => {
     health = () => Promise.reject(new TypeError("Failed to fetch"));
     render(<AuthScreen mode="login" onDone={() => {}} />);

@@ -65,8 +65,8 @@ const STRENGTH_KEYS = [
  * what the unauthenticated surface discloses.
  *
  * A 503 from /health is a server that answered and is unwell: degraded, not
- * unreachable. Any other failure (no network, a proxy that never answers) is
- * unreachable. */
+ * unreachable. Any other failure is unreachable: no network, a proxy's 502 or
+ * 504 for a backend that is gone, a 404 from the wrong host. */
 type Connection = "checking" | "ok" | "degraded" | "down";
 
 const CONNECTION: Record<Connection, { key: TranslationKey; dot: string }> = {
@@ -85,7 +85,7 @@ function useServerConnection(): Connection {
         const h = await api.health();
         if (live) setConn(h.status === "ok" ? "ok" : "degraded");
       } catch (e) {
-        if (live) setConn(e instanceof ApiError ? "degraded" : "down");
+        if (live) setConn(e instanceof ApiError && e.status === 503 ? "degraded" : "down");
       }
     };
     void check();
@@ -178,10 +178,11 @@ export function AuthScreen({
               {window.location.host}
             </dd>
             <dt className="text-muted-foreground">{t("auth.connection")}</dt>
-            {/* Not a live region: the form's one live region is the password
-                strength word, and a "Checking… / Reachable" change on load is
-                not worth interrupting a screen reader for. */}
-            <dd className="flex items-center gap-1.5 text-foreground">
+            {/* role="status": a polite announcement when the check resolves, so
+                a screen-reader user already in the form still hears it. Not an
+                aria-live attribute, which the form keeps for the password
+                strength word alone. */}
+            <dd role="status" className="flex items-center gap-1.5 text-foreground">
               <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CONNECTION[conn].dot)} />
               {t(CONNECTION[conn].key)}
             </dd>

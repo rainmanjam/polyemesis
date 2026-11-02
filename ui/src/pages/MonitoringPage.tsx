@@ -764,6 +764,23 @@ export function MonitoringPage() {
     cpuWarnPercent: cpuWarn,
     memPercent: system?.memPercent,
   });
+  // The sentence is a live region, so it must not change on every host
+  // sample: a CPU hovering at 87-88% would re-announce every poll. It is
+  // re-worded when the verdict changes (its key or a count in it) or when the
+  // percentage it quotes has moved 5 points or more; the tile below always
+  // carries the exact figure. Adjusted during render, React's pattern for
+  // state that follows a prop.
+  const { pct: verdictPct, ...verdictCounts } = pageVerdict.params;
+  const countsSig = `${pageVerdict.key}:${JSON.stringify(verdictCounts)}`;
+  const [held, setHeld] = useState({ sig: "", pct: 0 });
+  if (held.sig !== countsSig || (verdictPct !== undefined && Math.abs(verdictPct - held.pct) >= 5)) {
+    setHeld({ sig: countsSig, pct: verdictPct ?? 0 });
+  }
+  // Translated at render, so a change of language re-words it at once.
+  const verdictText = t(
+    pageVerdict.key,
+    verdictPct === undefined || held.sig !== countsSig ? pageVerdict.params : { ...pageVerdict.params, pct: held.pct },
+  );
   const cpuHigh = cpuOver(system?.cpuPercent, cpuWarn);
   const memHigh = memoryOver(system?.memPercent);
 
@@ -774,7 +791,12 @@ export function MonitoringPage() {
         subtitle={t("mon.subtitle")}
       />
 
-      {processesLoaded && processes.length > 0 && (
+      {/* Shown once there is a process list to read, or whenever something on
+          the page warns -- a hot CPU with no process running is still worth
+          the sentence. A calm page with nothing running says nothing here;
+          the Processes card's empty state already does. */}
+      {(processesLoaded || procFreshness.stale) &&
+        (processes.length > 0 || pageVerdict.tone === "warn" || pageVerdict.tone === "bad") && (
         <p
           aria-live="polite"
           data-verdict-tone={pageVerdict.tone}
@@ -787,7 +809,7 @@ export function MonitoringPage() {
                 : "text-muted-foreground",
           )}
         >
-          <span>{t(pageVerdict.key, pageVerdict.params)}</span>
+          <span>{verdictText}</span>
           {failedCount > 0 && (
             <Button
               variant="link"

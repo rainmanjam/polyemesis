@@ -16,12 +16,16 @@ import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../", import.meta.url)); // ui/src/
 
-/** Each entry is a pattern, not a fade, and says why. */
-const ALLOWED = new Set([
+/** Exact strings that are patterns, not fades, each with its file and why.
+ *  Only the string is excused, never the whole file: a new fade added beside
+ *  one of these still fails. */
+const ALLOWED: Record<string, string[]> = {
   // The transparency checkerboard behind the overlay preview: four
   // linear-gradient layers with hard 25%/75% stops, i.e. a tiled pattern.
-  "components/OverlaySettings.tsx",
-]);
+  "components/OverlaySettings.tsx": [
+    "linear-gradient(45deg,#374151 25%,transparent 25%),linear-gradient(-45deg,#374151 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#374151 75%),linear-gradient(-45deg,transparent 75%,#374151 75%)",
+  ],
+};
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -32,7 +36,8 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const GRADIENT = /createLinearGradient|createRadialGradient|createConicGradient|<linearGradient|<radialGradient|(?:linear|radial|conic)-gradient\(/;
+const GRADIENT =
+  /createLinearGradient|createRadialGradient|createConicGradient|<linearGradient|<radialGradient|(?:linear|radial|conic)-gradient\(|\bbg-(?:linear|gradient|radial|conic)\b/;
 
 describe("no gradients outside the logo mark", () => {
   const files = walk(SRC);
@@ -44,13 +49,20 @@ describe("no gradients outside the logo mark", () => {
   it("finds no fade in any component, page or stylesheet", () => {
     const offenders = files
       .map((f) => relative(SRC, f))
-      .filter((rel) => !ALLOWED.has(rel))
       .filter((rel) => {
-        const code = readFileSync(join(SRC, rel), "utf8")
+        let code = readFileSync(join(SRC, rel), "utf8")
           .replace(/\/\*[\s\S]*?\*\//g, "")
           .replace(/(^|[^:])\/\/.*$/gm, "$1");
+        for (const ok of ALLOWED[rel] ?? []) code = code.split(ok).join("");
         return GRADIENT.test(code);
       });
     expect(offenders).toEqual([]);
+  });
+
+  it("still finds every excused pattern, so a stale excuse cannot linger", () => {
+    for (const [rel, oks] of Object.entries(ALLOWED)) {
+      const code = readFileSync(join(SRC, rel), "utf8");
+      for (const ok of oks) expect(code, rel).toContain(ok);
+    }
   });
 });

@@ -414,9 +414,9 @@ export function SourceCard({
   const t = useT();
   // Binds each ingest caption to its field. The captions were visible but not
   // programmatically tied to the inputs, so a screen reader announced three
-  // unnamed fields. aria-labelledby points at the caption text alone, so the
-  // name is "Passphrase", not "Passphrase Passphrase — More information" from
-  // the InfoHint button that also sits inside the <label>.
+  // unnamed fields. The InfoHint sits BESIDE the <label>, not in it: a button
+  // inside a label is a second labelable element, and would end up in the
+  // field's name ("Passphrase Passphrase — More information").
   const fieldId = useId();
   // A LOCAL DRAFT, not a per-field commit.
   //
@@ -655,13 +655,12 @@ export function SourceCard({
                 onChange={(n) => setIngest({ srt: { ...ing.srt, latencyMs: n } })}
               />
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`${fieldId}-passphrase`} className="flex items-center gap-1">
-                  <span id={`${fieldId}-passphrase-label`}>{t("sources.passphrase")}</span>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-passphrase`}>{t("sources.passphrase")}</Label>
                   <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
-                </Label>
+                </div>
                 <SecretInput
                   id={`${fieldId}-passphrase`}
-                  aria-labelledby={`${fieldId}-passphrase-label`}
                   className="h-7 text-sm"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
@@ -674,26 +673,24 @@ export function SourceCard({
           {ing.mode === "rtmp" && (
             <>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`${fieldId}-app`} className="flex items-center gap-1">
-                  <span id={`${fieldId}-app-label`}>{t("sources.app")}</span>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-app`}>{t("sources.app")}</Label>
                   <InfoHint body="sources.help.app" title="sources.app" />
-                </Label>
+                </div>
                 <Input
                   id={`${fieldId}-app`}
-                  aria-labelledby={`${fieldId}-app-label`}
                   className="h-7 text-sm"
                   value={ing.rtmp.app}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })}
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor={`${fieldId}-streamkey`} className="flex items-center gap-1">
-                  <span id={`${fieldId}-streamkey-label`}>{t("sources.streamKey")}</span>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-streamkey`}>{t("sources.streamKey")}</Label>
                   <InfoHint body="sources.help.streamKey" title="sources.streamKey" />
-                </Label>
+                </div>
                 <SecretInput
                   id={`${fieldId}-streamkey`}
-                  aria-labelledby={`${fieldId}-streamkey-label`}
                   className="h-7 text-sm"
                   value={ing.rtmp.streamKey}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
@@ -990,20 +987,21 @@ function NumberField({
   onChange: (n: number) => void;
 }) {
   const bad = value < min || value > max;
-  // Bound to its caption and range, not to the InfoHint inside the label.
+  // Bound to its caption and range; the InfoHint is beside the label, not in it.
   const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <Label htmlFor={id} className="flex items-center gap-1">
-        <span id={`${id}-label`}>{label}</span>
-        <span id={`${id}-range`} className="font-normal text-muted-foreground">
-          {min}–{max}
-        </span>
+      <div className="flex items-center gap-1">
+        <Label htmlFor={id} className="flex items-center gap-1">
+          {label}
+          <span className="font-normal text-muted-foreground">
+            {min}–{max}
+          </span>
+        </Label>
         {hint && <InfoHint body={hint} />}
-      </Label>
+      </div>
       <Input
         id={id}
-        aria-labelledby={`${id}-label ${id}-range`}
         className={cn("tnum h-7 font-mono text-sm", bad && "border-down")}
         type="number"
         inputMode="numeric"

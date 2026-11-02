@@ -220,7 +220,7 @@ nominal case (a process running, a signal present) is neutral text with a 6px
 `--ok` dot, because a column of identical filled green pills is wallpaper that
 hides the row that is wrong. A reading marked `lamp` (an on-air destination, a
 running recorder) is the solid `--tally` lamp under its `--tally-foreground`
-label. Warn and bad keep their filled pills; idle keeps its outline. These are presentation words only. Never send
+label; the destination card's state badge reads the same flag. Warn and bad keep their filled pills; idle keeps its outline. These are presentation words only. Never send
 them to the server and never rename a state value; the API, MQTT, webhook and
 Stream Deck vocabularies are contracts. A new state goes in `lib/status.ts`
 with a test, not into a page.
@@ -328,7 +328,10 @@ that changes size shimmers in a dense row. A disabled button has
 do not set `focus-visible:outline-none` or `ring-*`; a box-shadow ring with an
 offset painted in `--surface` was the wrong colour on a card, and the controls
 that had opted out of the outline without a replacement (tab triggers, the
-dialog's close button) showed nothing at all.
+dialog's close button) showed nothing at all. The one exception is a
+programmatic jump target reached by a mouse click elsewhere (the destination
+card the On Air bar jumps to), which `:focus-visible` ignores: it draws the
+same outline on `:focus`.
 
 ### Elevation
 

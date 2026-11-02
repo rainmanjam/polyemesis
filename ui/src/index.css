@@ -544,7 +544,11 @@
      own text -- and some controls (tab triggers, the dialog close) drew none.
      Components no longer set focus-visible:outline-none or ring-* at all; a
      control that needs something else has to argue for it here. */
-  :focus-visible {
+  :focus-visible,
+  /* A programmatic jump target reached by a mouse click elsewhere (the
+     destination card the On Air bar focuses). :focus-visible ignores that
+     focus, and a jump that lands with no ring does not say where it landed. */
+  [data-jump-target]:focus {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
