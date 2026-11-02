@@ -1095,22 +1095,90 @@ caption_font_cjk_size() {
   esac
 }
 
+# HOW PRESENCE IS ASKED. "fontconfig" (the default) asks fc-list, so any font
+# that covers the script counts. "packages" asks the package database only
+# (dpkg-query, rpm -q, apk info -e, pacman -Q), which writes nothing: fc-list
+# can build or refresh a font cache as a side effect, and --check promises to
+# change nothing, so --check sets this.
+CAPTION_FONTS_PROBE=fontconfig
+
+# caption_font_pkg_present <manager> <package> -- a read-only package query.
+caption_font_pkg_present() {
+  case "$1" in
+    apt-get) dpkg-query -W -f='${Status}' "$2" 2>/dev/null | grep -q 'install ok installed' ;;
+    dnf)     rpm -q "$2" >/dev/null 2>&1 ;;
+    apk)     apk info -e "$2" >/dev/null 2>&1 ;;
+    pacman)  pacman -Q "$2" >/dev/null 2>&1 ;;
+    *)       return 1 ;;
+  esac
+}
+
 caption_fonts_have_base() {
+  local mgr p
+  if [ "$CAPTION_FONTS_PROBE" = packages ]; then
+    mgr="$(caption_font_manager)"
+    [ -n "$mgr" ] || return 1
+    for p in $(caption_font_pkgs "$mgr" base); do
+      caption_font_pkg_present "$mgr" "$p" || return 1
+    done
+    return 0
+  fi
   command -v fc-list >/dev/null 2>&1 && [ -n "$(fc-list 'DejaVu Sans' family 2>/dev/null)" ]
 }
 
+# ALL THREE LANGUAGES, NOT JUST JAPANESE. A Japanese-only font (IPAGothic,
+# say) satisfies :lang=ja and has no Hangul and too few Simplified Chinese
+# glyphs, so asking :lang=ja alone skipped the install on exactly the host that
+# still drew Korean and Chinese captions as boxes.
 caption_fonts_have_cjk() {
-  command -v fc-list >/dev/null 2>&1 && [ -n "$(fc-list :lang=ja family 2>/dev/null)" ]
+  local mgr p l
+  if [ "$CAPTION_FONTS_PROBE" = packages ]; then
+    mgr="$(caption_font_manager)"
+    [ -n "$mgr" ] || return 1
+    for p in $(caption_font_pkgs "$mgr" cjk); do
+      caption_font_pkg_present "$mgr" "$p" && return 0
+    done
+    return 1
+  fi
+  command -v fc-list >/dev/null 2>&1 || return 1
+  for l in ja ko zh-cn; do
+    [ -n "$(fc-list ":lang=$l" family 2>/dev/null)" ] || return 1
+  done
+  return 0
+}
+
+# caption_fonts_apk_community -- whether Alpine's community repository, where
+# font-noto-cjk lives, is enabled. setup-alpine can leave it commented out;
+# fontconfig and font-dejavu are in main and install either way.
+caption_fonts_apk_community() {
+  grep -Eq '^[[:space:]]*[^#[:space:]].*/community/?[[:space:]]*$' /etc/apk/repositories 2>/dev/null
+}
+
+# caption_fonts_apk_community_fix prints the exact remedy, naming this host's
+# release branch (v3.24, edge, ...).
+caption_fonts_apk_community_fix() {
+  local branch="v<version>" ver
+  if [ -r /etc/alpine-release ]; then
+    ver="$(cut -d. -f1,2 /etc/alpine-release 2>/dev/null)"
+    case "$ver" in *_alpha*|*_beta*|"") branch="edge" ;; *) branch="v$ver" ;; esac
+  fi
+  echo "     Enable it: uncomment the line ending in /${branch}/community in /etc/apk/repositories"
+  echo "     (or add https://dl-cdn.alpinelinux.org/alpine/${branch}/community), run \`apk update\`,"
+  echo "     then \`apk add font-noto-cjk && fc-cache -f\` -- or re-run the installer."
 }
 
 # caption_fonts_plan prints the one line confirm_plan shows. It reads only: no
 # package manager runs before the operator has answered "Proceed?".
 caption_fonts_plan() {
-  local mgr want=""
+  local mgr want="" cjk_note=""
   mgr="$(caption_font_manager)"
   caption_fonts_have_base || want="fontconfig + DejaVu (about 3 MB)"
   if [ "$CAPTION_FONTS_CJK" = yes ] && ! caption_fonts_have_cjk; then
-    want="${want:+$want, }Noto CJK ($(caption_font_cjk_size "$mgr"))"
+    if [ "$mgr" = apk ] && ! caption_fonts_apk_community; then
+      cjk_note="Noto CJK cannot install: Alpine's community repository is not enabled"
+    else
+      want="${want:+$want, }Noto CJK ($(caption_font_cjk_size "$mgr"))"
+    fi
   fi
   if [ -z "$want" ]; then
     want="already present"
@@ -1122,6 +1190,7 @@ caption_fonts_plan() {
     case "$want" in *"Noto CJK"*) want="${want} (--no-cjk-fonts to skip CJK)" ;; esac
   fi
   [ "$CAPTION_FONTS_CJK" = yes ] || want="${want}; CJK skipped (--no-cjk-fonts)"
+  [ -z "$cjk_note" ] || want="${want}; ${cjk_note}"
   echo "$want"
 }
 
@@ -1194,6 +1263,13 @@ install_caption_fonts() {
   elif [ -z "$mgr" ]; then
     cjk_state="MISSING"
     warn "caption fonts: no CJK font, and no package manager this script knows to install one with."
+  elif [ "$mgr" = apk ] && ! caption_fonts_apk_community; then
+    # Said, not attempted: apk's own error here is "unable to select packages",
+    # which names neither the repository nor the fix.
+    cjk_state="MISSING"
+    warn "caption fonts: font-noto-cjk is in Alpine's community repository, which is not enabled here."
+    caption_fonts_apk_community_fix
+    echo "     Everything else works. Chinese, Japanese and Korean captions show as empty boxes until then."
   else
     info "caption fonts: installing Noto CJK ($(caption_font_cjk_size "$mgr") download) with $mgr"
     for p in $(caption_font_pkgs "$mgr" cjk); do
@@ -2537,8 +2613,11 @@ ok()   { echo "[ ok ] \$*"; }
 warn() { echo "[warn] \$*"; }
 CAPTION_FONTS_RESULT=""
 CAPTION_FONTS_ERR=""
+CAPTION_FONTS_PROBE=fontconfig
 $(declare -f caption_font_manager caption_font_pkgs caption_font_cjk_size \
-  caption_fonts_have_base caption_fonts_have_cjk caption_font_install install_caption_fonts)
+  caption_font_pkg_present caption_fonts_have_base caption_fonts_have_cjk \
+  caption_fonts_apk_community caption_fonts_apk_community_fix \
+  caption_font_install install_caption_fonts)
 # POLYEMESIS_SKIP_CAPTION_FONTS=1 skips it: for scripts/acceptance-install.sh,
 # which runs this file as root in CI and must not download fonts.
 if [ "\${POLYEMESIS_SKIP_CAPTION_FONTS:-}" = 1 ]; then
@@ -3706,7 +3785,10 @@ main() {
       require_systemd || rc=1
       # Reported, never installed, and never a failure: see install_caption_fonts.
       # "would", because --check is the mode that changes nothing.
-      info "caption fonts (not installed by --check): $(caption_fonts_plan | sed 's/^will install/would install/')"
+      # Asked of the package database, not fontconfig: fc-list can write a font
+      # cache, and --check writes nothing. See CAPTION_FONTS_PROBE.
+      CAPTION_FONTS_PROBE=packages
+      info "caption fonts (by package query; --check installs nothing): $(caption_fonts_plan | sed 's/^will install/would install/')"
     else
       info "docker mode: the image carries FFmpeg, so no host FFmpeg is required"
       require_systemd || rc=1

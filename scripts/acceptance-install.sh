@@ -1903,11 +1903,16 @@ case " $* " in
 esac
 exit 0
 APTSTUB
+# STUB_FONTS: "base" = DejaVu; "cjk" = a font covering ja, ko and zh-cn;
+# "jaonly" = a Japanese-only font (IPAGothic-like). STUB_FC_LOG, when set,
+# records every fc-list call, for the --check case that must make none.
 cat > "$fonts_stub/fc-list" <<'FCSTUB'
 #!/usr/bin/env bash
+[ -z "${STUB_FC_LOG:-}" ] || echo "fc-list $*" >> "$STUB_FC_LOG"
 case "$*" in
   *"DejaVu Sans"*) case " ${STUB_FONTS:-} " in *" base "*) echo "DejaVu Sans" ;; esac ;;
-  *":lang=ja"*)    case " ${STUB_FONTS:-} " in *" cjk "*)  echo "Noto Sans CJK JP" ;; esac ;;
+  *":lang="*)      case " ${STUB_FONTS:-} " in *" cjk "*) echo "Noto Sans CJK JP" ;;
+                     *" jaonly "*) case "$*" in *":lang=ja "*|*":lang=ja") echo "IPAGothic" ;; esac ;; esac ;;
 esac
 exit 0
 FCSTUB
@@ -1985,6 +1990,61 @@ fi
 case "$out" in
   *"PLAN: already present"*) ok "and the plan says so" ;;
   *) bad "the plan for a host that has the fonts: $(printf '%s' "$out" | grep PLAN)" ;;
+esac
+
+# A Japanese-only font satisfies :lang=ja and nothing else. CJK must still
+# install, or Korean and Chinese captions stay boxes.
+log="$work/fonts-jaonly.log"
+out="$(fonts_run "$log" yes "base jaonly")"; st=$?
+if [ "$st" -eq 0 ] && grep -q 'install .*fonts-noto-cjk' "$log"; then
+  ok "a Japanese-only font does not count as CJK: Noto CJK still installs (ja, ko and zh-cn all checked)"
+else
+  bad "with only a Japanese font present, fonts-noto-cjk was not installed: $(tr '\n' ';' < "$log")"
+fi
+
+# Alpine with only `main` enabled: font-noto-cjk lives in community. DejaVu
+# and fontconfig still install; CJK is not attempted and the fix is named.
+got="$( ( load_install_defs || exit 1
+  caption_font_manager() { echo apk; }
+  caption_fonts_have_base() { return 1; }
+  caption_fonts_have_cjk() { return 1; }
+  caption_fonts_apk_community() { return 1; }
+  caption_font_install() { echo "INSTALL $*"; return 0; }
+  echo "PLAN: $(caption_fonts_plan)"
+  install_caption_fonts; echo "RC: $?"; echo "RESULT: $CAPTION_FONTS_RESULT" ) 2>&1)"
+case "$got" in
+  *"INSTALL apk fontconfig font-dejavu"*) ok "apk without community: fontconfig and font-dejavu (main) still install" ;;
+  *) bad "apk without community: the base set was not installed: $got" ;;
+esac
+case "$got" in
+  *"INSTALL apk font-noto-cjk"*) bad "apk without community: it tried font-noto-cjk anyway" ;;
+  *"community repository, which is not enabled"*"/community in /etc/apk/repositories"*"apk update"*"RC: 0"*"CJK MISSING"*)
+    ok "it warns with the exact fix (uncomment community, apk update), returns 0, and reports CJK MISSING" ;;
+  *) bad "apk without community: no actionable warning, or not 0/MISSING: $got" ;;
+esac
+case "$got" in
+  *"PLAN: "*"Alpine's community repository is not enabled"*) ok "and the plan says so before anything runs" ;;
+  *) bad "the plan does not mention the missing community repository: $(printf '%s' "$got" | grep PLAN)" ;;
+esac
+
+# --check promises to change nothing, and fc-list can write a font cache. In
+# --check presence is asked of the package database, so fc-list never runs.
+fclog="$work/fonts-check-fclist.log"; : > "$fclog"
+( load_install_defs || exit 1
+  # shellcheck disable=SC2034 # read by caption_fonts_have_*, via the eval
+  CAPTION_FONTS_PROBE=packages
+  export STUB_FC_LOG="$fclog" STUB_PKG_LOG="$work/fonts-check-pkg.log" STUB_FONTS=""
+  PATH="$fonts_stub:$PATH"
+  caption_fonts_plan >/dev/null ) 2>/dev/null
+if [ ! -s "$fclog" ]; then
+  ok "with the package probe (what --check uses), the plan never runs fc-list"
+else
+  bad "the package probe still ran fc-list: $(tr '\n' ';' < "$fclog")"
+fi
+check_body="$(sed -n '/^  if \[ "\$CHECK_ONLY" = true \]; then$/,/^  fi$/p' "$INSTALL")"
+case "$check_body" in
+  *"CAPTION_FONTS_PROBE=packages"*"caption_fonts_plan"*) ok "main's --check branch switches to the package probe before it reports fonts" ;;
+  *) bad "main's --check branch reports fonts without the package probe" ;;
 esac
 
 # dnf names the CJK package differently on Fedora and EL9; the second name has

@@ -214,14 +214,25 @@ under the unit's sandboxing — starts with one already built.
 
 - **`--no-cjk-fonts`** skips the CJK set and still installs fontconfig and
   DejaVu. Chinese, Japanese and Korean captions then show as empty boxes.
-- **Already there?** Nothing is installed. Presence is asked of fontconfig
-  (`fc-list :lang=ja`), so any CJK font you already have counts.
+- **Already there?** Nothing is installed. Presence is asked of fontconfig,
+  and CJK counts as present only when Japanese, Korean **and** Simplified
+  Chinese are all covered (`fc-list :lang=ja`, `:lang=ko`, `:lang=zh-cn`). Any
+  font that covers them counts, but a Japanese-only font such as IPAGothic
+  does not, so Noto CJK still installs next to it.
 - **It never stops the install.** polyemesis streams without a single font;
   only captions need them. A package that will not install is a warning that
   names it, and the summary's `Captions` line says what is missing. On Arch the
   installer runs `pacman -S`, never `-Sy`; if the package database is stale,
   run `pacman -Syu` and re-run.
-- **`--check`** reports the line and installs nothing.
+- **Alpine:** `font-noto-cjk` is in the `community` repository, which
+  `setup-alpine` can leave disabled. If it is, fontconfig and DejaVu (in
+  `main`) still install. For CJK the installer warns with the fix: uncomment
+  the `/v<version>/community` line in `/etc/apk/repositories`, run
+  `apk update`, then re-run.
+- **`--check`** reports the line and installs nothing. It reads the package
+  database (`dpkg-query`, `rpm -q`, `apk info -e`, `pacman -Q`) rather than
+  running `fc-list`, because `fc-list` can write a font cache and `--check`
+  changes nothing.
 - **Upgrades keep them.** The generated `update.sh` checks again before it
   stops the service and installs whatever has gone missing, respecting the
   choice you installed with; `update.sh --no-cjk-fonts` declines CJK for that
