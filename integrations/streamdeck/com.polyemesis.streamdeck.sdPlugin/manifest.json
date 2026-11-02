@@ -330,37 +330,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/delay-dump/idle"
+          "Image": "imgs/keys/delay-dump/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/live"
+          "Image": "imgs/keys/delay-dump/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/warn"
+          "Image": "imgs/keys/delay-dump/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/delay-dump/error"
+          "Image": "imgs/keys/delay-dump/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/held"
+          "Image": "imgs/keys/delay-dump/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/unbound"
+          "Image": "imgs/keys/delay-dump/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/halted"
+          "Image": "imgs/keys/delay-dump/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/needsAdmin"
+          "Image": "imgs/keys/delay-dump/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/muted"
+          "Image": "imgs/keys/delay-dump/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/restarted"
+          "Image": "imgs/keys/delay-dump/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/delay-dump/unavailable"
+          "Image": "imgs/keys/delay-dump/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
