@@ -123,7 +123,7 @@ type Buffer struct {
 	ts         tsState
 	marks      []*mark
 	scratch    []byte
-	resumed    *DumpTicket
+	resumed    atomic.Pointer[DumpTicket]
 }
 
 // Stats is a snapshot of the buffer.
@@ -187,14 +187,15 @@ func (b *Buffer) Push(now time.Time, pkt []byte) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.ts.off && tsAligned(pkt) {
+	if tsAligned(pkt) {
 		b.pushTSLocked(now, pkt)
 		return nil
 	}
-	// Not whole TS packets: buffered as it came, and no dump is offered for
-	// this stream any more -- there is nothing to cut it at.
-	b.ts.off = true
-	if b.ts.resync {
+	// Not whole TS packets. Buffered as it came -- unless a splice is waiting
+	// or has happened: then it cannot be rewritten to match what is around it,
+	// and it is dropped rather than put a stale timestamp on the air. On a TS
+	// relay such a datagram is damage anyway.
+	if b.ts.resync || b.ts.offset != 0 || len(b.ts.rw) > 0 {
 		return nil
 	}
 	b.appendLocked(b.atLocked(now), pkt)
@@ -423,7 +424,7 @@ func (b *Buffer) Stats() Stats {
 	st := b.stats
 	st.Dumped = b.shift
 	st.Dumping = b.ts.resync
-	st.Spliceable = !b.ts.off && b.ts.codec != codecNone && len(b.marks) > 0 &&
+	st.Spliceable = b.ts.codec != codecNone && len(b.marks) > 0 &&
 		len(b.queue) > 0 && b.marks[len(b.marks)-1].at >= b.queue[0].first
 	if len(b.queue) > 0 {
 		newest := b.queue[len(b.queue)-1].last

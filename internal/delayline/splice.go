@@ -120,11 +120,26 @@ type pidOut struct {
 type pidRewrite struct {
 	ccDelta uint8
 	ccSet   bool
+	// awaitStart: nothing on this PID is kept until a packet that starts a
+	// PES or a section. The resync discarded whatever began before the
+	// resume, and a continuation of it would be read as part of the PES the
+	// cut left open -- with a continuity counter that hides the join.
+	awaitStart bool
 	// gated: PESs on this PID are dropped while their PTS is <= floor.
 	gated    bool
 	floor    int64
 	dropping bool
+	// sticky keeps a gate past the first PES that clears it, until the PTS
+	// is well past the floor. Video: the resume picture clears the floor,
+	// and a leading picture after it (an HEVC RADL, shown before it) must
+	// still be dropped.
+	sticky bool
 }
+
+// stickyClear is how far past its floor a sticky gate's PTS must be before
+// the gate lifts: ten seconds, far beyond any reorder depth, and far short of
+// the 33-bit wrap that would make the comparison lie.
+const stickyClear = 10 * 90000
 
 // mark is one cut point: the start of a buffered IDR picture's PES.
 type mark struct {
@@ -203,10 +218,6 @@ func (c *classifier) feed(es []byte) bool {
 // tsState is the buffer's running view of the stream, and the splice in
 // progress. Guarded by Buffer.mu.
 type tsState struct {
-	// off: a datagram that is not whole, aligned TS packets has been seen.
-	// Nothing is rewritten and no dump is offered after that.
-	off bool
-
 	pmtPID   uint16
 	havePMT  bool
 	videoPID uint16
@@ -222,6 +233,7 @@ type tsState struct {
 
 	// resync is set by a dump until its resume keyframe arrives.
 	resync  bool
+	margin  time.Duration
 	splice  *mark
 	ticket  *DumpTicket
 	held    []byte
@@ -289,15 +301,15 @@ func pesFields(p []byte) (ptsAt, dtsAt, esAt int, ok bool) {
 		return -1, -1, ps + 6, true
 	}
 	flags := p[ps+7]
-	esAt = ps + 9 + int(p[ps+8])
-	if esAt > tsPacketSize {
-		return -1, -1, 0, false
-	}
+	hdrEnd := ps + 9 + int(p[ps+8])
+	// A header that runs past this packet still has its PTS and DTS here
+	// when they fit: they come first. esAt is then the end of the packet.
+	esAt = min(hdrEnd, tsPacketSize)
 	ptsAt, dtsAt = -1, -1
-	if flags&0x80 != 0 && ps+14 <= esAt {
+	if flags&0x80 != 0 && ps+14 <= hdrEnd && ps+14 <= tsPacketSize {
 		ptsAt = ps + 9
 	}
-	if flags&0xC0 == 0xC0 && ps+19 <= esAt {
+	if flags&0xC0 == 0xC0 && ps+19 <= hdrEnd && ps+19 <= tsPacketSize {
 		dtsAt = ps + 14
 	}
 	return ptsAt, dtsAt, esAt, true
@@ -468,11 +480,22 @@ func (ts *tsState) rewrite(p []byte) (keep bool, pts int64, hasPTS bool) {
 		pts, hasPTS = readTS(p[ptsAt:]), true
 	}
 	r := ts.rw[pid]
+	// Payload only: an adaptation-only packet (a PCR on a PID of its own)
+	// carries no part of any PES and must keep flowing.
+	if r != nil && r.awaitStart && pktHasPayload(p) {
+		if !pktPUSI(p) {
+			return false, pts, hasPTS
+		}
+		r.awaitStart = false
+	}
 	if r != nil && r.gated {
 		if pes {
-			if hasPTS && !ptsAfter(pts, r.floor) {
+			switch {
+			case hasPTS && !ptsAfter(pts, r.floor):
 				r.dropping = true
-			} else {
+			case r.sticky && hasPTS && !ptsAfter(pts, wrap(r.floor+stickyClear)):
+				r.dropping = false
+			default:
 				r.gated, r.dropping = false, false
 			}
 		}
@@ -700,7 +723,7 @@ func (b *Buffer) Dump(now time.Time, want, margin time.Duration) (*DumpTicket, e
 	if b.ts.resync {
 		return nil, ErrDumpPending
 	}
-	if b.ts.off || b.ts.codec == codecNone || len(b.marks) == 0 || len(b.queue) == 0 {
+	if b.ts.codec == codecNone || len(b.marks) == 0 || len(b.queue) == 0 {
 		return nil, ErrNotSpliceable
 	}
 	vnow := int64(now.Sub(b.epoch) - b.shift)
@@ -754,7 +777,7 @@ func (b *Buffer) Dump(now time.Time, want, margin time.Duration) (*DumpTicket, e
 	cut := time.Duration(vnow - pick.at)
 	t.result = DumpResult{Requested: want, Clamped: clamped, Before: before, Dumped: cut, After: before - cut}
 	ts := &b.ts
-	ts.resync, ts.splice, ts.ticket = true, pick, t
+	ts.resync, ts.splice, ts.ticket, ts.margin = true, pick, t, margin
 	ts.holding, ts.held = false, nil
 	ts.cand = nil
 	ts.out = make(map[uint16]pidOut, len(pick.out))
@@ -808,7 +831,13 @@ func (b *Buffer) truncateLocked(m *mark) error {
 		keep = idx
 	}
 	b.queue = b.queue[:keep]
+	// A segment still in RAM stays the tail and keeps filling, so the RAM
+	// bound counts it once; a fresh tail beside it would hold a second
+	// segment outside the budget.
 	b.tail = nil
+	if keep == idx+1 && s.data != nil {
+		b.tail = s
+	}
 	i := 0
 	for i < len(b.marks) && b.marks[i].at < m.at {
 		i++
@@ -887,11 +916,21 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 		ts.holding, ts.held = false, ts.held[:0]
 		return false
 	}
+	prevOffset := ts.offset
 	m := ts.splice
 	// The resume picture takes the cut picture's place on both clocks.
 	ts.offset = wrap(ts.heldPTS - m.pts)
 	before := b.shift
 	b.shift = now.Sub(b.epoch) - time.Duration(m.at)
+	// THE MARGIN HOLDS HOWEVER LATE THE RESUME IS. Dump allowed for one GOP
+	// of waiting; an input that stalls mid-dump (an encoder reconnecting)
+	// makes the wait as long as the stall. Taking all of it off the delay
+	// would leave less than the margin -- or none, releasing data as it
+	// arrives. So the delay gives up at most down to the margin, and the
+	// rest of the wait is a gap on the wire, which the stall was anyway.
+	if limit := b.delay - ts.margin; b.shift > limit {
+		b.shift = limit
+	}
 	if b.shift < before {
 		b.shift = before
 	}
@@ -903,6 +942,7 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 	ts.rw = map[uint16]*pidRewrite{}
 	for pid, o := range ts.out {
 		r := ts.rwFor(pid)
+		r.awaitStart = true
 		if o.ptsSeen {
 			r.gated, r.floor = true, o.pts
 		}
@@ -911,27 +951,30 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 	// picture itself lands exactly on the cut picture's PTS.
 	if ts.codec != codecNone {
 		r := ts.rwFor(ts.videoPID)
-		r.gated, r.floor = true, wrap(m.pts-1)
+		r.awaitStart = true
+		r.gated, r.floor, r.sticky = true, wrap(m.pts-1), true
 	}
 	ts.resync, ts.holding, ts.splice = false, false, nil
 	if t := ts.ticket; t != nil {
-		t.result.Dumped = b.shift - before
+		// The programme skipped: the cut picture to the resume picture. It is
+		// what the delay lost too, unless a stalled resume hit the margin.
+		t.result.Dumped = time.Duration(wrap(ts.offset-prevOffset)) * time.Second / 90000
+		if t.result.Dumped < 0 || t.result.Dumped > MaxDelay {
+			t.result.Dumped = b.shift - before
+		}
 		t.result.After = b.delay - b.shift
 		t.result.Complete = true
 		close(t.done)
-		b.resumed = t
+		b.resumed.Store(t)
 		ts.ticket = nil
 	}
 	return true
 }
 
 // takeResumed hands over a dump that completed since the last call, once.
+// Lock-free: the line asks after every datagram.
 func (b *Buffer) takeResumed() *DumpTicket {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	t := b.resumed
-	b.resumed = nil
-	return t
+	return b.resumed.Swap(nil)
 }
 
 // Result is the dump's outcome: final once Done has closed.

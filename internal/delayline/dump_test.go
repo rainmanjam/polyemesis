@@ -78,6 +78,8 @@ type esUnit struct {
 	firstNAL  bool
 	release   time.Duration
 	discarded bool
+	// esLen is the elementary-stream bytes the PES carried.
+	esLen int
 }
 
 type outReport struct {
@@ -102,6 +104,7 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 		u := o.u
 		// The picture's number follows its slice NAL header.
 		es := o.es
+		u.esLen = len(es)
 		for i := 0; i+3 < len(es); i++ {
 			if es[i] != 0 || es[i+1] != 0 || es[i+2] != 1 {
 				continue
@@ -614,5 +617,277 @@ func TestADiscardWhileADumpWaitsForItsKeyframeLeavesAUsableBuffer(t *testing.T) 
 	r.run(20 * time.Second)
 	if st := r.b.Stats(); st.Packets == 0 {
 		t.Fatal("the buffer took nothing after a Discard during a pending dump")
+	}
+}
+
+// THE MARGIN HOLDS HOWEVER LATE THE RESUME IS. The input stalls for 20 s right
+// after a dump -- an encoder reconnecting -- so the resume keyframe arrives
+// far later than the one GOP Dump allowed for. Without the cap the whole wait
+// came off the delay and the line released data the moment it arrived.
+//
+// Mutation: drop the `b.delay - ts.margin` cap in decideResumeLocked.
+func TestADumpWhoseResumeIsLateStillLeavesTheMargin(t *testing.T) {
+	g := delaytest.New(60)
+	s := g.Mux(60 * time.Second)
+	// Everything after 15.2 s arrives 20 s late.
+	for i, at := range s.Times {
+		if at >= 15200*time.Millisecond {
+			s.Times[i] = at + 20*time.Second
+		}
+	}
+	delay := 10 * time.Second
+	r := newRig(t, delay, memLimits(), s)
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(80 * time.Second)
+	res := ticket.Result()
+	if !res.Complete {
+		t.Fatal("did not resume once the input came back")
+	}
+	if res.After < DumpMargin {
+		t.Fatalf("a resume 20 s late left %s of delay, under the %s margin", res.After, DumpMargin)
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	last := rep.video[len(rep.video)-1]
+	// The newest picture: arrived at its own time plus the stall.
+	arrived := delaytest.Ticks(int64(last.index*delaytest.FrameTicks)) + 20*time.Second
+	if got := last.release - arrived; got < DumpMargin-50*time.Millisecond {
+		t.Fatalf("picture #%d went out %s after it arrived: under the %s margin", last.index, got, DumpMargin)
+	}
+	if rep.ccBreaks != 0 {
+		t.Errorf("%d continuity breaks", rep.ccBreaks)
+	}
+}
+
+// A datagram that is not whole TS packets, after a dump, is dropped -- the
+// splice offset and continuity cannot be applied to it -- and everything after
+// it is still rewritten. Before the fix one such datagram switched the
+// rewrite off for good: every later timestamp jumped forward by the dumped
+// time and the counters broke.
+func TestANonTSDatagramAfterADumpDoesNotStopTheRewrite(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(20 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	if err := r.b.Push(r.epoch.Add(20*time.Second), make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	rep := readOut(t, r.out, r.outAt, false)
+	for i := 1; i < len(rep.video); i++ {
+		if step := wrap(rep.video[i].dts - rep.video[i-1].dts); step != delaytest.FrameTicks {
+			t.Fatalf("video DTS steps %d at picture #%d after a stray datagram: the rewrite stopped",
+				step, rep.video[i].index)
+		}
+	}
+	if rep.ccBreaks != 0 {
+		t.Errorf("%d continuity breaks after a stray datagram", rep.ccBreaks)
+	}
+}
+
+// The same datagram while a dump waits for its keyframe must not wedge it.
+// Before the fix the buffer then dropped every later datagram and refused
+// every later dump as pending.
+func TestANonTSDatagramDuringADumpDoesNotWedgeIt(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.b.Push(r.epoch.Add(15*time.Second), make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	r.run(25 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("a stray datagram during the resync wedged the dump")
+	}
+	if st := r.b.Stats(); st.Packets == 0 || st.Dumping {
+		t.Fatalf("after the resume: %d packets held, dumping %t", st.Packets, st.Dumping)
+	}
+}
+
+// A PES that began before the resume keyframe and finishes after it is not
+// half-kept. Its start was discarded with the resync; its continuation, kept,
+// would be read as the end of the PES the cut left open, with a continuity
+// counter rewritten to hide the join. FFmpeg's muxer never interleaves PESs
+// this way; hardware muxers do.
+//
+// Mutation: drop `r.awaitStart = true` in decideResumeLocked.
+func TestAResumeDropsTheRestOfAPESThatBeganBeforeIt(t *testing.T) {
+	g := delaytest.New(60)
+	s := g.Mux(40 * time.Second)
+	// Move the last packet of the audio frame just before picture 480 (the
+	// resume keyframe at 16 s) to just after that picture's first packet.
+	k2 := -1
+	for i, p := range s.Pkts {
+		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && s.Times[i] == 16*time.Second {
+			k2 = i
+			break
+		}
+	}
+	if k2 < 0 {
+		t.Fatal("no picture at 16 s in the fixture")
+	}
+	tail := -1
+	for i := k2 - 1; i >= 0; i-- {
+		if pktPID(s.Pkts[i]) == delaytest.AudioPID {
+			tail = i
+			break
+		}
+	}
+	if tail < 0 || pktPUSI(s.Pkts[tail]) {
+		t.Fatal("the audio frame before the keyframe is not a multi-packet PES")
+	}
+	moved := s.Pkts[tail]
+	pkts := append([][]byte{}, s.Pkts[:tail]...)
+	pkts = append(pkts, s.Pkts[tail+1:k2+1]...)
+	pkts = append(pkts, moved)
+	pkts = append(pkts, s.Pkts[k2+1:]...)
+	times := append([]time.Duration{}, s.Times[:tail]...)
+	times = append(times, s.Times[tail+1:k2+1]...)
+	times = append(times, s.Times[k2])
+	times = append(times, s.Times[k2+1:]...)
+	s.Pkts, s.Times = pkts, times
+
+	r := newRig(t, 10*time.Second, memLimits(), s)
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	for _, a := range rep.audio {
+		if a.esLen != 400 {
+			t.Fatalf("audio frame #%d left with %d bytes, want 400: a fragment from before the resume "+
+				"was joined to it", a.index, a.esLen)
+		}
+	}
+	if rep.ccBreaks != 0 {
+		t.Errorf("%d continuity breaks", rep.ccBreaks)
+	}
+}
+
+// A leading picture after the resume keyframe (HEVC RADL: decoded after it,
+// shown before it) would be shown before the picture the splice put in the
+// cut picture's place -- a presentation timestamp from the dumped side.
+//
+// Mutation: drop `r.sticky = true` for video in decideResumeLocked.
+func TestAResumeDropsALeadingPictureShownBeforeTheResumeKeyframe(t *testing.T) {
+	g := delaytest.New(60)
+	g.HEVC, g.KeyType, g.Leading = true, delaytest.HEVCIDRWRADL, true
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, true)
+	var regular []esUnit
+	leadingKept := 0
+	for i, v := range rep.video {
+		if v.index < delaytest.LeadingIndex {
+			regular = append(regular, v)
+			continue
+		}
+		leadingKept++
+		if i > 0 && v.index != delaytest.LeadingIndex+rep.video[i-1].index {
+			t.Fatalf("leading picture of key #%d follows picture #%d: it belongs to the dumped side",
+				v.index-delaytest.LeadingIndex, rep.video[i-1].index)
+		}
+	}
+	at := spliceAt(t, regular)
+	if at < 0 {
+		t.Fatal("nothing was dumped")
+	}
+	k2 := regular[at].index
+	for _, v := range rep.video {
+		if v.index == delaytest.LeadingIndex+k2 {
+			t.Fatalf("the resume keyframe #%d's leading picture was kept: it is shown before the splice", k2)
+		}
+	}
+	if leadingKept == 0 {
+		t.Fatal("no leading picture survived anywhere: the fixture or the gate is wrong")
+	}
+}
+
+// The RAM bound the package promises -- MemBudget plus two segments -- holds
+// through a dump. A part-filled tail kept in RAM by the cut is still the tail.
+//
+// Mutation: in truncateLocked, always set b.tail = nil.
+func TestADumpKeepsTheRAMBound(t *testing.T) {
+	// Two segments of sealed RAM, 10 Mbit/s, and a dump just after a keyframe
+	// so the cut lands in the tail being filled.
+	seg := 256 << 10
+	lim := Limits{MemBudget: int64(2 * seg), DiskBudget: 256 << 20, SegmentBytes: seg, Dir: t.TempDir()}
+	g := delaytest.New(60)
+	g.PictureBytes = 40000
+	r := newRig(t, 10*time.Second, lim, g.Mux(30*time.Second))
+	r.run(14050 * time.Millisecond)
+	ticket, err := r.b.Dump(r.epoch.Add(14050*time.Millisecond), 20*time.Millisecond, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for c := 14100 * time.Millisecond; c < 30*time.Second; c += 100 * time.Millisecond {
+		r.run(c)
+	}
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	if bound := lim.MemBudget + 2*int64(lim.SegmentBytes); r.b.Stats().PeakMemBytes > bound {
+		t.Fatalf("PeakMemBytes %d over the %d bound after a dump", r.b.Stats().PeakMemBytes, bound)
+	}
+}
+
+// Through the 33-bit wrap: the splice is placed where PTS, DTS and PCR roll
+// over, and every clock still runs on by exactly one frame.
+func TestADumpAcrossThePTSWrapKeepsTheClocksContinuous(t *testing.T) {
+	g := delaytest.New(60)
+	g.Origin = ptsModulus - 14*90000 // wraps at 14 s of programme
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(18 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(18*time.Second), 3*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	if spliceAt(t, rep.video) < 0 {
+		t.Fatal("nothing was dumped")
+	}
+	for i := 1; i < len(rep.video); i++ {
+		if step := wrap(rep.video[i].dts - rep.video[i-1].dts); step != delaytest.FrameTicks {
+			t.Fatalf("video DTS steps %d at picture #%d across the wrap", step, rep.video[i].index)
+		}
+	}
+	for i := 1; i < len(rep.pcrs); i++ {
+		if d := wrap(rep.pcrs[i] - rep.pcrs[i-1]); d > 90000 {
+			t.Fatalf("PCR jumps %d ticks across the wrap", d)
+		}
+	}
+	if rep.ccBreaks != 0 {
+		t.Errorf("%d continuity breaks", rep.ccBreaks)
 	}
 }

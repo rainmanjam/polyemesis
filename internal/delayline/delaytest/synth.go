@@ -47,7 +47,14 @@ type Synth struct {
 	// audioLag, when set, muxes audio frame m that much after its PTS: the
 	// interleave jitter a real muxer has.
 	AudioLag func(m int) time.Duration
-	cc       map[uint16]uint8
+	// Origin, when set, is picture 0's DTS and audio frame 0's PTS in place
+	// of PTSBase: set it near 2^33 to put the 33-bit wrap in the run.
+	Origin int64
+	// Leading, on an HEVC stream, follows every key picture with a RADL
+	// picture: decoded after it and shown before it. Its slice carries
+	// LeadingIndex plus the key's number.
+	Leading bool
+	cc      map[uint16]uint8
 }
 
 // New is a Synth with GOP pictures per GOP and IDR key pictures.
@@ -200,15 +207,15 @@ func (g *Synth) picture(n int) []byte {
 	for len(es) < size {
 		es = append(es, 0xAB)
 	}
-	pts := int64(PTSBase + n*FrameTicks)
+	pts := (g.origin() + int64(n*FrameTicks)) & tsMask
 	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	putTS(hdr[9:], 3, pts+FrameTicks) // a B-frame-shaped stream: PTS one frame after DTS
+	putTS(hdr[9:], 3, (pts+FrameTicks)&tsMask) // a B-frame-shaped stream: PTS one frame after DTS
 	putTS(hdr[14:], 1, pts)
 	return g.packetize(VideoPID, append(hdr, es...), pts, key)
 }
 
 func (g *Synth) audioFrame(m int) []byte {
-	pts := int64(PTSBase + m*AudioTicks)
+	pts := (g.origin() + int64(m*AudioTicks)) & tsMask
 	es := make([]byte, 0, 400)
 	var idx [4]byte
 	binary.BigEndian.PutUint32(idx[:], uint32(m))
@@ -227,6 +234,40 @@ func (g *Synth) audioFrame(m int) []byte {
 type Stream struct {
 	Pkts  [][]byte
 	Times []time.Duration
+}
+
+// LeadingIndex marks a leading picture's number: LeadingIndex + the key's.
+const LeadingIndex = 1_000_000
+
+// HEVCRADL is the NAL type a leading picture carries.
+const HEVCRADL = 7
+
+const tsMask = int64(1)<<33 - 1
+
+func (g *Synth) origin() int64 {
+	if g.Origin != 0 {
+		return g.Origin
+	}
+	return PTSBase
+}
+
+// leading is the RADL picture after key picture n: DTS half a frame after the
+// key's, PTS half a frame before the key's.
+func (g *Synth) leading(n int) []byte {
+	es := []byte{0, 0, 0, 1, 0x46, 0x01, 0x50}
+	es = append(es, g.nal(HEVCRADL)...)
+	var idx [4]byte
+	binary.BigEndian.PutUint32(idx[:], uint32(LeadingIndex+n))
+	es = append(es, idx[:]...)
+	for len(es) < g.PictureBytes {
+		es = append(es, 0xAB)
+	}
+	dts := (g.origin() + int64(n*FrameTicks) + FrameTicks/2) & tsMask
+	pts := (g.origin() + int64(n*FrameTicks) + FrameTicks/2) & tsMask
+	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	putTS(hdr[9:], 3, pts)
+	putTS(hdr[14:], 1, dts)
+	return g.packetize(VideoPID, append(hdr, es...), -1, false)
 }
 
 // Ticks converts 90 kHz ticks to a duration.
@@ -255,6 +296,9 @@ func (g *Synth) Mux(dur time.Duration) *Stream {
 				add(g.psi(), vt)
 			}
 			add(g.picture(v), vt)
+			if g.Leading && g.HEVC && v%g.GOP == 0 {
+				add(g.leading(v), vt)
+			}
 			v++
 		} else {
 			add(g.audioFrame(a), at)
