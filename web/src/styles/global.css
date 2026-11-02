@@ -536,8 +536,7 @@
     font-size: 0.75rem;
     line-height: 1.5;
     /* Thin. This is a line of type, not a section: it has to be readable and
-       then forgotten, because it is above the headline on every page and a
-       visitor who arrives at the 24th document does not want a banner. */
+       then forgotten. It is on the home page only (see Announce.astro). */
     padding-block: 0.4375rem;
   }
   .announce a {

@@ -1,33 +1,52 @@
 ---
-/* The announcement bar, and the first of the three places the accent is spent.
+/* The announcement bar: one sentence, one link, on the HOME PAGE ONLY.
  *
  * docs/DESIGN-SYSTEM.md takes the site's structure from four comparable
  * products that agree almost exactly, and its first line is "thin announcement
- * bar, accent background, one sentence, one link". The site had no such bar at
- * all, which is why the accent had nowhere to land and had drifted onto
- * whatever needed emphasis instead — see the audit in index.astro.
+ * bar, accent background, one sentence, one link".
  *
- * WHAT IT SAYS is what polyemesis is and does: free and open source, one
- * stream in, every platform out, each with its own mix. It sat under the hero
- * buttons in 14px grey, where it was the least prominent thing in the hero. It
- * is now the first line on every page, so a stranger learns what the project
- * does before they learn anything else.
+ * IT USED TO SIT ON ALL 39 PAGES and restate the tagline ("Free and open
+ * source (MIT). One stream in, every platform out..."). The 2026-11 design
+ * review found two problems with that: on a docs page or the download page it
+ * was a banner between a reader and the task they came for, and a bar that
+ * never changes is not an announcement. So it is home-only now (Base renders
+ * it only when a page passes `announce`, which only index.astro does), and it
+ * carries news or a direct way in.
  *
- * NO VERSION NUMBER, NO DATE, NO COUNT. A bar reading "v0.9.0 is out" is a
- * claim that decays the moment v0.10.0 ships, on the one element that appears
- * on all 39 pages — and nothing would fail, because a stale banner renders
- * perfectly. Everything here is true for as long as the sentence is true, and
- * changing it is a deliberate edit to this file rather than a release chore
- * somebody forgets.
- *
- * ONE LINK, and it points at /features, the page that shows everything
- * polyemesis does, so the sentence above is one click from its evidence.
+ * WHAT IT SAYS, in order of preference:
+ *   - The latest release, read from GitHub at build time by the same helper
+ *     as the home page's trust line (lib/github-stats.ts). pages.yml rebuilds
+ *     the site when the release workflow completes, so the tag here moves
+ *     with the release rather than with whoever remembers to edit this file.
+ *   - When that read fails (rate limit, offline build), a direct install
+ *     link. Nothing is printed that the build did not just read: a failed
+ *     fetch yields the install line, never a stale or invented version.
  */
+import { REPO } from "../lib/github-stats";
+
+interface Props {
+  /** The latest release tag, or null when the build could not read it. */
+  release: string | null;
+}
+
+const { release } = Astro.props;
+const notes = release ? `https://github.com/${REPO}/releases/tag/${encodeURIComponent(release)}` : null;
 ---
 
 <div class="announce">
   <p class="wrap flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
-    <span>Free and open source (MIT). One stream in, every platform out, each with its own mix.</span>
-    <a href="/features">See everything it does&nbsp;→</a>
+    {
+      notes ? (
+        <>
+          <span>polyemesis {release} is out.</span>
+          <a href={notes} rel="noopener">What changed&nbsp;→</a>
+        </>
+      ) : (
+        <>
+          <span>Free and open source. One Docker command to install.</span>
+          <a href="/download">Install polyemesis&nbsp;→</a>
+        </>
+      )
+    }
   </p>
 </div>

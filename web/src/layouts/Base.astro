@@ -18,9 +18,14 @@ interface Props {
    *  keep: the canonical stops /404 and /404.html being seen as duplicates,
    *  while noindex stops either being indexed at all. */
   noindex?: boolean;
+  /** Show the announcement bar. Only the home page passes this (2026-11
+   * design review): on docs and task pages the bar sat between a reader and
+   * the thing they came for. `release` is the build-time read of the latest
+   * tag, null when that read failed. */
+  announce?: { release: string | null };
 }
 
-const { title, description, path, noindex = false } = Astro.props;
+const { title, description, path, noindex = false, announce } = Astro.props;
 const canonical = new URL(path ?? Astro.url.pathname, Astro.site ?? "https://polyemesis.com");
 const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
 ---
@@ -208,7 +213,7 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
         the top edge for the rest of the page — which is the behaviour the four
         sites in docs/DESIGN-SYSTEM.md all have. A sticky bar would spend a
         permanent 30px of a phone's viewport on a sentence that is read once. */}
-    <Announce />
+    {announce && <Announce release={announce.release} />}
     <Nav />
     <main id="main">
       <slot />

@@ -26,7 +26,7 @@ import { TRACK_LAYOUT } from "../data/tracks.mjs";
 const TRACKS = TRACK_LAYOUT;
 
 const DESTS = [
-  { id: "youtube", name: "YouTube", hint: "no music — no claim", preset: [1, 2, 4] },
+  { id: "youtube", name: "YouTube", hint: "no music, no claim", preset: [1, 2, 4] },
   { id: "twitch", name: "Twitch", hint: "music is fine live", preset: [1, 2, 3, 4] },
   { id: "podcast", name: "Podcast", hint: "voices only", preset: [1, 2] },
   { id: "archive", name: "Archive", hint: "everything, stream-copied", preset: [1, 2, 3, 4] },
@@ -35,13 +35,12 @@ const DESTS = [
 
 <section class="wrap py-20 sm:py-28" id="matrix">
   <div class="max-w-2xl">
-    <p class="eyebrow">The thing nothing else does</p>
-    <h2 class="mt-3 text-balance text-3xl font-medium sm:text-4xl">
+    <h2 class="text-balance text-3xl font-medium sm:text-4xl">
       Patch each track to the platforms that should hear it.
     </h2>
     <p class="mt-4 text-pretty leading-relaxed text-muted">
       This ingest carries four audio tracks. Light a crosspoint and that track is
-      summed into that destination's stereo pair — and into no other. Hover a
+      summed into that destination's stereo pair, and into no other. Hover a
       column to trace one destination's path. The video is copied, not
       re-encoded, so none of this buys a second encode.
     </p>
@@ -123,7 +122,7 @@ const DESTS = [
       <strong class="text-muted">How that figure is derived:</strong> summing{" "}
       <em>k</em> uncorrelated sources raises level by 10·log₁₀(<em>k</em>), so two
       tracks land about 3&nbsp;dB above one. This is a power sum of nominal track
-      levels — <em>not</em> a loudness measurement. Real EBU&nbsp;R128 loudness is
+      levels, <em>not</em> a loudness measurement. Real EBU&nbsp;R128 loudness is
       K-weighted and gated over time, and polyemesis measures it per destination
       on the mix that destination actually receives.
     </p>
@@ -169,10 +168,9 @@ const DESTS = [
      restarting. CSS keyframes cannot do that — `latch` restarts from scale
      0.88 every time, which is visible when you toggle a row quickly.
 
-     scroll() is deliberately NOT imported. It would replace
-     `animation-timeline: view()` — already running, free, and off the main
-     thread — with a JS-driven equivalent, in exactly the browsers we would be
-     adding weight for. */
+     scroll() is deliberately NOT imported. The site has no scroll-driven
+     motion at all since the 2026-11 design review removed the section
+     reveals, so there is nothing for it to drive. */
 
   const REDUCED = matchMedia("(prefers-reduced-motion: reduce)");
   // Read off the checkboxes, which carry the shared layout's slug, so this

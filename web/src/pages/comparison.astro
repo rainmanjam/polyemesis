@@ -135,7 +135,7 @@ const wins = [
  * @type {{who: string, what: string, rows: [string, string][], tail?: string}[]} */
 const losses = [
   {
-    who: "The OBS plugins",
+    who: "the OBS plugins",
     what: "obs-multi-rtmp and Aitum Multistream — free, GPL-2.0, installed in two minutes and already on the machine.",
     rows: [
       ["No server at all", "A plugin in OBS: no host to provision, no port to open. Here you run a server, or there is nothing to run."],
@@ -168,7 +168,7 @@ const losses = [
   },
   {
     who: "restream.io",
-    what: "SaaS, so self-hosting beats it on cost, privacy and limits by construction — and loses everywhere that being somebody else's problem is the feature.",
+    what: "SaaS. Self-hosting wins on cost, privacy and limits by construction; restream.io wins wherever having somebody else run it is the feature.",
     rows: [
       ["Studio — browser production, remote guests", "Missing. Multi-source plus compositing is the closest path."],
       ["Teams, roles, multiple workspaces", "Missing. Exactly one admin identity."],
@@ -441,26 +441,31 @@ const selectors = [
     </p>
   </section>
 
-  {/* ------------------------------------------- where polyemesis loses ---- */}
+  {/* -------------------------------------------- choose another tool when -- */}
   {/* IMMEDIATELY AFTER THE WIN TABLE, which is the whole point of the placement.
       Put the concessions at the bottom and they read as small print somebody was
       forced to include; put them next to the wins and they read as the same
       person writing with the same care, which is the only thing that makes the
-      wins worth anything. */}
+      wins worth anything.
+
+      THE HEADING NAMES A CHOICE, NOT A DEFEAT (2026-11 design review). It was
+      "Where polyemesis loses"; it is "Choose another tool when", and each card
+      says when that tool is the better pick. The content is unchanged: the
+      same rows, the same honesty, framed as advice to the reader. */}
   <section class="border-y border-line bg-surface/30 py-16">
     <div class="wrap">
-      <h2 class="text-2xl font-medium">Where polyemesis loses</h2>
+      <h2 class="text-2xl font-medium">Choose another tool when</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Every one of these is something another tool does and this one does not.
-        They are worth reading before you spend an evening on an install: these
-        are design decisions and a project's age, not a roadmap, so none of them
-        is about to change because you waited.
+        Each of these is a job another tool is built for. They are worth reading
+        before you spend an evening on an install: they follow from design
+        decisions and the project's age, not from a roadmap, so the right tool
+        for these jobs today is the one named.
       </p>
       <div class="mt-8 grid gap-4 lg:grid-cols-2">
         {
           losses.map((l) => (
             <div class="card p-5">
-              <p class="font-medium text-fg">{l.who} has, and polyemesis does not</p>
+              <p class="font-medium text-fg">Choose {l.who} for</p>
               <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
               <dl class="mt-4 divide-y divide-line border-y border-line">
                 {l.rows.map(([has, here]) => (

@@ -64,6 +64,7 @@ const features = [
   title="Multistream, a different mix per platform — polyemesis"
   description="Self-hosted multistreaming with a different audio mix per platform. One SRT ingest carries OBS's split tracks — send the clean feed where music gets muted."
   path="/"
+  announce={{ release: repo?.release ?? null }}
 >
   {/* ---------------------------------------------------------------- hero */}
   {/* THE HERO IS SHAPED AROUND ONE ACTION AND ONE PICTURE (S1, approved).
@@ -82,30 +83,35 @@ const features = [
     <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
     <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
       <div class="max-w-xl">
-        <span class="chip rise rise-1">MIT licensed · self-hosted</span>
-
         {/* One outcome line (S1, as the approved mockup has it): what the
             creator gets, in the creator's words, rather than the mechanism. The
             earlier "One stream in. A different mix out of each." was an outcome
             too, but it wrapped to three lines at desktop width and left "each."
             alone on the last one. The break is the one composed break, between
-            the two halves; the accent is the claim. */}
-        <h1 class="rise rise-2 mt-6 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
+            the two halves.
+
+            NO PILL ABOVE IT AND NO COLOUR IN IT (2026-11 design review). The
+            "MIT licensed · self-hosted" chip repeated the spec strip's Licence
+            cell one screen lower, and the blue on "audio mix" spent the
+            interaction colour on text nobody can click. Blue is for things you
+            act on; size and weight carry the headline. */}
+        <h1 class="rise rise-1 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
           Send each platform<br />
-          its own <span class="text-primary-bright">audio mix</span>.
+          its own audio mix.
         </h1>
 
-        <p class="rise rise-3 mt-6 text-pretty text-lg leading-relaxed text-muted">
+        <p class="rise rise-2 mt-6 text-pretty text-lg leading-relaxed text-muted">
           Self-hosted restreaming: one ingest goes out to every platform, and you
           choose which audio tracks each one gets, so a copyrighted song can stay
           off the VOD.
         </p>
 
-        <div class="rise rise-4">
+        <div class="rise rise-3">
           <div class="mt-8">
             <CodeBlock
               label="docker"
               codeId="install-command"
+              externalCopy
               code={`docker run -d --name polyemesis \\
   -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
@@ -113,17 +119,18 @@ const features = [
             />
           </div>
 
-          {/* The primary control copies the same text the block shows. It is
-              named by id rather than found through the box, so it can sit
-              outside it. The copy script reads the id at click time. */}
+          {/* ONE COPY ACTION, and it is the primary control (2026-11 design
+              review). The block above renders no Copy of its own
+              (`externalCopy`), so this button is the only thing on the hero
+              that copies the command. It carries `data-code-copy`, which is
+              how check-build pairs the block's <pre> with one copy control,
+              and `data-copy-target`, which is how the script finds the text
+              from outside the box. */}
           <div class="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-            {/* NOT data-code-copy: check-build pairs each <pre> with exactly one
-                of those, and the block already has its own Copy. This button is
-                a second, named route to the same text, so it carries its own
-                attribute and the one delegated listener handles both. */}
             <button
               type="button"
               class="btn btn-primary"
+              data-code-copy
               data-copy-target="install-command"
             >
               Copy install command
@@ -132,7 +139,7 @@ const features = [
               href="/docs/quickstart"
               class="text-sm text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
             >
-              Read the quickstart →
+              Read the quickstart
             </a>
           </div>
 
@@ -147,7 +154,7 @@ const features = [
               href="/calculator"
               class="text-fg underline decoration-line underline-offset-4 transition-colors hover:decoration-primary-bright"
             >
-              Bandwidth calculator →
+              Bandwidth calculator
             </a>
           </p>
         </div>
@@ -168,7 +175,7 @@ const features = [
           same point less truthfully, and the hero's job is one action and one
           picture. */}
       <div class="relative flex items-center">
-        <figure class="rise rise-5 w-full">
+        <figure class="rise rise-4 w-full">
           <div class="overflow-hidden rounded-token border border-line bg-surface shadow-2xl shadow-black/40">
             <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
               {/* Neutral, not the live green: in the install this was taken
@@ -200,6 +207,47 @@ const features = [
 
   <SpecStrip />
 
+  {/* ------------------------------------------------------------- problem */}
+  <section class="wrap py-20 sm:py-24">
+    <div class="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
+      <div>
+        <h2 class="text-balance text-3xl font-medium">
+          You send four tracks. Every platform will take one stereo pair.
+        </h2>
+      </div>
+      {/* ONE TRACK LAYOUT FOR THE WHOLE PAGE (S7). These four tracks are the
+          ones the patchbay below lets you route and the ones the Proof capture
+          was photographed with -- all three read src/data/tracks.mjs, which is
+          the seeded install's own layout. */}
+      <div class="space-y-4 text-pretty leading-relaxed text-muted">
+        <p>
+          You run OBS with split audio tracks: {LAYOUT_SENTENCE}
+        </p>
+        <p>
+          Every live platform accepts exactly one stereo pair. So
+          normally you must choose one mix for everyone — and risk a claim on
+          YouTube or a muted VOD on Twitch, or send both a
+          broadcast with no music — or multistream from the stream PC: several
+          encoders and several uploads off one machine and one connection.
+        </p>
+        <p class="text-fg">
+          polyemesis ingests once and lets you pick, per destination, which
+          tracks get summed into the stereo feed that destination receives.
+          YouTube gets everything but track {MUSIC_TRACK}. Your local archive
+          keeps all four. Your podcast feed keeps only the two voices.
+        </p>
+        <p class="text-sm leading-relaxed text-subtle">
+          Twitch can also carry the music bed while a separate archive track
+          leaves it out, from the same upload. That route is Twitch-only and has
+          its own requirements, covered on the{" "}
+          <a href="/twitch-vod-track" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">Twitch track page</a>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <MixMatrix />
+
   {/* ------------------------------------------------------- plan comparison */}
   {/* WHAT A FREE SELF-HOSTED TOOL SAVES, AND WHAT IT COSTS YOU (S3, approved).
       Hosted restreamers lead with a price ladder, and a visitor comparing them
@@ -216,11 +264,15 @@ const features = [
       re-check, so it is printed; the file's tier table is not a complete list.
 
       THE COST OF SELF-HOSTING IS STATED, NOT HIDDEN: the software is free, and
-      the server it runs on is not. A server is named in the first row. */}
+      the server it runs on is not. A server is named in the first row.
+
+      AFTER THE PROBLEM AND THE PATCHBAY, not before them (2026-11 design
+      review). A visitor should be able to try the routing before being asked
+      to compare prices for it; the price table answers "what does this cost"
+      for someone who already wants it. */}
   <section class="wrap py-16 sm:py-20">
     <div class="max-w-2xl">
-      <p class="eyebrow">What it saves, and what it costs you</p>
-      <h2 class="mt-3 text-balance text-3xl font-medium">
+      <h2 class="text-balance text-3xl font-medium">
         Hosted restreamers charge by destination. This one charges for a server.
       </h2>
     </div>
@@ -268,54 +320,11 @@ const features = [
     </p>
   </section>
 
-  {/* ------------------------------------------------------------- problem */}
-  <section class="wrap py-20 sm:py-24">
-    <div class="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
-      <div>
-        <p class="eyebrow">The problem</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">
-          You send four tracks. Every platform will take one stereo pair.
-        </h2>
-      </div>
-      {/* ONE TRACK LAYOUT FOR THE WHOLE PAGE (S7). These four tracks are the
-          ones the patchbay below lets you route and the ones the Proof capture
-          was photographed with -- all three read src/data/tracks.mjs, which is
-          the seeded install's own layout. */}
-      <div class="space-y-4 text-pretty leading-relaxed text-muted">
-        <p>
-          You run OBS with split audio tracks: {LAYOUT_SENTENCE}
-        </p>
-        <p>
-          Every live platform accepts exactly one stereo pair. So
-          normally you must choose one mix for everyone — and risk a claim on
-          YouTube or a muted VOD on Twitch, or send both a
-          broadcast with no music — or multistream from the stream PC: several
-          encoders and several uploads off one machine and one connection.
-        </p>
-        <p class="text-fg">
-          polyemesis ingests once and lets you pick, per destination, which
-          tracks get summed into the stereo feed that destination receives.
-          YouTube gets everything but track {MUSIC_TRACK}. Your local archive
-          keeps all four. Your podcast feed keeps only the two voices.
-        </p>
-        <p class="text-sm leading-relaxed text-subtle">
-          Twitch can also carry the music bed while a separate archive track
-          leaves it out, from the same upload. That route is Twitch-only and has
-          its own requirements, covered on the{" "}
-          <a href="/twitch-vod-track" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">Twitch track page</a>.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <MixMatrix />
-
   {/* --------------------------------------------------------------- proof */}
   <section class="border-y border-line bg-surface/30 py-20 sm:py-24">
     <div class="wrap">
       <div class="max-w-2xl">
-        <p class="eyebrow">Proof, not a diagram</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">
+        <h2 class="text-balance text-3xl font-medium">
           Loudness measured per destination, after routing, from one ingest.
         </h2>
         {/* THE FIGURES ARE READ OFF 04-meters.png, and LoudnessBars carries the
@@ -368,8 +377,7 @@ const features = [
   {/* ------------------------------------------------------------ features */}
   <section class="wrap py-20 sm:py-24">
     <div class="max-w-2xl">
-      <p class="eyebrow">What else it does</p>
-      <h2 class="mt-3 text-balance text-3xl font-medium">
+      <h2 class="text-balance text-3xl font-medium">
         The rest of it is a broadcast server.
       </h2>
     </div>
@@ -392,8 +400,7 @@ const features = [
   <section class="border-t border-line bg-surface/30 py-20 sm:py-24">
     <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
       <div>
-        <p class="eyebrow">How it is built</p>
-        <h2 class="mt-3 text-balance text-3xl font-medium">Decisions you can rely on.</h2>
+        <h2 class="text-balance text-3xl font-medium">Decisions you can rely on.</h2>
         <p class="mt-4 text-sm leading-relaxed text-subtle">
           Four choices that shape everything else. Each one was made on purpose
           and is held to release after release.
@@ -418,34 +425,26 @@ const features = [
   </section>
 
   {/* --------------------------------------------------------- who it is for */}
-  {/* NAMING WHO SHOULD NOT USE THIS is the point of the second column, and it is
-      the reason this section exists. Both reviews said the same thing from
-      different angles: the site never states its own limits, and a product that
-      cannot say who it is wrong for reads as marketing.
+  {/* SAYING WHEN ANOTHER TOOL FITS BETTER is the point of the second column,
+      and it is the reason this section exists. Both reviews said the same
+      thing from different angles: a product that cannot say who it suits
+      reads as marketing.
+
+      PHRASED AS A CHOICE, NOT A VERDICT (2026-11 design review). The labels
+      were the mono caps pair "BUILT FOR / NOT BUILT FOR", which read as a spec
+      sheet's exclusions. They are sentence-case headings now, each naming the
+      choice a reader makes, and the second column says what a hosted service
+      is good at rather than what polyemesis lacks.
 
       It sits immediately before the call to action deliberately. A reader who
-      recognises themselves in the right-hand column should leave here rather
-      than install, discover the mismatch, and conclude the software is bad at
-      something it never claimed. */}
+      recognises themselves in the right-hand column is better served by the
+      comparison than by an install. */}
   <section class="border-t border-line py-20 sm:py-24">
     <div class="wrap">
       <h2 class="text-balance text-3xl font-medium">Is this for you?</h2>
       <div class="mt-10 grid gap-8 sm:grid-cols-2">
         <div class="card p-6">
-          {/* text-fg, and it was `text-accent` — a class Tailwind never
-              generated, because this theme defines no --color-accent (the
-              accent token is --color-primary). It therefore emitted no rule at
-              all and the label inherited body colour, which happens to BE
-              --color-fg: the label has always rendered exactly as it does on
-              this line, and the difference from its "Not built for" sibling was
-              an accident that looked deliberate.
-
-              Left at fg rather than given the accent for real. The two columns
-              are a pair and the difference between them is emphasis, not
-              category — spending the accent here would put a fourth saturated
-              thing on a page whose accent budget is the announcement bar, half
-              the headline and the primary CTA. */}
-          <p class="font-mono text-[11px] uppercase tracking-wider text-fg">Built for</p>
+          <h3 class="text-lg font-medium text-fg">Choose polyemesis if</h3>
           <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
             <li>You already run a server, or are willing to. A VPS is enough.</li>
             <li>You stream to more than one platform and want each to hear something different.</li>
@@ -454,17 +453,17 @@ const features = [
           </ul>
         </div>
         <div class="card p-6">
-          <p class="font-mono text-[11px] uppercase tracking-wider text-subtle">Not built for</p>
+          <h3 class="text-lg font-medium text-fg">Choose a hosted service if</h3>
           <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
             <li>
-              You want somebody else to run it. There is no hosted tier, and no
-              plan for one. Hosted services exist and are good at it —{" "}
-              <a href="/free-restream-service" class="underline decoration-line underline-offset-4 hover:text-fg">what you trade either way</a>{" "}
+              You want somebody else to run it. Hosted services are good at
+              that, and polyemesis is self-hosted by design.{" "}
+              <a href="/free-restream-service" class="underline decoration-line underline-offset-4 hover:text-fg">What you trade either way</a>{" "}
               is written out.
             </li>
-            <li>You need a browser studio, guest invites, or cloud recording storage.</li>
-            <li>You want support with an SLA. This is MIT software maintained in the open.</li>
-            <li>One platform, one mix. You do not need any of this.</li>
+            <li>You want a browser studio, guest invites, or cloud recording storage.</li>
+            <li>You want support with an SLA. polyemesis is MIT software maintained in the open.</li>
+            <li>You send one mix to one platform and want nothing extra to run.</li>
           </ul>
         </div>
       </div>
