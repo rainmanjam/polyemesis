@@ -123,6 +123,67 @@ const inBadge = (x: number, y: number, size: number) => {
   return x >= 0.06 - m && x <= 0.36 + m && y >= 0.06 - m && y <= 0.36 + m;
 };
 
+// The tile (a rounded rect from 0.02 to 0.98) covers about 89% of a face outside the
+// badge. A face below this has lost its tile, and transparency is not a background
+// whose contrast anything can vouch for.
+const MIN_TILE_COVERAGE = 0.8;
+
+/**
+ * The worst contrast between `ink` and any opaque tile pixel outside the badge. Throws
+ * when the tile does not cover the face, because then there is no background to measure
+ * and a minimum over nothing (Infinity) would pass any threshold.
+ */
+function titleContrast(size: number, px: Buffer, ink: readonly number[]): number {
+  let worst = Infinity;
+  let opaque = 0;
+  let counted = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (inBadge((x + 0.5) / size, (y + 0.5) / size, size)) continue;
+      counted++;
+      const o = (y * size + x) * 4;
+      if (px[o + 3] !== 255) continue;
+      opaque++;
+      worst = Math.min(worst, contrast([px[o]!, px[o + 1]!, px[o + 2]!], ink));
+    }
+  }
+  const centre = ((size >> 1) * size + (size >> 1)) * 4 + 3;
+  if (opaque / counted < MIN_TILE_COVERAGE || px[centre] !== 255) {
+    throw new Error(
+      `the tile covers ${opaque} of ${counted} pixels outside the badge` +
+        `${px[centre] === 255 ? "" : " and not the centre, where the title sits"}: no background to measure the title against`,
+    );
+  }
+  return worst;
+}
+
+describe("titleContrast refuses a face with no tile behind the title", () => {
+  const size = 72;
+  const face = (paint: (x: number, y: number) => number[] | null) => {
+    const px = Buffer.alloc(size * size * 4);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const c = paint(x, y);
+        if (c) px.set([...c, 255], (y * size + x) * 4);
+      }
+    }
+    return px;
+  };
+
+  it("fails a blank, fully transparent face", () => {
+    expect(() => titleContrast(size, face(() => null), TITLE_WHITE)).toThrow(/no background/);
+  });
+
+  it("fails a face that is opaque only at its edges, transparent behind the title", () => {
+    const ring = face((x, y) => (Math.min(x, y, size - 1 - x, size - 1 - y) < 4 ? [20, 20, 20] : null));
+    expect(() => titleContrast(size, ring, TITLE_WHITE)).toThrow(/no background/);
+  });
+
+  it("measures a solid face", () => {
+    expect(titleContrast(size, face(() => [0, 0, 0]), TITLE_WHITE)).toBeCloseTo(21, 5);
+  });
+});
+
 describe("committed key faces, against the title colour the manifest gives their state", () => {
   for (const a of keyActions) {
     a.States.forEach((st, i) => {
@@ -130,16 +191,7 @@ describe("committed key faces, against the title colour the manifest gives their
         it(`${file}: its title reads at ${AA}:1 or better on every tile pixel`, () => {
           const ink = parseHex(st.TitleColor ?? "#FFFFFF");
           const { size, px } = decode(join(PLUGIN, file));
-          let worst = Infinity;
-          for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-              const o = (y * size + x) * 4;
-              if (px[o + 3] !== 255) continue;
-              if (inBadge((x + 0.5) / size, (y + 0.5) / size, size)) continue;
-              worst = Math.min(worst, contrast([px[o]!, px[o + 1]!, px[o + 2]!], ink));
-            }
-          }
-          expect(worst, `${a.UUID} state ${i}`).toBeGreaterThanOrEqual(AA);
+          expect(titleContrast(size, px, ink), `${a.UUID} state ${i}`).toBeGreaterThanOrEqual(AA);
         });
       }
     });

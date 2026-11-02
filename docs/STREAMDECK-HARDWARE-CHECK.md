@@ -9,6 +9,27 @@ hold feels right, and a dial turns smoothly. Run it before a release that change
 Tick every box. Note the device, the Stream Deck app version, the OS and the
 plugin version (Stream Deck app, **Preferences > Plugins**) next to the result.
 
+> **Check this first: does every state switch on a real device?** Elgato's
+> keys guide says Stream Deck supports up to two states: more are allowed in
+> the manifest, but their functionality "is not fully supported". This
+> plugin gives each key action eleven states (`KEY_STATE` in
+> `src/render.ts`), each with its own image and its own `TitleColor`. Warn,
+> state 2, is the only one with a near-black title. Nothing in CI can show
+> the app honours them; only a device can.
+>
+> - [ ] On a Destination key, drive it through idle, live, warn
+>       (reconnecting), failed (error), held and unbound. Do the same on a
+>       Mute track key for muted, restarted and unavailable, on Record for
+>       halted, and on any write key with a read token for needs-admin. Each
+>       time, the key shows **that state's image** and **its title colour**:
+>       near-black on warn's amber, white on every other state.
+> - [ ] Switch back and forth (e.g. live → warn → live) a few times. The image
+>       and the title colour change together every time, and the key never
+>       sticks on an earlier state's face or title colour.
+>
+> If any state shows the wrong image or title colour, stop and record it.
+> That outcome decides whether the plugin keeps eleven states.
+
 ## 0. Get the file
 
 - [ ] Download `com.polyemesis.streamdeck.streamDeckPlugin` from the GitHub
@@ -18,8 +39,13 @@ plugin version (Stream Deck app, **Preferences > Plugins**) next to the result.
       To build it yourself:
       `cd integrations/streamdeck && npm ci && npm run build && npm run pack`
       writes it to `dist/`.
-- [ ] For a release download, check it against `SHA256SUMS`
-      (`sha256sum -c SHA256SUMS --ignore-missing`).
+- [ ] For a release download, hash it and compare the result with its line in
+      `SHA256SUMS`:
+      - macOS: `shasum -a 256 com.polyemesis.streamdeck.streamDeckPlugin`
+      - Windows (PowerShell):
+        `Get-FileHash -Algorithm SHA256 com.polyemesis.streamdeck.streamDeckPlugin`
+        (it prints the hash in upper case; the comparison ignores case)
+      - Linux: `sha256sum -c SHA256SUMS --ignore-missing`
 
 ## 1. Install
 
