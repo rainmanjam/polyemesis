@@ -440,7 +440,11 @@ func (f *mqttAudienceFeed) state() *mqtt.AudienceState {
 	}
 	fn := f.fn.Load()
 	if fn == nil {
-		return nil
+		// A feed that is coming but not set yet: an empty, off-air picture
+		// rather than nil. Discovery is published once per connection, and a
+		// nil here on the first connect would leave the viewer sensors out
+		// until the next reconnect.
+		return &mqtt.AudienceState{At: time.Now()}
 	}
 	return (*fn)()
 }

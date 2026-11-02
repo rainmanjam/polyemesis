@@ -338,6 +338,9 @@ func TestAnalyticsReportCarriesPeakAverageChatAndCSV(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/csv") {
 		t.Fatalf("csv: %d %q", w.Code, w.Header().Get("Content-Type"))
 	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("csv Cache-Control = %q; the report names chatters", cc)
+	}
 	if cd := w.Header().Get("Content-Disposition"); cd != `attachment; filename="polyemesis-stream-`+strconv.FormatInt(st.ID, 10)+`.csv"` {
 		t.Fatalf("Content-Disposition = %q", cd)
 	}
@@ -394,5 +397,41 @@ func TestAnalyticsSettingsBoundsAreThePackagesBounds(t *testing.T) {
 		if (err == nil) != c.ok {
 			t.Errorf("interval %d retention %d: err=%v, want ok=%v", c.interval, c.retention, err, c.ok)
 		}
+	}
+}
+
+// TestAudienceStateForMQTTLeavesUnreportedPlatformsNil: the MQTT mapping
+// carries a reported count per platform, nil for one that did not report, and
+// the player only when it runs.
+func TestAudienceStateForMQTTLeavesUnreportedPlatformsNil(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	twelve := 12
+	f.fake.twitch["tok-a"] = &twelve
+	f.fake.twitch["tok-b"] = nil
+	f.account(t, db.PlatformTwitch, "shown", "tok-a")
+	f.account(t, db.PlatformTwitch, "hidden", "tok-b")
+	f.account(t, db.PlatformYouTube, "tube", "tok-y")
+	for _, n := range []string{"shown", "hidden", "tube"} {
+		f.running[f.dest[n]] = true
+	}
+
+	off := f.s.AudienceState()
+	if off == nil || off.OnAir || off.Total != nil || off.Twitch != nil {
+		t.Fatalf("before a tick = %+v, want off air with no counts", off)
+	}
+	f.tick(t)
+	st := f.s.AudienceState()
+	if !st.OnAir || st.Total == nil || *st.Total != 12 || st.Reported != 1 {
+		t.Fatalf("audience = %+v, want 12 over 1 reported", st)
+	}
+	if st.Twitch == nil || *st.Twitch != 12 {
+		t.Fatalf("twitch = %v, want 12 (the hidden channel adds nothing)", st.Twitch)
+	}
+	if st.YouTube != nil || st.Kick != nil || st.Player != nil {
+		t.Fatalf("youtube %v kick %v player %v, want all nil: YouTube sent no count, Kick and the player were not running",
+			st.YouTube, st.Kick, st.Player)
+	}
+	if !st.At.Equal(f.now) {
+		t.Fatalf("at = %v, want the tick %v", st.At, f.now)
 	}
 }

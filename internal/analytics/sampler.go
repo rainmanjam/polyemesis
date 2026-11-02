@@ -177,8 +177,14 @@ func New(src Source, store Store, cfg func() Config, now func() time.Time, log *
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Sampler{src: src, store: store, cfg: cfg, now: now, log: log,
-		live: Live{Readings: []Reading{}, Points: []Point{}}}
+	s := &Sampler{src: src, store: store, cfg: cfg, now: now, log: log}
+	// Seeded from the settings so the picture before the first tick says
+	// whether sampling is on, rather than reading as switched off for the
+	// few seconds until the loop's first tick.
+	c := s.config()
+	s.live = Live{Enabled: c.Enabled, IntervalSeconds: int(c.Interval / time.Second),
+		Readings: []Reading{}, Points: []Point{}}
+	return s
 }
 
 // Live returns a copy of the current picture.

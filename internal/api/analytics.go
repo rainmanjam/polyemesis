@@ -293,6 +293,9 @@ func (s *Server) handleAnalyticsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition",
 		`attachment; filename="polyemesis-stream-`+strconv.FormatInt(id, 10)+`.csv"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// The report names chatters: kept out of every cache, as the caption
+	// export is.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b.Bytes())
 }

@@ -548,3 +548,13 @@ func TestAverageTotalSkipsTicksAtWhichNothingReported(t *testing.T) {
 		t.Fatalf("row average = %v, want 15", s.Rows[0].Average)
 	}
 }
+
+// TestLiveBeforeTheFirstTickSaysWhetherSamplingIsOn: the picture served
+// before the loop's first tick must not read as switched off.
+func TestLiveBeforeTheFirstTickSaysWhetherSamplingIsOn(t *testing.T) {
+	s := New(newFake(), newMem(), enabled(2*time.Minute), nil, nil)
+	l := s.Live()
+	if !l.Enabled || l.OnAir || l.IntervalSeconds != 120 || l.At != nil {
+		t.Fatalf("before the first tick = %+v, want enabled, off air, interval 120, no tick", l)
+	}
+}

@@ -7,13 +7,14 @@ import (
 )
 
 // TestMQTTSnapshotCarriesTheAudienceOnceTheFeedIsSet: the runner starts before
-// the API server that owns the sampler, so the feed is empty at first and the
-// snapshot then carries no audience; once set, every snapshot reads it.
+// the API server that owns the sampler, so the feed is empty at first. The
+// snapshot then still carries an off-air audience, so the viewer entities are
+// in the first discovery payload; once set, every snapshot reads the sampler.
 func TestMQTTSnapshotCarriesTheAudienceOnceTheFeedIsSet(t *testing.T) {
 	feed := &mqttAudienceFeed{}
 	r := &mqttRunner{version: "test", engines: func() []mqttEngine { return nil }, audience: feed}
-	if got := r.snapshot().Audience; got != nil {
-		t.Fatalf("audience before the feed was set = %+v, want nil", got)
+	if got := r.snapshot().Audience; got == nil || got.OnAir || got.Total != nil {
+		t.Fatalf("audience before the feed was set = %+v, want an off-air picture so discovery carries the sensors", got)
 	}
 	n := 7
 	feed.set(func() *mqtt.AudienceState { return &mqtt.AudienceState{OnAir: true, Total: &n} })

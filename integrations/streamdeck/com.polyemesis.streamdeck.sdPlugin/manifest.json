@@ -418,7 +418,7 @@
       ],
       "PropertyInspectorPath": "ui/pi.html",
       "Encoder": {
-        "layout": "$A1"
+        "layout": "$B1"
       },
       "States": [
         {
