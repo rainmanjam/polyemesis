@@ -134,6 +134,10 @@ func DefaultLoudParams() LoudParams {
 	return LoudParams{BinMS: 1000, DeltaLU: 8, SilenceLUFS: -70}
 }
 
+// maxPTSSeconds bounds a timestamp ParseMomentary will believe: thirty days,
+// far past any one recording file, far short of anything that overflows.
+const maxPTSSeconds = 30 * 24 * 3600
+
 // LoudnessArgs is the FFmpeg invocation that measures one file: the first
 // audio track's EBU R128 momentary loudness, printed every 100ms to stdout.
 // Audio only, so hours of recording measure in a minute.
@@ -165,7 +169,12 @@ func ParseMomentary(r io.Reader, offsetMS int64) ([]Sample, error) {
 			f := strings.Fields(line[i+len("pts_time:"):])
 			at = -1
 			if len(f) > 0 {
-				if v, err := strconv.ParseFloat(f[0], 64); err == nil && !math.IsNaN(v) {
+				// The timestamp comes out of a media file. Anything that is
+				// not a finite number inside one plausible recording is
+				// dropped BEFORE it is scaled: ParseFloat accepts "inf", and
+				// int64(+Inf) is whatever the platform makes of it.
+				if v, err := strconv.ParseFloat(f[0], 64); err == nil &&
+					!math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= maxPTSSeconds {
 					at = int64(math.Round(v * 1000))
 				}
 			}
@@ -184,21 +193,21 @@ func ParseMomentary(r io.Reader, offsetMS int64) ([]Sample, error) {
 
 // LoudnessPeaks finds the bins at least DeltaLU above the recording's median
 // non-silent loudness.
-func LoudnessPeaks(samples []Sample, p LoudParams) []Signal {
-	if len(samples) == 0 || p.BinMS <= 0 {
+//
+// durMS is the recording's length and is what sizes the bins: never the
+// samples, whose timestamps came out of a media file. A sample outside
+// [0, durMS) is ignored, as ChatSpikes ignores a message outside it.
+func LoudnessPeaks(samples []Sample, durMS int64, p LoudParams) []Signal {
+	if len(samples) == 0 || p.BinMS <= 0 || durMS <= 0 {
 		return nil
 	}
-	var last int64
-	for _, s := range samples {
-		last = max(last, s.AtMS)
-	}
-	n := int(last/p.BinMS) + 1
+	n := int((durMS + p.BinMS - 1) / p.BinMS)
 	bins := make([]float64, n)
 	for i := range bins {
 		bins[i] = math.Inf(-1)
 	}
 	for _, s := range samples {
-		if s.AtMS < 0 {
+		if s.AtMS < 0 || s.AtMS >= durMS {
 			continue
 		}
 		i := int(s.AtMS / p.BinMS)

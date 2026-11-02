@@ -178,6 +178,49 @@ func TestEBUR128OutputParses(t *testing.T) {
 	}
 }
 
+// HOSTILE TIMESTAMPS. pts_time comes out of a media file, and a corrupt or
+// crafted one must not size an allocation. Non-finite, negative and absurd
+// values are dropped by the parser; whatever reaches LoudnessPeaks outside the
+// recording is ignored, and the bin array is bounded by the recording's
+// duration, not by the largest timestamp in the input.
+//
+// MUTATION: ParseMomentary accepts any finite pts_time. Observed: FAIL, the
+// 1e18 line yields a sample.
+// MUTATION: LoudnessPeaks sizes its bins from the samples instead of durMS.
+// Observed: FAIL (panic: makeslice: len out of range).
+// MUTATION: LoudnessPeaks keeps samples past durMS. Observed: FAIL, a peak
+// outside the recording.
+func TestHostileTimestampsCannotSizeAnAllocation(t *testing.T) {
+	hostile := "frame:0 pts:0 pts_time:1e18\nlavfi.r128.M=-10\n" +
+		"frame:1 pts:0 pts_time:inf\nlavfi.r128.M=-10\n" +
+		"frame:2 pts:0 pts_time:+Inf\nlavfi.r128.M=-10\n" +
+		"frame:3 pts:0 pts_time:nan\nlavfi.r128.M=-10\n" +
+		"frame:4 pts:0 pts_time:-5\nlavfi.r128.M=-10\n" +
+		"frame:5 pts:0 pts_time:9223372036854775807\nlavfi.r128.M=-10\n" +
+		"frame:6 pts:0 pts_time:1.5\nlavfi.r128.M=-10\n"
+	got, err := ParseMomentary(strings.NewReader(hostile), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].AtMS != 1500 {
+		t.Fatalf("only the 1.5s reading is a real timestamp; got %+v", got)
+	}
+
+	// Straight into the detector, bypassing the parser: a sample at an absurd
+	// time, one just past the end, one negative. None may allocate or fire.
+	samples := append(loud(120, -30, 0, 0, -30),
+		Sample{AtMS: math.MaxInt64, LUFS: 0},
+		Sample{AtMS: 1 << 62, LUFS: 0},
+		Sample{AtMS: 120_000, LUFS: 0},
+		Sample{AtMS: -1, LUFS: 0})
+	if peaks := LoudnessPeaks(samples, 120_000, DefaultLoudParams()); len(peaks) != 0 {
+		t.Errorf("samples outside the recording made peaks: %+v", peaks)
+	}
+	if peaks := LoudnessPeaks(samples, 0, DefaultLoudParams()); len(peaks) != 0 {
+		t.Errorf("a recording with no duration has no peaks: %+v", peaks)
+	}
+}
+
 // loud builds momentary samples, 10 per second: base everywhere, peak over
 // [fromS, toS).
 func loud(durS int, base float64, fromS, toS int, peak float64) []Sample {
@@ -194,7 +237,7 @@ func loud(durS int, base float64, fromS, toS int, peak float64) []Sample {
 
 // A shout over a steady programme is one peak, where the shout is.
 func TestALoudnessPeakIsFoundWhereTheShoutIs(t *testing.T) {
-	got := LoudnessPeaks(loud(120, -30, 60, 63, -18), DefaultLoudParams())
+	got := LoudnessPeaks(loud(120, -30, 60, 63, -18), 120_000, DefaultLoudParams())
 	if len(got) != 1 || got[0].Kind != KindLoudness || got[0].StartMS != 60_000 || got[0].EndMS != 63_000 {
 		t.Fatalf("got %+v, want one loudness peak 60000..63000", got)
 	}
@@ -208,20 +251,20 @@ func TestALoudnessPeakIsFoundWhereTheShoutIs(t *testing.T) {
 // MUTATION: the silence gate is removed. Observed: FAIL, -26 over a half-silent
 // stream becomes a peak.
 func TestLoudnessThresholdIsExactAndIgnoresSilence(t *testing.T) {
-	if got := LoudnessPeaks(loud(120, -30, 60, 62, -22), DefaultLoudParams()); len(got) != 1 {
+	if got := LoudnessPeaks(loud(120, -30, 60, 62, -22), 120_000, DefaultLoudParams()); len(got) != 1 {
 		t.Errorf("-22 over -30 is a peak; got %+v", got)
 	}
-	if got := LoudnessPeaks(loud(120, -30, 60, 62, -22.1), DefaultLoudParams()); len(got) != 0 {
+	if got := LoudnessPeaks(loud(120, -30, 60, 62, -22.1), 120_000, DefaultLoudParams()); len(got) != 0 {
 		t.Errorf("-22.1 over -30 is not a peak; got %+v", got)
 	}
 	half := loud(120, -30, 60, 62, -26)
 	for i := 0; i < 600; i++ {
 		half[i].LUFS = -120.691
 	}
-	if got := LoudnessPeaks(half, DefaultLoudParams()); len(got) != 0 {
+	if got := LoudnessPeaks(half, 120_000, DefaultLoudParams()); len(got) != 0 {
 		t.Errorf("silence pulled the baseline down: %+v", got)
 	}
-	if got := LoudnessPeaks(nil, DefaultLoudParams()); len(got) != 0 {
+	if got := LoudnessPeaks(nil, 120_000, DefaultLoudParams()); len(got) != 0 {
 		t.Errorf("no samples, no peaks: %+v", got)
 	}
 }
