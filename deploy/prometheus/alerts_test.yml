@@ -1,7 +1,7 @@
 # Unit tests for alerts.yml. Run with:
 #   promtool test rules deploy/prometheus/alerts_test.yml
 # (docker run --rm -v "$PWD/deploy/prometheus:/r" --entrypoint promtool \
-#    prom/prometheus:v3.15.0 test rules /r/alerts_test.yml)
+#    prom/prometheus:v3.15.1 test rules /r/alerts_test.yml)
 rule_files:
   - alerts.yml
 

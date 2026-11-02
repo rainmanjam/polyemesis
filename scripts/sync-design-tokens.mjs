@@ -14,10 +14,11 @@
  *
  *   - A relative @import ("../../../ui/src/styles/...") is the cheapest thing
  *     that could work and is the one that cannot. web/Dockerfile builds the
- *     site from the web/ directory as its context — `COPY . .` with a build
- *     context of web/ — so a path reaching up into ui/ is a file that does not
- *     exist in the image, and the failure appears only when someone builds the
- *     container rather than when they build locally.
+ *     site from the repo root but COPYs an explicit list -- web/, docs/ and the
+ *     paths the docs link to (web/Dockerfile.dockerignore is the allow-list) --
+ *     and ui/ is not on it, so a path reaching up into ui/ is a file that does
+ *     not exist in the image, and the failure appears only when someone builds
+ *     the container rather than when they build locally.
  *   - A shared npm package means a registry, a version and a release process
  *     for two consumers in one repository. DESIGN-SYSTEM.md rejects that by
  *     name under "What is deliberately absent".

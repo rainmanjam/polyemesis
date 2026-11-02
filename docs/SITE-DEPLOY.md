@@ -208,3 +208,15 @@ declared header set, and
 `web/public/_headers` against it name by name and value by value. While both
 files exist they cannot silently drift. Deleting the nginx path is a separate
 decision, and the test is what makes it safe to defer.
+
+If you do build the container, build it from the repository root, not from
+`web/`:
+
+```sh
+docker build -f web/Dockerfile -t polyemesis-site .
+docker run --rm -p 8080:8080 polyemesis-site
+```
+
+The site reads `docs/` and checks every repo path the docs link to, so a `web/`
+context has nothing to build from (it fails with `ENOENT: scandir '/docs/'`).
+`web/Dockerfile.dockerignore` limits the root context to what the build copies.
