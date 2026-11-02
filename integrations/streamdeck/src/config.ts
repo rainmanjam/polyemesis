@@ -33,6 +33,17 @@ export interface KeySettings {
   pollQuestion?: string;
   pollOptions?: string[];
   pollDuration?: number;
+  /**
+   * The per-destination stop key also cuts the delayed tail: the stop is sent with ?now=true, so nothing
+   * still buffered airs, and a hold on a destination already airing its tail cuts that tail. True or absent.
+   */
+  cutTail?: boolean;
+  /**
+   * The dump key's seconds: drop at least the newest this many seconds. Absent (or 0) drops everything
+   * since the last dump point. Kept as typed, even out of range: the key refuses a value that is not a
+   * whole 1 to 900 rather than reading it as absent, because absent is the larger dump.
+   */
+  dumpSeconds?: number;
 }
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -88,6 +99,24 @@ export function pollOptions(raw: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * The dump key's seconds. Empty, absent or 0 is "since the last dump point" (undefined), as the server
+ * reads them. Anything else is kept as a number, NaN included, so a bad value is refused by the key
+ * (see dumpSecondsValid) and never silently widened into the since-last-dump dump.
+ */
+export function dumpSeconds(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "string" && raw.trim() === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return n === 0 ? undefined : n;
+}
+
+/** The seconds a dump may ask for: a whole number, 1 to 900. The server refuses anything else. */
+export const MAX_DUMP_SECONDS = 900;
+export function dumpSecondsValid(n: number | undefined): boolean {
+  return n === undefined || (Number.isSafeInteger(n) && n >= 1 && n <= MAX_DUMP_SECONDS);
+}
+
 export function keySettings(raw: Record<string, unknown> | undefined): KeySettings {
   const preset = typeof raw?.presetId === "string" ? raw.presetId.trim() : "";
   const question = typeof raw?.pollQuestion === "string" ? raw.pollQuestion.trim() : "";
@@ -99,5 +128,8 @@ export function keySettings(raw: Record<string, unknown> | undefined): KeySettin
     pollQuestion: question === "" ? undefined : question,
     pollOptions: pollOptions(raw?.pollOptions),
     pollDuration: positiveId(raw?.pollDuration),
+    // True or absent, never false: an unticked box is the plain stop.
+    cutTail: raw?.cutTail === true ? true : undefined,
+    dumpSeconds: dumpSeconds(raw?.dumpSeconds),
   };
 }

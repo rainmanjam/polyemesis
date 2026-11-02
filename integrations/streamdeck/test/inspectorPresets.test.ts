@@ -20,6 +20,8 @@ interface FakeEl {
   textContent: string;
   className: string;
   value: string;
+  /** A checkbox's state. */
+  checked: boolean;
   children: FakeEl[];
   listeners: Record<string, (() => void)[]>;
   addEventListener(type: string, fn: () => void): void;
@@ -34,6 +36,7 @@ function element(id: string, isSelect = false): FakeEl {
     hidden: false,
     textContent: "",
     className: "",
+    checked: false,
     children: [],
     listeners: {},
     get value() {
@@ -65,6 +68,7 @@ function loadInspector(action: string) {
     "admin-warning", "test", "block-source", "block-destination", "block-preset", "block-install-wide",
     "block-track", "trackDestination", "track", "err-track", "block-issues", "issues", "issues-empty",
     "block-poll", "pollQuestion", "pollOptions", "pollDuration",
+    "hint-dump-all", "block-cut", "cutTail", "block-dump", "dumpSeconds",
   ];
   const selects = ["presetId", "trackDestination", "track"];
   const els = Object.fromEntries(ids.map((id) => [id, element(id, selects.includes(id))]));
@@ -303,5 +307,55 @@ describe("inspector issue list", () => {
     const { els, receive } = loadInspector(DEST);
     receive("sendToPropertyInspector", { type: "issues", issues: [{ html: "<img onerror=x>" }, 3, "Account expiring"] });
     expect(els.issues!.children.map((c) => c.textContent)).toEqual(["Account expiring"]);
+  });
+});
+
+describe("inspector broadcast delay fields", () => {
+  const STOP_ONE = "com.polyemesis.streamdeck.stop-destination";
+  const DUMP = "com.polyemesis.streamdeck.delay-dump";
+
+  it("shows the cut-tail box on the stop-destination key only, and the dump fields on the dump key only", () => {
+    const stop = loadInspector(STOP_ONE);
+    expect(stop.els["block-cut"]!.hidden).toBe(false);
+    expect(stop.els["block-dump"]!.hidden).toBe(true);
+    expect(stop.els["hint-dump-all"]!.hidden).toBe(true);
+    const dump = loadInspector(DUMP);
+    expect(dump.els["block-dump"]!.hidden).toBe(false);
+    expect(dump.els["block-destination"]!.hidden).toBe(false);
+    expect(dump.els["hint-dump-all"]!.hidden).toBe(false);
+    expect(dump.els["block-source"]!.hidden).toBe(false);
+    expect(dump.els["block-cut"]!.hidden).toBe(true);
+    const preset = loadInspector("com.polyemesis.streamdeck.preset");
+    expect(preset.els["block-cut"]!.hidden).toBe(true);
+    expect(preset.els["block-dump"]!.hidden).toBe(true);
+  });
+
+  it("shows the saved cut option, and saves it only when ticked", () => {
+    const { els, sent, receive, change } = loadInspector(STOP_ONE);
+    receive("didReceiveSettings", { settings: { sourceId: 7, destinationId: 5, cutTail: true } });
+    expect(els.cutTail!.checked).toBe(true);
+    els.cutTail!.checked = false;
+    change("cutTail");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 5 });
+    els.cutTail!.checked = true;
+    change("cutTail");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 5, cutTail: true });
+  });
+
+  it("saves the dump seconds as typed, none when empty, and a destination only when one is set", () => {
+    const { els, sent, receive, change } = loadInspector(DUMP);
+    receive("didReceiveSettings", { settings: { sourceId: 7, dumpSeconds: 10 } });
+    expect(els.dumpSeconds!.value).toBe("10");
+    els.dumpSeconds!.value = "";
+    change("dumpSeconds");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7 });
+    els.dumpSeconds!.value = " 1e ";
+    change("dumpSeconds");
+    // Kept as typed: the key refuses it, rather than this page dropping it into "since the last dump".
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, dumpSeconds: "1e" });
+    els.dumpSeconds!.value = "20";
+    els.destinationId!.value = "5";
+    change("destinationId");
+    expect(settingsSent(sent).at(-1)).toEqual({ sourceId: 7, destinationId: 5, dumpSeconds: "20" });
   });
 });

@@ -168,6 +168,19 @@ export class StopDestinationKey extends PolyAction {
   }
 }
 
+@action({ UUID: `${PLUGIN}.delay-dump` })
+export class DelayDumpKey extends PolyAction {
+  readonly kind = "dump" as const;
+
+  override onKeyDown(ev: KeyDownEvent): Promise<void> {
+    return rt().pressDumpDown(ev.action.id);
+  }
+
+  override onKeyUp(ev: KeyUpEvent): Promise<void> {
+    return rt().pressHoldUp(ev.action.id);
+  }
+}
+
 @action({ UUID: `${PLUGIN}.record` })
 export class RecordKey extends PolyAction {
   readonly kind = "record" as const;
@@ -260,6 +273,7 @@ streamDeck.actions.registerAction(new DestinationKey());
 streamDeck.actions.registerAction(new GoLiveKey());
 streamDeck.actions.registerAction(new StopAllKey());
 streamDeck.actions.registerAction(new StopDestinationKey());
+streamDeck.actions.registerAction(new DelayDumpKey());
 streamDeck.actions.registerAction(new RecordKey());
 streamDeck.actions.registerAction(new PresetKey());
 streamDeck.actions.registerAction(new PollKey());

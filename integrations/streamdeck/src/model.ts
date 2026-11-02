@@ -35,6 +35,39 @@ export interface FailureReason {
   keyChanged?: boolean;
 }
 
+/** DestStatus.delay: the live delay buffer of a delayed destination. */
+export interface DelayStatus {
+  /** The CONFIGURED delay. */
+  seconds: number;
+  phase: "buffering" | "on-air" | "draining";
+  drainRemainingSeconds?: number;
+  /** The delay actually running: shorter than `seconds` after a dump, until the destination next starts.
+   *  The server always sends it; an older server does not, and then it is `seconds`. */
+  effectiveSeconds?: number;
+  /** What the dumps since the last start have dropped. */
+  dumpedSeconds?: number;
+  /** A dump is waiting for its keyframe. */
+  dumping?: boolean;
+  /** A dump would be accepted now: on the air, with something since the last dump point. */
+  dumpable?: boolean;
+}
+
+/** The answer of POST /destinations/{id}/delay/dump: only what a key reads. */
+export interface DumpResult {
+  id: number;
+  name: string;
+  dumpedSeconds: number;
+}
+
+/** One row of POST /destinations/delay/dump-all. */
+export interface DumpAllRow {
+  id: number;
+  name: string;
+  outcome: "dumped" | "skipped" | "failed";
+  message?: string;
+  dumpedSeconds?: number;
+}
+
 export interface DestStatus {
   id: number;
   name: string;
@@ -61,7 +94,7 @@ export interface DestStatus {
   delaySeconds?: number;
   /** The live delay buffer. phase "draining" is a STOPPED destination still on
    *  the air with its buffered tail. */
-  delay?: { seconds: number; phase: "buffering" | "on-air" | "draining"; drainRemainingSeconds?: number } | null;
+  delay?: DelayStatus | null;
   /** Respawns in the last 15 minutes, present only when more than five: the
    *  server's restart-storm verdict, the PolyemesisDestinationRestartStorm threshold. */
   restartStorm?: number;

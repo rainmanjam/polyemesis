@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
   "Name": "Polyemesis",
-  "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
+  "Description": "Destination state, go live, stop all or one destination with confirmation, dump the broadcast delay, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
@@ -263,7 +263,7 @@
     {
       "UUID": "com.polyemesis.streamdeck.stop-destination",
       "Name": "Stop destination",
-      "Tooltip": "Hold to stop this one destination. Stopping a YouTube broadcast ends it for good. Needs an admin token.",
+      "Tooltip": "Hold to stop this one destination. Stopping a YouTube broadcast ends it for good. Can also cut the broadcast delay tail. Needs an admin token.",
       "Icon": "imgs/actions/stop-destination",
       "Controllers": [
         "Keypad"
@@ -313,6 +313,54 @@
         {
           "Image": "imgs/keys/stop-destination/unavailable",
           "TitleColor": "#FFFFFF"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
+      "UUID": "com.polyemesis.streamdeck.delay-dump",
+      "Name": "Dump delay",
+      "Tooltip": "Hold to drop the newest part of the broadcast delay buffer; the stream keeps running and the delay stays shorter until the destination next starts. Leave the destination empty to dump every delayed destination of the programme. Needs an admin token.",
+      "Icon": "imgs/actions/delay-dump",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "States": [
+        {
+          "Image": "imgs/keys/delay-dump/idle"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/live"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/warn"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/error"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/held"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/unbound"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/halted"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/needsAdmin"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/muted"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/restarted"
+        },
+        {
+          "Image": "imgs/keys/delay-dump/unavailable"
         }
       ],
       "DisableAutomaticStates": true,

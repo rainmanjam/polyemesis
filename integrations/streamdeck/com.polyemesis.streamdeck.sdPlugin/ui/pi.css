@@ -16,3 +16,5 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 [hidden] { display: none !important; }
 .issues { margin: 4px 0 0; padding-left: 18px; }
 .issues li { margin: 2px 0; }
+.check { display: flex; align-items: center; gap: 6px; }
+.check input { width: auto; margin: 0; }

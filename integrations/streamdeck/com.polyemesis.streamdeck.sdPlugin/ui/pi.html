@@ -39,6 +39,22 @@
   <section class="block" id="block-destination" hidden>
     <label for="destinationId" data-i18n="streamdeck.pi.destinationId">Destination ID</label>
     <input id="destinationId" type="number" min="1" step="1">
+    <p id="hint-dump-all" class="hint" data-i18n="streamdeck.pi.dumpAllHint" hidden></p>
+  </section>
+
+  <!-- The stop-destination key's option: the stop is sent with ?now=true, so the
+       delayed tail is cut. Same route, same destination, same hold. -->
+  <section class="block" id="block-cut" hidden>
+    <label class="check"><input id="cutTail" type="checkbox"> <span data-i18n="streamdeck.pi.cutTail">Cut the delayed tail</span></label>
+    <p class="hint" data-i18n="streamdeck.pi.cutTailHint"></p>
+  </section>
+
+  <section class="block" id="block-dump" hidden>
+    <label for="dumpSeconds" data-i18n="streamdeck.pi.dumpSeconds">Seconds to dump</label>
+    <!-- Text, not number: a number input reports "" for what it cannot parse, and "" means the
+         larger dump. The plugin refuses anything that is not a whole 1 to 900. -->
+    <input id="dumpSeconds" type="text" inputmode="numeric" autocomplete="off" spellcheck="false">
+    <p class="hint" data-i18n="streamdeck.pi.dumpHint"></p>
   </section>
 
   <section class="block" id="block-track" hidden>

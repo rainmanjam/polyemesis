@@ -105,7 +105,7 @@ describe("manifest", () => {
 
   it("exposes exactly the actions the plugin implements, and the dial is an encoder", () => {
     expect(manifest.Actions.map((a) => a.UUID.replace(`${manifest.UUID}.`, "")).sort()).toEqual(
-      ["destination", "failover", "go-live", "meter", "poll", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
+      ["delay-dump", "destination", "failover", "go-live", "meter", "poll", "preset", "record", "stop-all", "stop-destination", "track-gain", "track-mute"],
     );
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".meter"))!.Controllers).toEqual(["Encoder"]);
     expect(manifest.Actions.find((a) => a.UUID.endsWith(".track-gain"))!.Controllers).toEqual(["Encoder"]);
@@ -121,6 +121,11 @@ describe("manifest", () => {
   it("keeps stop-all out of multi-actions, where its hold could not complete", () => {
     const stop = manifest.Actions.find((a) => a.UUID.endsWith(".stop-all"))!;
     expect(stop.SupportedInMultiActions).toBe(false);
+  });
+
+  it("keeps the dump key out of multi-actions too: it confirms by a hold as well", () => {
+    const dump = manifest.Actions.find((a) => a.UUID.endsWith(".delay-dump"))!;
+    expect(dump.SupportedInMultiActions).toBe(false);
   });
 
   it("tells the user what the gain dial's rotate, push and touch do", () => {

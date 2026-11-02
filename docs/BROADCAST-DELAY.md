@@ -66,9 +66,10 @@ forward a few seconds. The delay is shorter by what was dumped.
 Press **Dump** in the delay panel on the destination's card. Choose
 **Everything since the last dump point** or a number of seconds, and confirm.
 The dialog shows the delay now and about what it will be after. The card then
-says, for example, "Dumped 11.4 s — delay now 18.6 s." On a Stream Deck, hold the **Dump** key.
-**Dump all** on the deck, or `POST /destinations/delay/dump-all`, dumps every
-delayed destination of the programme at once.
+says, for example, "Dumped 11.4 s — delay now 18.6 s." On a Stream Deck, hold
+the **Dump delay** key. Left without a destination, that key dumps every delayed
+destination of its programme at once, as `POST /destinations/delay/dump-all`
+does.
 
 - **Everything since the last dump point** is the default: it drops everything that
   arrived since the last dump, or since the destination started, down to the
@@ -179,7 +180,7 @@ left behind by a crash are deleted when polyemesis next starts.
   delay. `stop_destination` takes `now: true`. `dump_destination_delay` and
   `dump_all_delays` dump, with confirmation. See [MCP.md](MCP.md).
 - **Stream Deck:** the **Stop destination** key has a **Cut the delayed tail**
-  option, and a **Dump** key dumps one destination or every delayed one. Both
+  option, and the **Dump delay** key dumps one destination or every delayed one. Both
   need the 1.5 s hold. See the [Stream Deck README](../integrations/streamdeck/README.md).
 - **API:** `POST /destinations/{id}/delay/dump` and
   `POST /destinations/delay/dump-all`. See [API.md](API.md).

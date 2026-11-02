@@ -1,6 +1,8 @@
 import type {
   ConnectionInfo,
   DestinationLevels,
+  DumpAllRow,
+  DumpResult,
   Feed,
   LevelsReading,
   PollSpec,
@@ -209,8 +211,50 @@ export class PolyemesisClient {
     return this.call("POST", `/destinations/${id}/start`, sourceId);
   }
 
-  stopDestination(id: number, sourceId?: number): Promise<unknown> {
-    return this.call("POST", `/destinations/${id}/stop`, sourceId);
+  /**
+   * Stops one destination. With `now`, a delayed destination's buffered tail is CUT (?now=true): nothing
+   * still buffered airs, and a tail already airing from an earlier stop is cut too.
+   */
+  stopDestination(id: number, sourceId?: number, opts: { now?: boolean } = {}): Promise<unknown> {
+    return this.call("POST", `/destinations/${id}/stop`, sourceId, undefined, opts.now ? { now: "true" } : undefined);
+  }
+
+  /**
+   * Drops the newest part of one delayed destination's buffer; the stream keeps running and the delay
+   * stays shorter until the destination next starts. With no seconds, everything since the last dump
+   * point goes. The server answers 409 when there is nothing to dump. Needs an admin token.
+   */
+  async dumpDelay(id: number, seconds?: number, sourceId?: number): Promise<DumpResult> {
+    const out = await this.call<{ id?: unknown; name?: unknown; dumpedSeconds?: unknown }>(
+      "POST",
+      `/destinations/${id}/delay/dump`,
+      sourceId,
+      seconds === undefined ? undefined : { seconds },
+    );
+    return {
+      id: Number.isSafeInteger(out?.id) ? (out.id as number) : id,
+      name: typeof out?.name === "string" ? out.name : "",
+      dumpedSeconds: typeof out?.dumpedSeconds === "number" && Number.isFinite(out.dumpedSeconds) ? out.dumpedSeconds : 0,
+    };
+  }
+
+  /** Dumps every enabled, delayed destination of the programme. The server refuses without confirm. */
+  async dumpAll(sourceId?: number, seconds?: number): Promise<DumpAllRow[]> {
+    const body: { confirm: true; seconds?: number } = { confirm: true };
+    if (seconds !== undefined) body.seconds = seconds;
+    const out = await this.call<{ results?: unknown }>("POST", "/destinations/delay/dump-all", sourceId, body);
+    if (!Array.isArray(out?.results)) throw new ApiError("malformed", 200, "the dump answer carries no results");
+    return (out.results as Record<string, unknown>[]).map((r) => {
+      const outcome = r?.outcome === "dumped" || r?.outcome === "skipped" ? r.outcome : "failed";
+      const row: DumpAllRow = {
+        id: Number.isSafeInteger(r?.id) ? (r.id as number) : 0,
+        name: typeof r?.name === "string" ? r.name : "",
+        outcome,
+      };
+      if (typeof r?.message === "string" && r.message !== "") row.message = r.message;
+      if (typeof r?.dumpedSeconds === "number" && Number.isFinite(r.dumpedSeconds)) row.dumpedSeconds = r.dumpedSeconds;
+      return row;
+    });
   }
 
   /** Manual failover to a named source, e.g. "backup" or "slate". */

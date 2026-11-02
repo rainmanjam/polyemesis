@@ -13,7 +13,7 @@ its first tagged release.
 - **Broadcast delay: Dump (#11).** A delayed destination that is on the air can drop the newest
   part of its delay buffer, so what just happened never reaches that platform, and it stays on the
   air. Choose everything since the last dump or a number of seconds, from the card's delay panel,
-  a Stream Deck **Dump** key (one destination or every delayed one, hold to confirm),
+  a Stream Deck **Dump delay** key (one destination or every delayed one, hold to confirm),
   `POST /destinations/{id}/delay/dump`, `POST /destinations/delay/dump-all` (needs
   `{"confirm": true}`), or the MCP tools `dump_destination_delay` and `dump_all_delays`. The cut and
   the resume are at IDR keyframes and the timestamps run on unbroken, so the platform sees no
