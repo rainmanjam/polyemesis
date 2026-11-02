@@ -79,7 +79,51 @@ type Snapshot struct {
 	// families are omitted rather than published as zeros that would read as
 	// "nothing has failed".
 	Alerts *AlertDeliveries
+
+	// Playout is the public player's picture: viewers counted from requests,
+	// and the QoE the players beaconed. Nil when no playout manager is running,
+	// and then the families are omitted rather than published as zeros.
+	Playout *Playout
 }
+
+// Playout is the public origin's viewer and QoE numbers. Counters are since
+// the last analytics reset or process start; a reset reads as a counter reset.
+//
+// Labels are only ever a ladder rung's name or an error code from the closed
+// beacon enum -- never a session id, an address or anything a viewer typed.
+type Playout struct {
+	Viewers int
+
+	Beacons         int64
+	Untracked       int64
+	Startups        int64
+	StartupSeconds  float64
+	Rebuffers       int64
+	RebufferSeconds float64
+	// StartupBounds are the startup histogram's upper bounds in seconds, and
+	// StartupBuckets the CUMULATIVE count at or under each, then one more for
+	// +Inf. Empty omits the family.
+	StartupBounds  []float64
+	StartupBuckets []int64
+	// SessionsWithErrors is sessions that reported at least one error.
+	SessionsWithErrors int64
+	// Errors is keyed by beacon error code; ErrorCodes is the full enum, so
+	// every code has a series before its first occurrence.
+	Errors     map[string]int64
+	ErrorCodes []string
+	// Rejected is beacons refused, by reason ("invalid", "rate_limited").
+	Rejected map[string]int64
+
+	ActiveSessions int
+	ByVariant      map[string]int
+	// LatencySeconds is the median latency-to-live of active sessions; nil
+	// omits the sample.
+	LatencySeconds *float64
+}
+
+// beaconRejectReasons is every reason Playout.Rejected may carry, emitted in
+// full so a rule can rate() a reason before it first happens.
+var beaconRejectReasons = []string{"invalid", "rate_limited"}
 
 // AlertDeliveries is the alert-rule delivery outcome, summed over every
 // engine's notifier (alert rules are install-wide; see api.alertStats).
@@ -255,6 +299,7 @@ func Render(s Snapshot) string {
 	renderRecordings(&d, s.Recordings)
 	renderHost(&d, s.Host)
 	renderAlerts(&d, s.Alerts)
+	renderPlayout(&d, s.Playout)
 
 	return d.b.String()
 }
@@ -653,6 +698,69 @@ func renderAlerts(d *doc, a *AlertDeliveries) {
 		"Unix time of the newest alert-rule delivery that succeeded; absent until one has.")
 	if !a.LastSent.IsZero() {
 		d.sample("polyemesis_alert_last_success_timestamp_seconds", float64(a.LastSent.Unix()))
+	}
+}
+
+func renderPlayout(d *doc, p *Playout) {
+	if p == nil {
+		return
+	}
+	d.scalar("polyemesis_playout_viewers", "gauge",
+		"Public-player sessions inside the idle window, counted from media requests.", float64(p.Viewers))
+	d.scalar("polyemesis_playout_qoe_beacons_total", "counter",
+		"QoE beacons accepted from the public player.", float64(p.Beacons))
+	d.family("polyemesis_playout_qoe_beacons_rejected_total", "counter",
+		"QoE beacons refused, by reason: invalid (schema or bounds) or rate_limited.")
+	for _, r := range beaconRejectReasons {
+		d.sample("polyemesis_playout_qoe_beacons_rejected_total", float64(p.Rejected[r]), label{"reason", r})
+	}
+	d.scalar("polyemesis_playout_qoe_untracked_beacons_total", "counter",
+		"QoE beacons from sessions that arrived with the session table full; only their errors are counted.",
+		float64(p.Untracked))
+	d.scalar("polyemesis_playout_qoe_startups_total", "counter",
+		"Player sessions that reached the first frame.", float64(p.Startups))
+	d.scalar("polyemesis_playout_qoe_startup_seconds_total", "counter",
+		"Summed time from player start to first frame; divide by startups_total for the mean.", p.StartupSeconds)
+	if len(p.StartupBuckets) == len(p.StartupBounds)+1 {
+		// A classic cumulative histogram written as a counter family with an
+		// le label, which is all histogram_quantile needs:
+		//   histogram_quantile(0.9, rate(polyemesis_playout_qoe_startup_bucket_total[15m]))
+		d.family("polyemesis_playout_qoe_startup_bucket_total", "counter",
+			"Startups at or under each bound (le, seconds), cumulative; feed it to histogram_quantile.")
+		for i, b := range p.StartupBounds {
+			d.sample("polyemesis_playout_qoe_startup_bucket_total", float64(p.StartupBuckets[i]),
+				label{"le", formatValue(b)})
+		}
+		d.sample("polyemesis_playout_qoe_startup_bucket_total",
+			float64(p.StartupBuckets[len(p.StartupBounds)]), label{"le", "+Inf"})
+	}
+	d.scalar("polyemesis_playout_qoe_sessions_with_errors_total", "counter",
+		"Player sessions that reported at least one error, each counted once.", float64(p.SessionsWithErrors))
+	d.scalar("polyemesis_playout_qoe_rebuffers_total", "counter",
+		"Stalls after startup, summed over sessions.", float64(p.Rebuffers))
+	d.scalar("polyemesis_playout_qoe_rebuffer_seconds_total", "counter",
+		"Time spent stalled after startup, summed over sessions.", p.RebufferSeconds)
+	d.family("polyemesis_playout_qoe_errors_total", "counter",
+		"Player errors reported in beacons, by class.")
+	for _, c := range p.ErrorCodes {
+		d.sample("polyemesis_playout_qoe_errors_total", float64(p.Errors[c]), label{"code", c})
+	}
+	d.scalar("polyemesis_playout_qoe_sessions", "gauge",
+		"Player sessions that beaconed within the idle window.", float64(p.ActiveSessions))
+	d.family("polyemesis_playout_qoe_variant_sessions", "gauge",
+		"Active player sessions by the ladder rung they last reported.")
+	names := make([]string, 0, len(p.ByVariant))
+	for n := range p.ByVariant {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		d.sample("polyemesis_playout_qoe_variant_sessions", float64(p.ByVariant[n]), label{"variant", n})
+	}
+	d.family("polyemesis_playout_qoe_latency_seconds", "gauge",
+		"Median latency to the live edge across active sessions; absent when none reported one.")
+	if p.LatencySeconds != nil {
+		d.sample("polyemesis_playout_qoe_latency_seconds", *p.LatencySeconds)
 	}
 }
 

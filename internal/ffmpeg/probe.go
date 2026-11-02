@@ -62,6 +62,13 @@ type VideoStream struct {
 	FrameRate float64 `json:"frameRate"`
 	Bitrate   int     `json:"bitrate"`
 	PixFmt    string  `json:"pixFmt"`
+	// Profile and Level are ffprobe's: a profile NAME ("High", "Main 10") and
+	// the codec's own level number (H.264 level_idc, HEVC general_level_idc,
+	// AV1 seq_level_idx). The public player's master playlist derives its
+	// CODECS attribute from them; absent means unknown, and then it says
+	// nothing rather than guess.
+	Profile string `json:"profile,omitempty"`
+	Level   int    `json:"level,omitempty"`
 }
 
 // AudioStream describes one ingest audio track.
@@ -83,6 +90,8 @@ type ffprobeOutput struct {
 		Width         int               `json:"width"`
 		Height        int               `json:"height"`
 		PixFmt        string            `json:"pix_fmt"`
+		Profile       string            `json:"profile"`
+		Level         int               `json:"level"`
 		Channels      int               `json:"channels"`
 		ChannelLayout string            `json:"channel_layout"`
 		SampleRate    string            `json:"sample_rate"`
@@ -599,6 +608,8 @@ func ParseProbe(raw []byte) (*ProbeResult, error) {
 				Width:     s.Width,
 				Height:    s.Height,
 				PixFmt:    s.PixFmt,
+				Profile:   s.Profile,
+				Level:     s.Level,
 				FrameRate: parseRational(s.AvgFrameRate),
 				Bitrate:   atoi(s.BitRate),
 			}

@@ -1,7 +1,7 @@
 {
   "note": "The route coverage ledger for internal/api. Regenerated ONLY by `go test ./internal/api -run '^TestLedgerPreflight$' -update-coverage`, which refreshes the route list and the derived totals and NOTHING else -- it cannot suppress a missing counterpart, a failing positive control, or a raised ceiling. Read `excuses` to answer \"what is NOT covered, and why is that safe\". MinSecretLen is 8: the exact-literal scrub in internal/alerts refuses a shorter credential, which is a real permanent residual on the stderr path for very short secrets, covered only by the best-effort alerts.Redact pass. Every credential this system mints or accepts is longer (SRT refuses a passphrase under 10, publish tokens are 24), and the failure direction of the floor itself is over-masking, never disclosure.",
   "excusedCeiling": 60,
-  "counterpartlessExcusedCeiling": 32,
+  "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
   "nonGetDifferentialFloor": 20,
@@ -12,8 +12,8 @@
   "guardedFloor": 29,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 287,
-    "swept": 77,
+    "methodPatternPairs": 289,
+    "swept": 79,
     "excused": 60,
     "denied": 150,
     "nonTrieProbes": 12,
@@ -22,7 +22,7 @@
   },
   "partition": {
     "differential": 10,
-    "invariant": 61,
+    "invariant": 63,
     "inertSubsetOfInvariant": 6,
     "explainedVariance": 2,
     "unstable": 4
@@ -595,7 +595,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/jobs",
-      "coverage": "excused",
+      "coverage": "swept",
       "zeroSource": "unguarded"
     },
     {
@@ -643,7 +643,7 @@
     {
       "method": "GET",
       "pattern": "/api/v1/jobs/{id}",
-      "coverage": "excused",
+      "coverage": "swept",
       "zeroSource": "unguarded"
     },
     {
@@ -1010,6 +1010,18 @@
       "method": "POST",
       "pattern": "/api/v1/playout/analytics/reset",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "POST",
+      "pattern": "/api/v1/playout/beacon",
+      "coverage": "excused",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/playout/offline-clip",
+      "coverage": "excused",
       "zeroSource": "unguarded"
     },
     {
@@ -1918,6 +1930,16 @@
       "class": "invariant"
     },
     {
+      "path": "/api/v1/jobs",
+      "pattern": "GET /api/v1/jobs",
+      "class": "invariant"
+    },
+    {
+      "path": "/api/v1/jobs/1",
+      "pattern": "GET /api/v1/jobs/{id}",
+      "class": "invariant"
+    },
+    {
       "path": "/api/v1/jobs/overview",
       "pattern": "GET /api/v1/jobs/overview",
       "class": "invariant"
@@ -2454,26 +2476,6 @@
       "counterpart": "eventStream"
     },
     {
-      "route": "GET /api/v1/jobs",
-      "scope": "route",
-      "why": "503 without a job queue wired; the handler never reaches storage",
-      "want": {
-        "as": "read",
-        "status": 503
-      },
-      "counterpart": ""
-    },
-    {
-      "route": "GET /api/v1/jobs/{id}",
-      "scope": "route",
-      "why": "503 without a job queue wired; the handler never reaches storage",
-      "want": {
-        "as": "read",
-        "status": 503
-      },
-      "counterpart": ""
-    },
-    {
       "route": "GET /api/v1/library/recordings/{id}/media/{file}",
       "scope": "route",
       "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
@@ -2605,6 +2607,17 @@
         "status": 403
       },
       "counterpart": ""
+    },
+    {
+      "route": "GET /api/v1/playout/offline-clip",
+      "scope": "route",
+      "why": "the offline card's looping clip: an operator-chosen MP4 clip export, streamed. Gated by authorizePlayout like the poster and, like the poster, 404 rather than 401 when denied so a \u003cvideo\u003e tag never raises a password prompt. This fixture configures no clip, so an allowed request and a denied one are both 404 and the identity with anonymous is the claim. See TestPlayoutOfflineClipIsGatedAndAbsentWithoutAClip.",
+      "want": {
+        "as": "read",
+        "status": 404,
+        "anonMatchesRead": true
+      },
+      "counterpart": "playoutOfflineClip"
     },
     {
       "route": "GET /api/v1/playout/poster.jpg",
@@ -2816,6 +2829,17 @@
         "anonMatchesRead": true
       },
       "counterpart": ""
+    },
+    {
+      "route": "POST /api/v1/playout/beacon",
+      "scope": "route",
+      "why": "the public player's QoE beacon. Gated by authorizePlayout BEFORE the rate limit and the body, so a read token is refused exactly as a stranger is -- the 401 /playout/public gives -- and its answer carries nothing either way: 204 on success, an error string otherwise, never a cookie. The beacon holds no credential to leak; what it must not do is answer a stranger differently, which is the identity with anonymous asserted here. See TestPlayoutBeaconHonoursTheGate and TestPlayoutBeaconTreatsAReadTokenAsAnonymous.",
+      "want": {
+        "as": "read",
+        "status": 401,
+        "anonMatchesRead": true
+      },
+      "counterpart": "playoutBeaconGate"
     },
     {
       "route": "POST /api/v1/setup",

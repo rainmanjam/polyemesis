@@ -68,6 +68,7 @@ import type {
   PlayoutAdminView,
   PlayoutProtection,
   PlayoutPublicView,
+  BeaconV1,
   PlayoutUrls,
   PlaylistStatus,
   PostProdSettings,
@@ -1106,10 +1107,18 @@ export const api = {
     protection?: PlayoutProtection;
     title?: string;
     description?: string;
-  }) => put<{ protection: PlayoutProtection; title: string; description: string }>(
-    "/playout/publish",
-    body,
-  ),
+    offlineMessage?: string;
+    offlineClipJob?: number;
+    vodUrl?: string;
+  }) =>
+    put<{
+      protection: PlayoutProtection;
+      title: string;
+      description: string;
+      offlineMessage?: string;
+      offlineClipJob?: number;
+      vodUrl?: string;
+    }>("/playout/publish", body),
   /** Mints a new playback secret, which is the revocation mechanism: every
    *  link already handed out stops working. */
   rotatePlayoutToken: () =>
@@ -1132,6 +1141,29 @@ export const api = {
   /** Poster image URL. A plain <img> src, so the token rides in the query. */
   playoutPosterUrl: (token?: string) =>
     BASE + "/playout/poster.jpg" + tokenQuery(token),
+  /** The offline card's looping clip. A <video> src, so like the poster the
+   *  token rides in the query: the playback cookie is scoped to /playout/. */
+  playoutOfflineClipUrl: (path: string, token?: string) => path + tokenQuery(token),
+  /** One QoE beacon. Unauthenticated like playoutPublic; the token goes in a
+   *  header so it never lands in a URL, and `keepalive` lets the final
+   *  beacon outlive the page. Failures are swallowed: a report about playback
+   *  must never disturb playback. */
+  playoutBeacon: async (beacon: BeaconV1, token?: string): Promise<boolean> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["X-Playout-Token"] = token;
+    try {
+      const resp = await fetch(BASE + "/playout/beacon", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(beacon),
+        keepalive: true,
+        credentials: "omit",
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  },
   /** The HLS ladder. Relative, so it works under whatever host or proxy prefix
    *  the viewer reached the page through. */
   playoutMasterUrl: (token?: string) =>

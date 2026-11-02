@@ -153,6 +153,51 @@ polyemesis_failover_degraded == 1                           # a link is breaking
 polyemesis_failover_active{source!="primary"} == 1          # not broadcasting the primary
 ```
 
+### Public player QoE
+
+The [public player](API.md#qoe-beacons) beacons how playback went, and the
+scrape carries the aggregate. These families exist only while a playout
+manager is running. Counters restart at zero when the operator resets playout
+analytics, which Prometheus reads as a counter reset. The only labels are a
+ladder rung's name and an error code from a closed list, never anything that
+identifies a viewer.
+
+- `polyemesis_playout_viewers` is sessions inside the idle window, counted
+  from media requests (the same number the Playout page shows).
+- `polyemesis_playout_qoe_beacons_total`, and
+  `polyemesis_playout_qoe_beacons_rejected_total{reason}` with `invalid` or
+  `rate_limited`.
+- `polyemesis_playout_qoe_startups_total` and
+  `polyemesis_playout_qoe_startup_seconds_total`: divide for the mean time to
+  first frame.
+- `polyemesis_playout_qoe_startup_bucket_total{le}`: startups at or under each
+  bound (0.5, 1, 2, 3, 5, 10 s, +Inf), cumulative -- a classic histogram for
+  `histogram_quantile`.
+- `polyemesis_playout_qoe_sessions_with_errors_total`: sessions that reported
+  at least one error, each counted once.
+- `polyemesis_playout_qoe_rebuffers_total` and
+  `polyemesis_playout_qoe_rebuffer_seconds_total`: stalls after startup.
+- `polyemesis_playout_qoe_errors_total{code}`, one series per code
+  (`network`, `manifest`, `media`, `decode`, `codec_unsupported`, `other`),
+  present at 0 before the first.
+- `polyemesis_playout_qoe_sessions` and
+  `polyemesis_playout_qoe_variant_sessions{variant}`: players that reported
+  in the last two minutes, overall and by rung.
+- `polyemesis_playout_qoe_latency_seconds`: median distance behind the live
+  edge across those players. Absent, not 0, when none reported one.
+- `polyemesis_playout_qoe_untracked_beacons_total`: beacons from sessions that
+  arrived with the session table full.
+
+```promql
+rate(polyemesis_playout_qoe_startup_seconds_total[15m])
+  / rate(polyemesis_playout_qoe_startups_total[15m])         # mean time to first frame
+rate(polyemesis_playout_qoe_rebuffer_seconds_total[5m])
+  / clamp_min(polyemesis_playout_qoe_sessions, 1)            # share of time each viewer spends stalled
+increase(polyemesis_playout_qoe_errors_total{code="codec_unsupported"}[1h]) > 0
+histogram_quantile(0.9,
+  rate(polyemesis_playout_qoe_startup_bucket_total[15m]))    # p90 time to first frame
+```
+
 ## Queries to start from
 
 ```promql

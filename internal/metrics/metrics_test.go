@@ -59,6 +59,12 @@ func testSnapshot() Snapshot {
 			ProcCPUPercent: 12.5, ProcMemBytes: 512, NumCPU: 8,
 		},
 		Alerts: &AlertDeliveries{Sent: 3, Failed: 1, LastSent: time.Unix(1_790_000_000, 0)},
+		Playout: &Playout{
+			Viewers: 2, Beacons: 10, Startups: 2, StartupSeconds: 1.5,
+			Errors: map[string]int64{"media": 1}, ErrorCodes: []string{"network", "media"},
+			ActiveSessions: 2, ByVariant: map[string]int{"720p": 2},
+			StartupBounds: []float64{0.5, 1}, StartupBuckets: []int64{1, 2, 2}, SessionsWithErrors: 1,
+		},
 	}
 }
 
