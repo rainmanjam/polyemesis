@@ -132,3 +132,19 @@ func OpenCheap(t testing.TB, opts ...db.Option) *db.DB {
 	t.Helper()
 	return Open(t, append([]db.Option{db.WithPasswordCost(bcrypt.MinCost)}, opts...)...)
 }
+
+// OpenCheapAt is OpenAt with the bcrypt cost floored, for the fixtures that
+// need the store at a path of their own choosing (inside the DataDir they hand
+// the engine).
+//
+// It exists because those fixtures had been using OpenAt and paying the
+// production cost twice per test: once to hash the admin password and once
+// more when login compared against that hash. Under -race that is ~1.4s, and
+// internal/api had about 470 such tests -- over half of the package's
+// wall-clock against its CI deadline. The cost floor changes nothing a test
+// observes: what the production cost is, is asserted in
+// internal/db/password_cost_test.go against a store opened without it.
+func OpenCheapAt(t testing.TB, path string, opts ...db.Option) *db.DB {
+	t.Helper()
+	return OpenAt(t, path, append([]db.Option{db.WithPasswordCost(bcrypt.MinCost)}, opts...)...)
+}

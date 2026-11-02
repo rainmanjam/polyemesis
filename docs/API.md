@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the nineteen `GET`s among the twenty-one refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty `GET`s among the twenty-two refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,7 +133,7 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-one routes are refused outright**, for three different reasons. Masking
+**Twenty-two routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
 are `403` because of what they *do*. The last thirteen are `403` because of what
@@ -162,6 +162,7 @@ are `403` because of what they *do*. The last thirteen are `403` because of what
 | `GET /chat/messages` | the chat scrollback: what each viewer wrote, under their name |
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
+| `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
@@ -1469,7 +1470,7 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `GET` | `/oauth/{platform}/start`, `/callback` |
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
-| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users` |
+| `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
@@ -1537,6 +1538,56 @@ Its mod card is a web-app feature backed by internal endpoints. The trade is
 depth for breadth: shallower than Twitch's card, and it works across all four
 platforms at once.
 
+The card also carries `sanction`: the ban or timeout in force on that person,
+**as polyemesis recorded it**. Every successful `POST /chat/bans` — the
+operator's or automod's — is recorded, and a successful `DELETE /chat/bans`
+clears it. `account` narrows the read to one channel; without it any channel on
+the platform matches.
+
+```json
+"sanction": {"action": "timeout", "account": "acct", "until": "2026-11-01T18:10:00Z",
+             "since": "2026-11-01T18:00:00Z", "by": "operator", "reason": "spam"}
+```
+
+| `action` | meaning |
+|---|---|
+| `ban` | a permanent ban. No `until`. |
+| `timeout` | a timeout that ends at `until`. One whose `until` has passed reads as `none`. |
+| `none` | polyemesis has **recorded** nothing that is still in force. Not authoritative: see below. |
+
+`action` uses the same words as the `chat.moderation` event. A ban placed from
+the platform's own dashboard, or by another moderator, is **not** recorded, so
+`none` means "no ban placed through polyemesis", never "the platform has no
+ban". Do not use it to stop someone lifting a ban: the console keeps Lift ban
+available on `none`, and disables it only on a platform that cannot ban at
+all. The field is **absent** when the record could not be read (no database,
+or a failed read); treat absence as unknown.
+
+`/chat/flags` is automod's review list: the messages it found something in,
+newest first, one entry per message.
+
+```json
+{"flags": [{"message": {...}, "findings": [{"checker": "rules", "action": "flag",
+            "category": "spam", "reason": "matched rule \"links\"", "ruleId": 7}],
+            "acted": false, "at": "2026-11-01T18:00:03Z"}],
+ "truncated": false, "counts": {"twitch": 1},
+ "note": "Messages automod flagged since this server started, …"}
+```
+
+`counts` is how many messages are held per platform, over the whole list and
+whatever `limit` or `platform` says, so `limit=1` is enough for a client that
+only shows a count. `acted` is true only once an action automod performed on the
+message — hide, delete, time out, ban — **succeeded**; a finding that only flags,
+or an action the platform refused or the queue dropped, leaves it false.
+`message` is the chat message as `/chat/messages` returns it. `findings` is
+every opinion recorded about it, the fast checkers' and the model's together.
+A finding's `reason` is the operator's own words or a
+closed-set category reason — the model's own prose is never included. The list
+is kept **in memory only**: it holds the most recent 500, and it is **empty
+again after a restart**, because nothing is written to disk. An entry stays after its message is deleted or retracted: it is a record of
+automod's decisions, not a copy of the scrollback. `platform=` narrows it and
+`limit=` bounds it the same way as the other chat reads.
+
 `/chat/search?q=` finds a message again, matching on its text **or its author's
 name**, newest first — the one read here that is not chronological, because a
 result list answers "where did that comment go" and burying the likeliest answer
@@ -1564,7 +1615,8 @@ segment reliably.
 | `POST /chat/bans` | `platform`, `userId` (both required), `account`, `seconds`, `reason` |
 | `DELETE /chat/bans` | `platform`, `userId` (both required), `account` |
 | `PATCH /chat/settings` | `platform` (required), `account`, plus the rules in the JSON body |
-| `GET /chat/users` | `platform`, `authorId` (both required), `limit` |
+| `GET /chat/users` | `platform`, `authorId` (both required), `account`, `limit` |
+| `GET /chat/flags` | `platform`, `limit` |
 | `GET /chat/messages` | `platform`, `limit` |
 | `GET /chat/search` | `q`, `platform`, `limit` |
 

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
@@ -435,7 +437,9 @@ func enginelessServer(t *testing.T, rows func(*testing.T, *db.DB)) (*Server, htt
 	t.Helper()
 
 	dir := t.TempDir()
-	store, err := db.Open(filepath.Join(dir, "polyemesis.db"))
+	// The bcrypt floor is the only option: the path is still one nothing has
+	// written, which is what this fixture is about. See dbtest.OpenCheapAt.
+	store, err := db.Open(filepath.Join(dir, "polyemesis.db"), db.WithPasswordCost(bcrypt.MinCost))
 	if err != nil {
 		t.Fatalf("db.Open on a path nothing has ever written: %v", err)
 	}

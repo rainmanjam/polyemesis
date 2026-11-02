@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/StatusPill";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +16,8 @@ import { api } from "@/lib/api";
 import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState } from "@/lib/readState";
 import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { chatActionSupport } from "@/lib/chatModeration";
-import { clockTime } from "@/lib/format";
+import { chatSanctionStatus } from "@/lib/status";
+import { clockTime, dayAwareTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
 
@@ -87,11 +89,11 @@ export function ChatUserCard({
     if (!authorId) return;
     setLoading(true);
     api
-      .chatUser({ platform, authorId, limit: 200 })
+      .chatUser({ platform, account, authorId, limit: 200 })
       .then((c) => setRead(okRead(c)))
       .catch(() => setRead(failedRead()))
       .finally(() => setLoading(false));
-  }, [platform, authorId]);
+  }, [platform, account, authorId]);
 
   useEffect(() => {
     if (open) {
@@ -115,6 +117,27 @@ export function ChatUserCard({
   // missing. See lib/chatModeration.ts.
   const ban = chatActionSupport(platform, "ban", t);
   const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
+
+  // UX Council A48: what is in force on this person, AS POLYEMESIS RECORDED
+  // IT. The record is not authoritative: a ban placed on the platform's own
+  // dashboard, or by another moderator, never reaches it. So "none" reads "No
+  // ban placed through polyemesis" and Lift ban stays pressable -- the owner's
+  // decision. The button is disabled only where it is certain there is nothing
+  // to lift: the platform cannot ban at all, which `ban.reason` already says.
+  const sanction = card?.sanction;
+  const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
+  const sanctionDetail =
+    sanction?.action === "timeout" && sanction.until
+      ? t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel })
+      : sanction?.action === "ban"
+        ? t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel })
+        : card && !sanction
+          ? // "so Lift ban stays available" is false where the platform
+            // cannot ban, so that half is said only where it is true.
+            ban.ok
+            ? t("chatCard.sanctionUnknownDetail")
+            : t("chatCard.sanctionUnknownNoBan")
+          : "";
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {
     setBusy(what);
@@ -275,6 +298,14 @@ export function ChatUserCard({
             {card.truncated && <strong>{t("chatpage.showingRecentOnly")}</strong>}
             {card.retentionNote}
           </p>
+        )}
+
+        {/* ---- what is in force ---- */}
+        {card && (
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="chat-sanction">
+            <StatusPill reading={chatSanctionStatus(sanction)} />
+            {sanctionDetail && <span className="text-sm text-muted-foreground">{sanctionDetail}</span>}
+          </div>
         )}
 
         {/* ---- what can be done ---- */}

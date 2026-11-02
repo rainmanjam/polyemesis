@@ -67,7 +67,7 @@ func managerServer(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *b
 	t.Helper()
 
 	dir := t.TempDir()
-	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
+	store := dbtest.OpenCheapAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
@@ -261,7 +261,7 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 	t.Helper()
 
 	dir := t.TempDir()
-	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
+	store := dbtest.OpenCheapAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}

@@ -782,6 +782,9 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/chat/messages": denied(),
 	"GET /api/v1/chat/search":   denied(),
 	"GET /api/v1/chat/users":    denied(),
+	// UX Council A48: the flagged list carries the flagged message's text,
+	// which is the same content as the scrollback.
+	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both
@@ -1248,6 +1251,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"overlayDisplayStream":                  proveOverlayDisplayStream,
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
+	"chatFlags":                             proveChatFlags,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

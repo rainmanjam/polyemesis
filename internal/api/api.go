@@ -1529,6 +1529,9 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// The moderator's user card: what one person has said. Read from
 			// our own scrollback, because no platform publishes this.
 			r.Get("/chat/users", s.handleChatUser)
+			// Automod's review list: what it flagged, for the Chat page's
+			// Flagged chip (UX Council A48). Content, so read-scope denied.
+			r.Get("/chat/flags", s.handleChatFlags)
 			r.Delete("/chat/messages", s.handleChatDeleteMessage)
 			// Hiding is POST rather than DELETE because it is reversible, and
 			// separate from delete because the two are different decisions:
@@ -2162,6 +2165,9 @@ var readScopeDeniedPatterns = map[string]bool{
 	"/api/v1/chat/messages": true,
 	"/api/v1/chat/search":   true,
 	"/api/v1/chat/users":    true,
+	// UX Council A48: automod's review list carries each flagged message's
+	// text, which is the scrollback again under another name.
+	"/api/v1/chat/flags": true,
 }
 
 // obsScopePatterns is everything an "obs" token may reach: one route, keyed by

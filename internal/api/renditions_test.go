@@ -82,7 +82,7 @@ func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.H
 	t.Helper()
 
 	dir := t.TempDir()
-	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
+	store := dbtest.OpenCheapAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}

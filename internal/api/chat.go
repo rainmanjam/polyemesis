@@ -515,6 +515,53 @@ type chatUserCard struct {
 	// RetentionNote explains, in words, why this history is as deep as it is.
 	// Without it the card silently understates a talkative person as quiet.
 	RetentionNote string `json:"retentionNote"`
+
+	// Sanction is the ban or timeout in force on this person, as polyemesis
+	// recorded it (UX Council A48). ABSENT when it could not be read -- no
+	// store, or a failed read -- which a client must treat as unknown, never
+	// as "none": the card disables Lift ban on an explicit "none" only.
+	Sanction *chatSanction `json:"sanction,omitempty"`
+}
+
+// chatSanction is a viewer's current standing. Action is chat.ModBan or
+// chat.ModTimeout -- the moderation event's own values -- or "none".
+type chatSanction struct {
+	Action string `json:"action"`
+	// Account is the channel the sanction was placed in.
+	Account string `json:"account,omitempty"`
+	// Until is a timeout's end; absent on a permanent ban.
+	Until *time.Time `json:"until,omitempty"`
+	// Since is when it was placed.
+	Since *time.Time `json:"since,omitempty"`
+	// By is "operator" or "automod".
+	By     string `json:"by,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// sanctionNone is the explicit "nothing is in force" answer.
+const sanctionNone = "none"
+
+// sanctionFor reads a viewer's standing, or nil when it cannot be known.
+func (s *Server) sanctionFor(platform db.Platform, account, authorID string) *chatSanction {
+	if s.store == nil {
+		return nil
+	}
+	got, ok, err := s.store.ActiveChatSanction(platform, account, authorID, time.Now())
+	if err != nil {
+		s.log.Debug("chat sanction unavailable", "err", err)
+		return nil
+	}
+	if !ok {
+		return &chatSanction{Action: sanctionNone}
+	}
+	out := &chatSanction{Action: got.Action, Account: got.Account, By: got.By, Reason: got.Reason}
+	if !got.Until.IsZero() {
+		until := got.Until.UTC()
+		out.Until = &until
+	}
+	since := got.At.UTC()
+	out.Since = &since
+	return out
 }
 
 // handleChatUser answers with one person's recent messages and their roles.
@@ -541,6 +588,9 @@ func (s *Server) handleChatUser(w http.ResponseWriter, r *http.Request) {
 	out := chatUserCard{
 		Platform: platform,
 		AuthorID: authorID,
+		// Read before the history, and independently of it: an unreadable
+		// scrollback must not also cost the card its sanction state.
+		Sanction: s.sanctionFor(platform, strings.TrimSpace(q.Get("account")), authorID),
 		Messages: []chat.Message{},
 		RetentionNote: "Read from this server's own scrollback, not from " + string(platform) +
 			". No platform offers an API for a viewer's chat history, so this is as far back as " +
@@ -572,6 +622,42 @@ func (s *Server) handleChatUser(w http.ResponseWriter, r *http.Request) {
 		out.Moderator = last.Moderator
 		out.Subscriber = last.Subscriber
 		out.Broadcaster = last.Broadcaster
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// chatFlagsResult is automod's review list.
+type chatFlagsResult struct {
+	Flags []chat.FlaggedMessage `json:"flags"`
+	// Truncated says the limit was reached, so older flags may be held.
+	Truncated bool `json:"truncated"`
+	// Counts is how many messages are held per platform, over the WHOLE list
+	// and whatever the limit, so a client can show an exact count -- narrowed
+	// to the platforms it is showing -- with limit=1.
+	Counts map[db.Platform]int `json:"counts"`
+	// Note says what the list covers, so an empty one is not read as
+	// "automod has never flagged anything".
+	Note string `json:"note"`
+}
+
+// chatFlagsNote is the honesty line for /chat/flags.
+const chatFlagsNote = "Messages automod flagged since this server started, newest first. " +
+	"The list is kept in memory and holds the most recent 500."
+
+// handleChatFlags lists the messages automod flagged (UX Council A48).
+//
+// Automod's findings used to go to the log and nowhere else, so the Chat page
+// could not show a moderator what it had found. This reads the Hub's bounded
+// review list. It carries each flagged message's text, which is why it is in
+// readScopeDeniedPatterns with the rest of the chat reads.
+func (s *Server) handleChatFlags(w http.ResponseWriter, r *http.Request) {
+	limit := chatLimitParam(r)
+	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
+	out := chatFlagsResult{Flags: []chat.FlaggedMessage{}, Counts: map[db.Platform]int{}, Note: chatFlagsNote}
+	if s.chat != nil {
+		out.Counts = s.chat.FlagCounts()
+		out.Flags = s.chat.Flagged(platform, limit)
+		out.Truncated = len(out.Flags) >= limit
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -598,6 +598,18 @@ const KickMaxTimeout = 10080 * time.Minute
 // KICK COUNTS IN MINUTES. YouTube and Twitch count in seconds. This is the
 // conversion that makes a unified "600" mean ten minutes everywhere instead of
 // seven days here, and it is the entire reason the interface takes a Duration.
+// EffectiveTimeout is how long Kick actually enforces a timeout of d: Kick
+// counts whole minutes, and polyemesis rounds UP so a short timeout never
+// becomes zero, which Kick reads as permanent. See TimeoutRounder.
+func (k *KickAdapter) EffectiveTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	return (d + time.Minute - 1) / time.Minute * time.Minute
+}
+
+var _ TimeoutRounder = (*KickAdapter)(nil)
+
 func (k *KickAdapter) Ban(ctx context.Context, userID string, d time.Duration, reason string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -620,8 +632,9 @@ func (k *KickAdapter) Ban(ctx context.Context, userID string, d time.Duration, r
 				"ask for a permanent ban explicitly if that is what you mean", d)
 		}
 		// Rounded UP: a 30-second timeout must not truncate to zero minutes,
-		// because zero here means PERMANENT.
-		mins := int64((d + time.Minute - 1) / time.Minute)
+		// because zero here means PERMANENT. Through EffectiveTimeout so the
+		// Hub's sanction record and this request cannot disagree.
+		mins := int64(k.EffectiveTimeout(d) / time.Minute)
 		body["duration"] = mins
 	}
 	if reason = strings.TrimSpace(reason); reason != "" {
