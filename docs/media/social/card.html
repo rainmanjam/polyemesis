@@ -12,14 +12,21 @@
     --muted-foreground: #8b94a7;
     --border: #232a38;
     --border-strong: #303a4d;
-    --live: #3ecf6d;
+    --ok: #3ecf6d;
     --warn: #e8a33d;
-    --down: #e5484d;
-    --armed: #45b5d0;
+    --down: #f76e52;
+    --idle: #8b94a7;
+    --tally: #dd040c;
+    --tally-foreground: #fefbfa;
+    --primary-bright: #78a6e8;
     --meter-low: #3ecf6d;
     --meter-mid: #cfd23e;
-    --meter-high: #e8a33d;
-    --meter-peak: #e5484d;
+    --meter-peak: #f76e52;
+    /* Track chips are identity colours, never status: the site's --color-meter
+       (--cat-cyan), --color-game and --color-cohost. */
+    --track-mic: #45b5d0;
+    --track-music: #9b7fd4;
+    --track-cohost: #fd8dfb;
     --fg: #e6e9ef;
     --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   }
@@ -78,7 +85,7 @@
     letter-spacing: -0.028em;
     margin-bottom: 22px;
   }
-  h1 em { font-style: normal; color: var(--live); }
+  h1 em { font-style: normal; color: var(--primary-bright); }
 
   .sub {
     font-size: 21px; line-height: 1.45; color: var(--muted-foreground);
@@ -91,7 +98,7 @@
     font-family: var(--font-mono); font-size: 14px;
     color: var(--muted-foreground);
   }
-  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--live); }
+  .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--ok); }
 
   /* The right side is the argument: one source, three destinations, each
      taking a different set of the same tracks. */
@@ -109,10 +116,14 @@
     padding-bottom: 14px; margin-bottom: 14px;
     border-bottom: 1px solid var(--border);
   }
+  /* ON AIR is a tally lamp: a solid fill under a white-hot label, never red
+     ink (docs/DESIGN-SYSTEM.md). */
   .live-pill {
     display: inline-flex; align-items: center; gap: 6px;
-    color: var(--live);
+    background: var(--tally); color: var(--tally-foreground);
+    padding: 2px 8px; border-radius: 3px; font-weight: 600;
   }
+  .live-pill .dot { background: var(--tally-foreground); }
 
   .row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
   .row + .row { margin-top: 16px; }
@@ -127,9 +138,9 @@
   }
   .meter i {
     display: block; height: 100%;
+    /* Discrete zones, hard stops: green, yellow, red. No fade, no amber. */
     background: linear-gradient(90deg,
-      var(--meter-low) 0%, var(--meter-low) 62%,
-      var(--meter-mid) 82%, var(--meter-high) 94%, var(--meter-peak) 100%);
+      var(--meter-low) 0% 62%, var(--meter-mid) 62% 94%, var(--meter-peak) 94% 100%);
   }
   .dest { font-size: 15px; font-weight: 550; }
   .tracks { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); margin-top: 3px; }
@@ -142,9 +153,9 @@
     width: 26px; height: 8px; border-radius: 2px;
     background: var(--muted);
   }
-  .chip.on-mic   { background: var(--live); }
-  .chip.on-music { background: var(--armed); }
-  .chip.on-com   { background: var(--meter-mid); }
+  .chip.on-mic   { background: var(--track-mic); }
+  .chip.on-music { background: var(--track-music); }
+  .chip.on-com   { background: var(--track-cohost); }
 
   .legend {
     margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
@@ -214,9 +225,9 @@
     </div>
 
     <div class="legend">
-      <span><i class="swatch" style="background:var(--live)"></i> mic</span>
-      <span><i class="swatch" style="background:var(--armed)"></i> music</span>
-      <span><i class="swatch" style="background:var(--meter-mid)"></i> co-host</span>
+      <span><i class="swatch" style="background:var(--track-mic)"></i> mic</span>
+      <span><i class="swatch" style="background:var(--track-music)"></i> music</span>
+      <span><i class="swatch" style="background:var(--track-cohost)"></i> co-host</span>
     </div>
   </div>
 </div>
@@ -226,7 +237,7 @@
      re-rendering the card produces the same image — a social preview that
      changes on every build is one nobody can diff. */
   const heights = [10, 18, 26, 30, 22, 14, 20, 28];
-  const colours = ["--meter-low","--meter-low","--meter-mid","--meter-high",
+  const colours = ["--meter-low","--meter-low","--meter-mid","--meter-peak",
                    "--meter-mid","--meter-low","--meter-low","--meter-mid"];
   const el = document.getElementById("bars");
   heights.forEach((h, i) => {

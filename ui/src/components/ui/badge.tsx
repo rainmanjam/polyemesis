@@ -12,10 +12,13 @@ const badgeVariants = cva(
         // Signal variants. These are the only saturated colours in the kit.
         live: "border-ok/40 bg-ok-dim text-ok",
         warn: "border-warn/40 bg-warn-dim text-warn",
-        // No dim fill under the red: --down on --down-dim measures 3.88:1,
-        // below the 4.5:1 a 10px label needs (B2). On the card it is 4.55:1,
-        // and the border keeps it reading as a badge.
+        // No dim fill, and the border keeps it reading as a badge. The fill was
+        // dropped when the old red measured 3.88:1 on --down-dim (B2); the
+        // 2026-11 coral reads 5.19:1 there and 6.18:1 on --card, so either is
+        // AA now. Restoring the fill is a visual decision for the status PR.
         down: "border-down/60 text-down",
+        // Neutral since 2026-11 (--idle was cyan --armed); the hollow ring in
+        // StatusDot, not a hue, is what tells it from stopped.
         armed: "border-idle/40 bg-idle-dim text-idle",
       },
     },

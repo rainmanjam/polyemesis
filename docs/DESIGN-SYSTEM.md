@@ -54,7 +54,7 @@ duration was written inline at the point of use, which is how a scale drifts.
 
 ### Colour
 
-40 tokens carrying a literal colour, each mapped to a Tailwind name in the
+42 tokens carrying a literal colour, each mapped to a Tailwind name in the
 `@theme inline` block below. Count them with:
 
 ```sh
@@ -79,6 +79,7 @@ on-air lamp has to go, and idle spent a cyan beside the interaction blue:
 | `--down`, `--down-dim` | `oklch(70% 0.175 33)`, `oklch(28% 0.06 33)` | Failed, clipping. Coral, lighter than the old red, so it is never read as the tally |
 | `--idle`, `--idle-dim` | `--muted-foreground`'s and `--muted`'s values | Configured but idle. Was `--armed` (cyan); neutral now, told apart by its hollow ring |
 | `--tally`, `--tally-foreground`, `--tally-dim` | `oklch(56.5% 0.23 28.5)`, `oklch(99% 0.004 28)`, `oklch(25% 0.07 28.5)` | ON AIR and REC. New |
+| `--cat-cyan`, `--cat-cyan-dim` | `oklch(72.1% 0.1065 216.8)`, `oklch(30.2% 0.0421 220.8)` | Identity, never status. New, carrying the old `--armed` cyan |
 | `--destructive`, `--destructive-foreground` | `= --down`, dark ink `oklch(15.9% 0.0091 264.3)` | White on the coral is 2.87:1; the dark ink is 6.76:1 |
 | `--meter-peak` | `= --down` | The meter's red zone and CLIP |
 | `--meter-high` | removed | Amber left the meter |
@@ -103,9 +104,25 @@ The rules that matter:
   `--primary-bright`, because `--primary` as text measures 4.49:1 on `--card`.
 - **Amber means warn only.** It is not a meter stop and not a crosspoint. The
   meter is green, yellow and red; the website's lit crosspoint reads `--primary`.
-- **Gradients appear only in the logo mark.**
+- **Identity colours are never status.** `--cat-cyan` tells one *thing* from
+  another: the Facebook chat accent, a hashed chat-author colour, the moderator
+  shield, caption speaker labels, the website's mic track chip. It never goes on
+  a status dot, pill or badge. It is held at 4.5:1 as text on every surface and
+  at least ΔEOK 0.10 from `--ok`, `--warn`, `--down` and `--tally`. The
+  Facebook filter chip differs on and off by text colour and border as well as
+  fill.
+- **Gradients appear only in the logo mark.** A colour fade anywhere else is
+  decoration. The website's hero sweep (a blue light crossing the grid) was
+  removed for this; the grid itself is 1px lines drawn with gradient syntax, a
+  pattern rather than a fade.
+- **Translucent text is measured, not assumed.** A `text-*/NN` opacity modifier
+  is a new colour; `palette-contrast.test.ts` composites each one over every
+  surface and fails it below 4.5:1. The same goes for a translucent hover fill,
+  which is why the primary button hovers to solid `--primary-bright` rather than
+  `bg-primary/85` (3.84:1).
 
-Nothing decorative may use `--ok`, `--warn`, `--down`, `--tally` or `--idle`.
+Nothing decorative may use `--ok`, `--warn`, `--down`, `--tally`, `--idle` or
+`--cat-cyan`.
 The interactive accent is one desaturated slate blue, and it is the only colour
 a button may be (apart from the start and stop actions, which carry their
 signal).
@@ -113,10 +130,16 @@ signal).
 `ui/src/lib/palette-contrast.test.ts` holds all of this to its numbers. It
 computes WCAG ratios from the token values (oklch to linear sRGB, clamped as a
 browser clamps) and fails below threshold: every text token on every surface at
-4.5:1, every pill's ink on its fill, button ink on its fill, the tally label on
-the lamp, and the focus ring, tally lamp and meter segments at 3:1. It also
-fails if the tally and failed colours drift within ΔEOK 0.1 of each other, if
-any source paints text with `--primary`, or if any uses `--tally` as ink.
+4.5:1, every pill's ink on its fill, ink on the inert fills, every Button
+variant at rest and on hover (read from `button.tsx`), the tally label on the
+lamp, and the focus ring, tally lamp and meter segments at 3:1. It asserts the
+decisions directly where a threshold would let an old value back in: the ring
+is `--primary-bright`, idle is low-chroma, `--destructive` and `--meter-peak`
+equal `--down`, `--down-dim` shares its hue, the site crosspoint reads
+`--primary`. It fails if the tally drifts within ΔEOK 0.1 of the failed,
+destructive or meter red, if any source paints text with `--primary`, uses
+`--tally` as ink, or dims a text token below AA with an opacity modifier.
+Reverting any one of the 2026-11 token changes fails it.
 
 One known gap it does not assert: a text field is drawn as `bg-background`
 with a `border-input` outline on a `--card`, and neither edge reaches the 3:1
@@ -344,7 +367,7 @@ the value rather than left to a reader to infer:
 
 | Site token | Why it is not shared |
 |---|---|
-| `--color-meter`, `--color-cohost`, `--color-game` | Track colours for legend chips and loudness bars. A track is a label, not a state, so none may read a signal token: `--color-meter` used to borrow `--armed` and would have gone grey when idle went neutral, and `--color-cohost` sat 9.5° from the meter's yellow. Co-host is a magenta chosen for distance from every signal, meter and track colour (nearest: `--color-game`, ΔEOK 0.18) |
+| `--color-cohost`, `--color-game` | Track colours for legend chips. A track is a label, not a state, so none may read a signal token (`--color-meter`, the mic chip, now reads the shared identity token `--cat-cyan`; it used to borrow `--armed`, which went grey). `--color-cohost` sat 9.5° from the meter's yellow. Co-host is a magenta chosen for distance from every signal, meter and track colour (nearest: `--color-game`, ΔEOK 0.18) |
 | `--color-primary-bright`, `--font-display`, `--motion-enter`, `--ease-breath` | Site-only; the console has nothing for them to do |
 
 Two site tokens read an app token of a **different name**, because the names

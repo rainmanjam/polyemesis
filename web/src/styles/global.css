@@ -163,10 +163,12 @@
      at 4.22 before now clears 4.5 too. */
   --color-down: var(--down);
   /* TRACK colours: legend chips and the loudness bars, one per track kind.
-     SITE-ONLY LITERALS, and that is the point: a track colour is a label, not
-     a state, so none of them may read a signal token. --color-meter used to be
-     var(--armed); the app's idle state went neutral, and a chip that borrowed
-     it would have gone grey with it. It keeps the cyan as its own literal.
+     A track colour is a label, not a state, so none of them may read a signal
+     token. --color-meter used to be var(--armed); the app's idle state went
+     neutral, and a chip that borrowed it would have gone grey with it. It
+     reads the shared IDENTITY token --cat-cyan instead (the same cyan), which
+     exists for exactly this: telling one thing from another, never status.
+     Co-host and game stay site-only literals: the console has no use for them.
 
      --color-cohost was oklch(84.7% 0.1501 101.1), 9.5° from the meter's yellow
      (ΔEOK 0.031: the same colour at chip size). It is a magenta now, chosen by
@@ -175,7 +177,7 @@
      bright, 0.22 to --color-down, 0.34 to the meter yellow. 8.8:1 against a
      card. Violet rather than a second blue for `game`, because --color-meter is
      already cyan and two blues at 20px wide are one colour. */
-  --color-meter: oklch(72.1% 0.1065 216.8);
+  --color-meter: var(--cat-cyan);
   --color-cohost: oklch(80.0% 0.1900 328.0);
   --color-game: oklch(65.7% 0.1262 298.0);
 
@@ -265,35 +267,11 @@
     overflow: hidden;
   }
 
-  .signal-grid::after {
-    content: "";
-    position: absolute;
-    inset: 0 -60%;
-    pointer-events: none;
-    /* Primary blue, not amber. Amber means warn and nothing else; spending
-       it on decoration would cost it that meaning. */
-    background: linear-gradient(
-      100deg,
-      transparent 0%,
-      rgb(91 127 199 / 0.05) 42%,
-      rgb(120 166 232 / 0.08) 50%,
-      rgb(91 127 199 / 0.05) 58%,
-      transparent 100%
-    );
-    will-change: transform;
-    animation: bus-sweep 19s cubic-bezier(0.6, 0, 0.4, 1) infinite;
-  }
-
-  /* 19s, and deliberately not linear. A constant-speed sweep reads as a loading
-     shimmer — the exact thing this must not look like. Easing in and out makes
-     it a slow pass that most readers will never consciously notice, which is
-     the point of a background. */
-  @keyframes bus-sweep {
-    0%        { transform: translate3d(-55%, 0, 0); }
-    /* Sits off-screen for a third of the cycle. Without the hold it sweeps
-       continuously and becomes a pattern the eye starts tracking. */
-    70%, 100% { transform: translate3d(55%, 0, 0); }
-  }
+  /* No sweep. A blue light used to pass across this grid every 19 seconds: a
+     linear-gradient on ::after. Gradients appear only in the logo mark
+     (docs/DESIGN-SYSTEM.md), and blue is for interaction, so a decorative blue
+     fade is both rules broken at once. The grid itself is 1px lines drawn
+     with gradient syntax, a pattern rather than a colour fade, and stays. */
 
   .card {
     border: 1px solid var(--color-line);

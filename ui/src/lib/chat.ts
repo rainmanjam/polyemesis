@@ -71,9 +71,10 @@ const ACCENT: Record<
   facebook: {
     label: "Facebook",
     icon: FacebookGlyph,
-    rule: "border-l-idle",
-    text: "text-idle",
-    chipOn: "border-idle/40 bg-idle-dim text-idle",
+    // An identity colour, not a state: --cat-cyan, never --idle (grey).
+    rule: "border-l-cat-cyan",
+    text: "text-cat-cyan",
+    chipOn: "border-cat-cyan/40 bg-cat-cyan-dim text-cat-cyan",
   },
   /* TROVO HAS NO CHAT ADAPTER, and never will: Trovo shut down on 30 June
      2026. The entry exists only because ChatPlatform is an alias of Platform,

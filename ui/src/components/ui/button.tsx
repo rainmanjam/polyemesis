@@ -21,7 +21,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/85",
+        // Hover is the solid --primary-bright step (7.80:1 under the dark ink).
+        // It was bg-primary/85, which composites to 3.84:1 on --background.
+        default: "bg-primary text-primary-foreground hover:bg-primary-bright",
         // "live" and "down" are signal colours: only ever on actions that
         // start or stop a stream.
         live: "bg-ok text-background hover:bg-ok/85",

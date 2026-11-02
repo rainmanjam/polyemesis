@@ -258,6 +258,16 @@
   --tally-foreground: oklch(99.0% 0.0040 28.0);
   --tally-dim: oklch(25.0% 0.0700 28.5);
 
+  /* --- IDENTITY, NEVER STATUS. A category colour tells one THING from another
+     (a platform, a chat author, a speaker) and says nothing about health. It
+     keeps the cyan --armed used to have, because these were the uses that were
+     identity rather than state: the Facebook chat accent, a hashed author
+     colour, the moderator shield, caption speaker labels. Never on a status
+     dot, pill or badge -- palette-contrast.test.ts holds it at 4.5:1 as text on
+     --card and at least ΔEOK 0.10 from every signal colour. --- */
+  --cat-cyan: oklch(72.1% 0.1065 216.8);
+  --cat-cyan-dim: oklch(30.2% 0.0421 220.8);
+
   /* --- broadcast meter stops: green, yellow, red. Discrete zones; amber is
      not a meter colour, it means warn. --- */
   --meter-low: oklch(75.6% 0.1840 149.9);
@@ -405,6 +415,8 @@
   --color-tally: var(--tally);
   --color-tally-foreground: var(--tally-foreground);
   --color-tally-dim: var(--tally-dim);
+  --color-cat-cyan: var(--cat-cyan);
+  --color-cat-cyan-dim: var(--cat-cyan-dim);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
 

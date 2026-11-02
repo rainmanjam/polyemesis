@@ -62,7 +62,7 @@ import type {
  *  name so one person keeps one colour for the whole broadcast. */
 const NAME_TONES = [
   "text-primary-bright",
-  "text-idle",
+  "text-cat-cyan",
   "text-ok",
   "text-warn",
   "text-secondary-foreground",
@@ -209,7 +209,7 @@ function MessageRow({
       )}
 
       {m.author.moderator && (
-        <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-idle" aria-label={t("chatpage.moderator")} />
+        <Shield className="mr-0.5 inline h-3 w-3 align-text-bottom text-cat-cyan" aria-label={t("chatpage.moderator")} />
       )}
 
       {/* The name is the way in to moderation, which is where every chat tool

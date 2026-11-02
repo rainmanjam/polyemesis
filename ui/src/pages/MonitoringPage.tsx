@@ -1066,7 +1066,7 @@ export function MonitoringPage() {
                     <span className="tnum shrink-0 text-muted-foreground">
                       {clockTime(g.line.time)}
                     </span>
-                    <span className="shrink-0 text-primary-bright/70">{g.line.process}</span>
+                    <span className="shrink-0 text-muted-foreground">{g.line.process}</span>
                     {g.count > 1 && (
                       <span
                         className="shrink-0 rounded bg-muted px-1 tnum text-muted-foreground"
@@ -1098,7 +1098,7 @@ export function MonitoringPage() {
                       <span className="tnum shrink-0 text-muted-foreground">
                         {clockTime(l.time)}
                       </span>
-                      <span className="shrink-0 text-primary-bright/70">{l.process}</span>
+                      <span className="shrink-0 text-muted-foreground">{l.process}</span>
                       <span className={cn("break-all", LOG_LEVEL_CLASS[l.level] ?? "")}>
                         {l.text}
                       </span>
