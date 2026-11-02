@@ -1,9 +1,12 @@
 package playout
 
 import (
+	"context"
 	"net"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -101,21 +104,75 @@ func (m *Manager) Handler(prefix string) http.Handler {
 		}
 
 		w.Header().Set("Content-Type", ctype)
-		if manifestExts[ext] {
-			// The playlist is rewritten every segment; a cached one freezes the
-			// stream at whatever window the viewer first fetched.
-			w.Header().Set("Cache-Control", "no-store")
-		} else {
-			// Segments are immutable while they exist, but their names restart
-			// at zero when a muxer does, so a long cache would serve one run's
-			// bytes under the next run's URL. One segment of caching absorbs a
-			// player's retry burst and expires well before a restart matters.
-			w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(maxSegmentAge(s)))
-		}
+		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), SharedCacheable(r.Context())))
+		m.setETag(w, rel)
 
 		m.observe(r, rel, ext)
 		stripped.ServeHTTP(w, r)
 	})
+}
+
+// sharedCacheKey carries the origin's access decision down from the API's
+// gate, which is the only layer that knows it.
+type sharedCacheKey struct{}
+
+// WithSharedCache marks a request whose response may be stored by a shared
+// cache (a CDN): the stream is published with no token, so every viewer gets
+// the same bytes. Absent means no -- the direction that fails closed: a
+// caller that forgets to set it gets private responses, never a gated
+// segment in a CDN.
+func WithSharedCache(ctx context.Context, shared bool) context.Context {
+	return context.WithValue(ctx, sharedCacheKey{}, shared)
+}
+
+// SharedCacheable reports what WithSharedCache put on ctx.
+func SharedCacheable(ctx context.Context) bool {
+	v, _ := ctx.Value(sharedCacheKey{}).(bool)
+	return v
+}
+
+// immutableAge is a year, the conventional ceiling for an immutable asset.
+const immutableAge = 365 * 24 * 3600
+
+// cacheControl is the origin's whole caching policy, in one place.
+//
+//   - Playlists change every segment. An open stream's playlist may be held
+//     for one second, which collapses a CDN's viewers onto one origin fetch per
+//     second per POP; a gated stream's is never stored.
+//   - HLS .ts segments are numbered from the wall clock (args.go), so a name is
+//     never reused and the bytes behind it never change: immutable.
+//   - DASH chunks, init segments and captions still restart their names when
+//     a muxer does, so they keep the one-segment cache they always had.
+//
+// shared=false (a token, a session, or no decision at all) makes every
+// cacheable answer private: a browser may keep it, a CDN must not.
+func cacheControl(ext string, segmentAge int, shared bool) string {
+	scope := "private"
+	if shared {
+		scope = "public"
+	}
+	switch {
+	case manifestExts[ext]:
+		if shared {
+			return "public, max-age=1"
+		}
+		return "no-store"
+	case ext == ".ts":
+		return scope + ", max-age=" + strconv.Itoa(immutableAge) + ", immutable"
+	default:
+		return scope + ", max-age=" + strconv.Itoa(segmentAge)
+	}
+}
+
+// setETag gives every served file a strong validator from its size and
+// modification time, set before http.FileServer runs so that its
+// conditional-request handling answers If-None-Match with a 304.
+func (m *Manager) setETag(w http.ResponseWriter, rel string) {
+	fi, err := os.Stat(filepath.Join(m.dir, filepath.FromSlash(rel)))
+	if err != nil || !fi.Mode().IsRegular() {
+		return
+	}
+	w.Header().Set("ETag", `"`+strconv.FormatInt(fi.Size(), 16)+"-"+strconv.FormatInt(fi.ModTime().UnixNano(), 16)+`"`)
 }
 
 // observe records the request against the viewer table.

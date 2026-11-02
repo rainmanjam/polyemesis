@@ -635,7 +635,8 @@ func (s *Server) playoutHandler() http.Handler {
 			return
 		}
 
-		switch access := s.authorizePlayout(r); access {
+		access := s.authorizePlayout(r)
+		switch access {
 		case playoutAllowToken:
 			cfg := s.playoutStore().load()
 			s.setPlayoutTokenCookie(w, cfg.Token, s.playoutSettings().AllowCrossOrigin)
@@ -659,7 +660,11 @@ func (s *Server) playoutHandler() http.Handler {
 			writeError(w, http.StatusServiceUnavailable, "playout is not running")
 			return
 		}
-		h.ServeHTTP(w, r)
+		// Only an OPEN, published stream is the same bytes for every viewer,
+		// so only it may sit in a shared cache. A token holder's and an
+		// operator's answers are private: Cloudflare and most CDNs ignore Vary,
+		// so Cache-Control is the one thing keeping a gated segment out of them.
+		h.ServeHTTP(w, r.WithContext(playout.WithSharedCache(r.Context(), access == playoutAllowOpen)))
 	})
 }
 

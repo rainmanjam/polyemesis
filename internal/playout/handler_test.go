@@ -71,26 +71,72 @@ func TestHandlerServesOnlyMediaAndManifestFiles(t *testing.T) {
 	}
 }
 
-func TestHandlerNeverCachesAPlaylistAndOnlyBrieflyCachesASegment(t *testing.T) {
+// TestTheOriginCachePolicy pins Cache-Control for every kind of file, for an
+// open stream (shared caches allowed) and for everything else (a token, a
+// session, or no decision at all -- which must fail closed to private).
+func TestTheOriginCachePolicy(t *testing.T) {
 	tests := []struct {
-		name string
-		path string
-		want string
+		name         string
+		path         string
+		open, closed string
 	}{
-		{"a playlist is rewritten every segment", "/playout/hd/" + MediaPlaylist, "no-store"},
-		{"a manifest is rewritten every segment", "/playout/hd/" + DASHManifest, "no-store"},
-		// Segment names restart at zero when a muxer does, so a long cache
-		// would serve one run's bytes under the next run's URL.
-		{"a segment is cached for one segment", "/playout/hd/seg_00000.ts", "public, max-age=4"},
+		// The playlist moves every segment: one second in a CDN for an open
+		// stream, never stored for a gated one.
+		{"media playlist", "/playout/hd/" + MediaPlaylist, "public, max-age=1", "no-store"},
+		{"dash manifest", "/playout/hd/" + DASHManifest, "public, max-age=1", "no-store"},
+		// HLS segment names are numbered from the wall clock (args.go), so a
+		// name is never reused: immutable.
+		{"hls segment", "/playout/hd/seg_00000.ts", "public, max-age=31536000, immutable", "private, max-age=31536000, immutable"},
+		// DASH init and chunk names still restart with the muxer.
+		{"dash init segment", "/playout/hd/init-0.m4s", "public, max-age=4", "private, max-age=4"},
+		{"captions", "/playout/captions.vtt", "public, max-age=4", "private, max-age=4"},
 	}
 	_, handler := servedHarness(t, func(s *db.PlayoutSettings) { s.SegmentSeconds = 4 })
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			w := get(t, handler, tc.path, "10.0.0.1")
-			if got := w.Header().Get("Cache-Control"); got != tc.want {
-				t.Fatalf("cache-control = %q, want %q", got, tc.want)
-			}
-		})
+		for _, scope := range []struct {
+			name string
+			ctx  func(*http.Request) *http.Request
+			want string
+		}{
+			{"open stream", func(r *http.Request) *http.Request { return r.WithContext(WithSharedCache(r.Context(), true)) }, tc.open},
+			{"gated stream", func(r *http.Request) *http.Request { return r.WithContext(WithSharedCache(r.Context(), false)) }, tc.closed},
+			{"no decision", func(r *http.Request) *http.Request { return r }, tc.closed},
+		} {
+			t.Run(tc.name+"/"+scope.name, func(t *testing.T) {
+				r := scope.ctx(httptest.NewRequest(http.MethodGet, tc.path, nil))
+				r.RemoteAddr = "10.0.0.1:1"
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != http.StatusOK {
+					t.Fatalf("status %d", w.Code)
+				}
+				if got := w.Header().Get("Cache-Control"); got != scope.want {
+					t.Fatalf("cache-control = %q, want %q", got, scope.want)
+				}
+			})
+		}
+	}
+}
+
+// Every served file carries a strong validator, and a revalidation with it
+// is a 304 with no body -- what lets a CDN or player refresh a playlist
+// cheaply.
+func TestServedFilesCarryAnETagAndRevalidateTo304(t *testing.T) {
+	_, handler := servedHarness(t, nil)
+	for _, p := range []string{"/playout/hd/seg_00000.ts", "/playout/hd/" + MediaPlaylist} {
+		w := get(t, handler, p, "10.0.0.1")
+		etag := w.Header().Get("ETag")
+		if !strings.HasPrefix(etag, `"`) || len(etag) < 5 {
+			t.Fatalf("%s: etag %q", p, etag)
+		}
+		r := httptest.NewRequest(http.MethodGet, p, nil)
+		r.RemoteAddr = "10.0.0.1:1"
+		r.Header.Set("If-None-Match", etag)
+		w2 := httptest.NewRecorder()
+		handler.ServeHTTP(w2, r)
+		if w2.Code != http.StatusNotModified || w2.Body.Len() != 0 {
+			t.Fatalf("%s: revalidation %d with %d bytes", p, w2.Code, w2.Body.Len())
+		}
 	}
 }
 
