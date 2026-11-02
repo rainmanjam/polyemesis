@@ -112,6 +112,13 @@ type playoutPublish struct {
 	// by React as text nodes, so no escaping question arises.
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	// The offline card: what the player page shows when nothing is live.
+	// OfflineMessage is free text shown as a text node. OfflineClipJob names a
+	// finished clip export (an MP4) to loop behind it; 0 is none. VODURL is a
+	// link to the latest VOD wherever the operator keeps it, http(s) only.
+	OfflineMessage string `json:"offlineMessage,omitempty"`
+	OfflineClipJob int64  `json:"offlineClipJob,omitempty"`
+	VODURL         string `json:"vodUrl,omitempty"`
 }
 
 // normalize fills in anything missing and refuses to leave the door open by
@@ -899,10 +906,14 @@ type playoutAdminView struct {
 	// It is now blanked for a read-scoped token, along with the three URLs
 	// below -- each of which re-embeds the same secret, so blanking the field
 	// alone would hand it straight back in a different shape.
-	Token       string      `json:"token"`
-	Title       string      `json:"title"`
-	Description string      `json:"description"`
-	URLs        playoutURLs `json:"urls"`
+	Token       string `json:"token"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// The offline card's configuration. See playoutPublish.
+	OfflineMessage string      `json:"offlineMessage"`
+	OfflineClipJob int64       `json:"offlineClipJob"`
+	VODURL         string      `json:"vodUrl"`
+	URLs           playoutURLs `json:"urls"`
 	// Exposed states plainly whether this stream is reachable by anyone on the
 	// internet who has the URL and nothing else. The UI leads with it.
 	Exposed bool `json:"exposed"`
@@ -921,8 +932,13 @@ func (s *Server) handleGetPlayout(w http.ResponseWriter, r *http.Request) {
 		Token:       cfg.Token,
 		Title:       cfg.Title,
 		Description: cfg.Description,
-		Exposed:     set.Enabled && set.Public && cfg.Protection == PlayoutProtectOpen,
-		URLs:        playoutURLsFor(r, set, cfg),
+
+		OfflineMessage: cfg.OfflineMessage,
+		OfflineClipJob: cfg.OfflineClipJob,
+		VODURL:         cfg.VODURL,
+
+		Exposed: set.Enabled && set.Public && cfg.Protection == PlayoutProtectOpen,
+		URLs:    playoutURLsFor(r, set, cfg),
 	}
 	if m := s.playoutManager(); m != nil {
 		view.Status = m.Status()
@@ -1019,9 +1035,12 @@ func requestOrigin(r *http.Request) string {
 // playoutPublishRequest is what the Playout page sends. Pointers so an omitted
 // field is left alone rather than blanked.
 type playoutPublishRequest struct {
-	Protection  *playoutProtection `json:"protection,omitempty"`
-	Title       *string            `json:"title,omitempty"`
-	Description *string            `json:"description,omitempty"`
+	Protection     *playoutProtection `json:"protection,omitempty"`
+	Title          *string            `json:"title,omitempty"`
+	Description    *string            `json:"description,omitempty"`
+	OfflineMessage *string            `json:"offlineMessage,omitempty"`
+	OfflineClipJob *int64             `json:"offlineClipJob,omitempty"`
+	VODURL         *string            `json:"vodUrl,omitempty"`
 }
 
 func (s *Server) handlePutPlayoutPublish(w http.ResponseWriter, r *http.Request) {
@@ -1047,6 +1066,39 @@ func (s *Server) handlePutPlayoutPublish(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Description != nil {
 		cfg.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.OfflineMessage != nil {
+		msg := strings.TrimSpace(*req.OfflineMessage)
+		if len([]rune(msg)) > maxOfflineMessage {
+			writeError(w, http.StatusBadRequest, "offlineMessage is limited to 500 characters")
+			return
+		}
+		cfg.OfflineMessage = msg
+	}
+	if req.VODURL != nil {
+		u := strings.TrimSpace(*req.VODURL)
+		if !validVODURL(u) {
+			writeError(w, http.StatusBadRequest, "vodUrl must be an absolute http or https URL")
+			return
+		}
+		cfg.VODURL = u
+	}
+	if req.OfflineClipJob != nil {
+		id := *req.OfflineClipJob
+		if id < 0 {
+			writeError(w, http.StatusBadRequest, "offlineClipJob must be a clip export job id, or 0 for none")
+			return
+		}
+		if id > 0 {
+			// Checked on save so the operator hears about a clip the page can
+			// never play now, not from a viewer later. Checked again on serve,
+			// because the export can be deleted in between.
+			if _, err := s.offlineClipPath(id); err != nil {
+				writeError(w, http.StatusBadRequest, "offlineClipJob: "+err.Error())
+				return
+			}
+		}
+		cfg.OfflineClipJob = id
 	}
 
 	saved, err := st.save(cfg)
@@ -1120,6 +1172,27 @@ type playoutPublicView struct {
 	// viewer may find it reassuring. Derived from the same table the admin page
 	// reads, so the two never disagree.
 	Viewers int `json:"viewers"`
+
+	// State is live, ended or offline: whether segments are arriving, and if
+	// not, whether a broadcast stopped recently. Only a caller who passed the
+	// gate learns it, so it says nothing a 404 was hiding.
+	State playout.LiveState `json:"state"`
+	// EndedAt is when the stream was last on air, set only when State is
+	// ended.
+	EndedAt *time.Time `json:"endedAt,omitempty"`
+	// NextStartAt is the earliest upcoming scheduled start, for the offline
+	// card's countdown. Only the instant: no schedule name or target.
+	NextStartAt *time.Time `json:"nextStartAt,omitempty"`
+	// Offline is what the operator put on the offline card.
+	Offline playoutOfflineView `json:"offline"`
+}
+
+// playoutOfflineView is the offline card's content. Clip is a relative URL the
+// page appends the token to, like the poster; empty when there is no clip.
+type playoutOfflineView struct {
+	Message string `json:"message,omitempty"`
+	Clip    string `json:"clip,omitempty"`
+	VODURL  string `json:"vodUrl,omitempty"`
 }
 
 type playoutPublicVariant struct {
@@ -1127,6 +1200,9 @@ type playoutPublicVariant struct {
 	Playlist string `json:"playlist"`
 	Width    int    `json:"width,omitempty"`
 	Height   int    `json:"height,omitempty"`
+	// Codec is h264, hevc or av1, absent when unknown. The page checks it
+	// against what the browser can decode and falls back to an H.264 rung.
+	Codec string `json:"codec,omitempty"`
 }
 
 // handlePlayoutPublic answers the player page.
@@ -1171,8 +1247,25 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		Master:      PlayoutPrefix + playout.MasterPlaylist,
 		Poster:      "/api/v1/playout/poster.jpg",
 		Variants:    []playoutPublicVariant{},
+		State:       playout.LiveStateOffline,
+		NextStartAt: s.nextScheduledStart(time.Now()),
+		Offline: playoutOfflineView{
+			Message: cfg.OfflineMessage,
+			VODURL:  cfg.VODURL,
+		},
+	}
+	if cfg.OfflineClipJob > 0 {
+		if _, err := s.offlineClipPath(cfg.OfflineClipJob); err == nil {
+			view.Offline.Clip = playoutOfflineClipPath
+		}
 	}
 	if m := s.playoutManager(); m != nil {
+		state, last := m.LiveState()
+		view.State = state
+		if state == playout.LiveStateEnded {
+			at := last.UTC()
+			view.EndedAt = &at
+		}
 		st := m.Status()
 		view.Viewers = st.Analytics.Viewers
 		for _, v := range st.Variants {
@@ -1186,6 +1279,7 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 				Playlist: PlayoutPrefix + v.Playlist,
 				Width:    v.Width,
 				Height:   v.Height,
+				Codec:    v.Codec,
 			})
 		}
 	}

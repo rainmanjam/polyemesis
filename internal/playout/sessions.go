@@ -58,6 +58,9 @@ type Analytics struct {
 	// was set.
 	Peak   int        `json:"peak"`
 	PeakAt *time.Time `json:"peakAt,omitempty"`
+	// QoE is what the players reported about playback itself. Filled by the
+	// Manager; a bare Sessions snapshot leaves it zero.
+	QoE QoESummary `json:"qoe"`
 	// Sessions is how many sessions have been opened in total, counting a
 	// viewer who went away and came back as two.
 	Sessions int64 `json:"sessions"`

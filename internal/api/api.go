@@ -425,6 +425,11 @@ type Server struct {
 	// password would slow down the one request that creates the account.
 	setups *auth.Throttle
 
+	// beacons is the public player's QoE endpoint state, and nextStart caches
+	// the offline card's countdown. See playout_player.go.
+	beacons   beaconGate
+	nextStart nextStartCache
+
 	// setupCode is the one-time code POST /setup requires on a fresh install.
 	// Nil once an admin exists, and nil in a server built without one, which
 	// refuses setup rather than accepting it. See auth.SetupCode.
@@ -932,6 +937,11 @@ func (s *Server) registerRoutes(r chi.Router) {
 		// either open or presented with the playback token. See playout.go.
 		r.Get("/playout/public", s.handlePlayoutPublic)
 		r.Get("/playout/poster.jpg", s.handlePlayoutPoster)
+		// The player's own reports, and the offline card's clip. The same
+		// gate again: a beacon for a stream that is not published is a 404,
+		// and one without the token a 401. See playout_player.go.
+		r.Post(strings.TrimPrefix(playoutBeaconPath, "/api/v1"), s.handlePlayoutBeacon)
+		r.Get("/playout/offline-clip", s.handlePlayoutOfflineClip)
 
 		// --- authenticated ---
 		r.Group(func(r chi.Router) {
@@ -1750,7 +1760,12 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 			strings.HasPrefix(r.URL.Path, "/hls/") ||
 			// A playout viewer polls a playlist every segment; a busy origin
 			// would fill the log with nothing but segment reads.
-			strings.HasPrefix(r.URL.Path, PlayoutPrefix) {
+			strings.HasPrefix(r.URL.Path, PlayoutPrefix) ||
+			// And every open player page beacons every fifteen seconds. Its
+			// refusals are counted on the scrape
+			// (polyemesis_playout_qoe_beacons_rejected_total); a WARN line per
+			// anonymous 4xx would let any stranger write the log.
+			(r.URL.Path == playoutBeaconPath && ww.Status() < 500) {
 			return
 		}
 		level := slog.LevelDebug

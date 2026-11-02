@@ -651,18 +651,10 @@ var excusedRoutes = map[string]coverageExcus{
 		Want: &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
 	},
 
-	// ---- 503 without the subsystem wired. THREE of the four entries that used
-	// to sit here stated a premise that is false when driven: /jobs/overview
-	// answers 200 with 2759 bytes and /jobs/policy answers 200 with 2375, to a
-	// read token, on this exact fixture. Both are now SWEPT. /jobs and
-	// /jobs/{id} really are 503, and now say so in a form that fails if they
-	// stop being.
-	"GET /api/v1/jobs": notWired(),
-	// Re-declared. It used to carry needsRow("#163") -- "reached only with a row
-	// this fixture does not create" -- which is the wrong reason: the row is
-	// irrelevant, the queue is not wired, and the route never reaches its
-	// handler at all.
-	"GET /api/v1/jobs/{id}": notWired(),
+	// ---- 503 without the subsystem wired: NONE LEFT. /jobs/overview and
+	// /jobs/policy were found to answer 200 on this fixture and were swept;
+	// /jobs and /jobs/{id} really were 503 until plantRows wired a job queue
+	// and queued a job, and they are swept now too.
 
 	// ---- the streaming media origin and the player SPA.
 	"GET /playout/*": {
@@ -727,6 +719,27 @@ var excusedRoutes = map[string]coverageExcus{
 			"a denied one are both 404, which is why the identity with anonymous is the " +
 			"claim rather than the bytes.",
 		Want: &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
+	},
+	"POST /api/v1/playout/beacon": {
+		Why: "the public player's QoE beacon. Gated by authorizePlayout BEFORE the rate limit " +
+			"and the body, so a read token is refused exactly as a stranger is -- the 401 " +
+			"/playout/public gives -- and its answer carries nothing either way: 204 on " +
+			"success, an error string otherwise, never a cookie. The beacon holds no " +
+			"credential to leak; what it must not do is answer a stranger differently, " +
+			"which is the identity with anonymous asserted here. See " +
+			"TestPlayoutBeaconHonoursTheGate and TestPlayoutBeaconTreatsAReadTokenAsAnonymous.",
+		Want:        &routeWant{As: "read", Status: http.StatusUnauthorized, AnonMatchesRead: true},
+		Counterpart: "playoutBeaconGate",
+	},
+	"GET /api/v1/playout/offline-clip": {
+		Why: "the offline card's looping clip: an operator-chosen MP4 clip export, streamed. " +
+			"Gated by authorizePlayout like the poster and, like the poster, 404 rather than " +
+			"401 when denied so a <video> tag never raises a password prompt. This fixture " +
+			"configures no clip, so an allowed request and a denied one are both 404 and the " +
+			"identity with anonymous is the claim. See " +
+			"TestPlayoutOfflineClipIsGatedAndAbsentWithoutAClip.",
+		Want:        &routeWant{As: "read", Status: http.StatusNotFound, AnonMatchesRead: true},
+		Counterpart: "playoutOfflineClip",
 	},
 
 	// ---- reached only with a row this fixture does not create. SEVEN ENTRIES
@@ -816,12 +829,6 @@ func previewTelemetry() coverageExcus {
 	return e
 }
 
-func notWired() coverageExcus {
-	return coverageExcus{
-		Why:  "503 without a job queue wired; the handler never reaches storage",
-		Want: &routeWant{As: "read", Status: http.StatusServiceUnavailable},
-	}
-}
 func publicOrigin() coverageExcus {
 	return coverageExcus{
 		Why: "the public media origin under every method chi registered on the mount. " +
@@ -1232,6 +1239,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"hookDeliveries":                        proveHookDeliveries,
 	"playoutPublicView":                     provePlayoutPublicView,
 	"playoutManifestBytes":                  provePlayoutManifest,
+	"playoutBeaconGate":                     provePlayoutBeaconGate,
+	"playoutOfflineClip":                    provePlayoutOfflineClip,
 	"notFoundSurfaceIsPrincipalIndependent": proveNotFoundSurface,
 	"sourcePreviewManifest":                 proveSourcePreviewManifest,
 	"previewTiles":                          provePreviewTiles,

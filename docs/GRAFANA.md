@@ -131,7 +131,7 @@ is included too.
 | Destinations | Whether each destination is delivering; **why each failing destination is failing, and whether it is held**; failures by cause over time and over the whole range; delivery speed; output bitrate; restarts, dropped frames and stalls |
 | Host | Host and polyemesis CPU, as a share of the whole host; memory |
 | Recording | Free space on the recordings volume, used space, and the segment count |
-| Viewers and QoE | A placeholder. Viewer counts and player quality metrics are not exported yet, and this row fills in when they are. |
+| Viewers and QoE | A placeholder on the dashboard. The public player's viewer count and QoE are now on the scrape as `polyemesis_playout_*` (see [MONITORING.md](MONITORING.md#public-player-qoe)); the panels are not drawn yet. |
 
 **"Delivering" means running and moving.** A destination whose platform stops
 taking data keeps its FFmpeg process running; it reads *Down* here anyway,

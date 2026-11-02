@@ -406,6 +406,8 @@ tokens are for.
 | `GET` | `/tls/ca` | The generated CA, for trusting a self-signed instance |
 | `GET` | `/playout/public` | Public player, when playout is published |
 | `GET` | `/playout/poster.jpg` | Poster frame for the public player |
+| `POST` | `/playout/beacon` | The public player's QoE beacon. `204`; see [QoE beacons](#qoe-beacons) |
+| `GET` | `/playout/offline-clip` | The offline card's looping clip, when the operator chose one |
 | `GET` | `/overlay/config` | A chat overlay's style and platforms. Needs its overlay key in `X-Overlay-Key` |
 | `GET` | `/overlay/events` | A chat overlay's display stream (SSE), including the poll widget's `poll.display`. Needs its overlay key in `X-Overlay-Key` |
 
@@ -422,6 +424,91 @@ an HTTP basic password. A `read` token is treated exactly as an anonymous
 caller — the same status, the same body, the same headers. That is `read`
 meaning metadata and not content: live media is content, and `Public: false` is
 a decision about the resource that a role-level scope must not override.
+
+#### What `/playout/public` tells the player
+
+Past the gate, the view carries what the player page needs and nothing it
+does not: `enabled`, `title`, `description`, `master`, `poster`, `viewers`,
+and `variants` — each `{name, playlist, width?, height?, codec?}`, where
+`codec` is `h264`, `hevc` or `av1` (absent when unknown) so the page can skip
+a rung the browser cannot decode and fall back to an H.264 one. The master
+playlist carries the same codec as an RFC 8216 `CODECS` attribute.
+
+| Field | Meaning |
+|---|---|
+| `state` | `live` (segments arriving), `ended` (a broadcast stopped within the last 12 hours) or `offline` |
+| `endedAt` | When the stream was last on air; only with `state: "ended"` |
+| `nextStartAt` | The earliest upcoming scheduled start across enabled start and playlist-start schedules. The instant only: no schedule name or target |
+| `offline.message` | The operator's offline-card text |
+| `offline.vodUrl` | A link to the latest VOD, `http(s)` only |
+| `offline.clip` | `/api/v1/playout/offline-clip` when a clip is configured and playable. Like the poster it is an `/api/v1` URL the playback cookie does not reach, so the page appends `?t=` |
+
+None of it is visible without passing the gate: an unpublished stream is still
+`404` and a protected one still `401`, so `ended` and `offline` say nothing a
+`404` was hiding. The offline card is configured through `PUT /playout/publish`
+with `offlineMessage` (≤ 500 characters), `vodUrl` (absolute `http`/`https`)
+and `offlineClipJob` (the id of a finished clip export in MP4, MOV or WebM; `0`
+for none). Buffer clips are MPEG-TS, which a browser's `<video>` does not play,
+so they are not offered.
+
+#### QoE beacons
+
+`POST /api/v1/playout/beacon` is how the public player reports how playback
+went. It is the one write an anonymous caller can make, and the rules are
+written out because cross-platform analytics reads what it produces.
+
+**Order of checks.** The gate first — `404` for an unpublished stream, `401`
+without the playback token, exactly as `/playout/public` — then a rate limit
+(`429` with `Retry-After`), then the body. A `429` can therefore never reveal
+that a hidden stream exists. The page sends the token in `X-Playout-Token`
+(the playback cookie is scoped to `/playout/` and does not reach `/api/v1`);
+`?t=` and HTTP basic work too. The endpoint never sets the playback cookie.
+
+**Body.** At most 2048 bytes, one JSON object, unknown fields refused, trailing
+data refused. Schema version 1:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `v` | int | Schema version. Must be `1` |
+| `sid` | string | Random per page load, 16–64 of `[A-Za-z0-9_-]`. Never stored past the session table's two-minute idle window; never a metric label |
+| `seq` | int | Increases per beacon within a session, `0`–`1000000`. A repeat or lower `seq` is acknowledged and ignored, so a retried post cannot double-count |
+| `kind` | string | `start`, `heartbeat` or `end` |
+| `startupMs` | int? | Player creation to first frame, `0`–`600000`. Counted once per session |
+| `rebufferCount` | int | Stalls after startup, **cumulative** for the session, `0`–`100000` |
+| `rebufferMs` | int | Time stalled after startup, **cumulative**, `0`–`86400000` |
+| `variant` | string? | The rung playing now. Must name a running rung; omitted when the player does not know (native HLS) |
+| `latencyMs` | int? | Distance behind the live edge, `0`–`21600000` |
+| `errors` | string[]? | Failure classes seen **since the previous beacon**, at most 8, each one of `network`, `manifest`, `media`, `decode`, `codec_unsupported`, `other` |
+
+Counters are cumulative and the server takes the deltas per `sid`; a counter
+that goes backwards is a new baseline, not a negative. `errors` is a closed
+enum on purpose — an hls.js error detail carries the fragment URL, and the
+fragment URL carries the playback token, so there is no free-text field
+anywhere in the schema.
+
+**No PII.** No address, user agent, cookie or account is stored. The rate
+limiter keys on the client address hashed with a per-process random salt, in
+memory only, and forgets a key as soon as its bucket is full again.
+
+**Answers.** `204` accepted (including an ignored repeat), `400` with a reason,
+`401`/`404` from the gate, `429` limited, `503` when playout is not running.
+
+**Where it goes.** Into the admin view's `status.analytics.qoe` (`GET
+/playout`) and onto `/metrics` as the `polyemesis_playout_qoe_*` families; see
+[MONITORING.md](MONITORING.md#public-player-qoe). `POST
+/playout/analytics/reset` clears it with the viewer table.
+
+| `qoe` field | Meaning |
+|---|---|
+| `beacons` | Beacons accepted |
+| `sessions` | Distinct sessions that reported |
+| `startups`, `startupMs` | Sessions that reached a first frame, and their summed startup time |
+| `rebuffers`, `rebufferMs` | Stalls after startup and their summed duration |
+| `errors` | Count per error code |
+| `untracked` | Beacons from sessions that arrived with the 10,000-session table full; only their errors count |
+| `active` | Sessions that beaconed within the idle window and have not sent `end` |
+| `byVariant` | Active sessions by the rung they last reported |
+| `latencyMsMedian` | Median latency of active sessions; absent when none reported one |
 
 #### What `/health` actually reports
 

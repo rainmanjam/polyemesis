@@ -48,6 +48,7 @@ import { asSourceId } from "@/lib/types";
 import type {
   PlayoutAdminView,
   PlayoutProtection,
+  PlayoutQoESummary,
   PlayoutSettings,
   PlayoutVariant,
   RenditionView,
@@ -162,6 +163,9 @@ export function PlayoutPage() {
       protection?: PlayoutProtection;
       title?: string;
       description?: string;
+      offlineMessage?: string;
+      offlineClipJob?: number;
+      vodUrl?: string;
     }) => {
       setBusy(true);
       try {
@@ -279,6 +283,7 @@ export function PlayoutPage() {
             <Stat labelKey="play.sessions" value={String(analytics.sessions)} />
             <Stat labelKey="play.onDisk" value={fmtBytes(usage.bytes)} />
           </div>
+          <QoEStats qoe={analytics.qoe} />
           {analytics.uncounted > 0 && (
             <p className="mt-3 text-sm text-muted-foreground">
               {t("play.uncountedViewers", { count: analytics.uncounted })}
@@ -313,6 +318,13 @@ export function PlayoutPage() {
       <PlayerPageCard
         title={view.title}
         description={view.description}
+        onSave={(body) => putPublish(body)}
+      />
+
+      <OfflineCardSettings
+        offlineMessage={view.offlineMessage ?? ""}
+        vodUrl={view.vodUrl ?? ""}
+        offlineClipJob={view.offlineClipJob ?? 0}
         onSave={(body) => putPublish(body)}
       />
 
@@ -1483,6 +1495,154 @@ export function PlayerPageCard({
             onClick={() => void model.save()}
           >
             {t("common.save")}
+          </Button>
+          {model.dirty && (
+            <Button size="sm" variant="ghost" onClick={model.discard}>
+              {t("common.discard")}
+            </Button>
+          )}
+          <SaveStatus state={model.state} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------- QoE + offline
+
+/** What the public players reported. Hidden until one has: a row of zeros
+ *  on an install whose page nobody has opened reads as "playback is broken". */
+export function QoEStats({ qoe }: { qoe?: PlayoutQoESummary }) {
+  const t = useT();
+  if (!qoe || qoe.beacons === 0) return null;
+  const errors = Object.values(qoe.errors ?? {}).reduce((a, b) => a + (b ?? 0), 0);
+  const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-xs font-medium text-muted-foreground">{t("play.qoe")}</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Stat labelKey="play.qoeReporting" value={String(qoe.active)} />
+        <Stat
+          labelKey="play.qoeStartup"
+          value={qoe.startups > 0 ? secs(qoe.startupMs / qoe.startups) : "—"}
+        />
+        <Stat labelKey="play.qoeRebuffers" value={String(qoe.rebuffers)} />
+        <Stat
+          labelKey="play.qoeLatency"
+          value={qoe.latencyMsMedian !== undefined ? secs(qoe.latencyMsMedian) : "—"}
+        />
+        <Stat labelKey="play.qoeErrors" value={String(errors)} />
+      </div>
+    </div>
+  );
+}
+
+interface OfflineDraft {
+  offlineMessage: string;
+  vodUrl: string;
+  offlineClipJob: number;
+}
+
+/** The offline card on the public page: a message, a link to the latest VOD
+ *  and a looping clip. Same draft-and-save shape as PlayerPageCard. */
+export function OfflineCardSettings({
+  offlineMessage,
+  vodUrl,
+  offlineClipJob,
+  onSave,
+}: OfflineDraft & {
+  /** Throws on failure, so the draft stays and says "Not saved". */
+  onSave: (body: OfflineDraft) => Promise<void>;
+}) {
+  const t = useT();
+  const model = useSaveModel<OfflineDraft>({
+    stored: { offlineMessage, vodUrl, offlineClipJob },
+    equal: (a, b) =>
+      a.offlineMessage === b.offlineMessage && a.vodUrl === b.vodUrl && a.offlineClipJob === b.offlineClipJob,
+    onSave,
+  });
+  // Finished clip exports, for the clip picker. A server without a job queue
+  // answers 503; the picker then offers only "None".
+  const [clips, setClips] = useState<{ id: number; label: string }[]>([]);
+  useEffect(() => {
+    let live = true;
+    // Through a resolved promise so a synchronous throw lands in the catch
+    // with every other failure: the picker is a convenience, never a reason
+    // for the card to break.
+    Promise.resolve()
+      .then(() => api.listJobs({ states: ["done"], kinds: ["clip.export"], limit: 50 }))
+      .then((r) => {
+        if (!live) return;
+        setClips(
+          r.jobs.map((j) => {
+            const path = (j.result as { path?: string } | undefined)?.path ?? "";
+            return { id: j.id, label: `#${j.id} ${path.split(/[\\/]/).pop() ?? ""}`.trim() };
+          }),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const ids = useId();
+  return (
+    <Card className="mt-3">
+      <CardHeader>
+        <CardTitle>{t("play.offlineCard")}</CardTitle>
+        <CardDescription>{t("play.offlineCardNote")}</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor={`${ids}-msg`}>{t("play.offlineMessage")}</Label>
+          <Textarea
+            id={`${ids}-msg`}
+            value={model.draft.offlineMessage}
+            maxLength={500}
+            rows={2}
+            placeholder={t("play.offlineMessagePlaceholder")}
+            onChange={(e) => model.setDraft({ ...model.draft, offlineMessage: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${ids}-vod`}>{t("play.vodUrl")}</Label>
+          <Input
+            id={`${ids}-vod`}
+            type="url"
+            inputMode="url"
+            value={model.draft.vodUrl}
+            maxLength={2048}
+            placeholder="https://"
+            onChange={(e) => model.setDraft({ ...model.draft, vodUrl: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${ids}-clip`}>{t("play.offlineClip")}</Label>
+          <select
+            id={`${ids}-clip`}
+            value={model.draft.offlineClipJob}
+            onChange={(e) => model.setDraft({ ...model.draft, offlineClipJob: Number(e.target.value) })}
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option value={0}>{t("play.offlineClipNone")}</option>
+            {model.draft.offlineClipJob > 0 && !clips.some((c) => c.id === model.draft.offlineClipJob) && (
+              <option value={model.draft.offlineClipJob}>#{model.draft.offlineClipJob}</option>
+            )}
+            {clips.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">{t("play.offlineClipHint")}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <Button
+            size="sm"
+            disabled={!model.dirty || model.state === "saving"}
+            onClick={() => void model.save()}
+          >
+            {t("play.saveOfflineCard")}
           </Button>
           {model.dirty && (
             <Button size="sm" variant="ghost" onClick={model.discard}>

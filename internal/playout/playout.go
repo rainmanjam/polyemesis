@@ -111,6 +111,11 @@ type Upstream struct {
 	Height int
 	// VideoKbps is the rendition's target bitrate, 0 when unknown.
 	VideoKbps int
+	// Codec is the video bitstream: "h264", "hevc" or "av1" (ffprobe's names),
+	// empty when unknown. Video is copied, so this is what the viewer's
+	// browser has to decode -- the master playlist advertises it so a player
+	// can skip a rung it cannot play.
+	Codec string
 }
 
 // Resolver maps a variant's rendition id — nil meaning the ingest itself — onto
@@ -148,6 +153,7 @@ type variant struct {
 	bandwidth int
 	width     int
 	height    int
+	codec     string
 	// err is why this rung is not running, shown rather than swallowed.
 	err     string
 	startAt time.Time
@@ -164,12 +170,28 @@ type Manager struct {
 	clientIP func(*http.Request) string
 
 	sessions *Sessions
+	qoe      *QoE
+
+	// live is the newest segment seen and when it was last looked for. See
+	// LiveState.
+	liveMu      sync.Mutex
+	newestSeg   time.Time
+	liveScanned time.Time
+
+	// masterMu serialises writeMaster: Reconcile (engine goroutine) and
+	// refreshUpstreams (Run goroutine) both rewrite the master, and two writers
+	// sharing one temp file can tear it.
+	masterMu sync.Mutex
 
 	mu       sync.Mutex
 	settings db.PlayoutSettings
-	running  map[string]*variant
-	usage    Usage
-	stopped  bool
+	// resolve is the last Reconcile's resolver, kept so the sweep can re-read
+	// what each rung's upstream IS -- its size and codec -- without
+	// restarting anything. See refreshUpstreams.
+	resolve Resolver
+	running map[string]*variant
+	usage   Usage
+	stopped bool
 }
 
 // New creates a manager. It does not start anything: playout comes up on the
@@ -192,6 +214,7 @@ func New(d Deps) *Manager {
 		now:      d.Now,
 		clientIP: d.ClientIP,
 		sessions: NewSessions(0, 0),
+		qoe:      NewQoE(0, 0),
 		running:  map[string]*variant{},
 	}
 }
@@ -250,6 +273,7 @@ func (m *Manager) Reconcile(s db.PlayoutSettings, resolve Resolver) error {
 	m.mu.Lock()
 	stopped := m.stopped
 	m.settings = s
+	m.resolve = resolve
 	m.mu.Unlock()
 	if stopped {
 		return nil
@@ -281,6 +305,7 @@ func (m *Manager) Reconcile(s db.PlayoutSettings, resolve Resolver) error {
 			// Already running the right thing: carry the live process forward
 			// and drop the plan.
 			cur.bandwidth, cur.width, cur.height = w.bandwidth, w.width, w.height
+			cur.codec = w.codec
 			delete(want, name)
 			continue
 		}
@@ -320,6 +345,7 @@ func (m *Manager) plan(s db.PlayoutSettings, cfg db.PlayoutVariant, resolve Reso
 	}
 	v.hub = up.Hub
 	v.width, v.height = up.Width, up.Height
+	v.codec = normalizeCodec(up.Codec)
 
 	kbps := up.VideoKbps
 	if kbps <= 0 {
@@ -449,8 +475,12 @@ func (m *Manager) teardown(v *variant) {
 		m.ports.Release(v.port)
 	}
 	// The stale playlist left behind would be served to the next viewer,
-	// pointing at segments the next start is about to replace.
-	_ = clearVariantDir(filepath.Join(m.dir, v.cfg.Name))
+	// pointing at segments the next start is about to replace. What it says
+	// about WHEN the stream was last on air is kept first: it is how the public
+	// page tells "ended" from "offline".
+	dir := filepath.Join(m.dir, v.cfg.Name)
+	m.noteNewest(newestSegmentIn(dir))
+	_ = clearVariantDir(dir)
 }
 
 func (m *Manager) stopAll() {
@@ -483,6 +513,7 @@ func (m *Manager) Run(ctx context.Context) {
 	// segments, and waiting a full interval to collect them is exactly the
 	// window in which a box that was already near its cap fills up.
 	m.Sweep()
+	m.refreshUpstreams()
 
 	tick := time.NewTicker(sweepInterval)
 	defer tick.Stop()
@@ -492,8 +523,73 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-tick.C:
 			m.Sweep()
+			m.refreshUpstreams()
 		}
 	}
+}
+
+// refreshUpstreams re-reads each running rung's upstream size and codec and
+// rewrites the master playlist when any changed. It reports whether one did.
+//
+// The ladder is planned when the engine reconciles, and for the passthrough
+// rung that is usually BEFORE the ingest has been probed: the rung starts
+// with no size and no codec, and nothing reconciles again when the probe
+// lands. Without this the master would never advertise CODECS for the source
+// rung, so a browser that cannot decode an HEVC or AV1 ingest would be handed
+// it anyway. Metadata only: nothing here restarts a muxer.
+//
+// The resolver is called with m.mu RELEASED. It takes the engine's lock, and
+// the engine calls Reconcile, which takes m.mu, while holding its own -- so
+// holding m.mu across the call would be a lock-order inversion.
+func (m *Manager) refreshUpstreams() bool {
+	m.mu.Lock()
+	resolve := m.resolve
+	type rung struct {
+		v   *variant
+		rid *int64
+	}
+	var rungs []rung
+	for _, v := range m.running {
+		if v.proc != nil && v.err == "" {
+			rungs = append(rungs, rung{v, v.cfg.RenditionID})
+		}
+	}
+	m.mu.Unlock()
+	if resolve == nil || len(rungs) == 0 {
+		return false
+	}
+
+	type meta struct {
+		width, height int
+		codec         string
+	}
+	fresh := make(map[*variant]meta, len(rungs))
+	for _, r := range rungs {
+		up, err := resolve(r.rid)
+		if err != nil {
+			continue
+		}
+		fresh[r.v] = meta{up.Width, up.Height, normalizeCodec(up.Codec)}
+	}
+
+	changed := false
+	m.mu.Lock()
+	for v, md := range fresh {
+		if m.running[v.cfg.Name] != v {
+			continue // replaced while the lock was released
+		}
+		if v.width != md.width || v.height != md.height || v.codec != md.codec {
+			v.width, v.height, v.codec = md.width, md.height, md.codec
+			changed = true
+		}
+	}
+	m.mu.Unlock()
+	if changed {
+		if err := m.writeMaster(); err != nil {
+			m.log.Warn("playout: rewrite master playlist", "err", err)
+		}
+	}
+	return changed
 }
 
 // Sweep enforces the total-size cap over the playout directory.
@@ -534,12 +630,45 @@ func (m *Manager) Usage() Usage {
 	return m.usage
 }
 
-// Analytics reports the viewer picture.
-func (m *Manager) Analytics() Analytics { return m.sessions.Snapshot(m.now()) }
+// Analytics reports the viewer picture: the request-side table, and what the
+// players themselves reported.
+func (m *Manager) Analytics() Analytics {
+	now := m.now()
+	a := m.sessions.Snapshot(now)
+	a.QoE = m.qoe.Summary(now)
+	return a
+}
 
 // ResetAnalytics clears the viewer table and its counters, so an operator can
 // measure one broadcast rather than the uptime of the process.
-func (m *Manager) ResetAnalytics() { m.sessions.Reset() }
+func (m *Manager) ResetAnalytics() {
+	m.sessions.Reset()
+	m.qoe.Reset()
+}
+
+// RecordBeacon validates one QoE beacon against the running ladder and folds
+// it into the aggregate. The error wraps ErrBeaconInvalid on a refusal.
+func (m *Manager) RecordBeacon(b Beacon) error {
+	if err := ValidateBeacon(b, m.runningNames()); err != nil {
+		return err
+	}
+	m.qoe.Record(b, m.now())
+	return nil
+}
+
+// runningNames is the set of rungs a beacon may name: the ones a player could
+// have loaded.
+func (m *Manager) runningNames() map[string]bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]bool, len(m.running))
+	for name, v := range m.running {
+		if v.proc != nil && v.err == "" {
+			out[name] = true
+		}
+	}
+	return out
+}
 
 // VariantStatus is one rung as the API reports it.
 type VariantStatus struct {
@@ -553,6 +682,8 @@ type VariantStatus struct {
 	Bandwidth int `json:"bandwidth"`
 	Width     int `json:"width,omitempty"`
 	Height    int `json:"height,omitempty"`
+	// Codec is the video codec the rung carries, empty when unknown.
+	Codec string `json:"codec,omitempty"`
 	// Playlist and Manifest are paths relative to the playout root, so the
 	// caller decides the URL prefix.
 	Playlist  string     `json:"playlist"`
@@ -580,9 +711,10 @@ func (m *Manager) Status() Status {
 	m.mu.Lock()
 	s := m.settings
 	usage := m.usage
-	running := make(map[string]*variant, len(m.running))
+	// Copies, not pointers, for the same reason as writeMaster.
+	running := make(map[string]rungMeta, len(m.running))
 	for k, v := range m.running {
-		running[k] = v
+		running[k] = v.meta()
 	}
 	m.mu.Unlock()
 
@@ -607,9 +739,10 @@ func (m *Manager) Status() Status {
 			vs.Manifest = path2(cfg.Name, DASHManifest)
 		}
 		if v, ok := running[cfg.Name]; ok {
-			vs.Running = v.proc != nil && v.err == ""
+			vs.Running = v.running
 			vs.Error = v.err
 			vs.Bandwidth, vs.Width, vs.Height = v.bandwidth, v.width, v.height
+			vs.Codec = v.codec
 			if !v.startAt.IsZero() {
 				at := v.startAt
 				vs.StartedAt = &at
@@ -630,12 +763,18 @@ func (m *Manager) Status() Status {
 // failed to start simply absent from the ladder instead of a broken entry every
 // player retries.
 func (m *Manager) writeMaster() error {
+	m.masterMu.Lock()
+	defer m.masterMu.Unlock()
+
+	// A COPY of each rung, taken under the lock: refreshUpstreams updates a
+	// running rung's size and codec in place, so reading them through the
+	// pointer after unlocking would race it.
 	m.mu.Lock()
 	enabled := m.settings.Enabled
-	vs := make([]*variant, 0, len(m.running))
+	vs := make([]rungMeta, 0, len(m.running))
 	for _, v := range m.running {
 		if v.proc != nil && v.err == "" {
-			vs = append(vs, v)
+			vs = append(vs, v.meta())
 		}
 	}
 	m.mu.Unlock()
@@ -653,7 +792,7 @@ func (m *Manager) writeMaster() error {
 		if vs[i].bandwidth != vs[j].bandwidth {
 			return vs[i].bandwidth < vs[j].bandwidth
 		}
-		return vs[i].cfg.Name < vs[j].cfg.Name
+		return vs[i].name < vs[j].name
 	})
 
 	var b strings.Builder
@@ -666,8 +805,14 @@ func (m *Manager) writeMaster() error {
 		if v.width > 0 && v.height > 0 {
 			b.WriteString(",RESOLUTION=" + strconv.Itoa(v.width) + "x" + strconv.Itoa(v.height))
 		}
-		b.WriteString(",NAME=\"" + v.cfg.Name + "\"\n")
-		b.WriteString(path2(v.cfg.Name, MediaPlaylist) + "\n")
+		// CODECS only when the codec is known. It is what lets a browser that
+		// cannot decode HEVC or AV1 skip that rung instead of failing on it;
+		// a guessed value would make a player refuse a rung it could play.
+		if c := hlsCodecs(v.codec); c != "" {
+			b.WriteString(",CODECS=\"" + c + "\"")
+		}
+		b.WriteString(",NAME=\"" + v.name + "\"\n")
+		b.WriteString(path2(v.name, MediaPlaylist) + "\n")
 	}
 
 	// Written whole through a temp file: a player that fetched a half-written
@@ -677,6 +822,33 @@ func (m *Manager) writeMaster() error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// rungMeta is a variant's reportable state, copied under m.mu so it can be
+// read after the lock is released.
+type rungMeta struct {
+	name      string
+	running   bool
+	err       string
+	bandwidth int
+	width     int
+	height    int
+	codec     string
+	startAt   time.Time
+}
+
+// meta copies v's reportable state. The caller holds m.mu.
+func (v *variant) meta() rungMeta {
+	return rungMeta{
+		name:      v.cfg.Name,
+		running:   v.proc != nil && v.err == "",
+		err:       v.err,
+		bandwidth: v.bandwidth,
+		width:     v.width,
+		height:    v.height,
+		codec:     v.codec,
+		startAt:   v.startAt,
+	}
 }
 
 // path2 joins with a forward slash regardless of platform: these are URLs
