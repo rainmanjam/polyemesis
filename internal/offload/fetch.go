@@ -135,11 +135,17 @@ func (s *Service) FetchNow(ctx context.Context, name string) error {
 }
 
 func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, final string) error {
-	body, _, err := c.Get(ctx, it.Key)
+	body, info, err := c.Get(ctx, it.Key)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
+	// Refuse before writing a byte: the object's declared length must be the
+	// length that was uploaded. A broken or hostile endpoint must not be able
+	// to fill the recordings volume ahead of the digest check below.
+	if info.Size != it.Bytes {
+		return fmt.Errorf("%w: object declares %d bytes, %d were uploaded", ErrChecksumMismatch, info.Size, it.Bytes)
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(final), ".offload-fetch-*")
 	if err != nil {
 		return err
@@ -152,7 +158,12 @@ func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, fin
 		}
 	}()
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), body)
+	// And never trust the declaration either: at most one byte past the
+	// uploaded length is ever read, which is enough to tell "longer" apart.
+	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(body, it.Bytes+1))
+	if err == nil && n > it.Bytes {
+		err = fmt.Errorf("%w: object is longer than the %d bytes uploaded", ErrChecksumMismatch, it.Bytes)
+	}
 	if err == nil {
 		err = tmp.Sync()
 	}

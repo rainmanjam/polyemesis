@@ -107,7 +107,7 @@ type OffloadItem struct {
 
 // ErrStorageTargetHoldsOnlyCopies refuses deleting a target that still holds
 // the only copy of an evicted recording.
-var ErrStorageTargetHoldsOnlyCopies = errors.New("this target holds the only copy of evicted recordings; fetch them back or disable the target instead")
+var ErrStorageTargetHoldsOnlyCopies = fmt.Errorf("%w: this target holds the only copy of evicted recordings; fetch them back or disable the target instead", ErrStateConflict)
 
 const storageTargetCols = `id, name, provider, endpoint, bucket, region, prefix_template, path_style,
 	access_key_id, secret_enc, mode, keep_local_hours, offload_stems, offload_transcripts,
@@ -159,9 +159,13 @@ func (d *DB) ListStorageTargets() ([]StorageTarget, error) {
 	return out, rows.Err()
 }
 
-// GetStorageTarget returns one target or sql.ErrNoRows.
+// GetStorageTarget returns one target or ErrNotFound.
 func (d *DB) GetStorageTarget(id int64) (StorageTarget, error) {
-	return d.scanStorageTarget(d.sql.QueryRow(`SELECT `+storageTargetCols+` FROM storage_targets WHERE id = ?`, id))
+	t, err := d.scanStorageTarget(d.sql.QueryRow(`SELECT `+storageTargetCols+` FROM storage_targets WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return t, ErrNotFound
+	}
+	return t, err
 }
 
 func (d *DB) sealTargetSecret(secret string) ([]byte, error) {
@@ -219,7 +223,7 @@ func (d *DB) UpdateStorageTarget(t StorageTarget) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
+		return ErrNotFound
 	}
 	return nil
 }
@@ -249,7 +253,7 @@ func (d *DB) DeleteStorageTarget(id int64) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return sql.ErrNoRows
+		return ErrNotFound
 	}
 	return tx.Commit()
 }
@@ -337,6 +341,16 @@ func (d *DB) PutOffloadItem(it OffloadItem) error {
 		zeroOrUnix(it.NextAttemptAt), it.LastError, zeroOrUnix(it.VerifiedAt), it.Evicted,
 		zeroOrUnix(it.FetchedAt), time.Now().Unix())
 	return err
+}
+
+// OffloadKeyHolder returns the file that owns key on target, "" when none.
+func (d *DB) OffloadKeyHolder(target int64, key string) (string, error) {
+	var rel string
+	err := d.sql.QueryRow(`SELECT rel_path FROM offload_items WHERE target_id = ? AND object_key = ?`, target, key).Scan(&rel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return rel, err
 }
 
 // DeleteOffloadItemsFor drops the rows of a file that no longer exists

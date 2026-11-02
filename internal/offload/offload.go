@@ -278,13 +278,24 @@ func (s *Service) Pass(ctx context.Context) {
 			if ok && it.State == db.OffloadFailed && s.now().Before(it.NextAttemptAt) {
 				continue
 			}
-			if !ok {
-				key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, filepath.Base(cand.rel))
+			if !ok || strings.HasPrefix(it.Key, conflictKeyPrefix) {
+				key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, cand.rel)
 				if kerr != nil {
 					s.log.Warn("offload: prefix template", "target", t.Name, "err", kerr)
 					break
 				}
-				it = db.OffloadItem{TargetID: t.ID, RelPath: cand.rel, Kind: cand.kind, Key: key, State: db.OffloadPending}
+				if !ok {
+					it = db.OffloadItem{TargetID: t.ID, RelPath: cand.rel, Kind: cand.kind, State: db.OffloadPending}
+				}
+				it.Key = key
+				// One object, one file. A key another file already owns on
+				// this target is never written: in move mode that object may
+				// be the only copy of the other file.
+				if holder, herr := s.store.OffloadKeyHolder(t.ID, key); herr != nil || (holder != "" && holder != cand.rel) {
+					byKey[itemKey(t.ID, cand.rel)] = s.keyConflict(t, it, holder, herr)
+					changed = true
+					continue
+				}
 			}
 			byKey[itemKey(t.ID, cand.rel)] = s.upload(ctx, t, c, it, cand)
 			changed = true
@@ -296,6 +307,30 @@ func (s *Service) Pass(ctx context.Context) {
 	if changed {
 		s.onChange()
 	}
+}
+
+// conflictKeyPrefix marks the stored key of an item that was refused because
+// its rendered key belongs to another file. It is unique per file (the
+// rel_path follows it), so the refusal can be stored and shown without taking
+// the contested key; the key is rendered and checked again on every attempt.
+const conflictKeyPrefix = "conflict:"
+
+func (s *Service) keyConflict(t db.StorageTarget, it db.OffloadItem, holder string, herr error) db.OffloadItem {
+	contested := it.Key
+	it.Key = conflictKeyPrefix + it.RelPath
+	it.Attempts++
+	it.State = db.OffloadFailed
+	if herr != nil {
+		it.LastError = clipErr(herr)
+	} else {
+		it.LastError = clipErr(fmt.Errorf("object key %s is already held by %s on this target; change the prefix template", contested, holder))
+	}
+	it.NextAttemptAt = s.now().Add(backoffCap)
+	s.log.Warn("offload: object key conflict; not uploading", "target", t.Name, "file", it.RelPath, "holder", holder)
+	if err := s.store.PutOffloadItem(it); err != nil {
+		s.log.Warn("offload: persist item", "file", it.RelPath, "err", err)
+	}
+	return it
 }
 
 func itemKey(target int64, rel string) string { return strconv.FormatInt(target, 10) + "\x00" + rel }
@@ -448,7 +483,12 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		}
 		it.Bytes, it.SHA256 = n, sh
 		it.State = db.OffloadUploading
-		_ = s.store.PutOffloadItem(it)
+		// Claimed in the database BEFORE the PUT: the UNIQUE(target_id,
+		// object_key) index refuses a key another file holds, so the bucket
+		// write below can never overwrite that file's object.
+		if err := s.store.PutOffloadItem(it); err != nil {
+			return fmt.Errorf("claim object key %s: %w", it.Key, err)
+		}
 		body := io.NewSectionReader(f, 0, n)
 		if _, err := c.Put(ctx, it.Key, body, n, sh, mb, map[string]string{"sha256": sh}); err != nil {
 			return err
@@ -678,8 +718,20 @@ var kindDir = map[string]string{
 	"test":                   "test",
 }
 
-// ObjectKey renders a target's prefix template for one file.
-func ObjectKey(tpl, kind string, source *int64, at time.Time, base string) (string, error) {
+// ObjectKey renders a target's prefix template for one file. rel is the
+// file's slash-separated path relative to the recordings directory, kept
+// whole -- stems/x.flac and exports/x.flac never share a key just because
+// they share a basename.
+func ObjectKey(tpl, kind string, source *int64, at time.Time, rel string) (string, error) {
+	if rel == "" || strings.HasPrefix(rel, "/") || strings.Contains(rel, `\`) {
+		return "", fmt.Errorf("invalid file path %q", rel)
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("invalid file path %q", rel)
+		}
+	}
+	base := rel
 	if tpl == "" {
 		tpl = db.DefaultOffloadPrefix
 	}

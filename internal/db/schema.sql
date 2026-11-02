@@ -799,3 +799,6 @@ CREATE TABLE IF NOT EXISTS offload_items (
     PRIMARY KEY (target_id, rel_path)
 );
 CREATE INDEX IF NOT EXISTS idx_offload_items_rel ON offload_items(rel_path);
+-- One object key, one file, per target: a second file whose rendered key
+-- collides is refused here rather than overwriting what may be the only copy.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_offload_items_key ON offload_items(target_id, object_key);
