@@ -2,7 +2,11 @@ package alerts
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -67,4 +71,110 @@ func TestFlushAfterRunStoppedIsANoOp(t *testing.T) {
 	// the single-goroutine contract, not a breach of it.
 	n.co.Add([]Rule{rule}, downEvent("1", base), base)
 	n.Flush(base.Add(time.Hour))
+}
+
+// flushDeadline bounds every no-deadlock test below. It is a failure budget,
+// not a wait: a passing run returns as soon as the work is done.
+const flushDeadline = 10 * time.Second
+
+// waitOrDeadlock fails the test if ch is not closed within flushDeadline.
+func waitOrDeadlock(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(flushDeadline):
+		t.Fatalf("%s did not return within %s: Flush deadlocked", what, flushDeadline)
+	}
+}
+
+// flushingDoer calls Flush from inside the delivery, which runs on the sender
+// goroutine -- the one Run waits for during shutdown before it closes done.
+type flushingDoer struct {
+	n     *Notifier
+	calls atomic.Int32
+}
+
+func (d *flushingDoer) Do(*http.Request) (*http.Response, error) {
+	d.calls.Add(1)
+	// Repeated so that at least one call lands after Run's loop has chosen
+	// ctx.Done and stopped serving anything but the drain.
+	for i := 0; i < 50; i++ {
+		d.n.Flush(time.Now().Add(time.Hour))
+	}
+	return &http.Response{StatusCode: 200, Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(""))}, nil
+}
+
+// TestFlushFromADeliveryDuringShutdownCannotDeadlock: on shutdown Run closes
+// send and waits for the sender to drain before it closes done. A Doer that
+// calls Flush in that window must not wait on a Run that is waiting on it.
+func TestFlushFromADeliveryDuringShutdownCannotDeadlock(t *testing.T) {
+	rule := testRule(func(r *Rule) { r.DebounceSeconds = 1 })
+	doer := &flushingDoer{}
+	n := New(quietLog(), RuleFunc(func() ([]Rule, error) { return []Rule{rule}, nil }),
+		WithDoer(doer), WithFlushInterval(time.Hour), WithRetry(1, time.Millisecond, time.Millisecond))
+	doer.n = n
+
+	// Before Run: put one due delivery in the send queue, inline.
+	n.co.Add([]Rule{rule}, downEvent("1", base), base)
+	n.Flush(base.Add(time.Hour))
+
+	// A cancelled ctx makes the sender deliver it on the shutdown drain path.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ran := make(chan struct{})
+	go func() { defer close(ran); n.Run(ctx) }()
+	waitOrDeadlock(t, ran, "Run (draining a delivery whose Doer calls Flush)")
+	if doer.calls.Load() != 1 {
+		t.Fatalf("the Doer ran %d times, want 1: the drain did not deliver", doer.calls.Load())
+	}
+}
+
+// TestFlushFromRunsOwnGoroutineCannotDeadlock: the rule source is read on
+// Run's goroutine during every pass, so a Flush from inside it is a call from
+// Run to itself and must not wait for Run to serve it.
+func TestFlushFromRunsOwnGoroutineCannotDeadlock(t *testing.T) {
+	rule := testRule(func(r *Rule) { r.DebounceSeconds = 1 })
+	var n *Notifier
+	var armed atomic.Bool
+	returned := make(chan struct{})
+	n = New(quietLog(), RuleFunc(func() ([]Rule, error) {
+		if armed.CompareAndSwap(true, false) {
+			n.Flush(time.Now().Add(time.Hour))
+			close(returned)
+		}
+		return []Rule{rule}, nil
+	}), WithDoer(&fakeDoer{replies: []reply{{status: 200}}}),
+		WithFlushInterval(time.Hour), WithRulesTTL(0))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ran := make(chan struct{})
+	go func() { defer close(ran); n.Run(ctx) }()
+
+	armed.Store(true)
+	n.Publish(downEvent("1", time.Now())) // Run reads the rules for it
+	waitOrDeadlock(t, returned, "Flush from the rule source on Run's goroutine")
+	cancel()
+	waitOrDeadlock(t, ran, "Run after a re-entrant Flush")
+}
+
+// TestFlushFromTheRuleSourceBeforeRunCannotDeadlock: before Run starts Flush
+// does the pass inline under runMu and reads the rule source there, so a rule
+// source that calls Flush must not wait on the lock its own caller holds.
+func TestFlushFromTheRuleSourceBeforeRunCannotDeadlock(t *testing.T) {
+	rule := testRule(func(r *Rule) { r.DebounceSeconds = 1 })
+	var n *Notifier
+	var armed atomic.Bool
+	n = New(quietLog(), RuleFunc(func() ([]Rule, error) {
+		if armed.CompareAndSwap(true, false) {
+			n.Flush(time.Now().Add(time.Hour))
+		}
+		return []Rule{rule}, nil
+	}), WithDoer(&fakeDoer{replies: []reply{{status: 200}}}), WithRulesTTL(0))
+
+	armed.Store(true)
+	done := make(chan struct{})
+	go func() { defer close(done); n.Flush(time.Now().Add(time.Hour)) }()
+	waitOrDeadlock(t, done, "an inline Flush whose rule source calls Flush")
 }

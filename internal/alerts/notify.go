@@ -179,13 +179,18 @@ type Notifier struct {
 	// what it costs a test to break it.
 	co *coalescer
 
-	// flushes is how an exported Flush reaches co while Run is live: the run
-	// loop does the pass on its own goroutine and closes the request's done.
-	// runMu guards running, the switch between that and doing it inline;
+	// flushKick is how an exported Flush reaches co once Run has started: it
+	// records the latest requested time in flushAt and kicks the run loop,
+	// which does the pass on its own goroutine. Flush never waits for that
+	// pass, so it cannot deadlock against Run -- not from a delivery during
+	// shutdown, and not from a rule source running on Run's own goroutine.
+	// runMu guards running, the switch between that and doing the pass inline;
 	// Flush holds it across an inline pass so Run cannot start mid-pass.
-	flushes chan flushReq
-	runMu   sync.Mutex
-	running bool
+	flushKick chan struct{}
+	flushMu   sync.Mutex
+	flushAt   time.Time
+	runMu     sync.Mutex
+	running   bool
 
 	mu        sync.Mutex
 	stats     Stats
@@ -213,7 +218,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		send:       make(chan Delivery, defaultSendDepth),
 		record:     make(chan Event, defaultRecordDepth),
 		co:         newCoalescer(),
-		flushes:    make(chan flushReq),
+		flushKick:  make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
 	n.sleep = sleepCtx
@@ -335,9 +340,14 @@ func (n *Notifier) Run(ctx context.Context) {
 			}
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
-		case req := <-n.flushes:
-			n.flush(n.currentRules(), req.now)
-			close(req.done)
+		case <-n.flushKick:
+			n.flushMu.Lock()
+			at := n.flushAt
+			n.flushAt = time.Time{}
+			n.flushMu.Unlock()
+			if !at.IsZero() {
+				n.flush(n.currentRules(), at)
+			}
 		}
 	}
 }
@@ -376,33 +386,40 @@ func (n *Notifier) flush(rules []Rule, now time.Time) {
 	n.bump(func(s *Stats) { s.Pending = pending })
 }
 
-// flushReq asks the run loop for one coalescing pass at now.
-type flushReq struct {
-	now  time.Time
-	done chan struct{}
-}
-
 // Flush is the test and shutdown entry point into one coalescing pass.
 //
 // co is single-goroutine (see coalescer), so Flush never walks it beside a
-// live Run: it hands the pass to the run loop and waits for it. Before Run
-// starts it runs the pass inline, synchronously, so the caller can read
-// n.send straight after. After Run has stopped it does nothing -- send is
-// closed and there is no sender left to deliver to.
+// live Run. Before Run starts it runs the pass inline and synchronously, so
+// the caller can read n.send straight after. Once Run has started it only
+// REQUESTS the pass -- the latest requested time wins -- and returns without
+// waiting: the run loop does it on its own goroutine. Waiting would deadlock
+// whenever the caller is something Run is itself waiting on (a delivery
+// during the shutdown drain) or is Run's own goroutine (a rule source read
+// during a pass). After Run has stopped the request is simply never served.
+//
+// TryLock rather than Lock for the same reason: if runMu is held, either
+// another inline pass is in progress -- possibly this goroutine's own, when a
+// rule source calls Flush from inside it -- or Run is starting. Either way the
+// request is left for the run loop instead of waiting on the lock.
 func (n *Notifier) Flush(now time.Time) {
-	n.runMu.Lock()
-	if !n.running {
-		n.flush(n.currentRules(), now)
+	if n.runMu.TryLock() {
+		if !n.running {
+			n.flush(n.currentRules(), now)
+			n.runMu.Unlock()
+			return
+		}
 		n.runMu.Unlock()
-		return
 	}
-	n.runMu.Unlock()
 
-	req := flushReq{now: now, done: make(chan struct{})}
+	n.flushMu.Lock()
+	if now.After(n.flushAt) {
+		n.flushAt = now
+	}
+	n.flushMu.Unlock()
 	select {
-	case n.flushes <- req:
-		<-req.done
-	case <-n.done:
+	case n.flushKick <- struct{}{}:
+	default:
+		// A kick is already pending; it will read the flushAt set above.
 	}
 }
 
