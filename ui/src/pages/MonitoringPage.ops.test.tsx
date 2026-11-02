@@ -37,11 +37,13 @@ const state = vi.hoisted(() => ({
   failDestinations: false,
   cpuCeiling: 85,
   system: null as unknown,
+  connected: false,
 }));
 
 vi.mock("@/hooks/useLiveData", () => ({
   useLiveData: () => ({
     system: state.system,
+    connected: state.connected,
     bitrate: [],
     logs: [],
     status: null,
@@ -91,6 +93,7 @@ afterEach(() => {
   state.failDestinations = false;
   state.cpuCeiling = 85;
   state.system = null;
+  state.connected = false;
 });
 
 const proc = (name: string, pstate: string) => ({
@@ -213,6 +216,48 @@ describe("MonitoringPage: the verdict reads the whole page (2026-11 review, row 
     state.system = host(30);
     render(<MemoryRouter><MonitoringPage /></MemoryRouter>);
     expect(await screen.findByText(translate("en", "mon.verdictAllRunning", { count: 12 }))).toBeTruthy();
+  });
+
+  /* The sentence is a live region. It holds the percentage it quoted until
+   * the figure moves 5 points, so a CPU hovering at 89-91% is not
+   * re-announced on every host sample; the tile carries the exact figure. */
+  it("holds the quoted percentage through small moves and re-words on a real one", async () => {
+    state.processes = allRunning();
+    state.system = host(91);
+    const ui = () => <MemoryRouter><MonitoringPage /></MemoryRouter>;
+    const { rerender } = render(ui());
+    const at = (pct: number) => translate("en", "mon.verdictCpuHigh", { pct, limit: 85 });
+    expect(await screen.findByText(at(91))).toBeTruthy();
+
+    state.system = host(89);
+    rerender(ui());
+    expect(screen.getByText(at(91))).toBeTruthy();
+    expect(screen.queryByText(at(89))).toBeNull();
+
+    state.system = host(97);
+    rerender(ui());
+    expect(screen.getByText(at(97))).toBeTruthy();
+
+    // A change of verdict re-words at once.
+    state.system = host(30);
+    rerender(ui());
+    expect(screen.getByText(translate("en", "mon.verdictAllRunning", { count: 12 }))).toBeTruthy();
+  });
+
+  it("says the live figures are frozen once the socket drops, not before it first connects", async () => {
+    state.processes = allRunning();
+    state.system = host(30);
+    const ui = () => <MemoryRouter><MonitoringPage /></MemoryRouter>;
+    const { rerender } = render(ui());
+    const offline = translate("en", "chrome.socketOfflineHint");
+    expect(await screen.findByText(translate("en", "mon.verdictAllRunning", { count: 12 }))).toBeTruthy();
+    expect(screen.queryByText(offline)).toBeNull();
+
+    state.connected = true;
+    rerender(ui());
+    state.connected = false;
+    rerender(ui());
+    expect(screen.getByText(offline)).toBeTruthy();
   });
 
   it("still warns when no process is running at all", async () => {

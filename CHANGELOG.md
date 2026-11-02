@@ -727,20 +727,21 @@ its first tagged release.
   values, and fails a change that drops one below WCAG AA.
 
 - **Console quick wins from the 2026-11 design review.** Monitoring's sentence under the title now
-  reads the whole page: it says a process list has stopped updating, that the relay is losing
+  reads the whole page: it says live updates have dropped or the process list has stopped updating, that the relay is losing
   packets, or that host CPU or memory is over its threshold, before it says "All 12 running", and
   it turns amber when it does, even with no process running. The audio meter lights flat green, yellow and red zones (green below
   -18 dBFS, red from -2) instead of a colour ramp, and the bitrate chart is a straight green trace
   that breaks where samples are missing, with the programme's degraded-link failover floor drawn
   as a dashed line when that failover is on. A running process is plain text with a small green
-  dot instead of a filled green pill; filled pills stay for warnings and failures, and an on-air
-  destination's badge and the Recordings page's running recorder are a solid red tally lamp. Form labels
+  dot instead of a filled green pill; filled pills stay for warnings and failures, and on air is a solid red tally lamp everywhere it
+  is shown: the header's live count, the Dashboard's ON AIR bar, a destination card's badge and the
+  Recordings page's running recorder. Form labels
   are sentence case instead of capitals. Every control draws the same 2px focus ring at a 2px
   offset (tab triggers and the dialog's close button drew none), buttons move down 1px when
   pressed, and text fields have a visible edge (3.66:1 against a card, from 1.24:1). Monitoring's
   info icons, switches and "Show log" links have 24px targets. Pages share one right edge whether
   or not they scroll, the programme switcher shows the programme's name instead of cutting it to
-  ten characters, headings and help text wrap evenly, and Routing no longer scrolls sideways on a
+  ten characters (on a phone, the part before the dash, with the wordmark giving way to the logo), headings and help text wrap evenly, and Routing no longer scrolls sideways on a
   phone. The Dashboard's compact chat Send button has a name, and the Sources ingest fields are
   tied to their captions for screen readers. The sign-in screen names the server it is signing in
   to and whether that server answers (degraded only on the health check's own 503), from the

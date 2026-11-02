@@ -12,6 +12,7 @@ const calm: MonitorVerdictInput = {
   running: 12,
   failed: 0,
   processesStale: false,
+  liveLost: false,
   relayDropped: 0,
   ingestLossPercent: 0,
   cpuPercent: 30,
@@ -48,6 +49,15 @@ describe("monitorVerdict", () => {
     const v = monitorVerdict({ ...calm, processesStale: true });
     expect(v.key).toBe("mon.verdictStale");
     expect(v.tone).toBe("warn");
+  });
+
+  it("says live updates are lost before quoting any figure the socket froze", () => {
+    const v = monitorVerdict({ ...calm, liveLost: true, cpuPercent: 99, processesStale: true });
+    expect(v).toEqual({ key: "chrome.socketOfflineHint", params: {}, tone: "warn" });
+    // A failure still comes first: it was true when the socket last spoke.
+    expect(monitorVerdict({ ...calm, liveLost: true, failed: 1, running: 11 }).key).toBe(
+      "mon.verdictProcessesFailed",
+    );
   });
 
   it("reports ingest loss from either the drop counter or the loss percentage", () => {

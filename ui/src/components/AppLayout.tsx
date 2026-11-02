@@ -292,7 +292,9 @@ export function AppLayout({
             something to sit in. The mark carries its own colour. */}
         <div className="flex items-center gap-2">
           <BrandMark size={18} />
-          <span className="text-base font-semibold tracking-tight">polyemesis</span>
+          {/* The mark alone on a phone: the wordmark's 90px is what the
+              programme switcher needs to name its programme there. */}
+          <span className="hidden text-base font-semibold tracking-tight sm:inline">polyemesis</span>
         </div>
 
         {/* #638: which programme everything on screen is describing, and the
@@ -350,8 +352,14 @@ export function AppLayout({
 
         <div className="ml-auto flex items-center gap-3">
           {liveCount > 0 && (
-            <Badge variant="live" className="hidden sm:inline-flex">
-              <StatusDot tone="live" size="sm" />
+            // On air: the tally lamp, as on the On Air bar and the destination
+            // cards. Variant name unchanged; the fill is the lamp's.
+            <Badge
+              variant="live"
+              data-testid="header-on-air"
+              className="hidden border-transparent bg-tally text-tally-foreground sm:inline-flex"
+            >
+              <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-tally-foreground" />
               {liveLabel}
             </Badge>
           )}

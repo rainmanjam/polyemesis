@@ -34,6 +34,7 @@ export function ProgrammeSwitcher() {
   // gives an operator a control that silently does nothing — the shape #606
   // kept coming back as.
   if (!programmeKnown || programmes.length < 2) return null;
+  const current = programmes.find((p) => p.id === programme);
 
   return (
     <Select
@@ -48,10 +49,18 @@ export function ProgrammeSwitcher() {
         // —…" at 10rem with 400px of empty header beside it, and on a
         // multi-programme install the scope is the one thing an operator must
         // not misread. Grows to its content up to 18rem on desktop; on a
-        // phone it keeps to 9rem, with every full name in the open menu.
+        // phone it keeps to 9rem and shows the name's short part, with every
+        // full name in the open menu.
         className="h-7 w-auto min-w-0 max-w-[9rem] text-sm sm:max-w-[18rem] [&>span]:truncate"
       >
-        <SelectValue placeholder={t("chrome.programme")} />
+        <SelectValue placeholder={t("chrome.programme")}>
+          {current && (
+            <>
+              <span className="truncate sm:hidden">{shortProgrammeName(current.name)}</span>
+              <span className="hidden truncate sm:inline">{current.name}</span>
+            </>
+          )}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {programmes.map((p) => (
@@ -62,4 +71,12 @@ export function ProgrammeSwitcher() {
       </SelectContent>
     </Select>
   );
+}
+
+/** The part of a programme name before a spaced dash ("Main Programme" from
+ *  "Main Programme — Studio A"), for a phone-width header. The whole name when
+ *  there is no such separator. Presentation only: the name itself is the
+ *  operator's and is never rewritten. */
+function shortProgrammeName(name: string): string {
+  return name.split(/\s+[—–-]\s+/)[0] || name;
 }

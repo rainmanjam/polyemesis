@@ -539,9 +539,11 @@
   /* THE ONE FOCUS RING. Every control draws this outline and nothing else:
      2px of --ring (--primary-bright's value) at a 2px offset, the website's
      ring exactly. It used to be two systems -- buttons and fields drew a
-     box-shadow ring with an offset painted in --surface (the wrong colour on
-     a card), while nav links fell through to an outline the colour of their
-     own text -- and some controls (tab triggers, the dialog close) drew none.
+     box-shadow ring with a 1px offset painted in --surface (the wrong colour
+     on a card), while links fell through to this outline at a 1px offset --
+     and some controls (tab triggers, the dialog close) drew none. (An outline
+     measured mid-focus can read as the text colour: transition-colors fades
+     outline-color in from currentColor over --motion-instant.)
      Components no longer set focus-visible:outline-none or ring-* at all; a
      control that needs something else has to argue for it here. */
   :focus-visible,

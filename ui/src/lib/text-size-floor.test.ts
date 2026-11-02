@@ -57,7 +57,7 @@ const ALLOWED: Record<string, number> = {
   "components/signature/AudioMeter.tsx": 3,
   // The unit beside a stat value ("ms", "%"). A unit, not content.
   "components/signature/Stat.tsx": 1,
-  "pages/ClipEditor.tsx": 14,
+  "pages/ClipEditor.tsx": 9,
   "pages/ClipsPage.tsx": 0,
   "pages/Dashboard.tsx": 5,
   "pages/LibraryPage.tsx": 6,

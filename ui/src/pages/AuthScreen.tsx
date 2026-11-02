@@ -182,9 +182,11 @@ export function AuthScreen({
                 a screen-reader user already in the form still hears it. Not an
                 aria-live attribute, which the form keeps for the password
                 strength word alone. */}
-            <dd role="status" className="flex items-center gap-1.5 text-foreground">
+            <dd className="flex items-center gap-1.5 text-foreground">
               <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CONNECTION[conn].dot)} />
-              {t(CONNECTION[conn].key)}
+              {/* On a span, not the <dd>: a role on the <dd> takes it out of
+                  the definition list's structure. */}
+              <span role="status">{t(CONNECTION[conn].key)}</span>
             </dd>
           </dl>
           <CardHeader>

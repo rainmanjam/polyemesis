@@ -11,6 +11,8 @@ import type { TranslationKey } from "./i18n";
  *
  * Order is what an operator needs to hear first:
  *   1. a failed process (bad)
+ *   1b. the live socket has dropped since it last connected, so every host
+ *      and relay figure on the page is frozen (warn)
  *   2. a process list that has stopped refreshing, because every reading
  *      below it is then out of date (warn)
  *   3. packets lost or dropped on the relay (warn)
@@ -27,6 +29,9 @@ export interface MonitorVerdictInput {
   failed: number;
   /** The process poll has failed long enough to be called stale. */
   processesStale: boolean;
+  /** The live socket was connected and is not now: CPU, memory and relay
+   *  figures are the last ones it sent. */
+  liveLost: boolean;
   relayDropped: number;
   ingestLossPercent: number;
   /** Undefined until the first host sample arrives. */
@@ -58,6 +63,9 @@ export function memoryOver(memPercent: number | undefined): boolean {
 export function monitorVerdict(v: MonitorVerdictInput): MonitorVerdict {
   if (v.failed > 0) {
     return { key: "mon.verdictProcessesFailed", params: { count: v.failed }, tone: "bad" };
+  }
+  if (v.liveLost) {
+    return { key: "chrome.socketOfflineHint", params: {}, tone: "warn" };
   }
   if (v.processesStale) {
     return { key: "mon.verdictStale", params: {}, tone: "warn" };

@@ -107,7 +107,15 @@ export function OnAirBar({
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
         <h2 className="flex items-center gap-2">
-          <StatusDot tone={head.tone} size="lg" />
+          {/* On air is the tally lamp: a solid --tally square, the same red as
+              the destination cards' on-air badges, never the green that also
+              means running and healthy (2026-11 review). The words beside it
+              carry the state without the colour. */}
+          {air.live > 0 ? (
+            <span data-testid="on-air-lamp" aria-hidden="true" className="h-3 w-3 shrink-0 rounded-sm bg-tally" />
+          ) : (
+            <StatusDot tone={head.tone} size="lg" />
+          )}
           <span className="text-[15px] font-semibold uppercase tracking-wide">{t(head.text)}</span>
           {air.live > 0 && onAirSec > 0 && (
             <span className="tnum font-mono text-[13px] font-normal text-muted-foreground" data-testid="on-air-duration">

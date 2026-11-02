@@ -78,6 +78,23 @@ describe("the programme switcher", () => {
     expect(screen.getByTestId("programme-switcher").textContent).toContain("Horizontal");
   });
 
+  // 2026-11 review, row 20: on a phone the trigger had room for "Mai…". It
+  // shows the name's short part there (before " — "), and the whole name
+  // from sm up.
+  it("shows a short label on a phone and the full name from sm up", () => {
+    show({
+      programmes: [
+        { id: 1, name: "Main Programme — Studio A" },
+        { id: 2, name: "Vertical" },
+      ],
+    });
+    const trigger = screen.getByTestId("programme-switcher");
+    const phone = trigger.querySelector(".sm\\:hidden");
+    const wide = trigger.querySelector(".hidden.sm\\:inline");
+    expect(phone?.textContent).toBe("Main Programme");
+    expect(wide?.textContent).toBe("Main Programme — Studio A");
+  });
+
   it("offers the others, and choosing one is remembered", async () => {
     show();
     fireEvent.click(screen.getByTestId("programme-switcher"));

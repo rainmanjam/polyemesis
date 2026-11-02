@@ -162,7 +162,7 @@ export function VerticalExportPanel({
 
             {options && options.templates.length > 0 && (
               <div className="flex flex-col gap-1">
-                <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+                <Label>
                   {t("clipedit.vertical.templates")}
                 </Label>
                 {options.templates.map((tpl) => (
@@ -181,7 +181,7 @@ export function VerticalExportPanel({
             )}
 
             <div className="flex flex-col gap-1">
-              <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+              <Label>
                 {t("clipedit.vertical.layout")}
               </Label>
               <div className="grid grid-cols-1 gap-1.5">
@@ -204,7 +204,7 @@ export function VerticalExportPanel({
             {spec.layout === "stacked" && (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+                  <Label>
                     {t("clipedit.vertical.faceBox")}
                   </Label>
                   <Button variant="secondary" size="sm" onClick={grabFrame}>

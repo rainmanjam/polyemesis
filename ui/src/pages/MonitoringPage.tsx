@@ -510,8 +510,12 @@ function TileRemedy({
 export function MonitoringPage() {
   const t = useT();
   const {
-    system, bitrate, logs, status, clearLogs, programme, programmeKnown, programmes, selectProgramme,
+    system, bitrate, logs, status, clearLogs, programme, programmeKnown, programmes, selectProgramme, connected,
   } = useLiveData();
+  // Lost, not "not yet": the socket starts closed on every page load, and only
+  // a drop after it has connected means the figures below are frozen.
+  const [everConnected, setEverConnected] = useState(false);
+  if (connected && !everConnected) setEverConnected(true);
   const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   // False until the first answer. Before it, an empty list is loading; after it,
   // an empty list is the truth: nothing is running (A68).
@@ -758,6 +762,7 @@ export function MonitoringPage() {
     running: runningCount,
     failed: failedCount,
     processesStale: procFreshness.stale,
+    liveLost: everConnected && !connected,
     relayDropped: status?.relay.dropped ?? 0,
     ingestLossPercent: status?.relay.lossPercent ?? 0,
     cpuPercent: system?.cpuPercent,
