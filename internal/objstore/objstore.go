@@ -186,7 +186,7 @@ func (c *Client) Put(ctx context.Context, key string, body io.ReadSeeker, size i
 	}
 	h := http.Header{}
 	h.Set("Content-MD5", md5B64)
-	h.Set("Content-Type", "application/octet-stream")
+	h.Set(headerContentType, "application/octet-stream")
 	for k, v := range meta {
 		h.Set("X-Amz-Meta-"+k, v)
 	}
@@ -230,7 +230,7 @@ type Part struct {
 // CreateMultipart starts a multipart upload and returns its upload id.
 func (c *Client) CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error) {
 	h := http.Header{}
-	h.Set("Content-Type", "application/octet-stream")
+	h.Set(headerContentType, "application/octet-stream")
 	for k, v := range meta {
 		h.Set("X-Amz-Meta-"+k, v)
 	}
@@ -274,7 +274,7 @@ func (c *Client) CompleteMultipart(ctx context.Context, key, uploadID string, pa
 	body := b.Bytes()
 	sum := sha256.Sum256(body)
 	h := http.Header{}
-	h.Set("Content-Type", "application/xml")
+	h.Set(headerContentType, "application/xml")
 	resp, err := c.doQ(ctx, "CompleteMultipartUpload", http.MethodPost, key, url.Values{"uploadId": {uploadID}}, h,
 		bytes.NewReader(body), int64(len(body)), hex.EncodeToString(sum[:]))
 	if err != nil {
@@ -366,6 +366,9 @@ func (c *Client) MakeBucket(ctx context.Context) error {
 	}
 	return e
 }
+
+// headerContentType is set on every request that carries a body.
+const headerContentType = "Content-Type"
 
 const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 

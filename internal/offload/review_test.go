@@ -2,6 +2,10 @@ package offload
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"strings"
 	"sync"
@@ -255,5 +259,35 @@ func TestAFailureFromAnOldAddressRaisesNoStuckAlert(t *testing.T) {
 	}
 	if it, _ := f.item(id, name); it.State == db.OffloadStuck {
 		t.Fatalf("row marked stuck at the new address: %+v", it)
+	}
+}
+
+// recordingPut remembers the digests the probe sent with its object.
+type recordingPut struct {
+	*memStore
+	sha, md5b64 string
+	body        []byte
+}
+
+func (r *recordingPut) Put(ctx context.Context, key string, body io.ReadSeeker, size int64, sh, mb string, meta map[string]string) (string, error) {
+	b, _ := io.ReadAll(body)
+	r.body, r.sha, r.md5b64 = b, sh, mb
+	_, _ = body.Seek(0, io.SeekStart)
+	return r.memStore.Put(ctx, key, body, size, sh, mb, meta)
+}
+
+// Guard for sonar-project.properties e14: the probe's MD5 is exactly the
+// Content-MD5 of the bytes it puts (the S3 integrity header), and the
+// SHA-256 beside it is the payload hash the request is signed over.
+func TestTheProbesMD5IsOnlyTheContentMD5Header(t *testing.T) {
+	rp := &recordingPut{memStore: newMem()}
+	res := Probe(context.Background(), db.StorageTarget{Name: "p"}, func(db.StorageTarget) (Client, error) { return rp, nil })
+	if !res.OK {
+		t.Fatalf("%+v", res)
+	}
+	m := md5.Sum(rp.body)
+	sh := sha256.Sum256(rp.body)
+	if rp.md5b64 != base64.StdEncoding.EncodeToString(m[:]) || rp.sha != hex.EncodeToString(sh[:]) {
+		t.Fatalf("probe digests are not the Content-MD5 and payload SHA-256 of what it put: md5=%q sha=%q", rp.md5b64, rp.sha)
 	}
 }

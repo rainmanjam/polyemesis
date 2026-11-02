@@ -154,7 +154,11 @@ func New(log *slog.Logger, store *db.DB, box *secrets.Box, rec Recordings, onCha
 		o(s)
 	}
 	if s.onChange == nil {
-		s.onChange = func() {}
+		// Nobody to tell: a service built without a listener (tests, tools)
+		// still runs; the change is simply not announced.
+		s.onChange = func() {
+			// Intentionally empty: see above.
+		}
 	}
 	return s
 }

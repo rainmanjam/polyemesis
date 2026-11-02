@@ -402,3 +402,41 @@ func TestAPlaylistETagFollowsItsContentNotItsMtime(t *testing.T) {
 		t.Fatalf("same-length, same-mtime rewrite kept ETag %q", a)
 	}
 }
+
+// Sonar S2083/S6549: nothing outside the playout directory is ever read,
+// hashed or served -- not by "..", not by an encoded traversal, not by a
+// leading slash, not through a symlink that points out -- and every such
+// request is the same 404 with no-store as a file that does not exist.
+func TestNothingOutsideThePlayoutDirectoryIsReadOrDisclosed(t *testing.T) {
+	h, handler := servedHarness(t, nil)
+	outside := filepath.Join(filepath.Dir(h.dir), "outside-secret.m3u8")
+	if err := os.WriteFile(outside, []byte("#EXTM3U\n# outside the root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(h.dir, "hd", "link.m3u8")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"/playout/../outside-secret.m3u8",
+		"/playout/hd/../../outside-secret.m3u8",
+		"/playout/hd/..%2f..%2foutside-secret.m3u8",
+		"/playout/%2e%2e/outside-secret.m3u8",
+		"/playout//" + strings.TrimPrefix(outside, "/"),
+		"/playout/hd/link.m3u8",
+	} {
+		w := get(t, handler, p, "10.0.0.1")
+		if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" ||
+			w.Header().Get("ETag") != "" || strings.Contains(w.Body.String(), "outside the root") {
+			t.Errorf("%s: %d cc=%q etag=%q body=%q", p, w.Code, w.Header().Get("Cache-Control"), w.Header().Get("ETag"), w.Body.String())
+		}
+	}
+	// And a real file inside still serves, with Range.
+	r := httptest.NewRequest(http.MethodGet, "/playout/hd/seg_00000.ts", nil)
+	r.RemoteAddr = "10.0.0.1:1"
+	r.Header.Set("Range", "bytes=0-9")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusPartialContent || w.Body.Len() != 10 {
+		t.Fatalf("range inside the root: %d %d bytes", w.Code, w.Body.Len())
+	}
+}

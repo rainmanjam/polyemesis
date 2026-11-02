@@ -45,7 +45,7 @@ const PROVIDER_ENDPOINT: Record<StorageProvider, string> = {
   s3: "https://s3.us-east-1.amazonaws.com",
   r2: "https://ACCOUNT_ID.r2.cloudflarestorage.com",
   b2: "https://s3.us-west-004.backblazeb2.com",
-  minio: "http://minio.lan:9000",
+  minio: "https://minio.lan:9000",
   wasabi: "https://s3.us-east-1.wasabisys.com",
 };
 const PROVIDER_REGION: Record<StorageProvider, string> = {

@@ -109,15 +109,8 @@ func validateStorageTarget(t db.StorageTarget) error {
 	default:
 		return errors.New("provider must be one of s3, r2, b2, minio, wasabi")
 	}
-	u, err := url.Parse(t.Endpoint)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return errors.New("endpoint must be an http(s) URL, e.g. https://s3.us-east-1.amazonaws.com")
-	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("endpoint must not carry credentials, a query or a fragment; credentials go in the access key fields")
-	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && !netguard.IsPublicAddr(ip) && !t.AllowPrivateTarget {
-		return errors.New("endpoint is a private address; enable allowPrivateTarget to offload to a self-hosted target on purpose")
+	if err := validateEndpoint(t.Endpoint, t.AllowPrivateTarget); err != nil {
+		return err
 	}
 	if !bucketName.MatchString(t.Bucket) {
 		return errors.New("bucket must be 3-63 characters of lowercase letters, digits, dots and hyphens")
@@ -177,6 +170,26 @@ func locationChanged(saved, next db.StorageTarget) bool {
 		saved.Region != next.Region || saved.PathStyle != next.PathStyle || saved.AccessKeyID != next.AccessKeyID
 }
 
+// msgInvalidID is the 400 every storage route gives a path id that is not one.
+const msgInvalidID = "invalid id"
+
+// validateEndpoint refuses an endpoint that is not an http(s) URL with a
+// host, one that carries credentials, a query or a fragment, and a literal
+// private address the target did not opt into.
+func validateEndpoint(endpoint string, allowPrivate bool) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return errors.New("endpoint must be an http(s) URL, e.g. https://s3.us-east-1.amazonaws.com")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("endpoint must not carry credentials, a query or a fragment; credentials go in the access key fields")
+	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil && !netguard.IsPublicAddr(ip) && !allowPrivate {
+		return errors.New("endpoint is a private address; enable allowPrivateTarget to offload to a self-hosted target on purpose")
+	}
+	return nil
+}
+
 // readSafeStorageTarget is the read-scope view: no secret (never marshalled
 // anyway) and no access key id.
 func readSafeStorageTarget(t db.StorageTarget) db.StorageTarget {
@@ -223,7 +236,7 @@ func (s *Server) handleListStorageTargets(w http.ResponseWriter, r *http.Request
 func (s *Server) handleGetStorageTarget(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, msgInvalidID)
 		return
 	}
 	t, err := s.store.GetStorageTarget(s.box, id)
@@ -269,7 +282,7 @@ func (s *Server) handleCreateStorageTarget(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleUpdateStorageTarget(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, msgInvalidID)
 		return
 	}
 	existing, err := s.store.GetStorageTarget(s.box, id)
@@ -324,7 +337,7 @@ func (s *Server) handleUpdateStorageTarget(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, msgInvalidID)
 		return
 	}
 	t, err := s.store.GetStorageTarget(s.box, id)
@@ -458,7 +471,7 @@ func (idx offloadIndex) view(filename string) *recordingOffload {
 func (s *Server) handleRetryStorageTarget(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, msgInvalidID)
 		return
 	}
 	if _, err := s.store.GetStorageTarget(s.box, id); err != nil {
@@ -473,7 +486,7 @@ func (s *Server) handleRetryStorageTarget(w http.ResponseWriter, r *http.Request
 func (s *Server) handleRetryRecordingOffload(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid id")
+		writeError(w, http.StatusBadRequest, msgInvalidID)
 		return
 	}
 	rec, err := s.store.GetRecording(id)

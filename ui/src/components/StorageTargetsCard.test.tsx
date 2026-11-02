@@ -100,3 +100,49 @@ describe("StorageTargetsCard: a response that is not the list", () => {
     expect(screen.queryByText("No storage target yet.")).toBeNull();
   });
 });
+
+describe("StorageTargetsCard: adding and deleting", () => {
+  it("creates a target from the form with the secret it was given", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [], available: true });
+    const create = vi.spyOn(api.storage, "create").mockResolvedValue(target());
+    render(<StorageTargetsCard />);
+    await screen.findByText("No storage target yet.");
+    fireEvent.click(screen.getByRole("button", { name: /Add target/ }));
+    const dialog = await screen.findByRole("dialog");
+    const save = within(dialog).getByRole("button", { name: /^Save$/ });
+    expect((save as HTMLButtonElement).disabled).toBe(true); // a new target needs its secret
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "archive" } });
+    fireEvent.change(within(dialog).getByLabelText("Endpoint"), { target: { value: "https://s3.example" } });
+    fireEvent.change(within(dialog).getByLabelText("Bucket"), { target: { value: "media" } });
+    fireEvent.change(within(dialog).getByLabelText("Access key ID"), { target: { value: "fake-access-key" } });
+    fireEvent.change(within(dialog).getByLabelText(/Secret access key/), { target: { value: "fake-secret-value-not-real" } });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "archive", bucket: "media", secretAccessKey: "fake-secret-value-not-real" }),
+      ),
+    );
+  });
+
+  it("deletes a target after confirming", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: true });
+    const remove = vi.spyOn(api.storage, "remove").mockResolvedValue({ status: "deleted" });
+    render(<StorageTargetsCard />);
+    const row = await screen.findByTestId("storage-target");
+    fireEvent.click(within(row).getByRole("button", { name: "Delete target" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(1));
+  });
+
+  it("reports a failed save and keeps the dialog open", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [target({ counts: {} })], available: false });
+    vi.spyOn(api.storage, "update").mockRejectedValue(new Error("bucket must be 3-63 characters"));
+    render(<StorageTargetsCard />);
+    await screen.findByText(/Offload is not running on this server/);
+    const row = await screen.findByTestId("storage-target");
+    fireEvent.click(within(row).getByRole("button", { name: "Edit target" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Save$/ }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+  });
+});

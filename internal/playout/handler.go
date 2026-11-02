@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -55,9 +56,6 @@ func (m *Manager) Handler(prefix string) http.Handler {
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
-	fs := http.FileServer(http.Dir(m.dir))
-	stripped := http.StripPrefix(prefix, fs)
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s := m.Settings()
 		if s.AllowCrossOrigin {
@@ -104,23 +102,51 @@ func (m *Manager) Handler(prefix string) http.Handler {
 			notFound(w, r)
 			return
 		}
-		// Existence first, so a missing file's 404 carries no-store rather than
-		// the caching headers a present one would get -- http.FileServer's own
-		// error path drops them, and a CDN would otherwise be free to hold the
-		// 404 of a segment that is about to be written.
-		fi, err := os.Stat(filepath.Join(m.dir, filepath.FromSlash(rel)))
-		if err != nil || !fi.Mode().IsRegular() {
+		// ONE confined open, used for everything after it. The file is opened
+		// through an os.Root on the playout directory, which refuses a path
+		// that leaves it -- "..", an absolute path, a symlink pointing out --
+		// and the same open handle is what is stat'ed, hashed for the ETag and
+		// served. Any failure, missing or refused alike, is the same 404 with
+		// no-store, so the answer says nothing about what exists outside.
+		f, fi, ok := m.openServed(rel)
+		if !ok {
+			notFound(w, r)
+			return
+		}
+		defer f.Close()
+
+		w.Header().Set("Content-Type", ctype)
+		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
+		if !m.setETag(w, f, ext, fi) {
 			notFound(w, r)
 			return
 		}
 
-		w.Header().Set("Content-Type", ctype)
-		w.Header().Set("Cache-Control", cacheControl(ext, maxSegmentAge(s), sharedWindow(s), SharedCacheable(r.Context())))
-		m.setETag(w, rel, ext, fi)
-
 		m.observe(r, rel, ext)
-		stripped.ServeHTTP(w, r)
+		// ServeContent, not FileServer: it serves the handle already opened
+		// and confined above, and still answers Range and If-None-Match.
+		http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
 	})
+}
+
+// openServed opens rel under the playout directory through an os.Root, so it
+// cannot resolve outside it, and returns it only if it is a regular file.
+func (m *Manager) openServed(rel string) (*os.File, os.FileInfo, bool) {
+	root, err := os.OpenRoot(m.dir)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer root.Close()
+	f, err := root.Open(filepath.FromSlash(rel))
+	if err != nil {
+		return nil, nil, false
+	}
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		f.Close()
+		return nil, nil, false
+	}
+	return f, fi, true
 }
 
 // sharedCacheKey carries the origin's access decision down from the API's
@@ -206,17 +232,22 @@ func cacheControl(ext string, segmentAge, window int, shared bool) string {
 // coarser than the rewrite would otherwise hand a 304 for a changed playlist.
 // Segments are written once under a name never reused, so size and mtime are
 // exact for them.
-func (m *Manager) setETag(w http.ResponseWriter, rel, ext string, fi os.FileInfo) {
+func (m *Manager) setETag(w http.ResponseWriter, f *os.File, ext string, fi os.FileInfo) bool {
 	if manifestExts[ext] {
-		b, err := os.ReadFile(filepath.Join(m.dir, filepath.FromSlash(rel)))
-		if err != nil {
-			return
+		// The already-confined handle, read from its start, then rewound for
+		// the serve that follows.
+		h := sha256.New()
+		if _, err := io.Copy(h, f); err != nil {
+			return false
 		}
-		sum := sha256.Sum256(b)
-		w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
-		return
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return false
+		}
+		w.Header().Set("ETag", `"`+hex.EncodeToString(h.Sum(nil)[:16])+`"`)
+		return true
 	}
 	w.Header().Set("ETag", `"`+strconv.FormatInt(fi.Size(), 16)+"-"+strconv.FormatInt(fi.ModTime().UnixNano(), 16)+`"`)
+	return true
 }
 
 // notFound is every refusal this handler gives: never stored by anything.

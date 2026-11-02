@@ -70,7 +70,11 @@ func Probe(ctx context.Context, t db.StorageTarget, newClient func(db.StorageTar
 	res.Key = key
 	payload := []byte("polyemesis storage target check " + hex.EncodeToString(nonce[:]) + "\n")
 	sh := sha256.Sum256(payload)
-	mb := md5.Sum(payload)
+	// MD5 here is the S3 Content-MD5 integrity header the protocol requires
+	// (the service recomputes it and refuses a mismatch), not a security use.
+	// Sonar go:S4790 is scoped off for this file in sonar-project.properties
+	// (e14); TestTheProbesMD5IsOnlyTheContentMD5Header holds that true.
+	mb := md5.Sum(payload) // NOSONAR go:S4790 -- S3 Content-MD5 integrity header, not a security use
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if _, err := c.Put(ctx, key, bytes.NewReader(payload), int64(len(payload)), hex.EncodeToString(sh[:]),
