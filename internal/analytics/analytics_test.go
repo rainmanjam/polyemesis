@@ -530,3 +530,21 @@ func TestDisabledSamplerAsksNothingAndClosesTheOpenStream(t *testing.T) {
 		t.Fatal("the live view still says enabled")
 	}
 }
+
+// TestAverageTotalSkipsTicksAtWhichNothingReported: a tick where every
+// platform was silent is a gap, not a tick with an audience of 0, so it does
+// not pull the average down.
+func TestAverageTotalSkipsTicksAtWhichNothingReported(t *testing.T) {
+	t0 := time.Unix(1_800_000_000, 0)
+	s := Summarise([]Sample{
+		{At: t0, Platform: "kick", Viewers: ip(10)},
+		{At: t0.Add(time.Minute), Platform: "kick"},
+		{At: t0.Add(2 * time.Minute), Platform: "kick", Viewers: ip(20)},
+	})
+	if s.AverageTotal == nil || *s.AverageTotal != 15 {
+		t.Fatalf("average total = %v, want 15 (the silent tick left out)", s.AverageTotal)
+	}
+	if s.Rows[0].Average == nil || *s.Rows[0].Average != 15 {
+		t.Fatalf("row average = %v, want 15", s.Rows[0].Average)
+	}
+}
