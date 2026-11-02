@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
 	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
@@ -45,9 +46,9 @@ func tsFixture(t *testing.T, ffmpeg string, seconds int, extra ...string) []byte
 
 // pcrStream cuts a TS file into 1316-byte datagrams, each timed by the last
 // PCR before it: the pace a live relay would deliver it at.
-func pcrStream(t *testing.T, ts []byte) *stream {
+func pcrStream(t *testing.T, ts []byte) *delaytest.Stream {
 	t.Helper()
-	s := &stream{}
+	s := &delaytest.Stream{}
 	first, last := int64(-1), int64(0)
 	for off := 0; off+tsPacketSize <= len(ts); off += tsPacketSize {
 		p := ts[off : off+tsPacketSize]
@@ -58,13 +59,13 @@ func pcrStream(t *testing.T, ts []byte) *stream {
 			}
 			last = wrap(v - first)
 		}
-		s.pkts = append(s.pkts, p)
-		s.times = append(s.times, ticks(last))
+		s.Pkts = append(s.Pkts, p)
+		s.Times = append(s.Times, delaytest.Ticks(last))
 	}
 	// Datagrams of seven, all stamped with their first packet's time.
-	for i := 0; i < len(s.times); i += chunkPackets {
-		for j := i; j < i+chunkPackets && j < len(s.times); j++ {
-			s.times[j] = s.times[i]
+	for i := 0; i < len(s.Times); i += chunkPackets {
+		for j := i; j < i+chunkPackets && j < len(s.Times); j++ {
+			s.Times[j] = s.Times[i]
 		}
 	}
 	return s
@@ -168,8 +169,8 @@ func TestADumpedLibx264StreamDecodesCleanlyAndRemuxesToFLVWithMonotonicTimestamp
 	sv, _ := probePackets(t, ffprobe, srcPath)
 	v, a := probePackets(t, ffprobe, out)
 	// 90 kHz: one frame is 3000; audio frames are 1920.
-	checkMonotonic(t, "video", v, 2*frameTicks)
-	checkMonotonic(t, "audio", a, 2*audioTicks)
+	checkMonotonic(t, "video", v, 2*delaytest.FrameTicks)
+	checkMonotonic(t, "audio", a, 2*delaytest.AudioTicks)
 	dropped := len(sv) - len(v)
 	if want := int(res.Dumped * 30 / time.Second); dropped < want-2 || dropped > want+2 {
 		t.Errorf("%d pictures missing from the output; a %s dump is %d", dropped, res.Dumped, want)

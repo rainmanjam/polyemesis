@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/delayline/delaytest"
 )
 
 // The dump's contract, against a synthetic MPEG-TS whose every picture says
@@ -15,265 +17,20 @@ import (
 // a named assertion here. dump_ffmpeg_test.go repeats the important ones
 // against libx264 output decoded by FFmpeg.
 
-const (
-	tVideoPID  = 0x100
-	tAudioPID  = 0x101
-	tPMTPID    = 0x1000
-	frameTicks = 3000 // 30 fps at 90 kHz
-	audioTicks = 1920 // 1024 samples at 48 kHz
-	ptsBase    = 900000
-)
-
-// NAL unit types the synthetic stream can carry as a picture's first slice.
-const (
-	h264IDR      = 5
-	h264NonIDR   = 1
-	hevcIDRWRADL = 19
-	hevcCRA      = 21
-	hevcTrail    = 1
-)
-
-// synth builds a TS of numbered pictures and audio frames.
-type synth struct {
-	hevc bool
-	gop  int
-	// keyType is the NAL type of a GOP's first picture.
-	keyType byte
-	// override, when it returns ok, replaces the NAL type of picture n.
-	override func(n int) (byte, bool)
-	// pictureBytes is a non-key picture's size; a key picture is 3x.
-	pictureBytes int
-	// audioLag, when set, muxes audio frame m that much after its PTS: the
-	// interleave jitter a real muxer has.
-	audioLag func(m int) time.Duration
-	cc       map[uint16]uint8
-}
-
-func newSynth(gop int) *synth {
-	return &synth{gop: gop, keyType: h264IDR, pictureBytes: 1000, cc: map[uint16]uint8{}}
-}
-
-func (g *synth) nalType(n int) byte {
-	if g.override != nil {
-		if t, ok := g.override(n); ok {
-			return t
-		}
-	}
-	if n%g.gop == 0 {
-		return g.keyType
-	}
-	if g.hevc {
-		return hevcTrail
-	}
-	return h264NonIDR
-}
-
-func (g *synth) nextCC(pid uint16) uint8 {
-	c := g.cc[pid]
-	g.cc[pid] = (c + 1) & 0x0F
-	return c
-}
-
-func putTS(b []byte, prefix byte, v int64) {
-	b[0] = prefix<<4 | byte(v>>29)&0x0E | 1
-	b[1] = byte(v >> 22)
-	b[2] = byte(v>>14) | 1
-	b[3] = byte(v >> 7)
-	b[4] = byte(v<<1) | 1
-}
-
-// packetize splits one PES (or PSI section, with its pointer field) into TS
-// packets. pcr < 0 means none.
-func (g *synth) packetize(pid uint16, payload []byte, pcr int64, rai bool) []byte {
-	var out []byte
-	first := true
-	for len(payload) > 0 || first {
-		var af []byte
-		if first && (pcr >= 0 || rai) {
-			flags := byte(0)
-			if rai {
-				flags |= 0x40
-			}
-			af = []byte{flags}
-			if pcr >= 0 {
-				af[0] |= 0x10
-				af = append(af, byte(pcr>>25), byte(pcr>>17), byte(pcr>>9), byte(pcr>>1), byte(pcr<<7)|0x7E, 0)
-			}
-		}
-		room := 184
-		if af != nil {
-			room -= 1 + len(af)
-		}
-		n := len(payload)
-		if n > room {
-			n = room
-		}
-		if n < room {
-			// Stuff through the adaptation field.
-			total := 184 - n // bytes of adaptation field incl. its length byte
-			if af == nil && total >= 2 {
-				af = []byte{0}
-			}
-			if af != nil {
-				for len(af)+1 < total {
-					af = append(af, 0xFF)
-				}
-			}
-		}
-		p := make([]byte, 4, tsPacketSize)
-		p[0] = tsSyncByte
-		p[1] = byte(pid >> 8)
-		if first {
-			p[1] |= 0x40
-		}
-		p[2] = byte(pid)
-		afc := byte(0x10)
-		switch {
-		case af != nil:
-			afc = 0x30
-			p = append(p, byte(len(af)))
-			p = append(p, af...)
-		case 184-n == 1:
-			afc = 0x30
-			p = append(p, 0)
-		}
-		p[3] = afc | g.nextCC(pid)
-		p = append(p, payload[:n]...)
-		if len(p) != tsPacketSize {
-			panic("packetize: bad packet size")
-		}
-		out = append(out, p...)
-		payload = payload[n:]
-		first = false
-	}
-	return out
-}
-
-func (g *synth) psi() []byte {
-	pat := []byte{0, 0x00, 0xB0, 0x0D, 0x00, 0x01, 0xC1, 0x00, 0x00,
-		0x00, 0x01, 0xE0 | tPMTPID>>8, tPMTPID & 0xFF, 0, 0, 0, 0}
-	st := byte(0x1B)
-	if g.hevc {
-		st = 0x24
-	}
-	pmt := []byte{0, 0x02, 0xB0, 0x17, 0x00, 0x01, 0xC1, 0x00, 0x00,
-		0xE0 | tVideoPID>>8, tVideoPID & 0xFF, 0xF0, 0x00,
-		st, 0xE0 | tVideoPID>>8, tVideoPID & 0xFF, 0xF0, 0x00,
-		0x0F, 0xE0 | tAudioPID>>8, tAudioPID & 0xFF, 0xF0, 0x00,
-		0, 0, 0, 0}
-	return append(g.packetize(0, pat, -1, false), g.packetize(tPMTPID, pmt, -1, false)...)
-}
-
-func (g *synth) nal(t byte) []byte {
-	if g.hevc {
-		return []byte{0, 0, 1, t << 1, 0x01}
-	}
-	return []byte{0, 0, 1, 0x60 | t}
-}
-
-// picture is one video PES: AUD, parameter sets on a key picture, then one
-// slice carrying the picture's number.
-func (g *synth) picture(n int) []byte {
-	t := g.nalType(n)
-	es := []byte{0, 0, 0, 1, 0x09, 0xF0}
-	if g.hevc {
-		es = []byte{0, 0, 0, 1, 0x46, 0x01, 0x50}
-	}
-	key := n%g.gop == 0
-	if key {
-		if g.hevc {
-			es = append(es, 0, 0, 0, 1, 0x40, 0x01, 0xAA, 0, 0, 0, 1, 0x42, 0x01, 0xAA, 0, 0, 0, 1, 0x44, 0x01, 0xAA)
-		} else {
-			es = append(es, 0, 0, 0, 1, 0x67, 0x64, 0x00, 0x1F, 0xAC, 0, 0, 0, 1, 0x68, 0xEE, 0x3C, 0x80)
-		}
-	}
-	es = append(es, g.nal(t)...)
-	var idx [4]byte
-	binary.BigEndian.PutUint32(idx[:], uint32(n))
-	es = append(es, idx[:]...)
-	size := g.pictureBytes
-	if key {
-		size *= 3
-	}
-	for len(es) < size {
-		es = append(es, 0xAB)
-	}
-	pts := int64(ptsBase + n*frameTicks)
-	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-	putTS(hdr[9:], 3, pts+frameTicks) // a B-frame-shaped stream: PTS one frame after DTS
-	putTS(hdr[14:], 1, pts)
-	return g.packetize(tVideoPID, append(hdr, es...), pts, key)
-}
-
-func (g *synth) audioFrame(m int) []byte {
-	pts := int64(ptsBase + m*audioTicks)
-	es := make([]byte, 0, 400)
-	var idx [4]byte
-	binary.BigEndian.PutUint32(idx[:], uint32(m))
-	es = append(es, idx[:]...)
-	for len(es) < 400 {
-		es = append(es, 0xCD)
-	}
-	hdr := []byte{0, 0, 1, 0xC0, 0, 0, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
-	n := len(es) + 8
-	hdr[4], hdr[5] = byte(n>>8), byte(n)
-	putTS(hdr[9:], 2, pts)
-	return g.packetize(tAudioPID, append(hdr, es...), -1, false)
-}
-
-// stream is a muxed run: packets in order, each with its arrival time.
-type stream struct {
-	pkts  [][]byte
-	times []time.Duration
-}
-
-func ticks(t int64) time.Duration { return time.Duration(t) * time.Second / 90000 }
-
-// mux produces the stream for [0, dur) in decode order, PSI before every key.
-func (g *synth) mux(dur time.Duration) *stream {
-	s := &stream{}
-	add := func(b []byte, at time.Duration) {
-		for off := 0; off < len(b); off += tsPacketSize {
-			s.pkts = append(s.pkts, b[off:off+tsPacketSize])
-			s.times = append(s.times, at)
-		}
-	}
-	v, a := 0, 0
-	for {
-		vt, at := ticks(int64(v*frameTicks)), ticks(int64(a*audioTicks))
-		if g.audioLag != nil {
-			at += g.audioLag(a)
-		}
-		if vt >= dur && at >= dur {
-			return s
-		}
-		if vt <= at {
-			if v%g.gop == 0 {
-				add(g.psi(), vt)
-			}
-			add(g.picture(v), vt)
-			v++
-		} else {
-			add(g.audioFrame(a), at)
-			a++
-		}
-	}
-}
-
 // rig drives a Buffer on a simulated clock: each datagram is pushed at its
 // arrival time, and everything due is popped first.
 type rig struct {
 	t      *testing.T
 	b      *Buffer
 	epoch  time.Time
-	s      *stream
+	s      *delaytest.Stream
 	next   int
 	out    []byte
 	outAt  []time.Duration // release time of each output packet
 	inTime []time.Duration
 }
 
-func newRig(t *testing.T, delay time.Duration, lim Limits, s *stream) *rig {
+func newRig(t *testing.T, delay time.Duration, lim Limits, s *delaytest.Stream) *rig {
 	t.Helper()
 	epoch := time.Unix(1_700_000_000, 0)
 	b, err := NewBuffer(delay, lim, epoch)
@@ -297,11 +54,11 @@ func (r *rig) pop(at time.Duration) {
 
 // run pushes every datagram that arrives before until, then pops to until.
 func (r *rig) run(until time.Duration) {
-	for r.next < len(r.s.pkts) && r.s.times[r.next] < until {
-		at := r.s.times[r.next]
+	for r.next < len(r.s.Pkts) && r.s.Times[r.next] < until {
+		at := r.s.Times[r.next]
 		var dgram []byte
-		for n := 0; n < chunkPackets && r.next < len(r.s.pkts) && r.s.times[r.next] == at; n++ {
-			dgram = append(dgram, r.s.pkts[r.next]...)
+		for n := 0; n < chunkPackets && r.next < len(r.s.Pkts) && r.s.Times[r.next] == at; n++ {
+			dgram = append(dgram, r.s.Pkts[r.next]...)
 			r.next++
 		}
 		r.pop(at)
@@ -370,10 +127,10 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 			}
 			break
 		}
-		if u.pid == tAudioPID && len(es) >= 4 {
+		if u.pid == delaytest.AudioPID && len(es) >= 4 {
 			u.index = int(binary.BigEndian.Uint32(es[:4]))
 		}
-		if u.pid == tVideoPID {
+		if u.pid == delaytest.VideoPID {
 			rep.video = append(rep.video, u)
 		} else {
 			rep.audio = append(rep.audio, u)
@@ -395,7 +152,7 @@ func readOut(t *testing.T, out []byte, outAt []time.Duration, hevc bool) outRepo
 		if at := pcrAt(p); at >= 0 {
 			rep.pcrs = append(rep.pcrs, readPCRBase(p[at:]))
 		}
-		if pid != tVideoPID && pid != tAudioPID {
+		if pid != delaytest.VideoPID && pid != delaytest.AudioPID {
 			continue
 		}
 		if pktPUSI(p) {
@@ -447,9 +204,9 @@ func spliceAt(t *testing.T, v []esUnit) int {
 
 func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testing.T) {
 	const gop = 60 // 2 s
-	g := newSynth(gop)
+	g := delaytest.New(gop)
 	delay := 10 * time.Second
-	r := newRig(t, delay, memLimits(), g.mux(40*time.Second))
+	r := newRig(t, delay, memLimits(), g.Mux(40*time.Second))
 	r.run(15 * time.Second)
 
 	want := 3 * time.Second
@@ -481,14 +238,14 @@ func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testin
 	if (before.index+1)%gop != 0 {
 		t.Errorf("the kept stream ends at picture %d, mid-GOP: the cut was not at a keyframe", before.index)
 	}
-	if after.index%gop != 0 || after.nal != h264IDR {
+	if after.index%gop != 0 || after.nal != delaytest.H264IDR {
 		t.Errorf("the stream resumes at picture %d (NAL type %d), not at an IDR", after.index, after.nal)
 	}
 	// The dump covers at least the newest want: everything that arrived in
 	// [15s-want, 15s] is gone.
 	firstDropped, lastDropped := before.index+1, after.index-1
 	newest := int((15*time.Second)*30/time.Second) - 1
-	if ticks(int64(firstDropped*frameTicks)) > 15*time.Second-want || lastDropped < newest {
+	if delaytest.Ticks(int64(firstDropped*delaytest.FrameTicks)) > 15*time.Second-want || lastDropped < newest {
 		t.Errorf("dropped pictures %d..%d; the newest %s before the dump (to picture %d) must all be in that range",
 			firstDropped, lastDropped, want, newest)
 	}
@@ -496,15 +253,15 @@ func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testin
 	// TIMESTAMPS. Picture i of the output has PTS base+i frames, straight
 	// through the splice, and DTS likewise.
 	for i, u := range rep.video {
-		wantDTS := int64(ptsBase + (rep.video[0].index+i)*frameTicks)
-		if u.dts != wantDTS || u.pts != wantDTS+frameTicks {
+		wantDTS := int64(delaytest.PTSBase + (rep.video[0].index+i)*delaytest.FrameTicks)
+		if u.dts != wantDTS || u.pts != wantDTS+delaytest.FrameTicks {
 			t.Fatalf("released picture %d (#%d): PTS %d DTS %d, want PTS %d DTS %d -- the timeline steps at the splice",
-				i, u.index, u.pts, u.dts, wantDTS+frameTicks, wantDTS)
+				i, u.index, u.pts, u.dts, wantDTS+delaytest.FrameTicks, wantDTS)
 		}
 	}
 	for i := 1; i < len(rep.audio); i++ {
 		step := rep.audio[i].pts - rep.audio[i-1].pts
-		if step <= 0 || step > 2*audioTicks {
+		if step <= 0 || step > 2*delaytest.AudioTicks {
 			t.Fatalf("audio PTS steps by %d ticks between frames #%d and #%d: overlap or a gap at the splice",
 				step, rep.audio[i-1].index, rep.audio[i].index)
 		}
@@ -528,7 +285,7 @@ func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testin
 
 	// THE DELAY. Shorter by exactly the dumped programme time, and the
 	// pictures after the splice really are released that much sooner.
-	dumped := ticks(int64((after.index - before.index - 1) * frameTicks))
+	dumped := delaytest.Ticks(int64((after.index - before.index - 1) * delaytest.FrameTicks))
 	if d := res.Dumped - dumped; d < -40*time.Millisecond || d > 40*time.Millisecond {
 		t.Errorf("Dumped = %s, but %s of pictures were dropped", res.Dumped, dumped)
 	}
@@ -536,7 +293,7 @@ func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testin
 		t.Errorf("result %+v: want Before %s, After %s, complete, not clamped", res, delay, delay-res.Dumped)
 	}
 	last := rep.video[len(rep.video)-1]
-	if got := last.release - ticks(int64(last.index*frameTicks)); got-res.After > 40*time.Millisecond || res.After-got > 40*time.Millisecond {
+	if got := last.release - delaytest.Ticks(int64(last.index*delaytest.FrameTicks)); got-res.After > 40*time.Millisecond || res.After-got > 40*time.Millisecond {
 		t.Errorf("picture #%d went out %s after it arrived, want the new delay %s", last.index, got, res.After)
 	}
 	if st := r.b.Stats(); st.Dumped != res.Dumped || st.Dumping {
@@ -546,9 +303,9 @@ func TestADumpCutsAtOneIDRResumesAtTheNextAndKeepsEveryClockContinuous(t *testin
 
 func TestADumpNeverTakesTheDelayUnderTheMarginPlusAGOP(t *testing.T) {
 	const gop = 60
-	g := newSynth(gop)
+	g := delaytest.New(gop)
 	delay := 12 * time.Second
-	r := newRig(t, delay, memLimits(), g.mux(120*time.Second))
+	r := newRig(t, delay, memLimits(), g.Mux(120*time.Second))
 	clock := 15 * time.Second
 	r.run(clock)
 	dumps := 0
@@ -596,9 +353,9 @@ func TestADumpNeverTakesTheDelayUnderTheMarginPlusAGOP(t *testing.T) {
 }
 
 func TestADefaultDumpTakesEverythingSinceTheLastDumpPoint(t *testing.T) {
-	g := newSynth(30) // 1 s GOPs
+	g := delaytest.New(30) // 1 s GOPs
 	delay := 20 * time.Second
-	r := newRig(t, delay, memLimits(), g.mux(60*time.Second))
+	r := newRig(t, delay, memLimits(), g.Mux(60*time.Second))
 	r.run(25 * time.Second)
 	t1, err := r.b.Dump(r.epoch.Add(25*time.Second), 2*time.Second, DumpMargin)
 	if err != nil {
@@ -640,14 +397,14 @@ func TestADumpRefusesAStreamWithNoIDRPictures(t *testing.T) {
 	// Open GOP: every key picture after the first is an H.264 I picture
 	// (type 1, random-access flagged), which may reference what a dump
 	// discards.
-	g := newSynth(60)
-	g.override = func(n int) (byte, bool) {
+	g := delaytest.New(60)
+	g.Override = func(n int) (byte, bool) {
 		if n > 0 && n%60 == 0 {
-			return h264NonIDR, true
+			return delaytest.H264NonIDR, true
 		}
 		return 0, false
 	}
-	r := newRig(t, 10*time.Second, memLimits(), g.mux(20*time.Second))
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(20*time.Second))
 	r.run(15 * time.Second)
 	if _, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin); err == nil {
 		t.Fatal("dumped an open-GOP stream: the only cut points were I pictures that are not IDR")
@@ -663,13 +420,13 @@ func TestAnHEVCDumpCutsOnlyAtIDRAndRefusesCRA(t *testing.T) {
 		key   byte
 		dumps bool
 	}{
-		{"IDR_W_RADL", hevcIDRWRADL, true},
-		{"CRA", hevcCRA, false},
+		{"IDR_W_RADL", delaytest.HEVCIDRWRADL, true},
+		{"CRA", delaytest.HEVCCRA, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := newSynth(60)
-			g.hevc, g.keyType = true, tc.key
-			r := newRig(t, 10*time.Second, memLimits(), g.mux(30*time.Second))
+			g := delaytest.New(60)
+			g.HEVC, g.KeyType = true, tc.key
+			r := newRig(t, 10*time.Second, memLimits(), g.Mux(30*time.Second))
 			r.run(15 * time.Second)
 			ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
 			if !tc.dumps {
@@ -687,7 +444,7 @@ func TestAnHEVCDumpCutsOnlyAtIDRAndRefusesCRA(t *testing.T) {
 			}
 			rep := readOut(t, r.out, r.outAt, true)
 			at := spliceAt(t, rep.video)
-			if at < 0 || rep.video[at].nal != hevcIDRWRADL || rep.video[at].index%60 != 0 {
+			if at < 0 || rep.video[at].nal != delaytest.HEVCIDRWRADL || rep.video[at].index%60 != 0 {
 				t.Fatalf("resumed at %+v", rep.video[at])
 			}
 		})
@@ -697,17 +454,17 @@ func TestAnHEVCDumpCutsOnlyAtIDRAndRefusesCRA(t *testing.T) {
 func TestADumpResumesPastAnOpenGOPPictureToTheNextIDR(t *testing.T) {
 	// The picture right after the cut is an I picture that is not IDR: the
 	// resume must wait for the real IDR one GOP later.
-	g := newSynth(30)
+	g := delaytest.New(30)
 	cutGOPs := map[int]bool{}
-	g.override = func(n int) (byte, bool) {
+	g.Override = func(n int) (byte, bool) {
 		if cutGOPs[n] {
-			return h264NonIDR, true
+			return delaytest.H264NonIDR, true
 		}
 		return 0, false
 	}
 	// The first key picture after 15 s (picture 450) is open-GOP.
 	cutGOPs[450] = true
-	r := newRig(t, 10*time.Second, memLimits(), g.mux(30*time.Second))
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(30*time.Second))
 	r.run(15 * time.Second)
 	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
 	if err != nil {
@@ -719,7 +476,7 @@ func TestADumpResumesPastAnOpenGOPPictureToTheNextIDR(t *testing.T) {
 	}
 	rep := readOut(t, r.out, r.outAt, false)
 	at := spliceAt(t, rep.video)
-	if got := rep.video[at]; got.index != 480 || got.nal != h264IDR {
+	if got := rep.video[at]; got.index != 480 || got.nal != delaytest.H264IDR {
 		t.Fatalf("resumed at picture #%d (NAL %d); #450 is open-GOP, so the resume is #480", got.index, got.nal)
 	}
 }
@@ -732,10 +489,10 @@ func TestADumpTruncatesASpilledSegmentAndKeepsTheBudgetsExact(t *testing.T) {
 		SegmentBytes: DefaultSegmentBytes,
 		Dir:          dir,
 	}
-	g := newSynth(60)
+	g := delaytest.New(60)
 	// About 10 Mbit/s, so a dump point falls in a spilled segment.
-	g.pictureBytes = 40000
-	r := newRig(t, 10*time.Second, lim, g.mux(30*time.Second))
+	g.PictureBytes = 40000
+	r := newRig(t, 10*time.Second, lim, g.Mux(30*time.Second))
 	r.run(15 * time.Second)
 	if r.b.Stats().DiskBytes == 0 {
 		t.Fatal("nothing spilled: the fixture does not reach the disk path")
@@ -764,7 +521,7 @@ func TestADumpTruncatesASpilledSegmentAndKeepsTheBudgetsExact(t *testing.T) {
 		t.Errorf("after everything released: %d packets, %d bytes, %d on disk held", st.Packets, st.Bytes, st.DiskBytes)
 	}
 	rep := readOut(t, r.out, r.outAt, false)
-	if at := spliceAt(t, rep.video); at < 0 || rep.video[at].nal != h264IDR {
+	if at := spliceAt(t, rep.video); at < 0 || rep.video[at].nal != delaytest.H264IDR {
 		t.Fatal("the spilled-segment dump did not resume on an IDR")
 	}
 	if rep.ccBreaks != 0 {
@@ -773,8 +530,8 @@ func TestADumpTruncatesASpilledSegmentAndKeepsTheBudgetsExact(t *testing.T) {
 }
 
 func TestADumpIsRefusedWhileOneIsWaitingForItsKeyframe(t *testing.T) {
-	g := newSynth(60)
-	r := newRig(t, 10*time.Second, memLimits(), g.mux(30*time.Second))
+	g := delaytest.New(60)
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(30*time.Second))
 	r.run(15 * time.Second)
 	if _, err := r.b.Dump(r.epoch.Add(15*time.Second), time.Second, DumpMargin); err != nil {
 		t.Fatal(err)
@@ -801,14 +558,14 @@ func TestADumpDropsAudioThatWouldOverlapTheSplice(t *testing.T) {
 	// Audio from 15.5 s on is muxed half a second late, so the audio right
 	// after the resume keyframe is older programme than the audio right before
 	// the cut. Kept, its timestamps would step backwards.
-	g := newSynth(60)
-	g.audioLag = func(m int) time.Duration {
-		if ticks(int64(m*audioTicks)) >= 15500*time.Millisecond {
+	g := delaytest.New(60)
+	g.AudioLag = func(m int) time.Duration {
+		if delaytest.Ticks(int64(m*delaytest.AudioTicks)) >= 15500*time.Millisecond {
 			return 500 * time.Millisecond
 		}
 		return 0
 	}
-	r := newRig(t, 10*time.Second, memLimits(), g.mux(40*time.Second))
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
 	r.run(15 * time.Second)
 	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 3*time.Second, DumpMargin)
 	if err != nil {

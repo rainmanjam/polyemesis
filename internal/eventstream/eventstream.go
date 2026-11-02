@@ -159,7 +159,7 @@ var catalogue = []Spec{
 	{TypeRolloverStarted, TopicDestination, Granted, "A planned rollover began: a replacement broadcast is being created for a live one. reason says which trigger fired.", nil},
 	{TypeRolloverCompleted, TopicDestination, Granted, "A planned rollover finished: the replacement is live and the destination points at it. Connecting Twitch is a reconnect; reason says which.", nil},
 	{TypeRolloverFailed, TopicDestination, Granted, "A planned rollover stopped. The old broadcast is still on air unless reason says it could not be ended; no ingest was touched.", nil},
-	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, or dropping; data carries the delay and the buffer.", nil},
+	{TypeDestinationDelay, TopicDestination, Granted, "A destination's broadcast delay changed phase: buffering, on-air, draining, drained, cut, dropping, or dumped; data carries the delay and the buffer, and a dump says what it took.", nil},
 
 	// Ingest and failover.
 	{TypeIngestPublished, TopicIngest, Granted, "Data started arriving on a programme's ingest.", nil},
