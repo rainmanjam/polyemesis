@@ -155,6 +155,15 @@ jobs:
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
           ffprobe -hide_banner -version | head -1
+          # CAPTION FALLBACK FONTS, as the shipping image and ci.yml's Linux
+          # jobs have them: BtbN's libass reads the system's fontconfig, and
+          # the clipper's caption tests fail on boxes where a font is missing.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
       - name: Save FFmpeg cache (main only)
         if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

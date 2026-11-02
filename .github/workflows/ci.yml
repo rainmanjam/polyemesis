@@ -381,6 +381,18 @@ jobs:
           sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
           sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
           # Fail loudly rather than silently testing a build without SRT.
+          # CAPTION FALLBACK FONTS, as the shipping image has them (the
+          # Dockerfile's CAPTION_FONTS). BtbN's libass reads the system's
+          # fontconfig, and with no font installed a short's Arabic or Hebrew
+          # caption draws as boxes -- which the caption tests now detect
+          # (TestARealVerticalExportOfOtherScripts). Retried like every apt
+          # fetch in this file; the step ceiling bounds it.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
           # ffprobe TOO, and not because the install could half-succeed. #187:
@@ -873,6 +885,18 @@ jobs:
           sudo install -m 0755 "$FFCACHE/ffmpeg"  /usr/local/bin/ffmpeg
           sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
           # Fail loudly rather than silently testing a build without SRT.
+          # CAPTION FALLBACK FONTS, as the shipping image has them (the
+          # Dockerfile's CAPTION_FONTS). BtbN's libass reads the system's
+          # fontconfig, and with no font installed a short's Arabic or Hebrew
+          # caption draws as boxes -- which the caption tests now detect
+          # (TestARealVerticalExportOfOtherScripts). Retried like every apt
+          # fetch in this file; the step ceiling bounds it.
+          for attempt in 1 2 3; do
+            sudo apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && break
+            echo "apt attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $(( attempt * 5 ))
+          done
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
       - name: Save FFmpeg cache (main only)

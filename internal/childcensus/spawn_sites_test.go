@@ -37,8 +37,6 @@ var spawnersThatNeedNoCensus = map[string]string{
 	"internal/ffmpeg": "capability probes and duration counts: every one collects its " +
 		"output and returns, is bounded by a context deadline with WaitDelay set, and " +
 		"cannot outlive the call that made it, let alone the process",
-	"internal/clipper": "one ffprobe keyframe scan, output-collected, killed with its " +
-		"context; the clip ENCODE is a supervisor child and is enrolled there",
 	"internal/playlistmedia": "the probe helper only; every encode in this package goes " +
 		"through media.Exec, which enrols",
 	"internal/recording": "a single ffprobe for a finished file's duration, output-collected",
@@ -123,6 +121,10 @@ var spawnGroupPolicy = map[string]struct {
 		"same as media: the whisper and extract workers are killed by their context and " +
 			"have nothing to finalise, so staying in this group is what makes a Ctrl-C or " +
 			"an OOM kill reach them"},
+	"internal/highlights": {parentGroup,
+		"a loudness pass over a finished recording: background work with no teardown " +
+			"protocol worth protecting, so an abrupt death of polyemesis should take it " +
+			"too rather than leave it decoding hours of audio as an orphan"},
 	"internal/clipper": {parentGroup,
 		"an output-collected ffprobe that cannot outlive the call; a group of its own " +
 			"would buy nothing and cost the abrupt-death guarantee"},

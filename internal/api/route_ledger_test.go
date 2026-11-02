@@ -791,6 +791,10 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/analytics/live":         deniedWithCounterpart("analyticsLive"),
 	"GET /api/v1/analytics/streams":      deniedWithCounterpart("analyticsStreams"),
 	"GET /api/v1/analytics/streams/{id}": deniedWithCounterpart("analyticsReport"),
+	// Wave 4 #5a: every highlight suggestion carries a transcript excerpt.
+	"GET /api/v1/clipper/recordings/{id}/highlights": deniedWithCounterpart("clipHighlights"),
+	// Wave 4 #5b: saved layouts, the fonts listing and FFmpeg's capability.
+	"GET /api/v1/clipper/templates": deniedWithCounterpart("clipTemplates"),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both
@@ -1261,6 +1265,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"analyticsLive":                         proveAnalyticsLive,
 	"analyticsStreams":                      proveAnalyticsStreams,
 	"analyticsReport":                       proveAnalyticsReport,
+	"clipHighlights":                        proveClipHighlights,
+	"clipTemplates":                         proveClipTemplates,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

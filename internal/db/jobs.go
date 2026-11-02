@@ -1030,3 +1030,18 @@ func timeOrZero(unix int64) time.Time {
 	}
 	return time.Unix(unix, 0)
 }
+
+// UpgradeQueuedJobParams replaces a job's params if, and only if, no worker has
+// started it -- a running job's worker has already read them. It reports
+// whether the job was changed. One conditional UPDATE, so a claim racing it
+// either sees the old params or the new ones, never a worker reading one set
+// while the row holds another.
+func (d *DB) UpgradeQueuedJobParams(id int64, params json.RawMessage) (bool, error) {
+	res, err := d.sql.Exec(`UPDATE jobs SET params = ? WHERE id = ? AND state IN (?, ?)`,
+		string(params), id, string(jobs.StateQueued), string(jobs.StateDeferred))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}

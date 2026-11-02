@@ -37,6 +37,9 @@ import {
   type SpriteCue,
 } from "@/lib/timeline";
 import { autoApi } from "@/lib/autoApi";
+import { HighlightsPanel } from "@/components/HighlightsPanel";
+import { VerticalExportPanel } from "@/components/VerticalExportPanel";
+import { defaultVerticalSpec, verticalBody, type ClipTemplatesView, type VerticalSpec } from "@/lib/vertical";
 import { bytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -217,6 +220,23 @@ export function ClipEditor() {
   const [jobs, setJobs] = useState<ClipJob[]>([]);
   const [exporting, setExporting] = useState(false);
 
+  const [verticalOn, setVerticalOn] = useState(false);
+  const [verticalSpec, setVerticalSpec] = useState<VerticalSpec>(defaultVerticalSpec);
+  const [verticalOptions, setVerticalOptions] = useState<ClipTemplatesView | null>(null);
+  const loadVerticalOptions = useCallback(() => {
+    autoApi
+      .get<ClipTemplatesView>("/clipper/templates")
+      .then(setVerticalOptions)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    loadVerticalOptions();
+  }, [loadVerticalOptions]);
+  // Everything the export sends besides in and out: the editor's Export and a
+  // highlight's Accept send the same thing, so an accepted suggestion is the
+  // clip the editor would have made.
+  const vertical = verticalOn ? verticalBody(verticalSpec) : undefined;
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const [shuttle, setShuttle] = useState(0);
   const [activeSegment, setActiveSegment] = useState(0);
@@ -344,6 +364,7 @@ export function ClipEditor() {
           tracks: audioAll ? undefined : tracks,
           title,
           container,
+          vertical,
         })
         .then((p) => {
           setPlan(p);
@@ -356,7 +377,8 @@ export function ClipEditor() {
         .finally(() => setPlanning(false));
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [recordingId, source, inMs, outMs, mode, audioMode, audioAll, tracks, title, container, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the vertical body is rebuilt each render; its JSON is the dependency
+  }, [recordingId, source, inMs, outMs, mode, audioMode, audioAll, tracks, title, container, JSON.stringify(vertical), t]);
 
   const loadJobs = useCallback(() => {
     autoApi
@@ -595,17 +617,22 @@ export function ClipEditor() {
 
   // ------------------------------------------------------------------ export
 
+  const exportSettings = () => ({
+    mode,
+    audioMode,
+    tracks: audioAll ? undefined : tracks,
+    title,
+    container,
+    vertical,
+  });
+
   const runExport = async () => {
     setExporting(true);
     try {
       await autoApi.post<ClipJob>(`/clipper/recordings/${recordingId}/export`, {
         inMs: Math.round(inMs),
         outMs: Math.round(outMs),
-        mode,
-        audioMode,
-        tracks: audioAll ? undefined : tracks,
-        title,
-        container,
+        ...exportSettings(),
       });
       toast.success(t("clipedit.exportQueued"));
       loadJobs();
@@ -977,6 +1004,32 @@ export function ClipEditor() {
               </p>
             </CardContent>
           </Card>
+
+          {/* ---------- vertical short ---------- */}
+          <VerticalExportPanel
+            enabled={verticalOn}
+            onEnabledChange={setVerticalOn}
+            spec={verticalSpec}
+            onChange={setVerticalSpec}
+            options={verticalOptions}
+            onTemplatesChanged={loadVerticalOptions}
+            hasTranscript={source.hasTranscript}
+            durationMs={Math.max(0, outMs - inMs)}
+            videoRef={videoRef}
+            poster={seg?.poster}
+          />
+
+          {/* ---------- highlights ---------- */}
+          <HighlightsPanel
+            recordingId={recordingId}
+            exportBody={exportSettings}
+            onPreview={(from, to) => {
+              setInMs(from);
+              setOutMs(to);
+              seek(from);
+            }}
+            onAccepted={loadJobs}
+          />
 
           {/* ---------- transcript ---------- */}
           <Card className="min-h-0">

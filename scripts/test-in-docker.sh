@@ -11,11 +11,12 @@
 # WITH libfreetype. So this is not "some other FFmpeg" -- it is the same release
 # with the feature compiled in, and it is what the Docker image actually ships.
 #
-# One more thing it proves, which no local run can: the shipping image has
-# **zero font files**. fontconfig is installed and finds nothing, so
-# `drawtext=text=hi` fails with "Cannot find a valid font for the family Sans".
-# Anything that draws text has to carry its own font, and this is the only
-# environment where forgetting that shows up.
+# Fonts are the shipping image's and no more: fontconfig and DejaVu, the
+# caption fallback the Dockerfile installs (CAPTION_FONTS), so libass draws a
+# short's Arabic or Hebrew caption as letters here exactly as it does in the
+# image. There is no "Sans" alias beyond that, so `drawtext` without a fontfile
+# finds DejaVu -- the product never relies on that: everything that draws text
+# carries its own font, and its tests name that font.
 #
 # Usage:
 #   ./scripts/test-in-docker.sh                     # every package
@@ -55,7 +56,9 @@ fi
 # The digest is in the cache key, so a dependabot bump rebuilds the image.
 DIGEST="${BASE##*@sha256:}"
 [ "$DIGEST" = "$BASE" ] && DIGEST="unpinned"
-IMAGE="polyemesis-test:go${GO_VERSION}-${DIGEST:0:12}-ffmpeg"
+# The fonts are in the name too, so a checkout from before they were added
+# cannot reuse an image built without them.
+IMAGE="polyemesis-test:go${GO_VERSION}-${DIGEST:0:12}-ffmpeg-dejavu"
 
 command -v docker >/dev/null || { echo "docker is required"; exit 1; }
 
@@ -68,12 +71,10 @@ ARG BASE
 FROM ${BASE}
 # ffmpeg for the measurement tests; the rest is what cgo-free Go needs to build
 # and what the acceptance drivers shell out to.
-RUN apk add --no-cache ffmpeg git bash
-# NOT installed on purpose: a font package.
-#
-# The shipping image has none, and a test that draws text has to prove it works
-# there rather than on a machine that happens to have fonts lying around. If a
-# test needs a font it must supply one, exactly as the product must.
+# fontconfig and font-dejavu are the shipping image's caption fallback fonts
+# (the Dockerfile's CAPTION_FONTS default) -- and only those, so a test that
+# needs any other font still has to supply it, exactly as the product must.
+RUN apk add --no-cache ffmpeg git bash fontconfig font-dejavu
 WORKDIR /src
 DOCKERFILE
   [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "building $IMAGE failed"; exit 1; }

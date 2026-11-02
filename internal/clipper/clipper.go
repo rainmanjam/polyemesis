@@ -147,6 +147,10 @@ func containerFor(path string) Container {
 // addressable as one continuous timeline.
 type Segment struct {
 	Path string `json:"path"`
+	// RecordingID is the index row this file is, when the caller knows it.
+	// Optional: the cut never needs it. A captioned short does, to read the
+	// transcript at run time rather than carry its words in the job.
+	RecordingID int64 `json:"recordingId,omitempty"`
 	// Start is where this file begins on the timeline, i.e. the offset a caller
 	// would scrub to in order to see its first frame.
 	Start time.Duration `json:"start"`
@@ -303,6 +307,11 @@ type Request struct {
 	// Title is written into the clip's metadata, and names it in an exported
 	// EDL. Optional.
 	Title string `json:"title,omitempty"`
+
+	// Vertical, when set, makes this a 9:16 short: every frame re-encoded
+	// through a layout and optional burned captions, written as an MP4. See
+	// vertical.go. Nil is every clip this package cut before it existed.
+	Vertical *Vertical `json:"vertical,omitempty"`
 }
 
 // MaxClipDuration is a sanity ceiling, not a policy: a cut longer than this is
@@ -339,7 +348,13 @@ func (r Request) Validate() error {
 	if !ValidMode(r.Mode) {
 		return fmt.Errorf("%w: unknown mode %q", ErrInvalidRequest, r.Mode)
 	}
-	return r.Audio.validate()
+	if err := r.Audio.validate(); err != nil {
+		return err
+	}
+	if r.Vertical != nil {
+		return r.Vertical.validate(r)
+	}
+	return nil
 }
 
 func (a AudioSelection) validate() error {

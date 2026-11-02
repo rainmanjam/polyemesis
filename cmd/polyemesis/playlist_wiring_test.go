@@ -65,7 +65,7 @@ func TestTheNormaliseWorkerIsRegisteredWithTheQueue(t *testing.T) {
 	// being present, which is the fail-open rule registerProcessors states.
 	tools := &ffmpeg.Tools{FFmpeg: filepath.Join(dir, "no-ffmpeg"), FFprobe: filepath.Join(dir, "no-ffprobe")}
 
-	registerProcessors(log, config.Config{DataDir: dir}, store, gov, q, tools, nil, db.PostProdSettings{})
+	registerProcessors(log, config.Config{DataDir: dir}, store, nil, gov, q, tools, nil, db.PostProdSettings{})
 
 	err := q.Register(playlistmedia.KindNormalise, 1,
 		jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil }))
@@ -192,7 +192,7 @@ func TestStartPostProdRegistersItsProcessors(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pp := startPostProd(ctx, log, cfg, store, eng, &ffmpeg.Tools{
+	pp := startPostProd(ctx, log, cfg, store, nil, eng, &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
 	})

@@ -98,6 +98,13 @@ func TestReadTokenIsDeniedTheRoutesThatAreNotReads(t *testing.T) {
 			"the stream list carries each broadcast's title"},
 		{http.MethodGet, "/api/v1/analytics/streams/1", nil,
 			"the report names the stream's top chatters"},
+
+		// Wave 4 #5: the highlight queue's excerpts are the transcript again; the
+		// template list carries the fonts listing and FFmpeg's text capability.
+		{http.MethodGet, "/api/v1/clipper/recordings/1/highlights", nil,
+			"each highlight suggestion carries a transcript excerpt"},
+		{http.MethodGet, "/api/v1/clipper/templates", nil,
+			"the editor's saved layouts and this server's fonts and FFmpeg capability"},
 	}
 
 	// EVERY denied pattern must appear above. The deny list is subtractive, so
