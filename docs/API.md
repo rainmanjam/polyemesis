@@ -1376,8 +1376,15 @@ the same netguard check runs again at dial time, as for webhooks. **`DELETE` is
 `409`** while the target holds the only copy of an evicted recording; otherwise
 the target's unfinished multipart uploads are aborted on the service first.
 
+**Updating a target is an admin call, like webhooks and the automod key**:
+an `admin` token may change any field, including `mode`; a `read` token may
+not. The Test route alone is session-only. A `PUT` that changes `endpoint`,
+`bucket`, `region`, `accessKeyId` or `pathStyle` is `409` while the target holds
+moved recordings and otherwise resets every file on the target to be uploaded
+again.
+
 **A saved secret is used only for the address it was saved for.** A `PUT` or a
-Test that changes `endpoint`, `bucket` or `allowPrivateTarget` without a
+Test that changes `endpoint`, `bucket`, `pathStyle` or `allowPrivateTarget` without a
 `secretAccessKey` is `400` with `"code": "secret_required"`.
 
 **Stuck items.** After `maxAttempts` consecutive failures (default 8, 1-100 per

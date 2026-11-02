@@ -57,6 +57,24 @@ A moved recording stays in the Library, marked **In storage**, and retention no
 longer counts it against the local size or age limits. Its life in the bucket
 is the bucket's own lifecycle rule.
 
+When local retention (age or size) reaches a recording that every enabled
+target holds a verified copy of, with a move-mode target among them, it moves
+the recording instead of deleting it: the file goes, the Library row stays and
+it can be fetched back. A recording fetched back in the last 24 hours, or one
+a download, an export or a queued job is reading, is left on disk by both move
+mode and retention. Every enabled target must be usable for anything to be
+moved: a target whose secret will not open blocks it.
+
+Changing a target's endpoint, bucket, region, access key or addressing is
+refused while it holds moved recordings (fetch them back first); otherwise
+every file is uploaded again to the new address. Deleting a recording deletes
+its offload state; its objects stay in the bucket for the lifecycle rule.
+
+This release raises the database schema version to 2, so an older polyemesis
+refuses to open the database rather than scanning it and dropping the rows of
+moved recordings. To go back to an older release, restore the backup taken
+before the upgrade.
+
 ## Fetch back, and how the clipper waits
 
 The clipper, the post-production jobs and the download route need the file on

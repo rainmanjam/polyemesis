@@ -22,6 +22,11 @@
 # POLYEMESIS_RUSTFS_REGISTRY=quay.io to pull the mirror). Its S3 API listens on
 # 9000 inside the container (the console is 9001).
 #
+# LOCAL ONLY, and required before merging offload changes. CI never builds
+# these tests (the s3integration tag keeps them out of `go test ./...`) and no
+# CI job or required check runs this script; docs/TESTING.md says when to run
+# it and CONTRIBUTING.md asks for its output in the pull request.
+#
 # Usage:  ./scripts/acceptance-s3.sh
 set -euo pipefail
 
