@@ -68,6 +68,11 @@ type YouTubeConfig struct {
 	// reachable from a two-line edit. See QuotaUnits in quota.go.
 	QuotaUnits   QuotaUnits
 	QuotaReserve QuotaReserve
+	// Quota, when set, is the Google client's shared allowance (quota_pool.go):
+	// every adapter on one client ID draws on it, with the vertical read, the
+	// audience sampler and the request meter. QuotaUnits and QuotaReserve are
+	// then the pool's to apply, and only a test builds an adapter without one.
+	Quota *YouTubeQuota
 	// Backfill bounds the first poll's history.
 	Backfill time.Duration
 
@@ -117,7 +122,7 @@ func NewYouTube(cfg YouTubeConfig) (*YouTubeAdapter, error) {
 	// asks it.
 	return &YouTubeAdapter{
 		cfg:    cfg,
-		budget: newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now),
+		budget: adapterBudget(cfg),
 		chatID: cfg.LiveChatID,
 		health: Health{State: StateConnecting},
 	}, nil
@@ -656,22 +661,6 @@ func (y *YouTubeAdapter) classify(err error) error {
 	return err
 }
 
-// ChargeQuota spends cost units from this adapter's budget for a call that the adapter's own
-// loop did not make, and reports whether the budget can afford it. The vertical status read (#7)
-// is the caller: it reads YouTube on the operator's behalf, and it must not read past the budget
-// the chat poll is paced against. A nil adapter or one with no budget answers true, because
-// nothing is paced there and refusing would only stop a read that has no quota to protect.
-func (y *YouTubeAdapter) ChargeQuota(cost int) bool {
-	if y == nil || y.budget == nil {
-		return true
-	}
-	if !y.budget.allowRead(cost) {
-		return false
-	}
-	y.budget.spend(cost)
-	return true
-}
-
 // SetQuota replaces the daily allowance this adapter paces against, without
 // dropping the connection.
 //
@@ -699,4 +688,13 @@ func (y *YouTubeAdapter) SetQuota(units, reserve int) {
 		return
 	}
 	y.budget.setLimits(QuotaUnits(units), QuotaReserve(reserve))
+}
+
+// adapterBudget is the client's shared budget when one was handed in, and a
+// private one otherwise.
+func adapterBudget(cfg YouTubeConfig) *budget {
+	if cfg.Quota != nil {
+		return cfg.Quota.b
+	}
+	return newBudget(cfg.QuotaUnits, cfg.QuotaReserve, cfg.Now)
 }

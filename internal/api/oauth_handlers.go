@@ -114,6 +114,11 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// A changed YouTube client is a different Google project with its own
+	// daily counter: rebind the shared allowance now (PR #950 round 2, R12).
+	if platform == db.PlatformYouTube {
+		s.bindYouTubeClient()
+	}
 	// The check runs AFTER the store succeeds, and its verdict never changes
 	// the status code. An operator is usually part-way through a platform
 	// console when they paste these; refusing to save a credential they are
@@ -181,6 +186,11 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeletePlatformCreds(platform); err != nil {
 		writeStoreError(w, err)
 		return
+	}
+	// No client, no allowance to read against: YouTube reads are refused
+	// until credentials are stored again (final pass, F3).
+	if platform == db.PlatformYouTube {
+		s.ytQuotaShared.Unbind()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

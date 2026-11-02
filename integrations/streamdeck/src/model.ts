@@ -210,3 +210,17 @@ export interface PollSpec {
   options: string[];
   durationSeconds: number;
 }
+
+/**
+ * The cross-platform audience (Wave 4 #4), as GET /analytics/live answers it, reduced to what a viewers key
+ * shows. A count a platform did not report is ABSENT, never 0: `total` is the sum of what did report and is
+ * absent when nothing did. The public player is a reading with platform "player".
+ */
+export interface ViewersLive {
+  enabled: boolean;
+  onAir: boolean;
+  total?: number;
+  /** A platform failed at the last tick: `total` is the rest of the audience, not all of it. */
+  partial?: boolean;
+  readings: { platform: string; viewers?: number }[];
+}

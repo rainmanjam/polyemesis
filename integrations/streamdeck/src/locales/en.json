@@ -107,5 +107,15 @@
   "streamdeck.pi.issues": "Current issues",
   "streamdeck.pi.noIssues": "Nothing reported for this destination.",
   "streamdeck.issue.verticalHalfFailed": "Vertical half failed",
-  "streamdeck.issue.verticalHalfDown": "Vertical half down"
+  "streamdeck.issue.verticalHalfDown": "Vertical half down",
+  "streamdeck.viewers.total": "Viewers",
+  "streamdeck.viewers.notReported": "Not reported",
+  "streamdeck.viewers.offAir": "Off air",
+  "streamdeck.viewers.off": "Analytics off",
+  "streamdeck.viewers.player": "Player",
+  "streamdeck.pi.viewersPlatform": "Show",
+  "streamdeck.pi.viewersTotal": "Total, every platform",
+  "streamdeck.pi.viewersHint": "The audience across every platform, sampled while a destination is running. A count a platform does not report shows Not reported, never 0. Needs an admin token.",
+  "streamdeck.pi.viewersPlayer": "Public player",
+  "streamdeck.viewers.partial": "Partial"
 }

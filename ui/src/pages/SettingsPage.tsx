@@ -119,6 +119,7 @@ import {
 } from "@/lib/readState";
 import { PullIngestFields } from "@/components/PullIngestFields";
 import { ChatCommandSettings } from "@/components/ChatCommandSettings";
+import { AnalyticsSettings } from "@/components/AnalyticsSettings";
 import type {
   StoredCredentialCheck,
   AcmeCheckId,
@@ -1477,6 +1478,14 @@ function PipelineSettings({
       <ChatCommandSettings
         value={draft.chatCommands}
         onChange={(chatCommands) => setDraft({ ...draft, chatCommands })}
+      />
+
+      {/* The audience sampler (Wave 4 #4): it reads the same connected
+          accounts chat does, and its YouTube reads are charged to the chat
+          quota pacer configured above. */}
+      <AnalyticsSettings
+        value={draft.analytics}
+        onChange={(analytics) => setDraft({ ...draft, analytics })}
       />
 
       {/* Alert DELIVERY, not alert matching. Which conditions fire is per-rule

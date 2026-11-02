@@ -265,7 +265,7 @@ func requestJSON(ctx context.Context, method, endpoint, accessToken string, payl
 		req.Header.Set(k, v)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := doRequest(req)
 	if err != nil {
 		return err
 	}

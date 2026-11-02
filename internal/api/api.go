@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
@@ -396,10 +397,25 @@ type Server struct {
 	// The zero value is ready; see youtube_vertical.go.
 	verticalHealth verticalHealthPacer
 	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
-	// the engine answers liveness, the wall clock answers time, and the chat budget is charged.
+	// the engine answers liveness, the wall clock answers time, and the shared YouTube allowance is
+	// charged.
 	verticalHalfLive    func(ids ...int64) bool
 	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
+	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning
+	// and analyticsNow are its test seams (analyticsNow is the YouTube quota's clock too); nil in
+	// production. See analytics.go.
+	audience         *analytics.Sampler
+	analyticsRunning func() map[int64]bool
+	analyticsNow     func() time.Time
+	// ytQuotaShared is the install's one YouTube allowance, bound to the
+	// configured Google client and drawn on by chat, the vertical read, the
+	// sampler and the oauth request meter.
+	// ytVideos is each YouTube account's live video, remembered by the
+	// sampler so a tick is one videos.list. See analytics.go.
+	ytQuotaShared *chat.YouTubeQuota
+	ytVideosMu    sync.Mutex
+	ytVideos      map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -872,7 +888,23 @@ func New(o Options) *Server {
 		// lifecycleCoordinator.airing.
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
+	cs := db.DefaultSettings().Chat
+	if s.store != nil {
+		cs = s.youtubeQuota()
+	}
+	units, reserve := youtubeQuotaPair(cs)
+	// The quota's clock is the sampler's test seam when one is set, so a test
+	// fixes the time of day instead of racing Pacific midnight (R13).
+	s.ytQuotaShared = chat.NewYouTubeQuota(units, reserve, func() time.Time {
+		if s.analyticsNow != nil {
+			return s.analyticsNow()
+		}
+		return time.Now()
+	})
+	s.bindYouTubeClient()
+	s.ytVideos = map[int64]ytLiveVideo{}
 	if o.DB != nil {
+		s.audience = s.newAudienceSampler()
 		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
 			tokenFor:    s.tokenFor,
 			restart:     s.restartDestinationForRollover,
@@ -1513,6 +1545,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
+			// Cross-platform analytics (Wave 4 #4): the live audience picture
+			// and the per-stream reports. Reads of what the sampler stored --
+			// none calls a platform -- and every one is denied to a read
+			// token; see analytics.go and readScopeDeniedPatterns.
+			r.Get("/analytics/live", s.handleAnalyticsLive)
+			r.Get("/analytics/streams", s.handleAnalyticsStreams)
+			r.Get("/analytics/streams/{id}", s.handleAnalyticsStream)
 
 			// Facebook's broadcast surface, scoped to a DESTINATION rather
 			// than an account: one account can hold several broadcasts, and
@@ -2190,6 +2229,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	// UX Council A48: automod's review list carries each flagged message's
 	// text, which is the scrollback again under another name.
 	"/api/v1/chat/flags": true,
+	// Wave 4 #4: cross-platform analytics is admin-only. The reports name the
+	// stream's top chatters -- who spoke, a cut of the scrollback -- and every
+	// analytics read names the operator's connected channels. The scrape gives
+	// a read-scoped dashboard the counts without either.
+	"/api/v1/analytics/live":         true,
+	"/api/v1/analytics/streams":      true,
+	"/api/v1/analytics/streams/{id}": true,
 }
 
 // obsScopePatterns is everything an "obs" token may reach: one route, keyed by

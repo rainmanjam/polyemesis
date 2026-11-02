@@ -39,7 +39,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Spur wählen",
     "streamdeck.pi.trackHint": "Eine Änderung wird live übernommen, wenn möglich. Sonst startet das Ziel neu und die Zuschauer sehen eine Neuverbindung. Ein Windows-Server startet immer neu.",
     "streamdeck.pi.trackLabel": "Spur",
-    "streamdeck.pi.url": "Serveradresse"
+    "streamdeck.pi.url": "Serveradresse",
+    "streamdeck.pi.viewersHint": "Das Publikum über alle Plattformen, erfasst solange ein Ziel läuft. Eine Zahl, die eine Plattform nicht meldet, erscheint als Nicht gemeldet, nie als 0. Braucht ein Admin-Token.",
+    "streamdeck.pi.viewersPlatform": "Anzeigen",
+    "streamdeck.pi.viewersPlayer": "Öffentlicher Player",
+    "streamdeck.pi.viewersTotal": "Gesamt, alle Plattformen"
   },
   "en": {
     "streamdeck.auth.adminWarning": "This token can start and stop destinations. A read token is enough to show state.",
@@ -80,7 +84,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Choose a track",
     "streamdeck.pi.trackHint": "A change applies live when it can. Otherwise the destination restarts and viewers see a reconnect. A Windows server always restarts.",
     "streamdeck.pi.trackLabel": "Track",
-    "streamdeck.pi.url": "Server address"
+    "streamdeck.pi.url": "Server address",
+    "streamdeck.pi.viewersHint": "The audience across every platform, sampled while a destination is running. A count a platform does not report shows Not reported, never 0. Needs an admin token.",
+    "streamdeck.pi.viewersPlatform": "Show",
+    "streamdeck.pi.viewersPlayer": "Public player",
+    "streamdeck.pi.viewersTotal": "Total, every platform"
   },
   "es": {
     "streamdeck.auth.adminWarning": "Este token puede iniciar y detener destinos. Para ver el estado basta un token de lectura.",
@@ -121,7 +129,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Elige una pista",
     "streamdeck.pi.trackHint": "Un cambio se aplica en directo cuando es posible. Si no, el destino se reinicia y los espectadores ven una reconexión. Un servidor Windows siempre reinicia.",
     "streamdeck.pi.trackLabel": "Pista",
-    "streamdeck.pi.url": "Dirección del servidor"
+    "streamdeck.pi.url": "Dirección del servidor",
+    "streamdeck.pi.viewersHint": "La audiencia de todas las plataformas, muestreada mientras un destino está activo. Un recuento que una plataforma no informa aparece como No informado, nunca 0. Necesita un token de administrador.",
+    "streamdeck.pi.viewersPlatform": "Mostrar",
+    "streamdeck.pi.viewersPlayer": "Reproductor público",
+    "streamdeck.pi.viewersTotal": "Total, todas las plataformas"
   },
   "fr": {
     "streamdeck.auth.adminWarning": "Ce jeton peut démarrer et arrêter des destinations. Un jeton en lecture suffit pour afficher l'état.",
@@ -162,7 +174,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Choisir une piste",
     "streamdeck.pi.trackHint": "Un changement s'applique en direct quand c'est possible. Sinon la destination redémarre et les spectateurs voient une reconnexion. Un serveur Windows redémarre toujours.",
     "streamdeck.pi.trackLabel": "Piste",
-    "streamdeck.pi.url": "Adresse du serveur"
+    "streamdeck.pi.url": "Adresse du serveur",
+    "streamdeck.pi.viewersHint": "L'audience de toutes les plateformes, mesurée tant qu'une destination tourne. Un nombre qu'une plateforme ne communique pas s'affiche Non communiqué, jamais 0. Nécessite un jeton administrateur.",
+    "streamdeck.pi.viewersPlatform": "Afficher",
+    "streamdeck.pi.viewersPlayer": "Lecteur public",
+    "streamdeck.pi.viewersTotal": "Total, toutes plateformes"
   },
   "id": {
     "streamdeck.auth.adminWarning": "Token ini dapat memulai dan menghentikan tujuan. Token baca sudah cukup untuk menampilkan status.",
@@ -203,7 +219,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Pilih trek",
     "streamdeck.pi.trackHint": "Perubahan diterapkan langsung bila bisa. Jika tidak, tujuan dimulai ulang dan penonton melihat sambungan ulang. Server Windows selalu memulai ulang.",
     "streamdeck.pi.trackLabel": "Trek",
-    "streamdeck.pi.url": "Alamat server"
+    "streamdeck.pi.url": "Alamat server",
+    "streamdeck.pi.viewersHint": "Penonton di semua platform, dicatat selama ada tujuan yang berjalan. Jumlah yang tidak dilaporkan platform tampil sebagai Tidak dilaporkan, bukan 0. Perlu token admin.",
+    "streamdeck.pi.viewersPlatform": "Tampilkan",
+    "streamdeck.pi.viewersPlayer": "Pemutar publik",
+    "streamdeck.pi.viewersTotal": "Total, semua platform"
   },
   "it": {
     "streamdeck.auth.adminWarning": "Questo token può avviare e fermare le destinazioni. Per vedere lo stato basta un token di lettura.",
@@ -244,7 +264,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Scegli una traccia",
     "streamdeck.pi.trackHint": "Una modifica si applica in diretta quando possibile. Altrimenti la destinazione si riavvia e gli spettatori vedono una riconnessione. Un server Windows si riavvia sempre.",
     "streamdeck.pi.trackLabel": "Traccia",
-    "streamdeck.pi.url": "Indirizzo del server"
+    "streamdeck.pi.url": "Indirizzo del server",
+    "streamdeck.pi.viewersHint": "Il pubblico su tutte le piattaforme, campionato mentre una destinazione è attiva. Un numero che una piattaforma non comunica appare come Non comunicato, mai 0. Serve un token amministratore.",
+    "streamdeck.pi.viewersPlatform": "Mostra",
+    "streamdeck.pi.viewersPlayer": "Player pubblico",
+    "streamdeck.pi.viewersTotal": "Totale, tutte le piattaforme"
   },
   "ja": {
     "streamdeck.auth.adminWarning": "このトークンは配信先の開始と停止ができます。状態表示だけなら読み取り専用トークンで十分です。",
@@ -285,7 +309,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "トラックを選択",
     "streamdeck.pi.trackHint": "変更は可能ならライブで適用されます。そうでなければ配信先が再起動し、視聴者には再接続が見えます。Windows サーバーは常に再起動します。",
     "streamdeck.pi.trackLabel": "トラック",
-    "streamdeck.pi.url": "サーバーのアドレス"
+    "streamdeck.pi.url": "サーバーのアドレス",
+    "streamdeck.pi.viewersHint": "配信先が動作している間に計測した全プラットフォームの視聴者数です。プラットフォームが報告しない人数は 0 ではなく「未報告」と表示します。管理者トークンが必要です。",
+    "streamdeck.pi.viewersPlatform": "表示",
+    "streamdeck.pi.viewersPlayer": "公開プレーヤー",
+    "streamdeck.pi.viewersTotal": "合計(全プラットフォーム)"
   },
   "ko": {
     "streamdeck.auth.adminWarning": "이 토큰으로 대상을 시작하고 중지할 수 있습니다. 상태 보기만 하려면 읽기 전용 토큰이면 충분합니다.",
@@ -326,7 +354,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "트랙 선택",
     "streamdeck.pi.trackHint": "변경은 가능하면 실시간으로 적용됩니다. 그렇지 않으면 대상이 재시작되고 시청자에게 재연결이 보입니다. Windows 서버는 항상 재시작합니다.",
     "streamdeck.pi.trackLabel": "트랙",
-    "streamdeck.pi.url": "서버 주소"
+    "streamdeck.pi.url": "서버 주소",
+    "streamdeck.pi.viewersHint": "대상이 실행되는 동안 집계한 모든 플랫폼의 시청자입니다. 플랫폼이 보고하지 않은 수는 0이 아니라 보고되지 않음으로 표시합니다. 관리자 토큰이 필요합니다.",
+    "streamdeck.pi.viewersPlatform": "표시",
+    "streamdeck.pi.viewersPlayer": "공개 플레이어",
+    "streamdeck.pi.viewersTotal": "전체, 모든 플랫폼"
   },
   "nl": {
     "streamdeck.auth.adminWarning": "Dit token kan bestemmingen starten en stoppen. Voor alleen de status is een leestoken genoeg.",
@@ -367,7 +399,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Kies een spoor",
     "streamdeck.pi.trackHint": "Een wijziging wordt live toegepast als dat kan. Anders herstart de bestemming en zien kijkers een herverbinding. Een Windows-server herstart altijd.",
     "streamdeck.pi.trackLabel": "Spoor",
-    "streamdeck.pi.url": "Serveradres"
+    "streamdeck.pi.url": "Serveradres",
+    "streamdeck.pi.viewersHint": "Het publiek op alle platforms, gemeten zolang een bestemming loopt. Een aantal dat een platform niet meldt, staat er als Niet gemeld, nooit als 0. Vereist een beheerderstoken.",
+    "streamdeck.pi.viewersPlatform": "Tonen",
+    "streamdeck.pi.viewersPlayer": "Openbare speler",
+    "streamdeck.pi.viewersTotal": "Totaal, alle platforms"
   },
   "pl": {
     "streamdeck.auth.adminWarning": "Ten token może uruchamiać i zatrzymywać miejsca docelowe. Do podglądu stanu wystarczy token do odczytu.",
@@ -408,7 +444,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Wybierz ścieżkę",
     "streamdeck.pi.trackHint": "Zmiana jest stosowana na żywo, gdy to możliwe. W przeciwnym razie miejsce docelowe się restartuje, a widzowie widzą ponowne połączenie. Serwer Windows zawsze się restartuje.",
     "streamdeck.pi.trackLabel": "Ścieżka",
-    "streamdeck.pi.url": "Adres serwera"
+    "streamdeck.pi.url": "Adres serwera",
+    "streamdeck.pi.viewersHint": "Widownia na wszystkich platformach, mierzona, gdy działa cel. Liczba, której platforma nie podaje, wyświetla się jako Nie zgłoszono, nigdy jako 0. Wymaga tokenu administratora.",
+    "streamdeck.pi.viewersPlatform": "Pokaż",
+    "streamdeck.pi.viewersPlayer": "Odtwarzacz publiczny",
+    "streamdeck.pi.viewersTotal": "Łącznie, wszystkie platformy"
   },
   "pt-BR": {
     "streamdeck.auth.adminWarning": "Este token pode iniciar e parar destinos. Para ver o status basta um token de leitura.",
@@ -449,7 +489,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Escolha uma faixa",
     "streamdeck.pi.trackHint": "Uma mudança é aplicada ao vivo quando possível. Senão o destino reinicia e os espectadores veem uma reconexão. Um servidor Windows sempre reinicia.",
     "streamdeck.pi.trackLabel": "Faixa",
-    "streamdeck.pi.url": "Endereço do servidor"
+    "streamdeck.pi.url": "Endereço do servidor",
+    "streamdeck.pi.viewersHint": "O público de todas as plataformas, amostrado enquanto um destino está ativo. Uma contagem que a plataforma não informa aparece como Não informado, nunca 0. Precisa de um token de administrador.",
+    "streamdeck.pi.viewersPlatform": "Mostrar",
+    "streamdeck.pi.viewersPlayer": "Player público",
+    "streamdeck.pi.viewersTotal": "Total, todas as plataformas"
   },
   "ru": {
     "streamdeck.auth.adminWarning": "Этот токен может запускать и останавливать назначения. Для просмотра состояния достаточно токена на чтение.",
@@ -490,7 +534,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Выберите дорожку",
     "streamdeck.pi.trackHint": "Изменение применяется вживую, когда это возможно. Иначе назначение перезапускается, и зрители видят переподключение. Сервер Windows всегда перезапускается.",
     "streamdeck.pi.trackLabel": "Дорожка",
-    "streamdeck.pi.url": "Адрес сервера"
+    "streamdeck.pi.url": "Адрес сервера",
+    "streamdeck.pi.viewersHint": "Аудитория всех платформ, замеряется, пока работает направление. Число, которое платформа не сообщает, показывается как «Нет данных», а не 0. Нужен токен администратора.",
+    "streamdeck.pi.viewersPlatform": "Показывать",
+    "streamdeck.pi.viewersPlayer": "Публичный плеер",
+    "streamdeck.pi.viewersTotal": "Всего, все платформы"
   },
   "tr": {
     "streamdeck.auth.adminWarning": "Bu jeton hedefleri başlatabilir ve durdurabilir. Durumu görmek için okuma jetonu yeterlidir.",
@@ -531,7 +579,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Parça seçin",
     "streamdeck.pi.trackHint": "Değişiklik mümkünse canlı uygulanır. Değilse hedef yeniden başlar ve izleyiciler yeniden bağlanma görür. Windows sunucusu her zaman yeniden başlatır.",
     "streamdeck.pi.trackLabel": "Parça",
-    "streamdeck.pi.url": "Sunucu adresi"
+    "streamdeck.pi.url": "Sunucu adresi",
+    "streamdeck.pi.viewersHint": "Bir hedef çalışırken ölçülen, tüm platformlardaki izleyiciler. Bir platformun bildirmediği sayı 0 değil Bildirilmedi olarak görünür. Yönetici belirteci gerekir.",
+    "streamdeck.pi.viewersPlatform": "Göster",
+    "streamdeck.pi.viewersPlayer": "Herkese açık oynatıcı",
+    "streamdeck.pi.viewersTotal": "Toplam, tüm platformlar"
   },
   "uk": {
     "streamdeck.auth.adminWarning": "Цей токен може запускати й зупиняти призначення. Для перегляду стану достатньо токена лише для читання.",
@@ -572,7 +624,11 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "Виберіть доріжку",
     "streamdeck.pi.trackHint": "Зміна застосовується наживо, коли це можливо. Інакше призначення перезапускається, і глядачі бачать перепідключення. Сервер Windows завжди перезапускається.",
     "streamdeck.pi.trackLabel": "Доріжка",
-    "streamdeck.pi.url": "Адреса сервера"
+    "streamdeck.pi.url": "Адреса сервера",
+    "streamdeck.pi.viewersHint": "Аудиторія всіх платформ, заміряється, поки працює напрямок. Число, яке платформа не повідомляє, показується як «Немає даних», а не 0. Потрібен токен адміністратора.",
+    "streamdeck.pi.viewersPlatform": "Показувати",
+    "streamdeck.pi.viewersPlayer": "Публічний плеєр",
+    "streamdeck.pi.viewersTotal": "Усього, усі платформи"
   },
   "zh-Hans": {
     "streamdeck.auth.adminWarning": "此令牌可以启动和停止目标。仅查看状态时，读取令牌即可。",
@@ -613,6 +669,10 @@ window.POLYEMESIS_STRINGS = {
     "streamdeck.pi.trackChoose": "选择音轨",
     "streamdeck.pi.trackHint": "可以时，更改会实时生效。否则目标会重启，观众会看到重新连接。Windows 服务器总是重启。",
     "streamdeck.pi.trackLabel": "音轨",
-    "streamdeck.pi.url": "服务器地址"
+    "streamdeck.pi.url": "服务器地址",
+    "streamdeck.pi.viewersHint": "在有推流目标运行时统计的所有平台观众。平台未报告的人数显示为“未报告”,而不是 0。需要管理员令牌。",
+    "streamdeck.pi.viewersPlatform": "显示",
+    "streamdeck.pi.viewersPlayer": "公共播放器",
+    "streamdeck.pi.viewersTotal": "总计(所有平台)"
   }
 };

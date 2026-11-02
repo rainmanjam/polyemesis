@@ -198,6 +198,34 @@ histogram_quantile(0.9,
   rate(polyemesis_playout_qoe_startup_bucket_total[15m]))    # p90 time to first frame
 ```
 
+### Cross-platform viewers
+
+The audience sampler asks each connected account that a running destination
+streams to for its viewer count, every `analytics.intervalSeconds` (default 60)
+while anything is on air. The scrape carries its last tick. These families
+exist on every install; their samples exist only while something is on air.
+
+- `polyemesis_platform_viewers{platform}` is the count each platform reported,
+  summed over that platform's accounts. **A platform that did not report a count
+  has no sample** -- a hidden YouTube count, a Kick streamer who opted out, a
+  read the YouTube quota pacer refused -- because an absent count is not an
+  audience of 0, and a 0 here would be graphed as one.
+- `polyemesis_platform_viewers_reported{platform}` is 1 when the platform
+  reported a count at the last tick and 0 when it was asked and did not, so an
+  absent viewers sample can be told from a platform that was never asked.
+- `polyemesis_audience_viewers` is every reported count plus the public
+  player's, absent when nothing reported **and absent on a partial tick** -- one
+  at which a platform failed or was still going live -- because that total is
+  the audience minus whoever failed. A platform that stays offline past its
+  going-live window is left out without making the tick partial. The player is not repeated per
+  platform: `polyemesis_playout_viewers` already carries it.
+
+```promql
+polyemesis_audience_viewers                                  # everyone watching, where it was reported
+sum by (platform) (polyemesis_platform_viewers)              # per platform
+polyemesis_platform_viewers_reported == 0                    # asked, and no count came back
+```
+
 ## Queries to start from
 
 ```promql

@@ -785,6 +785,12 @@ var excusedRoutes = map[string]coverageExcus{
 	// UX Council A48: the flagged list carries the flagged message's text,
 	// which is the same content as the scrollback.
 	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),
+	// Wave 4 #4: cross-platform analytics is admin-only. Each route names
+	// something a read token is not for -- the connected channels, the
+	// broadcast titles, the top chatters -- and each proof plants it.
+	"GET /api/v1/analytics/live":         deniedWithCounterpart("analyticsLive"),
+	"GET /api/v1/analytics/streams":      deniedWithCounterpart("analyticsStreams"),
+	"GET /api/v1/analytics/streams/{id}": deniedWithCounterpart("analyticsReport"),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both
@@ -1252,6 +1258,9 @@ var counterpartProofs = map[string]counterpartProof{
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"chatFlags":                             proveChatFlags,
+	"analyticsLive":                         proveAnalyticsLive,
+	"analyticsStreams":                      proveAnalyticsStreams,
+	"analyticsReport":                       proveAnalyticsReport,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

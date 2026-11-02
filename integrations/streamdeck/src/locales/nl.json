@@ -107,5 +107,15 @@
   "streamdeck.pi.issues": "Huidige problemen",
   "streamdeck.pi.noIssues": "Niets gemeld voor deze bestemming.",
   "streamdeck.issue.verticalHalfFailed": "Verticale helft mislukt",
-  "streamdeck.issue.verticalHalfDown": "Verticale helft gestopt"
+  "streamdeck.issue.verticalHalfDown": "Verticale helft gestopt",
+  "streamdeck.viewers.total": "Kijkers",
+  "streamdeck.viewers.notReported": "Niet gemeld",
+  "streamdeck.viewers.offAir": "Niet in de lucht",
+  "streamdeck.viewers.off": "Analyse uit",
+  "streamdeck.viewers.player": "Speler",
+  "streamdeck.pi.viewersPlatform": "Tonen",
+  "streamdeck.pi.viewersTotal": "Totaal, alle platforms",
+  "streamdeck.pi.viewersHint": "Het publiek op alle platforms, gemeten zolang een bestemming loopt. Een aantal dat een platform niet meldt, staat er als Niet gemeld, nooit als 0. Vereist een beheerderstoken.",
+  "streamdeck.pi.viewersPlayer": "Openbare speler",
+  "streamdeck.viewers.partial": "Gedeeltelijk"
 }

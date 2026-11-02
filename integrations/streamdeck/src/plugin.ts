@@ -238,6 +238,15 @@ export class TrackGainDial extends PolyAction {
   }
 }
 
+/**
+ * The viewer count (Wave 4 #4): the total, or one platform's, from the install's analytics sampler. One
+ * action for a key and a dial; the runtime paints both and each device takes its half. Nothing to press.
+ */
+@action({ UUID: `${PLUGIN}.viewers` })
+export class ViewersAction extends PolyAction {
+  readonly kind = "viewers" as const;
+}
+
 @action({ UUID: `${PLUGIN}.meter` })
 export class MeterDial extends PolyAction {
   readonly kind = "meter" as const;
@@ -267,6 +276,7 @@ streamDeck.actions.registerAction(new FailoverKey());
 streamDeck.actions.registerAction(new TrackMuteKey());
 streamDeck.actions.registerAction(new TrackGainDial());
 streamDeck.actions.registerAction(new MeterDial());
+streamDeck.actions.registerAction(new ViewersAction());
 
 streamDeck.settings.onDidReceiveGlobalSettings((ev: DidReceiveGlobalSettingsEvent<JsonObject>) => {
   applyGlobals(ev.settings as Record<string, unknown>);

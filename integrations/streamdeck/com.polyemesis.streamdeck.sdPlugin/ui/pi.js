@@ -21,6 +21,7 @@
   const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
   const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
   const isPollAction = () => actionType === "com.polyemesis.streamdeck.poll";
+  const isViewersAction = () => actionType === "com.polyemesis.streamdeck.viewers";
 
   const $ = (id) => document.getElementById(id);
 
@@ -87,6 +88,8 @@
       const duration = Number($("pollDuration").value);
       if (Number.isSafeInteger(duration) && duration > 0) payload.pollDuration = duration;
     }
+    // The viewers key's platform; empty is the total, and saves nothing.
+    if (isViewersAction() && $("viewersPlatform").value) payload.viewersPlatform = $("viewersPlatform").value;
     send({ event: "setSettings", context: actionContext, payload });
     flashSaved();
   }
@@ -217,6 +220,7 @@
     if (typeof settings.pollQuestion === "string") $("pollQuestion").value = settings.pollQuestion;
     if (Array.isArray(settings.pollOptions)) $("pollOptions").value = settings.pollOptions.join("\n");
     if (typeof settings.pollDuration === "number") $("pollDuration").value = String(settings.pollDuration);
+    $("viewersPlatform").value = typeof settings.viewersPlatform === "string" ? settings.viewersPlatform : "";
     if (isTrackAction()) {
       savedDestinationId = typeof settings.destinationId === "number" ? String(settings.destinationId) : "";
       savedTrack = typeof settings.track === "number" ? String(settings.track) : "";
@@ -301,8 +305,9 @@
     $("block-preset").hidden = actionType !== "com.polyemesis.streamdeck.preset";
     $("block-install-wide").hidden = actionType !== "com.polyemesis.streamdeck.record";
     $("block-poll").hidden = !isPollAction();
-    // Recording and polls are install-wide: those keys take no programme, so they show no programme field.
-    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record" || isPollAction();
+    $("block-viewers").hidden = !isViewersAction();
+    // Recording, polls and viewers are install-wide: those keys take no programme, so they show no programme field.
+    $("block-source").hidden = actionType === "com.polyemesis.streamdeck.record" || isPollAction() || isViewersAction();
     $("block-issues").hidden = actionType !== "com.polyemesis.streamdeck.destination";
     socket = new WebSocket("ws://127.0.0.1:" + port);
     socket.onopen = function () {
@@ -323,6 +328,7 @@
     $("track").addEventListener("change", onTrackChange);
     $("presetId").addEventListener("change", saveAction);
     ["pollQuestion", "pollOptions", "pollDuration"].forEach((f) => $(f).addEventListener("change", saveAction));
+    $("viewersPlatform").addEventListener("change", saveAction);
     $("test").addEventListener("click", runTest);
   };
 })();

@@ -35,6 +35,7 @@ import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { api } from "@/lib/api";
 import { bytes, clockTime, kbps, pct } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
+import { StreamReports } from "@/components/StreamReports";
 import { ProcessTable } from "@/components/ProcessTable";
 import {
   VERDICT_WINDOW_SEC,
@@ -1108,6 +1109,12 @@ export function MonitoringPage() {
             </div>
           </CardContent>
       </Card>
+
+      {/* Per-stream audience reports (Wave 4 #4): what each broadcast drew,
+          after the fact. */}
+      <div className="mt-3">
+        <StreamReports />
+      </div>
 
       {/* Raw FFmpeg arguments are a power tool, so they are closed by default and
           do not mount until asked for. A live output's command is one deliberate

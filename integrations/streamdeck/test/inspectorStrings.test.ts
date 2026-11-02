@@ -23,8 +23,9 @@ describe("inspector strings", () => {
     // install-wide note, the track controls' destination and track pickers with their placeholders,
     // load error, not-listed mark and live-or-restart hint, and the destination key's issue list heading
     // and its empty line), the poll key's 4 (question, options, duration and hint), 6 connection
-    // messages and 4 config errors.
-    expect(enKeys).toHaveLength(39);
+    // messages and 4 config errors, and the viewers key's 4 (its picker, the total option, the player
+    // option and the hint).
+    expect(enKeys).toHaveLength(43);
     for (const [locale, strings] of Object.entries(all)) {
       expect(Object.keys(strings).sort(), locale).toEqual(enKeys);
     }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/routing"
@@ -1710,6 +1711,23 @@ type Settings struct {
 	// it is a control surface over a programme, not a property of the chat
 	// pipeline, and because Chat's fields are spread field by field in the UI.
 	ChatCommands ChatCommandSettings `json:"chatCommands"`
+	// Analytics is the cross-platform audience sampler (Wave 4 #4): how often
+	// the connected accounts are asked for a viewer count while the stream is
+	// on air, and how long the per-stream reports are kept.
+	Analytics AnalyticsSettings `json:"analytics"`
+}
+
+// AnalyticsSettings controls the audience sampler.
+//
+// ON BY DEFAULT, because it asks nothing while nothing is on air and its
+// YouTube reads are charged to the same quota pacer the chat poll uses, so it
+// cannot spend the allowance chat depends on.
+type AnalyticsSettings struct {
+	Enabled bool `json:"enabled"`
+	// IntervalSeconds is the time between two samples while on air, 30-900.
+	IntervalSeconds int `json:"intervalSeconds"`
+	// RetentionDays is how long a finished stream's report is kept, 1-3650.
+	RetentionDays int `json:"retentionDays"`
 }
 
 // ChatCommandSettings turns chat commands on and picks the programme they act
@@ -2338,6 +2356,11 @@ func DefaultSettings() Settings {
 		// not an occasion to move it. Pinned by
 		// TestAlertDefaultsMatchTheAlertsPackage.
 		Alerts: AlertSettings{RetryAttempts: 4},
+		Analytics: AnalyticsSettings{
+			Enabled:         true,
+			IntervalSeconds: int(analytics.DefaultInterval / time.Second),
+			RetentionDays:   analytics.DefaultRetentionDays,
+		},
 		// Automod is ON, and does NOTHING except flag for review.
 		//
 		// Those two facts together are the point. Shipping it off means an
@@ -2488,6 +2511,14 @@ func (s Settings) Validate() error {
 	}
 	if s.ChatCommands.SourceID < 0 {
 		add("chat commands programme %d is not a programme", s.ChatCommands.SourceID)
+	}
+	if v := s.Analytics.IntervalSeconds; v < analytics.MinIntervalSeconds || v > analytics.MaxIntervalSeconds {
+		add("analytics sample interval %ds out of range (%d-%d)", v,
+			analytics.MinIntervalSeconds, analytics.MaxIntervalSeconds)
+	}
+	if v := s.Analytics.RetentionDays; v < analytics.MinRetentionDays || v > analytics.MaxRetentionDays {
+		add("analytics retention %d days out of range (%d-%d)", v,
+			analytics.MinRetentionDays, analytics.MaxRetentionDays)
 	}
 	if s.Meters.IntervalMS < 40 || s.Meters.IntervalMS > 2000 {
 		add("meter interval %dms out of range (40-2000)", s.Meters.IntervalMS)

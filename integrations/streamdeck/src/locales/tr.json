@@ -107,5 +107,15 @@
   "streamdeck.pi.issues": "Mevcut sorunlar",
   "streamdeck.pi.noIssues": "Bu hedef için bildirilen bir şey yok.",
   "streamdeck.issue.verticalHalfFailed": "Dikey yarı hatalı",
-  "streamdeck.issue.verticalHalfDown": "Dikey yarı durdu"
+  "streamdeck.issue.verticalHalfDown": "Dikey yarı durdu",
+  "streamdeck.viewers.total": "İzleyici",
+  "streamdeck.viewers.notReported": "Bildirilmedi",
+  "streamdeck.viewers.offAir": "Yayında değil",
+  "streamdeck.viewers.off": "Analitik kapalı",
+  "streamdeck.viewers.player": "Oynatıcı",
+  "streamdeck.pi.viewersPlatform": "Göster",
+  "streamdeck.pi.viewersTotal": "Toplam, tüm platformlar",
+  "streamdeck.pi.viewersHint": "Bir hedef çalışırken ölçülen, tüm platformlardaki izleyiciler. Bir platformun bildirmediği sayı 0 değil Bildirilmedi olarak görünür. Yönetici belirteci gerekir.",
+  "streamdeck.pi.viewersPlayer": "Herkese açık oynatıcı",
+  "streamdeck.viewers.partial": "Kısmi"
 }

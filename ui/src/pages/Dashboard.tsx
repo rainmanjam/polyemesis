@@ -52,6 +52,7 @@ import { DestinationDialog } from "@/components/DestinationDialog";
 import { OnAirBar } from "@/components/OnAirBar";
 import { EmptyState } from "@/components/EmptyState";
 import { ChatPanel } from "@/components/ChatPanel";
+import { AudiencePanel } from "@/components/AudiencePanel";
 import { NarrowDisclosure } from "@/components/NarrowDisclosure";
 import { useIsNarrow } from "@/hooks/useIsNarrow";
 import { StatusDot } from "@/components/signature/StatusDot";
@@ -1966,6 +1967,10 @@ export function Dashboard() {
         <NarrowDisclosure narrow={narrow} label={t("dashMobile.chatPipeline")}>
         <SideColumn stacked={topRow.sideStacked}>
           <ChatPanel className="h-80" />
+
+          {/* Who is watching, across every platform (Wave 4 #4). Under chat,
+              which is the other half of the audience. */}
+          <AudiencePanel />
 
           <Card>
             <CardHeader>

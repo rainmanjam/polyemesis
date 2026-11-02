@@ -174,6 +174,13 @@ const GLYPH = {
     inRoundRect(0.16, 0.43, 0.6, 0.57, 0.04),
     inRoundRect(0.16, 0.66, 0.42, 0.8, 0.04),
   ),
+  // Viewers: two people, a head and shoulders each, the one in front a little larger.
+  viewers: any(
+    inCircle(0.36, 0.36, 0.13),
+    minus(inCircle(0.36, 0.84, 0.26), inRoundRect(0, 0.84, 1, 1, 0)),
+    inCircle(0.68, 0.3, 0.1),
+    minus(inCircle(0.68, 0.72, 0.2), inRoundRect(0, 0.72, 1, 1, 0)),
+  ),
   // Record: a solid disc.
   record: inCircle(0.5, 0.5, 0.3),
   // Routing preset: three sliders with knobs set at different points.
@@ -323,7 +330,7 @@ function write(rel, size, paint) {
 // barred circle), so those states are faces of their own and never the generic error or warn
 // tile. Only the record key ever shows halted, and only the track mute key shows the last
 // three; every key has every face so the state indices line up across actions.
-const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute", "poll"];
+const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute", "poll", "viewers"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
 // The badge is drawn most of the way toward the state's TITLE colour, so on the bright

@@ -1509,6 +1509,9 @@ export interface Settings {
   /** Chat commands (#6). Optional so a client that predates it can still PUT
    *  settings. */
   chatCommands?: ChatCommandSettings;
+  /** The cross-platform audience sampler (Wave 4 #4). Optional so a client
+   *  that predates it can still PUT settings. */
+  analytics?: AnalyticsSettings;
   /** The version of the document this was read at, as GET /settings served it.
    *
    *  Sent back on the next PUT, which the server refuses (409,
@@ -1728,6 +1731,17 @@ export interface ChatCommandSettings {
   enabled: boolean;
   /** The programme the commands act on; 0 is the default programme. */
   sourceId?: number;
+}
+
+/** The audience sampler. It asks the connected accounts for a viewer count
+ *  only while a destination is running, and YouTube reads are charged to the
+ *  chat quota pacer. */
+export interface AnalyticsSettings {
+  enabled: boolean;
+  /** Seconds between two samples while on air, 30-900. */
+  intervalSeconds: number;
+  /** Days a finished stream's report is kept, 1-3650. */
+  retentionDays: number;
 }
 
 /** Link-health thresholds. Each is independent and 0 switches it off. RTT and
@@ -4059,6 +4073,102 @@ export interface RolloverView {
   nextAt?: string;
   planReason?: string;
   reasonIfNone?: string;
+}
+
+// ---------------------------------------------------------- analytics (W4 #4)
+
+/** Why a reading carries no count. A count that was not reported is NOT zero:
+ *  the row says "not reported" and the total leaves it out. */
+export type AnalyticsReason = "offline" | "starting" | "hidden" | "quota" | "error" | "unlinked";
+
+/** One connected account's answer at the last sample. `platform` is
+ *  `"player"` for the public player, which is its own row and counted once. */
+export interface AnalyticsReading {
+  platform: string;
+  account?: string;
+  name?: string;
+  live: boolean;
+  /** Absent when the platform did not report a count. */
+  viewers?: number;
+  reason?: AnalyticsReason;
+}
+
+export interface AnalyticsPoint {
+  at: string;
+  /** Absent for a tick at which nothing reported, or a partial one: a gap,
+   *  not a dip to 0. */
+  total?: number;
+  /** A platform failed at this tick (quota, error, not yet live). */
+  partial?: boolean;
+}
+
+/** The public player's QoE over the stream so far. */
+export interface AnalyticsPlayerQoE {
+  sessions: number;
+  startups: number;
+  startupMs: number;
+  rebuffers: number;
+  rebufferMs: number;
+  sessionsWithErrors: number;
+  startupHistogram?: number[];
+}
+
+export interface AnalyticsStream {
+  id: number;
+  title?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs: number;
+  peakTotal?: number;
+  averageTotal?: number;
+}
+
+/** GET /analytics/live. */
+export interface AnalyticsLive {
+  enabled: boolean;
+  onAir: boolean;
+  stream?: AnalyticsStream;
+  at?: string;
+  /** Sum of the readings that reported; absent when none did. */
+  total?: number;
+  reported: number;
+  readings: AnalyticsReading[];
+  points: AnalyticsPoint[];
+  player?: AnalyticsPlayerQoE;
+  /** A platform failed at the last tick: `total` is the rest of the audience. */
+  partial?: boolean;
+  intervalSeconds: number;
+  /** What the sampler actually waits; longer than intervalSeconds when the
+   *  YouTube quota share cannot afford the configured interval. */
+  effectiveIntervalSeconds?: number;
+  stretched?: boolean;
+}
+
+export interface AnalyticsRow {
+  platform: string;
+  account?: string;
+  name?: string;
+  samples: number;
+  reported: number;
+  /** Over the reported samples only; absent when none reported. */
+  peak?: number;
+  average?: number;
+}
+
+/** GET /analytics/streams/{id}. */
+export interface AnalyticsReport {
+  stream: AnalyticsStream;
+  summary: {
+    rows: AnalyticsRow[];
+    peakTotal?: number;
+    averageTotal?: number;
+    points: AnalyticsPoint[];
+  };
+  chat: { platform: string; messages: number }[];
+  topChatters: { platform: string; name: string; messages: number }[];
+  player?: AnalyticsPlayerQoE;
+  recordings: { id: number; filename: string; startedAt: string; durationMs: number; transcript: boolean }[];
+  clips: { name: string; createdAt: string; seconds: number }[];
 }
 
 // ---------------------------------------------------------------- offload

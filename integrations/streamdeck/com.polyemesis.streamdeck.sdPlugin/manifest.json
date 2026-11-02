@@ -496,6 +496,69 @@
       "SupportedInMultiActions": false
     },
     {
+      "UUID": "com.polyemesis.streamdeck.viewers",
+      "Name": "Viewers",
+      "Tooltip": "The audience across every platform, or one platform's, while a destination is running. A count a platform does not report shows Not reported, never 0. Works on a key or a dial. Needs an admin token.",
+      "Icon": "imgs/actions/viewers",
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "PropertyInspectorPath": "ui/pi.html",
+      "Encoder": {
+        "layout": "$B1"
+      },
+      "States": [
+        {
+          "Image": "imgs/keys/viewers/idle",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/live",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/warn",
+          "TitleColor": "#0B0D11"
+        },
+        {
+          "Image": "imgs/keys/viewers/error",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/held",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/unbound",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/halted",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/needsAdmin",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/muted",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/restarted",
+          "TitleColor": "#FFFFFF"
+        },
+        {
+          "Image": "imgs/keys/viewers/unavailable",
+          "TitleColor": "#FFFFFF"
+        }
+      ],
+      "DisableAutomaticStates": true,
+      "UserTitleEnabled": false,
+      "SupportedInMultiActions": false
+    },
+    {
       "UUID": "com.polyemesis.streamdeck.track-mute",
       "Name": "Mute track",
       "Tooltip": "Mutes or unmutes one audio track on one destination. Applies live when the server can, otherwise by a restart the viewers see. Needs an admin token.",
