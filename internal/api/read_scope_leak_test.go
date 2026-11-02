@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,8 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/polls"
 	"github.com/rainmanjam/polyemesis/internal/scheduler"
 )
@@ -423,6 +427,23 @@ func plantRows(t *testing.T, store *db.DB, s *Server) {
 	}); err != nil {
 		t.Fatalf("plant poll: %v", err)
 	}
+
+	// A job queue and one queued job, so GET /jobs and GET /jobs/{id} answer
+	// rather than 503. The same move as the poll engine above: both routes used
+	// to be EXCUSED as notWired, which was true of the fixture and said nothing
+	// about the bodies -- a job carries a target and its processor's params,
+	// and the sweep now reads both as every principal. The queue is never
+	// started: these routes read the store, and a worker would race the sweep.
+	if s.jobq == nil {
+		s.jobq = jobs.New(slog.New(slog.NewTextHandler(io.Discard, nil)), store)
+	}
+	if _, err := store.EnqueueJob(jobs.Job{
+		Kind:   clipper.JobKind,
+		Target: jobs.RecordingTarget(1),
+		Params: json.RawMessage(`{"inMs":0,"outMs":10000}`),
+	}); err != nil {
+		t.Fatalf("plant job: %v", err)
+	}
 }
 
 // plantRecordingOnDisk indexes rec the way a fixture under a RUNNING engine has
@@ -599,6 +620,10 @@ func leakRoutes() []string {
 		"/api/v1/setup",
 		"/api/v1/jobs/overview",
 		"/api/v1/jobs/policy",
+		// And the queue itself, now that plantRows wires one and queues a job:
+		// both were excused as notWired, a premise about the fixture only.
+		"/api/v1/jobs",
+		"/api/v1/jobs/1",
 		"/api/v1/hooks/1/deliveries",
 
 		// PROMOTED OUT OF excusedRoutes BY plantRows, which is the fixture half

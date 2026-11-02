@@ -2988,6 +2988,11 @@ func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
 		// packager reads as "unknown" and omits.
 		if v != nil {
 			up.Width, up.Height = v.Width, v.Height
+			// Copied, so the ingest's codec is the viewer's codec: an HEVC or
+			// AV1 ingest is advertised as such and a browser that cannot
+			// decode it can skip the rung.
+			up.Codec = v.Codec
+			up.Profile, up.Level, up.PixFmt = v.Profile, v.Level, v.PixFmt
 		}
 		return up, nil
 	}
@@ -3014,6 +3019,7 @@ func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
 		Width:     r.row.Width,
 		Height:    r.row.Height,
 		VideoKbps: r.row.VideoBitrate,
+		Codec:     r.row.Encoder.Codec(),
 	}, nil
 }
 
