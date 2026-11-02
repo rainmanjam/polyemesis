@@ -351,8 +351,17 @@ func (m *Manager) Scan() (bool, error) {
 	}
 	m.unprobeableMu.Unlock()
 
+	// A segment move-mode offload deleted after verifying its upload is gone
+	// from disk ON PURPOSE: the object store holds it and the clipper fetches
+	// it back on demand. Dropping its row here would make an offloaded
+	// recording vanish from the Library the first scan after it was moved.
+	evicted, err := m.store.EvictedRecordings()
+	if err != nil {
+		m.log.Warn("read offload state; keeping every missing row this scan", "err", err)
+		return changed, nil
+	}
 	for _, r := range indexed {
-		if !onDisk[r.Filename] {
+		if !onDisk[r.Filename] && !evicted[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
 				m.log.Warn("drop missing recording from index", "file", r.Filename, "err", err)
 				continue
@@ -493,6 +502,20 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	recs, err := m.store.ListRecordings()
 	if err != nil {
 		return false, err
+	}
+	// Offloaded-and-evicted rows hold no local bytes, so they neither age out
+	// of the local budget nor count against its size cap. Their lifetime in
+	// the bucket is the bucket's lifecycle rule, not this sweep.
+	if evicted, eerr := m.store.EvictedRecordings(); eerr != nil {
+		return false, eerr
+	} else if len(evicted) > 0 {
+		local := recs[:0]
+		for _, r := range recs {
+			if !evicted[r.Filename] {
+				local = append(local, r)
+			}
+		}
+		recs = local
 	}
 	if len(recs) == 0 {
 		return false, nil
@@ -700,6 +723,18 @@ func liveSegments(recs []db.Recording, window time.Duration, now time.Time) map[
 		if !r.StartedAt.Before(cutoff) {
 			live[r.Filename] = true
 		}
+	}
+	return live
+}
+
+// LiveSet names the segments a recorder may still be writing: every segment
+// that started within one segment length plus slack, and the newest one
+// unconditionally. It is the same inference Sweep protects with, exported so
+// offload never uploads (or evicts) a file retention would not touch either.
+func LiveSet(recs []db.Recording, segmentSeconds int, now time.Time) map[string]bool {
+	live := liveSegments(recs, liveWindow(segmentSeconds), now)
+	if n := newestSegmentName(recs); n != "" {
+		live[n] = true
 	}
 	return live
 }

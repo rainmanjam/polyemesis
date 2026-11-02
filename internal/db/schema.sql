@@ -749,3 +749,53 @@ CREATE TABLE IF NOT EXISTS caption_ingest (
     stream_key_hash TEXT NOT NULL,
     updated_at      INTEGER NOT NULL
 );
+
+-- S3-compatible storage targets for recording offload (Wave 4 #10). The secret
+-- access key is sealed in its own column and never leaves this table in a read:
+-- StorageTarget.SecretAccessKey is json:"-" and the API reports only hasSecret.
+CREATE TABLE IF NOT EXISTS storage_targets (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                 TEXT    NOT NULL,
+    provider             TEXT    NOT NULL DEFAULT 's3',   -- s3 | r2 | b2 | minio | wasabi
+    endpoint             TEXT    NOT NULL,
+    bucket               TEXT    NOT NULL,
+    region               TEXT    NOT NULL DEFAULT '',
+    prefix_template      TEXT    NOT NULL DEFAULT '',
+    path_style           INTEGER NOT NULL DEFAULT 0,
+    access_key_id        TEXT    NOT NULL DEFAULT '',
+    secret_enc           BLOB,                            -- secretbox sealed
+    mode                 TEXT    NOT NULL DEFAULT 'mirror', -- mirror | move
+    keep_local_hours     INTEGER NOT NULL DEFAULT 24,
+    offload_stems        INTEGER NOT NULL DEFAULT 0,
+    offload_transcripts  INTEGER NOT NULL DEFAULT 0,
+    offload_clips        INTEGER NOT NULL DEFAULT 0,
+    verify_download      INTEGER NOT NULL DEFAULT 0,
+    allow_private_target INTEGER NOT NULL DEFAULT 0,
+    enabled              INTEGER NOT NULL DEFAULT 1,
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL
+);
+
+-- One row per (target, file): the offload state of a finished recording segment,
+-- stem, transcript or clip. rel_path is relative to the recordings directory.
+-- evicted = 1 means move mode deleted the local copy after the upload was
+-- verified; the object under object_key is then the only copy, which is why a
+-- target holding evicted rows refuses deletion.
+CREATE TABLE IF NOT EXISTS offload_items (
+    target_id       INTEGER NOT NULL REFERENCES storage_targets(id),
+    rel_path        TEXT    NOT NULL,
+    kind            TEXT    NOT NULL,                     -- recording | stem | transcript | clip
+    object_key      TEXT    NOT NULL,
+    bytes           INTEGER NOT NULL DEFAULT 0,
+    sha256          TEXT    NOT NULL DEFAULT '',
+    state           TEXT    NOT NULL DEFAULT 'pending',   -- pending | uploading | verified | failed
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT    NOT NULL DEFAULT '',
+    verified_at     INTEGER NOT NULL DEFAULT 0,
+    evicted         INTEGER NOT NULL DEFAULT 0,
+    fetched_at      INTEGER NOT NULL DEFAULT 0,
+    updated_at      INTEGER NOT NULL,
+    PRIMARY KEY (target_id, rel_path)
+);
+CREATE INDEX IF NOT EXISTS idx_offload_items_rel ON offload_items(rel_path);

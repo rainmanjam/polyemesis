@@ -241,6 +241,17 @@ func ParseStemFilename(name string) (time.Time, string, bool) {
 	return t, mm[3], true
 }
 
+// StemMasterBase is the extension-less name of the master segment a stem was
+// recorded beside (stems/rec-s3-20240115-143000-mic.flac -> rec-s3-20240115-143000),
+// and false for anything that is not a stem this build wrote.
+func StemMasterBase(name string) (string, bool) {
+	if _, _, ok := ParseStemFilename(name); !ok {
+		return "", false
+	}
+	mm := stemFilenameRE.FindStringSubmatch(strings.TrimSuffix(name, filepath.Ext(name)))
+	return mm[1] + "-" + mm[2], true
+}
+
 // SweepStems deletes stems whose master segment retention has already removed.
 //
 // Stems are not indexed, so they cannot be swept by the same size and age rules
