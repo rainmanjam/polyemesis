@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -143,5 +144,66 @@ func TestTheStorageTestRouteIsSessionOnly(t *testing.T) {
 		"accessKeyId": "fake-access-key", "secretAccessKey": "fake-secret-value-not-real"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("session: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The saved secret is bound to the endpoint, bucket and private-address
+// opt-in it was saved with. Pointing a Test or a save anywhere else needs the
+// secret typed again.
+func TestTheSavedSecretOnlyGoesWhereItWasSavedFor(t *testing.T) {
+	h, _, sign := sourceServer(t)
+	rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets", map[string]any{
+		"name": "b2", "provider": "b2", "endpoint": "https://s3.b2.example", "bucket": "media-archive",
+		"accessKeyId": "fake-access-key", "secretAccessKey": "fake-secret-value-not-real"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+
+	rebinds := map[string]map[string]any{
+		"endpoint":           {"endpoint": "https://elsewhere.example"},
+		"bucket":             {"bucket": "someone-elses-bucket"},
+		"allowPrivateTarget": {"allowPrivateTarget": true},
+	}
+	for name, change := range rebinds {
+		t.Run("test/"+name, func(t *testing.T) {
+			body := map[string]any{"id": created.ID}
+			for k, v := range change {
+				body[k] = v
+			}
+			rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets/test", body)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "secret_required") {
+				t.Fatalf("saved secret lent to a changed %s: %d %s", name, rec.Code, rec.Body.String())
+			}
+			body["secretAccessKey"] = "another-fake-secret"
+			if rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets/test", body); rec.Code != http.StatusOK {
+				t.Fatalf("with a typed secret: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+		t.Run("update/"+name, func(t *testing.T) {
+			rec := doJSON(t, h, sign, http.MethodPut, "/api/v1/storage/targets/"+strconv.FormatInt(created.ID, 10), change)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "secret_required") {
+				t.Fatalf("saved secret kept across a %s change: %d %s", name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+	// Unchanged address: the saved secret is used (the probe runs and reports
+	// a step, rather than the handler asking for the secret).
+	if rec := doJSON(t, h, sign, http.MethodPost, "/api/v1/storage/targets/test", map[string]any{"id": created.ID}); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"steps"`) {
+		t.Fatalf("same address: %d %s", rec.Code, rec.Body.String())
+	}
+	// A save that changes nothing about the address keeps the secret.
+	if rec := doJSON(t, h, sign, http.MethodPut, "/api/v1/storage/targets/"+strconv.FormatInt(created.ID, 10),
+		map[string]any{"name": "renamed", "endpoint": "https://S3.B2.example/"}); rec.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body.String())
+	}
+	// And a save that moves it, with the secret typed, is accepted.
+	if rec := doJSON(t, h, sign, http.MethodPut, "/api/v1/storage/targets/"+strconv.FormatInt(created.ID, 10),
+		map[string]any{"bucket": "new-bucket", "secretAccessKey": "another-fake-secret"}); rec.Code != http.StatusOK {
+		t.Fatalf("move with secret: %d %s", rec.Code, rec.Body.String())
 	}
 }

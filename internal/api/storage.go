@@ -144,6 +144,32 @@ func validateStorageTarget(t db.StorageTarget) error {
 	return nil
 }
 
+// THE SECRET IS BOUND TO WHERE IT WAS SAVED FOR, as the automod key is bound
+// to its endpoint (automod_probe.go). A stored secret is used only against the
+// endpoint, bucket and private-address opt-in it was saved with; a Test or a
+// save that points the target anywhere else must carry the secret itself.
+// SigV4 never transmits the secret, but a signature made with it is still the
+// credential's authority, and it is not this route's to lend to an address the
+// caller chose.
+const errSecretRebind = "the endpoint, bucket or private-address setting differs from the saved target, " +
+	"so its saved secret access key is not used; enter the secret access key again"
+
+func normalEndpoint(e string) string {
+	e = strings.TrimSuffix(strings.TrimSpace(e), "/")
+	if u, err := url.Parse(e); err == nil {
+		u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+		return u.String()
+	}
+	return e
+}
+
+// secretBindingChanged reports whether next points the saved secret somewhere
+// other than saved.
+func secretBindingChanged(saved, next db.StorageTarget) bool {
+	return normalEndpoint(saved.Endpoint) != normalEndpoint(next.Endpoint) ||
+		saved.Bucket != next.Bucket || saved.AllowPrivateTarget != next.AllowPrivateTarget
+}
+
 // readSafeStorageTarget is the read-scope view: no secret (never marshalled
 // anyway) and no access key id.
 func readSafeStorageTarget(t db.StorageTarget) db.StorageTarget {
@@ -258,6 +284,10 @@ func (s *Server) handleUpdateStorageTarget(w http.ResponseWriter, r *http.Reques
 	if req.SecretAccessKey != nil {
 		t.SecretAccessKey = strings.TrimSpace(*req.SecretAccessKey)
 	}
+	if t.SecretAccessKey == "" && secretBindingChanged(existing, t) {
+		writeErrorCode(w, http.StatusBadRequest, "secret_required", errSecretRebind)
+		return
+	}
 	if err := validateStorageTarget(t); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -298,17 +328,22 @@ func (s *Server) handleTestStorageTarget(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	base := db.StorageTarget{Provider: db.StorageProviderS3, Mode: db.OffloadMirror, Enabled: true}
+	var saved *db.StorageTarget
 	if req.ID != nil {
-		saved, err := s.store.GetStorageTarget(s.box, *req.ID)
+		row, err := s.store.GetStorageTarget(s.box, *req.ID)
 		if err != nil {
 			writeStoreError(w, err)
 			return
 		}
-		base = saved
+		base = row
+		saved = &row
 	}
 	t := req.applyTo(base)
 	if req.SecretAccessKey != nil && strings.TrimSpace(*req.SecretAccessKey) != "" {
 		t.SecretAccessKey = strings.TrimSpace(*req.SecretAccessKey)
+	} else if saved != nil && secretBindingChanged(*saved, t) {
+		writeErrorCode(w, http.StatusBadRequest, "secret_required", errSecretRebind)
+		return
 	}
 	if t.SecretAccessKey == "" {
 		if t.SecretUnreadable {
