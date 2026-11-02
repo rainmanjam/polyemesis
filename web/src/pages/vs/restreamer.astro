@@ -75,7 +75,7 @@ const pricing = [
     "restream.io Professional",
     "$49/mo, or $39/mo billed annually at $470/yr",
     "5 channels",
-    "1080p Studio. Dual Format — horizontal and vertical output together",
+    "1080p Studio. Dual Format: horizontal and vertical output together",
   ],
   ["polyemesis", "Free, MIT, self-hosted", "No configured cap", "Your hardware and your bandwidth are the bill"],
 ];
@@ -87,7 +87,7 @@ const merits = [
   },
   {
     h: "Restreamer shares one ingest across destinations",
-    p: "Several destination processes pull from the single ingested internal stream without re-encoding it — the same shared-rendition idea polyemesis uses, and it has had it longer.",
+    p: "Several destination processes pull from the single ingested internal stream without re-encoding it: the same shared-rendition idea polyemesis uses, and it has had it longer.",
   },
   {
     h: "restream.io needs no server from you",
@@ -95,7 +95,7 @@ const merits = [
   },
   {
     h: "restream.io keeps shipping",
-    p: `In the twelve months to ${CHECKED} it added Dual-Format streaming — separate horizontal and vertical outputs at once — and automated AI clip generation.`,
+    p: `In the twelve months to ${CHECKED} it added Dual-Format streaming (separate horizontal and vertical outputs at once) and automated AI clip generation.`,
   },
 ];
 ---
@@ -130,7 +130,7 @@ const merits = [
   </section>
 
   {/* ---------------------------------------------------- disambiguation ---- */}
-  <section class="border-t border-line py-16" data-reveal>
+  <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Which one did you mean?</h2>
       <div class="mt-8 grid gap-5 lg:grid-cols-2">
@@ -160,16 +160,16 @@ const merits = [
   </section>
 
   {/* ------------------------------------------------------------ the audio -- */}
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Neither can build a second mix</h2>
       <p class="mt-3 max-w-3xl text-pretty leading-relaxed text-muted">
         This is the sharpest version of the argument on this site, and it is
-        worth being exact about why. The OBS plugins people also weigh up —
+        worth being exact about why. The OBS plugins people also weigh up,{" "}
         <a href="/vs/obs-multi-rtmp" class="text-primary-bright underline-offset-4 hover:underline">obs-multi-rtmp</a>{" "}
         and{" "}
-        <a href="/vs/aitum-multistream" class="text-primary-bright underline-offset-4 hover:underline">Aitum Multistream</a>
-        — genuinely do send different audio to different platforms, by selecting
+        <a href="/vs/aitum-multistream" class="text-primary-bright underline-offset-4 hover:underline">Aitum Multistream</a>,
+        genuinely do send different audio to different platforms, by selecting
         a track OBS mixed for them. Neither Restreamer nor restream.io can do
         even that.
       </p>
@@ -178,7 +178,7 @@ const merits = [
           <p class="font-medium text-fg">Restreamer</p>
           <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
             Per egress target the web UI offers three choices: copy the primary
-            stream's audio, transcode the codec — AAC or MP3 — or force silence.
+            stream's audio, transcode the codec (AAC or MP3), or force silence.
             There is no matrix for summing discrete channels into a new stereo
             mix. Re-routing multiple tracks is possible, but only by writing
             FFmpeg pipelines by hand against the underlying REST API, which is a
@@ -199,14 +199,14 @@ const merits = [
         polyemesis takes a multitrack ingest and sums a mix per destination, with
         a gain on each input-channel-to-output-channel cell and a loudness target
         measured after the routing rather than before it. The clean feed goes to
-        one platform, the full mix to the next, from one upload — and the picture
+        one platform, the full mix to the next, from one upload, and the picture
         is copied through rather than re-encoded to do it.
       </p>
     </div>
   </section>
 
   {/* ------------------------------------------------------------- ingest --- */}
-  <section class="border-t border-line py-16" data-reveal>
+  <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">The reason is upstream, at the ingest</h2>
       <p class="mt-3 max-w-3xl text-pretty leading-relaxed text-muted">
@@ -222,7 +222,7 @@ const merits = [
         </li>
         <li class="text-pretty leading-relaxed text-muted">
           <span class="font-medium text-fg">restream.io</span> accepts RTMP,
-          RTMPS and SRT. Multitrack SRT is not supported at all — a single stereo
+          RTMPS and SRT. Multitrack SRT is not supported at all: a single stereo
           stream is the input contract.
         </li>
         <li class="text-pretty leading-relaxed text-muted">
@@ -236,7 +236,7 @@ const merits = [
   </section>
 
   {/* ------------------------------------------------------------ pricing --- */}
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">What each one costs</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
@@ -282,7 +282,7 @@ const merits = [
   </section>
 
   {/* ---------------------------------------------------------- their merits -- */}
-  <section class="border-t border-line py-16" data-reveal>
+  <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">What they do well</h2>
       <div class="mt-8 grid gap-5 sm:grid-cols-2">
@@ -299,12 +299,12 @@ const merits = [
         Restreamer's stable line was at v2.12.0 when this was checked, with
         ongoing dependency and container maintenance. If one mix to every
         platform is what you need, it does that job for nothing and has done for
-        years — and it is the tool this project would point you at.
+        years, and it is the tool this project would point you at.
       </p>
     </div>
   </section>
 
-  <section class="wrap py-20 text-center" data-reveal>
+  <section class="wrap py-20 text-center">
     <h2 class="text-balance text-3xl font-medium">Different audio per platform?</h2>
     <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
       That is the one thing neither of them does, and the reason this project

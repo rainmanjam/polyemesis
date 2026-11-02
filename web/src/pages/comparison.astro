@@ -108,7 +108,7 @@ const wins = [
   // the toggle gets a quiet fallback to the ordinary ingest. A bare "Yes" in a
   // comparison table is the worst place to omit that. The copy rule is to state
   // it in the same block that announces the feature, not in a footnote.
-  ["A second audio mix to the same destination, from one ingest", "Yes — Twitch Enhanced Broadcasting, needs a GPU", "—", "—"],
+  ["A second audio mix to the same destination, from one ingest", "Yes: Twitch Enhanced Broadcasting, needs a GPU", "—", "—"],
   ["Runs on hardware you control, no per-destination pricing", "Yes", "Yes", "No"],
 ];
 
@@ -135,8 +135,8 @@ const wins = [
  * @type {{who: string, what: string, rows: [string, string][], tail?: string}[]} */
 const losses = [
   {
-    who: "The OBS plugins",
-    what: "obs-multi-rtmp and Aitum Multistream — free, GPL-2.0, installed in two minutes and already on the machine.",
+    who: "the OBS plugins",
+    what: "obs-multi-rtmp and Aitum Multistream: free, GPL-2.0, installed in two minutes and already on the machine.",
     rows: [
       ["No server at all", "A plugin in OBS: no host to provision, no port to open. Here you run a server, or there is nothing to run."],
       ["Nothing new to learn", "The destinations sit in OBS beside the ones already there. Here it is a second UI and a second set of concepts."],
@@ -149,11 +149,11 @@ const losses = [
     who: "Restreamer",
     what: "Ranked by how often each was asked for on their own tracker, which is the honest ordering.",
     rows: [
-      ["WebRTC / WHIP output", "Missing. Sizeable subsystem; the real use case is sub-second self-monitoring."],
-      ["Decklink / SDI capture, in and out", "Missing. Needs an FFmpeg built with decklink, so a third image variant."],
-      ["Multi-input compositing / video grid", "Missing. Natural once multi-source is settled."],
-      ["HDR 10-bit HEVC", "Partial. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
-      ["LL-HLS", "Declined, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
+      ["WebRTC / WHIP output", "Not in polyemesis. A sizeable subsystem; the real use case is sub-second self-monitoring."],
+      ["Decklink / SDI capture, in and out", "Not in polyemesis. It needs an FFmpeg built with decklink, so a third image variant."],
+      ["Multi-input compositing / video grid", "Not in polyemesis. Natural once multi-source is settled."],
+      ["HDR 10-bit HEVC", "Partial in polyemesis. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
+      ["LL-HLS", "Declined in polyemesis, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
       ["Maturity", "Restreamer is established. polyemesis is pre-release with one maintainer."],
     ],
   },
@@ -168,13 +168,13 @@ const losses = [
   },
   {
     who: "restream.io",
-    what: "SaaS, so self-hosting beats it on cost, privacy and limits by construction — and loses everywhere that being somebody else's problem is the feature.",
+    what: "SaaS. Self-hosting wins on cost, privacy and limits by construction; restream.io wins wherever having somebody else run it is the feature.",
     rows: [
-      ["Studio — browser production, remote guests", "Missing. Multi-source plus compositing is the closest path."],
-      ["Teams, roles, multiple workspaces", "Missing. Exactly one admin identity."],
-      ["No server to run", "By design, no."],
+      ["Studio: browser production, remote guests", "Not in polyemesis. Multi-source plus compositing is the closest path."],
+      ["Teams, roles, multiple workspaces", "Not in polyemesis, which has exactly one admin identity."],
+      ["No server to run", "polyemesis is self-hosted by design."],
     ],
-    tail: "Teams and roles is the one to take seriously. Access to the UI is full control of the server's streaming, so any multi-operator deployment — a church A/V team, an agency running several clients — hits that immediately.",
+    tail: "Teams and roles is the one to take seriously. Access to the UI is full control of the server's streaming, so any multi-operator deployment (a church A/V team, an agency running several clients) hits that immediately.",
   },
 ];
 
@@ -221,11 +221,11 @@ const selectors = [
   },
   {
     name: "MistServer",
-    what: "A media server, and the one here that genuinely can pick tracks per push target — by track ID, codec, language, bitrate, or a first/last/optimal heuristic.",
+    what: "A media server, and the one here that genuinely can pick tracks per push target: by track ID, codec, language, bitrate, or a first/last/optimal heuristic.",
     // No `src`/`file`: see the note above. This card's evidence is the facts
     // file, not a line of their source, and the page says which.
     source: "competitor-facts §6 · checked 15 Aug 2026",
-    note: "It selects, and selects well. Its ROUTING SERVER has no amix, no loudnorm, no ebur128 — but an external Stream Process (MistProcAV, an FFmpeg pipeline) can decode, filter and inject a track back into the buffer, so mixing is reachable, just not where the routing happens.",
+    note: "It selects, and selects well. Its ROUTING SERVER has no amix, no loudnorm, no ebur128, but an external Stream Process (MistProcAV, an FFmpeg pipeline) can decode, filter and inject a track back into the buffer, so mixing is reachable, just not where the routing happens.",
   },
 ];
 ---
@@ -257,13 +257,13 @@ const selectors = [
       <p class="text-pretty leading-relaxed text-fg">
         <strong>polyemesis is built for one case, completely:</strong>
         <em>this</em> platform gets the clean mix, <em>that</em> one gets the
-        full mix — from a single upload and a single video encode, with the
+        full mix, from a single upload and a single video encode, with the
         picture never re-encoded to do it.
       </p>
       <p class="mt-3 text-pretty leading-relaxed text-muted">
         That is the case the whole product is arranged around: the routing
         matrix, the per-destination loudness targets, the multitrack archive and
-        the stems all exist because the audio is the hard part — and because
+        the stems all exist because the audio is the hard part, and because
         everywhere else it is a track you pick rather than a mix you build.
       </p>
     </div>
@@ -289,8 +289,8 @@ const selectors = [
         enough. A server instead: Restreamer is more mature and far more widely
         deployed than this. No server at all: restream.io. An industrial-strength
         media server with real track selection: MistServer. polyemesis exists for
-        the one case none of them serve — and if that is not your problem, the
-        rest of this page is academic.
+        the one case none of them serve. If that is not your problem, one of the
+        tools above is the better fit.
       </p>
     </div>
   </section>
@@ -309,7 +309,7 @@ const selectors = [
       also the reason these are separate pages instead of three more columns
       here: a Yes/No grid cannot say "both do this, and one costs more to
       change", which is the true shape of the plugin comparison. */}
-  <section class="wrap pb-16" data-reveal>
+  <section class="wrap pb-16">
     <h2 class="text-2xl font-medium">Compared one at a time</h2>
     <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
       If you already run something, start here. Each page compares polyemesis
@@ -339,7 +339,7 @@ const selectors = [
             href: "/vs/obs-multi-rtmp",
             name: "obs-multi-rtmp",
             kind: "OBS plugin · free · GPL-2.0",
-            line: "Get from OBS means fanning out costs one encode, not four. What it cannot share is your uplink — the same bytes, sent once per platform.",
+            line: "Get from OBS means fanning out costs one encode, not four. What it cannot share is your uplink: the same bytes, sent once per platform.",
           },
           {
             href: "/vs/restreamer",
@@ -368,7 +368,7 @@ const selectors = [
             <p class="font-medium text-fg">{c.name}</p>
             <p class="mt-1 font-mono text-[11px] text-subtle">{c.kind}</p>
             <p class="mt-3 text-sm leading-relaxed text-muted">{c.line}</p>
-            <p class="mt-4 text-sm text-primary-bright">Read the comparison →</p>
+            <p class="mt-4 text-sm text-primary-bright">Read the comparison</p>
           </a>
         ))
       }
@@ -379,11 +379,11 @@ const selectors = [
     </p>
   </section>
 
-  <section class="wrap pb-16" data-reveal>
+  <section class="wrap pb-16">
     <h2 class="text-2xl font-medium">Where they differ</h2>
     <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-      One axis, and it is the one this project exists for. The shared ground —
-      everything all three do — is in the table below this one.
+      One axis, and it is the one this project exists for. The shared ground
+      (everything all three do) is in the table below this one.
     </p>
     <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
       <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
@@ -423,7 +423,7 @@ const selectors = [
       <span class="chip align-middle">experimental</span>
       <span class="ml-2">
         On the second-audio-mix row, and only where the destination is Twitch. The
-        negotiation itself is proven — polyemesis’s tests reach ingest.twitch.tv on
+        negotiation itself is proven: polyemesis’s tests reach ingest.twitch.tv on
         every run, and Twitch accepts a supported-GPU inventory, grants the VOD
         audio track and mints a key. What nobody has watched yet is a broadcast
         published through that key. Off Twitch the two-mix egress is a different
@@ -436,31 +436,36 @@ const selectors = [
       was an open request on{" "}
       <a href="https://github.com/datarhei/restreamer/issues" rel="noopener"
         class="underline underline-offset-2 hover:text-fg">Restreamer's own tracker</a>{" "}
-      when this was surveyed in July 2026 — users asking it for the thing
+      when this was surveyed in July 2026: users asking it for the thing
       polyemesis was built to be.
     </p>
   </section>
 
-  {/* ------------------------------------------- where polyemesis loses ---- */}
+  {/* -------------------------------------------- choose another tool when -- */}
   {/* IMMEDIATELY AFTER THE WIN TABLE, which is the whole point of the placement.
       Put the concessions at the bottom and they read as small print somebody was
       forced to include; put them next to the wins and they read as the same
       person writing with the same care, which is the only thing that makes the
-      wins worth anything. */}
-  <section class="border-y border-line bg-surface/30 py-16" data-reveal>
+      wins worth anything.
+
+      THE HEADING NAMES A CHOICE, NOT A DEFEAT (2026-11 design review). It was
+      "Where polyemesis loses"; it is "Choose another tool when", and each card
+      says when that tool is the better pick. The content is unchanged: the
+      same rows, the same honesty, framed as advice to the reader. */}
+  <section class="border-y border-line bg-surface/30 py-16">
     <div class="wrap">
-      <h2 class="text-2xl font-medium">Where polyemesis loses</h2>
+      <h2 class="text-2xl font-medium">Choose another tool when</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Every one of these is something another tool does and this one does not.
-        They are worth reading before you spend an evening on an install: these
-        are design decisions and a project's age, not a roadmap, so none of them
-        is about to change because you waited.
+        Each of these is a job another tool is built for. They are worth reading
+        before you spend an evening on an install: they follow from design
+        decisions and the project's age, not from a roadmap, so the right tool
+        for these jobs today is the one named.
       </p>
       <div class="mt-8 grid gap-4 lg:grid-cols-2">
         {
           losses.map((l) => (
             <div class="card p-5">
-              <p class="font-medium text-fg">{l.who} has, and polyemesis does not</p>
+              <h3 class="font-medium text-fg">Choose {l.who} for</h3>
               <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
               <dl class="mt-4 divide-y divide-line border-y border-line">
                 {l.rows.map(([has, here]) => (
@@ -480,7 +485,7 @@ const selectors = [
         <a href="/docs/comparison" class="underline underline-offset-2 hover:text-fg"
           >docs/COMPARISON.md</a
         >, which carries the same rows with their evidence, their issue numbers
-        and the date each was checked — including the footnotes recording the
+        and the date each was checked, including the footnotes recording the
         rows that were wrong and were corrected, in both directions: some had
         gone stale understating this product, and twice a cell asserted a
         competitor lacked something they ship.
@@ -489,7 +494,7 @@ const selectors = [
   </section>
 
   {/* --------------------------------------------- select versus mix ------ */}
-  <section class="wrap pb-16" data-reveal>
+  <section class="wrap pb-16">
     <h2 class="text-2xl font-medium">They select a track. polyemesis mixes.</h2>
     <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
       Most people weighing this up already have one of these installed. The
@@ -510,8 +515,8 @@ const selectors = [
             <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
             {s.href && (
               <p class="mt-4">
-                <a href={s.href} class="text-sm text-primary-bright underline-offset-4 hover:underline">
-                  Full comparison against {s.name} →
+                <a href={s.href} class="tap text-sm text-primary-bright underline-offset-4 hover:underline">
+                  Full comparison against {s.name}
                 </a>
               </p>
             )}
@@ -533,13 +538,13 @@ const selectors = [
     </p>
   </section>
 
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">What all three do</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
         The basic job is table stakes everywhere: ingest once, fan out, reconnect
         when a platform drops, show you whether it is working. Worth stating
-        plainly — it means the choice between these three comes down to the
+        plainly: it means the choice between these three comes down to the
         audio, and not to whether the fundamentals are there.
       </p>
       <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
@@ -579,7 +584,7 @@ const selectors = [
         <span class="ml-2">
           On the hardware-encoding row: all five encoders are offered, and each is
           probed with a real one-frame encode at startup so one that is listed but
-          unusable is caught before a broadcast is. What is unverified is narrower —
+          unusable is caught before a broadcast is. What is unverified is narrower:
           the command-line flags handed to NVENC, QSV, VA-API and AMF were read out
           of FFmpeg’s own option tables rather than measured on silicon.
           VideoToolbox is not in that set: a real encode with its own flags runs on
@@ -599,13 +604,13 @@ const selectors = [
         Rows and cards carry their own check date where one exists. The oldest
         reads here are from July 2026, re-checked 9 August 2026; the MistServer,
         StreamElements and Streamlabs material was read 15–16 August 2026. These
-        products move independently of this page — check them before deciding on
+        products move independently of this page, so check them before deciding on
         the strength of a row.
       </p>
     </div>
   </section>
 
-  <section class="wrap py-20 text-center" data-reveal>
+  <section class="wrap py-20 text-center">
     <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>
     {/* The quickstart rather than the install page, for the same reason the home
         page leads with it: a reader who has just weighed five products against
@@ -614,18 +619,18 @@ const selectors = [
         click away and is not what anyone needs first. */}
     <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
       Then the next thing to read is the one that tells you what running it is
-      actually like — not the download page.
+      actually like, and that is the quickstart rather than the download page.
     </p>
     <div class="mt-7 flex flex-wrap justify-center gap-3">
       <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
       <a href="/docs/comparison" class="btn btn-ghost">This page, with its sources</a>
     </div>
     <p class="mt-5 text-sm text-subtle">
-      <a href="/#matrix" class="underline decoration-line underline-offset-4 hover:text-fg"
+      <a href="/#matrix" class="tap underline decoration-line underline-offset-4 hover:text-fg"
         >Try the routing matrix</a
       >
       ·
-      <a href="/download" class="underline decoration-line underline-offset-4 hover:text-fg"
+      <a href="/download" class="tap underline decoration-line underline-offset-4 hover:text-fg"
         >Install options</a
       >
     </p>

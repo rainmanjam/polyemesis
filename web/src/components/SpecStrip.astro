@@ -10,9 +10,14 @@
  * performance claim — "0.2% CPU" was proposed and dropped, because a number
  * without a reproducible benchmark behind it is exactly the kind of thing this
  * audience tests and disbelieves.
+ *
+ * ONE VALUE PER CELL (2026-11 design review). "SRT · up to 32 tracks" was two
+ * facts sharing a cell behind a separator. The track count is an SRT figure
+ * (RTMP is the single-track fallback), so its label says so.
  */
 const specs = [
-  { k: "Ingest", v: "SRT · up to 32 tracks" },
+  { k: "Ingest", v: "SRT and RTMP" },
+  { k: "Tracks over SRT", v: "up to 32" },
   { k: "Video", v: "-c:v copy" },
   { k: "Ships as", v: "one static binary" },
   { k: "Runtime deps", v: "FFmpeg only" },
@@ -23,11 +28,11 @@ const specs = [
 
 <div class="border-y border-line bg-surface/40">
   <div class="wrap">
-    <dl class="grid grid-cols-2 divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
+    <dl class="grid grid-cols-2 divide-line sm:grid-cols-4 lg:grid-cols-7 lg:divide-x">
       {
         specs.map((s) => (
-          <div class="px-4 py-4 first:pl-0 lg:px-5">
-            <dt class="font-mono text-[10px] uppercase tracking-wider text-subtle">{s.k}</dt>
+          <div class="py-4 pr-4 last:col-span-2 sm:last:col-span-1 lg:px-5 lg:first:pl-0">
+            <dt class="font-mono text-[10px] uppercase tracking-wider text-muted">{s.k}</dt>
             <dd class="mt-1 font-mono text-[13px] text-fg">{s.v}</dd>
           </div>
         ))

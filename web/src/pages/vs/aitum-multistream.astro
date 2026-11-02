@@ -41,7 +41,7 @@ const steps = [
     tool: "In polyemesis",
     where: "One upload leaves the stream PC. The rest happens on the server.",
     list: [
-      "In OBS, put each source on its own track — mic on 1, game on 2, music on 3. No layout to design, because nothing is being summed yet.",
+      "In OBS, put each source on its own track: mic on 1, game on 2, music on 3. No layout to design, because nothing is being summed yet.",
       "Send one multitrack SRT stream to polyemesis.",
       "Tick the tracks each destination should hear: Twitch gets 1, 2 and 3; YouTube gets 1 and 2.",
       "Change your mind mid-broadcast by unticking a box. The track layout in OBS never moves.",
@@ -58,7 +58,7 @@ const merits = [
   },
   {
     h: "Per-destination encoding",
-    p: "Each destination can clone the main OBS output or re-encode independently, with its own resolution, bitrate and encoder. That is not a lesser feature than what a server does — it is the same feature, paid for locally.",
+    p: "Each destination can clone the main OBS output or re-encode independently, with its own resolution, bitrate and encoder. That is not a lesser feature than what a server does. It is the same feature, paid for locally.",
   },
   {
     h: "It is where you already are",
@@ -97,7 +97,7 @@ const CHECKED = "16 September 2026";
     </h1>
     <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
       The Aitum Multistream OBS plugin can already send different audio to
-      different platforms — anyone telling you otherwise has not used it. Each
+      different platforms; anyone telling you otherwise has not used it. Each
       destination is assigned one of OBS's six audio tracks, and that track goes
       out. The question this page answers is a narrower one: where the mix on
       that track gets made, and what it costs you to have more than one.
@@ -115,7 +115,7 @@ const CHECKED = "16 September 2026";
   </section>
 
   {/* ------------------------------------------------------ the walkthrough -- */}
-  <section class="border-t border-line py-16" data-reveal>
+  <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">The same broadcast, set up both ways</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
@@ -152,11 +152,11 @@ const CHECKED = "16 September 2026";
   </section>
 
   {/* ------------------------------------------------------- what it costs -- */}
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Where the work lands</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Not a capability difference. A location difference — and on a machine
+        Not a capability difference. A location difference, and on a machine
         that is also running the game, location is the whole argument.
       </p>
       <div class="mt-8 grid max-w-4xl gap-5 sm:grid-cols-2">
@@ -193,7 +193,7 @@ const CHECKED = "16 September 2026";
   </section>
 
   {/* --------------------------------------------------------- their merits -- */}
-  <section class="border-t border-line py-16" data-reveal>
+  <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">What Aitum Multistream does well</h2>
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
@@ -214,7 +214,7 @@ const CHECKED = "16 September 2026";
   </section>
 
   {/* ------------------------------------------------------ pick the other -- */}
-  <section class="border-t border-line bg-surface/30 py-16" data-reveal>
+  <section class="border-t border-line bg-surface/30 py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Use Aitum, not this</h2>
       <ul class="mt-5 max-w-3xl space-y-3">
@@ -235,12 +235,12 @@ const CHECKED = "16 September 2026";
       <p class="mt-6 max-w-3xl text-pretty leading-relaxed text-muted">
         polyemesis is worth the server when the mixes outnumber the tracks, when
         the stream PC has no headroom left to encode with, or when the upload is
-        the ceiling — one stream out instead of one per platform.
+        the ceiling: one stream out instead of one per platform.
       </p>
     </div>
   </section>
 
-  <section class="wrap py-20 text-center" data-reveal>
+  <section class="wrap py-20 text-center">
     <h2 class="text-balance text-3xl font-medium">Weighing up the others too?</h2>
     <div class="mt-7 flex flex-wrap justify-center gap-3">
       <a href="/comparison" class="btn btn-ghost">All five compared</a>

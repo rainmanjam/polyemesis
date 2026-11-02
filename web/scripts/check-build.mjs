@@ -74,24 +74,42 @@ const servedAt = (page) => "/" + page.replace(/\.html$/, "").replace(/(^|\/)inde
 const cssFiles = readdirSync(join(DIST, "_astro")).filter((f) => f.endsWith(".css"));
 const css = cssFiles.map((f) => readFileSync(join(DIST, "_astro", f), "utf8")).join("\n");
 
-// 1. animation-timeline must survive as its own declaration.
-const folded = /animation:[^;}]*\bview\(\)/.exec(css);
-if (folded) {
-  fail.push(
-    `animation-timeline was folded into an \`animation\` shorthand, which Chrome drops:\n` +
-    `      ${folded[0].slice(0, 90)}\n` +
-    `    Use the longhands so the minifier has no shorthand to merge into.`,
-  );
+/* 1. NO SCROLL REVEALS. These two checks used to guard the reveals themselves
+ *    (the timeline surviving minification, reduced motion switching it off).
+ *    The 2026-11 design review removed the reveals: a full-page capture, a
+ *    print or a link preview rendered every section below the hero as blank
+ *    space, and the motion carried nothing a reader needed. What is guarded
+ *    now is that they stay removed, because `data-reveal` on one section is
+ *    the realistic way they come back. */
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  if (/<[a-z][^>]*\sdata-reveal\b/i.test(html) || /querySelectorAll\(\s*["']\[data-reveal\]/.test(html)) {
+    fail.push(`${f}: carries \`data-reveal\` — scroll reveals were removed; content below the hero renders in place`);
+  }
 }
-if (!/animation-timeline:\s*view\(\)/.test(css)) {
-  fail.push("no `animation-timeline: view()` in the built CSS — scroll reveals are not shipping");
+if (/\.reveal(?:\.shown)?\s*[{,]/.test(css)) {
+  fail.push("the built CSS has a `.reveal` rule — the IntersectionObserver reveal fallback was removed and must not come back");
+}
+if (/animation-timeline\s*:/.test(css) || /animation:[^;}]*\bview\(\)/.test(css)) {
+  fail.push("the built CSS drives an animation from a scroll timeline — scroll reveals were removed and must not come back");
 }
 
-// 2. Reduced motion must switch scroll-driven reveals OFF, not shorten them.
+// 2. Reduced motion must make the hero's entry cascade paint at once. `.rise`
+//    holds its `from` keyframe (opacity 0) through its delay because of
+//    `animation-fill-mode: both`, so zeroing duration alone is not enough.
 if (!/@media\s*\(prefers-reduced-motion/.test(css)) {
   fail.push("no prefers-reduced-motion block in the built CSS");
-} else if (!/animation-name:\s*none\s*!important/.test(css)) {
-  fail.push("reduced motion does not set `animation-name: none !important` — a scroll-driven reveal ignores animation-duration");
+} else {
+  // The block itself, not the whole bundle: the same declarations elsewhere
+  // would not be conditional on the reader's preference.
+  const reduced = (css.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\}\s*\}/) || [""])[0];
+  // Lightning CSS writes 0.001ms as `.001ms`; accept any sub-millisecond form.
+  if (!/animation-duration:\s*(?:0|0?\.\d+m?s|\d*\.?\d+e-\d+m?s)\s*!important/.test(reduced)) {
+    fail.push("reduced motion does not collapse `animation-duration` with !important — the hero still animates for a reader who asked for less motion");
+  }
+  if (!/animation-delay:\s*0s?\s*!important/.test(reduced)) {
+    fail.push("reduced motion does not set `animation-delay: 0s !important` — the hero cascade still staggers in for a reader who asked for less motion");
+  }
 }
 
 /* The two mobile-overflow fixes must still be IN the shipped CSS.
@@ -202,7 +220,12 @@ for (const f of pages) {
    * A hand-rolled <pre> breaks the equality whether or not it carries a class,
    * and so does a Copy button that lost its block. Counting is enough here and
    * an HTML parse would not be better: the thing being asserted is a ratio
-   * between two markers that only this component produces together.
+   * between two markers that only this component produces together -- or, for
+   * a block rendered with `externalCopy` (the home hero), that the page
+   * produces as a pair: the block emits no button, and the page's one primary
+   * button carries `data-code-copy` and a `data-copy-target` naming the
+   * block's <code id>. That target is checked below, because the arithmetic
+   * alone would pass a button that copies nothing.
    *
    * BOTH MARKERS ARE MATCHED INSIDE A TAG, not anywhere in the file, and the
    * first version of this was not -- it counted a bare `data-code-copy`, and
@@ -213,6 +236,11 @@ for (const f of pages) {
   const pre = (html.match(/<pre[\s>]/g) || []).length;
   const copy = (html.match(/<button[^>]*\bdata-code-copy\b/g) || []).length;
   const quote = (html.match(/class="[^"]*\bcode-quote\b/g) || []).length;
+  for (const m of html.matchAll(/<button[^>]*\bdata-copy-target="([^"]+)"/g)) {
+    if (!new RegExp(`<code[^>]*\\bid="${m[1]}"`).test(html)) {
+      fail.push(`${f}: a copy button targets #${m[1]}, but no <code id="${m[1]}"> is on the page, so it copies nothing`);
+    }
+  }
   if (pre !== copy + quote) {
     fail.push(
       `${f}: ${pre} <pre> but ${copy} copy button(s) and ${quote} quote block(s) — ` +
@@ -242,8 +270,9 @@ if (!/var\(--motion-instant\)/.test(css)) {
       "so the scale is decorative and cannot be overridden",
   );
 }
-/* --motion-enter is the entry duration, and it is the one the page-load cascade
- * and the scroll reveals both run on. It was declared in the token block and
+/* --motion-enter is the entry duration, and it is the one the hero's page-load
+ * cascade runs on (the scroll reveals that also used it were removed in the
+ * 2026-11 design review). It was declared in the token block and
  * referenced by NOTHING: `.rise` was written `0.45s cubic-bezier(0.22, 0.61,
  * 0.36, 1)` and `.reveal` was `0.5s ease`, four lines below the token that
  * named the same intention. That is how a scale stops being one — not by being

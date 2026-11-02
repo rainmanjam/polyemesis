@@ -46,14 +46,33 @@ interface Props {
    * which reads textContent at click time and so needs no special handling for
    * content that was not there at build. */
   codeId?: string;
+  /* THE PAGE OWNS THE COPY CONTROL, for a block whose Copy is the primary
+   * action of the section it sits in (the home hero). The block then renders
+   * no button of its own, and the page renders exactly one, carrying both
+   * `data-code-copy` (so check-build still pairs this <pre> with one copy
+   * control) and `data-copy-target={codeId}` (so the script finds the text
+   * from outside the box). Two controls that copy the same string was the
+   * defect: the hero had a small Copy in the bar and a large "Copy install
+   * command" under it. Requires codeId. */
+  externalCopy?: boolean;
   class?: string;
 }
 
-const { label, code, variant = "command", codeId, class: extra } = Astro.props;
-const copyable = variant === "command";
+const { label, code, variant = "command", codeId, externalCopy = false, class: extra } = Astro.props;
+if (externalCopy && !codeId) {
+  throw new Error("CodeBlock: externalCopy needs a codeId for the page's copy button to target");
+}
+const copyable = variant === "command" && !externalCopy;
 ---
 
 <div class:list={["code", variant === "quote" && "code-quote", extra]}>
+  {
+    label && externalCopy && (
+      <div class="code-bar">
+        <span class="code-label">{label}</span>
+      </div>
+    )
+  }
   {
     label && copyable && (
       <div class="code-bar">
