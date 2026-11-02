@@ -1,0 +1,46 @@
+# Build context for web/Dockerfile, which is built from the REPOSITORY ROOT:
+#
+#   docker build -f web/Dockerfile -t polyemesis-site .
+#
+# BuildKit reads <Dockerfile>.dockerignore in preference to the root
+# .dockerignore, so this file governs the site image and the root one keeps
+# governing the release images (it excludes docs/, which the site needs).
+#
+# An ALLOW-LIST: everything is excluded, then only what web/Dockerfile COPYs is
+# let back in. Keep the two in step -- a path added to a COPY line has to be
+# re-included here or the build fails with "not found".
+*
+
+!web/
+!docs/
+!deploy/
+!internal/
+!integrations/
+!scripts/
+!README.md
+!CHANGELOG.md
+!SECURITY.md
+!CONTRIBUTING.md
+!CODE_OF_CONDUCT.md
+!LICENSE
+!config.example.yaml
+!docker-compose.yml
+
+# Then out again, inside the allowed directories: dependencies and build output
+# (the image installs and builds its own), test fixtures, and anything
+# secret-shaped, so a local file can never ride into a build layer.
+**/node_modules
+**/.git
+web/dist
+web/.astro
+internal/web/dist
+integrations/**/bin
+**/testdata
+**/*.db
+**/*.log
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/id_rsa*

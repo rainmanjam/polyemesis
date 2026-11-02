@@ -261,8 +261,10 @@ node scripts/sync-design-tokens.mjs
 That copies the `:root` block verbatim into `web/src/styles/tokens.css`, which
 `web/src/styles/global.css` imports. Run it after editing any token.
 
-A checked-in copy rather than an import, because the website has to build from
-`web/` alone: `web/Dockerfile` uses that directory as its build context, so a
+A checked-in copy rather than an import, because the website must not depend on
+`ui/`: `web/Dockerfile` (built from the repository root with
+`docker build -f web/Dockerfile .`) copies an explicit list of paths --
+`web/`, `docs/` and the files the docs link to -- and `ui/` is not on it, so a
 relative path reaching into `ui/` is a file the image does not contain. A shared
 npm package is rejected under [what is deliberately
 absent](#what-is-deliberately-absent), and generating the file during the Astro
