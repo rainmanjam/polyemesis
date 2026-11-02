@@ -13,9 +13,10 @@
  * their password, which is the one screen where looking like the right site
  * matters most.
  *
- * THE COLOURS ARE LITERAL AND THAT IS DELIBERATE. They happen to equal three of
- * the app's tokens today -- --primary, --meter-low and --armed -- and wiring
- * them to those tokens is the tempting move. It is wrong: those tokens carry
+ * THE COLOURS ARE LITERAL AND THAT IS DELIBERATE. Two of them equal app
+ * tokens today -- --primary and --meter-low -- and the third is the cyan the
+ * old --armed token had before idle went neutral -- exactly the drift this
+ * note warns about. Wiring them to tokens is the tempting move. It is wrong: those tokens carry
  * MEANING elsewhere in this UI (a destination's state, a meter's band), so
  * repointing one to serve a design need would silently restyle the logo, and a
  * mark that drifts with the palette stops matching the site it is supposed to

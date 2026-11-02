@@ -44,7 +44,7 @@ const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 10
 
 <div class="card overflow-hidden">
   <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
-    <span class="size-1.5 rounded-full bg-live"></span>
+    <span class="size-1.5 rounded-full bg-ok"></span>
     <span class="font-mono text-[11px] text-subtle">
       loudness per destination · EBU R128, measured after routing
     </span>
@@ -68,7 +68,7 @@ const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 10
               aria-hidden="true"
             />
             <div
-              class:list={["loud-bar h-full rounded-full", d.tone === "live" ? "bg-live/70" : "bg-meter/70"]}
+              class:list={["loud-bar h-full rounded-full", d.tone === "live" ? "bg-ok/70" : "bg-meter/70"]}
               style={`width: ${pct(d.lufs)}%; animation-delay: -${(i * 0.83).toFixed(2)}s; animation-duration: ${(3.1 + i * 0.37).toFixed(2)}s`}
             />
           </div>

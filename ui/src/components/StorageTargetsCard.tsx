@@ -424,14 +424,14 @@ export function StorageTargetsCard() {
 
               {result && (
                 <div className="grid gap-1 rounded-md border border-border p-2" data-testid="storage-test-result">
-                  <p className={result.ok ? "text-sm text-live" : "text-sm text-down"}>
+                  <p className={result.ok ? "text-sm text-ok" : "text-sm text-down"}>
                     {result.ok
                       ? t("storage.testPassed")
                       : t("storage.testFailed", { step: t(STEP_KEY[result.failedStep ?? "put"]) })}
                   </p>
                   {result.steps.map((s) => (
                     <p key={s.step} className="flex items-start gap-1.5 text-tiny">
-                      {s.ok ? <Check className="h-3 w-3 text-live" /> : <X className="h-3 w-3 text-muted-foreground" />}
+                      {s.ok ? <Check className="h-3 w-3 text-ok" /> : <X className="h-3 w-3 text-muted-foreground" />}
                       <span className="font-medium">{t(STEP_KEY[s.step])}</span>
                       <span className="text-muted-foreground">
                         {s.ok ? t("storage.stepOk") : s.skipped ? t("storage.stepSkipped") : s.error}

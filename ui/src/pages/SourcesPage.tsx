@@ -705,7 +705,7 @@ export function SourceCard({
         {phase === "receiving" && (
           <div
             role="status"
-            className="flex items-start gap-3 rounded-md border border-live/30 bg-live-dim/20 px-3 py-2"
+            className="flex items-start gap-3 rounded-md border border-ok/30 bg-ok-dim/20 px-3 py-2"
           >
             {/* WHAT IS ARRIVING, not only that something is (A2). A small live
                 picture of this source's own feed, so the operator can see it is
@@ -723,10 +723,10 @@ export function SourceCard({
                 </LazyBoundary>
               </div>
             ) : (
-              <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-live" />
+              <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-ok" />
             )}
             <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-[12px] font-semibold text-live">{t("sources.signalDetected")}</p>
+              <p className="text-[12px] font-semibold text-ok">{t("sources.signalDetected")}</p>
               <p className="text-[12px] text-muted-foreground">{t("sources.signalDetectedBody")}</p>
               {!previewOn && (
                 <p className="text-[12px] text-muted-foreground">{t("sources.thumbnailOff")}</p>
@@ -826,8 +826,8 @@ export function SourceCard({
              "why is it breaking up" is a question about one encoder's uplink,
              and answering it per programme is something Restreamer's UI does
              not do. */
-          <div className="flex flex-wrap items-center gap-3 rounded-md border border-live/30 bg-live-dim/20 px-2 py-1.5">
-            <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-live">
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-ok/30 bg-ok-dim/20 px-2 py-1.5">
+            <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-ok">
               <Activity className="h-3 w-3" /> {t("sources.publishing")}
             </span>
             <span className="font-mono text-sm text-muted-foreground">{source.link.peer}</span>
@@ -919,7 +919,7 @@ export function SourceCard({
               setting. */}
           {source.tokenEnforced ? (
             <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
-              <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-live" />
+              <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0 text-ok" />
               <span>
                 <strong className="font-semibold">{t("sources.tokenIsCredential")}</strong>{" "}
                 {/* Mode-specific, because the two protocols carry the token in

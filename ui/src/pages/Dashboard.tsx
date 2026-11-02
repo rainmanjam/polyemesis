@@ -672,8 +672,8 @@ export function GoLiveComposer() {
 
 // A bulk result is reported per destination, never as one boolean, so each
 // outcome needs its own place in the signal language -- the same table the
-// metadata composer keeps for the same reason. Tokens only: there is no
-// text-ok, and DestinationCard.tsx:302-305 records what a hand-written colour
+// metadata composer keeps for the same reason. Tokens only, through the
+// tone tables: DestinationCard.tsx:302-305 records what a hand-written colour
 // class cost.
 //
 // `skipped` is armed rather than idle because "we never got to this one" is a
@@ -909,7 +909,7 @@ export function LaneHeading({ name, destinations }: { name: string; destinations
       <Cue
         aria-hidden="true"
         data-lane-cue={onAir ? "on-air" : "off-air"}
-        className={cn("h-3.5 w-3.5 shrink-0", onAir ? "text-live" : "text-muted-foreground")}
+        className={cn("h-3.5 w-3.5 shrink-0", onAir ? "text-ok" : "text-muted-foreground")}
       />
       <span data-lane-name className="truncate font-semibold uppercase tracking-wide text-foreground">
         {name}

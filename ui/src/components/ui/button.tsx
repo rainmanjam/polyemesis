@@ -24,9 +24,10 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/85",
         // "live" and "down" are signal colours: only ever on actions that
         // start or stop a stream.
-        live: "bg-live text-background hover:bg-live/85",
-        // Dark text on the red, as live has on the green: the light
-        // destructive-foreground measures 3.65:1 there, --background 4.98:1 (B2).
+        live: "bg-ok text-background hover:bg-ok/85",
+        // Dark text on the coral, as on the green: --background measures
+        // 6.76:1 on it, white 2.87:1. --destructive-foreground is that same
+        // dark ink now (it was a near-white at 3.65:1, B2).
         destructive: "bg-destructive text-background hover:bg-destructive/85",
         outline: "border border-border-strong bg-transparent hover:bg-accent hover:text-accent-foreground",
         secondary: "bg-secondary text-secondary-foreground hover:bg-card-raised",

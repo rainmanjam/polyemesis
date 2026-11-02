@@ -2,7 +2,7 @@ import type { TranslationKey } from "./i18n";
 
 /** What the music mark beside a destination in the routing rail means.
  *
- *  It used to be a bare note glyph in `text-live` or `text-warn`, with no
+ *  It used to be a bare note glyph in `text-ok` or `text-warn`, with no
  *  title, no aria-label and no word next to it -- in a product where green
  *  means ON AIR on every other screen and in the rail's own status dots. So the
  *  one mark that means "this destination excludes the music role" read as "this

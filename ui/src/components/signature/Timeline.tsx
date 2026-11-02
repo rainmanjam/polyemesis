@@ -120,8 +120,8 @@ function readPalette(): Palette {
     primaryDim: cssVar("--primary-dim", "#253148"),
     playhead: cssVar("--meter-hold", "#e6e9ef"),
     warn: cssVar("--warn", "#e8a33d"),
-    armed: cssVar("--armed", "#45b5d0"),
-    muted: cssVar("--subtle-foreground", "#5d6779"),
+    armed: cssVar("--idle", "#8b94a7"),
+    muted: cssVar("--subtle-foreground", "#7d8798"),
     text: cssVar("--muted-foreground", "#8b94a7"),
     mono: cssVar("--font-mono", "ui-monospace, SFMono-Regular, monospace"),
   };

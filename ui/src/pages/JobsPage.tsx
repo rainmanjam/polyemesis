@@ -733,7 +733,7 @@ function JobTable({
                     type="button"
                     className={cn(
                       "text-left",
-                      hasDetail ? "hover:text-primary" : "cursor-default",
+                      hasDetail ? "hover:text-primary-bright" : "cursor-default",
                     )}
                     disabled={!hasDetail}
                     onClick={() => setOpen(expanded ? null : j.id)}
@@ -864,7 +864,7 @@ function ProgressCell({ job }: { job: JobView }) {
   return (
     <div className="flex items-center gap-2">
       <div className="h-1 flex-1 overflow-hidden rounded-full bg-secondary">
-        <div className="h-full bg-live transition-[width]" style={{ width: `${pct}%` }} />
+        <div className="h-full bg-ok transition-[width]" style={{ width: `${pct}%` }} />
       </div>
       <span className="tnum w-8 shrink-0 text-right font-mono text-sm">{pct}%</span>
       {/* The ETA is withheld below a few per cent, where the extrapolation is

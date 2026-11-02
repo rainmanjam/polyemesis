@@ -33,7 +33,7 @@ const x = (db: number) => Math.round(((db + 60) / 60) * WIDTH);
 /** The palette's fallbacks, used because jsdom resolves every CSS variable to
  *  "". They identify which channel drew a rectangle. */
 const HOLD = "#e6e9ef";
-const PEAK = "#e5484d";
+const PEAK = "#f76e52";
 
 interface Rect {
   x: number;

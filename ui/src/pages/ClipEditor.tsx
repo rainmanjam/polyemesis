@@ -1331,7 +1331,7 @@ function TranscriptRow({
       </span>
       <span className="min-w-0 flex-1">
         {line.speaker && (
-          <span className="mr-1 font-semibold text-armed">{line.speaker}:</span>
+          <span className="mr-1 font-semibold text-idle">{line.speaker}:</span>
         )}
         {line.text}
       </span>

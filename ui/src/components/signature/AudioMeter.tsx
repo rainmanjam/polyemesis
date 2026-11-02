@@ -75,8 +75,11 @@ function readPalette(): Palette {
   return {
     low: cssVar("--meter-low", "#3ecf6d"),
     mid: cssVar("--meter-mid", "#cfd23e"),
-    high: cssVar("--meter-high", "#e8a33d"),
-    peak: cssVar("--meter-peak", "#e5484d"),
+    // Amber is not a meter colour: it means warn. --meter-high is gone, so the
+    // hot stop holds the yellow until the red begins. Discrete zones replace
+    // this gradient in a follow-up; until then the meter is green/yellow/red.
+    high: cssVar("--meter-mid", "#cfd23e"),
+    peak: cssVar("--meter-peak", "#f76e52"),
     bg: cssVar("--meter-bg", "#12161e"),
     grid: cssVar("--meter-grid", "#232a38"),
     hold: cssVar("--meter-hold", "#e6e9ef"),

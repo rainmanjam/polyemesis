@@ -107,7 +107,7 @@ export function SetupChecklist({
             aria-valuenow={checklist.done}
           >
             <span
-              className="block h-full rounded-full bg-live"
+              className="block h-full rounded-full bg-ok"
               style={{ width: `${(checklist.done / 5) * 100}%` }}
             />
           </span>
@@ -134,7 +134,7 @@ export function SetupChecklist({
                 <span
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-full border text-[13px] font-semibold",
-                    state === "done" && "border-live bg-live-dim text-live",
+                    state === "done" && "border-ok bg-ok-dim text-ok",
                     state === "next" && "border-primary text-foreground",
                     (state === "todo" || state === "waiting") && "border-border-strong text-muted-foreground",
                     state === "locked" && "border-dashed border-border-strong text-muted-foreground",
@@ -300,15 +300,15 @@ function IngestAddresses({
         <div
           className={cn(
             "flex items-start gap-3 rounded-md border px-3 py-2.5",
-            signal ? "border-live/40 bg-live-dim" : "border-dashed border-border-strong",
+            signal ? "border-ok/40 bg-ok-dim" : "border-dashed border-border-strong",
           )}
           role="status"
         >
           <span className="relative mt-1.5 flex h-2.5 w-2.5 shrink-0" aria-hidden="true">
             {!signal && (
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-armed opacity-60 motion-reduce:animate-none" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-idle opacity-60 motion-reduce:animate-none" />
             )}
-            <span className={cn("relative inline-flex h-2.5 w-2.5 rounded-full", signal ? "bg-live" : "bg-armed")} />
+            <span className={cn("relative inline-flex h-2.5 w-2.5 rounded-full", signal ? "bg-ok" : "bg-idle")} />
           </span>
           <div className="flex flex-col gap-0.5">
             <span className="text-sm font-semibold">
