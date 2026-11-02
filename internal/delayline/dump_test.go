@@ -46,7 +46,7 @@ type synth struct {
 	// audioLag, when set, muxes audio frame m that much after its PTS: the
 	// interleave jitter a real muxer has.
 	audioLag func(m int) time.Duration
-	cc           map[uint16]uint8
+	cc       map[uint16]uint8
 }
 
 func newSynth(gop int) *synth {
