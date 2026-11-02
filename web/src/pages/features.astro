@@ -273,7 +273,12 @@ for (const name of new Set(sections.flatMap((s) => [s.shot, ...("setup" in s && 
  * reader scrolling ahead of the network sees the screen's layout rather than an
  * empty frame. See lib/lqip.ts. */
 const placeholder = new Map<string, string>();
-for (const name of fullShot.keys()) {
+// Only the captures that load lazily: the first section's loads eagerly and
+// needs none, so generating one for it would ship an unreferenced file.
+const lazyShots = new Set(
+  sections.flatMap((s, i) => [...(i > 0 ? [s.shot] : []), ...("setup" in s && s.setup ? [s.setup.shot] : [])]),
+);
+for (const name of lazyShots) {
   placeholder.set(name, await lqipStyle(shotOf(name)));
 }
 
@@ -584,7 +589,9 @@ const rooms = [
           <div>
             <h3 class="text-sm font-medium text-fg">{x.h}</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted">{x.p}</p>
-            <a href={x.href} class="tap mt-2 inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs</a>
+            <p class="mt-2">
+              <a href={x.href} aria-label={`Docs: ${x.h}`} class="tap inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs</a>
+            </p>
           </div>
         ))}
       </div>

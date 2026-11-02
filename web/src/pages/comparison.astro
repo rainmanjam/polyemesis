@@ -149,11 +149,11 @@ const losses = [
     who: "Restreamer",
     what: "Ranked by how often each was asked for on their own tracker, which is the honest ordering.",
     rows: [
-      ["WebRTC / WHIP output", "Missing. Sizeable subsystem; the real use case is sub-second self-monitoring."],
-      ["Decklink / SDI capture, in and out", "Missing. Needs an FFmpeg built with decklink, so a third image variant."],
-      ["Multi-input compositing / video grid", "Missing. Natural once multi-source is settled."],
-      ["HDR 10-bit HEVC", "Partial. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
-      ["LL-HLS", "Declined, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
+      ["WebRTC / WHIP output", "Not in polyemesis. A sizeable subsystem; the real use case is sub-second self-monitoring."],
+      ["Decklink / SDI capture, in and out", "Not in polyemesis. It needs an FFmpeg built with decklink, so a third image variant."],
+      ["Multi-input compositing / video grid", "Not in polyemesis. Natural once multi-source is settled."],
+      ["HDR 10-bit HEVC", "Partial in polyemesis. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
+      ["LL-HLS", "Declined in polyemesis, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
       ["Maturity", "Restreamer is established. polyemesis is pre-release with one maintainer."],
     ],
   },
@@ -170,9 +170,9 @@ const losses = [
     who: "restream.io",
     what: "SaaS. Self-hosting wins on cost, privacy and limits by construction; restream.io wins wherever having somebody else run it is the feature.",
     rows: [
-      ["Studio: browser production, remote guests", "Missing. Multi-source plus compositing is the closest path."],
-      ["Teams, roles, multiple workspaces", "Missing. Exactly one admin identity."],
-      ["No server to run", "By design, no."],
+      ["Studio: browser production, remote guests", "Not in polyemesis. Multi-source plus compositing is the closest path."],
+      ["Teams, roles, multiple workspaces", "Not in polyemesis, which has exactly one admin identity."],
+      ["No server to run", "polyemesis is self-hosted by design."],
     ],
     tail: "Teams and roles is the one to take seriously. Access to the UI is full control of the server's streaming, so any multi-operator deployment (a church A/V team, an agency running several clients) hits that immediately.",
   },
@@ -465,7 +465,7 @@ const selectors = [
         {
           losses.map((l) => (
             <div class="card p-5">
-              <p class="font-medium text-fg">Choose {l.who} for</p>
+              <h3 class="font-medium text-fg">Choose {l.who} for</h3>
               <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
               <dl class="mt-4 divide-y divide-line border-y border-line">
                 {l.rows.map(([has, here]) => (

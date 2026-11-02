@@ -334,9 +334,18 @@ describe("the announcement bar", () => {
       e.isDirectory() ? astroFiles(join(dir, e.name)) : e.name.endsWith(".astro") ? [join(dir, e.name)] : [],
     );
 
-  it("is requested by the home page and by no other page", () => {
-    const requesting = astroFiles("pages").filter((f) => /\bannounce=\{/.test(readFileSync(join(src, f), "utf8")));
+  // Pages, layouts AND components: a layout such as DocPage passing
+  // `announce` to Base would put the bar on every document.
+  const everyAstro = () => ["pages", "layouts", "components"].flatMap((d) => astroFiles(d));
+
+  it("is requested by the home page and by nothing else", () => {
+    const requesting = everyAstro().filter((f) => /\bannounce=\{/.test(readFileSync(join(src, f), "utf8")));
     expect(requesting).toEqual([join("pages", "index.astro")]);
+  });
+
+  it("is rendered only through Base", () => {
+    const rendering = everyAstro().filter((f) => /<Announce\b/.test(readFileSync(join(src, f), "utf8")));
+    expect(rendering).toEqual([join("layouts", "Base.astro")]);
   });
 
   it("is rendered by Base only when a page asks for it", () => {
