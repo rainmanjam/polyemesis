@@ -31,8 +31,8 @@ const specs = [
     <dl class="grid grid-cols-2 divide-line sm:grid-cols-4 lg:grid-cols-7 lg:divide-x">
       {
         specs.map((s) => (
-          <div class="px-4 py-4 first:pl-0 last:col-span-2 sm:last:col-span-1 lg:px-5">
-            <dt class="font-mono text-[10px] uppercase tracking-wider text-subtle">{s.k}</dt>
+          <div class="py-4 pr-4 last:col-span-2 sm:last:col-span-1 lg:px-5 lg:first:pl-0">
+            <dt class="font-mono text-[10px] uppercase tracking-wider text-muted">{s.k}</dt>
             <dd class="mt-1 font-mono text-[13px] text-fg">{s.v}</dd>
           </div>
         ))
