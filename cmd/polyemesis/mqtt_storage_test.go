@@ -31,3 +31,19 @@ func TestTheSnapshotCountsEachStorageTargetsStuckUploads(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+// Codex #4: two targets with the same name get distinct topics and entities.
+func TestStorageTargetsWithTheSameNameDoNotShareATopic(t *testing.T) {
+	store := dbtest.Open(t)
+	for i := 0; i < 2; i++ {
+		if _, err := store.CreateStorageTarget(nil, db.StorageTarget{Name: "Archive", Provider: "s3", Endpoint: "http://h", Bucket: "b", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &mqttRunner{store: store, log: slog.New(slog.NewTextHandler(io.Discard, nil)), version: "test",
+		engines: func() []mqttEngine { return nil }, started: time.Now()}
+	got := r.snapshot().Storage
+	if len(got) != 2 || got[0].Slug == got[1].Slug || got[0].Name != "Archive" || got[1].Name != "Archive" {
+		t.Fatalf("%+v", got)
+	}
+}

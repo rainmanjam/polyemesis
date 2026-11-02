@@ -444,7 +444,7 @@ The script starts RustFS 1.0.4 in Docker, pinned by digest
 `POLYEMESIS_RUSTFS_REGISTRY=quay.io`), waits until its S3 API answers, and runs
 seven cases: the SigV4 round trip with a key that needs escaping, the server
 refusing a body that is not the signed digest, a wrong secret refused and never
-echoed, multipart with its composite ETag plus a ranged GET and abort, a mirror
+echoed, multipart with its composite ETag and abort, a mirror
 upload verified with the local file untouched, a multipart upload resumed across
 a restart, and the Test button.
 Without an endpoint the tests fail rather than skip, so a green run is a run

@@ -430,7 +430,10 @@ func (r *mqttRunner) storageStates(now time.Time) []mqtt.StorageState {
 	}
 	out := make([]mqtt.StorageState, 0, len(targets))
 	for _, t := range targets {
-		st := mqtt.StorageState{ID: t.ID, Name: t.Name, Slug: mqtt.Slug(t.Name), Enabled: t.Enabled, At: now}
+		// Keyed by ID, not by name: two targets may share a name, and their
+		// retained topics and Home Assistant entities must not collide. The
+		// name stays the friendly name.
+		st := mqtt.StorageState{ID: t.ID, Name: t.Name, Slug: mqtt.StorageSlug(t.ID), Enabled: t.Enabled, At: now}
 		for _, it := range items {
 			if it.TargetID != t.ID {
 				continue

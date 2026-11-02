@@ -147,7 +147,7 @@ func TestLiveWrongSecretIsRefusedAndNeverEchoed(t *testing.T) {
 	}
 }
 
-func TestLiveMultipartAndRangedGet(t *testing.T) {
+func TestLiveMultipartCompleteAndAbort(t *testing.T) {
 	c := liveClient(t)
 	ctx := context.Background()
 	part := bytes.Repeat([]byte("0123456789abcdef"), (5<<20)/16) // 5 MiB, the S3 minimum part size
@@ -177,16 +177,6 @@ func TestLiveMultipartAndRangedGet(t *testing.T) {
 	info, err := c.Head(ctx, key)
 	if err != nil || info.ETag != want || info.Size != int64(len(part)+len(tail)) || info.Meta["sha256"] != "recorded-by-the-caller" {
 		t.Fatalf("head %+v %v", info, err)
-	}
-	off := int64(len(part)) + 4
-	rc, rinfo, partial, err := c.GetFrom(ctx, key, off)
-	if err != nil || !partial || rinfo.Size != info.Size {
-		t.Fatalf("ranged get partial=%v %+v %v", partial, rinfo, err)
-	}
-	got, _ := io.ReadAll(rc)
-	rc.Close()
-	if string(got) != string(tail[4:]) {
-		t.Fatalf("ranged body %q", got)
 	}
 	// Abort of an upload, and of one that no longer exists, both succeed.
 	abandoned := k(t, "mp/abandoned")

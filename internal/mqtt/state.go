@@ -1,6 +1,9 @@
 package mqtt
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // The payloads published on the retained topics.
 //
@@ -154,3 +157,7 @@ type StorageState struct {
 	Verified int       `json:"verified"`
 	At       time.Time `json:"at"`
 }
+
+// StorageSlug is a storage target's topic segment: its ID, because target
+// names are not unique.
+func StorageSlug(id int64) string { return "target-" + strconv.FormatInt(id, 10) }

@@ -156,8 +156,12 @@ export function StorageTargetsCard() {
   const load = useCallback(async () => {
     try {
       const list = await api.storage.list();
+      // A response without the list (a proxy page, an older server, a test
+      // double that does not know the route) is a failed read, not a crash
+      // and not "no targets".
+      if (!list || !Array.isArray(list.targets)) throw new Error(t("storage.loadFailed"));
       setTargets(list.targets);
-      setAvailable(list.available);
+      setAvailable(list.available !== false);
       setLoadFailed(false);
     } catch (err) {
       setLoadFailed(true);

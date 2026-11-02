@@ -48,7 +48,7 @@ func (s *Service) putMultipart(ctx context.Context, t db.StorageTarget, c Client
 			PartSize: partSize, Bytes: n, SHA256: sh}
 		// Persisted before the first part, so a crash from here on leaves an
 		// upload the startup sweep knows about and can resume or abort.
-		if perr := s.store.PutOffloadMultipart(mp); perr != nil {
+		if perr := s.store.PutOffloadMultipartIfBinding(mp, t.BindingGen); perr != nil {
 			_ = c.AbortMultipart(ctx, it.Key, id)
 			return "", perr
 		}
@@ -77,7 +77,13 @@ func (s *Service) putMultipart(ctx context.Context, t db.StorageTarget, c Client
 			return "", err
 		}
 		mp.Parts = append(mp.Parts, db.OffloadPart{Number: i, ETag: etag, MD5: pmb, Size: size})
-		if err := s.store.PutOffloadMultipart(mp); err != nil {
+		// Conditioned on the binding generation like the claim: a target moved
+		// while parts were going up gets no progress row back, and the upload
+		// at the old address is abandoned there.
+		if err := s.store.PutOffloadMultipartIfBinding(mp, t.BindingGen); err != nil {
+			if errors.Is(err, db.ErrBindingChanged) {
+				_ = c.AbortMultipart(context.WithoutCancel(ctx), mp.Key, mp.UploadID)
+			}
 			return "", err
 		}
 	}

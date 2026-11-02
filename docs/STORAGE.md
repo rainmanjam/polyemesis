@@ -8,8 +8,7 @@ Cloudflare R2, Backblaze B2 (its S3 API), MinIO or Wasabi. Add a target on the
 Offload is **mirror mode**: it copies, and it never moves or deletes a local
 file. Local retention keeps working exactly as it does without offload, and the
 copy in the bucket lives as long as the bucket's own lifecycle rule allows.
-A move mode -- delete the local copy once it is safely in the bucket, and fetch
-it back on demand -- is planned, not part of this release.
+Nothing in this release removes a file from local disk on offload's account.
 
 ## What a target holds
 

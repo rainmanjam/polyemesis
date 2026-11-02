@@ -124,3 +124,50 @@ func TestThePosterAndTheRefusalsFollowTheSharedCacheRule(t *testing.T) {
 		}
 	}
 }
+
+// Codex #3: the public view follows the shared-cache rule -- briefly public
+// for an open stream, private and not stored for a token holder or an
+// operator, never stored when refused.
+func TestThePublicViewFollowsTheSharedCacheRule(t *testing.T) {
+	cases := []struct{ cfg, who, want string }{
+		{"public open", "anonymous", "public, max-age=5"},
+		{"public open", "session", "private, no-store"},
+		{"public token", "query token", "private, no-store"},
+		{"public token", "anonymous", "no-store"},
+		{"private", "anonymous", "no-store"},
+	}
+	principals := map[string]playoutPrincipal{}
+	for _, p := range playoutPrincipals() {
+		principals[p.name] = p
+	}
+	configs := map[string]playoutConfig{}
+	for _, c := range playoutConfigs() {
+		configs[c.name] = c
+	}
+	for _, tc := range cases {
+		t.Run(tc.cfg+"/"+tc.who, func(t *testing.T) {
+			c := configs[tc.cfg]
+			_, h, sign := playoutOriginServer(t, c.set, c.pub)
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/playout/public", nil)
+			r.RemoteAddr = "203.0.113.9:5555"
+			principals[tc.who].apply(t, h, sign, r)
+			w := do(t, h, r)
+			if got := w.Header().Get("Cache-Control"); got != tc.want {
+				t.Fatalf("%d Cache-Control %q, want %q", w.Code, got, tc.want)
+			}
+		})
+	}
+}
+
+// Codex #6: a poster that cannot be served after the gate let the request in
+// (no frame on disk yet) is a 404 nothing may store.
+func TestAPosterNotYetAvailableIsNoStore(t *testing.T) {
+	c := playoutConfigs()[1] // public open
+	_, h, _ := playoutOriginServer(t, c.set, c.pub)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/playout/poster.jpg", nil)
+	r.RemoteAddr = "203.0.113.9:5555"
+	w := do(t, h, r)
+	if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%d %q", w.Code, w.Header().Get("Cache-Control"))
+	}
+}

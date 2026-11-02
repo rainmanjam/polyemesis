@@ -21,6 +21,7 @@ next.
 | `seg_*.ts` (HLS segments) | `public, max-age=31536000, s-maxage=<window>` | `private, max-age=31536000, immutable` |
 | `init-*.m4s`, `chunk-*.m4s`, `*.vtt` | `public, max-age=<segment seconds>` | `private, max-age=<segment seconds>` |
 | `/api/v1/playout/poster.jpg` | `public, max-age=10` | `private, max-age=10` |
+| `/api/v1/playout/public` (the watch page's view) | `public, max-age=5` | `private, no-store` |
 | a refusal (401, 404, 503) | `no-store` | `no-store` |
 
 `<window>` is the seekable window: the DVR window when one is set, otherwise

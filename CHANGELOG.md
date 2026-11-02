@@ -23,7 +23,7 @@ its first tagged release.
   event and counted per target over MQTT (a Home Assistant sensor each), with **Retry now** per
   target and per recording; the Library shows each recording's state. Moving a target to another
   address re-uploads its files, and an upload still running against the old address cannot record
-  its result. Move mode (delete local after upload, fetch back on demand) is planned. The player
+  its result. The player
   origin now sends `public` caching only for an open stream (HLS segments numbered from the wall
   clock, a year in the browser and the seekable window at the edge; one-second playlists),
   `private`/`no-store` for anything token-gated or signed in and for every refusal, and an `ETag`

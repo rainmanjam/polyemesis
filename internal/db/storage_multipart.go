@@ -97,6 +97,38 @@ func (d *DB) PutOffloadMultipart(m OffloadMultipart) error {
 	return err
 }
 
+// PutOffloadMultipartIfBinding is PutOffloadMultipart for a write an upload
+// makes: it lands only while the target still exists at binding generation
+// gen, the one the upload's pass started with. A target moved since (whose
+// rebind dropped all its progress) gets ErrBindingChanged, so an upload ID
+// from the OLD bucket is never recorded for the new one to resume.
+func (d *DB) PutOffloadMultipartIfBinding(m OffloadMultipart, gen int64) error {
+	parts, err := json.Marshal(m.Parts)
+	if err != nil {
+		return err
+	}
+	if m.Parts == nil {
+		parts = []byte("[]")
+	}
+	created := m.CreatedAt
+	if created.IsZero() {
+		created = time.Now()
+	}
+	res, err := d.sql.Exec(`INSERT INTO offload_multipart (`+multipartCols+`)
+		SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT binding_gen FROM storage_targets WHERE id = ?) = ?
+		ON CONFLICT(target_id, rel_path) DO UPDATE SET object_key=excluded.object_key, upload_id=excluded.upload_id,
+			part_size=excluded.part_size, bytes=excluded.bytes, sha256=excluded.sha256, parts=excluded.parts`,
+		m.TargetID, m.RelPath, m.Key, m.UploadID, m.PartSize, m.Bytes, m.SHA256, string(parts), created.Unix(),
+		m.TargetID, gen)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrBindingChanged
+	}
+	return nil
+}
+
 // DeleteOffloadMultipart drops the row once the upload completed or was aborted.
 func (d *DB) DeleteOffloadMultipart(target int64, rel string) error {
 	_, err := d.sql.Exec(`DELETE FROM offload_multipart WHERE target_id = ? AND rel_path = ?`, target, rel)

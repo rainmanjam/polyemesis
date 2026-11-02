@@ -4,7 +4,7 @@
 # Starts RustFS, waits until its S3 API answers, then runs the
 # s3integration-tagged Go tests in internal/objstore (SigV4 round trip, the
 # server refusing a body that is not the signed digest, a wrong secret refused
-# and never echoed, multipart with its composite ETag, a ranged GET, abort) and
+# and never echoed, multipart with its composite ETag, abort) and
 # internal/offload (mirror mode: upload and verify, the local file untouched;
 # a multipart upload resumed across a restart; the Test button's
 # put/get/delete). Unit CI
@@ -100,7 +100,7 @@ grep -E '^(=== RUN|--- |ok|FAIL|panic)' "$out" || true
 # A mistyped -run exits 0 having run nothing; insist on the cases by name.
 for want in TestLiveRoundTripWithAKeyThatNeedsEscaping TestLiveServerRefusesABodyThatIsNotTheSignedDigest \
 	TestLiveWrongSecretIsRefusedAndNeverEchoed TestLiveMirrorUploadsVerifiesAndKeepsTheLocalFile \
-	TestLiveProbeRunsPutGetDelete TestLiveMultipartAndRangedGet \
+	TestLiveProbeRunsPutGetDelete TestLiveMultipartCompleteAndAbort \
 	TestLiveMultipartResumesAcrossARestartAndVerifies; do
 	if ! grep -q -- "--- PASS: $want " "$out"; then
 		echo "FAIL: $want did not pass" >&2

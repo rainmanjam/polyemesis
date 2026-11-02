@@ -400,9 +400,11 @@ func (s *Service) unkeyed(t db.StorageTarget, it db.OffloadItem, why error) db.O
 	it.Attempts++
 	s.log.Warn("offload: file has no usable object key", "target", t.Name, "file", it.RelPath, "err", clipErr(why))
 	// No key is a configuration fault: waiting will not give the file one.
-	it = s.fail(t, it, why, true)
+	it, stuck := s.fail(t, it, why, true)
 	if err := s.store.PutOffloadItemIfBinding(it, t.BindingGen); err != nil {
 		s.log.Warn("offload: persist item", "file", it.RelPath, "err", err)
+	} else if stuck != nil {
+		s.raiseStuck(*stuck)
 	}
 	return it
 }
@@ -596,6 +598,7 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		}
 		return nil
 	}()
+	var stuck *StuckEvent
 	switch {
 	case err != nil && ctx.Err() != nil:
 		// Shutdown, not a fault of the file or the target: failed and due
@@ -616,7 +619,7 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		}
 		it.Attempts++
 		s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", clipErr(err))
-		it = s.fail(t, it, err, !retryable(err))
+		it, stuck = s.fail(t, it, err, !retryable(err))
 		if it.State == db.OffloadStuck {
 			// Giving up: the parts already sent are abandoned on the service
 			// too, not left to bill until a lifecycle rule notices.
@@ -638,6 +641,8 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		} else {
 			s.log.Warn("offload: persist item", "file", it.RelPath, "err", perr)
 		}
+	} else if stuck != nil {
+		s.raiseStuck(*stuck)
 	}
 	return it
 }
@@ -667,7 +672,11 @@ func (s *Service) SetStuckHook(fn func(StuckEvent)) {
 
 // fail records a failed attempt: retried later with backoff, or stuck when it
 // was the target's last allowed attempt or the error is permanent.
-func (s *Service) fail(t db.StorageTarget, it db.OffloadItem, err error, permanent bool) db.OffloadItem {
+// The stuck event is RETURNED, not raised: it may be raised only once the
+// state it describes has been written, and that write is conditioned on the
+// target's binding generation -- a failure against an address the target has
+// since moved away from is not a stuck upload, and must not page anybody.
+func (s *Service) fail(t db.StorageTarget, it db.OffloadItem, err error, permanent bool) (db.OffloadItem, *StuckEvent) {
 	it.LastError = clipErr(err)
 	limit := t.MaxAttempts
 	if limit <= 0 {
@@ -678,14 +687,14 @@ func (s *Service) fail(t db.StorageTarget, it db.OffloadItem, err error, permane
 		it.State = db.OffloadStuck
 		it.NextAttemptAt = time.Time{}
 		if was != db.OffloadStuck {
-			s.raiseStuck(StuckEvent{TargetID: t.ID, TargetName: t.Name, RelPath: it.RelPath, Kind: it.Kind,
-				Attempts: it.Attempts, Error: it.LastError})
+			return it, &StuckEvent{TargetID: t.ID, TargetName: t.Name, RelPath: it.RelPath, Kind: it.Kind,
+				Attempts: it.Attempts, Error: it.LastError}
 		}
-		return it
+		return it, nil
 	}
 	it.State = db.OffloadFailed
 	it.NextAttemptAt = s.now().Add(backoff(it.Attempts, true))
-	return it
+	return it, nil
 }
 
 func (s *Service) raiseStuck(ev StuckEvent) {
@@ -739,11 +748,26 @@ func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size 
 	if info.Size != size {
 		return fmt.Errorf("%w: stored %d bytes, sent %d", ErrChecksumMismatch, info.Size, size)
 	}
-	if etag := strings.ToLower(info.ETag); !info.OpaqueETag && (hexMD5.MatchString(etag) || compositeETag.MatchString(etag)) && etag != wantETag {
-		return fmt.Errorf("%w: stored ETag %s is not the %s that was sent", ErrChecksumMismatch, etag, wantETag)
+	// EVIDENCE IS REQUIRED, not merely the absence of a contradiction. A
+	// matching MD5 or composite ETag, the SHA-256 metadata this upload stored,
+	// or a read-back each says the object is these bytes; an object that
+	// offers none of them (an opaque ETag and no metadata) is not verified,
+	// however right its length.
+	evidence := false
+	if etag := strings.ToLower(info.ETag); !info.OpaqueETag && (hexMD5.MatchString(etag) || compositeETag.MatchString(etag)) {
+		if etag != wantETag {
+			return fmt.Errorf("%w: stored ETag %s is not the %s that was sent", ErrChecksumMismatch, etag, wantETag)
+		}
+		evidence = true
 	}
-	if got, ok := info.Meta["sha256"]; ok && got != sh {
-		return fmt.Errorf("%w: stored sha256 metadata differs", ErrChecksumMismatch)
+	if got, ok := info.Meta["sha256"]; ok {
+		if got != sh {
+			return fmt.Errorf("%w: stored sha256 metadata differs", ErrChecksumMismatch)
+		}
+		evidence = true
+	}
+	if !evidence && !t.VerifyDownload {
+		return fmt.Errorf("%w: the stored object carries no checksum to compare (no MD5 ETag, no sha256 metadata); enable verify-by-download for this target", ErrChecksumMismatch)
 	}
 	if t.VerifyDownload {
 		body, _, err := c.Get(ctx, key)

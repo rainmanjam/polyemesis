@@ -762,6 +762,7 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	// scope register could not see (#539/#550).
 	m := s.playoutManager()
 	if m == nil {
+		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
 	}
@@ -774,7 +775,9 @@ func (s *Server) handlePlayoutPoster(w http.ResponseWriter, r *http.Request) {
 	if err != nil || len(jpeg) == 0 {
 		// No segment on disk yet is the normal state of a stream nobody is
 		// feeding, so this is a 404 rather than a 500 the operator would go
-		// looking for a cause for.
+		// looking for a cause for. Never stored: a poster appears as soon as
+		// the first segment does.
+		w.Header().Set("Cache-Control", "no-store")
 		http.NotFound(w, r)
 		return
 	}
@@ -1246,7 +1249,8 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
 
-	switch access := s.authorizePlayout(r); access {
+	access := s.authorizePlayout(r)
+	switch access {
 	case playoutAllowToken:
 		cfg := s.playoutStore().load()
 		s.setPlayoutTokenCookie(w, cfg.Token, set.AllowCrossOrigin)
@@ -1254,13 +1258,25 @@ func (s *Server) handlePlayoutPublic(w http.ResponseWriter, r *http.Request) {
 		// No WWW-Authenticate here. The page's own fetch would trigger the
 		// browser's credential dialog on top of the React UI, which is a worse
 		// experience than the page explaining that the link needs a token.
+		w.Header().Set("Cache-Control", "no-store")
 		writeError(w, http.StatusUnauthorized, "this stream requires a playback token")
 		return
 	default:
 		if !access.ok() {
+			w.Header().Set("Cache-Control", "no-store")
 			http.NotFound(w, r)
 			return
 		}
+	}
+	// The same rule as the media origin (docs/CDN.md): only an OPEN stream's
+	// view is the same for everybody, so only it may sit in a shared cache,
+	// and briefly -- it carries the live state and the viewer count. A token
+	// holder's (which sets a cookie) and an operator's are private and not
+	// stored.
+	if access == playoutAllowOpen {
+		w.Header().Set("Cache-Control", "public, max-age=5")
+	} else {
+		w.Header().Set("Cache-Control", "private, no-store")
 	}
 
 	cfg := s.playoutStore().load()

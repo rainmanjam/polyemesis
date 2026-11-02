@@ -217,37 +217,6 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo
 	return resp.Body, infoFrom(resp), nil
 }
 
-// GetFrom opens the object from byte offset on, for resuming a download.
-// partial reports whether the server honoured the range (206); a server that
-// answers 200 sent the whole object, and the caller must start over. Size in
-// the returned info is the WHOLE object's length either way.
-func (c *Client) GetFrom(ctx context.Context, key string, offset int64) (io.ReadCloser, ObjectInfo, bool, error) {
-	if offset <= 0 {
-		body, info, err := c.Get(ctx, key)
-		return body, info, false, err
-	}
-	h := http.Header{}
-	h.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
-	resp, err := c.do(ctx, "GetObject", http.MethodGet, key, h, nil, 0, emptySHA256)
-	if err != nil {
-		return nil, ObjectInfo{}, false, err
-	}
-	info := infoFrom(resp)
-	if resp.StatusCode != http.StatusPartialContent {
-		return resp.Body, info, false, nil
-	}
-	// Content-Range: bytes <first>-<last>/<total>
-	cr := resp.Header.Get("Content-Range")
-	i := strings.LastIndexByte(cr, '/')
-	total, perr := strconv.ParseInt(cr[i+1:], 10, 64)
-	if i < 0 || perr != nil || !strings.HasPrefix(cr, "bytes "+strconv.FormatInt(offset, 10)+"-") {
-		_ = resp.Body.Close()
-		return nil, ObjectInfo{}, false, fmt.Errorf("objstore: GetObject: unusable Content-Range %q", cr)
-	}
-	info.Size = total
-	return resp.Body, info, true, nil
-}
-
 // Part is one completed part of a multipart upload.
 type Part struct {
 	Number int    `json:"n"`

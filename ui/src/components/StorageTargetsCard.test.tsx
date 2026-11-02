@@ -91,3 +91,12 @@ describe("StorageTargetsCard", () => {
     expect(screen.getByTestId("storage-targets").textContent).not.toContain("No storage target yet");
   });
 });
+
+describe("StorageTargetsCard: a response that is not the list", () => {
+  it("says the read failed instead of crashing", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({} as never);
+    render(<StorageTargetsCard />);
+    await screen.findByText("Could not load the storage targets.");
+    expect(screen.queryByText("No storage target yet.")).toBeNull();
+  });
+});

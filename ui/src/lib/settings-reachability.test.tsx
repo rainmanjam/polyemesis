@@ -344,6 +344,10 @@ function responseFor(path: string): unknown {
     return { usedBytes: 1, freeBytes: 2, totalBytes: 3, count: 0, storage: { halted: false } };
   }
   if (path.endsWith("/recordings")) return [];
+  // The Recordings page's offload card. Storage targets are rows of their own
+  // table, not leaves of Settings, so there is nothing here for the walk to
+  // reach -- the card only has to render without throwing.
+  if (path.endsWith("/storage/targets")) return { targets: [], available: true };
   if (path.endsWith("/playout")) {
     return {
       status: {

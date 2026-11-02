@@ -133,3 +133,127 @@ func TestAnUploadInFlightDuringAMoveDoesNotMarkTheNewAddressVerified(t *testing.
 		t.Fatalf("not uploaded at the new address: %+v", it)
 	}
 }
+
+// partRebinder moves the target after the first part lands.
+type partRebinder struct {
+	*memStore
+	after func()
+	once  sync.Once
+}
+
+func (p *partRebinder) UploadPart(ctx context.Context, key, id string, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
+	etag, err := p.memStore.UploadPart(ctx, key, id, n, body, size, sh, mb)
+	p.once.Do(p.after)
+	return etag, err
+}
+
+// Codex #1: a multipart upload in flight when the target is moved records no
+// progress afterwards -- the rebind dropped it, and the old bucket's upload
+// ID must never be left for the new address to resume -- and the upload at
+// the old address is abandoned there.
+func TestAMoveMidMultipartLeavesNoProgressForTheNewAddress(t *testing.T) {
+	f := newFixture(t)
+	f.svc.mpThreshold, f.svc.partSize, f.svc.partBackoff = 100, 40, time.Millisecond
+	id := f.target()
+	m := f.mems[id]
+	pr := &partRebinder{memStore: m}
+	pr.after = func() {
+		cur, _ := f.store.GetStorageTarget(f.svc.box, id)
+		cur.Bucket, cur.SecretAccessKey = "new-bucket", ""
+		if err := f.store.RebindStorageTarget(f.svc.box, cur); err != nil {
+			t.Errorf("rebind: %v", err)
+		}
+	}
+	f.svc.newClient = func(db.StorageTarget) (Client, error) { return pr, nil }
+	name := f.segment(5*time.Hour, bigBody(130), true)
+	f.segment(time.Minute, "newest", true)
+	f.svc.Pass(context.Background())
+	if rows, _ := f.store.ListOffloadMultipart(id); len(rows) != 0 {
+		t.Fatalf("progress from the old bucket recreated after the move: %+v", rows)
+	}
+	if len(m.aborted) != 1 {
+		t.Fatalf("the old address's upload was not abandoned: %v", m.aborted)
+	}
+	if it, _ := f.item(id, name); it.State == db.OffloadVerified {
+		t.Fatalf("verified for the new address: %+v", it)
+	}
+}
+
+// noEvidence answers HEAD with the right size, an opaque ETag and no SHA-256
+// metadata: nothing that says the object is the bytes that were sent.
+type noEvidence struct{ *memStore }
+
+func (n noEvidence) Head(ctx context.Context, key string) (objstore.ObjectInfo, error) {
+	info, err := n.memStore.Head(ctx, key)
+	info.ETag, info.OpaqueETag = "opaque-etag", true
+	delete(info.Meta, "sha256")
+	return info, err
+}
+
+// Codex #2: an object with no checksum to compare is not verified on its
+// length alone; verify-by-download is what can still verify it.
+func TestAnObjectWithNoChecksumIsNotVerifiedOnLengthAlone(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	f.mems[id].corrupt = true // wrong bytes, right length
+	f.svc.newClient = func(db.StorageTarget) (Client, error) { return noEvidence{f.mems[id]}, nil }
+	name := f.segment(5*time.Hour, "footage", true)
+	f.segment(time.Minute, "newest", true)
+	f.svc.Pass(context.Background())
+	if it, _ := f.item(id, name); it.State == db.OffloadVerified {
+		t.Fatalf("verified with no evidence: %+v", it)
+	}
+	// With the read-back, good bytes do verify.
+	f2 := newFixture(t)
+	id2, _ := f2.store.CreateStorageTarget(f2.svc.box, db.StorageTarget{Name: "dl", Provider: "s3", Endpoint: "http://h.test",
+		Bucket: "b", AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true, VerifyDownload: true})
+	f2.mems[id2] = newMem()
+	f2.svc.newClient = func(db.StorageTarget) (Client, error) { return noEvidence{f2.mems[id2]}, nil }
+	n2 := f2.segment(5*time.Hour, "footage", true)
+	f2.segment(time.Minute, "newest", true)
+	f2.svc.Pass(context.Background())
+	if it, _ := f2.item(id2, n2); it.State != db.OffloadVerified {
+		t.Fatalf("read-back of good bytes not verified: %+v", it)
+	}
+}
+
+// refusingRebinder moves the target and then refuses the upload, the way a
+// failure from the OLD address arrives after an operator's move.
+type refusingRebinder struct {
+	*memStore
+	move func()
+}
+
+func (r refusingRebinder) Put(context.Context, string, io.ReadSeeker, int64, string, string, map[string]string) (string, error) {
+	r.move()
+	return "", &objstore.Error{Op: "PutObject", StatusCode: 403, Code: "AccessDenied"}
+}
+
+// Codex #5: a permanent failure from an address the target has moved away
+// from is not a stuck upload: its state write is refused, and no alert,
+// webhook or event is raised for it.
+func TestAFailureFromAnOldAddressRaisesNoStuckAlert(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	var raised []StuckEvent
+	f.svc.SetStuckHook(func(ev StuckEvent) { raised = append(raised, ev) })
+	var once sync.Once
+	f.svc.newClient = func(db.StorageTarget) (Client, error) {
+		return refusingRebinder{memStore: f.mems[id], move: func() {
+			once.Do(func() {
+				cur, _ := f.store.GetStorageTarget(f.svc.box, id)
+				cur.Bucket, cur.SecretAccessKey = "new-bucket", ""
+				_ = f.store.RebindStorageTarget(f.svc.box, cur)
+			})
+		}}, nil
+	}
+	name := f.segment(5*time.Hour, "footage", true)
+	f.segment(time.Minute, "newest", true)
+	f.svc.Pass(context.Background())
+	if len(raised) != 0 {
+		t.Fatalf("stuck raised for a failure at the old address: %+v", raised)
+	}
+	if it, _ := f.item(id, name); it.State == db.OffloadStuck {
+		t.Fatalf("row marked stuck at the new address: %+v", it)
+	}
+}
