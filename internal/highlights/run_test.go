@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/childcensus"
 )
@@ -27,6 +30,15 @@ func TestHighlightsHelperProcess(t *testing.T) {
 	case "readings":
 		fmt.Println("reading 1")
 		fmt.Println("reading 2")
+		os.Exit(0)
+	case "forever":
+		// A bad reading, then output without end -- bounded only so a
+		// runner that never kills it cannot leave it behind for good.
+		fmt.Println("not a reading")
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			fmt.Println("reading 0.0")
+		}
 		os.Exit(0)
 	case "fail":
 		fmt.Fprintln(os.Stderr, "Input #0, wav")
@@ -101,5 +113,48 @@ func TestAFailedLoudnessPassCarriesFFmpegsLastLine(t *testing.T) {
 	}
 	if err := RunStreaming(context.Background(), filepath.Join(t.TempDir(), "no-such-ffmpeg"), nil, func(io.Reader) error { return nil }); err == nil {
 		t.Error("a binary that does not exist reported success")
+	}
+}
+
+// A PASS THE PARSER GIVES UP ON IS STOPPED, NOT READ TO THE END. When the
+// parser fails, the child is killed and reaped and leaves the census at once,
+// instead of the runner draining what could be hours of audio decoded for
+// nothing. The helper writes a bad line and then output for 30 s.
+//
+// MUTATION: drain the pipe after a parser error instead of cancelling.
+// Observed: FAIL, still running after 10 s.
+func TestAPassTheParserRejectsIsKilledNotDrained(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // reaps the helper if the runner under test does not
+	parse := errors.New("not a reading")
+	var pid int
+	done := make(chan error, 1)
+	go func() {
+		done <- RunStreaming(ctx, os.Args[0], helperArgs("forever"), func(io.Reader) error {
+			pid, _ = censusKind("highlights")
+			return parse
+		})
+	}()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the runner was still reading the child 10 s after the parser gave up")
+	}
+	if !errors.Is(err, parse) {
+		t.Errorf("err = %v, want the parser's error", err)
+	}
+	if pid == 0 {
+		t.Fatal("the child was never in the census")
+	}
+	if liveAt(pid) {
+		t.Errorf("pid %d is still in the census after the runner returned", pid)
+	}
+	// Reaped, not merely signalled: a zombie still answers signal 0. Windows
+	// has no signal 0; there a returned Wait is the evidence.
+	if runtime.GOOS != "windows" {
+		if p, ferr := os.FindProcess(pid); ferr == nil && p.Signal(syscall.Signal(0)) == nil {
+			t.Errorf("pid %d still exists after the runner returned", pid)
+		}
 	}
 }
