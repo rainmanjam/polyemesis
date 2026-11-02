@@ -177,6 +177,21 @@ func (s *Server) serveEventStream(w http.ResponseWriter, r *http.Request, filter
 				if sub.Overflowed() {
 					s.log.Info("events stream: disconnected a client that fell behind",
 						"buffer", eventstream.DefaultClientBuffer)
+					// ABORTED, NOT ENDED. A clean return finishes the
+					// response and, on HTTP/1.1, hands the connection back
+					// to keep-alive to wait for a next request -- from a
+					// client that is not reading. The hub let go of it but
+					// the socket stayed, its backlog parked in kernel
+					// buffers, until the idle timeout (and for ever on a
+					// server without one). That is what happened whenever
+					// the hub dropped a client before any write had
+					// blocked: no deadline fired, because none was needed.
+					// Aborting closes an HTTP/1 connection and resets only
+					// this stream on HTTP/2; EventSource reconnects from
+					// either, with Last-Event-ID, exactly as from a clean
+					// end. chi's Recoverer re-panics this value and
+					// net/http logs nothing for it.
+					panic(http.ErrAbortHandler)
 				}
 				return
 			}

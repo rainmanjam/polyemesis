@@ -254,6 +254,11 @@ func (m *Manager) setStorage(st StorageState) bool {
 	return true
 }
 
+// scanBetweenReads runs, when set, between Scan's two snapshots -- the window
+// in which another writer can add a file and its row. Nil outside tests; it
+// pins the order of the reads rather than waiting for a loaded host to hit it.
+var scanBetweenReads func()
+
 // Scan indexes every .mkv in the recordings directory and drops index rows
 // whose file has disappeared. Filesystem is the source of truth: a user who
 // deletes a file by hand should not be left with a phantom row.
@@ -261,6 +266,25 @@ func (m *Manager) setStorage(st StorageState) bool {
 // Finished segments are also measured once, so the index can report how long
 // each one runs and how many audio tracks it kept.
 func (m *Manager) Scan() (bool, error) {
+	// THE INDEX FIRST, THEN THE DIRECTORY. The loop at the bottom drops every
+	// row whose file this listing did not see, so the two reads must be in the
+	// order that makes "not on disk" true. Read the other way round, a segment
+	// whose file and row both appeared between them -- another engine's
+	// manager scanning this same directory, or anything else that indexes a
+	// file it has just written -- was in the index but not in the listing,
+	// and was de-indexed as "disappeared from disk" with its file sitting
+	// there. The row came back on the next scan under a new id and unmeasured
+	// (so the offloader skipped it), and the delete cascaded its session
+	// membership, metadata and transcripts away. Index first, a row
+	// that arrives late is simply not judged until the next scan, and a row
+	// that was already there had its file there too.
+	indexed, err := m.store.ListRecordings()
+	if err != nil {
+		return false, err
+	}
+	if scanBetweenReads != nil {
+		scanBetweenReads()
+	}
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -269,10 +293,6 @@ func (m *Manager) Scan() (bool, error) {
 		return false, err
 	}
 
-	indexed, err := m.store.ListRecordings()
-	if err != nil {
-		return false, err
-	}
 	measured := map[string]bool{}
 	for _, r := range indexed {
 		measured[r.Filename] = r.DurationMS > 0
