@@ -1118,6 +1118,8 @@ caption_fonts_plan() {
     want="missing, and no apt-get/dnf/apk/pacman to install them with"
   else
     want="will install ${want} with ${mgr}"
+    # The interview asks no question about this, so the plan names the way out.
+    case "$want" in *"Noto CJK"*) want="${want} (--no-cjk-fonts to skip CJK)" ;; esac
   fi
   [ "$CAPTION_FONTS_CJK" = yes ] || want="${want}; CJK skipped (--no-cjk-fonts)"
   echo "$want"
@@ -1134,18 +1136,21 @@ caption_font_install() {
   local mgr="$1" log rc=0
   shift
   log="$(mktemp)"
+  # Every command below reads </dev/null. The documented install is
+  # `curl ... | sudo bash`, where stdin IS the rest of this script: a child that
+  # reads stdin (a dpkg conffile prompt, say) would swallow it.
   case "$mgr" in
     apt-get)
       # Once per run. On a fresh host (or a container) the lists are empty and
       # every install fails until this has run; on an old one they are stale.
       if [ "${CAPTION_FONTS_APT_UPDATED:-false}" != true ]; then
-        apt-get update -qq >"$log" 2>&1 || true
+        apt-get update -qq </dev/null >"$log" 2>&1 || true
         CAPTION_FONTS_APT_UPDATED=true
       fi
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" >>"$log" 2>&1 || rc=$? ;;
-    dnf)    dnf install -y -q --setopt=install_weak_deps=False "$@" >>"$log" 2>&1 || rc=$? ;;
-    apk)    apk add --no-cache -q "$@" >>"$log" 2>&1 || rc=$? ;;
-    pacman) pacman -S --needed --noconfirm --noprogressbar "$@" >>"$log" 2>&1 || rc=$? ;;
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" </dev/null >>"$log" 2>&1 || rc=$? ;;
+    dnf)    dnf install -y -q --setopt=install_weak_deps=False "$@" </dev/null >>"$log" 2>&1 || rc=$? ;;
+    apk)    apk add --no-cache -q "$@" </dev/null >>"$log" 2>&1 || rc=$? ;;
+    pacman) pacman -S --needed --noconfirm --noprogressbar "$@" </dev/null >>"$log" 2>&1 || rc=$? ;;
     *)      rc=1 ;;
   esac
   CAPTION_FONTS_ERR="$(tail -n 4 "$log" 2>/dev/null || true)"
@@ -1212,7 +1217,7 @@ install_caption_fonts() {
   # no home to keep a cache of its own in: without this, every
   # FFmpeg it starts rescans every font file before it draws the first caption.
   if command -v fc-cache >/dev/null 2>&1; then
-    fc-cache -f >/dev/null 2>&1 || warn "caption fonts: \`fc-cache -f\` failed; libass will scan fonts at each start"
+    fc-cache -f </dev/null >/dev/null 2>&1 || warn "caption fonts: \`fc-cache -f\` failed; libass will scan fonts at each start"
   fi
 
   if [ "$base_ok" = true ]; then
@@ -2534,7 +2539,11 @@ CAPTION_FONTS_RESULT=""
 CAPTION_FONTS_ERR=""
 $(declare -f caption_font_manager caption_font_pkgs caption_font_cjk_size \
   caption_fonts_have_base caption_fonts_have_cjk caption_font_install install_caption_fonts)
-if [ "\$(id -u)" = 0 ]; then
+# POLYEMESIS_SKIP_CAPTION_FONTS=1 skips it: for scripts/acceptance-install.sh,
+# which runs this file as root in CI and must not download fonts.
+if [ "\${POLYEMESIS_SKIP_CAPTION_FONTS:-}" = 1 ]; then
+  echo "caption-font check skipped (POLYEMESIS_SKIP_CAPTION_FONTS=1)"
+elif [ "\$(id -u)" = 0 ]; then
   install_caption_fonts
   echo "caption fonts: \$CAPTION_FONTS_RESULT"
 else
@@ -3692,7 +3701,8 @@ main() {
       check_ffmpeg || rc=1
       require_systemd || rc=1
       # Reported, never installed, and never a failure: see install_caption_fonts.
-      info "caption fonts: $(caption_fonts_plan)"
+      # "would", because --check is the mode that changes nothing.
+      info "caption fonts (not installed by --check): $(caption_fonts_plan | sed 's/^will install/would install/')"
     else
       info "docker mode: the image carries FFmpeg, so no host FFmpeg is required"
       require_systemd || rc=1

@@ -274,6 +274,9 @@ grep -q 'no server-side undo' "$INSTALL" \
 # install.sh stopped writing the check.
 
 work="$(mktemp -d)"
+# The generated update.sh installs missing caption fonts when run as root, and
+# CI runs this suite as root in a container. This suite downloads nothing.
+export POLYEMESIS_SKIP_CAPTION_FONTS=1
 # Split from the EXIT case, which now has to carry the verdict as well: bash
 # keeps ONE EXIT handler, so a line that installs only the rm silently disarms
 # the verdict armed at the top of this file and a truncated log goes back to
@@ -1922,7 +1925,7 @@ grep -q '^fc-cache -f' "$log" \
   && ok "it rebuilds the system font cache (fc-cache -f) afterwards" \
   || bad "it never ran fc-cache -f, so the sandboxed service starts without a cache"
 case "$out" in
-  *"PLAN: will install fontconfig + DejaVu (about 3 MB), Noto CJK (about 60 MB) with apt-get"*)
+  *"PLAN: will install fontconfig + DejaVu (about 3 MB), Noto CJK (about 60 MB) with apt-get (--no-cjk-fonts to skip CJK)"*)
     ok "the plan names both sets and the CJK download size before anything runs" ;;
   *) bad "the plan line does not name the sets and size: $(printf '%s' "$out" | grep PLAN)" ;;
 esac
@@ -1996,7 +1999,7 @@ got="$( ( load_install_defs || exit 1; parse_args; echo "$CAPTION_FONTS_CJK" ) 2
 root="$work/fonts-update"; mkdir -p "$root"
 ( load_install_defs || exit 1
   # shellcheck disable=SC2034 # read by write_binary_update_script, via the eval
-  INSTALL_DIR="$root/opt"; DATA_DIR="$root/data"; BIN_PATH="$root/polyemesis"; CAPTION_FONTS_CJK=no
+  { INSTALL_DIR="$root/opt"; DATA_DIR="$root/data"; BIN_PATH="$root/polyemesis"; CAPTION_FONTS_CJK=no; }
   write_binary_update_script )
 upd="$root/opt/update.sh"
 grep -qx 'CAPTION_FONTS_CJK="no"' "$upd" \
@@ -2013,6 +2016,15 @@ if [ -n "$call" ] && [ -n "$refuse" ] && [ -n "$stop" ] && [ "$refuse" -lt "$cal
 else
   bad "update.sh font step is misplaced (refusal line ${refuse:-?}, fonts ${call:-?}, stop ${stop:-?})"
 fi
+
+# A data directory with something in it, so the run gets past the refusals to
+# the font step (it then refuses on the missing secret.key, after the step).
+mkdir -p "$root/data"; printf 'x\n' > "$root/data/polyemesis.db"
+out="$(POLYEMESIS_SKIP_CAPTION_FONTS=1 bash "$upd" 2>&1)"
+case "$out" in
+  *"caption-font check skipped (POLYEMESIS_SKIP_CAPTION_FONTS=1)"*) ok "update.sh honours POLYEMESIS_SKIP_CAPTION_FONTS, which keeps this suite from downloading fonts as root" ;;
+  *) bad "update.sh ignored POLYEMESIS_SKIP_CAPTION_FONTS: $(printf '%s' "$out" | head -3)" ;;
+esac
 
 # ------------------------------------------------------------- vacuity guard
 #
