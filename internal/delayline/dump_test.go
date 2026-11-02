@@ -586,3 +586,33 @@ func TestADumpDropsAudioThatWouldOverlapTheSplice(t *testing.T) {
 		t.Errorf("%d continuity breaks: dropping overlapped audio must not break the counters", rep.ccBreaks)
 	}
 }
+
+// A cut that is still waiting for its keyframe when the line is cut (Stop now,
+// a restart, shutdown) leaves nothing behind: the buffer is empty and usable,
+// and the dump reports itself incomplete rather than claiming a resume.
+func TestADiscardWhileADumpWaitsForItsKeyframeLeavesAUsableBuffer(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(30*time.Second))
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.b.Discard()
+	if st := r.b.Stats(); st.Packets != 0 || st.Dumping {
+		t.Fatalf("after Discard: %d packets held, dumping %t", st.Packets, st.Dumping)
+	}
+	select {
+	case <-ticket.Done():
+		t.Fatal("a discarded dump reports that it resumed")
+	default:
+	}
+	if ticket.Result().Complete {
+		t.Fatal("a discarded dump reports itself complete")
+	}
+	// Data pushed afterwards is buffered, not swallowed by a stale resync.
+	r.run(20 * time.Second)
+	if st := r.b.Stats(); st.Packets == 0 {
+		t.Fatal("the buffer took nothing after a Discard during a pending dump")
+	}
+}
