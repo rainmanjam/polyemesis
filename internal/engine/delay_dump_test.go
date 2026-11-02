@@ -90,7 +90,7 @@ func TestDumpingARunningDelayedDestinationShortensItsDelayAndAnnouncesIt(t *test
 	if st.Seconds != 6 {
 		t.Errorf("the configured delay changed to %d: a dump must not rewrite what the operator set", st.Seconds)
 	}
-	if got := time.Duration(st.EffectiveSeconds * float64(time.Second)); got != res.After {
+	if got := time.Duration(st.EffectiveSeconds * float64(time.Second)); got-res.After > time.Millisecond || res.After-got > time.Millisecond {
 		t.Errorf("status effectiveSeconds %v, the dump left %s", st.EffectiveSeconds, res.After)
 	}
 

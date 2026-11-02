@@ -961,6 +961,11 @@ then the answer has `"cut": true`. `now` must be `true` or `false`; anything els
 the broadcast's delay: polyemesis does not hold that destination's output back,
 and there is no tail to drain ([CAPTIONS.md](CAPTIONS.md)).
 
+**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
+it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
+(below), and a dialog in the console is a confirmation a script or a replayed
+request never sees. `start-all` takes no body.
+
 **Dump ([BROADCAST-DELAY.md](BROADCAST-DELAY.md#dump)).**
 `POST /destinations/{id}/delay/dump` drops the newest part of a delayed
 destination's buffer and keeps it on the air. That programme never airs there.
@@ -992,11 +997,6 @@ destination: the fields above plus `"outcome": "dumped"`, or `"skipped"` or
 `"failed"` with a `message`. Undelayed destinations are not listed. Both routes
 need an admin token. Each dump raises the `delay.dumped` audit alert
 ([MONITORING.md](MONITORING.md)).
-
-**`stop-all` needs a body of `{"confirm": true}`**, and answers `400` without
-it — no body, an empty object, or `"confirm": false`. It ends live broadcasts
-(below), and a dialog in the console is a confirmation a script or a replayed
-request never sees. `start-all` takes no body.
 
 **X go-live announcement.** An X destination's `xGoLiveTweet` is `first` (the
 default, also what an absent or empty value means), `every` or `never`. X posts

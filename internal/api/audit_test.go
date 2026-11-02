@@ -8,10 +8,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/delayline"
 )
 
 // plantedSecret is the string that must never reach a chat channel. It is
@@ -77,6 +79,10 @@ func everyAuditEvent() []alerts.Event {
 		// (mcp_tools.go), never from argument text.
 		auditMCPAction("stop_destination", "deploy bot streamkey="+plantedSecret, "destination 3",
 			"done (200)", dirty, true),
+		// The destination NAME is planted: an operator typed it, and it travels
+		// in the text and a field. The figures are numbers from the line.
+		auditDelayDumped(&db.Destination{Name: dirty, DelaySeconds: 30},
+			delayline.DumpResult{Dumped: 10 * time.Second, After: 20 * time.Second, Complete: true}, dirty),
 	}
 }
 
@@ -304,6 +310,9 @@ func TestAuditSeveritiesMatchWhatTheFloorsPromise(t *testing.T) {
 		// ended something on air. A warning, not critical -- the operator may
 		// well have asked it to; info for the rest of the write tools.
 		alerts.TypeMCPAction: alerts.SeverityWarning,
+		// Programme withheld from the air on purpose: a deliberate act worth a
+		// record, not an emergency.
+		alerts.TypeDelayDumped: alerts.SeverityWarning,
 	}
 	seen := map[alerts.Type]bool{}
 	for _, ev := range everyAuditEvent() {

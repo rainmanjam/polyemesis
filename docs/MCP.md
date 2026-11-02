@@ -63,7 +63,7 @@ System page shows the same status line, for example `MCP: on (Read + Control)`.
 |---|---|---|
 | **Read** | `get_status`, `list_destinations`, `get_destination`, `list_sources`, `list_routing_presets`, `get_levels`, `list_recordings`, `get_timeline`, `get_stop_impact`, and both [resources](#resources) | `mcp-read` and `mcp-admin` tokens |
 | **Content** | `search_chat`, `get_chat_user`, `search_transcripts` | `mcp-admin` tokens |
-| **Control** | `go_live`, `stop_destination`, `stop_all_destinations`, `start_destination`, `retry_destination`, `set_track_level`, `apply_routing_preset`, `set_recording`, `switch_failover_source`, `create_clip`, `schedule_broadcast` | `mcp-admin` tokens |
+| **Control** | `go_live`, `stop_destination`, `stop_all_destinations`, `start_destination`, `retry_destination`, `dump_destination_delay`, `dump_all_delays`, `set_track_level`, `apply_routing_preset`, `set_recording`, `switch_failover_source`, `create_clip`, `schedule_broadcast` | `mcp-admin` tokens |
 
 The switch is off on a fresh install and after an upgrade. Turning it on the
 first time turns on **Read** and nothing else. A level that is off does not
@@ -140,6 +140,8 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `retry_destination` | Restart one destination now, clearing a retry hold | **yes** | `POST /destinations/{id}/restart` |
 | `go_live` | Start every destination of a programme, paced | **yes** | `POST /destinations/start-all` |
 | `stop_all_destinations` | Stop every destination of a programme, cutting every broadcast delay | **yes** | `POST /destinations/stop-all` |
+| `dump_destination_delay` | Drop the newest part of one delayed destination's buffer and keep it on the air. `seconds` drops at least that much; without it, everything since the last dump. The delay stays shorter until the destination next starts | **yes** | `POST /destinations/{id}/delay/dump` |
+| `dump_all_delays` | The same for every delayed destination of a programme | **yes** | `POST /destinations/delay/dump-all` |
 | `set_track_level` | Mute, unmute or set the gain of one track in one destination's live mix | | `POST /destinations/{id}/tracks/{track}/gain` |
 | `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | **yes** | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
 | `set_recording` | Recording on or off | **yes, to turn off** | `POST /recording` |
@@ -172,6 +174,7 @@ would not.
 ### Confirmation
 
 `stop_destination`, `stop_all_destinations`, `retry_destination`,
+`dump_destination_delay`, `dump_all_delays`,
 `apply_routing_preset`, `go_live`, `set_recording` with `enabled: false`, and
 `schedule_broadcast` with `action: stop` do nothing unless called with
 `confirm: true`. The server enforces this, not the client.

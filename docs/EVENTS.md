@@ -262,13 +262,23 @@ delayed programme reached the platform.
 - `dropping`: the buffer ran out of room and is dropping data to keep the
   delay. `error` says why (disk budget, free-space floor). Sent at most once a
   minute.
+- `dumped`: an operator [dumped](BROADCAST-DELAY.md#dump) the newest part of the
+  buffer and the stream has resumed at the next keyframe. The destination is
+  still on the air. `data.dumpSeconds` is what this dump took,
+  `data.delayBeforeSeconds` and `data.delayAfterSeconds` the delay either side,
+  `data.requestedSeconds` what was asked for (0 for "since the last dump"), and
+  `data.clamped` is `true` when the safety margin allowed less.
 
 ```json
 {"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,
- "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0}
+ "diskBytes": 0, "drainRemainingSeconds": 12.4, "droppedBytes": 0,
+ "effectiveSeconds": 30}
 ```
 
-`drainRemainingSeconds` and `droppedBytes` appear only when non-zero.
+`seconds` is always the configured delay. `effectiveSeconds` is the delay the
+audience has now, which a dump shortens until the destination next starts, and
+`dumpedSeconds` is the total dumped since then. `drainRemainingSeconds`,
+`droppedBytes` and `dumpedSeconds` appear only when non-zero.
 
 ### Ingest and failover
 
