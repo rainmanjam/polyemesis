@@ -7,13 +7,12 @@ import { ChatUserCard } from "./ChatUserCard";
 import { api } from "@/lib/api";
 import type { ChatSanction, ChatUserCard as CardData } from "@/lib/types";
 
-/* UX COUNCIL A48: THE CARD SAYS WHAT IS IN FORCE, AND LIFT BAN FOLLOWS IT.
+/* UX COUNCIL A48: THE CARD SAYS WHAT POLYEMESIS HAS IN FORCE.
  *
- * Lift ban used to be offered for every viewer, banned or not, so pressing it
- * for someone who was never banned was a no-op reported as a success. The
- * server now says what polyemesis has in force; the button is disabled, with a
- * reason a screen reader is given, only when that answer is an explicit
- * "none". An absent answer is unknown and leaves it pressable.
+ * The server reports the ban or timeout polyemesis placed. That record is NOT
+ * authoritative -- a ban made on the platform's own dashboard never reaches
+ * it -- so the owner's rule is that neither "none" nor an absent answer
+ * disables Lift ban. Only a platform that cannot ban at all does.
  *
  * jsdom because Radix renders the dialog through a portal. */
 
@@ -26,7 +25,7 @@ function draw(platform: "twitch" | "facebook" = "twitch") {
 }
 
 const card = (sanction?: ChatSanction): CardData =>
-  ({ name: "someone", messages: [], truncated: false, retentionNote: "", sanction }) as CardData;
+  ({ platform: "twitch", authorId: "u1", name: "someone", messages: [], truncated: false, retentionNote: "", sanction }) as CardData;
 
 const liftBan = () => screen.getByRole("button", { name: /Lift ban/ }) as HTMLButtonElement;
 
@@ -41,15 +40,14 @@ describe("A48: the user card's sanction state", () => {
     expect(chatUser.mock.calls[0][0]).toMatchObject({ platform: "twitch", account: "acct", authorId: "u1" });
   });
 
-  it("disables Lift ban when nothing is in force, and says why to assistive tech", async () => {
+  // A recorded "none" is not "no ban anywhere": a ban from the platform's own
+  // dashboard is invisible to polyemesis, and lifting it from here must work.
+  it("keeps Lift ban enabled when polyemesis recorded no sanction, and says only that", async () => {
     chatUser.mockResolvedValue(card({ action: "none" }));
     draw();
-    await waitFor(() => expect(screen.getByText("No active ban")).toBeTruthy());
-    expect(liftBan().disabled).toBe(true);
-    const describedBy = liftBan().getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    const reason = document.getElementById(describedBy ?? "");
-    expect(reason?.textContent).toMatch(/Nothing to lift/);
+    await waitFor(() => expect(screen.getByText("No ban placed through polyemesis")).toBeTruthy());
+    expect(liftBan().disabled).toBe(false);
+    expect(screen.queryByText(/No active ban/)).toBeNull();
   });
 
   it("keeps Lift ban available for a timeout and shows when it ends", async () => {
@@ -81,11 +79,12 @@ describe("A48: the user card's sanction state", () => {
     expect(screen.getByText(/could not tell whether this person is banned/)).toBeTruthy();
   });
 
-  it("gives the platform's own reason, not 'nothing to lift', where banning is impossible", async () => {
+  // The one certain case: the platform cannot ban, so there is nothing to lift.
+  it("disables Lift ban only where the platform cannot ban, with the platform's reason", async () => {
     chatUser.mockResolvedValue(card({ action: "none" }));
     draw("facebook");
-    await waitFor(() => expect(screen.getByText("No active ban")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("No ban placed through polyemesis")).toBeTruthy());
     expect(liftBan().disabled).toBe(true);
-    expect(screen.queryByText(/Nothing to lift/)).toBeNull();
+    expect(liftBan().title).toMatch(/Facebook/);
   });
 });

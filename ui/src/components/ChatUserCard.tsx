@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useT } from "@/lib/i18n";
 import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Shield, Timer, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DisabledReason } from "@/components/DisabledReason";
 import { StatusPill } from "@/components/StatusPill";
 import {
   Dialog,
@@ -17,7 +16,6 @@ import { api } from "@/lib/api";
 import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState } from "@/lib/readState";
 import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { chatActionSupport } from "@/lib/chatModeration";
-import { disabledDescribedBy } from "@/lib/disabledReason";
 import { chatSanctionStatus } from "@/lib/status";
 import { clockTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -120,16 +118,13 @@ export function ChatUserCard({
   const ban = chatActionSupport(platform, "ban", t);
   const hideUpstream = chatActionSupport(platform, "hideUpstream", t);
 
-  // UX Council A48: what is in force on this person. Lift ban used to be
-  // offered whatever the answer, so pressing it for someone who was never
-  // banned was a no-op reported as a success. It is disabled ONLY on an
-  // explicit "none" from the server: an absent sanction is a read that could
-  // not tell, and taking the button away on a guess would strand a moderator
-  // with a banned viewer and nothing to press. The platform's own reason, when
-  // it cannot ban at all, outranks this one.
+  // UX Council A48: what is in force on this person, AS POLYEMESIS RECORDED
+  // IT. The record is not authoritative: a ban placed on the platform's own
+  // dashboard, or by another moderator, never reaches it. So "none" reads "No
+  // ban placed through polyemesis" and Lift ban stays pressable -- the owner's
+  // decision. The button is disabled only where it is certain there is nothing
+  // to lift: the platform cannot ban at all, which `ban.reason` already says.
   const sanction = card?.sanction;
-  const liftReasonId = useId();
-  const liftBlocked = !ban.ok ? ban.reason : sanction?.action === "none" ? t("chatCard.liftBanNothing") : "";
   const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
   const sanctionDetail =
     sanction?.action === "timeout" && sanction.until
@@ -458,9 +453,8 @@ export function ChatUserCard({
             <Button
               size="sm"
               variant="secondary"
-              disabled={liftBlocked !== "" || busy !== ""}
-              aria-describedby={disabledDescribedBy(liftReasonId, ban.ok ? liftBlocked : null)}
-              title={liftBlocked || t("chatCard.liftBanTitle")}
+              disabled={!ban.ok || busy !== ""}
+              title={ban.reason || t("chatCard.liftBanTitle")}
               onClick={() =>
                 run(t("chatCard.banLifted"), () =>
                   api.unbanChatUser({ platform, account, userId: authorId }),
@@ -515,10 +509,6 @@ export function ChatUserCard({
               </Button>
             )}
           </div>
-          {/* Why Lift ban is grey, where the eye already is. The platform's
-              own reason is printed once above the timeouts, so this one only
-              carries the "nothing to lift" case. */}
-          <DisabledReason id={liftReasonId} reason={ban.ok ? liftBlocked : null} />
         </div>
       </DialogContent>
     </Dialog>

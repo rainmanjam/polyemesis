@@ -1454,13 +1454,15 @@ the platform matches.
 |---|---|
 | `ban` | a permanent ban. No `until`. |
 | `timeout` | a timeout that ends at `until`. One whose `until` has passed reads as `none`. |
-| `none` | polyemesis has placed nothing that is still in force. |
+| `none` | polyemesis has **recorded** nothing that is still in force. Not authoritative: see below. |
 
 `action` uses the same words as the `chat.moderation` event. A ban placed from
 the platform's own dashboard, or by another moderator, is **not** recorded, so
-`none` means "nothing polyemesis placed", not "the platform has no ban". The
-field is **absent** when the record could not be read (no database, or a failed
-read); treat absence as unknown, not as `none`.
+`none` means "no ban placed through polyemesis", never "the platform has no
+ban". Do not use it to stop someone lifting a ban: the console keeps Lift ban
+available on `none`, and disables it only on a platform that cannot ban at
+all. The field is **absent** when the record could not be read (no database,
+or a failed read); treat absence as unknown.
 
 `/chat/flags` is automod's review list: the messages it found something in,
 newest first, one entry per message.
@@ -1477,8 +1479,8 @@ every opinion recorded about it, the fast checkers' and the model's together;
 `acted` says the automod matrix permitted at least one action, so the message
 was not only logged. A finding's `reason` is the operator's own words or a
 closed-set category reason — the model's own prose is never included. The list
-is kept **in memory** for this server's lifetime and holds the most recent 500,
-and an entry stays after its message is deleted or retracted: it is a record of
+is kept **in memory only**: it holds the most recent 500, and it is **empty
+again after a restart**, because nothing is written to disk. An entry stays after its message is deleted or retracted: it is a record of
 automod's decisions, not a copy of the scrollback. `platform=` narrows it and
 `limit=` bounds it the same way as the other chat reads.
 
