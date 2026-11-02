@@ -140,7 +140,9 @@ describe("the home hero (S1)", () => {
   });
 
   it("keeps the interaction colour off the headline", () => {
-    expect(h1).not.toMatch(/text-primary/);
+    // Written without the literal class name: ui/src/lib/palette-contrast.test.ts
+    // scans web/ sources for it and would read this assertion as a use.
+    expect(h1).not.toMatch(/\bprimary\b|<span\b/);
   });
 
   it("keeps the quickstart as a text link, not a second button", () => {
