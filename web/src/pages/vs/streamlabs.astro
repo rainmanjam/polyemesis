@@ -32,13 +32,13 @@ const paths = [
   {
     name: "Multistream",
     what: "The cloud fan-out. Twitch, YouTube, TikTok, Kick, Facebook, Patreon, X and custom RTMP.",
-    verdict: "Paid — an Ultra feature",
+    verdict: "Paid: an Ultra feature",
     ok: true,
     then: "Your stream goes to Streamlabs and their servers relay it onward. Usable from Streamlabs Desktop, the Streamlabs plugin for OBS, or any encoder via an RTMP URL from their dashboard.",
   },
   {
     name: "Dual Output",
-    what: "Two canvases — one vertical, one horizontal — in Streamlabs Desktop.",
+    what: "Two canvases (one vertical, one horizontal) in Streamlabs Desktop.",
     verdict: "Free, and capped at two",
     ok: true,
     then: "Their words: “Stream to one platform per canvas, completely free.” It is the free multistreaming path, and its ceiling is two destinations of prescribed shapes rather than a number you choose.",
@@ -48,11 +48,11 @@ const paths = [
 const differences = [
   {
     h: "Their servers, or yours",
-    p: "“We process your stream on our servers so you can expand your reach without straining your PC.” That is the design, stated on their own page, and for most people it is the right trade: one upload, no hardware. polyemesis makes the opposite trade — the relay is a binary on a box you own, so nothing leaves your network except the streams you are publishing.",
+    p: "“We process your stream on our servers so you can expand your reach without straining your PC.” That is the design, stated on their own page, and for most people it is the right trade: one upload, no hardware. polyemesis makes the opposite trade: the relay is a binary on a box you own, so nothing leaves your network except the streams you are publishing.",
   },
   {
     h: "A subscription, or not",
-    p: "Multistream proper is an Ultra feature. The free tier is Dual Output and stops at two destinations. polyemesis is MIT and has no paid tier and no cap on destinations — the limit is your upstream bandwidth and roughly 4% of one CPU core per destination, which is a physical limit rather than a billing one.",
+    p: "Multistream proper is an Ultra feature. The free tier is Dual Output and stops at two destinations. polyemesis is MIT and has no paid tier and no cap on destinations: the limit is your upstream bandwidth and roughly 4% of one CPU core per destination, which is a physical limit rather than a billing one.",
   },
   {
     h: "RTMP in, or multitrack SRT in",
@@ -60,7 +60,7 @@ const differences = [
   },
   {
     h: "Where the audio decision happens",
-    p: "polyemesis sums tracks server-side and gives every destination its own stereo mix — the full mix to one platform, a music-free mix to another, a mic-only feed to a third, from one upload and one video encode. Streamlabs' page does not describe per-destination audio either way, so nothing is claimed about it here; if that is the thing you need, it is a question worth putting to them directly.",
+    p: "polyemesis sums tracks server-side and gives every destination its own stereo mix: the full mix to one platform, a music-free mix to another, a mic-only feed to a third, from one upload and one video encode. Streamlabs' page does not describe per-destination audio either way, so nothing is claimed about it here; if that is the thing you need, it is a question worth putting to them directly.",
   },
 ];
 ---

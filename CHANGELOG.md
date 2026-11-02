@@ -711,6 +711,18 @@ its first tagged release.
 
 ### Changed
 
+- **Website: quicker to read, quicker to try.** On the home page the routing problem and the
+  playable patchbay now come straight after the spec strip, before the hosted-pricing table. The
+  hero has one copy action for the install command, no pill above the headline, and no colour in
+  it. The announcement bar is on the home page only, and says what the latest release is (or links
+  straight to the install page). Sections no longer fade in on scroll, so a full-page capture,
+  print or link preview shows the whole page. Screenshots on the features page show a low-resolution
+  preview while they load instead of an empty frame, and the first one loads immediately. Headings
+  that named limits now name choices ("Choose polyemesis if", "Choose another tool when"), eyebrows
+  that repeated their heading are gone, the download page's ports are a list, and the spec strip
+  has one value per cell. Standalone text links have a 24px hit area. Em dashes in the site's own
+  copy became ordinary punctuation, and arrows mark a section's primary link only.
+
 - **Broadcast palette, in the console and on the website.** Failed is a lighter coral, so it can
   no longer be mistaken for an on-air lamp, and it reads better: the failed badge goes from 4.55:1
   to 6.18:1 on a card, failed text on a raised card from 4.22:1 to 5.73:1, and the destructive

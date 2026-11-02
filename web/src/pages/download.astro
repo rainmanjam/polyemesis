@@ -19,8 +19,8 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       No account to create, nothing phoning home, no hosted tier to graduate
       to. It can publish its own state over MQTT, but that is off by default and
       goes to a broker you name. The
-      only runtime dependency is FFmpeg, and the container bundles it —
-      transcription is the one optional extra that wants a second binary,
+      only runtime dependency is FFmpeg, and the container bundles it.
+      Transcription is the one optional extra that wants a second binary,
       whisper.cpp.
     </p>
     {/* THE TWO DOCUMENTS THE README SENDS PEOPLE TO, at the top of the page
@@ -32,7 +32,8 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         budget docs/DESIGN-SYSTEM.md sets is the home page's announcement bar
         and the primary CTA; a standing arrow link in the same hue as
         the one filled button on the page competes with it for the same
-        meaning. The arrow and the hover underline carry the affordance, and
+        meaning. The hover underline carries the affordance (no arrow: these
+        are a pair of sibling links, and arrows mark a primary link only), and
         the accent arrives on approach.
         Inline links inside prose are deliberately NOT changed — see
         `.doc-prose a` in global.css. There, colour separates a link from the
@@ -40,10 +41,10 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         here it decorates a link that is already unmistakably a link. */}
     <p class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
       <a href="/docs/quickstart" class="tap text-fg transition-colors hover:text-primary-bright hover:underline"
-        >Quickstart — from install to a first stream →</a
+        >Quickstart: from install to a first stream</a
       >
       <a href="/docs/install" class="tap text-fg transition-colors hover:text-primary-bright hover:underline"
-        >Install guide — per-platform, service files, GPU images →</a
+        >Install guide: per-platform, service files, GPU images</a
       >
     </p>
   </section>
@@ -90,7 +91,7 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
         Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
         and omitting the suffix is the classic reason an ingest silently
         receives nothing. 1935 is published up front because a container's port
-        mappings are fixed when it is created — an RTMP source added later has
+        mappings are fixed when it is created: an RTMP source added later has
         nothing listening for it, and says so nowhere.
       </p>
     </div>
@@ -100,7 +101,7 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
       <p class="mt-2 text-sm leading-relaxed text-muted">
         Asks what you want, then sets up Docker or a static binary with a
         systemd unit, a data directory and TLS. Read it before you pipe it to a
-        root shell — it is long, but it is one file and declares every flag up
+        root shell. It is long, but it is one file and declares every flag up
         front.
       </p>
       <CodeBlock
@@ -119,7 +120,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       </p>
       <p class="mt-2 text-[11px] leading-relaxed text-subtle">
         In binary mode it also installs the fonts burned-in captions are drawn
-        with — fontconfig, DejaVu and Noto CJK — so Chinese, Japanese, Korean,
+        with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean,
         Arabic and Hebrew captions render out of the box. CJK is the large
         part (60–190 MB by distribution);{" "}
         <span class="font-mono">--no-cjk-fonts</span> leaves it out.
@@ -129,7 +130,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
     <div class="card p-6">
       <h2 class="text-lg font-medium">Static binary</h2>
       <p class="mt-2 text-sm leading-relaxed text-muted">
-        The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg — and it
+        The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg, and it
         needs one built with <span class="font-mono">--enable-libsrt</span> if
         you want multitrack ingest.
       </p>
@@ -147,7 +148,7 @@ rainmanjam/polyemesis/main/scripts/install.sh \\
       </p>
       <p class="mt-2 text-[11px] leading-relaxed text-subtle">
         Linux is the operated target, and the broadcast path is tested on
-        Windows and macOS in CI too — that suite has caught Windows-only bugs
+        Windows and macOS in CI too; that suite has caught Windows-only bugs
         before they shipped. What is not yet proven on Windows is long-running
         service operation: the service wrapper is unexercised and recording can
         truncate on service stop. Run it on Linux for production, and on Windows
@@ -222,7 +223,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
             "A fresh install has none. SRT carries many tracks from many sources " +
             "and is what the routing needs. RTMP shares its port between sources, " +
             "told apart by the stream key, and carries one audio track unless the " +
-            "publisher sends Enhanced RTMP. Copy the ingest URL — it carries the credential " +
+            "publisher sends Enhanced RTMP. Copy the ingest URL: it carries the credential " +
             "that addresses this source.",
         },
         {
@@ -232,7 +233,7 @@ make build            # builds the UI, embeds it, produces ./polyemesis
             "In OBS, Settings, Output, Advanced, Recording: set Type to Custom " +
             "Output (FFmpeg), FFmpeg Output Type to Output to URL, container " +
             "mpegts, and tick the audio tracks to send. Paste the ingest URL, " +
-            "then press Start Recording — with Output to URL, that is the SRT push.",
+            "then press Start Recording. With Output to URL, that is the SRT push.",
           url: "https://polyemesis.com/download",
         },
         {
@@ -253,21 +254,21 @@ make build            # builds the UI, embeds it, produces ./polyemesis
         <li>
           <span class="font-mono text-subtle">1.</span> Open the UI and set an admin
           password. If it is ever lost, <span class="font-mono">-reset-admin</span> on
-          the box sets a new one — there is no recovery from anywhere else.
+          the box sets a new one; there is no recovery from anywhere else.
         </li>
         <li>
           <span class="font-mono text-subtle">2.</span> Choose an ingest mode. A fresh
           install has none: SRT carries many tracks from many sources and is what the
           routing needs; RTMP shares its port between sources the same way, told apart
           by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. Then
-          copy the ingest URL — it carries the credential that addresses this source.
+          copy the ingest URL: it carries the credential that addresses this source.
         </li>
         <li>
           <span class="font-mono text-subtle">3.</span> In OBS, Settings → Output →
           Advanced → Recording, set Type to “Custom Output (FFmpeg)”, FFmpeg Output
           Type to “Output to URL”, container <span class="font-mono">mpegts</span>,
           and tick the audio tracks to send. Paste the ingest URL, then press Start{" "}
-          <em>Recording</em> — with Output to URL, that is the SRT push.
+          <em>Recording</em>. With Output to URL, that is the SRT push.
         </li>
         <li>
           <span class="font-mono text-subtle">4.</span> Add destinations, then tick
@@ -292,8 +293,8 @@ make build            # builds the UI, embeds it, produces ./polyemesis
         {
           [
             ["FFmpeg", "The only dependency the server itself needs. Needs libsrt for SRT ingest. Without it you fall back to RTMP, which carries one audio track on classic RTMP. FFmpeg 8.0 or later is required; 8.x is what the container ships, and CI tests the latest 8.x and 9.x."],
-            ["CPU", "Video is copied, not re-encoded, so cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC. Renditions are the exception — those are a real encode, and the UI estimates what one will cost before you save it."],
-            ["Ports", "One TCP port for the UI and API. One UDP port for SRT, shared by every source. RTMP is optional and works the same way — one TCP port, shared by every source that uses it."],
+            ["CPU", "Video is copied, not re-encoded, so cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC. Renditions are the exception: those are a real encode, and the UI estimates what one will cost before you save it."],
+            ["Ports", "One TCP port for the UI and API. One UDP port for SRT, shared by every source. RTMP is optional and works the same way: one TCP port, shared by every source that uses it."],
             ["Disk", "Only if you record. Retention is bounded by age, total size, and a free-space floor that accounts for files polyemesis did not write."],
           ].map(([t, d]) => (
             <div class="py-4">

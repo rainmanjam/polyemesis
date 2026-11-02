@@ -115,7 +115,7 @@ const SECTION_ROWS = [
   ["start", "Getting it running", "Install it, point an encoder at it, and put a certificate in front of it."],
   ["routing", "The routing", "The part the rest of the product exists to serve: a different audio mix per destination."],
   ["operating", "Operating it", "Configuration, platforms, upgrades, and what to do when it will not connect."],
-  ["automation", "Automating it", "Metrics, webhooks, MQTT and the HTTP API — everything that lets something else drive."],
+  ["automation", "Automating it", "Metrics, webhooks, MQTT and the HTTP API: everything that lets something else drive."],
   ["reference", "Understanding it", "How it fits together, what it depends on, and how it compares."],
 ];
 
@@ -224,7 +224,7 @@ const DOCS_BY_SECTION = {
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
       "A value on an FFmpeg command line replaces the process running it; track levels now change live instead. What a restart costs, and what a save tells you."],
     ["UPGRADING.md", "Upgrading polyemesis and its database",
-      "Stop, replace the binary, start — the database migrates itself forward. What to back up first, the version-specific notes, and how to roll back."],
+      "Stop, replace the binary, start: the database migrates itself forward. What to back up first, the version-specific notes, and how to roll back."],
     ["TROUBLESHOOTING.md", "Troubleshooting: SRT, RTMP and audio problems",
       "Organised by what you can observe. SRT handshake failures, an ingest that never goes live, a destination producing nothing, and audio that is wrong."],
   ],

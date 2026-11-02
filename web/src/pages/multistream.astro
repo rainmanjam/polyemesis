@@ -42,7 +42,7 @@ const approaches = [
     how: "Your streaming PC uploads a separate copy of the stream for every destination. The encode can be shared across all of them or run independently per destination.",
     cost: "Upload multiplies by the number of destinations. CPU multiplies only if you re-encode per destination instead of sharing the encode OBS already made.",
     audio: "Whatever mix that output was given.",
-    who: "obs-multi-rtmp, Aitum Multistream, SE.Live — plugins that live inside OBS.",
+    who: "obs-multi-rtmp, Aitum Multistream, SE.Live: plugins that live inside OBS.",
     href: "/vs/obs-multi-rtmp",
     hrefLabel: "How the plugins compare",
   },
@@ -71,7 +71,7 @@ const platforms = [
     name: "Twitch",
     slug: "twitch",
     body:
-      "Twitch is the destination that makes the audio question concrete. Its Enhanced Broadcasting can carry a second audio track alongside the live one, which is how the broadcast keeps a music bed while the archive gets a mix without it — from one upload and one encode.",
+      "Twitch is the destination that makes the audio question concrete. Its Enhanced Broadcasting can carry a second audio track alongside the live one, which is how the broadcast keeps a music bed while the archive gets a mix without it, from one upload and one encode.",
     caveat:
       "It needs a GPU on the machine polyemesis runs on: Twitch refuses the negotiation outright when the request reports none, which matters on the VPS this audience often uses.",
     href: "/twitch-vod-track",
@@ -81,7 +81,7 @@ const platforms = [
     name: "YouTube",
     slug: "youtube",
     body:
-      "YouTube takes one stereo pair, like every other live platform. Multistreaming to it is unremarkable — the interesting decision is which mix it gets, and that is the same decision for every destination in the fan-out.",
+      "YouTube takes one stereo pair, like every other live platform. Multistreaming to it is unremarkable. The interesting decision is which mix it gets, and that is the same decision for every destination in the fan-out.",
     caveat:
       "A second audio track is not offered here. Nothing in this project has measured YouTube accepting one, and the code refuses to try.",
     href: "/docs/audio-routing",
@@ -91,7 +91,7 @@ const platforms = [
     name: "Kick",
     slug: "kick",
     body:
-      "Kick is an RTMP destination and behaves like one. polyemesis signs in to it for chat and metadata as well, so a Kick fan-out is not only video — the moderation timeline reads it alongside the others.",
+      "Kick is an RTMP destination and behaves like one. polyemesis signs in to it for chat and metadata as well, so a Kick fan-out is not only video: the moderation timeline reads it alongside the others.",
     caveat:
       "Chat moderation covers five platforms: YouTube, Twitch, Kick, Facebook and Rumble. Facebook is read-and-moderate only; it is not in the send fan-out.",
     href: "/docs/platforms",
@@ -120,8 +120,8 @@ const platforms = [
     </h1>
     <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
       Going live to Twitch and YouTube at once is a solved problem with three
-      well-known answers. Sending them <em>different audio</em> — the full mix to
-      one, a music-free mix to another, your mic alone to a third — is where the
+      well-known answers. Sending them <em>different audio</em> (the full mix to
+      one, a music-free mix to another, your mic alone to a third) is where the
       three answers stop agreeing. This page covers both.
     </p>
   </section>
@@ -166,7 +166,7 @@ const platforms = [
     <p class="mt-4 max-w-2xl text-pretty leading-relaxed text-muted">
       It is the third kind: a relay on hardware you control. What it adds to that
       category is the audio. One SRT ingest carries up to 32 tracks, and each
-      destination gets its own stereo mix summed from the tracks you choose —
+      destination gets its own stereo mix summed from the tracks you choose,
       server-side, so your encoder uploads once and encodes video once. Video is
       copied through untouched.
     </p>

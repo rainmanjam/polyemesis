@@ -57,11 +57,11 @@ const whichOne = [
 const merits = [
   {
     h: "No cap on destinations, and no paid tier",
-    p: "Free at $0 with no paywall above it, and no ceiling on how many platforms you publish to — the limit is your encoding capacity and your upstream bandwidth, which is an honest limit rather than a billing one.",
+    p: "Free at $0 with no paywall above it, and no ceiling on how many platforms you publish to: the limit is your encoding capacity and your upstream bandwidth, which is an honest limit rather than a billing one.",
   },
   {
     h: "Canvas does vertical and horizontal at once",
-    p: "Its Canvas system produces simultaneous 16:9 and 9:16 output from a single OBS session, with Twitch Dual-Output Beta wired in. polyemesis reaches a vertical output differently — a 9:16 rendition, encoded once and shared, that crops, letterboxes or blur-fills the frame you already sent. What it cannot do is lay out a separate vertical scene; if the vertical cut needs its own composition, that is a reason to run SE.Live.",
+    p: "Its Canvas system produces simultaneous 16:9 and 9:16 output from a single OBS session, with Twitch Dual-Output Beta wired in. polyemesis reaches a vertical output differently: a 9:16 rendition, encoded once and shared, that crops, letterboxes or blur-fills the frame you already sent. What it cannot do is lay out a separate vertical scene; if the vertical cut needs its own composition, that is a reason to run SE.Live.",
   },
   {
     h: "Per-destination encoding, with aspect ratio in the mix",
@@ -95,7 +95,7 @@ const merits = [
     <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
       Anyone looking into StreamElements multistream support meets a fork in the
       road immediately, and it is not signposted well: the StreamElements almost
-      everybody knows — overlays, tips, the chat dashboard — sends no video
+      everybody knows (overlays, tips, the chat dashboard) sends no video
       anywhere. The multistreaming lives in a separate OBS plugin called SE.Live,
       and before comparing anything it is worth knowing which one you are holding.
     </p>
@@ -162,7 +162,7 @@ const merits = [
             Windows, and only Windows. macOS and Linux are not supported.
           </p>
           <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
-            Nothing else compared on this site has a stop like this — the other
+            Nothing else compared on this site has a stop like this: the other
             plugins follow OBS wherever it runs, and the servers are containers.
             If you broadcast from a Mac, the comparison ends at this paragraph.
           </p>
@@ -172,7 +172,7 @@ const merits = [
             Transport
           </p>
           <p class="mt-3 text-pretty leading-relaxed text-fg">
-            RTMP and RTMPS out. No SRT, and no ingest of any kind — it captures
+            RTMP and RTMPS out. No SRT, and no ingest of any kind: it captures
             from the OBS it lives inside and is not a relay.
           </p>
           <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
@@ -192,7 +192,7 @@ const merits = [
     <div class="wrap">
       <h2 class="text-2xl font-medium">On the audio, it is the same story as the other two plugins</h2>
       <p class="mt-4 max-w-3xl text-pretty leading-relaxed text-muted">
-        SE.Live routes one OBS audio track — any of the six — to each platform
+        SE.Live routes one OBS audio track (any of the six) to each platform
         output. So yes, it can give Twitch and YouTube different sound, and a
         comparison claiming otherwise would be wrong. What it cannot do is
         combine tracks into a new mix at the output; whatever those six tracks

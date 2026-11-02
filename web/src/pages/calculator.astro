@@ -72,7 +72,7 @@ const CHECKED = "2026-08-06";
     </h1>
     <p class="rise rise-2 mt-4 max-w-2xl leading-relaxed text-subtle">
       Two different connections carry two different loads. Your encoder's upstream
-      carries <em>one</em> stream. The server's uplink carries one per destination —
+      carries <em>one</em> stream. The server's uplink carries one per destination,
       but because polyemesis copies the video rather than re-encoding it, the video
       half is the same bitstream repeated, and it has to satisfy the strictest
       platform you send it to.
@@ -126,7 +126,7 @@ const CHECKED = "2026-08-06";
           <h2 class="text-sm font-semibold text-fg">Destinations</h2>
           <p class="mt-1 text-xs text-muted">
             These are the bitrates each platform <em>recommends</em>, checked {CHECKED}.
-            polyemesis ships the same figures as guidance and does not enforce them —
+            polyemesis ships the same figures as guidance and does not enforce them:
             nothing here refuses a value, and some platforms publish a higher maximum
             than the figure they recommend.
           </p>
@@ -174,7 +174,7 @@ const CHECKED = "2026-08-06";
           <div class="mt-5 border-t border-line pt-4">
             <h3 class="text-xs font-semibold text-fg">Other RTMP or SRT endpoints</h3>
             <p class="mt-1 text-xs text-muted">
-              A company CDN, a second polyemesis, an nginx-rtmp box — anything with a URL.
+              A company CDN, a second polyemesis, an nginx-rtmp box: anything with a URL.
             </p>
             <div id="custom-list" class="mt-3 flex flex-col gap-2"></div>
             <div class="mt-3 flex flex-wrap items-end gap-2">
@@ -286,13 +286,13 @@ const CHECKED = "2026-08-06";
         <h2 class="text-sm font-semibold text-fg">What you need</h2>
 
         <div class="mt-4">
-          <p class="text-xs text-muted">Encoder upstream — your home or studio</p>
+          <p class="text-xs text-muted">Encoder upstream (your home or studio)</p>
           <p id="r-ingest" class="mt-1 font-mono text-2xl text-fg">—</p>
           <p id="r-ingest-note" class="mt-1 text-[11px] text-muted"></p>
         </div>
 
         <div class="mt-5 border-t border-line pt-4">
-          <p class="text-xs text-muted">Server uplink — where polyemesis runs</p>
+          <p class="text-xs text-muted">Server uplink (where polyemesis runs)</p>
           <p id="r-egress" class="mt-1 font-mono text-2xl text-fg">—</p>
           <p id="r-egress-note" class="mt-1 text-[11px] text-muted"></p>
         </div>
@@ -308,7 +308,7 @@ const CHECKED = "2026-08-06";
             <dd id="r-month" class="text-right font-mono text-fg">—</dd>
           </dl>
           <p class="mt-2 text-[11px] text-muted">
-            A month is 4.35 weeks. Check it against your host's transfer allowance —
+            A month is 4.35 weeks. Check it against your host's transfer allowance:
             that is the number a VPS bills on, not the bitrate.
           </p>
         </div>
@@ -336,7 +336,7 @@ const CHECKED = "2026-08-06";
         <li>
           <span class="text-fg">The recommendation that binds</span> is the lowest among
           the destinations still taking the <em>copied</em> stream, because that is one
-          bitstream they all share. A destination on a rendition is exempt — that is
+          bitstream they all share. A destination on a rendition is exempt: that is
           what the rendition bought. It binds your <em>choice</em>, not the software:
           nothing here or in polyemesis refuses a bitrate above it.
         </li>
@@ -355,7 +355,7 @@ const CHECKED = "2026-08-06";
       </ul>
       <p class="mt-4 text-xs text-muted">
         Platform figures are the bitrates each platform recommends, transcribed from the
-        server's own preset table and checked {CHECKED}. They are advisory there too —
+        server's own preset table and checked {CHECKED}. They are advisory there too:
         polyemesis never refuses a value for being above one, and some platforms accept
         more than they recommend. Protocol overhead is an estimate and varies with
         resolution, keyframe interval and network path.
@@ -554,7 +554,7 @@ const CHECKED = "2026-08-06";
           "soft",
           `${d.name}: its rendition is ${r.video} kbps, above the ${d.max} kbps ` +
             `${d.key.startsWith("custom-") ? "limit you set" : "figure the platform recommends"}. ` +
-            `Nothing here or on the server refuses it — check what the platform accepts.`,
+            `Nothing here or on the server refuses it, so check what the platform accepts.`,
         );
       }
     }
@@ -593,14 +593,14 @@ const CHECKED = "2026-08-06";
           "soft",
           `${sharedVideo} kbps is above the ${tightest.max} kbps ${tightest.name} recommends, ` +
             `and ${copied.length === 1 ? "it is" : `${copied.length} destinations are`} taking ` +
-            `the copied stream. That is a recommendation, not a limit — polyemesis will send ` +
+            `the copied stream. That is a recommendation, not a limit: polyemesis will send ` +
             `it, and several platforms accept more than they recommend. If that one does not, ` +
             `lower the bitrate, drop the destination, or give it a rendition.`,
         );
       }
     } else if (hint) {
       hint.textContent = dests.length
-        ? "No destination is taking the copied stream — every one has a rendition."
+        ? "No destination is taking the copied stream; every one has a rendition."
         : "";
     }
 
@@ -611,7 +611,7 @@ const CHECKED = "2026-08-06";
         "soft",
         `${renditionRates.size} rendition${renditionRates.size === 1 ? "" : "s"} ` +
           `(${[...renditionRates].sort((a, b) => a - b).join(", ")} kbps). Each is one video ` +
-          `encode on the server, shared by every destination asking for that bitrate — so this ` +
+          `encode on the server, shared by every destination asking for that bitrate, so this ` +
           `costs CPU that a copied stream does not. Audio is unaffected: a rendition re-encodes ` +
           `video only.`,
       );

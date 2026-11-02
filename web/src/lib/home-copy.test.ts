@@ -235,7 +235,7 @@ describe("the home trust line (S4)", () => {
   });
 
   it("keeps a plain source link when the fetch fails", () => {
-    expect(source).toMatch(/Read the source →/);
+    expect(source).toMatch(/>Read the source<\/a/);
   });
 });
 
@@ -292,7 +292,7 @@ describe("the features page's dashboard copy", () => {
     const features = pages("features.astro");
     const dashboard = features.slice(features.indexOf("The programme you picked in the header"));
     const sentence = dashboard.slice(0, dashboard.indexOf("\n"));
-    expect(sentence).toMatch(/its ingest — bitrate, uptime,/);
+    expect(sentence).toMatch(/its ingest \(bitrate, uptime,/);
   });
 });
 

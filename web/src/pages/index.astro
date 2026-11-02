@@ -33,16 +33,16 @@ const LAYOUT_SENTENCE =
 
 const features = [
   {
-    t: "Video is copied, not re-encoded — unless you ask for a rendition",
+    t: "Video is copied, not re-encoded, unless you ask for a rendition",
     d: "Without a rendition every destination gets -c:v copy, so CPU cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC.",
   },
   {
     t: "Shared renditions for the platforms that refuse your source",
-    d: "One encode feeds every destination that selects it, ref-counted so an unused tier costs nothing — and it re-encodes video only, so audio still routes per destination.",
+    d: "One encode feeds every destination that selects it, ref-counted so an unused tier costs nothing. It re-encodes video only, so audio still routes per destination.",
   },
   {
     t: "One port per protocol, many programmes",
-    d: "Sources are told apart by a publish token — supplied in OBS's Stream Key field on RTMP, and as the streamid on SRT — so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on classic RTMP, more over Enhanced RTMP.",
+    d: "Sources are told apart by a publish token (supplied in OBS's Stream Key field on RTMP, and as the streamid on SRT), so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on classic RTMP, more over Enhanced RTMP.",
   },
   {
     t: "Live meters on every channel of every track",
@@ -50,7 +50,7 @@ const features = [
   },
   {
     t: "Chat moderation across five platforms",
-    d: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick — and a moderator card showing what one person said across every platform at once.",
+    d: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick, plus a moderator card showing what one person said across every platform at once.",
   },
   {
     t: "Failover with a standby ingest and a slate",
@@ -229,10 +229,11 @@ const features = [
         </p>
         <p>
           Every live platform accepts exactly one stereo pair. So
-          normally you must choose one mix for everyone — and risk a claim on
+          normally you must choose one mix for everyone, and risk a claim on
           YouTube or a muted VOD on Twitch, or send both a
-          broadcast with no music — or multistream from the stream PC: several
-          encoders and several uploads off one machine and one connection.
+          broadcast with no music. The alternative is to multistream from the
+          stream PC: several encoders and several uploads off one machine and
+          one connection.
         </p>
         <p class="text-fg">
           polyemesis ingests once and lets you pick, per destination, which
@@ -346,7 +347,7 @@ const features = [
           on the ingest.
         </p>
         <p class="mt-3 text-sm text-subtle">
-          Track layout in this capture: the same four tracks as above —{" "}
+          Track layout in this capture, the same four tracks as above:{" "}
           {TRACK_LAYOUT.map((t) => `${t.id} ${t.name.toLowerCase()}`).join(", ")}.
         </p>
       </div>
@@ -414,10 +415,10 @@ const features = [
       <dl class="divide-y divide-line border-y border-line">
         {
           [
-            ["SRT carries every audio track", "One ingest accepting up to 32 tracks — six is what OBS sends — and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily, so the feature this product exists for is the one with the most road behind it. RTMP sits alongside it as the single-track fallback; Enhanced RTMP carries more on every supported FFmpeg, though an OBS-as-publisher run has not been confirmed."],
+            ["SRT carries every audio track", "One ingest accepting up to 32 tracks (six is what OBS sends), and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily, so the feature this product exists for is the one with the most road behind it. RTMP sits alongside it as the single-track fallback; Enhanced RTMP carries more on every supported FFmpeg, though an OBS-as-publisher run has not been confirmed."],
             ["Routing audio never touches your picture", "Video is stream-copied end to end, so the frames a platform receives are the frames your encoder made, and the cost of routing scales with audio rather than resolution. Shared renditions re-encode video only when you ask for one, and the cost of that encode is shown before it starts."],
-            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with no hosted service behind it and no per-destination pricing — the only connections it makes are the ones you configure."],
-            ["Built for the operator at the desk", "One account and full control — no permission model to configure and none to get wrong. Live ingest, destination and process state are on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
+            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with no hosted service behind it and no per-destination pricing. The only connections it makes are the ones you configure."],
+            ["Built for the operator at the desk", "One account and full control: no permission model to configure and none to get wrong. Live ingest, destination and process state are on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
           ].map(([t, d]) => (
             <div class="py-4">
               <dt class="text-[15px] font-medium text-fg">{t}</dt>
@@ -516,12 +517,12 @@ const features = [
         </div>
 
         <div class="mt-7 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
-          <a href="/download" class="tap text-fg transition-colors hover:text-primary-bright hover:underline">Install options →</a>
-          <a href="/docs" class="tap text-fg transition-colors hover:text-primary-bright hover:underline">All {PUBLISHED.length} documents →</a>
+          <a href="/download" class="tap text-fg transition-colors hover:text-primary-bright hover:underline">Install options</a>
+          <a href="/docs" class="tap text-fg transition-colors hover:text-primary-bright hover:underline">All {PUBLISHED.length} documents</a>
           <a
             href="https://github.com/rainmanjam/polyemesis"
             rel="noopener"
-            class="tap text-fg transition-colors hover:text-primary-bright hover:underline">Read the source →</a
+            class="tap text-fg transition-colors hover:text-primary-bright hover:underline">Read the source</a
           >
           {repo && (
             <span class="text-subtle">
