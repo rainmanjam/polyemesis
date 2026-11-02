@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Yalnızca kaydedildi",
   "chatFlags.messageGone": "Mesaj metni artık tutulmuyor.",
   "chatFlags.openUser": "{name} için kullanıcı kartını aç",
-  "chatFlags.unknownAuthor": "Bilinmeyen izleyici"
+  "chatFlags.unknownAuthor": "Bilinmeyen izleyici",
+  "chatFlags.note": "Bu sunucu başlatıldığından beri automod'un işaretlediği mesajlar, en yenisi önce. Liste yalnızca bellekte tutulur, en son 500'ü saklar ve yeniden başlatmadan sonra yine boştur.",
+  "chatCard.sanctionUnknownNoBan": "Sunucu bu kişinin yasaklı olup olmadığını belirleyemedi."
 }

@@ -55,8 +55,9 @@ type flagsResponse struct {
 		Findings []automod.Finding `json:"findings"`
 		Acted    bool              `json:"acted"`
 	} `json:"flags"`
-	Truncated bool   `json:"truncated"`
-	Note      string `json:"note"`
+	Truncated bool           `json:"truncated"`
+	Note      string         `json:"note"`
+	Counts    map[string]int `json:"counts"`
 }
 
 func TestChatFlagsListsWhatAutomodFlagged(t *testing.T) {
@@ -103,6 +104,13 @@ func TestChatFlagsListsWhatAutomodFlagged(t *testing.T) {
 	if len(f.Findings) != 1 || f.Findings[0].Category != automod.CategorySpam || f.Findings[0].Reason == "" {
 		t.Fatalf("findings = %+v", f.Findings)
 	}
+	// review #3/#9: per-platform counts over the whole held list, independent
+	// of limit, so the chip can count without fetching every entry.
+	var small flagsResponse
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/chat/flags?limit=1", nil, http.StatusOK), &small)
+	if small.Counts["twitch"] != 1 || len(small.Counts) != 1 {
+		t.Errorf("counts = %v, want twitch 1", small.Counts)
+	}
 	if out.Note == "" {
 		t.Error("no note: an empty list would read as \"automod never flagged anything\"")
 	}
@@ -121,6 +129,9 @@ func TestChatFlagsWithNoChatIsAnEmptyList(t *testing.T) {
 	raw := send(t, h, sign, http.MethodGet, "/api/v1/chat/flags", nil, http.StatusOK)
 	if !strings.Contains(string(raw), `"flags":[]`) {
 		t.Fatalf("no chat hub answered %s, want an empty flags array", raw)
+	}
+	if !strings.Contains(string(raw), `"counts":{}`) {
+		t.Fatalf("no chat hub answered %s, want an empty counts object", raw)
 	}
 }
 

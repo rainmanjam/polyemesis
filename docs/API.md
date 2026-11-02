@@ -1471,13 +1471,18 @@ newest first, one entry per message.
 {"flags": [{"message": {...}, "findings": [{"checker": "rules", "action": "flag",
             "category": "spam", "reason": "matched rule \"links\"", "ruleId": 7}],
             "acted": false, "at": "2026-11-01T18:00:03Z"}],
- "truncated": false, "note": "Messages automod flagged since this server started, …"}
+ "truncated": false, "counts": {"twitch": 1},
+ "note": "Messages automod flagged since this server started, …"}
 ```
 
+`counts` is how many messages are held per platform, over the whole list and
+whatever `limit` or `platform` says, so `limit=1` is enough for a client that
+only shows a count. `acted` is true only once an action automod performed on the
+message — hide, delete, time out, ban — **succeeded**; a finding that only flags,
+or an action the platform refused or the queue dropped, leaves it false.
 `message` is the chat message as `/chat/messages` returns it. `findings` is
-every opinion recorded about it, the fast checkers' and the model's together;
-`acted` says the automod matrix permitted at least one action, so the message
-was not only logged. A finding's `reason` is the operator's own words or a
+every opinion recorded about it, the fast checkers' and the model's together.
+A finding's `reason` is the operator's own words or a
 closed-set category reason — the model's own prose is never included. The list
 is kept **in memory only**: it holds the most recent 500, and it is **empty
 again after a restart**, because nothing is written to disk. An entry stays after its message is deleted or retracted: it is a record of

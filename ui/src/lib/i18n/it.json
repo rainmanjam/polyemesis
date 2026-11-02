@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Solo registrato",
   "chatFlags.messageGone": "Il testo del messaggio non è più conservato.",
   "chatFlags.openUser": "Apri la scheda utente di {name}",
-  "chatFlags.unknownAuthor": "Spettatore sconosciuto"
+  "chatFlags.unknownAuthor": "Spettatore sconosciuto",
+  "chatFlags.note": "Messaggi segnalati da automod dall'avvio di questo server, i più recenti prima. L'elenco è tenuto in memoria, conserva gli ultimi 500 e torna vuoto dopo un riavvio.",
+  "chatCard.sanctionUnknownNoBan": "Il server non è riuscito a stabilire se questa persona è bannata."
 }

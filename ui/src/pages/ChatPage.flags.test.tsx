@@ -5,7 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router";
 
 import { api } from "@/lib/api";
-import type { ChatFlaggedMessage, ChatMessage } from "@/lib/types";
+import type { ChatFlaggedMessage, ChatFlagsResult, ChatMessage, ChatPlatform } from "@/lib/types";
+import { FLAGS_REFRESH_MS } from "@/hooks/useChatFlags";
 
 /* UX COUNCIL A48: AUTOMOD'S FLAGS, READABLE ON CHAT.
  *
@@ -47,12 +48,22 @@ const flag = (platform: "twitch" | "youtube", id: string, name: string, acted = 
   at: "2026-11-01T18:00:02Z",
 });
 
+/** A server answer: counts are over the whole list, as the server sends them. */
+const result = (flags: ChatFlaggedMessage[], truncated = false): ChatFlagsResult => {
+  const counts: Partial<Record<ChatPlatform, number>> = {};
+  for (const f of flags) counts[f.message.platform] = (counts[f.message.platform] ?? 0) + 1;
+  return { flags, truncated, counts, note: "server prose the UI must not render" };
+};
+
 const chatFlags = vi.spyOn(api, "chatFlags");
+const chatSearch = vi.spyOn(api, "chatSearch");
 const chatUser = vi.spyOn(api, "chatUser");
 
 beforeEach(() => {
   chatFlags.mockReset();
   chatUser.mockReset();
+  chatSearch.mockReset();
+  chatSearch.mockResolvedValue({ query: "", messages: [], truncated: false, retentionNote: "" } as never);
   chatUser.mockResolvedValue({ platform: "twitch", authorId: "u-t1", messages: [], truncated: false, retentionNote: "" });
   if (!Element.prototype.scrollTo) {
     Element.prototype.scrollTo = function () {};
@@ -71,11 +82,7 @@ const chip = () => screen.getByRole("button", { name: /Show messages automod fla
 
 describe("the Flagged chip (A48)", () => {
   it("counts the flagged messages and opens the list", async () => {
-    chatFlags.mockResolvedValue({
-      flags: [flag("twitch", "t1", "ana", true), flag("youtube", "y1", "bo")],
-      truncated: false,
-      note: "Messages automod flagged since this server started.",
-    });
+    chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana", true), flag("youtube", "y1", "bo")]));
     draw();
     await waitFor(() => expect(chip().textContent).toContain("2"));
     expect(chip().getAttribute("aria-pressed")).toBe("false");
@@ -89,15 +96,15 @@ describe("the Flagged chip (A48)", () => {
     expect(within(list).getAllByText(/Spam · Rules · Flag for review/).length).toBe(2);
     expect(within(list).getByText("Acted on")).toBeTruthy();
     expect(within(list).getByText("Logged only")).toBeTruthy();
-    expect(screen.getByText(/since this server started/)).toBeTruthy();
+    // review #8: the coverage line comes from the catalogue, not the server's
+    // English, and a category's English reason is not repeated after it.
+    expect(screen.getByText(/empty again after a restart/)).toBeTruthy();
+    expect(screen.queryByText(/server prose/)).toBeNull();
+    expect(screen.queryByText(/matched rule/)).toBeNull();
   });
 
   it("is filtered by the same platform toggles as the timeline", async () => {
-    chatFlags.mockResolvedValue({
-      flags: [flag("twitch", "t1", "ana"), flag("youtube", "y1", "bo")],
-      truncated: false,
-      note: "",
-    });
+    chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana"), flag("youtube", "y1", "bo")]));
     draw();
     await waitFor(() => expect(chip().textContent).toContain("2"));
     fireEvent.click(screen.getByRole("button", { name: /YouTube/, pressed: true }));
@@ -114,7 +121,7 @@ describe("the Flagged chip (A48)", () => {
   });
 
   it("says nothing was flagged only when the server said so", async () => {
-    chatFlags.mockResolvedValue({ flags: [], truncated: false, note: "" });
+    chatFlags.mockResolvedValue(result([]));
     draw();
     await waitFor(() => expect(chip().textContent).toContain("0"));
     fireEvent.click(chip());
@@ -132,12 +139,78 @@ describe("the Flagged chip (A48)", () => {
   });
 
   it("opens the flagged author's user card", async () => {
-    chatFlags.mockResolvedValue({ flags: [flag("twitch", "t1", "ana")], truncated: true, note: "" });
+    chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana")]));
     draw();
-    await waitFor(() => expect(chip().textContent).toContain("1+"));
+    await waitFor(() => expect(chip().textContent).toContain("1"));
     fireEvent.click(chip());
     fireEvent.click(await screen.findByRole("button", { name: "Open the user card for ana" }));
     await waitFor(() => expect(chatUser).toHaveBeenCalled());
     expect(chatUser.mock.calls[0][0]).toMatchObject({ platform: "twitch", account: "acct", authorId: "u-t1" });
+  });
+
+  // review #9: the count is exact per platform, so a filtered view never reads
+  // "0+" off the unfiltered list's truncation.
+  it("never adds a + from the unfiltered list to a filtered count", async () => {
+    chatFlags.mockResolvedValue(result([flag("youtube", "y1", "bo")], true));
+    draw();
+    await waitFor(() => expect(chip().textContent).toContain("1"));
+    fireEvent.click(screen.getByRole("button", { name: /YouTube/, pressed: true }));
+    await waitFor(() => expect(chip().textContent).toMatch(/Flagged\s*0$/));
+    expect(chip().textContent).not.toContain("+");
+  });
+
+  // review #8: a rule finding has no category, so its reason -- the
+  // operator's rule name -- is the only "why" there is.
+  it("shows a finding's reason only when it has no category", async () => {
+    const f = flag("twitch", "t1", "ana");
+    f.findings = [{ checker: "rules", action: "flag", reason: 'matched rule "links"' }];
+    chatFlags.mockResolvedValue(result([f]));
+    draw();
+    await waitFor(() => expect(chip().textContent).toContain("1"));
+    fireEvent.click(chip());
+    expect(await screen.findByText(/matched rule "links"/)).toBeTruthy();
+  });
+
+  // review #3: the full list only while it is open.
+  it("asks for one entry while closed and the whole list while open", async () => {
+    chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana")]));
+    draw();
+    await waitFor(() => expect(chatFlags).toHaveBeenCalled());
+    expect(chatFlags.mock.calls[0][0]).toEqual({ limit: 1 });
+    fireEvent.click(chip());
+    await waitFor(() => expect(chatFlags.mock.calls.at(-1)?.[0]).toEqual({ limit: 500 }));
+  });
+
+  // review #10: search wins over the list, rather than firing invisibly.
+  it("shows search results, not the list, once a search is typed", async () => {
+    chatFlags.mockResolvedValue(result([flag("twitch", "t1", "ana")]));
+    draw();
+    await waitFor(() => expect(chip().textContent).toContain("1"));
+    fireEvent.click(chip());
+    await screen.findByRole("list", { name: "Messages automod flagged" });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "hello" } });
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Messages automod flagged" })).toBeNull());
+    expect(chip().getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("the Flagged poll (review #3)", () => {
+  it("does not poll while the tab is hidden", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    try {
+      chatFlags.mockResolvedValue(result([]));
+      draw();
+      const first = chatFlags.mock.calls.length;
+      expect(first).toBe(1);
+      await vi.advanceTimersByTimeAsync(FLAGS_REFRESH_MS * 3);
+      expect(chatFlags.mock.calls.length).toBe(first);
+      hidden.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(FLAGS_REFRESH_MS);
+      expect(chatFlags.mock.calls.length).toBe(first + 1);
+    } finally {
+      hidden.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

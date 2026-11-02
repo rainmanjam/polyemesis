@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Tylko zapisano",
   "chatFlags.messageGone": "Treść wiadomości nie jest już przechowywana.",
   "chatFlags.openUser": "Otwórz kartę użytkownika {name}",
-  "chatFlags.unknownAuthor": "Nieznany widz"
+  "chatFlags.unknownAuthor": "Nieznany widz",
+  "chatFlags.note": "Wiadomości oznaczone przez automod od uruchomienia tego serwera, najnowsze najpierw. Lista jest trzymana w pamięci, przechowuje 500 ostatnich i po restarcie jest znowu pusta.",
+  "chatCard.sanctionUnknownNoBan": "Serwer nie mógł ustalić, czy ta osoba jest zbanowana."
 }

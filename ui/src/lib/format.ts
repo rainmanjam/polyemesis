@@ -112,6 +112,19 @@ export function clockTime(iso: string): string {
   return d.toLocaleTimeString(undefined, { timeZone: displayZone, hour12: false });
 }
 
+/** A moment worth reading at a glance: the clock alone when it falls on
+ *  today's date in the console's zone, otherwise the date as well. A one-day
+ *  timeout ending tomorrow, or a ban placed last week, must not read as a bare
+ *  "14:02" that looks like today. */
+export function dayAwareTime(iso: string, now: Date = new Date()): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime()) || d.getUTCFullYear() <= 1) return "";
+  const day = (x: Date) =>
+    x.toLocaleDateString("en-CA", { timeZone: displayZone, year: "numeric", month: "2-digit", day: "2-digit" });
+  return day(d) === day(now) ? clockTime(iso) : timestamp(iso);
+}
+
 /** Percent as an integer with a trailing sign. */
 export function pct(n: number): string {
   return `${(n ?? 0).toFixed(0)}%`;

@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "기록만 됨",
   "chatFlags.messageGone": "메시지 내용은 더 이상 보관되지 않습니다.",
   "chatFlags.openUser": "{name}의 사용자 카드 열기",
-  "chatFlags.unknownAuthor": "알 수 없는 시청자"
+  "chatFlags.unknownAuthor": "알 수 없는 시청자",
+  "chatFlags.note": "이 서버가 시작된 이후 automod가 플래그한 메시지이며 최신순입니다. 목록은 메모리에만 보관되고 최근 500개를 유지하며 다시 시작하면 비워집니다.",
+  "chatCard.sanctionUnknownNoBan": "서버가 이 사람이 차단되었는지 확인하지 못했습니다."
 }

@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Apenas registrado",
   "chatFlags.messageGone": "O texto da mensagem não está mais guardado.",
   "chatFlags.openUser": "Abrir o cartão de usuário de {name}",
-  "chatFlags.unknownAuthor": "Espectador desconhecido"
+  "chatFlags.unknownAuthor": "Espectador desconhecido",
+  "chatFlags.note": "Mensagens sinalizadas pelo automod desde que este servidor foi iniciado, as mais recentes primeiro. A lista fica só na memória, guarda as 500 mais recentes e volta a ficar vazia após reiniciar.",
+  "chatCard.sanctionUnknownNoBan": "O servidor não conseguiu saber se esta pessoa está banida."
 }

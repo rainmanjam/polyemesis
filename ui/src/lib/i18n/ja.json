@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "記録のみ",
   "chatFlags.messageGone": "メッセージ本文はもう保持されていません。",
   "chatFlags.openUser": "{name} のユーザーカードを開く",
-  "chatFlags.unknownAuthor": "不明な視聴者"
+  "chatFlags.unknownAuthor": "不明な視聴者",
+  "chatFlags.note": "このサーバーの起動以降に automod がフラグを付けたメッセージ（新しい順）。一覧はメモリ上にのみ保持され、最新の 500 件を保持し、再起動すると空に戻ります。",
+  "chatCard.sanctionUnknownNoBan": "この人が BAN されているかサーバーで確認できませんでした。"
 }

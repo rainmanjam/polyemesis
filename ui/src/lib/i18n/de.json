@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Nur protokolliert",
   "chatFlags.messageGone": "Der Nachrichtentext wird nicht mehr vorgehalten.",
   "chatFlags.openUser": "Benutzerkarte von {name} öffnen",
-  "chatFlags.unknownAuthor": "Unbekannter Zuschauer"
+  "chatFlags.unknownAuthor": "Unbekannter Zuschauer",
+  "chatFlags.note": "Von Automod markierte Nachrichten seit dem Start dieses Servers, neueste zuerst. Die Liste liegt nur im Speicher, hält die letzten 500 und ist nach einem Neustart wieder leer.",
+  "chatCard.sanctionUnknownNoBan": "Der Server konnte nicht feststellen, ob diese Person gesperrt ist."
 }

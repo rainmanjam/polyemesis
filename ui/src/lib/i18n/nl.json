@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Alleen gelogd",
   "chatFlags.messageGone": "De berichttekst wordt niet meer bewaard.",
   "chatFlags.openUser": "Gebruikerskaart van {name} openen",
-  "chatFlags.unknownAuthor": "Onbekende kijker"
+  "chatFlags.unknownAuthor": "Onbekende kijker",
+  "chatFlags.note": "Berichten die automod heeft gemarkeerd sinds deze server is gestart, nieuwste eerst. De lijst staat alleen in het geheugen, bewaart de laatste 500 en is na een herstart weer leeg.",
+  "chatCard.sanctionUnknownNoBan": "De server kon niet vaststellen of deze persoon verbannen is."
 }

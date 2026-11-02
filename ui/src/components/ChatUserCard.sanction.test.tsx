@@ -87,4 +87,24 @@ describe("A48: the user card's sanction state", () => {
     expect(liftBan().disabled).toBe(true);
     expect(liftBan().title).toMatch(/Facebook/);
   });
+
+  // review #2: a time on another day carries its date.
+  it("dates a timeout that ends on another day", async () => {
+    const tomorrow = new Date(Date.now() + 26 * 3600_000).toISOString();
+    chatUser.mockResolvedValue(card({ action: "timeout", until: tomorrow, by: "operator" }));
+    draw();
+    await waitFor(() => expect(screen.getByText("Timed out")).toBeTruthy());
+    const detail = screen.getByText(/Ends at/).textContent ?? "";
+    expect(detail).toMatch(/\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/);
+  });
+
+  // review #8: "Lift ban stays available" is not said where it is disabled.
+  it("does not promise Lift ban on a platform that cannot ban", async () => {
+    chatUser.mockResolvedValue(card(undefined));
+    draw("facebook");
+    await waitFor(() => expect(screen.getByText("Ban state unknown")).toBeTruthy());
+    expect(screen.getByText(/could not tell whether this person is banned/)).toBeTruthy();
+    expect(screen.queryByText(/stays available/)).toBeNull();
+  });
 });
+

@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Hanya dicatat",
   "chatFlags.messageGone": "Teks pesan tidak lagi disimpan.",
   "chatFlags.openUser": "Buka kartu pengguna {name}",
-  "chatFlags.unknownAuthor": "Penonton tidak dikenal"
+  "chatFlags.unknownAuthor": "Penonton tidak dikenal",
+  "chatFlags.note": "Pesan yang ditandai automod sejak server ini dimulai, terbaru lebih dulu. Daftar disimpan di memori, menampung 500 terbaru, dan kosong lagi setelah dimulai ulang.",
+  "chatCard.sanctionUnknownNoBan": "Server tidak dapat memastikan apakah orang ini diblokir."
 }

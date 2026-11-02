@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Logged only",
   "chatFlags.messageGone": "The message text is no longer held.",
   "chatFlags.openUser": "Open the user card for {name}",
-  "chatFlags.unknownAuthor": "Unknown viewer"
+  "chatFlags.unknownAuthor": "Unknown viewer",
+  "chatFlags.note": "Messages automod flagged since this server started, newest first. The list is kept in memory, holds the most recent 500 and is empty again after a restart.",
+  "chatCard.sanctionUnknownNoBan": "The server could not tell whether this person is banned."
 }

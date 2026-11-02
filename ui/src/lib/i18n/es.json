@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "Solo registrado",
   "chatFlags.messageGone": "El texto del mensaje ya no se conserva.",
   "chatFlags.openUser": "Abrir la ficha de usuario de {name}",
-  "chatFlags.unknownAuthor": "Espectador desconocido"
+  "chatFlags.unknownAuthor": "Espectador desconocido",
+  "chatFlags.note": "Mensajes marcados por automod desde que se inició este servidor, los más recientes primero. La lista se guarda en memoria, conserva los 500 más recientes y queda vacía tras un reinicio.",
+  "chatCard.sanctionUnknownNoBan": "El servidor no pudo saber si esta persona está expulsada."
 }

@@ -65,22 +65,38 @@ export function ChatPage() {
   // UX Council A48: what automod flagged, behind a chip with its count. The
   // list honours the same platform filter as the timeline, so a filtered-out
   // platform's flags are not counted either.
-  const flagsRead = useChatFlags();
   const [showFlags, setShowFlags] = useState(false);
+  // Search wins: typing in the search box while the list is open shows the
+  // results, rather than firing a search nobody can see (#945 review).
+  const flagsOpen = showFlags && !search.active;
+  const flagsRead = useChatFlags(flagsOpen);
   const allFlags = useMemo(
     () => (mayClaim(flagsRead.read) ? flagsRead.read.value.flags : []),
     [flagsRead.read],
   );
-  const flagsNote = mayClaim(flagsRead.read) ? flagsRead.read.value.note : undefined;
-  const flagsTruncated = mayClaim(flagsRead.read) && flagsRead.read.value.truncated;
   const flags = useMemo(
     () => allFlags.filter((f) => !hidden.has(f.message.platform)),
     [allFlags, hidden],
   );
-  const flagCount = mayClaim(flagsRead.read) ? `${flags.length}${flagsTruncated ? "+" : ""}` : "";
+  // From the server's per-platform counts, narrowed to the platforms shown.
+  // Exact over the whole held list, so there is no "+": a "+" from the
+  // unfiltered list once read "Flagged 0+" on a filtered view.
+  const flagCount = mayClaim(flagsRead.read)
+    ? String(
+        Object.entries(flagsRead.read.value.counts ?? {}).reduce(
+          (n, [p, c]) => (hidden.has(p as ChatPlatform) ? n : n + (c ?? 0)),
+          0,
+        ),
+      )
+    : "";
   const toggleFlags = () => {
-    if (!showFlags) flagsRead.reload();
-    setShowFlags(!showFlags);
+    if (flagsOpen) {
+      setShowFlags(false);
+      return;
+    }
+    // Opening the list clears a search that would otherwise keep it hidden.
+    if (search.active) search.setQuery("");
+    setShowFlags(true);
   };
 
   const platforms = useMemo(() => platformsIn(messages, statuses), [messages, statuses]);
@@ -218,8 +234,8 @@ export function ChatPage() {
                   icon is otherwise announced as a bare digit. */}
               <Button
                 size="sm"
-                variant={showFlags ? "secondary" : "outline"}
-                aria-pressed={showFlags}
+                variant={flagsOpen ? "secondary" : "outline"}
+                aria-pressed={flagsOpen}
                 aria-label={t("chatFlags.chipAria", { count: flagCount || "0" })}
                 onClick={toggleFlags}
               >
@@ -279,12 +295,11 @@ export function ChatPage() {
 
           <ChatSearchBox search={search} />
 
-          {showFlags ? (
+          {flagsOpen ? (
             <ChatFlaggedList
               flags={flags}
               failed={readFailed(flagsRead.read)}
               filtered={flags.length === 0 && allFlags.length > 0}
-              note={flagsNote}
               onOpenUser={setCard}
             />
           ) : search.active ? (

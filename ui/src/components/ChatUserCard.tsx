@@ -17,7 +17,7 @@ import { failedRead, mayClaim, okRead, pendingRead, readFailed, type ReadState }
 import { accentFor, TIMEOUTS } from "@/lib/chat";
 import { chatActionSupport } from "@/lib/chatModeration";
 import { chatSanctionStatus } from "@/lib/status";
-import { clockTime } from "@/lib/format";
+import { clockTime, dayAwareTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatPlatform, ChatUserCard as CardData } from "@/lib/types";
 
@@ -128,11 +128,15 @@ export function ChatUserCard({
   const byLabel = sanction?.by === "automod" ? t("chatCard.sanctionByAutomod") : t("chatCard.sanctionByOperator");
   const sanctionDetail =
     sanction?.action === "timeout" && sanction.until
-      ? t("chatCard.sanctionTimeoutDetail", { time: clockTime(sanction.until), by: byLabel })
+      ? t("chatCard.sanctionTimeoutDetail", { time: dayAwareTime(sanction.until), by: byLabel })
       : sanction?.action === "ban"
-        ? t("chatCard.sanctionBanDetail", { time: clockTime(sanction.since ?? ""), by: byLabel })
+        ? t("chatCard.sanctionBanDetail", { time: dayAwareTime(sanction.since ?? ""), by: byLabel })
         : card && !sanction
-          ? t("chatCard.sanctionUnknownDetail")
+          ? // "so Lift ban stays available" is false where the platform
+            // cannot ban, so that half is said only where it is true.
+            ban.ok
+            ? t("chatCard.sanctionUnknownDetail")
+            : t("chatCard.sanctionUnknownNoBan")
           : "";
 
   const run = async (what: string, fn: () => Promise<{ detail?: string } | void>) => {

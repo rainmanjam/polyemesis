@@ -34,7 +34,6 @@ export function ChatFlaggedList({
   flags,
   failed,
   filtered,
-  note,
   onOpenUser,
 }: {
   /** Already narrowed to the platforms the timeline is showing. */
@@ -43,8 +42,6 @@ export function ChatFlaggedList({
   failed: boolean;
   /** Some flags exist but the platform filter hides all of them. */
   filtered: boolean;
-  /** The server's line on what the list covers. */
-  note?: string;
   onOpenUser: (m: ChatMessage) => void;
 }) {
   const t = useT();
@@ -64,7 +61,7 @@ export function ChatFlaggedList({
           title={t("chatFlags.emptyTitle")}
           body={filtered ? t("chatFlags.emptyFiltered") : t("chatFlags.emptyBody")}
         />
-        {note && <p className="max-w-md text-center text-sm text-muted-foreground">{note}</p>}
+        <p className="max-w-md text-center text-sm text-muted-foreground">{t("chatFlags.note")}</p>
       </div>
     );
   }
@@ -106,7 +103,11 @@ export function ChatFlaggedList({
                 {f.findings.map((fi, i) => (
                   <li key={i} className="text-sm text-muted-foreground">
                     <span className="text-foreground">{findingLabel(fi, t)}</span>
-                    {fi.reason ? ` — ${fi.reason}` : ""}
+                    {/* The category already says why, in the catalogue's words;
+                        the server's reason is the same thing in English. Only a
+                        rule or history finding, which has no category, adds
+                        its reason -- the operator's own rule name. */}
+                    {fi.reason && !fi.category ? ` — ${fi.reason}` : ""}
                   </li>
                 ))}
               </ul>
@@ -114,7 +115,7 @@ export function ChatFlaggedList({
           );
         })}
       </ul>
-      {note && <p className="px-2 py-1.5 text-sm text-muted-foreground">{note}</p>}
+      <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("chatFlags.note")}</p>
     </div>
   );
 }

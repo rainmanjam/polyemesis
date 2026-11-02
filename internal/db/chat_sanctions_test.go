@@ -137,3 +137,42 @@ func TestASanctionIsScopedToItsAccount(t *testing.T) {
 		t.Fatal("an any-account lift left the chan-a ban in place")
 	}
 }
+
+// review #7. An expired timeout is not a sanction and must not stay a row: a
+// raid timing out hundreds of accounts would otherwise grow this table without
+// bound. Every write prunes what has already ended.
+func TestRecordingASanctionPrunesExpiredTimeouts(t *testing.T) {
+	d := testDB(t)
+	start := time.UnixMilli(1_800_000_000_000)
+	for i, s := range []ChatSanction{
+		{Platform: PlatformTwitch, Account: "acct", UserID: "gone", Action: "timeout", Until: start.Add(time.Minute), At: start},
+		{Platform: PlatformTwitch, Account: "acct", UserID: "still", Action: "timeout", Until: start.Add(3 * time.Hour), At: start},
+		{Platform: PlatformTwitch, Account: "acct", UserID: "forever", Action: "ban", At: start},
+		{Platform: PlatformTwitch, Account: "acct", UserID: "new", Action: "ban", At: start.Add(time.Hour)},
+	} {
+		if err := d.RecordChatSanction(s); err != nil {
+			t.Fatalf("RecordChatSanction %d: %v", i, err)
+		}
+	}
+	rows := map[string]bool{}
+	r, err := d.sql.Query(`SELECT user_id FROM chat_sanctions`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for r.Next() {
+		var u string
+		if err := r.Scan(&u); err != nil {
+			t.Fatal(err)
+		}
+		rows[u] = true
+	}
+	if rows["gone"] {
+		t.Error("a timeout that ended an hour before the last write is still a row")
+	}
+	for _, u := range []string{"still", "forever", "new"} {
+		if !rows[u] {
+			t.Errorf("%s was pruned, but its sanction is still in force", u)
+		}
+	}
+}

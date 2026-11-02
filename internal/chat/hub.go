@@ -97,6 +97,10 @@ type Hub struct {
 	// flags is automod's review list, oldest first and bounded by flagCap.
 	// See flags.go.
 	flags []FlaggedMessage
+	// viewerLocks serialises Ban and Unban per (platform, account, user), so
+	// the sanction record lands in the order the platform saw the calls. Entries
+	// are reference-counted and deleted when idle. See lockViewer.
+	viewerLocks map[string]*viewerLock
 
 	// display is the on-screen overlay's sink (see display.go), or nil.
 	display DisplaySink
@@ -837,6 +841,7 @@ func (h *Hub) Ban(ctx context.Context, p db.Platform, account, userID string, d 
 	if !ok {
 		return fmt.Errorf("chat: polyemesis cannot ban on %s; use the %s dashboard", p, p)
 	}
+	defer h.lockViewer(r, userID)()
 	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
 	defer cancel()
 	if err := b.Ban(ctx, userID, d, reason); err != nil {
@@ -868,6 +873,9 @@ func (h *Hub) recordSanction(ctx context.Context, r *runner, userID, action stri
 		Action: action, At: now, By: actorOf(ctx), Reason: reason,
 	}
 	if d > 0 {
+		if tr, ok := r.adapter.(TimeoutRounder); ok {
+			d = tr.EffectiveTimeout(d)
+		}
 		s.Until = now.Add(d)
 	}
 	if err := sc.RecordChatSanction(s); err != nil {
@@ -893,6 +901,7 @@ func (h *Hub) Unban(ctx context.Context, p db.Platform, account, userID string) 
 	if !ok {
 		return fmt.Errorf("chat: polyemesis cannot lift a ban on %s; use the %s dashboard", p, p)
 	}
+	defer h.lockViewer(r, userID)()
 	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
 	defer cancel()
 	if err := b.Unban(ctx, userID); err != nil {
@@ -1411,4 +1420,47 @@ func (h *Hub) SetQuota(units, reserve int) int {
 		}
 	}
 	return applied
+}
+
+// TimeoutRounder is the optional half of Banner for a platform whose timeouts
+// do not run for exactly the duration asked. Kick counts whole minutes and
+// rounds up; the sanction record has to say what the platform enforces, or the
+// user card reads "none" while the viewer still cannot talk.
+type TimeoutRounder interface {
+	EffectiveTimeout(d time.Duration) time.Duration
+}
+
+type viewerLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockViewer serialises moderation on one viewer and returns the unlock. Held
+// across the platform call: the point is that a lift cannot complete -- call
+// and record -- while a ban on the same person is still in flight, and then
+// have the ban's record land last. Different viewers never wait for each other.
+func (h *Hub) lockViewer(r *runner, userID string) func() {
+	key := runnerKey(r.platform, r.account) + "\x00" + userID
+	h.mu.Lock()
+	if h.viewerLocks == nil {
+		h.viewerLocks = map[string]*viewerLock{}
+	}
+	l := h.viewerLocks[key]
+	if l == nil {
+		l = &viewerLock{}
+		h.viewerLocks[key] = l
+	}
+	l.refs++
+	h.mu.Unlock()
+
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		h.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(h.viewerLocks, key)
+		}
+		h.mu.Unlock()
+	}
 }

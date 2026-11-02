@@ -3,6 +3,8 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -143,16 +145,34 @@ func TestACleanMessageIsNotHeld(t *testing.T) {
 // The list is bounded: a raid of flagged spam must not grow it without end.
 func TestTheFlagListIsBounded(t *testing.T) {
 	h := testHub(t)
+	id := func(i int) string { return "m" + strconv.Itoa(i) }
 	for i := 0; i < flagCap+25; i++ {
-		h.noteFlag(Message{Platform: db.PlatformTwitch, ID: string(rune('a'+i%26)) + strings.Repeat("x", i)},
-			[]automod.Finding{{Checker: automod.CheckerRules, Action: automod.ActionFlag}}, false)
+		h.noteFlag(Message{Platform: db.PlatformTwitch, ID: id(i)},
+			[]automod.Finding{{Checker: automod.CheckerRules, Action: automod.ActionFlag}})
 	}
-	if n := len(h.Flagged("", 0)); n != flagCap {
-		t.Fatalf("held %d flags, want the cap of %d", n, flagCap)
+	held := h.Flagged("", 0)
+	if len(held) != flagCap {
+		t.Fatalf("held %d flags, want the cap of %d", len(held), flagCap)
+	}
+	// The NEWEST are kept: a raid is when this fills, and the latest flags are
+	// the ones a moderator is looking for. Keeping the oldest 500 would pass a
+	// length check and show a list frozen at the start of the raid.
+	if held[0].Message.ID != id(flagCap+24) {
+		t.Errorf("newest held flag is %s, want %s", held[0].Message.ID, id(flagCap+24))
+	}
+	if held[len(held)-1].Message.ID != id(25) {
+		t.Errorf("oldest held flag is %s, want %s (the first 25 shed)", held[len(held)-1].Message.ID, id(25))
+	}
+	for _, f := range held {
+		if f.Message.ID == id(0) || f.Message.ID == id(24) {
+			t.Fatalf("an early flag %s survived the cap", f.Message.ID)
+		}
 	}
 }
 
-func TestAFlagThatActedSaysSo(t *testing.T) {
+// review #1. A Flag finding is permitted by the default matrix and performs
+// nothing, so it must not read as "acted on".
+func TestAFlagAloneIsNotActedOn(t *testing.T) {
 	h := testHub(t)
 	f := automod.Finding{Checker: automod.CheckerRules, Action: automod.ActionFlag}
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "acct",
@@ -162,8 +182,63 @@ func TestAFlagThatActedSaysSo(t *testing.T) {
 	}})
 	attach(t, h, a)
 	waitFor(t, "the flag", func() bool { return len(h.Flagged("", 10)) == 1 })
-	if !h.Flagged("", 10)[0].Acted {
-		t.Fatal("a finding the matrix acted on was reported as not acted on")
+	time.Sleep(50 * time.Millisecond) // the worker has had its chance
+	if h.Flagged("", 10)[0].Acted {
+		t.Fatal("a flag-only finding, which sends nothing, was reported as acted on")
+	}
+}
+
+// "Acted on" means an action RAN AND SUCCEEDED, not that one was permitted.
+func TestAFlagIsActedOnOnlyOnceTheActionSucceeds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		acted bool
+	}{
+		{"succeeded", nil, true},
+		{"refused", errors.New("platform said no"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHub(t)
+			f := automod.Finding{Checker: automod.CheckerRules, Action: automod.ActionTimeout, TimeoutSeconds: 60}
+			b := &failingBanner{banningAdapter: &banningAdapter{fakeAdapter: &fakeAdapter{
+				platform: db.PlatformTwitch, account: "acct",
+				messages: []Message{{ID: "m1", Author: Author{ID: "u1"}, Text: "x"}},
+			}}, err: tc.err}
+			h.SetModerator(&stubModerator{verdict: automod.Verdict{
+				Findings: []automod.Finding{f}, Act: []automod.Finding{f},
+			}})
+			if err := h.Attach(context.Background(), b); err != nil {
+				t.Fatalf("Attach: %v", err)
+			}
+			waitFor(t, "the action to be attempted", func() bool { return b.attempted() == 1 })
+			if tc.acted {
+				waitFor(t, "the flag to be marked acted", func() bool {
+					f := h.Flagged("", 10)
+					return len(f) == 1 && f[0].Acted
+				})
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+			if f := h.Flagged("", 10); len(f) != 1 || f[0].Acted {
+				t.Fatalf("a refused timeout left the flag as %+v, want held and not acted", f)
+			}
+		})
+	}
+}
+
+// The chip counts per platform from the whole held list, so a closed list can
+// show an exact count without fetching every entry.
+func TestFlagCountsArePerPlatform(t *testing.T) {
+	h := testHub(t)
+	fs := []automod.Finding{{Checker: automod.CheckerRules, Action: automod.ActionFlag}}
+	h.noteFlag(Message{Platform: db.PlatformTwitch, ID: "a"}, fs)
+	h.noteFlag(Message{Platform: db.PlatformTwitch, ID: "b"}, fs)
+	h.noteFlag(Message{Platform: db.PlatformYouTube, ID: "c"}, fs)
+	h.noteFlag(Message{Platform: db.PlatformTwitch, ID: "a"}, fs) // same message again
+	got := h.FlagCounts()
+	if got[db.PlatformTwitch] != 2 || got[db.PlatformYouTube] != 1 || len(got) != 2 {
+		t.Fatalf("counts = %v, want twitch 2 and youtube 1", got)
 	}
 }
 

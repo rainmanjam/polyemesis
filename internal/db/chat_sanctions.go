@@ -58,10 +58,19 @@ CREATE TABLE IF NOT EXISTS chat_sanctions (
 
 // RecordChatSanction stores s, replacing any earlier sanction on the same
 // viewer in the same channel: a timeout escalated to a ban is a ban.
+//
+// Every write also prunes the timeouts that have already ended. ActiveChatSanction
+// filters them out, so they are dead rows, and a raid timing out hundreds of
+// accounts would otherwise grow this table without bound. Pruning on write
+// bounds it by the sanctions actually in force, with no timer to keep alive.
 func (d *DB) RecordChatSanction(s ChatSanction) error {
 	var until int64
 	if !s.Until.IsZero() {
 		until = s.Until.UnixMilli()
+	}
+	if _, err := d.sql.Exec(`DELETE FROM chat_sanctions WHERE until_ms != 0 AND until_ms <= ?`,
+		s.At.UnixMilli()); err != nil {
+		return err
 	}
 	_, err := d.sql.Exec(`INSERT INTO chat_sanctions
 		(platform, account, user_id, action, until_ms, at_ms, by_actor, reason)

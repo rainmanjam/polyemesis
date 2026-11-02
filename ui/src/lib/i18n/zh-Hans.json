@@ -3591,5 +3591,7 @@
   "chatFlags.loggedOnly": "仅记录",
   "chatFlags.messageGone": "消息文本已不再保留。",
   "chatFlags.openUser": "打开 {name} 的用户卡片",
-  "chatFlags.unknownAuthor": "未知观众"
+  "chatFlags.unknownAuthor": "未知观众",
+  "chatFlags.note": "自此服务器启动以来 automod 标记的消息，最新的在前。列表只保存在内存中，保留最近 500 条，重启后会再次清空。",
+  "chatCard.sanctionUnknownNoBan": "服务器无法确定此人是否已被封禁。"
 }

@@ -2752,7 +2752,8 @@ export interface ChatFlagFinding {
 export interface ChatFlaggedMessage {
   message: ChatMessage;
   findings: ChatFlagFinding[];
-  /** The automod matrix permitted at least one action, so it was not only logged. */
+  /** An action automod performed on this message succeeded. A flag-only
+   *  finding, or an action refused or dropped, leaves this false. */
   acted: boolean;
   at: string;
 }
@@ -2761,6 +2762,8 @@ export interface ChatFlaggedMessage {
 export interface ChatFlagsResult {
   flags: ChatFlaggedMessage[];
   truncated: boolean;
+  /** Messages held per platform over the whole list, whatever the limit. */
+  counts: Partial<Record<ChatPlatform, number>>;
   /** What the list covers. Render it beside an empty list. */
   note: string;
 }

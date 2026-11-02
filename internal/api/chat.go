@@ -631,6 +631,10 @@ type chatFlagsResult struct {
 	Flags []chat.FlaggedMessage `json:"flags"`
 	// Truncated says the limit was reached, so older flags may be held.
 	Truncated bool `json:"truncated"`
+	// Counts is how many messages are held per platform, over the WHOLE list
+	// and whatever the limit, so a client can show an exact count -- narrowed
+	// to the platforms it is showing -- with limit=1.
+	Counts map[db.Platform]int `json:"counts"`
 	// Note says what the list covers, so an empty one is not read as
 	// "automod has never flagged anything".
 	Note string `json:"note"`
@@ -649,8 +653,9 @@ const chatFlagsNote = "Messages automod flagged since this server started, newes
 func (s *Server) handleChatFlags(w http.ResponseWriter, r *http.Request) {
 	limit := chatLimitParam(r)
 	platform := db.Platform(strings.TrimSpace(r.URL.Query().Get("platform")))
-	out := chatFlagsResult{Flags: []chat.FlaggedMessage{}, Note: chatFlagsNote}
+	out := chatFlagsResult{Flags: []chat.FlaggedMessage{}, Counts: map[db.Platform]int{}, Note: chatFlagsNote}
 	if s.chat != nil {
+		out.Counts = s.chat.FlagCounts()
 		out.Flags = s.chat.Flagged(platform, limit)
 		out.Truncated = len(out.Flags) >= limit
 	}
