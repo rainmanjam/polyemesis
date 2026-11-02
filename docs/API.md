@@ -1729,8 +1729,8 @@ key and no connected account is a reading with `reason: "unlinked"`.
 thumbnails, compliance, the broadcast lifecycle and this sampler — draws on one
 daily allowance, bound to the configured Google client and sized by
 `chat.youtubeQuotaUnits`. Saving a different client starts a new tally (it is a
-different project); until YouTube credentials are stored the sampler does not
-read YouTube. The
+different project); until YouTube credentials are stored, or after they are
+deleted, the sampler does not read YouTube. The
 sampler finds each account's live video once (`liveBroadcasts.list`, 1 unit) and
 then spends **1 unit a tick** on `videos.list` against the remembered id. It is
 held to **15%** of the allowance: one account at 60 s is 1,440 units per 24 h on
@@ -1773,7 +1773,8 @@ stream's `peakTotal` (the highest single-tick total, not a sum of per-platform
 peaks), chat messages per platform, the ten `topChatters`, the player's QoE over
 the stream, and the `recordings` and `clips` made during it. Chat is counted from
 every running destination's connected account, including platforms with no
-viewer count (Facebook, Rumble, X), from one interval before the stream starts to
+viewer count (Facebook, Rumble, X), and -- for a destination with a pasted key
+and no account -- from the chat attached for its platform, from one interval before the stream starts to
 its last on-air tick; an ended stream's peak and average are the ones stored at
 its close. `?format=csv`
 returns the same report as CSV, where a count nobody sent reads `not reported`

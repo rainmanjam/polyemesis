@@ -168,6 +168,10 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 	}
 	linked := map[int64]bool{}
 	out := []analytics.Target{}
+	// Platforms with a running destination that has no account row: a pasted
+	// key, or Rumble, whose chat hangs off no account. Their chat is whatever
+	// adapter is attached for that platform (final pass, F1).
+	pasted := map[db.Platform]bool{}
 	for _, d := range dests {
 		if !running[d.ID] {
 			continue
@@ -187,10 +191,12 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 			// broadcast to read, and the horizontal's own row says so.
 			continue
 		}
+		pasted[d.Platform] = true
 		if _, ok := s.providers.StatsFor(d.Platform); ok {
 			out = append(out, analytics.Target{Platform: string(d.Platform), Name: d.Name, Unlinked: true})
 		}
 	}
+	out = append(out, s.attachedChatTargets(pasted)...)
 	if len(linked) == 0 {
 		return out, nil
 	}
@@ -213,6 +219,22 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// attachedChatTargets is a chat-only target for every attached chat adapter
+// of a platform a pasted-key destination is running on, by the adapter's own
+// account ref -- independent of an account row and of a viewer count.
+func (s *Server) attachedChatTargets(platforms map[db.Platform]bool) []analytics.Target {
+	if s.chat == nil || len(platforms) == 0 {
+		return nil
+	}
+	var out []analytics.Target
+	for _, st := range s.chat.Statuses() {
+		if platforms[st.Platform] && st.Account != "" {
+			out = append(out, analytics.Target{Platform: string(st.Platform), Account: st.Account, ChatOnly: true})
+		}
+	}
+	return out
 }
 
 // Allow reports whether a YouTube read fits the sampler's share of the shared

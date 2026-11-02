@@ -471,6 +471,14 @@ func run(h *hooks) error {
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
 	})
+	// FIRST, before any loop below can call YouTube: every YouTube Data API
+	// call internal/oauth makes -- title push, compliance, the lifecycle and
+	// its startup reconciliation, preannounce, recurring, rollover -- is
+	// charged to the configured client's one shared allowance (bound in
+	// api.New), the one chat paces against. A startup sweep that ran first
+	// would spend quota nobody counted. TestTheQuotaMeterIsInstalledBefore-
+	// AnyLoopCanCallYouTube holds the order.
+	api.InstallYouTubeMeter(srv)
 	// After api.New, which is what installs the server as the bridge's
 	// Actions: a fact OBS reports before that would be recorded and acted on
 	// by nothing.
@@ -507,10 +515,6 @@ func run(h *hooks) error {
 	// charges YouTube reads to the chat quota pacer. See internal/api/analytics.go.
 	go srv.AnalyticsLoop(ctx)
 	mqttAudience.set(srv.AudienceState)
-	// Every YouTube Data API call internal/oauth makes -- title push,
-	// compliance, the lifecycle, rollover -- is charged to the Google
-	// client's one shared allowance, the one chat paces against.
-	api.InstallYouTubeMeter(srv)
 	// The stream-key cross-check behind "YouTube's key changed — click to
 	// update". Read-only against the platform; see internal/api/keycheck.go.
 	eng.SetKeyChecker(srv.KeyChecker())

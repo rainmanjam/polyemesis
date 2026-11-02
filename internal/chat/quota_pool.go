@@ -31,7 +31,8 @@ type YouTubeQuota struct {
 	share      map[string]int
 	shareReset time.Time
 	// clientID is the Google client this allowance belongs to; see Bind.
-	clientID string
+	// lastID is the last non-empty one, which survives an Unbind.
+	clientID, lastID string
 }
 
 func newYouTubeQuota(b *budget) *YouTubeQuota {
@@ -177,7 +178,9 @@ func (q *YouTubeQuota) Bind(clientID string) {
 	if clientID == q.clientID {
 		return
 	}
-	if q.clientID != "" {
+	// A client other than the last one bound -- even across an Unbind -- is a
+	// different project with its own counter.
+	if q.lastID != "" && clientID != q.lastID {
 		q.b.mu.Lock()
 		q.b.used = 0
 		q.b.resetAt = quotaResetAfter(q.b.now())
@@ -185,6 +188,22 @@ func (q *YouTubeQuota) Bind(clientID string) {
 		q.share = map[string]int{}
 	}
 	q.clientID = clientID
+	if clientID != "" {
+		q.lastID = clientID
+	}
+}
+
+// Unbind is the YouTube credentials being deleted (final pass, F3): the
+// allowance belongs to no client until they are stored again, so the
+// sampler's YouTube reads are refused. The tally is kept, so re-storing the
+// same client resumes it; a different one starts afresh.
+func (q *YouTubeQuota) Unbind() {
+	if q == nil {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.clientID = ""
 }
 
 // ClientID is the Google client the allowance is bound to, "" before Bind.

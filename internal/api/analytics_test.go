@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/analytics"
+	"github.com/rainmanjam/polyemesis/internal/chat"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/metrics"
@@ -783,5 +784,72 @@ func TestAnEndedStreamsReportShowsItsStoredTotals(t *testing.T) {
 	f.get(t, "/api/v1/analytics/streams/"+strconv.FormatInt(id, 10), &rep)
 	if rep.Stream.PeakTotal == nil || *rep.Stream.PeakTotal != 10 || rep.Summary.PeakTotal == nil || *rep.Summary.PeakTotal != 10 {
 		t.Fatalf("report peak = %v / %v, want the stored 10", rep.Stream.PeakTotal, rep.Summary.PeakTotal)
+	}
+}
+
+// ---------------------------------------------------------- final pass
+
+// TestAPastedKeyDestinationsAttachedChatIsCounted (F1): a running Rumble
+// destination with a pasted key has no account row and no viewer count, but
+// its attached chat adapter's chat is the stream's.
+func TestAPastedKeyDestinationsAttachedChatIsCounted(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	hub := chat.New()
+	t.Cleanup(hub.Close)
+	f.s.chat = hub
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := hub.Attach(ctx, &moderatableAdapter{platform: db.PlatformRumble, account: "rumble"}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := f.store.CreateDestination(&db.Destination{
+		Name: "Rumble by key", Kind: db.DestRTMP, Platform: db.PlatformRumble,
+		URL: "rtmp://ingest.example/app", StreamKey: "key-rumble",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.running[d.ID] = true
+	f.tick(t)
+	if _, err := f.store.AppendChatMessages([]db.ChatMessage{
+		{Platform: db.PlatformRumble, Account: "rumble", MessageID: "r1", AuthorID: "fan", AuthorName: "fan", Text: "hi", At: f.now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	rows, _ := f.store.ListAnalyticsStreams(1)
+	var rep analytics.Report
+	f.get(t, "/api/v1/analytics/streams/"+strconv.FormatInt(rows[0].Stream.ID, 10), &rep)
+	if len(rep.Chat) != 1 || rep.Chat[0].Platform != "rumble" || rep.Chat[0].Messages != 1 {
+		t.Fatalf("chat = %+v, want the Rumble adapter's message counted", rep.Chat)
+	}
+}
+
+// TestDeletingYouTubeCredentialsUnbindsTheAllowance (F3): reads are refused
+// until a client is stored again, and a different client starts afresh.
+func TestDeletingYouTubeCredentialsUnbindsTheAllowance(t *testing.T) {
+	s, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	call := func(method string, body any) {
+		r := jsonRequest(t, method, "/api/v1/platforms/credentials/youtube", body)
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusOK {
+			t.Fatalf("%s creds: %d %s", method, w.Code, w.Body.String())
+		}
+	}
+	call(http.MethodPut, map[string]string{"clientId": "project-one", "clientSecret": "client-pass"})
+	q := s.ytQuotaShared
+	q.Spend(40)
+	call(http.MethodDelete, nil)
+	if q.ClientID() != "" {
+		t.Fatalf("still bound to %q after the credentials were deleted", q.ClientID())
+	}
+	if (analyticsSource{s}).Allow(analytics.Target{Platform: "youtube", AccountID: 1, Account: "ref"}) {
+		t.Fatal("a YouTube read was allowed with the credentials deleted")
+	}
+	call(http.MethodPut, map[string]string{"clientId": "project-two", "clientSecret": "client-pass"})
+	if q.ClientID() != "project-two" || q.Status().Used != 0 {
+		t.Fatalf("after a new client: %q used %d, want a fresh tally", q.ClientID(), q.Status().Used)
 	}
 }

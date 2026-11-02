@@ -187,6 +187,11 @@ func (s *Server) handleDeleteCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// No client, no allowance to read against: YouTube reads are refused
+	// until credentials are stored again (final pass, F3).
+	if platform == db.PlatformYouTube {
+		s.ytQuotaShared.Unbind()
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
