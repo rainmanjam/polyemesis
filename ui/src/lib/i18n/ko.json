@@ -3676,5 +3676,6 @@
   "aud.partial": "일부만: 이번 집계에서 응답하지 않은 플랫폼이 있어 합계에서 빼고 그래프에도 그리지 않습니다.",
   "aud.stretched": "YouTube 할당량 몫을 넘지 않도록 {seconds}초마다 집계합니다.",
   "aud.reasonUnlinked": "이 대상은 붙여 넣은 스트림 키를 사용하므로 조회할 연결 계정이 없습니다.",
-  "aud.notConnected": "연결 안 됨"
+  "aud.notConnected": "연결 안 됨",
+  "aud.reasonStarting": "이 플랫폼에서는 아직 라이브가 아닙니다. 보통 대상이 시작되고 1~2분 안에 라이브가 됩니다."
 }

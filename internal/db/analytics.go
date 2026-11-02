@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS analytics_streams (
 	qoe_last    TEXT    NOT NULL DEFAULT '',
 	chat_from   INTEGER NOT NULL DEFAULT 0,     -- unix ms: chat before this is not the stream's
 	peak_total  INTEGER,                        -- set at close; NULL while open or when nothing reported
-	avg_total   REAL
+	avg_total   REAL,
+	wait_ms     INTEGER NOT NULL DEFAULT 0      -- the last tick's chosen interval; a restart's close grace
 );
 -- The accounts a stream was read from. Its chat is theirs and nobody else's:
 -- a second connected channel the stream is not on is not its audience.
@@ -63,6 +64,8 @@ CREATE TABLE IF NOT EXISTS analytics_samples (
 	FOREIGN KEY (stream_id) REFERENCES analytics_streams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_analytics_samples_stream ON analytics_samples(stream_id, at);
+-- The hourly prune deletes by age across every stream.
+CREATE INDEX IF NOT EXISTS idx_analytics_samples_at ON analytics_samples(at);
 CREATE TABLE IF NOT EXISTS analytics_chatters (
 	stream_id   INTEGER NOT NULL,
 	platform    TEXT    NOT NULL,
@@ -83,12 +86,12 @@ const (
 	analyticsOpenQuery = `INSERT INTO analytics_streams (started_at, last_at, chat_from, chat_cursor, qoe_start, qoe_last)
 		VALUES (?, ?, ?, COALESCE((SELECT MIN(id) FROM chat_messages WHERE at_ms >= ?) - 1,
 			(SELECT COALESCE(MAX(id), 0) FROM chat_messages)), ?, ?)`
-	analyticsOpenStateQuery = `SELECT id, started_at, last_at FROM analytics_streams WHERE ended_at = 0
-		ORDER BY id DESC LIMIT 1`
+	analyticsOpenStreamsQuery = `SELECT id, started_at, last_at, wait_ms FROM analytics_streams WHERE ended_at = 0
+		ORDER BY id DESC`
 	analyticsSampleInsert = `INSERT INTO analytics_samples (stream_id, at, platform, account, name, viewers, reason)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
 	analyticsTickUpdate = `UPDATE analytics_streams SET last_at = ?,
-		title = CASE WHEN title = '' THEN ? ELSE title END, qoe_last = ? WHERE id = ?`
+		title = CASE WHEN title = '' THEN ? ELSE title END, qoe_last = ?, wait_ms = ? WHERE id = ?`
 	analyticsCursorQuery  = `SELECT chat_cursor, chat_from FROM analytics_streams WHERE id = ?`
 	analyticsAccountAdd   = `INSERT OR IGNORE INTO analytics_stream_accounts (stream_id, platform, account) VALUES (?, ?, ?)`
 	analyticsChatMaxQuery = `SELECT COALESCE(MAX(id), 0) FROM chat_messages`
@@ -105,7 +108,9 @@ const (
 			author_name = CASE WHEN excluded.author_name <> '' THEN excluded.author_name
 				ELSE analytics_chatters.author_name END`
 	analyticsCursorUpdate = `UPDATE analytics_streams SET chat_cursor = ? WHERE id = ?`
-	analyticsCloseUpdate  = `UPDATE analytics_streams SET ended_at = ?,
+	// ended_at is never before started_at (R8): a stream with no recorded
+	// on-air tick ends at its own start.
+	analyticsCloseUpdate = `UPDATE analytics_streams SET ended_at = MAX(?, started_at),
 		last_at = CASE WHEN last_at > ? THEN last_at ELSE ? END, peak_total = ?, avg_total = ? WHERE id = ?`
 	analyticsSamplesQuery = `SELECT at, platform, account, name, viewers, reason FROM analytics_samples
 		WHERE stream_id = ? ORDER BY at, rowid`
@@ -169,26 +174,37 @@ func (d *DB) OpenAnalyticsStream(at time.Time, qoe *analytics.PlayerQoE, lead ti
 	return res.LastInsertId()
 }
 
-// OpenAnalyticsStreamState is the stream a previous process left open.
-func (d *DB) OpenAnalyticsStreamState() (analytics.OpenState, bool, error) {
-	var id, start, last int64
-	err := d.sql.QueryRow(analyticsOpenStateQuery).Scan(&id, &start, &last)
-	if errors.Is(err, sql.ErrNoRows) {
-		return analytics.OpenState{}, false, nil
-	}
+// OpenAnalyticsStreams is every stream a previous process left open, newest
+// first.
+func (d *DB) OpenAnalyticsStreams() ([]analytics.OpenState, error) {
+	rows, err := d.sql.Query(analyticsOpenStreamsQuery)
 	if err != nil {
-		return analytics.OpenState{}, false, err
+		return nil, err
 	}
-	st := analytics.OpenState{ID: id, Start: time.UnixMilli(start)}
-	if last > 0 {
-		st.LastAt = time.UnixMilli(last)
+	defer rows.Close()
+	out := []analytics.OpenState{}
+	for rows.Next() {
+		var id, start, last, wait int64
+		if err := rows.Scan(&id, &start, &last, &wait); err != nil {
+			return nil, err
+		}
+		st := analytics.OpenState{ID: id, Start: time.UnixMilli(start), Wait: time.Duration(wait) * time.Millisecond}
+		if last > 0 {
+			st.LastAt = time.UnixMilli(last)
+		}
+		out = append(out, st)
 	}
-	return st, true, nil
+	return out, rows.Err()
 }
 
 // RecordAnalyticsTick stores one tick and tallies the chat since the last.
-func (d *DB) RecordAnalyticsTick(id int64, at time.Time, rs []analytics.Reading, title string, qoe *analytics.PlayerQoE) error {
-	q, err := qoeJSON(qoe)
+//
+// The stream's chat accounts are the tick's ChatAccounts -- every running
+// destination's connected account, viewer count or not (round 2, R2) -- and a
+// tick that could not name them (TallyChat false) leaves the chat for the next.
+func (d *DB) RecordAnalyticsTick(id int64, t analytics.Tick) error {
+	at, rs, title := t.At, t.Readings, t.Title
+	q, err := qoeJSON(t.QoE)
 	if err != nil {
 		return err
 	}
@@ -198,12 +214,12 @@ func (d *DB) RecordAnalyticsTick(id int64, at time.Time, rs []analytics.Reading,
 	}
 	defer func() { _ = tx.Rollback() }()
 	ms := at.UnixMilli()
-	for _, r := range rs {
-		if r.Account != "" {
-			if _, err := tx.Exec(analyticsAccountAdd, id, r.Platform, r.Account); err != nil {
-				return err
-			}
+	for _, c := range t.ChatAccounts {
+		if _, err := tx.Exec(analyticsAccountAdd, id, c.Platform, c.Account); err != nil {
+			return err
 		}
+	}
+	for _, r := range rs {
 		var v any
 		if r.Viewers != nil {
 			v = *r.Viewers
@@ -212,11 +228,13 @@ func (d *DB) RecordAnalyticsTick(id int64, at time.Time, rs []analytics.Reading,
 			return err
 		}
 	}
-	if _, err := tx.Exec(analyticsTickUpdate, ms, title, q, id); err != nil {
+	if _, err := tx.Exec(analyticsTickUpdate, ms, title, q, t.Wait.Milliseconds(), id); err != nil {
 		return err
 	}
-	if err := tallyAnalyticsChat(tx, id, math.MaxInt64); err != nil {
-		return err
+	if t.TallyChat {
+		if err := tallyAnalyticsChat(tx, id, math.MaxInt64); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

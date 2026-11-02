@@ -14,6 +14,7 @@ const MIN_POLL_MS = 15_000;
 
 const REASON: Record<string, TranslationKey> = {
   offline: "aud.reasonOffline",
+  starting: "aud.reasonStarting",
   hidden: "aud.reasonHidden",
   quota: "aud.reasonQuota",
   error: "aud.reasonError",

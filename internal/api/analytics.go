@@ -55,25 +55,46 @@ const analyticsTopChatters = 10
 // analyticsStreamsLimit bounds the stream list.
 const analyticsStreamsLimit = 100
 
-// ytQuota is the shared YouTube allowance of this install's Google client:
-// the one the chat adapters, the vertical read, the sampler and the request
-// meter all draw on. An install with no YouTube credentials has an empty
-// client id, which still names one budget.
+// ytQuota is the install's YouTube allowance: ONE value, bound to the
+// configured Google client, held by every chat adapter, the vertical read,
+// the sampler and the request meter (PR #950 round 2, R3 and R12). It is
+// never looked up by key per call, so a transient credential-read error
+// cannot hand anyone a fresh, unspent budget. Until the credentials have been
+// read it is bound lazily here.
 func (s *Server) ytQuota() *chat.YouTubeQuota {
-	id := ""
-	if s.store != nil {
-		if creds, err := s.store.GetPlatformCreds(s.box, db.PlatformYouTube); err == nil {
-			id = creds.ClientID
-		}
+	if s.ytQuotaShared.ClientID() == "" {
+		s.bindYouTubeClient()
 	}
-	return s.ytQuotaPool.For(id)
+	return s.ytQuotaShared
+}
+
+// bindYouTubeClient binds the allowance to the stored YouTube client. Called
+// at startup and whenever the YouTube credentials are saved or deleted. A
+// read error leaves the binding as it was.
+func (s *Server) bindYouTubeClient() {
+	if s.store == nil {
+		return
+	}
+	creds, err := s.store.GetPlatformCreds(s.box, db.PlatformYouTube)
+	if err != nil {
+		return
+	}
+	s.ytQuotaShared.Bind(creds.ClientID)
 }
 
 // YouTubeMeter charges the shared allowance for each YouTube Data API call
-// internal/oauth makes on a path that did not charge it already. main
-// installs it with oauth.SetYouTubeMeter.
+// internal/oauth makes on a path that did not charge it already.
 func (s *Server) YouTubeMeter() oauth.YouTubeMeter {
-	return func(cost int) { s.ytQuotaPool.Current().Spend(cost) }
+	return func(cost int) { s.ytQuota().Spend(cost) }
+}
+
+// InstallYouTubeMeter is the wiring main uses: every YouTube Data API call
+// internal/oauth makes -- title push, compliance, the go-live lifecycle,
+// rollover -- is charged to this server's allowance. hosts are extra API
+// hosts to meter besides Google's, for a test that aims the providers at a
+// stub; production passes none.
+func InstallYouTubeMeter(s *Server, hosts ...string) {
+	oauth.SetYouTubeMeter(s.YouTubeMeter(), hosts...)
 }
 
 // ytLiveVideo is an account's live video, remembered so each tick is one
@@ -181,12 +202,15 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 		if !linked[acct.ID] {
 			continue
 		}
-		if _, ok := s.providers.StatsFor(acct.Platform); !ok {
-			continue
-		}
-		out = append(out, analytics.Target{
+		t := analytics.Target{
 			Platform: string(acct.Platform), AccountID: acct.ID, Account: acct.AccountRef, Name: acct.AccountName,
-		})
+		}
+		// A platform with no viewer count still has chat, and the stream's
+		// chat is every running destination's account's (round 2, R2).
+		if _, ok := s.providers.StatsFor(acct.Platform); !ok {
+			t.ChatOnly = true
+		}
+		out = append(out, t)
 	}
 	return out, nil
 }
@@ -195,11 +219,15 @@ func (a analyticsSource) Targets(context.Context) ([]analytics.Target, error) {
 // allowance, spending nothing: Read charges each call it actually makes.
 // Every other platform has no daily allowance; it is paced by its own
 // Retry-After instead (#4).
+//
+// Until the YouTube credentials have been read there is no client to charge,
+// so a YouTube read is refused rather than charged to nobody (R3).
 func (a analyticsSource) Allow(t analytics.Target) bool {
 	if t.Platform != string(db.PlatformYouTube) {
 		return true
 	}
-	return a.s.ytQuota().AffordShare(analyticsQuotaTag, analyticsQuotaShare, 1)
+	q := a.s.ytQuota()
+	return q.ClientID() != "" && q.AffordShare(analyticsQuotaTag, analyticsQuotaShare, 1)
 }
 
 // Interval stretches the configured interval when the sampler's share of the
@@ -217,7 +245,8 @@ func (a analyticsSource) Interval(configured time.Duration, targets []analytics.
 		return configured
 	}
 	q := a.s.ytQuota()
-	left := min(q.ShareLeft(analyticsQuotaTag, analyticsQuotaShare), q.Status().Remaining)
+	// Reads left above the send reserve (R9): the share is inside it.
+	left := min(q.ShareLeft(analyticsQuotaTag, analyticsQuotaShare), q.ReadsLeft())
 	ticks := left / perTick
 	resetIn := q.ResetIn()
 	if ticks <= 0 {
@@ -519,6 +548,11 @@ func (s *Server) analyticsReport(id int64) (analytics.Report, error) {
 		TopChatters: top,
 		Recordings:  []analytics.RecordingLink{},
 		Clips:       []analytics.ClipLink{},
+	}
+	if row.Stream.EndedAt != nil {
+		// An ended stream's totals are the ones stored at its close: retention
+		// thins its samples, and the list reads the stored pair (R10).
+		rep.Summary.PeakTotal, rep.Summary.AverageTotal = row.Stream.PeakTotal, row.Stream.AverageTotal
 	}
 	rep.Stream.PeakTotal, rep.Stream.AverageTotal = rep.Summary.PeakTotal, rep.Summary.AverageTotal
 	if row.QoEStart != nil && row.QoELast != nil {

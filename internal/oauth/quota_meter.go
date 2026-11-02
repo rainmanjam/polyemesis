@@ -26,15 +26,27 @@ import (
 // YouTubeMeter is told the unit cost of each YouTube Data API call made.
 type YouTubeMeter func(cost int)
 
-var youTubeMeter atomic.Pointer[YouTubeMeter]
+type installedMeter struct {
+	m YouTubeMeter
+	// hosts are extra API hosts metered on every path, for a test that aims
+	// the providers at a stub. Production installs none.
+	hosts map[string]bool
+}
 
-// SetYouTubeMeter installs the meter. Nil removes it.
-func SetYouTubeMeter(m YouTubeMeter) {
+var youTubeMeter atomic.Pointer[installedMeter]
+
+// SetYouTubeMeter installs the meter. Nil removes it. hosts are extra hosts
+// to meter besides Google's (tests only).
+func SetYouTubeMeter(m YouTubeMeter, hosts ...string) {
 	if m == nil {
 		youTubeMeter.Store(nil)
 		return
 	}
-	youTubeMeter.Store(&m)
+	im := &installedMeter{m: m, hosts: map[string]bool{}}
+	for _, h := range hosts {
+		im.hosts[h] = true
+	}
+	youTubeMeter.Store(im)
 }
 
 type quotaChargedKey struct{}
@@ -50,19 +62,36 @@ func WithQuotaCharged(ctx context.Context) context.Context {
 const (
 	ytCostList  = 1
 	ytCostWrite = 50
+	// ytCostUploadVideo is videos.insert.
+	ytCostUploadVideo = 1600
 )
 
 // youTubeCost is the unit cost of a request, and whether it is a YouTube
 // Data API request at all. Only the production host counts: a request aimed
 // at a test stub is not spending anybody's quota.
+//
+// /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
+// 50, and videos.insert -- which polyemesis does not make -- is 1,600.
 func youTubeCost(r *http.Request) (int, bool) {
-	if r.URL.Host != "www.googleapis.com" || !strings.HasPrefix(r.URL.Path, "/youtube/v3/") {
+	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
 	}
-	if r.Method == http.MethodGet {
-		return ytCostList, true
+	switch {
+	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/videos"):
+		return ytCostUploadVideo, true
+	case strings.HasPrefix(r.URL.Path, "/upload/youtube/v3/"):
+		return ytCostWrite, true
+	case !strings.HasPrefix(r.URL.Path, "/youtube/v3/"):
+		return 0, false
 	}
-	return ytCostWrite, true
+	return costByMethod(r.Method), true
+}
+
+func costByMethod(method string) int {
+	if method == http.MethodGet {
+		return ytCostList
+	}
+	return ytCostWrite
 }
 
 // doRequest sends a request through the shared client, charging the meter
@@ -71,7 +100,9 @@ func doRequest(r *http.Request) (*http.Response, error) {
 	if m := youTubeMeter.Load(); m != nil {
 		if charged, _ := r.Context().Value(quotaChargedKey{}).(bool); !charged {
 			if cost, ok := youTubeCost(r); ok {
-				(*m)(cost)
+				m.m(cost)
+			} else if m.hosts[r.URL.Host] {
+				m.m(costByMethod(r.Method))
 			}
 		}
 	}

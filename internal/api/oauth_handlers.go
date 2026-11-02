@@ -114,6 +114,11 @@ func (s *Server) handlePutCreds(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	// A changed YouTube client is a different Google project with its own
+	// daily counter: rebind the shared allowance now (PR #950 round 2, R12).
+	if platform == db.PlatformYouTube {
+		s.bindYouTubeClient()
+	}
 	// The check runs AFTER the store succeeds, and its verdict never changes
 	// the status code. An operator is usually part-way through a platform
 	// console when they paste these; refusing to save a credential they are

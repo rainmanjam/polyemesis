@@ -142,3 +142,24 @@ func TestTheMeterChargesYouTubeDataAPICallsOnly(t *testing.T) {
 		t.Fatalf("metered %d units, want 51 (a list and a write; not Twitch, not a pre-charged read)", spent)
 	}
 }
+
+// TestTheMeterChargesTheUploadHostToo (R4): thumbnails.set lives under
+// /upload/youtube/v3/ and is a 50-unit write.
+func TestTheMeterChargesTheUploadHostToo(t *testing.T) {
+	cases := []struct {
+		method, url string
+		cost        int
+		ok          bool
+	}{
+		{http.MethodPost, "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=v", 50, true},
+		{http.MethodPost, "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet", 1600, true},
+		{http.MethodGet, "https://www.googleapis.com/youtube/v3/videos", 1, true},
+		{http.MethodGet, "https://www.googleapis.com/drive/v3/files", 0, false},
+	}
+	for _, c := range cases {
+		r, _ := http.NewRequest(c.method, c.url, nil)
+		if cost, ok := youTubeCost(r); cost != c.cost || ok != c.ok {
+			t.Errorf("%s %s = %d %v, want %d %v", c.method, c.url, cost, ok, c.cost, c.ok)
+		}
+	}
+}

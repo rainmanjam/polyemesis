@@ -15,7 +15,8 @@ import (
 // against its own private 10,000, and a read made with no chat attached was
 // counted against nothing at all.
 //
-// So the budget lives here, one per client ID, and every spender draws on it:
+// So the budget lives here, bound to the configured client, and every
+// spender draws on it:
 // the chat adapters through YouTubeConfig.Quota, the vertical read and the
 // sampler by charging it before each call, and the rest of the Data API calls
 // through the meter internal/oauth runs on every request it sends to YouTube.
@@ -29,6 +30,8 @@ type YouTubeQuota struct {
 	// of the allowance; shareReset is when it was last zeroed.
 	share      map[string]int
 	shareReset time.Time
+	// clientID is the Google client this allowance belongs to; see Bind.
+	clientID string
 }
 
 func newYouTubeQuota(b *budget) *YouTubeQuota {
@@ -38,7 +41,7 @@ func newYouTubeQuota(b *budget) *YouTubeQuota {
 // Spend records units already spent -- a call that was made. Never refused:
 // the platform has already counted it.
 func (q *YouTubeQuota) Spend(units int) {
-	if q == nil {
+	if q == nil || q.b == nil {
 		return
 	}
 	q.b.spend(units)
@@ -149,60 +152,66 @@ func (q *YouTubeQuota) Status() QuotaStatus {
 	return q.b.status()
 }
 
-// YouTubeQuotaPool holds one YouTubeQuota per Google client ID.
-type YouTubeQuotaPool struct {
-	mu      sync.Mutex
-	units   QuotaUnits
-	reserve QuotaReserve
-	now     func() time.Time
-	byID    map[string]*YouTubeQuota
-	last    string
+// NewYouTubeQuota builds the install's YouTube allowance. now may be nil for
+// time.Now. It is not bound to a client until Bind is called.
+func NewYouTubeQuota(units QuotaUnits, reserve QuotaReserve, now func() time.Time) *YouTubeQuota {
+	return newYouTubeQuota(newBudget(units, reserve, now))
 }
 
-// NewYouTubeQuotaPool builds a pool whose budgets start at this allowance.
-// now may be nil for time.Now.
-func NewYouTubeQuotaPool(units QuotaUnits, reserve QuotaReserve, now func() time.Time) *YouTubeQuotaPool {
-	return &YouTubeQuotaPool{units: units, reserve: reserve, now: now, byID: map[string]*YouTubeQuota{}}
-}
-
-// For is the budget of one Google client ID, created on first use.
-func (p *YouTubeQuotaPool) For(clientID string) *YouTubeQuota {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	q, ok := p.byID[clientID]
-	if !ok {
-		q = newYouTubeQuota(newBudget(p.units, p.reserve, p.now))
-		p.byID[clientID] = q
-	}
-	p.last = clientID
-	return q
-}
-
-// Current is the budget of the client most recently asked for. An install
-// has one set of YouTube developer credentials, so this is the one the
-// request meter charges, without a database read per request.
-func (p *YouTubeQuotaPool) Current() *YouTubeQuota {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	id := p.last
-	p.mu.Unlock()
-	return p.For(id)
-}
-
-// SetLimits replaces every client's allowance, and the one new clients start at.
-func (p *YouTubeQuotaPool) SetLimits(units, reserve int) {
-	if p == nil {
+// Bind names the Google client this allowance belongs to (PR #950 round 2,
+// R3 and R12).
+//
+// An install has ONE set of YouTube developer credentials, so it has one
+// allowance, and every spender -- each chat adapter, the vertical read, the
+// sampler, the request meter -- holds this same value. Binding a DIFFERENT
+// client is a different Google project with its own counter, so the tally
+// starts again, and because the adapters hold this budget rather than a copy
+// they move with it. The first bind keeps what was spent before it: those
+// calls were made with the configured client, which was simply not read yet.
+func (q *YouTubeQuota) Bind(clientID string) {
+	if q == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.units, p.reserve = QuotaUnits(units), QuotaReserve(reserve)
-	for _, q := range p.byID {
-		q.b.setLimits(p.units, p.reserve)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if clientID == q.clientID {
+		return
 	}
+	if q.clientID != "" {
+		q.b.mu.Lock()
+		q.b.used = 0
+		q.b.resetAt = quotaResetAfter(q.b.now())
+		q.b.mu.Unlock()
+		q.share = map[string]int{}
+	}
+	q.clientID = clientID
+}
+
+// ClientID is the Google client the allowance is bound to, "" before Bind.
+func (q *YouTubeQuota) ClientID() string {
+	if q == nil {
+		return ""
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.clientID
+}
+
+// ReadsLeft is how many one-unit reads still fit above the send reserve.
+func (q *YouTubeQuota) ReadsLeft() int {
+	if q == nil {
+		return 0
+	}
+	q.b.mu.Lock()
+	defer q.b.mu.Unlock()
+	q.b.rollLocked()
+	return q.b.affordable(1)
+}
+
+// SetLimits replaces the allowance.
+func (q *YouTubeQuota) SetLimits(units, reserve int) {
+	if q == nil {
+		return
+	}
+	q.b.setLimits(QuotaUnits(units), QuotaReserve(reserve))
 }

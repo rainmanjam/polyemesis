@@ -5,17 +5,17 @@ import (
 	"time"
 )
 
-// TestEveryYouTubeAdapterOfOneClientSharesOneBudget: the daily allowance is
-// the Google Cloud project's, not each channel's, so two connected YouTube
-// channels on one client draw on one budget.
-func TestEveryYouTubeAdapterOfOneClientSharesOneBudget(t *testing.T) {
-	pool := NewYouTubeQuotaPool(10000, 200, nil)
-	q := pool.For("client-a")
+// TestEveryYouTubeAdapterSharesTheClientsBudget: the daily allowance is the
+// Google Cloud project's, not each channel's, so two connected YouTube
+// channels draw on one budget.
+func TestEveryYouTubeAdapterSharesTheClientsBudget(t *testing.T) {
+	q := NewYouTubeQuota(10000, 200, nil)
+	q.Bind("client-a")
 	a, err := NewYouTube(YouTubeConfig{AccountRef: "one", Token: StaticToken("t"), Quota: q})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewYouTube(YouTubeConfig{AccountRef: "two", Token: StaticToken("t"), Quota: pool.For("client-a")})
+	b, err := NewYouTube(YouTubeConfig{AccountRef: "two", Token: StaticToken("t"), Quota: q})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,39 @@ func TestEveryYouTubeAdapterOfOneClientSharesOneBudget(t *testing.T) {
 	if got := q.Status().Used; got != 150 {
 		t.Fatalf("the shared budget has %d used, want 150 from both adapters", got)
 	}
-	if pool.For("client-b") == q {
-		t.Fatal("a second Google client shares the first one's budget")
+}
+
+// TestANewClientIDStartsANewTallyForEveryAdapter (R12): a different Google
+// project has its own counter. The adapters hold the same budget, so they
+// move to the new tally with it -- nothing is left on the old one.
+func TestANewClientIDStartsANewTallyForEveryAdapter(t *testing.T) {
+	q := NewYouTubeQuota(10000, 200, nil)
+	q.Bind("client-a")
+	a, _ := NewYouTube(YouTubeConfig{AccountRef: "one", Token: StaticToken("t"), Quota: q})
+	a.budget.spend(500)
+	q.Bind("client-a")
+	if q.Status().Used != 500 {
+		t.Fatal("rebinding the same client reset its tally")
+	}
+	q.Bind("client-b")
+	if q.Status().Used != 0 || q.ClientID() != "client-b" {
+		t.Fatalf("after the client changed: used %d client %q, want a fresh tally for client-b", q.Status().Used, q.ClientID())
+	}
+	a.budget.spend(7)
+	if q.Status().Used != 7 {
+		t.Fatal("the adapter kept spending on the old client's tally")
+	}
+}
+
+// TestTheFirstBindKeepsWhatWasSpentBeforeIt (R3): calls metered before the
+// credentials were read are the configured client's; binding to it is not a
+// change of project.
+func TestTheFirstBindKeepsWhatWasSpentBeforeIt(t *testing.T) {
+	q := NewYouTubeQuota(10000, 200, nil)
+	q.Spend(50)
+	q.Bind("client-a")
+	if q.Status().Used != 50 {
+		t.Fatalf("used %d after the first bind, want the 50 spent before it", q.Status().Used)
 	}
 }
 
@@ -33,7 +64,7 @@ func TestEveryYouTubeAdapterOfOneClientSharesOneBudget(t *testing.T) {
 // of the allowance however much is left for everyone else.
 func TestTheShareCapsWhatOneUserMaySpend(t *testing.T) {
 	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
-	q := NewYouTubeQuotaPool(1000, 0, func() time.Time { return now }).For("c")
+	q := NewYouTubeQuota(1000, 0, func() time.Time { return now })
 	for i := 0; i < 150; i++ {
 		if !q.ChargeShare("analytics", 0.15, 1) {
 			t.Fatalf("refused read %d inside a 150-unit share", i+1)
@@ -56,29 +87,40 @@ func TestTheShareCapsWhatOneUserMaySpend(t *testing.T) {
 // TestAShareStopsAtTheReserveToo: the share is inside the read budget, so it
 // never spends the units held back for sending.
 func TestAShareStopsAtTheReserveToo(t *testing.T) {
-	q := NewYouTubeQuotaPool(1000, 200, nil).For("c")
+	q := NewYouTubeQuota(1000, 200, nil)
 	q.Spend(799)
+	if q.ReadsLeft() != 1 {
+		t.Fatalf("reads left = %d, want 1 above the 200-unit reserve", q.ReadsLeft())
+	}
 	if !q.ChargeShare("analytics", 0.15, 1) {
 		t.Fatal("refused the last unit above the reserve")
 	}
-	if q.ChargeShare("analytics", 0.15, 1) {
-		t.Fatal("the share spent into the send reserve")
+	if q.ChargeShare("analytics", 0.15, 1) || q.Charge(1) {
+		t.Fatal("a read spent into the send reserve")
 	}
 }
 
 func TestPauseSpendsTheWholeAllowance(t *testing.T) {
-	q := NewYouTubeQuotaPool(1000, 0, nil).For("c")
+	q := NewYouTubeQuota(1000, 0, nil)
 	q.Pause()
 	if q.Charge(1) || q.Afford(1) {
 		t.Fatal("a paused budget still affords a read")
 	}
 }
 
-func TestPoolLimitsReachEveryClient(t *testing.T) {
-	pool := NewYouTubeQuotaPool(10000, 200, nil)
-	a, b := pool.For("a"), pool.For("b")
-	pool.SetLimits(50000, 500)
-	if a.Status().Limit != 50000 || b.Status().Limit != 50000 || pool.For("new").Status().Limit != 50000 {
-		t.Fatal("a raised allowance did not reach every client's budget")
+func TestSetLimitsReachesTheSharedBudget(t *testing.T) {
+	q := NewYouTubeQuota(10000, 200, nil)
+	a, _ := NewYouTube(YouTubeConfig{AccountRef: "one", Token: StaticToken("t"), Quota: q})
+	q.SetLimits(50000, 500)
+	if q.Status().Limit != 50000 || a.budget.status().Limit != 50000 {
+		t.Fatal("a raised allowance did not reach the shared budget")
+	}
+}
+
+func TestANilQuotaRefusesAndSpendsNothing(t *testing.T) {
+	var q *YouTubeQuota
+	q.Spend(1)
+	if q.Charge(1) || q.Afford(1) || q.ChargeShare("a", 1, 1) || q.ReadsLeft() != 0 {
+		t.Fatal("a nil quota allowed a read")
 	}
 }

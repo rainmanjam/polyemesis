@@ -41,13 +41,13 @@ func TestAnalyticsStoresNotReportedAsNull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RecordAnalyticsTick(id, t0, []analytics.Reading{
+	if err := d.RecordAnalyticsTick(id, tickOf(t0, []analytics.Reading{
 		{Platform: "kick", Account: "k", Name: "K", Reason: analytics.ReasonHidden},
 		{Platform: "twitch", Account: "t", Viewers: aip(0)},
-	}, "First title", nil); err != nil {
+	}, "First title", nil)); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RecordAnalyticsTick(id, t0.Add(time.Minute), nil, "Second title", nil); err != nil {
+	if err := d.RecordAnalyticsTick(id, tickOf(t0.Add(time.Minute), nil, "Second title", nil)); err != nil {
 		t.Fatal(err)
 	}
 	s, err := d.AnalyticsSamples(id)
@@ -99,11 +99,11 @@ func TestAnalyticsTalliesChatOnceByIDAndSkipsEchoes(t *testing.T) {
 	// The stream's accounts are the ones its readings name; only their chat is
 	// the stream's (#7).
 	accts := []analytics.Reading{{Platform: "twitch", Account: "acct"}, {Platform: "kick", Account: "k"}}
-	if err := d.RecordAnalyticsTick(id, now, accts, "", nil); err != nil {
+	if err := d.RecordAnalyticsTick(id, tickOf(now, accts, "", nil)); err != nil {
 		t.Fatal(err)
 	}
 	// A second tick with nothing new must not count anything twice.
-	if err := d.RecordAnalyticsTick(id, now.Add(time.Minute), nil, "", nil); err != nil {
+	if err := d.RecordAnalyticsTick(id, tickOf(now.Add(time.Minute), nil, "", nil)); err != nil {
 		t.Fatal(err)
 	}
 	kick := ChatMessage{Platform: PlatformKick, Account: "k", MessageID: "k1", AuthorID: "a3", AuthorName: "kicker", Text: "hi", At: now}
@@ -132,7 +132,7 @@ func TestAnalyticsPruneDeletesOnlyEndedStreamsPastTheCutoff(t *testing.T) {
 	d := testDB(t)
 	t0 := time.UnixMilli(1_800_000_000_000)
 	old, _ := d.OpenAnalyticsStream(t0, nil, 0)
-	_ = d.RecordAnalyticsTick(old, t0, []analytics.Reading{{Platform: "kick", Viewers: aip(1)}}, "", nil)
+	_ = d.RecordAnalyticsTick(old, tickOf(t0, []analytics.Reading{{Platform: "kick", Viewers: aip(1)}}, "", nil))
 	_ = d.CloseAnalyticsStream(old, t0.Add(time.Hour))
 	recent, _ := d.OpenAnalyticsStream(t0.Add(48*time.Hour), nil, 0)
 	_ = d.CloseAnalyticsStream(recent, t0.Add(49*time.Hour))
@@ -167,15 +167,15 @@ func TestAnalyticsPruneDeletesOnlyEndedStreamsPastTheCutoff(t *testing.T) {
 
 func TestAnalyticsOpenStateAndQoERoundTrip(t *testing.T) {
 	d := testDB(t)
-	if _, ok, err := d.OpenAnalyticsStreamState(); ok || err != nil {
-		t.Fatalf("empty: ok=%v err=%v", ok, err)
+	if open, err := d.OpenAnalyticsStreams(); len(open) != 0 || err != nil {
+		t.Fatalf("empty: %d open, err=%v", len(open), err)
 	}
 	t0 := time.UnixMilli(1_800_000_000_000)
 	id, _ := d.OpenAnalyticsStream(t0, &analytics.PlayerQoE{Sessions: 2}, 0)
-	_ = d.RecordAnalyticsTick(id, t0.Add(time.Minute), nil, "", &analytics.PlayerQoE{Sessions: 5})
-	st, ok, err := d.OpenAnalyticsStreamState()
-	if !ok || err != nil || st.ID != id || !st.LastAt.Equal(t0.Add(time.Minute)) {
-		t.Fatalf("open state = %+v ok=%v err=%v", st, ok, err)
+	_ = d.RecordAnalyticsTick(id, tickOf(t0.Add(time.Minute), nil, "", &analytics.PlayerQoE{Sessions: 5}))
+	open, err := d.OpenAnalyticsStreams()
+	if err != nil || len(open) != 1 || open[0].ID != id || !open[0].LastAt.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("open = %+v err=%v", open, err)
 	}
 	row, _ := d.GetAnalyticsStream(id)
 	if row.QoEStart == nil || row.QoEStart.Sessions != 2 || row.QoELast == nil || row.QoELast.Sessions != 5 {
@@ -210,7 +210,7 @@ func TestAnalyticsTalliesOnlyTheStreamsOwnAccounts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.RecordAnalyticsTick(id, now, []analytics.Reading{{Platform: "twitch", Account: "ours"}}, "", nil); err != nil {
+	if err := d.RecordAnalyticsTick(id, tickOf(now, []analytics.Reading{{Platform: "twitch", Account: "ours"}}, "", nil)); err != nil {
 		t.Fatal(err)
 	}
 	counts, top, err := d.AnalyticsChat(id, 10)
@@ -244,7 +244,7 @@ func TestAnalyticsChatIsBoundedToTheStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := t0.Add(2 * time.Minute)
-	if err := d.RecordAnalyticsTick(id, last, []analytics.Reading{{Platform: "twitch", Account: "ours"}}, "", nil); err != nil {
+	if err := d.RecordAnalyticsTick(id, tickOf(last, []analytics.Reading{{Platform: "twitch", Account: "ours"}}, "", nil)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.AppendChatMessages([]ChatMessage{msg("after-the-end", last.Add(2*time.Minute))}); err != nil {
@@ -271,8 +271,8 @@ func TestAnalyticsPruneDropsOldSamplesOfAnOpenStream(t *testing.T) {
 	d := testDB(t)
 	t0 := time.UnixMilli(1_800_000_000_000)
 	id, _ := d.OpenAnalyticsStream(t0, nil, 0)
-	_ = d.RecordAnalyticsTick(id, t0, []analytics.Reading{{Platform: "kick", Viewers: aip(1)}}, "", nil)
-	_ = d.RecordAnalyticsTick(id, t0.Add(48*time.Hour), []analytics.Reading{{Platform: "kick", Viewers: aip(2)}}, "", nil)
+	_ = d.RecordAnalyticsTick(id, tickOf(t0, []analytics.Reading{{Platform: "kick", Viewers: aip(1)}}, "", nil))
+	_ = d.RecordAnalyticsTick(id, tickOf(t0.Add(48*time.Hour), []analytics.Reading{{Platform: "kick", Viewers: aip(2)}}, "", nil))
 	if _, err := d.PruneAnalytics(t0.Add(24 * time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -291,8 +291,8 @@ func TestAnalyticsCloseStoresTheTotals(t *testing.T) {
 	d := testDB(t)
 	t0 := time.UnixMilli(1_800_000_000_000)
 	id, _ := d.OpenAnalyticsStream(t0, nil, 0)
-	_ = d.RecordAnalyticsTick(id, t0, []analytics.Reading{{Platform: "kick", Viewers: aip(10)}}, "", nil)
-	_ = d.RecordAnalyticsTick(id, t0.Add(time.Minute), []analytics.Reading{{Platform: "kick", Viewers: aip(20)}}, "", nil)
+	_ = d.RecordAnalyticsTick(id, tickOf(t0, []analytics.Reading{{Platform: "kick", Viewers: aip(10)}}, "", nil))
+	_ = d.RecordAnalyticsTick(id, tickOf(t0.Add(time.Minute), []analytics.Reading{{Platform: "kick", Viewers: aip(20)}}, "", nil))
 	if err := d.CloseAnalyticsStream(id, t0.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -315,9 +315,9 @@ func TestAnalyticsRecentSamplesAreTheLastTicks(t *testing.T) {
 	t0 := time.UnixMilli(1_800_000_000_000)
 	id, _ := d.OpenAnalyticsStream(t0, nil, 0)
 	for i := 0; i < 5; i++ {
-		_ = d.RecordAnalyticsTick(id, t0.Add(time.Duration(i)*time.Minute), []analytics.Reading{
+		_ = d.RecordAnalyticsTick(id, tickOf(t0.Add(time.Duration(i)*time.Minute), []analytics.Reading{
 			{Platform: "kick", Viewers: aip(i)}, {Platform: "twitch", Reason: analytics.ReasonQuota},
-		}, "", nil)
+		}, "", nil))
 	}
 	s, err := d.AnalyticsRecentSamples(id, 2)
 	if err != nil {
@@ -325,5 +325,98 @@ func TestAnalyticsRecentSamplesAreTheLastTicks(t *testing.T) {
 	}
 	if len(s) != 4 || !s[0].At.Equal(t0.Add(3*time.Minute)) || s[1].Reason != analytics.ReasonQuota {
 		t.Fatalf("recent = %+v, want the last two ticks, both samples each, reasons kept", s)
+	}
+}
+
+// tickOf is a tick whose chat accounts are its readings' accounts.
+func tickOf(at time.Time, rs []analytics.Reading, title string, qoe *analytics.PlayerQoE) analytics.Tick {
+	t := analytics.Tick{At: at, Readings: rs, TallyChat: true, Title: title, QoE: qoe}
+	for _, r := range rs {
+		if r.Account != "" {
+			t.ChatAccounts = append(t.ChatAccounts, analytics.ChatAccount{Platform: r.Platform, Account: r.Account})
+		}
+	}
+	return t
+}
+
+// ---------------------------------------------------------- review round 2
+
+// TestAnalyticsChatAccountsComeFromTheTickNotTheReadings (R2): a platform
+// with no viewer count -- Facebook here -- still has its chat counted.
+func TestAnalyticsChatAccountsComeFromTheTickNotTheReadings(t *testing.T) {
+	d := testDB(t)
+	now := time.Now()
+	id, _ := d.OpenAnalyticsStream(now, nil, 0)
+	if _, err := d.AppendChatMessages([]ChatMessage{
+		{Platform: PlatformFacebook, Account: "page", MessageID: "1", AuthorID: "f", AuthorName: "fan", Text: "hi", At: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RecordAnalyticsTick(id, analytics.Tick{At: now, TallyChat: true,
+		ChatAccounts: []analytics.ChatAccount{{Platform: "facebook", Account: "page"}}}); err != nil {
+		t.Fatal(err)
+	}
+	counts, _, _ := d.AnalyticsChat(id, 10)
+	if len(counts) != 1 || counts[0].Platform != "facebook" || counts[0].Messages != 1 {
+		t.Fatalf("counts = %+v, want Facebook's chat counted", counts)
+	}
+}
+
+// TestAnalyticsATickThatCouldNotNameItsChatsTalliesNothing (R2): the cursor
+// does not move past chat that was not counted.
+func TestAnalyticsATickThatCouldNotNameItsChatsTalliesNothing(t *testing.T) {
+	d := testDB(t)
+	now := time.Now()
+	id, _ := d.OpenAnalyticsStream(now, nil, 0)
+	acct := []analytics.ChatAccount{{Platform: "twitch", Account: "ours"}}
+	// The first tick knows no chat yet (its target list came back empty).
+	_ = d.RecordAnalyticsTick(id, analytics.Tick{At: now, TallyChat: true})
+	if _, err := d.AppendChatMessages([]ChatMessage{
+		{Platform: PlatformTwitch, Account: "ours", MessageID: "1", AuthorID: "a", AuthorName: "viewer", Text: "hi", At: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = d.RecordAnalyticsTick(id, analytics.Tick{At: now.Add(time.Minute), TallyChat: false})
+	_ = d.RecordAnalyticsTick(id, analytics.Tick{At: now.Add(2 * time.Minute), TallyChat: true, ChatAccounts: acct})
+	counts, _, _ := d.AnalyticsChat(id, 10)
+	if len(counts) != 1 || counts[0].Messages != 1 {
+		t.Fatalf("counts = %+v, want the message counted by the next good tick", counts)
+	}
+}
+
+// TestAnalyticsOpenStreamsListsEveryOpenRow (R6), with each one's wait (R5).
+func TestAnalyticsOpenStreamsListsEveryOpenRow(t *testing.T) {
+	d := testDB(t)
+	t0 := time.UnixMilli(1_800_000_000_000)
+	a, _ := d.OpenAnalyticsStream(t0, nil, 0)
+	b, _ := d.OpenAnalyticsStream(t0.Add(time.Hour), nil, 0)
+	_ = d.RecordAnalyticsTick(b, analytics.Tick{At: t0.Add(time.Hour), Wait: 7 * time.Minute})
+	c, _ := d.OpenAnalyticsStream(t0.Add(2*time.Hour), nil, 0)
+	_ = d.CloseAnalyticsStream(c, t0.Add(2*time.Hour))
+	open, err := d.OpenAnalyticsStreams()
+	if err != nil || len(open) != 2 || open[0].ID != b || open[1].ID != a || open[0].Wait != 7*time.Minute {
+		t.Fatalf("open = %+v (%v), want b then a, b with its 7m wait", open, err)
+	}
+}
+
+// TestAnalyticsCloseNeverEndsBeforeItStarted (R8).
+func TestAnalyticsCloseNeverEndsBeforeItStarted(t *testing.T) {
+	d := testDB(t)
+	t0 := time.UnixMilli(1_800_000_000_000)
+	id, _ := d.OpenAnalyticsStream(t0, nil, 0)
+	if err := d.CloseAnalyticsStream(id, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := d.GetAnalyticsStream(id)
+	if row.Stream.EndedAt == nil || row.Stream.EndedAt.Before(t0) || row.Stream.DurationMs < 0 {
+		t.Fatalf("stream = %+v, want it ended at its start, not before", row.Stream)
+	}
+}
+
+func TestAnalyticsSamplesAreIndexedByTime(t *testing.T) {
+	d := testDB(t)
+	var n int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_analytics_samples_at'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("no index on analytics_samples(at) for the hourly prune (%d, %v)", n, err)
 	}
 }

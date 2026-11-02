@@ -3676,5 +3676,6 @@
   "aud.partial": "Partial: a platform did not answer this sample, so the total leaves it out and is not graphed.",
   "aud.stretched": "Sampling every {seconds} s to stay inside the YouTube quota share.",
   "aud.reasonUnlinked": "This destination uses a pasted stream key, so there is no connected account to ask.",
-  "aud.notConnected": "not connected"
+  "aud.notConnected": "not connected",
+  "aud.reasonStarting": "Not live on this platform yet; it usually goes live within a minute or two of the destination starting."
 }

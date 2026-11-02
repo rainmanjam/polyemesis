@@ -2052,7 +2052,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	// The shared allowance the sampler, the vertical read and the request
 	// meter draw on, and the sampler's own interval: both applied now, not at
 	// the next tick (PR #950 review, #2 and #15).
-	s.ytQuotaPool.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
+	s.ytQuotaShared.SetLimits(settings.Chat.YouTubeQuotaUnits, settings.Chat.YouTubeQuotaReserve)
 	if s.audience != nil {
 		s.audience.Wake()
 	}

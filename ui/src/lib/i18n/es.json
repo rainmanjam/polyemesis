@@ -3676,5 +3676,6 @@
   "aud.partial": "Parcial: una plataforma no respondió en esta muestra, así que el total la deja fuera y no se grafica.",
   "aud.stretched": "Muestreo cada {seconds} s para no pasar de la parte de la cuota de YouTube.",
   "aud.reasonUnlinked": "Este destino usa una clave de transmisión pegada, así que no hay una cuenta conectada a la que preguntar.",
-  "aud.notConnected": "no conectado"
+  "aud.notConnected": "no conectado",
+  "aud.reasonStarting": "Aún no está en directo en esta plataforma; suele estarlo uno o dos minutos después de que arranque el destino."
 }

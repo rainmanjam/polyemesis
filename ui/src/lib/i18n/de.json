@@ -3676,5 +3676,6 @@
   "aud.partial": "Unvollständig: Eine Plattform hat bei dieser Messung nicht geantwortet, daher fehlt sie in der Summe und wird nicht gezeichnet.",
   "aud.stretched": "Messung alle {seconds} s, um im YouTube-Kontingentanteil zu bleiben.",
   "aud.reasonUnlinked": "Dieses Ziel nutzt einen eingefügten Stream-Schlüssel, daher gibt es kein verbundenes Konto zum Abfragen.",
-  "aud.notConnected": "nicht verbunden"
+  "aud.notConnected": "nicht verbunden",
+  "aud.reasonStarting": "Auf dieser Plattform noch nicht live; meist geht es ein, zwei Minuten nach dem Start des Ziels live."
 }

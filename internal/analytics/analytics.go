@@ -43,6 +43,10 @@ const (
 	// ReasonUnlinked: a destination is running with a pasted stream key and
 	// no connected account, so there is nobody to ask. Shown, never read.
 	ReasonUnlinked = "unlinked"
+	// ReasonStarting: not live yet, inside the window after its destination
+	// came on air (OfflineWindow). The platform is going live; the tick is
+	// partial. After the window the same answer is ReasonOffline.
+	ReasonStarting = "starting"
 )
 
 // ErrQuota is what a Source's Read answers when the quota pacer refused the
@@ -60,11 +64,12 @@ func (e *RetryAfterError) Error() string {
 // transient reports whether a reason is a failure of this tick rather than a
 // steady fact. A tick with one is PARTIAL: its total is not the audience, it
 // is the audience minus whoever failed, and graphing it would draw a dip that
-// never happened. Offline counts: a platform that is not live while its
-// destination runs is going live or has failed, not an audience of none.
-// Hidden and unlinked do not: they are true for the whole stream.
+// never happened. A platform going live (starting) counts. Offline after the
+// window does not (round 2, R1): a channel that never transitions would
+// otherwise erase every total of the stream. Hidden and unlinked do not
+// either: they are true for the whole stream.
 func transient(reason string) bool {
-	return reason == ReasonOffline || reason == ReasonQuota || reason == ReasonError
+	return reason == ReasonStarting || reason == ReasonQuota || reason == ReasonError
 }
 
 // Reading is one account's answer at one tick.

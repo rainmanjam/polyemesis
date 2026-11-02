@@ -4074,7 +4074,7 @@ export interface RolloverView {
 
 /** Why a reading carries no count. A count that was not reported is NOT zero:
  *  the row says "not reported" and the total leaves it out. */
-export type AnalyticsReason = "offline" | "hidden" | "quota" | "error" | "unlinked";
+export type AnalyticsReason = "offline" | "starting" | "hidden" | "quota" | "error" | "unlinked";
 
 /** One connected account's answer at the last sample. `platform` is
  *  `"player"` for the public player, which is its own row and counted once. */

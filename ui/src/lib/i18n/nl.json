@@ -3676,5 +3676,6 @@
   "aud.partial": "Gedeeltelijk: een platform antwoordde niet bij deze meting, dus het totaal laat het weg en wordt niet getekend.",
   "aud.stretched": "Meet elke {seconds} s om binnen het YouTube-quotumdeel te blijven.",
   "aud.reasonUnlinked": "Deze bestemming gebruikt een geplakte streamsleutel, dus er is geen verbonden account om te vragen.",
-  "aud.notConnected": "niet verbonden"
+  "aud.notConnected": "niet verbonden",
+  "aud.reasonStarting": "Nog niet live op dit platform; dat is meestal een of twee minuten na de start van de bestemming."
 }

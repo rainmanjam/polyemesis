@@ -3676,5 +3676,6 @@
   "aud.partial": "不完整:本次采样有平台未响应,因此总数不含它,也不绘制。",
   "aud.stretched": "为不超出 YouTube 配额份额,每 {seconds} 秒采样一次。",
   "aud.reasonUnlinked": "此推流目标使用粘贴的推流密钥,没有可查询的已连接账号。",
-  "aud.notConnected": "未连接"
+  "aud.notConnected": "未连接",
+  "aud.reasonStarting": "此平台尚未开播;通常在推流目标启动后一两分钟内开播。"
 }

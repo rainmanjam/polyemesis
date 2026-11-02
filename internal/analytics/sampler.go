@@ -62,6 +62,32 @@ type Target struct {
 	// Unlinked is a running destination with a pasted stream key and no
 	// connected account: shown as a row, never read.
 	Unlinked bool
+	// ChatOnly is a connected account whose platform has no viewer count to
+	// read (Facebook, Rumble, X): its chat is the stream's, but it is never
+	// asked for viewers and has no row (round 2, R2).
+	ChatOnly bool
+}
+
+// ChatAccount names one chat the stream's tally counts.
+type ChatAccount struct {
+	Platform string
+	Account  string
+}
+
+// Tick is one tick as the store records it.
+type Tick struct {
+	At       time.Time
+	Readings []Reading
+	// ChatAccounts are the chats the stream is on this tick. TallyChat is
+	// false when the target list could not be read: the chat that arrived is
+	// left for the next tick rather than counted for nobody (R2).
+	ChatAccounts []ChatAccount
+	TallyChat    bool
+	Title        string
+	QoE          *PlayerQoE
+	// Wait is the interval the sampler chose after this tick, kept so a
+	// restart judges its close grace by it (R5).
+	Wait time.Duration
 }
 
 // Stats is one platform read, reduced to what the sampler keeps.
@@ -95,6 +121,8 @@ type Source interface {
 
 // OpenState is the stream a previous process left open.
 type OpenState struct {
+	// Wait is the last tick's chosen interval.
+	Wait   time.Duration
 	ID     int64
 	Start  time.Time
 	LastAt time.Time
@@ -107,12 +135,12 @@ type Store interface {
 	// lead is how far before `at` the stream's chat starts: the chat between
 	// going live and the first tick belongs to the stream.
 	OpenAnalyticsStream(at time.Time, qoe *PlayerQoE, lead time.Duration) (int64, error)
-	// OpenAnalyticsStreamState is the stream left open, if any.
-	OpenAnalyticsStreamState() (OpenState, bool, error)
+	// OpenAnalyticsStreams is every stream left open, newest first.
+	OpenAnalyticsStreams() ([]OpenState, error)
 	// RecordAnalyticsTick stores one tick's readings, the first broadcast
 	// title seen, the player's counters, and tallies the chat that arrived
 	// since the previous tick.
-	RecordAnalyticsTick(id int64, at time.Time, rs []Reading, title string, qoe *PlayerQoE) error
+	RecordAnalyticsTick(id int64, t Tick) error
 	// CloseAnalyticsStream ends the stream at `at`, with a last chat tally.
 	CloseAnalyticsStream(id int64, at time.Time) error
 	// AnalyticsRecentSamples is the samples of a stream's last `ticks` ticks,
@@ -200,6 +228,14 @@ type Sampler struct {
 	// when it may be asked again (#4: pacing and Retry-After per platform).
 	failures map[string]int
 	retryAt  map[string]time.Time
+	// platformRetryAt holds a whole platform app back after a 429: the
+	// bucket is the app's, shared by every account on it (R7).
+	platformRetryAt map[string]time.Time
+	// firstSeen is when each target came on air, for the offline window (R1).
+	firstSeen map[string]time.Time
+	// onAirWait is the wait the last on-air tick chose: the close grace is
+	// counted in it, stretched or not (R5).
+	onAirWait time.Duration
 	// wait is the interval the last tick chose; lastTick when it ran.
 	wait        time.Duration
 	lastTick    time.Time
@@ -234,6 +270,7 @@ func New(src Source, store Store, cfg func() Config, now func() time.Time, log *
 	}
 	s := &Sampler{src: src, store: store, cfg: cfg, now: now, log: log,
 		failures: map[string]int{}, retryAt: map[string]time.Time{},
+		platformRetryAt: map[string]time.Time{}, firstSeen: map[string]time.Time{},
 		wake: make(chan struct{}, 1), firstWait: defaultFirstWait}
 	// Seeded from the settings so the picture before the first tick says
 	// whether sampling is on, rather than reading as switched off for the
@@ -326,9 +363,17 @@ func (s *Sampler) config() Config {
 	return c
 }
 
+// grace is how long off air before the stream closes: two intervals of
+// whatever the sampler is actually waiting -- a stretched wait included (R5)
+// -- and never under CloseGrace.
 func (s *Sampler) grace(c Config) time.Duration {
-	return max(CloseGrace, 2*c.Interval)
+	return max(CloseGrace, 2*max(c.Interval, s.onAirWait))
 }
+
+// OfflineWindow is the least time after a platform's destination comes on
+// air during which "not live" is read as going live (partial), rather than
+// as a steady offline (R1). Two intervals, if longer.
+const OfflineWindow = 2 * time.Minute
 
 // Tick takes one sample. Exported so tests drive the clock.
 func (s *Sampler) Tick(ctx context.Context) {
@@ -347,6 +392,7 @@ func (s *Sampler) Tick(ctx context.Context) {
 	onAir := c.Enabled && s.src.OnAir()
 	if !onAir {
 		s.wait = c.Interval
+		s.firstSeen = map[string]time.Time{}
 		if s.open != 0 && (!c.Enabled || now.Sub(s.lastOnAir) >= s.grace(c)) {
 			s.closeOpen()
 		}
@@ -375,7 +421,9 @@ func (s *Sampler) Tick(ctx context.Context) {
 		qoe = &pq
 	}
 	if s.open == 0 {
-		id, err := s.store.OpenAnalyticsStream(now, qoe, c.Interval)
+		// The chat lead is the wait actually in force, so a stream rolled over
+		// while the interval is stretched keeps its chat (R9).
+		id, err := s.store.OpenAnalyticsStream(now, qoe, max(c.Interval, s.onAirWait))
 		if err != nil {
 			s.log.Warn("analytics: could not open a stream record", "err", err)
 			return
@@ -384,7 +432,7 @@ func (s *Sampler) Tick(ctx context.Context) {
 		s.publish(func(l *Live) { l.Points = []Point{} })
 	}
 
-	targets, readings, title := s.read(ctx, now)
+	targets, listed, readings, title := s.read(ctx, now, c)
 	if playerOK {
 		v := pv
 		readings = append(readings, Reading{Platform: PlatformPlayer, Live: true, Viewers: &v})
@@ -392,13 +440,23 @@ func (s *Sampler) Tick(ctx context.Context) {
 	s.lastTargets = targets
 	s.wait = s.src.Interval(c.Interval, targets)
 	effective := int(s.wait / time.Second)
-	if err := s.store.RecordAnalyticsTick(s.open, now, readings, title, qoe); err != nil {
+	chats := make([]ChatAccount, 0, len(targets))
+	for _, t := range targets {
+		if !t.Unlinked && t.Account != "" {
+			chats = append(chats, ChatAccount{Platform: t.Platform, Account: t.Account})
+		}
+	}
+	if err := s.store.RecordAnalyticsTick(s.open, Tick{
+		At: now, Readings: readings, ChatAccounts: chats, TallyChat: listed,
+		Title: title, QoE: qoe, Wait: s.wait,
+	}); err != nil {
 		// Memory follows the store (#13): nothing advances for a tick that was
 		// not written, so the grace and the sparkline agree with the report.
 		s.log.Warn("analytics: could not store a sample", "err", err)
 		return
 	}
 	s.lastOnAir = now
+	s.onAirWait = s.wait
 
 	total, reported := Total(readings)
 	partial := false
@@ -454,12 +512,27 @@ func targetKey(t Target) string { return t.Platform + "/" + t.Account }
 
 // read asks every target, in a stable order, and returns them, the readings
 // and the first broadcast title any of them reported.
-func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading, string) {
+//
+// listed is false when the target list could not be read at all.
+func (s *Sampler) read(ctx context.Context, now time.Time, c Config) ([]Target, bool, []Reading, string) {
 	targets, err := s.src.Targets(ctx)
 	if err != nil {
 		s.log.Warn("analytics: could not list accounts", "err", err)
-		return nil, []Reading{}, ""
+		return nil, false, []Reading{}, ""
 	}
+	// When each target came on air, for the offline window; a target that
+	// left forgets it.
+	seen := make(map[string]time.Time, len(targets))
+	for _, t := range targets {
+		k := targetKey(t)
+		if at, ok := s.firstSeen[k]; ok {
+			seen[k] = at
+		} else {
+			seen[k] = now
+		}
+	}
+	s.firstSeen = seen
+	window := max(OfflineWindow, 2*max(c.Interval, s.onAirWait))
 	sort.SliceStable(targets, func(i, j int) bool {
 		if targets[i].Platform != targets[j].Platform {
 			return targets[i].Platform < targets[j].Platform
@@ -472,6 +545,9 @@ func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading,
 	out := make([]Reading, 0, len(targets)+1)
 	title := ""
 	for _, t := range targets {
+		if t.ChatOnly {
+			continue
+		}
 		r := Reading{Platform: t.Platform, Account: t.Account, Name: t.Name}
 		key := targetKey(t)
 		switch {
@@ -479,7 +555,7 @@ func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading,
 			r.Reason = ReasonUnlinked
 			out = append(out, r)
 			continue
-		case now.Before(s.retryAt[key]):
+		case now.Before(s.retryAt[key]) || now.Before(s.platformRetryAt[t.Platform]):
 			// Backing off: the platform asked us to wait, or keeps failing.
 			r.Reason = ReasonError
 			out = append(out, r)
@@ -502,6 +578,10 @@ func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading,
 			errors.As(err, &retry)
 			if d := backoffFor(s.failures[key], retry); d > 0 {
 				s.retryAt[key] = now.Add(d)
+				if retry != nil {
+					// A 429 is the app's bucket: every account on it waits (R7).
+					s.platformRetryAt[t.Platform] = now.Add(d)
+				}
 			}
 			if !errors.Is(err, context.Canceled) {
 				s.log.Info("analytics: platform read failed", "platform", t.Platform, "err", err)
@@ -510,7 +590,12 @@ func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading,
 			// Not live is not a count of zero viewers on a live stream. A
 			// platform that is not carrying this broadcast has nobody to
 			// report, so it is left out of the total like any other silence.
+			// Just after its destination came on air it is going live, and the
+			// tick is partial; after the window it is a steady offline (R1).
 			r.Reason = ReasonOffline
+			if now.Sub(seen[key]) < window {
+				r.Reason = ReasonStarting
+			}
 		case st.Viewers == nil:
 			r.Live, r.Reason = true, ReasonHidden
 		default:
@@ -526,32 +611,44 @@ func (s *Sampler) read(ctx context.Context, now time.Time) ([]Target, []Reading,
 		}
 		out = append(out, r)
 	}
-	return targets, out, title
+	return targets, true, out, title
 }
 
-// resume picks up a stream a previous process left open: continued when it
-// was on air within the grace, closed at its last tick otherwise.
+// resume picks up the stream a previous process left open: the newest one
+// is continued when it was on air within the grace, closed at its last tick
+// otherwise, and EVERY other open row is closed (R6). A close that fails is
+// retried on the next tick: loaded stays false until they all succeed.
 func (s *Sampler) resume(now time.Time, c Config) {
-	s.loaded = true
-	st, ok, err := s.store.OpenAnalyticsStreamState()
+	open, err := s.store.OpenAnalyticsStreams()
 	if err != nil {
-		s.log.Warn("analytics: could not read the open stream", "err", err)
+		s.log.Warn("analytics: could not read the open streams", "err", err)
 		return
 	}
-	if !ok {
-		return
-	}
-	last := st.LastAt
-	if last.IsZero() {
-		last = st.Start
-	}
-	if now.Sub(last) >= s.grace(c) || !c.Enabled {
-		if err := s.store.CloseAnalyticsStream(st.ID, last); err != nil {
-			s.log.Warn("analytics: could not close a stale stream", "err", err)
+	ok := true
+	for i, st := range open {
+		if st.ID == s.open {
+			continue
 		}
-		return
+		last := st.LastAt
+		if last.IsZero() || last.Before(st.Start) {
+			last = st.Start
+		}
+		grace := max(CloseGrace, 2*max(c.Interval, st.Wait))
+		if i == 0 && s.open == 0 && c.Enabled && now.Sub(last) < grace {
+			s.adopt(st, last)
+			continue
+		}
+		if err := s.store.CloseAnalyticsStream(st.ID, last); err != nil {
+			s.log.Warn("analytics: could not close a stale stream; will retry", "err", err)
+			ok = false
+		}
 	}
-	s.open, s.openStart, s.lastOnAir = st.ID, st.Start, last
+	s.loaded = ok
+}
+
+// adopt continues a stream a previous process left open.
+func (s *Sampler) adopt(st OpenState, last time.Time) {
+	s.open, s.openStart, s.lastOnAir, s.onAirWait = st.ID, st.Start, last, st.Wait
 	// The QoE baseline did not survive the restart, and the counters it would
 	// be subtracted from were reset with the process; the stream's player QoE
 	// is reported from here on only if a baseline exists.
@@ -571,8 +668,15 @@ func (s *Sampler) resume(now time.Time, c Config) {
 // closeOpen ends the open stream at its last on-air tick. A close that
 // fails leaves it open here as well as in the store, so the next tick tries
 // again rather than orphaning a row that retention can never reach (#10).
+//
+// A stream whose every write failed has no on-air tick: it ends at its own
+// start, never before it (R8).
 func (s *Sampler) closeOpen() bool {
-	if err := s.store.CloseAnalyticsStream(s.open, s.lastOnAir); err != nil {
+	at := s.lastOnAir
+	if at.Before(s.openStart) {
+		at = s.openStart
+	}
+	if err := s.store.CloseAnalyticsStream(s.open, at); err != nil {
 		s.log.Warn("analytics: could not close the stream record; will retry", "err", err)
 		return false
 	}

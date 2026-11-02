@@ -94,6 +94,15 @@ describe("AudiencePanel", () => {
     expect(screen.queryByText(translate("en", "aud.totalWithPlayer"))).toBeNull();
   });
 
+  it("explains a platform that is still going live (R1)", async () => {
+    vi.spyOn(api.analytics, "live").mockResolvedValue(
+      live({ readings: [{ platform: "youtube", name: "Main", live: false, reason: "starting" }], total: undefined, reported: 0 }),
+    );
+    render(<AudiencePanel />);
+    const row = await screen.findByTestId("audience-row-youtube");
+    expect(within(row).getByText(NOT_REPORTED).getAttribute("title")).toBe(translate("en", "aud.reasonStarting"));
+  });
+
   it("survives a refused read", async () => {
     vi.spyOn(api.analytics, "live").mockRejectedValue(new Error("403"));
     render(<AudiencePanel />);

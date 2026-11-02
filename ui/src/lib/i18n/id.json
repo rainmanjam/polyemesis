@@ -3676,5 +3676,6 @@
   "aud.partial": "Sebagian: satu platform tidak menjawab pada sampel ini, jadi total tidak menyertakannya dan tidak digambar.",
   "aud.stretched": "Dicatat setiap {seconds} detik agar tetap dalam jatah kuota YouTube.",
   "aud.reasonUnlinked": "Tujuan ini memakai kunci stream yang ditempel, jadi tidak ada akun terhubung yang bisa ditanya.",
-  "aud.notConnected": "tidak terhubung"
+  "aud.notConnected": "tidak terhubung",
+  "aud.reasonStarting": "Belum siaran langsung di platform ini; biasanya mulai satu atau dua menit setelah tujuan berjalan."
 }

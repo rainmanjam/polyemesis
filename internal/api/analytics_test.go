@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,7 +129,7 @@ func newAnalyticsFixture(t *testing.T) *analyticsFixture {
 	t.Helper()
 	fake := newFakeLiveStats(t)
 	s, h, store := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(fake.srv.URL))})
-	f := &analyticsFixture{s: s, h: h, store: store, fake: fake, now: time.Unix(1_800_000_000, 0),
+	f := &analyticsFixture{s: s, h: h, store: store, fake: fake, now: time.Unix(1_800_043_200, 0), // midday Pacific: no test races the quota reset (R13)
 		running: map[int64]bool{}, dest: map[string]int64{}}
 	s.analyticsNow = func() time.Time { return f.now }
 	s.analyticsRunning = func() map[int64]bool { return f.running }
@@ -517,7 +518,7 @@ func TestAnalyticsShareStretchesTheInterval(t *testing.T) {
 	f.account(t, db.PlatformYouTube, "tube", "tok-y")
 	f.running[f.dest["tube"]] = true
 	// A 1,000-unit project: a 150-unit share, nearly all of it spent.
-	f.s.ytQuotaPool.SetLimits(1000, 0)
+	f.s.ytQuotaShared.SetLimits(1000, 0)
 	q := f.s.ytQuota()
 	for q.ShareLeft(analyticsQuotaTag, analyticsQuotaShare) > 3 {
 		if !q.ChargeShare(analyticsQuotaTag, analyticsQuotaShare, 1) {
@@ -621,11 +622,11 @@ func TestTheVerticalReadAlwaysChargesTheSharedAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := s.ytQuota()
-	if !s.verticalChargeOK("ref") || q.Status().Used != 1 {
+	if !s.verticalChargeOK() || q.Status().Used != 1 {
 		t.Fatalf("used = %d, want the read charged with no chat attached", q.Status().Used)
 	}
 	q.Pause()
-	if s.verticalChargeOK("ref") {
+	if s.verticalChargeOK() {
 		t.Fatal("the vertical read went ahead on a spent allowance")
 	}
 }
@@ -649,5 +650,138 @@ func TestAPartialTickHasNoTotalOnTheScrapeOrMQTT(t *testing.T) {
 	}
 	if st := f.s.AudienceState(); st.Total != nil || st.Twitch == nil {
 		t.Fatalf("MQTT = %+v, want no total and Twitch's 7", st)
+	}
+}
+
+// TestTitlePushAndGoLiveChargeTheServersAllowance (R13): through the same
+// helper main uses, a title push and a go-live transition made by the oauth
+// providers are charged to this server's one YouTube allowance.
+func TestTitlePushAndGoLiveChargeTheServersAllowance(t *testing.T) {
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/liveBroadcasts" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"items":[{"id":"bc1","snippet":{"title":"Old","channelId":"ch"},"status":{"lifeCycleStatus":"testing"}}]}`))
+		default:
+			_, _ = w.Write([]byte(`{"id":"bc1","status":{"lifeCycleStatus":"live"},"snippet":{"title":"New"}}`))
+		}
+	}))
+	t.Cleanup(stub.Close)
+	s, _, store := testServer(t, config.Config{})
+	if err := store.PutPlatformCreds(s.box, db.PlatformYouTube, "cid", "client-pass"); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(stub.URL)
+	InstallYouTubeMeter(s, u.Host)
+	t.Cleanup(func() { oauth.SetYouTubeMeter(nil) })
+
+	y := oauth.NewYouTube(oauth.WithBaseURL(stub.URL))
+	q := s.ytQuota()
+	before := q.Status().Used
+	_, _ = y.PushMetadata(context.Background(), "cid", "tok", "ch", oauth.Metadata{Title: "New"})
+	pushed := q.Status().Used - before
+	if pushed < 50 {
+		t.Fatalf("a title push charged %d units, want at least the 50 of its write", pushed)
+	}
+	before = q.Status().Used
+	_, _ = y.TransitionBroadcast(context.Background(), "tok", "bc1", oauth.PhaseLive)
+	if went := q.Status().Used - before; went < 50 {
+		t.Fatalf("a go-live transition charged %d units, want at least 50", went)
+	}
+}
+
+// TestYouTubeReadsWaitForTheClientToBeKnown (R3): with no YouTube
+// credentials there is no client to charge, so the sampler does not read
+// YouTube on an unbound budget.
+func TestYouTubeReadsWaitForTheClientToBeKnown(t *testing.T) {
+	fake := newFakeLiveStats(t)
+	s, _, _ := testServerWith(t, Options{Providers: oauth.NewSet(oauth.WithBaseURL(fake.srv.URL))})
+	if (analyticsSource{s}).Allow(analytics.Target{Platform: "youtube", AccountID: 1, Account: "tube-ref"}) {
+		t.Fatal("a YouTube read was allowed with no client to charge it to")
+	}
+	if !(analyticsSource{s}).Allow(analytics.Target{Platform: "twitch", AccountID: 2}) {
+		t.Fatal("Twitch was held back by YouTube's missing credentials")
+	}
+}
+
+// TestSavingYouTubeCredentialsBindsTheAllowance (R3, R12): the save path
+// binds the configured client, and a different client starts a new tally.
+func TestSavingYouTubeCredentialsBindsTheAllowance(t *testing.T) {
+	s, h, _ := testServer(t, config.Config{})
+	sign := login(t, h)
+	put := func(id string) {
+		r := jsonRequest(t, http.MethodPut, "/api/v1/platforms/credentials/youtube",
+			map[string]string{"clientId": id, "clientSecret": "client-pass"})
+		sign(r)
+		if w := do(t, h, r); w.Code != http.StatusOK {
+			t.Fatalf("save creds: %d %s", w.Code, w.Body.String())
+		}
+	}
+	put("project-one")
+	q := s.ytQuotaShared
+	if q.ClientID() != "project-one" {
+		t.Fatalf("bound to %q after the save", q.ClientID())
+	}
+	q.Spend(300)
+	put("project-two")
+	if q.ClientID() != "project-two" || q.Status().Used != 0 {
+		t.Fatalf("after a new client: %q used %d, want a fresh tally", q.ClientID(), q.Status().Used)
+	}
+}
+
+// ---------------------------------------------------------- review round 2
+
+// TestAnalyticsCountsChatOnAPlatformWithNoViewerCount (R2): a running
+// destination's connected Facebook account has no viewer count to read, but
+// its chat is the stream's.
+func TestAnalyticsCountsChatOnAPlatformWithNoViewerCount(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	n := 3
+	f.fake.twitch["tok-a"] = &n
+	f.account(t, db.PlatformTwitch, "shown", "tok-a")
+	f.account(t, db.PlatformFacebook, "page", "tok-f")
+	f.running[f.dest["shown"]], f.running[f.dest["page"]] = true, true
+	f.tick(t)
+	if _, err := f.store.AppendChatMessages([]db.ChatMessage{
+		{Platform: db.PlatformFacebook, Account: "page-ref", MessageID: "fb1", AuthorID: "fan", AuthorName: "fan", Text: "hi", At: f.now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = f.now.Add(time.Minute)
+	f.tick(t)
+	var live analytics.Live
+	f.get(t, "/api/v1/analytics/live", &live)
+	if len(live.Readings) != 1 || live.Readings[0].Platform != "twitch" {
+		t.Fatalf("readings = %+v, want Twitch only: Facebook has no viewer count", live.Readings)
+	}
+	var rep analytics.Report
+	f.get(t, "/api/v1/analytics/streams/"+strconv.FormatInt(live.Stream.ID, 10), &rep)
+	if len(rep.Chat) != 1 || rep.Chat[0].Platform != "facebook" || rep.Chat[0].Messages != 1 {
+		t.Fatalf("chat = %+v, want Facebook's message counted", rep.Chat)
+	}
+}
+
+// TestAnEndedStreamsReportShowsItsStoredTotals (R10): the list and the
+// report agree, even when the samples changed after the close.
+func TestAnEndedStreamsReportShowsItsStoredTotals(t *testing.T) {
+	f := newAnalyticsFixture(t)
+	n := 10
+	f.fake.twitch["tok-a"] = &n
+	f.account(t, db.PlatformTwitch, "shown", "tok-a")
+	f.running[f.dest["shown"]] = true
+	f.tick(t)
+	f.running = map[int64]bool{}
+	f.now = f.now.Add(analytics.CloseGrace)
+	f.tick(t)
+	rows, _ := f.store.ListAnalyticsStreams(1)
+	id := rows[0].Stream.ID
+	big := 999
+	// A sample landing after the close (or the samples thinned by retention):
+	// the stored totals are the stream's.
+	_ = f.store.RecordAnalyticsTick(id, analytics.Tick{At: f.now, Readings: []analytics.Reading{{Platform: "twitch", Account: "x", Viewers: &big}}})
+	var rep analytics.Report
+	f.get(t, "/api/v1/analytics/streams/"+strconv.FormatInt(id, 10), &rep)
+	if rep.Stream.PeakTotal == nil || *rep.Stream.PeakTotal != 10 || rep.Summary.PeakTotal == nil || *rep.Summary.PeakTotal != 10 {
+		t.Fatalf("report peak = %v / %v, want the stored 10", rep.Stream.PeakTotal, rep.Summary.PeakTotal)
 	}
 }

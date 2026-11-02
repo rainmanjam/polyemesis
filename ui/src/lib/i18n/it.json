@@ -3676,5 +3676,6 @@
   "aud.partial": "Parziale: una piattaforma non ha risposto a questo campione, quindi il totale la esclude e non viene tracciato.",
   "aud.stretched": "Campionamento ogni {seconds} s per restare nella quota YouTube riservata.",
   "aud.reasonUnlinked": "Questa destinazione usa una chiave di streaming incollata, quindi non c'è un account collegato da interrogare.",
-  "aud.notConnected": "non collegato"
+  "aud.notConnected": "non collegato",
+  "aud.reasonStarting": "Non ancora in diretta su questa piattaforma; di solito lo è uno o due minuti dopo l'avvio della destinazione."
 }

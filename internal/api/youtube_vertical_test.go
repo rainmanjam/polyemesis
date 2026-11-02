@@ -567,7 +567,7 @@ func TestVerticalStatusReadIsRefusedByTheRealYouTubeAdapterWhenItsBudgetIsSpent(
 	// The adapter draws on the Google client's shared allowance (PR #950
 	// review), here a one-unit one, which is the budget the status read is
 	// charged to as well.
-	s.ytQuotaPool.SetLimits(1, 0)
+	s.ytQuotaShared.SetLimits(1, 0)
 	yt, err := chat.NewYouTube(chat.YouTubeConfig{
 		AccountRef: acct.AccountRef, Channel: acct.AccountName, Token: noChatToken,
 		APIBase: fake.srv.URL, Quota: s.ytQuota(),

@@ -200,6 +200,8 @@ type fakeSource struct {
 	qoe     PlayerQoE
 	// interval, when set, is the source's pacing of the configured interval.
 	interval func(time.Duration) time.Duration
+	// targetsErr makes Targets fail.
+	targetsErr error
 }
 
 func (f *fakeSource) Interval(configured time.Duration, _ []Target) time.Duration {
@@ -215,6 +217,9 @@ func (f *fakeSource) OnAir() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.o
 func (f *fakeSource) Targets(context.Context) ([]Target, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.targetsErr != nil {
+		return nil, f.targetsErr
+	}
 	return append([]Target(nil), f.targets...), nil
 }
 func (f *fakeSource) Allow(t Target) bool {
@@ -247,6 +252,9 @@ type memStream struct {
 	open             bool
 	title            string
 	qoeStart, qoeEnd *PlayerQoE
+	wait             time.Duration
+	chat             [][]ChatAccount
+	tallied          []bool
 }
 
 type memStore struct {
@@ -269,27 +277,30 @@ func (m *memStore) OpenAnalyticsStream(at time.Time, q *PlayerQoE, lead time.Dur
 	m.streams = append(m.streams, st)
 	return st.id, nil
 }
-func (m *memStore) OpenAnalyticsStreamState() (OpenState, bool, error) {
-	for _, s := range m.streams {
-		if s.open {
-			return OpenState{ID: s.id, Start: s.start, LastAt: s.last}, true, nil
+func (m *memStore) OpenAnalyticsStreams() ([]OpenState, error) {
+	out := []OpenState{}
+	for i := len(m.streams) - 1; i >= 0; i-- {
+		if s := m.streams[i]; s.open {
+			out = append(out, OpenState{ID: s.id, Start: s.start, LastAt: s.last, Wait: s.wait})
 		}
 	}
-	return OpenState{}, false, nil
+	return out, nil
 }
-func (m *memStore) RecordAnalyticsTick(id int64, at time.Time, rs []Reading, title string, q *PlayerQoE) error {
+func (m *memStore) RecordAnalyticsTick(id int64, tk Tick) error {
 	if m.failRecord > 0 {
 		m.failRecord--
 		return errors.New("disk full")
 	}
 	st := m.streams[id-1]
-	st.last = at
+	st.last, st.wait = tk.At, tk.Wait
 	if st.title == "" {
-		st.title = title
+		st.title = tk.Title
 	}
-	st.qoeEnd = q
-	for _, r := range rs {
-		m.samples[id] = append(m.samples[id], Sample{At: at, Platform: r.Platform, Account: r.Account, Viewers: r.Viewers, Reason: r.Reason})
+	st.qoeEnd = tk.QoE
+	st.chat = append(st.chat, tk.ChatAccounts)
+	st.tallied = append(st.tallied, tk.TallyChat)
+	for _, r := range tk.Readings {
+		m.samples[id] = append(m.samples[id], Sample{At: tk.At, Platform: r.Platform, Account: r.Account, Viewers: r.Viewers, Reason: r.Reason})
 	}
 	return nil
 }
@@ -410,7 +421,8 @@ func TestSamplerReadingsMapEveryKindOfSilenceToNotReported(t *testing.T) {
 	s := New(src, store, enabled(time.Minute), c.now, nil)
 	s.Tick(context.Background())
 
-	want := map[string]string{"hidden": ReasonHidden, "offline": ReasonOffline, "broken": ReasonError, "ok": ""}
+	// The offline channel just came on air: going live, not yet a steady offline (R1).
+	want := map[string]string{"hidden": ReasonHidden, "offline": ReasonStarting, "broken": ReasonError, "ok": ""}
 	l := s.Live()
 	for _, r := range l.Readings {
 		if r.Reason != want[r.Account] {
@@ -474,7 +486,7 @@ func TestSamplerResumesAFreshStreamAndClosesAStaleOne(t *testing.T) {
 	store := newMem()
 	t0 := time.Unix(1_800_000_000, 0)
 	id, _ := store.OpenAnalyticsStream(t0, &PlayerQoE{Sessions: 3}, 0)
-	_ = store.RecordAnalyticsTick(id, t0, []Reading{{Platform: "kick", Viewers: ip(4)}}, "", nil)
+	_ = store.RecordAnalyticsTick(id, Tick{At: t0, Readings: []Reading{{Platform: "kick", Viewers: ip(4)}}})
 
 	src := newFake()
 	src.onAir = true
@@ -494,7 +506,7 @@ func TestSamplerResumesAFreshStreamAndClosesAStaleOne(t *testing.T) {
 	// A process that comes back long after: the old stream ends at its last tick.
 	store2 := newMem()
 	id2, _ := store2.OpenAnalyticsStream(t0, nil, 0)
-	_ = store2.RecordAnalyticsTick(id2, t0.Add(time.Minute), nil, "", nil)
+	_ = store2.RecordAnalyticsTick(id2, Tick{At: t0.Add(time.Minute)})
 	c2 := &clock{t: t0.Add(time.Hour)}
 	s2 := New(src, store2, enabled(time.Minute), c2.now, nil)
 	s2.Tick(context.Background())
@@ -713,7 +725,7 @@ func TestResumeLoadsOnlyTheRecentTicks(t *testing.T) {
 	t0 := time.Unix(1_800_000_000, 0)
 	id, _ := store.OpenAnalyticsStream(t0, nil, 0)
 	for i := 0; i < 300; i++ {
-		_ = store.RecordAnalyticsTick(id, t0.Add(time.Duration(i)*time.Minute), []Reading{{Platform: "kick", Viewers: ip(i)}}, "", nil)
+		_ = store.RecordAnalyticsTick(id, Tick{At: t0.Add(time.Duration(i) * time.Minute), Readings: []Reading{{Platform: "kick", Viewers: ip(i)}}})
 	}
 	src := newFake()
 	src.onAir = true
@@ -882,5 +894,172 @@ func TestCSVNeutralisesAFormulaBehindWhitespace(t *testing.T) {
 		if got := neutralise(in); got != in {
 			t.Errorf("neutralise(%q) = %q, want it unchanged", in, got)
 		}
+	}
+}
+
+// ---------------------------------------------------------- review round 2
+
+// TestAPlatformThatNeverGoesLiveStopsMakingTicksPartial (R1): offline is
+// partial only while the platform is plausibly going live -- two intervals,
+// at least two minutes, after its destination came on air. After that it is
+// a steady "offline": left out of the total, but the tick is complete, so a
+// broadcast to a channel that never transitions does not erase every total.
+func TestAPlatformThatNeverGoesLiveStopsMakingTicksPartial(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{{Platform: "youtube", AccountID: 1, Account: "yt"}, {Platform: "twitch", AccountID: 2, Account: "tw"}}
+	src.stats["yt"] = Stats{Live: false}
+	src.stats["tw"] = Stats{Live: true, Viewers: ip(9)}
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, newMem(), enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	if l := s.Live(); !l.Partial || l.Readings[1].Reason != ReasonStarting {
+		t.Fatalf("first tick = %+v, want partial while YouTube is going live", l.Readings)
+	}
+	c.step(2 * time.Minute)
+	s.Tick(context.Background())
+	l := s.Live()
+	if l.Partial || l.Readings[1].Reason != ReasonOffline || l.Total == nil || *l.Total != 9 {
+		t.Fatalf("after the window: partial=%v readings=%+v total=%v, want a complete tick of 9", l.Partial, l.Readings, l.Total)
+	}
+	if transient(ReasonOffline) || !transient(ReasonStarting) || !transient(ReasonQuota) || !transient(ReasonError) {
+		t.Fatal("only starting, quota and error are partial")
+	}
+}
+
+// TestChatAccountsComeFromTheRunningDestinations (R2): a platform the
+// sampler cannot read viewers from still has chat, and a failed target list
+// tallies nothing rather than moving the cursor past chat it did not count.
+func TestChatAccountsComeFromTheRunningDestinations(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{
+		{Platform: "facebook", AccountID: 3, Account: "fb", ChatOnly: true},
+		{Platform: "twitch", AccountID: 2, Account: "tw"},
+	}
+	src.stats["tw"] = Stats{Live: true, Viewers: ip(1)}
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	got := store.streams[0].chat[0]
+	if len(got) != 2 || got[0] != (ChatAccount{Platform: "facebook", Account: "fb"}) || !store.streams[0].tallied[0] {
+		t.Fatalf("chat accounts = %+v tallied %v, want Facebook's chat as well as Twitch's", got, store.streams[0].tallied)
+	}
+	if len(s.Live().Readings) != 1 || src.reads["fb"] != 0 {
+		t.Fatal("a chat-only account was read for viewers")
+	}
+	src.targetsErr = errors.New("database is locked")
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if store.streams[0].tallied[1] {
+		t.Fatal("a tick whose targets failed tallied chat for accounts it could not name")
+	}
+}
+
+// TestTheCloseGraceFollowsAStretchedInterval (R5): a stretched wait is not
+// "off air" between two of its own ticks, and a restart inside it resumes.
+func TestTheCloseGraceFollowsAStretchedInterval(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.interval = func(time.Duration) time.Duration { return 10 * time.Minute }
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	src.onAir = false
+	c.step(10 * time.Minute)
+	s.Tick(context.Background())
+	if !store.streams[0].open {
+		t.Fatal("one stretched interval off air closed the stream")
+	}
+	// A restart 15 minutes after the last tick, still inside 2 x 10 minutes.
+	s2 := New(src, store, enabled(time.Minute), c.now, nil)
+	src.onAir = true
+	c.step(5 * time.Minute)
+	s2.Tick(context.Background())
+	if len(store.streams) != 1 || !store.streams[0].open {
+		t.Fatalf("a restart inside the stretched grace opened a new stream (%d)", len(store.streams))
+	}
+}
+
+// TestResumeClosesEveryOrphanAndRetriesAFailedClose (R6).
+func TestResumeClosesEveryOrphanAndRetriesAFailedClose(t *testing.T) {
+	store := newMem()
+	t0 := time.Unix(1_800_000_000, 0)
+	old1, _ := store.OpenAnalyticsStream(t0, nil, 0)
+	old2, _ := store.OpenAnalyticsStream(t0.Add(time.Hour), nil, 0)
+	cur, _ := store.OpenAnalyticsStream(t0.Add(2*time.Hour), nil, 0)
+	_ = store.RecordAnalyticsTick(cur, Tick{At: t0.Add(2 * time.Hour)})
+	src := newFake()
+	src.onAir = true
+	c := &clock{t: t0.Add(2*time.Hour + time.Minute)}
+	store.failClose = 1
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	for _, id := range []int64{old1, old2} {
+		if store.streams[id-1].open {
+			t.Fatalf("orphan %d is still open after a retry", id)
+		}
+	}
+	if !store.streams[cur-1].open || len(store.streams) != 3 {
+		t.Fatalf("the current stream was not resumed (%d streams)", len(store.streams))
+	}
+}
+
+// TestABackOffHoldsTheWholePlatformApp (R7): a 429 is the app's shared
+// bucket, so a second account on the same platform waits too.
+func TestABackOffHoldsTheWholePlatformApp(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.targets = []Target{{Platform: "twitch", AccountID: 1, Account: "a"}, {Platform: "twitch", AccountID: 2, Account: "b"}}
+	src.errs["a"] = &RetryAfterError{After: 3 * time.Minute}
+	src.stats["b"] = Stats{Live: true, Viewers: ip(2)}
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, newMem(), enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	if src.reads["b"] != 0 {
+		t.Fatal("asked the same app again in the tick it answered 429")
+	}
+	c.step(time.Minute)
+	s.Tick(context.Background())
+	if src.reads["b"] != 0 {
+		t.Fatal("asked the same app inside its Retry-After")
+	}
+}
+
+// TestACloseNeverEndsBeforeTheStreamStarted (R8).
+func TestACloseNeverEndsBeforeTheStreamStarted(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	store := newMem()
+	store.failRecord = 1
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	start := c.t
+	s.Tick(context.Background())
+	src.onAir = false
+	c.step(CloseGrace)
+	s.Tick(context.Background())
+	if st := store.streams[0]; st.open || st.end.Before(start) {
+		t.Fatalf("closed at %v before its start %v", st.end, start)
+	}
+}
+
+// TestTheChatLeadFollowsAStretchedInterval (R9).
+func TestTheChatLeadFollowsAStretchedInterval(t *testing.T) {
+	src := newFake()
+	src.onAir = true
+	src.interval = func(time.Duration) time.Duration { return 10 * time.Minute }
+	store := newMem()
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, store, enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background())
+	c.step(RolloverAfter)
+	s.Tick(context.Background())
+	if len(store.leads) != 2 || store.leads[1] != 10*time.Minute {
+		t.Fatalf("leads = %v, want the rolled-over stream's lead to be the stretched wait", store.leads)
 	}
 }

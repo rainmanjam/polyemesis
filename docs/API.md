@@ -1726,8 +1726,11 @@ horizontal's account, once per broadcast; a running destination with a pasted
 key and no connected account is a reading with `reason: "unlinked"`.
 
 **YouTube quota.** Every YouTube spender — chat, the vertical read, title push,
-compliance, the broadcast lifecycle and this sampler — draws on one daily
-allowance per Google client, the one `chat.youtubeQuotaUnits` describes. The
+thumbnails, compliance, the broadcast lifecycle and this sampler — draws on one
+daily allowance, bound to the configured Google client and sized by
+`chat.youtubeQuotaUnits`. Saving a different client starts a new tally (it is a
+different project); until YouTube credentials are stored the sampler does not
+read YouTube. The
 sampler finds each account's live video once (`liveBroadcasts.list`, 1 unit) and
 then spends **1 unit a tick** on `videos.list` against the remembered id. It is
 held to **15%** of the allowance: one account at 60 s is 1,440 units per 24 h on
@@ -1736,7 +1739,8 @@ afford the configured interval until the reset, the wait is stretched and
 `effectiveIntervalSeconds` / `stretched` say so. A refused or spent quota is a
 reading with `reason: "quota"`, never a stale number, and YouTube's own
 `quotaExceeded` pauses every spender until the reset. A platform's 429 is
-honoured: that account is not asked again until its `Retry-After` passes.
+honoured: no account on that platform is asked again until its `Retry-After`
+passes (the rate bucket is the app's).
 Finished streams are kept for `analytics.retentionDays` (default 90); a stream
 on air for 24 hours is closed and a new one opened, so retention reaches a
 broadcast that never stops.
@@ -1744,9 +1748,11 @@ broadcast that never stops.
 **A count the platform did not report is absent, never `0`.** A reading carries
 `viewers` only when the platform sent one; otherwise `reason` says why —
 `offline`, `hidden` (live, no count: a hidden YouTube count, a Kick streamer who
-opted out, Twitch sending none), `quota`, `error` or `unlinked`. `total` sums the
+opted out, Twitch sending none), `starting` (not live yet, within two intervals
+— at least two minutes — of its destination coming on air), `quota`, `error`
+or `unlinked`. `total` sums the
 readings that carried a count and is absent when none did; `reported` says how
-many did. A tick at which a platform failed (`offline`, `quota` or `error`) is
+many did. A tick at which a platform failed (`starting`, `quota` or `error`) is
 `partial`: its total is the rest of the audience, so it is left out of the
 sparkline, the stream's peak and average, the scrape's
 `polyemesis_audience_viewers` and the MQTT total.
@@ -1765,7 +1771,11 @@ the total "including the public player").
 `reported`, `peak` and `average` (over the samples that reported only), the
 stream's `peakTotal` (the highest single-tick total, not a sum of per-platform
 peaks), chat messages per platform, the ten `topChatters`, the player's QoE over
-the stream, and the `recordings` and `clips` made during it. `?format=csv`
+the stream, and the `recordings` and `clips` made during it. Chat is counted from
+every running destination's connected account, including platforms with no
+viewer count (Facebook, Rumble, X), from one interval before the stream starts to
+its last on-air tick; an ended stream's peak and average are the ones stored at
+its close. `?format=csv`
 returns the same report as CSV, where a count nobody sent reads `not reported`
 and a cell a spreadsheet would run as a formula is prefixed with `'`.
 

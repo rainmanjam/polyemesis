@@ -300,24 +300,14 @@ func (s *Server) verticalHalfIsLive(ids ...int64) bool {
 	return false
 }
 
-// verticalChargeOK spends one unit of the YouTube allowance for a read made on the operator's
-// behalf, through the same budget the chat poll uses. It answers true when no chat connection
-// paces against an allowance, because then there is no budget to protect.
-func (s *Server) verticalChargeOK(accountRef string) bool {
+// verticalChargeOK spends one unit of the install's YouTube allowance for a read made on the
+// operator's behalf -- the same allowance the chat poll paces against -- and reports whether it
+// fitted above the send reserve. Always charged, chat or no chat (PR #950 review, #1).
+func (s *Server) verticalChargeOK() bool {
 	if s.verticalChargeQuota != nil {
 		return s.verticalChargeQuota(chat.QuotaCostListLiveStreams)
 	}
-	// ALWAYS CHARGED, to the Google client's one shared allowance (PR #950
-	// review, #1): with no chat adapter attached this used to answer true and
-	// spend nothing, so a read made with chat off was counted against nothing.
-	_ = accountRef
 	return s.ytQuota().Charge(chat.QuotaCostListLiveStreams)
-}
-
-// quotaChargeable is what the vertical read needs from a chat adapter that paces against a
-// YouTube allowance. chat.YouTubeAdapter satisfies it; an adapter that does not pace does not.
-type quotaChargeable interface {
-	ChargeQuota(cost int) bool
 }
 
 // handleYouTubeVerticalStatus reads the vertical half's health by stream id. It is paced and
@@ -380,7 +370,7 @@ func (s *Server) handleYouTubeVerticalStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, view)
 		return
 	}
-	if !s.verticalChargeOK(acct.AccountRef) {
+	if !s.verticalChargeOK() {
 		// Refused before the call, so nothing reached YouTube. Not remembered: the next request
 		// after the budget frees up should read. The sub-row says why in words, not a bare error.
 		view.HealthError = "the YouTube quota is nearly spent; the vertical status is paused until it resets"

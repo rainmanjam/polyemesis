@@ -396,22 +396,25 @@ type Server struct {
 	// The zero value is ready; see youtube_vertical.go.
 	verticalHealth verticalHealthPacer
 	// verticalHalfLive, verticalNow and verticalChargeQuota are seams for tests. Nil in production:
-	// the engine answers liveness, the wall clock answers time, and the chat budget is charged.
+	// the engine answers liveness, the wall clock answers time, and the shared YouTube allowance is
+	// charged.
 	verticalHalfLive    func(ids ...int64) bool
 	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
-	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning,
-	// analyticsChargeQuota and analyticsNow are its test seams; nil in production. See analytics.go.
+	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning
+	// and analyticsNow are its test seams (analyticsNow is the YouTube quota's clock too); nil in
+	// production. See analytics.go.
 	audience         *analytics.Sampler
 	analyticsRunning func() map[int64]bool
 	analyticsNow     func() time.Time
-	// ytQuotaPool is one shared YouTube allowance per Google client ID, drawn
-	// on by chat, the vertical read, the sampler and the oauth request meter.
+	// ytQuotaShared is the install's one YouTube allowance, bound to the
+	// configured Google client and drawn on by chat, the vertical read, the
+	// sampler and the oauth request meter.
 	// ytVideos is each YouTube account's live video, remembered by the
 	// sampler so a tick is one videos.list. See analytics.go.
-	ytQuotaPool *chat.YouTubeQuotaPool
-	ytVideosMu  sync.Mutex
-	ytVideos    map[int64]ytLiveVideo
+	ytQuotaShared *chat.YouTubeQuota
+	ytVideosMu    sync.Mutex
+	ytVideos      map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -882,7 +885,15 @@ func New(o Options) *Server {
 		cs = s.youtubeQuota()
 	}
 	units, reserve := youtubeQuotaPair(cs)
-	s.ytQuotaPool = chat.NewYouTubeQuotaPool(units, reserve, nil)
+	// The quota's clock is the sampler's test seam when one is set, so a test
+	// fixes the time of day instead of racing Pacific midnight (R13).
+	s.ytQuotaShared = chat.NewYouTubeQuota(units, reserve, func() time.Time {
+		if s.analyticsNow != nil {
+			return s.analyticsNow()
+		}
+		return time.Now()
+	})
+	s.bindYouTubeClient()
 	s.ytVideos = map[int64]ytLiveVideo{}
 	if o.DB != nil {
 		s.audience = s.newAudienceSampler()
