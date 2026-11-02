@@ -232,7 +232,10 @@ jobs:
         if: needs.changes.outputs.code != 'true'
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code != 'true'
+        uses: ./.github/actions/restore-go-cache
       - name: Documentation-only change, so only the doc-drift guards ran
         if: needs.changes.outputs.code != 'true'
         run: |
@@ -270,7 +273,10 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-go-cache
 
       # polyemesis shells out to ffmpeg and ffprobe, and a large part of the
       # test suite asserts on real filter-graph behaviour rather than on
@@ -296,8 +302,9 @@ jobs:
       # and the asset name in the key changes whenever the pin does. The latest
       # 8.x and 9.x are re-checked by ffmpeg-compat.yml.
       - name: Cache FFmpeg
+        id: ffcache
         if: needs.changes.outputs.code == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -395,6 +402,12 @@ jobs:
           # this step still printed an ffmpeg version and passed. The one binary
           # that was verified was the one the skips did not turn on.
           ffprobe -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true' && needs.changes.outputs.code == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       # The gate is "gofmt named no files", and it has to rest on gofmt having
       # RUN. It used to be `gofmt -l ./cmd ./internal | tee /tmp/fmt && test !
@@ -771,7 +784,10 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-go-cache
 
       # FFmpeg on every runner, for the reason the ubuntu job gives: without it
       # the measurement tests SKIP rather than fail, and the run goes green
@@ -787,7 +803,8 @@ jobs:
       # and the asset name in the key changes whenever the pin does. The latest
       # 8.x and 9.x are re-checked by ffmpeg-compat.yml.
       - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -882,6 +899,12 @@ jobs:
           done
           ffmpeg -hide_banner -protocols | tr ' ' '\n' | grep -qx srt
           ffmpeg -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true' && runner.os == 'Linux' && needs.changes.outputs.code == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS' && needs.changes.outputs.code == 'true'
         # BREW CANNOT SUPPLY 8.1, AND THAT IS RECORDED RATHER THAN HIDDEN.
@@ -900,7 +923,8 @@ jobs:
       # is a different asset, and a separate step because the Linux cache above
       # is gated to runner.os == 'Linux'.
       - name: Cache FFmpeg (Windows)
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache-win
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: runner.os == 'Windows' && needs.changes.outputs.code == 'true'
         with:
           path: ${{ runner.temp }}/ffcache
@@ -959,6 +983,12 @@ jobs:
           # exactly how the choco failure stayed invisible until the NEXT step
           # could not find the binary.
           Add-Content -Path $env:GITHUB_PATH -Value $bin
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache-win.outputs.cache-hit != 'true' && runner.os == 'Windows' && needs.changes.outputs.code == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ffcache
+          key: ${{ steps.ffcache-win.outputs.cache-primary-key }}
       # BOTH binaries, on all three. #187: the skip helpers key off ffprobe and
       # this step only ever ran ffmpeg, so the binary that decides whether the
       # upload gate's tests run at all was the one nothing here looked at. The
@@ -1345,7 +1375,7 @@ jobs:
           path: |
             bcast-server.log
             data/recordings/
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore
 
       # THE WINDOWS UNINSTALLER HAD ZERO COVERAGE OF ANY KIND, #509. Unlike
@@ -1822,8 +1852,13 @@ jobs:
         with:
           # Keep in step with the Dockerfiles' node tag and @types/node major.
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
       - if: needs.changes.outputs.code == 'true'
         run: npm ci --ignore-scripts
       - if: needs.changes.outputs.code == 'true'
@@ -1902,8 +1937,13 @@ jobs:
         with:
           # Matches the manifest's Nodejs.Version: the plugin runs on Node 24.
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: integrations/streamdeck/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: integrations/streamdeck/package-lock.json
       - if: needs.changes.outputs.code == 'true'
         run: npm ci --ignore-scripts
       - if: needs.changes.outputs.code == 'true'
@@ -1931,7 +1971,9 @@ jobs:
           name: com.polyemesis.streamdeck.streamDeckPlugin
           path: integrations/streamdeck/dist/com.polyemesis.streamdeck.streamDeckPlugin
           if-no-files-found: error
-          retention-days: 7
+          # For sideloading a pull request's build by hand; nothing downloads
+          # it, and a release attaches its own copy.
+          retention-days: 3
 
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #
@@ -2112,13 +2154,21 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-go-cache
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
       # `make release` depends on the ui target, which needs the built assets
       # for go:embed. Building them here keeps the check honest end to end.
       - if: needs.changes.outputs.code == 'true'
@@ -2328,12 +2378,20 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
 
       # THE BROWSER IS CACHED; THE SYSTEM LIBRARIES ARE NOT, and the split is
       # the whole point of this block.
@@ -2372,7 +2430,8 @@ jobs:
       # Playwright, which the install below would then have to download over
       # anyway -- a partial hit here buys nothing and makes the cache's
       # contents harder to reason about.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: matrix.suite == 'acceptance-browser'
         with:
           path: ~/.cache/ms-playwright
@@ -2428,6 +2487,12 @@ jobs:
           # no CDN request -- while a cache that restored incompletely still
           # self-heals instead of failing later as "chromium not found".
           npx --no-install playwright install chromium
+      - name: Save Playwright browser cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true' && matrix.suite == 'acceptance-browser'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
 
       # The same step timeout the `acceptance` job's suite step carries at
       # :724, and missing here until now. This job's ceiling is 45 minutes,
@@ -2438,7 +2503,10 @@ jobs:
         timeout-minutes: 35
 
       - name: Upload logs
-        if: always()
+        # On failure only, and kept three days: nothing downloads these, a
+        # green run's logs are never read, and every suite on every run used to
+        # leave a bundle behind. CONTRIBUTING.md, "CI caches and artifacts".
+        if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.suite }}-logs
@@ -2446,7 +2514,7 @@ jobs:
             /tmp/poly-*/**/*.log
             ui/test-results/**
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   # The measurement suites. Everything above proves the code COMPILES and that
   # its pure functions agree with themselves; these prove the product actually
@@ -2541,13 +2609,21 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-go-cache
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: ui/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main' && needs.changes.outputs.code == 'true'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: ui/package-lock.json
 
       # Says out loud why a green check did no work, so a reader of the checks
       # list is never left guessing whether the suite ran or silently no-opped.
@@ -2576,8 +2652,9 @@ jobs:
       #   source of red CI, which retries could not fix because its budget never
       #   fit its ceiling.
       - name: Cache FFmpeg
+        id: ffcache
         if: needs.changes.outputs.code == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -2663,6 +2740,12 @@ jobs:
           # this step still printed an ffmpeg version and passed. The one binary
           # that was verified was the one the skips did not turn on.
           ffprobe -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true' && needs.changes.outputs.code == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       # The gate is "gofmt named no files", and it has to rest on gofmt having
       # RUN. It used to be `gofmt -l ./cmd ./internal | tee /tmp/fmt && test !
@@ -2791,9 +2874,11 @@ jobs:
       # for the next occurrence. Only that suite writes one; the others match
       # nothing here and if-no-files-found already covers it.
       - name: Upload logs
-        # always(), but not when the suite never ran: a documentation-only job
-        # has no artifact to collect, only a warning about its absence.
-        if: always() && needs.changes.outputs.code == 'true'
+        # On failure only, and kept three days: nothing downloads these and a
+        # green run's logs are never read (CONTRIBUTING.md, "CI caches and
+        # artifacts"). Never when the suite did not run: a documentation-only
+        # job has no artifact to collect, only a warning about its absence.
+        if: failure() && needs.changes.outputs.code == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.suite }}-logs
@@ -2812,4 +2897,4 @@ jobs:
             /tmp/polyemesis-acceptance*/engine-log-at-baseline-timeout.txt
             /tmp/polyemesis-acceptance*/baseline-wait.txt
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3

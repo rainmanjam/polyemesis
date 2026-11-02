@@ -204,8 +204,13 @@ jobs:
         with:
           # Same major as the ui job in ci.yml and as the Dockerfiles' node tag.
           node-version: 24
-          cache: npm
+          cache: ${{ github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: web/package-lock.json
+      - name: Restore npm cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-npm-cache
+        with:
+          lockfile: web/package-lock.json
 
       # FIRST, so the log says whether this run can publish before it spends any
       # time building. A reader who came here asking "why is the site still not
