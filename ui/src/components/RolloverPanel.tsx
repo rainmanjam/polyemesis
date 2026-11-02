@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { countdownFor, formatRemaining } from "@/lib/rolloverCountdown";
 import { classifyRun } from "@/lib/recurringOutcome";
-import { getDestinationSourceId, getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
+import { getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
 import { useT } from "@/lib/i18n";
 import type { DestStatus, RolloverSettings, RolloverView } from "@/lib/types";
 
@@ -66,34 +66,20 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [runOpen, setRunOpen] = useState(false);
-  // The programme the destination carries. Resolved once, because the rollover routes are programme-scoped.
-  const [sourceId, setSourceId] = useState<number | null | undefined>(undefined);
-
-  useEffect(() => {
-    let live = true;
-    getDestinationSourceId(dest.id)
-      .then((id) => {
-        if (live) setSourceId(id);
-      })
-      .catch((err: unknown) => {
-        if (live) setNotice({ tone: "bad", text: messageOf(err) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [dest.id]);
-
+  // ONE READ, AT MOUNT. The panel used to look up the destination's programme with its own GET first, which put
+  // a round trip between the card mounting and the rollover read; a row deleted inside that gap answered the
+  // read 404 (the browser suite's intermittent console error). The rollover routes need no programme from the
+  // client -- the server takes it from the destination row -- so there is nothing to look up.
   const load = useCallback(async () => {
-    if (sourceId === undefined) return;
     try {
-      const v = await getRollover(dest.id, sourceId);
+      const v = await getRollover(dest.id);
       setView(v);
       setNow(new Date());
       setForm((cur) => cur ?? formFrom(v.settings));
     } catch (err) {
       setNotice({ tone: "bad", text: messageOf(err) });
     }
-  }, [dest.id, sourceId]);
+  }, [dest.id]);
 
   useEffect(() => {
     void load();
@@ -122,7 +108,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
     setBusy(true);
     setNotice(null);
     try {
-      const v = await saveRollover(dest.id, sourceId, {
+      const v = await saveRollover(dest.id, {
         enabled: form.enabled,
         marginMinutes: form.marginMinutes,
         quietStart: form.quietStart,
@@ -144,7 +130,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
     setBusy(true);
     setNotice(null);
     try {
-      await runRollover(dest.id, sourceId);
+      await runRollover(dest.id);
       setNotice({ tone: "ok", text: t("wave3.rollover.runDone") });
     } catch (err) {
       const c = classifyRun(err);
