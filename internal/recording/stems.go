@@ -276,11 +276,28 @@ func (m *Manager) SweepStems() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if len(indexed) == 0 {
+	// A master moved to offload storage is still in the index, but it is not
+	// on this disk: it must not hold the cutoff back for ever (its own stems
+	// are kept below, by name), or the stems of every master retention has
+	// since deleted would live on and be charged against the size cap.
+	evicted, err := m.store.EvictedRecordings()
+	if err != nil {
+		return false, err
+	}
+	local := indexed[:0:0]
+	keepBase := map[string]bool{}
+	for _, r := range indexed {
+		if evicted[r.Filename] {
+			keepBase[strings.TrimSuffix(r.Filename, filepath.Ext(r.Filename))] = true
+			continue
+		}
+		local = append(local, r)
+	}
+	if len(local) == 0 {
 		return false, nil
 	}
-	oldest := indexed[0].StartedAt
-	for _, r := range indexed[1:] {
+	oldest := local[0].StartedAt
+	for _, r := range local[1:] {
 		if r.StartedAt.Before(oldest) {
 			oldest = r.StartedAt
 		}
@@ -294,6 +311,9 @@ func (m *Manager) SweepStems() (bool, error) {
 		}
 		start, _, ok := ParseStemFilename(e.Name())
 		if !ok || !start.Before(cutoff) {
+			continue
+		}
+		if base, _ := StemMasterBase(e.Name()); keepBase[base] {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {

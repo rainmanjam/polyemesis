@@ -11,7 +11,6 @@ package api
 // sends a signed request out of the process.
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -25,6 +24,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/eventstream"
 	"github.com/rainmanjam/polyemesis/internal/hooks"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/netguard"
 	"github.com/rainmanjam/polyemesis/internal/offload"
 )
@@ -177,7 +177,33 @@ func normalEndpoint(e string) string {
 // other than saved.
 func secretBindingChanged(saved, next db.StorageTarget) bool {
 	return normalEndpoint(saved.Endpoint) != normalEndpoint(next.Endpoint) ||
-		saved.Bucket != next.Bucket || saved.AllowPrivateTarget != next.AllowPrivateTarget
+		saved.Bucket != next.Bucket || saved.AllowPrivateTarget != next.AllowPrivateTarget ||
+		saved.PathStyle != next.PathStyle
+}
+
+// locationChanged reports whether an edit changes WHERE the target's objects
+// live -- a different service, bucket, region, account or addressing. Such an
+// edit is refused while the target holds evicted recordings, and otherwise
+// sends every one of its files back to be uploaded at the new address.
+func locationChanged(saved, next db.StorageTarget) bool {
+	return normalEndpoint(saved.Endpoint) != normalEndpoint(next.Endpoint) || saved.Bucket != next.Bucket ||
+		saved.Region != next.Region || saved.PathStyle != next.PathStyle || saved.AccessKeyID != next.AccessKeyID
+}
+
+// untrustedTargets are the targets whose copies cannot be fetched from here:
+// their secret is missing or will not open on this machine.
+func (s *Server) untrustedTargets() []int64 {
+	targets, err := s.store.ListStorageTargets(s.box)
+	if err != nil {
+		return nil
+	}
+	var out []int64
+	for _, t := range targets {
+		if !t.HasSecret || t.SecretUnreadable {
+			out = append(out, t.ID)
+		}
+	}
+	return out
 }
 
 // readSafeStorageTarget is the read-scope view: no secret (never marshalled
@@ -303,7 +329,18 @@ func (s *Server) handleUpdateStorageTarget(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.UpdateStorageTarget(s.box, t); err != nil {
+	if locationChanged(existing, t) {
+		// Multipart progress made at the old address is read first, so it
+		// can still be aborted there after the rebind drops it.
+		pending, _ := s.store.ListOffloadMultipart(existing.ID)
+		if err := s.store.RebindStorageTarget(s.box, t); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if s.offload != nil {
+			s.offload.AbortUploads(r.Context(), existing, pending)
+		}
+	} else if err := s.store.UpdateStorageTarget(s.box, t); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -328,7 +365,8 @@ func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Refused before anything is aborted, so a 409 changes nothing.
-	if err := s.store.StorageTargetDeletable(id); err != nil {
+	untrusted := s.untrustedTargets()
+	if err := s.store.StorageTargetDeletable(id, untrusted); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -337,7 +375,7 @@ func (s *Server) handleDeleteStorageTarget(w http.ResponseWriter, r *http.Reques
 	if s.offload != nil {
 		s.offload.AbortTarget(r.Context(), t)
 	}
-	if err := s.store.DeleteStorageTarget(id); err != nil {
+	if err := s.store.DeleteStorageTarget(id, untrusted); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -393,15 +431,53 @@ func (s *Server) handleTestStorageTarget(w http.ResponseWriter, r *http.Request)
 // kickOffload runs a pass soon after a target changes, rather than on the
 // next 30-second tick.
 func (s *Server) kickOffload() {
-	off := s.offload
-	if off == nil {
-		return
+	if off := s.offload; off != nil {
+		off.Kick()
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		off.Pass(ctx)
-	}()
+}
+
+// offloadInUse is the job-queue half of eviction's in-use check: a queued or
+// running job about any recording of this one's session -- a transcription,
+// a proxy, a clip export cutting across the session -- keeps every file of
+// the session on disk until it is done.
+func (s *Server) offloadInUse(name string) bool {
+	if s.jobq == nil {
+		return false
+	}
+	list, err := s.jobq.List(jobs.Active())
+	if err != nil || len(list) == 0 {
+		return err != nil // a queue that cannot answer is treated as busy
+	}
+	busy := map[int64]bool{}
+	for _, j := range list {
+		if id, ok := jobs.ParseRecordingTarget(j.Target); ok {
+			busy[id] = true
+		}
+	}
+	if len(busy) == 0 {
+		return false
+	}
+	recs, err := s.store.ListRecordings()
+	if err != nil {
+		return true
+	}
+	for _, r := range recs {
+		if r.Filename != name {
+			continue
+		}
+		if busy[r.ID] {
+			return true
+		}
+		if sess, err := s.store.SessionForRecording(r.ID); err == nil && sess != nil {
+			members, _ := s.store.SessionRecordings(sess.ID)
+			for _, m := range members {
+				if busy[m.ID] {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // ---- Library integration ----

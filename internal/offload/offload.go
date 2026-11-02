@@ -37,6 +37,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/clipper"
@@ -75,7 +76,7 @@ const (
 	SettleWindow = 2 * time.Minute
 	// FetchPin keeps a fetched-back recording local this long after the
 	// fetch, so move mode does not evict it out from under the clipper.
-	FetchPin = 24 * time.Hour
+	FetchPin = db.OffloadFetchPin
 	// backoffBase and backoffCap bound the retry schedule: 30s, 1m, 2m, ...
 	// capped at an hour, with jitter so a fleet of failures does not retry in
 	// lockstep.
@@ -99,9 +100,16 @@ type Service struct {
 	segSecs   func() int
 
 	passMu sync.Mutex
+	again  atomic.Bool
 
 	stuckMu sync.Mutex
 	onStuck func(StuckEvent)
+
+	// pins are files something is reading right now (a download, a clip
+	// export, a queued or running job): eviction leaves them alone.
+	pinMu sync.Mutex
+	pins  map[string]int
+	busy  func(name string) bool
 
 	// Multipart: files above mpThreshold go up in parts of partSize, each
 	// part tried partTries times with backoff starting at partBackoff.
@@ -113,9 +121,10 @@ type Service struct {
 	fetchTries   int
 	fetchBackoff time.Duration
 
-	fetchMu sync.Mutex
-	fetches map[string]*FetchState
-	baseCtx context.Context
+	fetchMu  sync.Mutex
+	fetches  map[string]*FetchState
+	fetchSem chan struct{}
+	baseCtx  context.Context
 }
 
 // Option configures a Service.
@@ -267,9 +276,31 @@ func usable(t db.StorageTarget) bool {
 // the API to kick after a target is saved.
 func (s *Service) Pass(ctx context.Context) {
 	if !s.passMu.TryLock() {
+		// A pass is already running. The ask is not dropped: the running
+		// pass goes round once more when it finishes, so a target saved or a
+		// Retry pressed mid-pass is acted on without waiting for the tick.
+		s.again.Store(true)
 		return
 	}
 	defer s.passMu.Unlock()
+	for {
+		s.again.Store(false)
+		s.passOnce(ctx)
+		if ctx.Err() != nil || !s.again.Load() {
+			return
+		}
+	}
+}
+
+// Kick asks for a pass soon, on the service's own context, without blocking.
+func (s *Service) Kick() {
+	s.fetchMu.Lock()
+	ctx := s.baseCtx
+	s.fetchMu.Unlock()
+	go s.Pass(ctx)
+}
+
+func (s *Service) passOnce(ctx context.Context) {
 	targets, err := s.store.ListStorageTargets(s.box)
 	if err != nil {
 		s.log.Warn("offload: list targets", "err", err)
@@ -296,6 +327,28 @@ func (s *Service) Pass(ctx context.Context) {
 		return
 	}
 	changed := s.prune(items, cands)
+	// A file that is on disk and marked evicted is an eviction interrupted
+	// between the mark and the unlink: the file is still here, so the mark
+	// is wrong. Clear it; the next eviction goes through the gate again.
+	for _, cand := range cands {
+		if cand.kind != db.OffloadKindRecording {
+			continue
+		}
+		for _, t := range targets {
+			if it, ok := byKey[itemKey(t.ID, cand.rel)]; ok && it.Evicted {
+				if s.store.UndoEvict(cand.rel) == nil {
+					for _, tt := range targets {
+						if x, ok := byKey[itemKey(tt.ID, cand.rel)]; ok {
+							x.Evicted = false
+							byKey[itemKey(tt.ID, cand.rel)] = x
+						}
+					}
+					changed = true
+				}
+				break
+			}
+		}
+	}
 
 	clients := map[int64]Client{}
 	for _, t := range active {
@@ -370,7 +423,7 @@ func (s *Service) Pass(ctx context.Context) {
 			changed = true
 		}
 	}
-	if s.evict(ctx, active, clients, cands, byKey) {
+	if s.evict(ctx, targets, clients, cands, byKey) {
 		changed = true
 	}
 	if changed {
@@ -450,6 +503,15 @@ func (s *Service) candidates() ([]candidate, error) {
 		finishedMasters[strings.TrimSuffix(r.Filename, filepath.Ext(r.Filename))] = r
 		out = append(out, candidate{rel: r.Filename, kind: db.OffloadKindRecording, at: r.StartedAt,
 			source: r.SourceID, path: path, size: fi.Size(), mtime: fi.ModTime(), rec: r})
+	}
+	// A master move mode took off the disk is still a finished master: its
+	// stems are uploaded too (to a target added since, or after a retry).
+	if evicted, err := s.store.EvictedRecordings(); err == nil {
+		for i := range recs {
+			if evicted[recs[i].Filename] {
+				finishedMasters[strings.TrimSuffix(recs[i].Filename, filepath.Ext(recs[i].Filename))] = &recs[i]
+			}
+		}
 	}
 	dir := s.rec.Dir()
 	add := func(sub, kind string, keep func(name string) (*db.Recording, bool)) {
@@ -554,6 +616,15 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		}
 		it.Bytes, it.SHA256 = n, sh
 		it.State = db.OffloadUploading
+		// The attempt count is the row's as it is NOW: a Retry now pressed
+		// after this pass read the items reset it, and this pass's copy is stale.
+		if cur, cerr := s.store.OffloadItemsFor(it.RelPath); cerr == nil {
+			for _, row := range cur {
+				if row.TargetID == it.TargetID && row.Attempts < it.Attempts {
+					it.Attempts = row.Attempts
+				}
+			}
+		}
 		// Claimed in the database BEFORE the PUT: the UNIQUE(target_id,
 		// object_key) index refuses a key another file holds, so the bucket
 		// write below can never overwrite that file's object.
@@ -595,6 +666,16 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		it.LastError = clipErr(err)
 		it.NextAttemptAt = time.Time{}
 	case err != nil:
+		// Counted from the row as it is NOW, not as this pass read it: an
+		// operator who pressed Retry now while the attempt was in flight reset
+		// the count, and that reset is not overwritten by a stale copy.
+		if cur, cerr := s.store.OffloadItemsFor(it.RelPath); cerr == nil {
+			for _, row := range cur {
+				if row.TargetID == it.TargetID && row.Attempts < it.Attempts {
+					it.Attempts = row.Attempts
+				}
+			}
+		}
 		it.Attempts++
 		s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", clipErr(err))
 		it = s.fail(t, it, err, !retryable(err))
@@ -614,6 +695,43 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		s.log.Warn("offload: persist item", "file", it.RelPath, "err", perr)
 	}
 	return it
+}
+
+// Pin marks a recording as in use until the returned func is called. A
+// pinned recording is never evicted.
+func (s *Service) Pin(name string) func() {
+	s.pinMu.Lock()
+	if s.pins == nil {
+		s.pins = map[string]int{}
+	}
+	s.pins[name]++
+	s.pinMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.pinMu.Lock()
+			if s.pins[name]--; s.pins[name] <= 0 {
+				delete(s.pins, name)
+			}
+			s.pinMu.Unlock()
+		})
+	}
+}
+
+// SetInUse registers the question "is a job about to read this recording?",
+// asked of the job queue, so queued and running post-production and clip
+// exports keep their inputs.
+func (s *Service) SetInUse(fn func(name string) bool) {
+	s.pinMu.Lock()
+	s.busy = fn
+	s.pinMu.Unlock()
+}
+
+func (s *Service) inUse(name string) bool {
+	s.pinMu.Lock()
+	pinned, busy := s.pins[name] > 0, s.busy
+	s.pinMu.Unlock()
+	return pinned || (busy != nil && busy(name))
 }
 
 // StuckEvent is what the alert, webhook and event-stream paths are told when
@@ -682,10 +800,7 @@ func (s *Service) Retry(target int64, rel string) (int64, error) {
 		return n, err
 	}
 	s.onChange()
-	s.fetchMu.Lock()
-	ctx := s.baseCtx
-	s.fetchMu.Unlock()
-	go s.Pass(ctx)
+	s.Kick()
 	return n, nil
 }
 
@@ -716,7 +831,7 @@ func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size 
 	if info.Size != size {
 		return fmt.Errorf("%w: stored %d bytes, sent %d", ErrChecksumMismatch, info.Size, size)
 	}
-	if etag := strings.ToLower(info.ETag); (hexMD5.MatchString(etag) || compositeETag.MatchString(etag)) && etag != wantETag {
+	if etag := strings.ToLower(info.ETag); !info.OpaqueETag && (hexMD5.MatchString(etag) || compositeETag.MatchString(etag)) && etag != wantETag {
 		return fmt.Errorf("%w: stored ETag %s is not the %s that was sent", ErrChecksumMismatch, etag, wantETag)
 	}
 	if got, ok := info.Meta["sha256"]; ok && got != sh {
@@ -763,15 +878,28 @@ func clipErr(err error) string {
 }
 
 // evict deletes local recording masters move mode no longer needs on disk.
-func (s *Service) evict(ctx context.Context, active []db.StorageTarget, clients map[int64]Client, cands []candidate, byKey map[string]db.OffloadItem) bool {
+func (s *Service) evict(ctx context.Context, targets []db.StorageTarget, clients map[int64]Client, cands []candidate, byKey map[string]db.OffloadItem) bool {
+	// EVERY ENABLED target counts, usable or not. A target whose secret will
+	// not open or whose client could not be built cannot vouch for a copy, so
+	// it blocks eviction rather than being quietly left out of the check.
+	var enabled []db.StorageTarget
 	keep := -1
-	for _, t := range active {
+	for _, t := range targets {
+		if !t.Enabled {
+			continue
+		}
+		enabled = append(enabled, t)
 		if t.Mode == db.OffloadMove && t.KeepLocalHours > keep {
 			keep = t.KeepLocalHours
 		}
 	}
-	if keep < 0 || len(active) == 0 {
+	if keep < 0 {
 		return false
+	}
+	for _, t := range enabled {
+		if !usable(t) || clients[t.ID] == nil {
+			return false
+		}
 	}
 	now := s.now()
 	changed := false
@@ -779,12 +907,12 @@ func (s *Service) evict(ctx context.Context, active []db.StorageTarget, clients 
 		if cand.kind != db.OffloadKindRecording || ctx.Err() != nil {
 			continue
 		}
-		if now.Sub(cand.at) < time.Duration(keep)*time.Hour {
+		if now.Sub(cand.at) < time.Duration(keep)*time.Hour || s.inUse(cand.rel) {
 			continue
 		}
 		var its []db.OffloadItem
 		ok := true
-		for _, t := range active {
+		for _, t := range enabled {
 			it, found := byKey[itemKey(t.ID, cand.rel)]
 			if !found || !Evictable(it, cand.size, cand.mtime, now) {
 				ok = false
@@ -796,36 +924,72 @@ func (s *Service) evict(ctx context.Context, active []db.StorageTarget, clients 
 			continue
 		}
 		// Last look before the only irreversible step: every target still
-		// holds an object of exactly this size and digest.
-		for i, t := range active {
+		// holds an object of exactly this size AND this SHA-256. Size alone is
+		// not evidence -- a replaced object can have the same length -- so a
+		// missing or different digest, or a missing object, sends the file
+		// back to be uploaded again rather than leaving a "verified" row that
+		// would never be re-checked.
+		ids := make([]int64, 0, len(enabled))
+		for i, t := range enabled {
 			info, err := clients[t.ID].Head(ctx, its[i].Key)
-			if err != nil || info.Size != its[i].Bytes || (info.Meta["sha256"] != "" && info.Meta["sha256"] != its[i].SHA256) {
-				ok = false
-				s.log.Warn("offload: remote copy failed its pre-eviction check; keeping the local file",
-					"target", t.Name, "file", cand.rel, "err", err)
-				break
+			if err == nil && info.Size == its[i].Bytes && info.Meta["sha256"] == its[i].SHA256 {
+				ids = append(ids, t.ID)
+				continue
 			}
+			ok = false
+			if err == nil || errors.Is(err, objstore.ErrNotFound) {
+				it := its[i]
+				it.State, it.Attempts, it.NextAttemptAt = db.OffloadPending, 0, time.Time{}
+				it.LastError = "the stored object no longer matches; uploading again"
+				_ = s.store.PutOffloadItem(it)
+				changed = true
+			}
+			s.log.Warn("offload: remote copy failed its pre-eviction check; keeping the local file",
+				"target", t.Name, "file", cand.rel, "err", err)
+			break
 		}
 		if !ok {
 			continue
 		}
-		path, err := s.rec.Resolve(cand.rel)
-		if err != nil {
-			continue
+		if s.evictOne(cand, ids) {
+			s.log.Info("offload: local copy removed after verified upload", "file", cand.rel, "targets", len(ids))
+			changed = true
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			s.log.Warn("offload: evict", "file", cand.rel, "err", err)
-			continue
-		}
-		all, _ := s.store.OffloadItemsFor(cand.rel)
-		for _, it := range all {
-			it.Evicted = true
-			_ = s.store.PutOffloadItem(it)
-		}
-		s.log.Info("offload: local copy removed after verified upload", "file", cand.rel, "targets", len(active))
-		changed = true
 	}
 	return changed
+}
+
+// evictOne marks the file evicted -- through db.BeginEvict, the transaction
+// that re-reads every enabled target's row and refuses unless the set the
+// caller just checked is still exactly the enabled set and every row is still
+// verified -- then re-checks the file and unlinks it, undoing the mark when
+// anything about the file is not as it was checked.
+//
+// Mark first, unlink second: a crash between them leaves a file that is
+// local AND marked evicted, which Pass repairs by clearing the mark. The other
+// order would leave a missing file nothing points at.
+func (s *Service) evictOne(cand candidate, checked []int64) bool {
+	if err := s.store.BeginEvict(cand.rel, checked); err != nil {
+		return false
+	}
+	path, err := s.rec.Resolve(cand.rel)
+	if err == nil {
+		var fi os.FileInfo
+		if fi, err = os.Stat(path); err == nil && (fi.Size() != cand.size || !fi.ModTime().Equal(cand.mtime)) {
+			err = errors.New("file changed since it was checked")
+		}
+	}
+	if err == nil {
+		err = os.Remove(path)
+	}
+	if err != nil {
+		// Including ErrNotExist: a file somebody else removed was not evicted
+		// by us, and marking it so would keep a deleted recording's row alive.
+		_ = s.store.UndoEvict(cand.rel)
+		s.log.Warn("offload: evict", "file", cand.rel, "err", err)
+		return false
+	}
+	return true
 }
 
 // Evictable is the per-target half of the eviction rule: the item is
@@ -838,7 +1002,7 @@ func Evictable(it db.OffloadItem, localSize int64, localMtime, now time.Time) bo
 	if it.Bytes != localSize || localMtime.After(it.VerifiedAt) {
 		return false
 	}
-	if !it.FetchedAt.IsZero() && now.Sub(it.FetchedAt) < FetchPin {
+	if !it.FetchedAt.IsZero() && now.Sub(it.FetchedAt) < db.OffloadFetchPin {
 		return false
 	}
 	return true

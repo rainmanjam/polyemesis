@@ -547,13 +547,22 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 	// a human naming one file that started days ago is owed the deletion, and
 	// refusing it for ever is how an archive stops being manageable.
 	live[newestSegmentName(recs)] = true
+	// A recording fetched back from offload storage stays put for the fetch
+	// pin, whatever retention says: a clip may be being cut from it.
+	if pinned, perr := m.store.OffloadPinnedRecordings(time.Now().Add(-db.OffloadFetchPin)); perr != nil {
+		return false, perr
+	} else {
+		for name := range pinned {
+			live[name] = true
+		}
+	}
 
 	if s.MaxAgeHours > 0 {
 		cutoff := time.Now().Add(-time.Duration(s.MaxAgeHours) * time.Hour)
 		remaining := recs[:0]
 		for _, r := range recs {
 			if !live[r.Filename] && r.StartedAt.Before(cutoff) {
-				if m.delete(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
+				if m.retire(r, fmt.Sprintf("older than %dh", s.MaxAgeHours)) {
 					deleted = true
 					continue
 				}
@@ -586,7 +595,7 @@ func (m *Manager) Sweep(s db.RecordingSettings) (bool, error) {
 			if live[recs[i].Filename] {
 				continue
 			}
-			if !m.delete(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
+			if !m.retire(recs[i], fmt.Sprintf("size cap %.1f GB exceeded", s.MaxGB)) {
 				continue
 			}
 			total -= recs[i].Bytes
@@ -805,6 +814,29 @@ func creditStems(stems []stemSize, cutoff time.Time) int64 {
 	return freed
 }
 
+// retire is what retention does to a recording it has decided to take off the
+// local disk. A recording every enabled storage target holds a verified copy
+// of, with a move-mode target among them, is EVICTED -- the file goes, the row
+// and its offload state stay, and it can be fetched back -- rather than
+// deleted, which would leave the only copy in a bucket nothing points at.
+// Everything else is deleted exactly as before.
+func (m *Manager) retire(r db.Recording, reason string) bool {
+	if err := m.store.BeginEvict(r.Filename, nil); err == nil {
+		path, rerr := m.Resolve(r.Filename)
+		if rerr == nil {
+			rerr = os.Remove(path)
+		}
+		if rerr != nil && !os.IsNotExist(rerr) {
+			m.log.Warn("evict recording for retention", "file", r.Filename, "err", rerr)
+			_ = m.store.UndoEvict(r.Filename)
+			return false
+		}
+		m.log.Info("recording moved to offload storage by retention policy", "file", r.Filename, "reason", reason)
+		return true
+	}
+	return m.delete(r, reason)
+}
+
 func (m *Manager) delete(r db.Recording, reason string) bool {
 	path, err := m.Resolve(r.Filename)
 	if err != nil {
@@ -921,6 +953,13 @@ func (m *Manager) Delete(id int64) error {
 	}
 	if err := m.store.DeleteRecording(id); err != nil {
 		return err
+	}
+	// An operator deleting a recording deletes its offload state too: rows
+	// left behind would keep a storage target undeletable ("holds the only
+	// copy") for a recording that no longer exists. The object in the bucket
+	// is left to the bucket's lifecycle rule, as everywhere else.
+	if err := m.store.DeleteOffloadItemsFor(r.Filename); err != nil {
+		m.log.Warn("drop offload state of a deleted recording", "file", r.Filename, "err", err)
 	}
 	m.removeDerived(r.Filename)
 	// The session this belonged to may now be empty, and its span is wrong

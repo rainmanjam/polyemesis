@@ -143,6 +143,9 @@ func (m *memStore) GetFrom(_ context.Context, key string, off int64) (io.ReadClo
 	if !ok {
 		return nil, objstore.ObjectInfo{}, false, &objstore.Error{Op: "GetObject", StatusCode: 404}
 	}
+	if off > 0 && off >= int64(len(b)) {
+		return nil, objstore.ObjectInfo{}, false, &objstore.Error{Op: "GetObject", StatusCode: 416, Code: "InvalidRange"}
+	}
 	var r io.Reader = bytes.NewReader(b[off:])
 	if len(m.getCuts) > 0 {
 		r = &cutReader{r: r, left: m.getCuts[0]}

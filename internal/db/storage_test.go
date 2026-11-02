@@ -57,18 +57,18 @@ func TestATargetHoldingTheOnlyCopyRefusesDeletion(t *testing.T) {
 	if err := d.PutOffloadItem(OffloadItem{TargetID: a, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadVerified, Evicted: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.DeleteStorageTarget(a); !errors.Is(err, ErrStorageTargetHoldsOnlyCopies) || !errors.Is(err, ErrStateConflict) {
+	if err := d.DeleteStorageTarget(a, nil); !errors.Is(err, ErrStorageTargetHoldsOnlyCopies) || !errors.Is(err, ErrStateConflict) {
 		t.Fatalf("delete of the only copy: %v", err)
 	}
 	// Once another target holds a verified copy, the first may go.
 	_ = d.PutOffloadItem(OffloadItem{TargetID: b, RelPath: "rec.mkv", Kind: OffloadKindRecording, Key: "k", State: OffloadVerified, Evicted: true})
-	if err := d.DeleteStorageTarget(a); err != nil {
+	if err := d.DeleteStorageTarget(a, nil); err != nil {
 		t.Fatal(err)
 	}
 	if ev, _ := d.EvictedRecordings(); !ev["rec.mkv"] {
 		t.Fatal("evicted state lost with the other target")
 	}
-	if err := d.DeleteStorageTarget(a); !errors.Is(err, ErrNotFound) {
+	if err := d.DeleteStorageTarget(a, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
 	}
 }

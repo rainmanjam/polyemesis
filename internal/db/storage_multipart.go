@@ -115,3 +115,97 @@ func (d *DB) RecoverInterruptedOffload() (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// OffloadFetchPin keeps a fetched-back recording local this long: neither move
+// mode nor retention removes it from disk inside the window, so a clip being
+// cut from it is never pulled out from under the editor.
+const OffloadFetchPin = 24 * time.Hour
+
+// OffloadPinnedRecordings names the recordings fetched back since cutoff.
+func (d *DB) OffloadPinnedRecordings(cutoff time.Time) (map[string]bool, error) {
+	rows, err := d.sql.Query(`SELECT DISTINCT rel_path FROM offload_items WHERE kind = ? AND fetched_at > ?`,
+		OffloadKindRecording, cutoff.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out[p] = true
+	}
+	return out, rows.Err()
+}
+
+// ErrNotCovered refuses an eviction the stored state does not justify.
+var ErrNotCovered = errors.New("not every enabled storage target holds a verified copy")
+
+// BeginEvict is the one gate a local recording passes through before its file
+// is unlinked: in a single transaction it re-reads the ENABLED targets, needs
+// at least one in move mode, needs a verified row with a digest on every one
+// of them, and -- when checked is non-nil -- needs that set to be exactly the
+// targets the caller just re-checked on the service. Only then are the rows
+// marked evicted, and only then may the caller unlink, undoing the mark with
+// UndoEvict if the unlink fails.
+//
+// Being one transaction is what serialises it against a target being deleted
+// or rebound: SQLite runs write transactions one at a time, so either the
+// delete commits first and this sees the target gone, or this commits first
+// and the delete sees the evicted row and refuses.
+func (d *DB) BeginEvict(rel string, checked []int64) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`SELECT id, mode FROM storage_targets WHERE enabled = 1`)
+	if err != nil {
+		return err
+	}
+	enabled := map[int64]bool{}
+	move := false
+	for rows.Next() {
+		var id int64
+		var mode string
+		if err := rows.Scan(&id, &mode); err != nil {
+			rows.Close()
+			return err
+		}
+		enabled[id] = true
+		move = move || mode == OffloadMove
+	}
+	rows.Close()
+	if !move || len(enabled) == 0 {
+		return ErrNotCovered
+	}
+	if checked != nil {
+		if len(checked) != len(enabled) {
+			return ErrNotCovered
+		}
+		for _, id := range checked {
+			if !enabled[id] {
+				return ErrNotCovered
+			}
+		}
+	}
+	for id := range enabled {
+		var state, sha string
+		err := tx.QueryRow(`SELECT state, sha256 FROM offload_items WHERE target_id = ? AND rel_path = ?`, id, rel).Scan(&state, &sha)
+		if err != nil || state != OffloadVerified || sha == "" {
+			return ErrNotCovered
+		}
+	}
+	if _, err := tx.Exec(`UPDATE offload_items SET evicted = 1, updated_at = ? WHERE rel_path = ?`, time.Now().Unix(), rel); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UndoEvict clears the mark when the unlink BeginEvict allowed did not happen.
+func (d *DB) UndoEvict(rel string) error {
+	_, err := d.sql.Exec(`UPDATE offload_items SET evicted = 0, updated_at = ? WHERE rel_path = ?`, time.Now().Unix(), rel)
+	return err
+}

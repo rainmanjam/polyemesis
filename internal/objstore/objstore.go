@@ -95,6 +95,10 @@ type ObjectInfo struct {
 	// Meta is the x-amz-meta-* user metadata, keys lower-cased and without
 	// the prefix.
 	Meta map[string]string
+	// OpaqueETag is true when the service says the object is encrypted with
+	// SSE-KMS or a customer key: its ETag is then 32 hex digits that are NOT
+	// the MD5 of the body, and must not be compared as if they were.
+	OpaqueETag bool
 }
 
 // Error is a non-2xx answer from the service.
@@ -398,6 +402,8 @@ const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b785
 
 func infoFrom(resp *http.Response) ObjectInfo {
 	info := ObjectInfo{ETag: strings.Trim(resp.Header.Get("ETag"), `"`), Meta: map[string]string{}}
+	sse := strings.ToLower(resp.Header.Get("X-Amz-Server-Side-Encryption"))
+	info.OpaqueETag = strings.HasPrefix(sse, "aws:kms") || resp.Header.Get("X-Amz-Server-Side-Encryption-Customer-Algorithm") != ""
 	if n, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64); err == nil {
 		info.Size = n
 	}

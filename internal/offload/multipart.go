@@ -151,6 +151,24 @@ func (s *Service) abortUpload(ctx context.Context, c Client, target int64, rel s
 	_ = s.store.DeleteOffloadMultipart(target, rel)
 }
 
+// AbortUploads aborts the given multipart uploads on target t (its OLD
+// binding, after a rebind dropped the rows). Best effort, like every abort:
+// the bucket lifecycle rule is the backstop.
+func (s *Service) AbortUploads(ctx context.Context, t db.StorageTarget, rows []db.OffloadMultipart) {
+	if len(rows) == 0 {
+		return
+	}
+	c, err := s.newClient(t)
+	if err != nil {
+		return
+	}
+	for _, mp := range rows {
+		if err := c.AbortMultipart(context.WithoutCancel(ctx), mp.Key, mp.UploadID); err != nil {
+			s.log.Warn("offload: abort multipart upload at the old address", "file", mp.RelPath, "err", clipErr(err))
+		}
+	}
+}
+
 // AbortTarget aborts every multipart upload in progress on a target. Called
 // before the target is deleted, while its credentials are still readable.
 func (s *Service) AbortTarget(ctx context.Context, t db.StorageTarget) {

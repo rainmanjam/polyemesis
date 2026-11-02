@@ -880,6 +880,10 @@ func New(o Options) *Server {
 	if s.obs != nil {
 		s.obs.SetActions(s.OBSActions())
 	}
+	// Eviction asks the job queue whether a recording is about to be read.
+	if s.offload != nil {
+		s.offload.SetInUse(s.offloadInUse)
+	}
 	return s
 }
 

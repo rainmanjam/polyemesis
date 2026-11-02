@@ -217,6 +217,21 @@ func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, erro
 // leaves the stored secret as it was, so a form that never displays the
 // secret can still be saved.
 func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
+	q, args, err := updateTargetQuery(box, t)
+	if err != nil {
+		return err
+	}
+	res, err := d.sql.Exec(q, args...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func updateTargetQuery(box *secrets.Box, t StorageTarget) (string, []any, error) {
 	q := `UPDATE storage_targets SET name=?, provider=?, endpoint=?, bucket=?, region=?, prefix_template=?,
 		path_style=?, access_key_id=?, mode=?, keep_local_hours=?, offload_stems=?, offload_transcripts=?,
 		offload_clips=?, verify_download=?, allow_private_target=?, enabled=?, max_attempts=?, updated_at=?`
@@ -226,21 +241,14 @@ func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
 	if t.SecretAccessKey != "" {
 		enc, err := sealTargetSecret(box, t.SecretAccessKey)
 		if err != nil {
-			return err
+			return "", nil, err
 		}
 		q += `, secret_enc=?`
 		args = append(args, enc)
 	}
 	q += ` WHERE id=?`
 	args = append(args, t.ID)
-	res, err := d.sql.Exec(q, args...)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return q, args, nil
 }
 
 func maxAttemptsOr(n int) int {
@@ -272,43 +280,62 @@ func (d *DB) RetryOffloadItems(target int64, rel string) (int64, error) {
 	return res.RowsAffected()
 }
 
+// onlyCopies counts the evicted files whose only usable copy is on the
+// target: no OTHER target that is still trusted holds a verified row. A
+// target whose secret cannot be opened on this machine is not trusted -- its
+// copy cannot be fetched -- so its rows do not count as somewhere else.
+func onlyCopies(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, id int64, untrusted []int64) (int, error) {
+	query := `SELECT COUNT(*) FROM offload_items i WHERE i.target_id = ? AND i.evicted = 1
+		AND NOT EXISTS (SELECT 1 FROM offload_items o WHERE o.rel_path = i.rel_path AND o.target_id != i.target_id
+			AND o.state = 'verified'`
+	args := []any{id}
+	for _, u := range untrusted {
+		query += ` AND o.target_id != ?`
+		args = append(args, u)
+	}
+	query += `)`
+	var n int
+	err := q.QueryRow(query, args...).Scan(&n)
+	return n, err
+}
+
 // StorageTargetDeletable answers DeleteStorageTarget's refusal without
 // deleting, so the caller can abort the target's multipart uploads first.
-func (d *DB) StorageTargetDeletable(id int64) error {
-	var only int
-	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM offload_items i WHERE i.target_id = ? AND i.evicted = 1
-		AND NOT EXISTS (SELECT 1 FROM offload_items o WHERE o.rel_path = i.rel_path AND o.target_id != i.target_id
-			AND o.state = 'verified')`, id).Scan(&only); err != nil {
+func (d *DB) StorageTargetDeletable(id int64, untrusted []int64) error {
+	n, err := onlyCopies(d.sql, id, untrusted)
+	if err != nil {
 		return err
 	}
-	if only > 0 {
+	if n > 0 {
 		return ErrStorageTargetHoldsOnlyCopies
 	}
 	return nil
 }
 
 // DeleteStorageTarget removes a target and its item rows, unless it holds the
-// only copy of an evicted file.
-func (d *DB) DeleteStorageTarget(id int64) error {
+// only usable copy of an evicted file.
+func (d *DB) DeleteStorageTarget(id int64, untrusted []int64) error {
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var only int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM offload_items i WHERE i.target_id = ? AND i.evicted = 1
-		AND NOT EXISTS (SELECT 1 FROM offload_items o WHERE o.rel_path = i.rel_path AND o.target_id != i.target_id
-			AND o.state = 'verified')`, id).Scan(&only); err != nil {
+	n, err := onlyCopies(tx, id, untrusted)
+	if err != nil {
 		return err
 	}
-	if only > 0 {
+	if n > 0 {
 		return ErrStorageTargetHoldsOnlyCopies
 	}
-	if _, err := tx.Exec(`DELETE FROM offload_multipart WHERE target_id = ?`, id); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM offload_items WHERE target_id = ?`, id); err != nil {
-		return err
+	for _, q := range []string{
+		`DELETE FROM offload_multipart WHERE target_id = ?`,
+		`DELETE FROM offload_items WHERE target_id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
 	}
 	res, err := tx.Exec(`DELETE FROM storage_targets WHERE id = ?`, id)
 	if err != nil {
@@ -316,6 +343,51 @@ func (d *DB) DeleteStorageTarget(id int64) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+// ErrStorageTargetRebindHoldsCopies refuses moving a target to another
+// endpoint, bucket, account or addressing while it holds evicted files: their
+// objects are at the old address.
+var ErrStorageTargetRebindHoldsCopies = fmt.Errorf("%w: recordings moved to this target are stored at its current address; fetch them back before changing the endpoint, bucket, region, access key or addressing", ErrStateConflict)
+
+// RebindStorageTarget is UpdateStorageTarget for an edit that changes WHERE
+// objects live. In one transaction it refuses while any of the target's rows
+// is evicted, then saves, puts every row back to pending -- nothing is
+// verified at the new address yet -- and drops multipart progress made at the
+// old one. The transaction is what keeps an eviction from slipping in between.
+func (d *DB) RebindStorageTarget(box *secrets.Box, t StorageTarget) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var held int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM offload_items WHERE target_id = ? AND evicted = 1`, t.ID).Scan(&held); err != nil {
+		return err
+	}
+	if held > 0 {
+		return ErrStorageTargetRebindHoldsCopies
+	}
+	q, args, err := updateTargetQuery(box, t)
+	if err != nil {
+		return err
+	}
+	res, err := tx.Exec(q, args...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(`UPDATE offload_items SET state = ?, attempts = 0, next_attempt_at = 0, verified_at = 0,
+		last_error = 'target moved; uploading to the new address', updated_at = ? WHERE target_id = ?`,
+		OffloadPending, time.Now().Unix(), t.ID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM offload_multipart WHERE target_id = ?`, t.ID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

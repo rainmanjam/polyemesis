@@ -72,11 +72,28 @@ func (s *Service) Fetch(name string) (FetchState, error) {
 	if st, ok := s.fetches[name]; ok && st.State == FetchFetching {
 		return *st, nil
 	}
+	s.pruneFetchesLocked()
 	st := &FetchState{State: FetchFetching, Since: s.now()}
 	s.fetches[name] = st
 	ctx := s.baseCtx
+	if s.fetchSem == nil {
+		s.fetchSem = make(chan struct{}, maxConcurrentFetches)
+	}
+	sem := s.fetchSem
 	go func() {
-		err := s.FetchNow(ctx, name)
+		// A long session asks for many segments at once; at most
+		// maxConcurrentFetches transfers (and temp files) run together.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+		}
+		var err error
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		} else {
+			err = s.FetchNow(ctx, name)
+			<-sem
+		}
 		s.fetchMu.Lock()
 		if err != nil {
 			st.State, st.Error = FetchFailed, clipErr(err)
@@ -88,6 +105,22 @@ func (s *Service) Fetch(name string) (FetchState, error) {
 		s.onChange()
 	}()
 	return *st, nil
+}
+
+// maxConcurrentFetches bounds fetch-back transfers in flight.
+const maxConcurrentFetches = 2
+
+// fetchStateTTL is how long a finished or failed fetch's state is kept for
+// the Library and the clipper to read.
+const fetchStateTTL = time.Hour
+
+func (s *Service) pruneFetchesLocked() {
+	now := s.now()
+	for name, st := range s.fetches {
+		if st.State != FetchFetching && now.Sub(st.Since) > fetchStateTTL {
+			delete(s.fetches, name)
+		}
+	}
 }
 
 // FetchNow fetches synchronously: GET from the first target holding a
@@ -200,18 +233,26 @@ func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, fin
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if _, err := os.Stat(final); err == nil {
-		return errors.New("a local file already exists under this name")
-	}
-	if err := os.Rename(tmpName, final); err != nil {
+	// NO-REPLACE, not a rename: a recorder that created this name between a
+	// check and the rename would have its file overwritten. A hard link fails
+	// with EEXIST if the name exists, atomically; the temporary name is then
+	// removed by the deferred cleanup.
+	if err := os.Link(tmpName, final); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return errors.New("a local file already exists under this name")
+		}
 		return err
 	}
-	keep = true
 	return nil
 }
 
 // fetchAttempt appends what the service sends from *got on to tmp and h.
 func (s *Service) fetchAttempt(ctx context.Context, c Client, it db.OffloadItem, tmp *os.File, h hash.Hash, got *int64) error {
+	if *got == it.Bytes {
+		// Everything arrived on an earlier attempt that then errored; asking
+		// for bytes=<size>- would be a 416. The digest check decides.
+		return nil
+	}
 	body, info, partial, err := c.GetFrom(ctx, it.Key, *got)
 	if err != nil {
 		return err
@@ -236,7 +277,7 @@ func (s *Service) fetchAttempt(ctx context.Context, c Client, it db.OffloadItem,
 	if *got > it.Bytes {
 		return fmt.Errorf("%w: object is longer than the %d bytes uploaded", ErrChecksumMismatch, it.Bytes)
 	}
-	if err != nil {
+	if err != nil && *got < it.Bytes {
 		return err
 	}
 	if *got < it.Bytes {
