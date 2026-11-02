@@ -77,7 +77,8 @@ does.
 - **A number of seconds** drops at least that much of the newest programme.
 - **The safety margin.** A dump never leaves less than 2 s plus one GOP of
   delay. If you ask for more than that allows, it dumps as much as it can and
-  says so ("clamped").
+  says so ("clamped"). If the feed stalls while a dump waits for its keyframe,
+  the delay still never drops below 2 s.
 - **It cuts at keyframes.** The cut is at the start of a keyframe in the buffer,
   and the stream resumes at the next keyframe that arrives. So a dump takes a
   little more than you asked for, up to one GOP (usually 2 s) more, and takes up
