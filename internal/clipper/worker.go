@@ -52,6 +52,9 @@ type JobResult struct {
 	Sources     int      `json:"sources"`
 	EDLPath     string   `json:"edlPath,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
+	// Vertical marks a 9:16 short, so a picker that wants a landscape clip --
+	// the playout offline card -- can leave it out.
+	Vertical bool `json:"vertical,omitempty"`
 }
 
 // Resolver turns a job's Target into the segments to cut from.
@@ -61,8 +64,28 @@ type JobResult struct {
 // knows both.
 type Resolver func(ctx context.Context, target string) (Timeline, error)
 
+// WorkerOption customises NewWorker.
+type WorkerOption func(*workerConfig)
+
+type workerConfig struct {
+	transcript TranscriptSource
+	fonts      func(name string) (string, error)
+	burn       bool
+}
+
+// WithTranscript lets the worker caption a vertical export. A job carries the
+// caption tracks and style but never the words -- see Captions.Tracks -- so
+// without a source a captioned short is rendered without captions, and says so.
+func WithTranscript(src TranscriptSource) WorkerOption {
+	return func(c *workerConfig) { c.transcript = src }
+}
+
 // NewWorker adapts a Cutter to the job queue.
-func NewWorker(c *Cutter, resolve Resolver) jobs.Worker {
+func NewWorker(c *Cutter, resolve Resolver, opts ...WorkerOption) jobs.Worker {
+	var cfg workerConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return jobs.WorkerFunc(func(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 		params, err := parseJobParams(job)
 		if err != nil {
@@ -72,6 +95,7 @@ func NewWorker(c *Cutter, resolve Resolver) jobs.Worker {
 		if err != nil {
 			return jobs.Permanent(err)
 		}
+		params.Request.Vertical = captionsAtRunTime(params.Request, tl, cfg, rep)
 		plan, err := planForJob(ctx, c, tl, params.Request)
 		if err != nil {
 			return err
@@ -85,6 +109,11 @@ func NewWorker(c *Cutter, resolve Resolver) jobs.Worker {
 		}
 
 		res, err := c.Execute(ctx, plan, jobProgress(rep))
+		if errors.Is(err, ErrOutputExists) {
+			// Another attempt would encode the whole short again only to
+			// find the same file there.
+			return jobs.Permanent(err)
+		}
 		if err != nil {
 			return err
 		}
@@ -139,6 +168,7 @@ func jobResult(plan Plan, res Result, params JobParams, rep jobs.Reporter) JobRe
 		ReEncodedMS: plan.HeadDuration.Milliseconds(),
 		Sources:     len(plan.Sources),
 		Warnings:    plan.Warnings,
+		Vertical:    plan.Vertical != nil,
 	}
 	if params.EDLPath == "" {
 		return out
@@ -174,4 +204,57 @@ func permanentPlanError(err error) bool {
 		errors.Is(err, ErrOutOfRange) ||
 		errors.Is(err, ErrNoSegments) ||
 		errors.Is(err, ErrNoWorkDir)
+}
+
+// captionsAtRunTime completes a captioned short from what the job did not
+// carry: the words (from the transcript store), the font file (from the font's
+// name) and whether this FFmpeg can draw at all. A transcript or font that
+// cannot be read costs the captions, not the short: the job log says so and
+// the render goes ahead.
+func captionsAtRunTime(req Request, tl Timeline, cfg workerConfig, rep jobs.Reporter) *Vertical {
+	v := req.Vertical
+	if v == nil || v.Captions == nil {
+		return v
+	}
+	out := *v
+	c := *v.Captions
+	out.Captions = &c
+	if c.FontFile == "" && cfg.fonts != nil {
+		path, err := cfg.fonts(c.Style.Normalized().Font)
+		if err != nil {
+			rep.Logf("the caption font could not be found (%v); rendering without captions", err)
+			c.Cues, c.Burn = nil, false
+			return &out
+		}
+		c.FontFile = path
+		c.Burn = cfg.burn
+	}
+	if len(c.Cues) > 0 {
+		return &out
+	}
+	if cfg.transcript == nil {
+		rep.Logf("captions were asked for but this worker has no transcript source; rendering without them")
+		return &out
+	}
+	cues, err := CaptionCues(tl.Segments(), cfg.transcript, req.In, req.Out, c.Tracks)
+	if err != nil {
+		rep.Logf("the transcript could not be read (%v); rendering without captions", err)
+		return &out
+	}
+	c.Cues = cues
+	return &out
+}
+
+// WithCaptionFonts resolves a caption font NAME to a file when the job runs. A
+// job names its font rather than carrying the server's path to it -- see
+// Vertical.ForJob.
+func WithCaptionFonts(resolve func(name string) (string, error)) WorkerOption {
+	return func(c *workerConfig) { c.fonts = resolve }
+}
+
+// WithCaptionBurn tells the worker whether this FFmpeg can burn captions -- it
+// has the libass subtitles filter -- which is a fact about the machine the job
+// runs on rather than about the request.
+func WithCaptionBurn(ok bool) WorkerOption {
+	return func(c *workerConfig) { c.burn = ok }
 }

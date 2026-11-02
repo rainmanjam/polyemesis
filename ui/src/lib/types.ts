@@ -3825,6 +3825,9 @@ export interface AutomodSettings {
   history: AutomodHistory;
   /** The PRIMARY model checker, and the policy both checkers share. */
   model: AutomodModel;
+  /** Lets the clip editor's highlight scan send transcript excerpts to the
+   *  PRIMARY model's provider for scoring. Its own switch, off by default. */
+  highlightScoring?: boolean;
   /** The optional fallback, asked only when the primary could not answer.
    *  Optional here so a document from an older server still types. */
   secondary?: AutomodModel;

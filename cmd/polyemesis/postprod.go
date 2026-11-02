@@ -2,19 +2,26 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/api"
+	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/config"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/ffmpeg"
+	"github.com/rainmanjam/polyemesis/internal/highlights"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
 	"github.com/rainmanjam/polyemesis/internal/uploadverify"
@@ -48,7 +55,7 @@ type postProd struct {
 // nice(1). None of those is a reason to refuse to serve a live stream, so a
 // failure here degrades one feature and logs why. The one thing that can fail
 // hard — the database — was already opened by the caller.
-func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
+func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, eng *engine.Manager, tools *ffmpeg.Tools) postProd {
 	settings, err := store.GetSettings()
 	if err != nil {
 		// Falling back to defaults rather than giving up: the stored policy is
@@ -93,7 +100,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// be applied to work that had already started.
 	q.SetAdmit(gov.MayStart)
 
-	registerProcessors(log, cfg, store, gov, q, tools, whisper, settings.PostProd)
+	registerProcessors(log, cfg, store, box, gov, q, tools, whisper, settings.PostProd)
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -136,7 +143,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 // missing. A processor that fails a job with "whisper.cpp is not installed"
 // tells an operator what to do; a button that silently does not exist tells
 // them the feature is broken. This is the fail-open rule applied to a queue.
-func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
+func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, gov *jobs.Governor, q *jobs.Queue, tools *ffmpeg.Tools, whisper *transcribe.Tools, pp db.PostProdSettings) {
 	reg := func(kind jobs.Kind, err error) {
 		if err != nil {
 			log.Error("cannot register a job kind", "kind", kind, "error", err)
@@ -170,9 +177,18 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, gov *
 		log.Error("cannot register the derived-media job kinds", "error", err)
 	}
 
-	cutter := clipper.New(log, tools.FFmpeg, tools.FFprobe)
+	cutter := newCutter(log, tools, gov)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
-	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve)))
+	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve,
+		clipper.WithTranscript(api.ClipTranscriptSource(store)),
+		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
+		clipper.WithCaptionBurn(tools.HasFilter("subtitles")))))
+
+	// Highlight scans (Wave 4 #5a). Niced like every other derived-media
+	// child: measuring loudness decodes the whole recording's audio. The
+	// model, when a scan asks for it, is the Automod primary connector on a
+	// budget of its OWN, so a post-pass never spends live moderation's.
+	reg(highlights.JobKind, q.Register(highlights.JobKind, 1, highlights.NewWorker(highlightDeps(log, store, box, gov, tools))))
 
 	// Playlist normalisation. THIS IS THE PRODUCER OF THE FILE THE PLAYLIST
 	// TIER REFUSES TO START WITHOUT: engine.playlistItemsReady requires a
@@ -342,8 +358,9 @@ func recordingTimeline(store *db.DB, recordingsDir string) clipper.Resolver {
 			return clipper.Timeline{}, err
 		}
 		return clipper.NewTimeline([]clipper.Segment{{
-			Path:     filepath.Join(recordingsDir, rec.Filename),
-			Duration: time.Duration(rec.DurationMS) * time.Millisecond,
+			RecordingID: rec.ID,
+			Path:        filepath.Join(recordingsDir, rec.Filename),
+			Duration:    time.Duration(rec.DurationMS) * time.Millisecond,
 		}})
 	}
 }
@@ -445,5 +462,87 @@ func backfillSessions(log *slog.Logger, store *db.DB, settings db.Settings) {
 	if res.Created > 0 || res.Assigned > 0 {
 		log.Info("grouped existing recordings into sessions",
 			"sessions", res.Created, "recordings", res.Assigned, "extended", res.Extended)
+	}
+}
+
+// highlightDeps wires a highlight scan to the store, the niced FFmpeg, and the
+// operator's model.
+func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.Governor, tools *ffmpeg.Tools) highlights.Deps {
+	ffmpegBin := "ffmpeg"
+	if tools != nil && tools.FFmpeg != "" {
+		ffmpegBin = tools.FFmpeg
+	}
+	return highlights.Deps{
+		FFmpeg: ffmpegBin,
+		Run: func(ctx context.Context, name string, args []string, stdout func(io.Reader) error) error {
+			if gov != nil {
+				name, args = gov.NiceCommand(name, args...)
+			}
+			return highlights.RunStreaming(ctx, name, args, stdout)
+		},
+		ChatTimes: func(fromMS, toMS int64) ([]highlights.ChatStamp, error) {
+			rows, err := store.ChatStampsBetween(fromMS, toMS)
+			out := make([]highlights.ChatStamp, len(rows))
+			for i, r := range rows {
+				out[i] = highlights.ChatStamp{ID: r.ID, AtMS: r.AtMS}
+			}
+			return out, err
+		},
+		// The same adapter the clip worker reads captions through: a missing
+		// transcript is none, and a store that cannot be read is an error.
+		Transcript: func(recordingID int64) ([]highlights.Line, error) {
+			lines, err := api.ClipTranscriptSource(store)(recordingID)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]highlights.Line, 0, len(lines))
+			for _, l := range lines {
+				out = append(out, highlights.Line{StartMS: l.StartMS, EndMS: l.EndMS, Text: l.Text})
+			}
+			return out, nil
+		},
+		Save: func(recordingID int64, sugs []highlights.Suggestion) (int, error) {
+			rows := make([]db.Highlight, 0, len(sugs))
+			for _, sg := range sugs {
+				signals, err := json.Marshal(sg.Signals)
+				if err != nil {
+					return 0, err
+				}
+				rows = append(rows, db.Highlight{StartMS: sg.StartMS, EndMS: sg.EndMS, Score: sg.Score,
+					SignalScore: sg.SignalScore, ModelScore: sg.ModelScore, Signals: signals, Excerpt: sg.Excerpt})
+			}
+			return store.ReplacePendingHighlights(recordingID, rows)
+		},
+		Model: api.HighlightModel(store, box, automod.NewBudget(), log),
+	}
+}
+
+// newCutter is the production clip cutter: every FFmpeg and ffprobe it starts
+// runs under the governor's priority wrapper, as derived-media jobs already
+// do, so a clip export -- a full 1080x1920 encode for a vertical short --
+// yields the CPU to a live broadcast instead of competing with it. The
+// governor's own policy still decides WHEN the job runs.
+func newCutter(log *slog.Logger, tools *ffmpeg.Tools, gov *jobs.Governor, opts ...clipper.Option) *clipper.Cutter {
+	if gov != nil {
+		opts = append(opts, clipper.WithNice(niceWrapper(gov)))
+	}
+	return clipper.New(log, tools.FFmpeg, tools.FFprobe, opts...)
+}
+
+// captionFontIn resolves a caption font name to a file in dir. The name is
+// matched against the directory's own listing and the path built from the
+// listed name, so a name from a job's params never becomes a path by itself.
+func captionFontIn(dir string) func(name string) (string, error) {
+	return func(name string) (string, error) {
+		names, err := ffmpeg.ListFonts(dir)
+		if err != nil {
+			return "", err
+		}
+		for _, n := range names {
+			if n == name {
+				return ffmpeg.FontPath(dir, n)
+			}
+		}
+		return "", fmt.Errorf("font %q is not in the fonts directory", name)
 	}
 }
