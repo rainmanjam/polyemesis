@@ -154,6 +154,13 @@ func hlsOutput(s VariantSpec) []string {
 		// time rather than only to an offset.
 		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
 		"-hls_segment_type", "mpegts",
+		// Number segments from the wall clock in microseconds rather than
+		// from zero. A restarted muxer used to write seg_00000.ts again, so a
+		// segment URL named different bytes from one run to the next and no
+		// cache could hold it for longer than a segment. Numbered this way a
+		// name is never reused, which is what lets the origin call an HLS
+		// segment immutable (see Handler) and a pull CDN keep it.
+		"-hls_start_number_source", "epoch_us",
 		"-hls_segment_filename", filepath.Join(s.Dir, hlsSegmentPattern),
 		filepath.Join(s.Dir, MediaPlaylist),
 	)

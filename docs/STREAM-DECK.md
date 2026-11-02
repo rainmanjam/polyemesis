@@ -50,7 +50,7 @@ streamdeck link com.polyemesis.streamdeck.sdPlugin
 
 `npm run build` bundles the plugin into
 `com.polyemesis.streamdeck.sdPlugin/bin`. `streamdeck link` installs that
-folder into the Stream Deck app. The **polyemesis** category then appears in
+folder into the Stream Deck app. The **Polyemesis** category then appears in
 the app's action list. After a rebuild, `streamdeck restart
 com.polyemesis.streamdeck` reloads it.
 

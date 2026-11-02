@@ -223,8 +223,8 @@ func isLoopbackHost(host string) bool {
 }
 
 // relayMCP pumps messages between stdio and the server until stdin closes.
-func relayMCP(ctx context.Context, endpoint string, client *http.Client, stdin io.ReadCloser, stdout io.WriteCloser) error {
-	ctx, cancel := context.WithCancel(ctx)
+func relayMCP(parent context.Context, endpoint string, client *http.Client, stdin io.ReadCloser, stdout io.WriteCloser) error {
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	local, err := (&mcp.IOTransport{Reader: stdin, Writer: stdout}).Connect(ctx)
 	if err != nil {
@@ -276,7 +276,13 @@ func relayMCP(ctx context.Context, endpoint string, client *http.Client, stdin i
 				resp := &jsonrpc.Response{ID: req.ID, Error: &jsonrpc.Error{
 					Code: jsonrpc.CodeInternalError, Message: "polyemesis: " + oneLine(err.Error()),
 				}}
-				if werr := local.Write(ctx, resp); werr != nil {
+				// Written on parent, not ctx. A refusal the SDK treats as fatal
+				// (a 401, say) fails the remote connection inside the Write
+				// above, which wakes the server -> stdout goroutine's Read and
+				// it cancels ctx -- usually before this line runs. On ctx the
+				// answer would be dropped and the client would read EOF instead
+				// of the error. parent still stops it on a real shutdown.
+				if werr := local.Write(parent, resp); werr != nil {
 					readErr = werr
 					break
 				}

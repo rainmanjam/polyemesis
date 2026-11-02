@@ -704,6 +704,18 @@ func liveSegments(recs []db.Recording, window time.Duration, now time.Time) map[
 	return live
 }
 
+// LiveSet names the segments a recorder may still be writing: every segment
+// that started within one segment length plus slack, and the newest one
+// unconditionally. It is the same inference Sweep protects with, exported so
+// offload never uploads a file retention would not touch either.
+func LiveSet(recs []db.Recording, segmentSeconds int, now time.Time) map[string]bool {
+	live := liveSegments(recs, liveWindow(segmentSeconds), now)
+	if n := newestSegmentName(recs); n != "" {
+		live[n] = true
+	}
+	return live
+}
+
 // newestSegmentName is the last segment by start time, which Sweep protects
 // unconditionally.
 func newestSegmentName(recs []db.Recording) string {

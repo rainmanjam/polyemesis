@@ -1,12 +1,12 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.polyemesis.streamdeck",
-  "Name": "polyemesis",
+  "Name": "Polyemesis",
   "Description": "Destination state, go live, stop all or one destination with confirmation, recording, routing presets, failover, track mute and gain, and dial meters for a polyemesis install.",
   "Author": "polyemesis",
   "Version": "0.1.0.0",
   "Icon": "imgs/plugin-icon",
-  "Category": "polyemesis",
+  "Category": "Polyemesis",
   "CategoryIcon": "imgs/category-icon",
   "CodePath": "bin/plugin.js",
   "SDKVersion": 3,
@@ -38,37 +38,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/destination/idle"
+          "Image": "imgs/keys/destination/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/live"
+          "Image": "imgs/keys/destination/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/warn"
+          "Image": "imgs/keys/destination/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/destination/error"
+          "Image": "imgs/keys/destination/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/held"
+          "Image": "imgs/keys/destination/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/unbound"
+          "Image": "imgs/keys/destination/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/halted"
+          "Image": "imgs/keys/destination/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/needsAdmin"
+          "Image": "imgs/keys/destination/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/muted"
+          "Image": "imgs/keys/destination/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/restarted"
+          "Image": "imgs/keys/destination/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/destination/unavailable"
+          "Image": "imgs/keys/destination/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -85,37 +96,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/go-live/idle"
+          "Image": "imgs/keys/go-live/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/live"
+          "Image": "imgs/keys/go-live/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/warn"
+          "Image": "imgs/keys/go-live/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/go-live/error"
+          "Image": "imgs/keys/go-live/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/held"
+          "Image": "imgs/keys/go-live/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/unbound"
+          "Image": "imgs/keys/go-live/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/halted"
+          "Image": "imgs/keys/go-live/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/needsAdmin"
+          "Image": "imgs/keys/go-live/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/muted"
+          "Image": "imgs/keys/go-live/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/restarted"
+          "Image": "imgs/keys/go-live/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/go-live/unavailable"
+          "Image": "imgs/keys/go-live/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -132,37 +154,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/stop-all/idle"
+          "Image": "imgs/keys/stop-all/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/live"
+          "Image": "imgs/keys/stop-all/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/warn"
+          "Image": "imgs/keys/stop-all/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/stop-all/error"
+          "Image": "imgs/keys/stop-all/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/held"
+          "Image": "imgs/keys/stop-all/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/unbound"
+          "Image": "imgs/keys/stop-all/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/halted"
+          "Image": "imgs/keys/stop-all/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/needsAdmin"
+          "Image": "imgs/keys/stop-all/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/muted"
+          "Image": "imgs/keys/stop-all/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/restarted"
+          "Image": "imgs/keys/stop-all/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-all/unavailable"
+          "Image": "imgs/keys/stop-all/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -180,37 +213,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/failover/idle"
+          "Image": "imgs/keys/failover/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/live"
+          "Image": "imgs/keys/failover/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/warn"
+          "Image": "imgs/keys/failover/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/failover/error"
+          "Image": "imgs/keys/failover/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/held"
+          "Image": "imgs/keys/failover/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/unbound"
+          "Image": "imgs/keys/failover/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/halted"
+          "Image": "imgs/keys/failover/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/needsAdmin"
+          "Image": "imgs/keys/failover/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/muted"
+          "Image": "imgs/keys/failover/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/restarted"
+          "Image": "imgs/keys/failover/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/failover/unavailable"
+          "Image": "imgs/keys/failover/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -227,37 +271,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/stop-destination/idle"
+          "Image": "imgs/keys/stop-destination/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/live"
+          "Image": "imgs/keys/stop-destination/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/warn"
+          "Image": "imgs/keys/stop-destination/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/stop-destination/error"
+          "Image": "imgs/keys/stop-destination/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/held"
+          "Image": "imgs/keys/stop-destination/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/unbound"
+          "Image": "imgs/keys/stop-destination/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/halted"
+          "Image": "imgs/keys/stop-destination/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/needsAdmin"
+          "Image": "imgs/keys/stop-destination/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/muted"
+          "Image": "imgs/keys/stop-destination/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/restarted"
+          "Image": "imgs/keys/stop-destination/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/stop-destination/unavailable"
+          "Image": "imgs/keys/stop-destination/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -275,37 +330,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/record/idle"
+          "Image": "imgs/keys/record/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/live"
+          "Image": "imgs/keys/record/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/warn"
+          "Image": "imgs/keys/record/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/record/error"
+          "Image": "imgs/keys/record/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/held"
+          "Image": "imgs/keys/record/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/unbound"
+          "Image": "imgs/keys/record/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/halted"
+          "Image": "imgs/keys/record/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/needsAdmin"
+          "Image": "imgs/keys/record/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/muted"
+          "Image": "imgs/keys/record/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/restarted"
+          "Image": "imgs/keys/record/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/record/unavailable"
+          "Image": "imgs/keys/record/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -322,37 +388,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/preset/idle"
+          "Image": "imgs/keys/preset/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/live"
+          "Image": "imgs/keys/preset/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/warn"
+          "Image": "imgs/keys/preset/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/preset/error"
+          "Image": "imgs/keys/preset/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/held"
+          "Image": "imgs/keys/preset/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/unbound"
+          "Image": "imgs/keys/preset/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/halted"
+          "Image": "imgs/keys/preset/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/needsAdmin"
+          "Image": "imgs/keys/preset/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/muted"
+          "Image": "imgs/keys/preset/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/restarted"
+          "Image": "imgs/keys/preset/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/preset/unavailable"
+          "Image": "imgs/keys/preset/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -370,37 +447,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/poll/idle"
+          "Image": "imgs/keys/poll/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/live"
+          "Image": "imgs/keys/poll/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/warn"
+          "Image": "imgs/keys/poll/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/poll/error"
+          "Image": "imgs/keys/poll/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/held"
+          "Image": "imgs/keys/poll/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/unbound"
+          "Image": "imgs/keys/poll/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/halted"
+          "Image": "imgs/keys/poll/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/needsAdmin"
+          "Image": "imgs/keys/poll/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/muted"
+          "Image": "imgs/keys/poll/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/restarted"
+          "Image": "imgs/keys/poll/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/poll/unavailable"
+          "Image": "imgs/keys/poll/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
@@ -470,37 +558,48 @@
       "PropertyInspectorPath": "ui/pi.html",
       "States": [
         {
-          "Image": "imgs/keys/track-mute/idle"
+          "Image": "imgs/keys/track-mute/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/live"
+          "Image": "imgs/keys/track-mute/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/warn"
+          "Image": "imgs/keys/track-mute/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/track-mute/error"
+          "Image": "imgs/keys/track-mute/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/held"
+          "Image": "imgs/keys/track-mute/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/unbound"
+          "Image": "imgs/keys/track-mute/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/halted"
+          "Image": "imgs/keys/track-mute/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/needsAdmin"
+          "Image": "imgs/keys/track-mute/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/muted"
+          "Image": "imgs/keys/track-mute/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/restarted"
+          "Image": "imgs/keys/track-mute/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/track-mute/unavailable"
+          "Image": "imgs/keys/track-mute/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,

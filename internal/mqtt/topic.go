@@ -120,6 +120,11 @@ func (t *Topics) Rendition(source, rend string) string {
 	return t.join("source", source, "rendition", rend, "state")
 }
 
+// Storage is one offload storage target's state topic.
+func (t *Topics) Storage(target string) string {
+	return t.join("storage", target, "state")
+}
+
 // All is the wildcard matching everything under this instance. Used by the
 // retained-cleanup sweep and worth having in one place, because getting it
 // wrong means either missing orphans or clearing another install's tree.

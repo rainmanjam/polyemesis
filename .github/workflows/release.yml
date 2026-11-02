@@ -712,7 +712,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          # Both projects this job runs npm ci in: the embedded web UI and the
+          # Stream Deck plugin.
+          cache-dependency-path: |
+            ui/package-lock.json
+            integrations/streamdeck/package-lock.json
 
       # Docker is never required to run polyemesis: `make release` produces a
       # self-contained binary per platform with the web UI embedded, and the
@@ -832,6 +836,45 @@ jobs:
           ./scripts/sbom-guard.sh \
             dist/polyemesis-sbom.spdx.json \
             dist/polyemesis-sbom.cdx.json
+
+      # THE STREAM DECK PLUGIN, as the installable .streamDeckPlugin, built,
+      # validated and packed exactly as ci.yml's streamdeck job does it.
+      #
+      # ITS VERSION IS THE TAG'S. Stream Deck requires four numeric parts, so
+      # v0.12.3 becomes 0.12.3.0: the tag without its v, without any -suffix,
+      # with a .0 build number. `streamdeck pack --version` writes that into
+      # the packaged manifest, so the committed manifest's Version is a
+      # development placeholder and nobody has to bump it when cutting a
+      # release. A rehearsal (schedule, dispatch from main) has no version tag
+      # and packs the committed value instead -- it publishes nothing, so there
+      # is nothing for the version to disagree with.
+      #
+      # AFTER the SBOM, BEFORE the checksums. The SBOM scans the source tree,
+      # which already holds integrations/streamdeck/package-lock.json; running
+      # npm ci first would only add a node_modules for it to wander into. The
+      # checksums and the provenance attestation read dist/*, so they cover
+      # the plugin like every other asset.
+      - name: Stream Deck plugin
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        working-directory: integrations/streamdeck
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+          npm run validate
+          v="${REF_NAME#v}"
+          v="${v%%-*}"
+          if [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            npm run pack -- --version "${v}.0"
+          elif [ "${PUBLISH}" = "true" ]; then
+            echo "::error::Cannot derive a Stream Deck version (x.y.z.w) from ref '${REF_NAME}'. Refusing to publish a plugin whose version does not match the release."
+            exit 1
+          else
+            echo "::notice::rehearsal on '${REF_NAME}': packing the committed manifest Version."
+            npm run pack
+          fi
+          cp dist/com.polyemesis.streamdeck.streamDeckPlugin "$GITHUB_WORKSPACE/dist/"
 
       # Checksums so someone can verify a download they did not build.
       - name: Checksums

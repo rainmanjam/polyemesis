@@ -215,6 +215,10 @@ const DOCS_BY_SECTION = {
       "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
     ["BROADCAST-DELAY.md", "Broadcast delay: hold one destination back up to 15 minutes",
       "Delay one platform's copy of the stream to cut something before it airs. Stop plays the tail out; Stop now, Stop all and delete cut it. RAM and disk are bounded."],
+    ["STORAGE.md", "S3-compatible offload: mirror recordings to a bucket",
+      "Copy finished recordings, stems, transcripts and clips to S3, R2, B2, Wasabi or a self-hosted store. Every upload is verified; local files are never deleted."],
+    ["CDN.md", "Serving the public player through a pull CDN",
+      "Put Cloudflare or Bunny in front of the player origin. Which responses a CDN may cache and for how long, what stays private, and how to purge by hand."],
     ["LINK-HEALTH.md", "Degraded-link failover, link stats and chat commands",
       "Leave a primary that is still connected but failing: bitrate, RTT and loss thresholds, live link stats, and !bitrate, !switch and !fix in chat."],
     ["HOT-RELOAD.md", "What a settings change restarts, and what it does not",
@@ -313,6 +317,10 @@ const WITHHELD_ROWS = [
   [
     "RELEASE-RUNBOOK.md",
     "How a maintainer cuts a polyemesis release: rehearse with dry_run, what each release gate refuses, and why a wrong CHANGELOG date is fixed by re-dating on main and re-cutting the tag on that new commit with scripts/cut-release.sh -- re-pushing it to the same commit changes nothing. It is about publishing this project, not about running it, so it is for whoever holds the tag-push -- and UPGRADING.md is the half a reader of this site actually needs.",
+  ],
+  [
+    "STREAMDECK-HARDWARE-CHECK.md",
+    "The maintainer's checklist for trying the packaged Stream Deck plugin on a real Stream Deck and Stream Deck+ before a release: install, pair, hold-to-confirm, dials, reconnect. It is a release step for whoever holds the tag-push, like RELEASE-RUNBOOK.md, and STREAM-DECK.md is the half a reader of this site needs.",
   ],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];

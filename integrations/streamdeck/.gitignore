@@ -4,3 +4,4 @@ com.polyemesis.streamdeck.sdPlugin/bin/
 coverage/
 logs/
 com.polyemesis.streamdeck.sdPlugin/logs/
+dist/

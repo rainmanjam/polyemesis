@@ -1289,12 +1289,18 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `PUT` | `/library/recordings/{id}/speaker` |
 | `POST` | `/library/recordings/{id}/jobs/{kind}` |
 | `GET` | `/library/recordings/{id}/media/{file}` |
+| `POST` | `/library/recordings/{id}/offload/retry` |
 | `GET` | `/clipper/recordings/{id}`, `/keyframes`, `/transcript` |
 | `POST` | `/clipper/recordings/{id}/plan`, `/export` |
 | `GET` | `/clipper/jobs/{id}/download` |
 
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
+
+**Each Library recording carries an `offload` field** when a storage target has
+seen it: one entry per target with its `state` (`pending`, `uploading`,
+`verified`, `failed`, `stuck`), `attempts` and `lastError`. Offload copies and
+never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
 
 **`DELETE /library/recordings/{id}/transcript` takes an optional `?track=N`.**
 Absent, it deletes the whole transcript; present, it deletes one track's, so a
@@ -1431,6 +1437,58 @@ self-hosted endpoint on purpose`. Send `"allowPrivateTarget": true` in the same
 body to mean it — it defaults to `false` and is read back with the hook. The
 same check runs again at dial time on every delivery, so a name that changes its
 answer later is refused then. See [HOOKS.md](HOOKS.md#private-and-lan-endpoints-allowprivatetarget).
+
+### Storage targets (offload)
+
+S3-compatible buckets (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) that
+finished recordings are copied to. Mirror mode only: the local file is never
+moved or deleted. See
+[STORAGE.md](STORAGE.md).
+
+| Method | Path |
+|---|---|
+| `GET` `POST` | `/storage/targets` |
+| `GET` `PUT` `DELETE` | `/storage/targets/{id}` |
+| `POST` | `/storage/targets/test` |
+| `POST` | `/storage/targets/{id}/retry` |
+
+**The secret access key is write-only.** It is sent as `secretAccessKey` on
+`POST` or `PUT`, sealed with the install's secret key, and never returned:
+responses carry `hasSecret` (and `secretUnreadable` when this machine's key
+cannot open it). A `PUT` without it keeps the stored one. A `read` token gets
+the target with `accessKeyId` blanked.
+
+**`POST /storage/targets/test` is session-only**, like `/automod/test`: it
+unseals the secret and sends signed requests out of the process, so no API
+token reaches it. It takes the same body as a save (plus `id` to reuse a saved
+target's secret), writes a small object under the prefix, reads it back, deletes
+it, and answers `{"ok", "steps": [{"step": "put"|"get"|"delete", "ok", "error",
+"skipped"}], "failedStep"}`.
+
+**A literal private address is `400`** unless `"allowPrivateTarget": true`, and
+the same netguard check runs again at dial time, as for webhooks. **`DELETE`**
+aborts the target's unfinished multipart uploads on the service first; objects
+already in the bucket stay there.
+
+**Updating a target is an admin call, like webhooks and the automod key**:
+an `admin` token may change any field; a `read` token may not. The Test route
+alone is session-only. A `PUT` that changes `endpoint`, `bucket`, `region`,
+`accessKeyId` or `pathStyle` resets every file on the target to be uploaded
+again at the new address, and an upload still running against the old one
+cannot record its result.
+
+**A saved secret is used only for the address it was saved for.** A `PUT` or a
+Test that changes `endpoint`, `bucket`, `pathStyle` or `allowPrivateTarget` without a
+`secretAccessKey` is `400` with `"code": "secret_required"`.
+
+**Stuck items.** After `maxAttempts` consecutive failures (default 8, 1-100 per
+target), or at once on an error waiting cannot cure (a refused credential, a
+missing bucket, a key the file cannot have), an item is `stuck`: it is not
+retried again on its own, and `offload.stuck` is raised as an alert, a webhook
+and an events-stream event. `POST /storage/targets/{id}/retry` (every failed or
+stuck item on the target) and `POST /library/recordings/{id}/offload/retry`
+(one recording, every target) put them back with their attempts reset, and
+answer `{"retried": n}`.
 
 ### Alerts and schedules
 

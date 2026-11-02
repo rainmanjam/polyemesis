@@ -318,6 +318,8 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 		},
 	}
 
+	snap.Storage = r.storageStates(now)
+
 	for _, e := range engines {
 		st := e.Status()
 		src := mqtt.SourceState{
@@ -447,4 +449,47 @@ func (f *mqttAudienceFeed) state() *mqtt.AudienceState {
 		return &mqtt.AudienceState{At: time.Now()}
 	}
 	return (*fn)()
+}
+
+// storageStates counts each offload target's uploads by state for telemetry.
+// A store that cannot answer leaves the section out for this tick rather than
+// publishing zeros that would read as "nothing stuck".
+func (r *mqttRunner) storageStates(now time.Time) []mqtt.StorageState {
+	if r.store == nil {
+		return nil
+	}
+	targets, err := r.store.ListStorageTargets(nil)
+	if err != nil {
+		r.log.Warn("mqtt: storage targets unavailable", "err", err)
+		return nil
+	}
+	items, err := r.store.ListOffloadItems()
+	if err != nil {
+		r.log.Warn("mqtt: offload state unavailable", "err", err)
+		return nil
+	}
+	out := make([]mqtt.StorageState, 0, len(targets))
+	for _, t := range targets {
+		// Keyed by ID, not by name: two targets may share a name, and their
+		// retained topics and Home Assistant entities must not collide. The
+		// name stays the friendly name.
+		st := mqtt.StorageState{ID: t.ID, Name: t.Name, Slug: mqtt.StorageSlug(t.ID), Enabled: t.Enabled, At: now}
+		for _, it := range items {
+			if it.TargetID != t.ID {
+				continue
+			}
+			switch it.State {
+			case db.OffloadStuck:
+				st.Stuck++
+			case db.OffloadFailed:
+				st.Failed++
+			case db.OffloadVerified:
+				st.Verified++
+			default:
+				st.Pending++
+			}
+		}
+		out = append(out, st)
+	}
+	return out
 }
