@@ -118,8 +118,20 @@ npm run coverage  # the same tests with lcov, read by SonarCloud
 npm run typecheck # tsc --noEmit
 npm run build     # bundles src/plugin.ts into com.polyemesis.streamdeck.sdPlugin/bin
                   # and writes ui/strings.js from the catalogs
+npm run validate  # Elgato's validator (@elgato/cli) on the built folder
+npm run pack      # validates again and writes dist/com.polyemesis.streamdeck.streamDeckPlugin
 node scripts/icons.mjs   # redraws every icon under com.polyemesis.streamdeck.sdPlugin/imgs
 ```
+
+CI runs validate and pack on every pull request and uploads the
+`.streamDeckPlugin` as a workflow artifact. Each release attaches it, listed in
+`SHA256SUMS`, with the manifest Version set from the tag: v0.12.3 packs as
+0.12.3.0, so the Version committed in `manifest.json` is a development
+placeholder. `.sdignore` in the plugin folder keeps OS clutter out of the package.
+
+Before a release that changes the plugin, run the owner's
+[hardware check](../../docs/STREAMDECK-HARDWARE-CHECK.md) on a real Stream Deck
+and Stream Deck+.
 
 The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, and
 the PNGs are committed. Each key action has eleven faces at 72 and 144 px, one per
