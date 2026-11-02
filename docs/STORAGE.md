@@ -53,6 +53,16 @@ before the delete, each target is asked again for the object's size and
 digest; a missing or different object keeps the file. Stems, transcripts and
 clips are never deleted by move mode.
 
+> **Open decision (stems in move mode).** Move mode keeps a recording's stems
+> on local disk even after the master is moved to the bucket, and keeps them
+> past retention's stem cutoff while the master is evicted. That is the
+> owner's call for move mode only; mirror mode (PR #949) never deletes
+> anything, so the question does not arise there. Also outstanding on this
+> branch before it can be proposed: the two verification-round races (a stale
+> evictOne undoing a retention eviction, and a rebind during an in-flight
+> upload evicting against the old bucket); #949's binding generation is the
+> fix pattern for the second.
+
 A moved recording stays in the Library, marked **In storage**, and retention no
 longer counts it against the local size or age limits. Its life in the bucket
 is the bucket's own lifecycle rule.
