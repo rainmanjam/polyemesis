@@ -56,9 +56,13 @@ import sys
 sys.path.insert(0, sys.argv[1])
 sys.path.insert(0, sys.argv[2])
 import obspython
-import polyemesis_obs as s
+# What the script imports, so the interpreter's start-up cost is paid here and
+# not inside the script's own time. The script itself -- anything its module
+# body does -- is imported AFTER the marker, under the 60s.
+import json, queue, ssl, threading, urllib.error, urllib.request
 print("` + driverReady + `", flush=True)
-settings ={"server": sys.argv[3], "token": sys.argv[4]}
+import polyemesis_obs as s
+settings = {"server": sys.argv[3], "token": sys.argv[4]}
 s.script_defaults(settings)
 s.script_update(settings)
 props = s.script_properties()
@@ -124,20 +128,27 @@ func runScript(t *testing.T, srvURL, token string) string {
 		sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 		seen := false
 		for sc.Scan() {
+			if !seen && sc.Text() == driverReady {
+				// The marker is this test's, not the script's output.
+				seen = true
+				close(ready)
+				continue
+			}
 			mu.Lock()
 			out.WriteString(sc.Text() + "\n")
 			mu.Unlock()
-			if !seen && sc.Text() == driverReady {
-				seen = true
-				close(ready)
-			}
 		}
+		// A scanner that stopped on an error (an over-long line) has not
+		// drained the pipe, and a child blocked writing to it never exits.
+		_, _ = io.Copy(io.Discard, pipe)
 		// Wait only after the pipe is drained; see exec.Cmd.StdoutPipe.
 		exited <- cmd.Wait()
 	}()
 	// kill stops the child and waits for it, so nothing is still writing
-	// output (or err) while the failure below reads it.
-	kill := func() { _ = cmd.Process.Kill(); <-exited }
+	// output (or err) while the failure below reads it. Closing the pipe as
+	// well means a handle inherited by anything the child started cannot hold
+	// the reader open after the child itself is gone.
+	kill := func() { _ = cmd.Process.Kill(); _ = pipe.Close(); <-exited }
 
 	// PHASE ONE: THE INTERPRETER COMES UP. No wall clock of this test's own,
 	// and that is deliberate. Starting CPython and importing urllib, ssl and
@@ -146,41 +157,54 @@ func runScript(t *testing.T, srvURL, token string) string {
 	// internal/db and internal/api packages ran 10-15x slow it cost more than
 	// the whole 60s this test used to give the script -- both tests in the
 	// package timed out together, and the driver's own join(20) shows the
-	// script itself had not even been reached. What bounds this phase is the
-	// test binary's -timeout; the margin is so this test kills its child and
-	// says where it was, rather than leaving a goroutine dump and an orphan.
+	// script itself had not even been reached. Only the interpreter and the
+	// standard library are in this phase; the script's module is imported
+	// after the marker, inside the 60s.
+	//
+	// What bounds this phase is the test binary's -timeout, less room for the
+	// whole of phase two and a margin to kill and report, so the test fails
+	// with its child stopped and its phase named rather than as a goroutine
+	// dump with a python process left running.
 	var startup <-chan time.Time
 	if dl, ok := t.Deadline(); ok {
-		startup = time.After(time.Until(dl) - 30*time.Second)
+		if room := time.Until(dl) - scriptBudget - 30*time.Second; room > 0 {
+			startup = time.After(room)
+		}
 	}
 	select {
 	case <-ready:
 	case err := <-exited:
-		t.Fatalf("python exited before the script was loaded: %v\n%s", err, output())
+		t.Fatalf("python exited before the interpreter was ready: %v\n%s", err, output())
 	case <-startup:
 		kill()
-		t.Fatalf("python did not finish importing the script before the test binary's "+
-			"deadline\n%s", output())
+		t.Fatalf("python did not come up before the test binary's deadline left room "+
+			"for the script\n%s", output())
 	}
 
-	// PHASE TWO: THE SCRIPT ITSELF, from loaded to finished, and this is the
-	// 60s that has always been here, unchanged. A script that hangs in its
-	// callback, its worker or its unload still fails on it.
+	// PHASE TWO: THE SCRIPT ITSELF, from its import to finished, and this is
+	// the 60s that has always been here, unchanged. A script that hangs in its
+	// module body, its callback, its worker or its unload still fails on it.
 	select {
 	case err := <-exited:
 		if err != nil {
 			t.Fatalf("the script failed: %v\n%s", err, output())
 		}
-	case <-time.After(60 * time.Second):
+	case <-time.After(scriptBudget):
 		kill()
-		t.Fatalf("the script did not finish within 60s of being loaded\n%s", output())
+		t.Fatalf("the script did not finish within %v of the interpreter coming up\n%s",
+			scriptBudget, output())
 	}
 	return output()
 }
 
-// driverReady is the line scriptDriver prints once python is up and the script
-// is imported, which is where the script's own time starts.
-const driverReady = "polyemesis-test: script imported"
+// driverReady is the line scriptDriver prints once python and the standard
+// library are up, just before it imports the script: where the script's own
+// time starts.
+const driverReady = "polyemesis-test: interpreter ready"
+
+// scriptBudget is the script's own time, from import to finished. The same 60s
+// this test has always given it.
+const scriptBudget = 60 * time.Second
 
 func TestTheOBSScriptPostsTheThreeFactsWithItsToken(t *testing.T) {
 	var (
