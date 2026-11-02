@@ -510,37 +510,48 @@
       },
       "States": [
         {
-          "Image": "imgs/keys/viewers/idle"
+          "Image": "imgs/keys/viewers/idle",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/live"
+          "Image": "imgs/keys/viewers/live",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/warn"
+          "Image": "imgs/keys/viewers/warn",
+          "TitleColor": "#0B0D11"
         },
         {
-          "Image": "imgs/keys/viewers/error"
+          "Image": "imgs/keys/viewers/error",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/held"
+          "Image": "imgs/keys/viewers/held",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/unbound"
+          "Image": "imgs/keys/viewers/unbound",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/halted"
+          "Image": "imgs/keys/viewers/halted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/needsAdmin"
+          "Image": "imgs/keys/viewers/needsAdmin",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/muted"
+          "Image": "imgs/keys/viewers/muted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/restarted"
+          "Image": "imgs/keys/viewers/restarted",
+          "TitleColor": "#FFFFFF"
         },
         {
-          "Image": "imgs/keys/viewers/unavailable"
+          "Image": "imgs/keys/viewers/unavailable",
+          "TitleColor": "#FFFFFF"
         }
       ],
       "DisableAutomaticStates": true,
