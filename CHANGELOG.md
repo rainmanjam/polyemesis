@@ -10,6 +10,16 @@ its first tagged release.
 
 ### Added
 
+- **The installer sets up caption fonts, CJK included.** In binary mode `install.sh` installs
+  fontconfig, DejaVu (Latin, Greek, Cyrillic, Arabic, Hebrew) and Noto CJK with the host's own
+  package manager (apt-get, dnf, apk or pacman) and runs `fc-cache -f`, so burned-in captions in
+  Chinese, Japanese and Korean render out of the box. The plan shows what it will install and the
+  download size (CJK is about 60 MB on apt, up to about 190 MB on pacman); `--no-cjk-fonts` leaves
+  CJK out and keeps the rest. Fonts already present are left alone, and a package that will not
+  install is a warning, never a failed install. The generated `update.sh` installs any that have
+  gone missing before it stops the service, keeping the install-time choice. See
+  docs/INSTALL.md, "Caption fonts".
+
 - **Broadcast delay: Dump (#11).** A delayed destination that is on the air can drop the newest
   part of its delay buffer, so what just happened never reaches that platform, and it stays on the
   air. Choose everything since the last dump or a number of seconds, from the card's delay panel,

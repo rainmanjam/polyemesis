@@ -37,6 +37,14 @@ missing `secret.key` or does not open, and then:
   after the backup **with the service still stopped** and prints the two
   commands that finish it by hand.
 
+In binary mode `update.sh` also checks the caption fonts before it stops
+anything, and installs any that are missing (fontconfig, DejaVu and, unless you
+installed with `--no-cjk-fonts` or pass it to `update.sh`, Noto CJK) — see
+[Caption fonts](INSTALL.md#caption-fonts). When they are present it runs no
+package manager, and a font that will not install is a warning, never a reason
+to refuse the upgrade. An `update.sh` written before this change does not do
+it; re-run `install.sh` to regenerate it.
+
 If you installed with `install.sh`, run `sudo <installDir>/update.sh` rather
 than the manual steps below — including for a binary you copied in by hand
 afterwards. Operators who installed before 0.7.0 do not have it: re-run

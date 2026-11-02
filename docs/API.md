@@ -1395,7 +1395,9 @@ symbols; CJK is not in the default image (88 MiB) and is added with
 dropping a `.ttf`/`.otf` that has the glyphs into `<data>/fonts`. libass draws
 outline glyphs only, so a colour emoji font is never used: an emoji draws from
 a monochrome font that has it (DejaVu has some) or as a box. On a
-host install, install fonts the usual way for the OS. The plan warns, naming
+host install, `scripts/install.sh` (binary mode) installs fontconfig, DejaVu and
+Noto CJK for you (`--no-cjk-fonts` skips CJK; see INSTALL.md, "Caption
+fonts"); otherwise install fonts the usual way for the OS. The plan warns, naming
 the script (never a character of what was said), when captions need glyphs
 the bundled Inter does not have. An empty `style.outline` is the default
 6 px; `-1` is none. A short carries at most 2000 caption events, with a
