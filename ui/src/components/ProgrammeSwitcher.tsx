@@ -44,7 +44,12 @@ export function ProgrammeSwitcher() {
         aria-label={t("chrome.programme")}
         title={t("chrome.programmeHint")}
         data-testid="programme-switcher"
-        className="h-7 max-w-[10rem] text-[11px]"
+        // Wide enough to name the programme. It truncated to "Main Programme
+        // —…" at 10rem with 400px of empty header beside it, and on a
+        // multi-programme install the scope is the one thing an operator must
+        // not misread. Grows to its content up to 18rem on desktop; on a
+        // phone it keeps to 9rem, with every full name in the open menu.
+        className="h-7 w-auto min-w-0 max-w-[9rem] text-sm sm:max-w-[18rem] [&>span]:truncate"
       >
         <SelectValue placeholder={t("chrome.programme")} />
       </SelectTrigger>

@@ -216,7 +216,14 @@
   /* --- 60 / NEUTRAL, borders & focus --- */
   --border: oklch(28.5% 0.0277 264.0);
   --border-strong: oklch(34.8% 0.0360 263.0);
-  --input: oklch(28.5% 0.0277 264.0);
+  /* A text field's edge. It was --border's value, 1.24:1 against the --card a
+     field sits on, and the field's --background fill is 1.09:1: nothing told
+     a field from the panel around it at WCAG 1.4.11's 3:1. A field is a
+     control, not a divider, so its edge is its own lighter step: 3.66:1 on
+     --card, 3.39 on --card-raised, 3.56 on --popover, 3.28 on --muted, 4.00
+     against the field's own --background fill. palette-contrast.test.ts holds
+     it at 3:1 on every ground a field is drawn on. */
+  --input: oklch(55.0% 0.0300 263.0);
   /* The focus ring is --primary-bright's value (the website's ring already
      was): 7.13:1 against --card where --primary gave 4.49. Written as the
      literal rather than var(--primary-bright) because every colour in this
@@ -459,6 +466,12 @@
   --shadow-raised: var(--shadow-raised);
   --shadow-overlay: var(--shadow-overlay);
 
+  /* Letter-spacing for the few all-caps runs the console keeps: table
+     headers, menu group labels, status pills and meter scales. Sentence case
+     everywhere else (form labels are not shouted). One value, so caps read as
+     one voice rather than three trackings picked per file. */
+  --tracking-caps: 0.08em;
+
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
@@ -523,9 +536,30 @@
     background: var(--subtle-foreground);
   }
 
+  /* THE ONE FOCUS RING. Every control draws this outline and nothing else:
+     2px of --ring (--primary-bright's value) at a 2px offset, the website's
+     ring exactly. It used to be two systems -- buttons and fields drew a
+     box-shadow ring with an offset painted in --surface (the wrong colour on
+     a card), while nav links fell through to an outline the colour of their
+     own text -- and some controls (tab triggers, the dialog close) drew none.
+     Components no longer set focus-visible:outline-none or ring-* at all; a
+     control that needs something else has to argue for it here. */
   :focus-visible {
     outline: 2px solid var(--ring);
-    outline-offset: 1px;
+    outline-offset: 2px;
+  }
+
+  /* Ragged wraps read as unedited. Headings balance their lines; help text
+     avoids a one-word last line. Both are progressive: a browser without
+     them wraps as before. */
+  h1,
+  h2,
+  h3,
+  [data-slot="card-title"] {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
   }
 }
 
@@ -720,7 +754,7 @@
 .polyemesis-tour .driver-popover-footer-btn:focus-visible,
 .polyemesis-tour .driver-popover-close-btn:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 /* Colour only. The four side-* classes carry the geometry and are untouched. */

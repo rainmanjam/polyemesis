@@ -1,9 +1,10 @@
 import { InfoHint } from "@/components/InfoHint";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Area,
-  AreaChart,
   CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip as ReTooltip,
   XAxis,
@@ -47,8 +48,11 @@ import {
   verdict,
 } from "@/lib/logSummary";
 import { cn } from "@/lib/utils";
+import { bitrateTrace } from "@/lib/bitrateTrace";
+import { cpuOver, memoryOver, monitorVerdict } from "@/lib/monitorVerdict";
 import {
   asDestinationId,
+  asSourceId,
   type Destination,
   type DryRunResult,
   type ExpertResponse,
@@ -701,14 +705,33 @@ export function MonitoringPage() {
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [groups, follow]);
 
-  const chartData = useMemo(
-    () =>
-      bitrate.map((s) => ({
-        t: new Date(s.t).getTime(),
-        kbps: Math.round(s.kbps),
-      })),
-    [bitrate],
-  );
+  const chartData = useMemo(() => bitrateTrace(bitrate), [bitrate]);
+
+  // This programme's degraded-link floor, the one bitrate threshold an operator
+  // has actually set. Drawn on the chart only while that failover is on; with
+  // it off there is no threshold, and inventing one would be decoration.
+  // Keyed by the programme it was read for, so a switch of programme shows no
+  // line until the new programme's floor arrives, rather than the old one's.
+  const [floorRead, setFloorRead] = useState<{ programme: number; kbps: number | null } | null>(null);
+  useEffect(() => {
+    if (!programmeKnown || programme == null) return;
+    let cancelled = false;
+    api
+      .getSource(asSourceId(programme))
+      .then((src) => {
+        if (cancelled) return;
+        const d = src.ingest.degraded;
+        const kbps = d?.enabled && (d.minBitrateKbps ?? 0) > 0 ? (d.minBitrateKbps ?? null) : null;
+        setFloorRead({ programme, kbps });
+      })
+      .catch(() => {
+        if (!cancelled) setFloorRead({ programme, kbps: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [programme, programmeKnown]);
+  const bitrateFloor = floorRead && floorRead.programme === programme ? floorRead.kbps : null;
 
   // localeCompare, not the default sort. Array.prototype.sort compares UTF-16
   // code units, which puts every capital before every lowercase: a filter list
@@ -723,13 +746,26 @@ export function MonitoringPage() {
     [processes],
   );
 
-  // THE ONE SENTENCE UNDER THE TITLE (A66). It says whether the stream is
-  // healthy before any tile is read: failures first, then ingest loss, then
-  // the calm case. It does not reuse the Dashboard verdict, which is still to
-  // be unified (A3, A73); it reads the same process states the table does.
+  // THE ONE SENTENCE UNDER THE TITLE (A66). lib/monitorVerdict.ts decides it
+  // from the process states AND every tile below that can warn (freshness,
+  // ingest loss, CPU, memory), with the tiles' own thresholds, so "all
+  // running" never sits above a CPU warning. It does not reuse the Dashboard
+  // verdict, which is still to be unified (A3, A73).
   const failedCount = processes.filter((p) => p.status.state === "failed").length;
   const runningCount = processes.filter((p) => p.status.state === "running").length;
-  const losing = (status?.relay.dropped ?? 0) > 0 || (status?.relay.lossPercent ?? 0) > 0;
+  const pageVerdict = monitorVerdict({
+    processes: processes.length,
+    running: runningCount,
+    failed: failedCount,
+    processesStale: procFreshness.stale,
+    relayDropped: status?.relay.dropped ?? 0,
+    ingestLossPercent: status?.relay.lossPercent ?? 0,
+    cpuPercent: system?.cpuPercent,
+    cpuWarnPercent: cpuWarn,
+    memPercent: system?.memPercent,
+  });
+  const cpuHigh = cpuOver(system?.cpuPercent, cpuWarn);
+  const memHigh = memoryOver(system?.memPercent);
 
   return (
     <div className="p-3">
@@ -739,16 +775,19 @@ export function MonitoringPage() {
       />
 
       {processesLoaded && processes.length > 0 && (
-        <p aria-live="polite" className={cn("mb-3 flex flex-wrap items-center gap-2 text-sm", failedCount > 0 ? "text-down" : "text-muted-foreground")}>
-          <span>
-            {failedCount > 0
-              ? t("mon.verdictProcessesFailed", { count: failedCount })
-              : losing
-                ? t("mon.verdictIngestLoss")
-                : runningCount === processes.length
-                  ? t("mon.verdictAllRunning", { count: processes.length })
-                  : t("mon.verdictSomeNotRunning", { running: runningCount, count: processes.length })}
-          </span>
+        <p
+          aria-live="polite"
+          data-verdict-tone={pageVerdict.tone}
+          className={cn(
+            "mb-3 flex flex-wrap items-center gap-2 text-sm",
+            pageVerdict.tone === "bad"
+              ? "text-down"
+              : pageVerdict.tone === "warn"
+                ? "text-warn"
+                : "text-muted-foreground",
+          )}
+        >
+          <span>{t(pageVerdict.key, pageVerdict.params)}</span>
           {failedCount > 0 && (
             <Button
               variant="link"
@@ -769,7 +808,7 @@ export function MonitoringPage() {
             <Stat
               labelKey="mon.hostCpu"
               value={system ? pct(system.cpuPercent) : "—"}
-              tone={(system?.cpuPercent ?? 0) > cpuWarn ? "warn" : "default"}
+              tone={cpuHigh ? "warn" : "default"}
             />
             <div className="mt-1 text-sm text-muted-foreground">
               {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
@@ -778,7 +817,7 @@ export function MonitoringPage() {
             <div className="mt-1 text-tiny text-muted-foreground">
               {t("mon.cpuWarnsAbove", { pct: cpuWarn })}
             </div>
-            {(system?.cpuPercent ?? 0) > cpuWarn && (
+            {cpuHigh && (
               <TileRemedy text={t("mon.remedy.cpu")} to="/renditions" label={t("reason.action.renditions")} />
             )}
           </CardContent>
@@ -788,7 +827,7 @@ export function MonitoringPage() {
             <Stat
               labelKey="mon.memory"
               value={system ? pct(system.memPercent) : "—"}
-              tone={(system?.memPercent ?? 0) > 90 ? "warn" : "default"}
+              tone={memHigh ? "warn" : "default"}
             />
             <div className="mt-1 text-sm text-muted-foreground">
               {/* app-council A93: the words around the figures are translated;
@@ -800,7 +839,7 @@ export function MonitoringPage() {
               })}
               <InfoHint body="mon.memory.hint" title="mon.memory" className="ml-1" />
             </div>
-            {(system?.memPercent ?? 0) > 90 && (
+            {memHigh && (
               <TileRemedy text={t("mon.remedy.memory")} to="/renditions" label={t("reason.action.renditions")} />
             )}
           </CardContent>
@@ -871,13 +910,16 @@ export function MonitoringPage() {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
-                <defs>
-                  <linearGradient id="bitrateFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              {/* A LINEAR TRACE, NOT A FILLED AREA. The blue gradient fill
+                 broke two palette rules at once: blue is interaction only,
+                 and gradients belong to the logo. The trace is the signal
+                 colour, drawn straight between samples (no monotone easing
+                 inventing a curve between two readings), and it BREAKS where
+                 samples are missing (bitrateTrace) rather than bridging a
+                 hole with a line nobody measured. The one threshold line is
+                 this programme's degraded-link floor, drawn only when the
+                 operator has switched that failover on. */}
+              <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
                 <XAxis
                   dataKey="t"
@@ -891,6 +933,9 @@ export function MonitoringPage() {
                   minTickGap={40}
                 />
                 <YAxis
+                  // Room for the floor line even while the ingest sits far
+                  // above it, so the threshold is never clipped off the top.
+                  domain={[0, (max: number) => Math.ceil(Math.max(max, bitrateFloor ?? 0) * 1.1)]}
                   stroke="var(--subtle-foreground)"
                   tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }}
                   tickLine={false}
@@ -909,16 +954,32 @@ export function MonitoringPage() {
                   labelFormatter={(v) => new Date(v as number).toLocaleTimeString(undefined, { hour12: false })}
                   formatter={(v) => [kbps(v as number), t("chrome.ingest")]}
                 />
-                <Area
-                  type="monotone"
+                {bitrateFloor != null && (
+                  <ReferenceLine
+                    y={bitrateFloor}
+                    stroke="var(--warn)"
+                    strokeDasharray="4 3"
+                    ifOverflow="extendDomain"
+                    label={{
+                      value: t("mon.bitrateFloor", { kbps: bitrateFloor }),
+                      position: "insideTopLeft",
+                      fill: "var(--muted-foreground)",
+                      // A sentence, not an axis label: the 12px content floor.
+                      fontSize: 12,
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                )}
+                <Line
+                  type="linear"
                   dataKey="kbps"
-                  stroke="var(--primary)"
+                  stroke="var(--ok)"
                   strokeWidth={1.5}
-                  fill="url(#bitrateFill)"
+                  connectNulls={false}
                   isAnimationActive={false}
                   dot={false}
                 />
-              </AreaChart>
+              </LineChart>
             </ResponsiveContainer>
           )}
         </CardContent>

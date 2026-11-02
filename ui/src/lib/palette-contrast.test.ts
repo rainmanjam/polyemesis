@@ -247,6 +247,14 @@ describe("non-text indicators clear 3:1", () => {
     ["tally", "background"],
     // The primary fill's edge (a button, a checked box, a lit site crosspoint).
     ["primary", "card"],
+    // A text field's edge (WCAG 1.4.11): against every panel a field sits on,
+    // and against the field's own --background fill inside it.
+    ["input", "card"],
+    ["input", "card-raised"],
+    ["input", "popover"],
+    ["input", "muted"],
+    ["input", "surface"],
+    ["input", "background"],
     // Meter segments and the peak-hold tick in their trough.
     ["meter-low", "meter-bg"],
     ["meter-mid", "meter-bg"],

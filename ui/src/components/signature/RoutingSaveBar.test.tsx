@@ -22,6 +22,25 @@ const base = {
   onDiscard: vi.fn(),
 };
 
+describe("RoutingSaveBar on a phone (2026-11 review, row 25)", () => {
+  /* At 390px the bar wraps to three lines, and pinned to the bottom of the
+   * pane it sat over the last destination row while there was nothing to
+   * save. Clean, it now pins only from sm up, so a phone scrolls past it;
+   * dirty, it pins at every width, because then the Save is the point. */
+  const classes = (c: HTMLElement) => (c.firstElementChild as HTMLElement).className.split(/\s+/);
+
+  it("does not float over the page on a phone while nothing is pending", () => {
+    const { container } = render(<RoutingSaveBar {...base} dirty={false} />);
+    expect(classes(container)).not.toContain("sticky");
+    expect(classes(container)).toContain("sm:sticky");
+  });
+
+  it("pins at every width once there is something to save", () => {
+    const { container } = render(<RoutingSaveBar {...base} dirty />);
+    expect(classes(container)).toContain("sticky");
+  });
+});
+
 /** The bar's own status line; SaveStatus is a second, separate one. */
 const bar = () => screen.getAllByRole("status")[0];
 

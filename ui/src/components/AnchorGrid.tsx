@@ -104,7 +104,6 @@ export function AnchorGrid({
               }}
               className={[
                 "size-6 rounded-sm transition-colors",
-                "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
                 "disabled:cursor-not-allowed disabled:opacity-50",
                 selected
                   ? "bg-primary"

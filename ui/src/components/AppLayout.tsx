@@ -336,7 +336,7 @@ export function AppLayout({
                 <button
                   type="button"
                   aria-label={t("b1.ingestWhy")}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" />
                 </button>
@@ -715,8 +715,22 @@ export function AppLayout({
             against a 900px viewport. Making this pane a containing block keeps
             that — and anything else a page renders — inside the scroller where
             it belongs. */}
-        <main id="main-content" tabIndex={-1} className="relative min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
+        {/* ONE GUTTER AND ONE MEASURE, set here rather than per page. Content
+            ended at x=1418 on the long pages and x=1428 on the short ones: the
+            difference was the 10px scrollbar appearing only when a page
+            scrolled. scrollbar-gutter reserves it on every page, so the right
+            edge no longer depends on page length, and one max-width keeps a
+            wide monitor from stretching a form row across 2500px. Pages keep
+            their p-3; Playout's p-4 was the one outlier. h-full so a page that
+            fills the pane (Chat) still can. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="relative min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
+        >
+          <div className="mx-auto h-full w-full max-w-screen-2xl">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

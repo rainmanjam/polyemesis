@@ -12,7 +12,7 @@ import { StatusPill } from "./StatusPill";
 import { DisabledReason } from "./DisabledReason";
 import { disabledDescribedBy } from "@/lib/disabledReason";
 import { SaveStatus } from "./SaveStatus";
-import { destinationStatus, processStatus } from "@/lib/status";
+import { destinationStatus, processStatus, recorderStatus } from "@/lib/status";
 
 afterEach(cleanup);
 
@@ -88,6 +88,52 @@ describe("StatusPill (A11, A91)", () => {
     const { container } = render(<StatusPill reading={destinationStatus(false, "running")} />);
     expect(screen.getByText("Off")).toBeTruthy();
     expect(container.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("idle");
+  });
+});
+
+describe("StatusPill: nominal is quiet, exceptions and lamps are filled (2026-11 review, row 10)", () => {
+  /* A column of identical green pills is status wallpaper: it hides the one
+   * row that is wrong. A running process is the normal case, so it is plain
+   * text with a 6px dot. Fills are kept for what needs a look (warn, failed)
+   * and for the two lamps (on air, recording), which use the tally. */
+  const shape = (el: Element | null) => el?.getAttribute("data-shape");
+
+  it("draws a running process as neutral text and a 6px dot, not a filled pill", () => {
+    const { container } = render(<StatusPill reading={processStatus("running")} />);
+    const el = container.querySelector("[data-tone]");
+    expect(shape(el)).toBe("dot");
+    expect(el?.className).toContain("text-foreground");
+    expect(el?.className).not.toMatch(/\bbg-/);
+    const dot = el?.querySelector("[data-dot]");
+    expect(dot?.getAttribute("class")).toMatch(/\bh-1\.5\b/);
+    expect(dot?.getAttribute("class")).toMatch(/\bw-1\.5\b/);
+    expect(dot?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps a filled pill for a warning and for a failure", () => {
+    for (const s of ["reconnecting", "failed"] as const) {
+      const { container, unmount } = render(<StatusPill reading={processStatus(s)} />);
+      expect(shape(container.querySelector("[data-tone]"))).toBe("pill");
+      unmount();
+    }
+  });
+
+  it("lights an on-air destination as a solid tally lamp", () => {
+    const { container } = render(<StatusPill reading={destinationStatus(true, "running")} />);
+    const el = container.querySelector("[data-tone]");
+    expect(shape(el)).toBe("lamp");
+    expect(el?.className).toMatch(/\bbg-tally\b/);
+    expect(el?.className).toMatch(/\btext-tally-foreground\b/);
+  });
+
+  it("lights a running recorder as the REC lamp", () => {
+    const { container } = render(<StatusPill reading={recorderStatus({ state: "running" } as never)} />);
+    expect(shape(container.querySelector("[data-tone]"))).toBe("lamp");
+  });
+
+  it("never lamps a reading that is not ok, whatever asked for it", () => {
+    const { container } = render(<StatusPill reading={destinationStatus(true, "failed")} />);
+    expect(shape(container.querySelector("[data-tone]"))).toBe("pill");
   });
 });
 

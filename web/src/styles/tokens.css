@@ -53,7 +53,14 @@
   /* --- 60 / NEUTRAL, borders & focus --- */
   --border: oklch(28.5% 0.0277 264.0);
   --border-strong: oklch(34.8% 0.0360 263.0);
-  --input: oklch(28.5% 0.0277 264.0);
+  /* A text field's edge. It was --border's value, 1.24:1 against the --card a
+     field sits on, and the field's --background fill is 1.09:1: nothing told
+     a field from the panel around it at WCAG 1.4.11's 3:1. A field is a
+     control, not a divider, so its edge is its own lighter step: 3.66:1 on
+     --card, 3.39 on --card-raised, 3.56 on --popover, 3.28 on --muted, 4.00
+     against the field's own --background fill. palette-contrast.test.ts holds
+     it at 3:1 on every ground a field is drawn on. */
+  --input: oklch(55.0% 0.0300 263.0);
   /* The focus ring is --primary-bright's value (the website's ring already
      was): 7.13:1 against --card where --primary gave 4.49. Written as the
      literal rather than var(--primary-bright) because every colour in this

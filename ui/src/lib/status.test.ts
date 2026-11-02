@@ -52,6 +52,21 @@ describe("destinationStatus", () => {
     expect(destinationStatus(true, "failed").tone).toBe("bad");
   });
 
+  // 2026-11 review, row 10: on air and recording are lamps, and ONLY when ok.
+  // A failed or reconnecting destination is a failure or a warning, never a
+  // lit lamp; a running process that is not on air is not a lamp either.
+  it("marks on air and recording as lamps, and nothing that is not ok", () => {
+    expect(destinationStatus(true, "running").lamp).toBe(true);
+    expect(delayStatus("on-air").lamp).toBe(true);
+    expect(recorderStatus({ state: "running" } as never).lamp).toBe(true);
+    expect(destinationStatus(true, "failed")).not.toHaveProperty("lamp");
+    expect(destinationStatus(true, "reconnecting")).not.toHaveProperty("lamp");
+    expect(destinationStatus(false, "running")).not.toHaveProperty("lamp");
+    expect(recorderStatus({ state: "failed" } as never)).not.toHaveProperty("lamp");
+    expect(delayStatus("draining")).not.toHaveProperty("lamp");
+    expect(processStatus("running")).not.toHaveProperty("lamp");
+  });
+
   // A broadcast delay fills BEFORE any process exists, by design (#11). The card
   // read "Stopped" for those minutes, which is the one word that says the
   // broadcast ended. A filling delay is a filling state, amber, and not stopped.

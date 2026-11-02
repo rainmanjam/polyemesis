@@ -9,7 +9,9 @@ const Switch = React.forwardRef<
   <SwitchPrimitives.Root
     className={cn(
       "peer inline-flex h-4.5 w-8 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
-      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-surface",
+      // The track stays 18px; an invisible ::after takes the target to 24px
+      // tall (WCAG 2.5.8) without moving the rows a switch sits in.
+      "relative after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-['']",
       "disabled:cursor-not-allowed disabled:opacity-50",
       "data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted",
       className,

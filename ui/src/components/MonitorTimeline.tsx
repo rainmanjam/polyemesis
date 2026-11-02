@@ -138,7 +138,7 @@ export function MonitorTimeline() {
                       <Link
                         to={processLogHref(row.process, row.sourceId)}
                         aria-label={`${t("reason.action.log")}: ${row.title}`}
-                        className="self-start text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        className="relative self-start text-muted-foreground underline underline-offset-2 after:absolute after:inset-x-0 after:-inset-y-1 after:content-[''] hover:text-foreground"
                       >
                         {t("reason.action.log")}
                       </Link>

@@ -56,8 +56,11 @@ export function InfoHint({
           aria-label={accessibleName}
           className={cn(
             "inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full align-text-bottom",
+            // A 24px target around a 14px glyph (WCAG 2.5.8). The glyph stays
+            // small so it sits in a line of 12px text without pushing the
+            // line apart; the invisible ::after is what the pointer hits.
+            "relative after:absolute after:-inset-[5px] after:content-['']",
             "text-muted-foreground transition-colors hover:text-foreground",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             className,
           )}
         >

@@ -257,7 +257,7 @@ export function DestinationCard({
       // focus-visible suppresses, and a jump that lands with no ring is a jump
       // that does not say where it landed.
       tabIndex={domId ? -1 : undefined}
-      className="overflow-hidden focus:outline-none focus:ring-2 focus:ring-ring"
+      className="overflow-hidden"
     >
       <CardContent className="flex flex-col gap-2.5 p-3">
         {/* --- identity + state --- */}

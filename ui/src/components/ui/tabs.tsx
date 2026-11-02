@@ -24,7 +24,7 @@ const TabsTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       "inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2.5 py-1 text-sm font-medium text-muted-foreground transition-colors",
-      "hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+      "hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
       "data-[state=active]:bg-card-raised data-[state=active]:text-foreground",
       className,
     )}

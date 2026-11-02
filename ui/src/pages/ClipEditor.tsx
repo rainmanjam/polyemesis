@@ -1125,7 +1125,6 @@ function ModeButton({
       aria-pressed={active}
       className={cn(
         "rounded-md border p-2 text-left transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "border-primary bg-primary-dim text-foreground"
           : "border-border bg-card hover:bg-card-raised",

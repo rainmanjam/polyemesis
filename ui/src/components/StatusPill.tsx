@@ -1,5 +1,6 @@
 import { Circle, CircleDashed, CircleDot, CircleX, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { StatusIndicator, StatusReading, StatusTone } from "@/lib/status";
 
@@ -33,11 +34,53 @@ export interface StatusPillProps {
   className?: string;
 }
 
+/* THREE SHAPES, BY HOW MUCH THE STATE NEEDS THE OPERATOR (2026-11 review).
+ *
+ *   dot   An ok reading that is the normal case (a process running, a signal
+ *         present): neutral text and a 6px --ok dot. A column of identical
+ *         filled green pills is status wallpaper that hides the one row that
+ *         is wrong, so the nominal state is drawn quietly.
+ *   lamp  An ok reading that is ON AIR or RECORDING (reading.lamp): the solid
+ *         --tally lamp under its own --tally-foreground label. The tally is a
+ *         lamp, never ink (DESIGN-SYSTEM.md).
+ *   pill  Everything else keeps its filled or outlined Badge: warn and failed
+ *         need a look, and idle keeps its hollow outline.
+ *
+ * The word and data-tone are the same in all three; only the drawing changes.
+ * The silhouette still travels with the reading: the dot is filled (ok's
+ * mark), and the lamp and pills keep their indicator icon. */
 export function StatusPill({ reading, className }: Readonly<StatusPillProps>) {
   const t = useT();
   const Icon = INDICATOR_ICON[reading.indicator];
+  if (reading.tone === "ok" && !reading.lamp) {
+    return (
+      <span
+        data-tone={reading.tone}
+        data-shape="dot"
+        className={cn("inline-flex items-center gap-1.5 text-sm text-foreground", className)}
+      >
+        <span data-dot aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" />
+        {t(reading.labelKey)}
+      </span>
+    );
+  }
+  if (reading.tone === "ok") {
+    return (
+      <span
+        data-tone={reading.tone}
+        data-shape="lamp"
+        className={cn(
+          "inline-flex items-center gap-1 rounded-sm bg-tally px-1.5 py-0.5 text-sm font-semibold uppercase tracking-caps text-tally-foreground",
+          className,
+        )}
+      >
+        <Icon aria-hidden="true" className="h-3 w-3 shrink-0" />
+        {t(reading.labelKey)}
+      </span>
+    );
+  }
   return (
-    <Badge variant={TONE_VARIANT[reading.tone]} className={className} data-tone={reading.tone}>
+    <Badge variant={TONE_VARIANT[reading.tone]} className={className} data-tone={reading.tone} data-shape="pill">
       <Icon aria-hidden="true" className="h-3 w-3 shrink-0" />
       {t(reading.labelKey)}
     </Badge>

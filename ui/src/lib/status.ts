@@ -34,6 +34,11 @@ export interface StatusReading {
   labelKey: TranslationKey;
   tone: StatusTone;
   indicator: StatusIndicator;
+  /** On air or recording: StatusPill draws an ok reading that carries this as
+   *  the solid --tally lamp. Every other ok reading (a process running, a
+   *  signal present) is the nominal case and is drawn quietly. Absent, never
+   *  false, so readings without it compare equal to what they always were. */
+  lamp?: true;
 }
 
 const INDICATOR: Record<StatusTone, StatusIndicator> = {
@@ -45,6 +50,12 @@ const INDICATOR: Record<StatusTone, StatusIndicator> = {
 
 function reading(labelKey: TranslationKey, tone: StatusTone): StatusReading {
   return { labelKey, tone, indicator: INDICATOR[tone] };
+}
+
+/** Marks an on-air or recording reading as a lamp. Only an ok reading lights:
+ *  a failed destination is a failure, not a lamp. */
+function lamp(r: StatusReading): StatusReading {
+  return r.tone === "ok" ? { ...r, lamp: true } : r;
 }
 
 const PROCESS_TONE: Record<ProcessState, StatusTone> = {
@@ -75,7 +86,8 @@ export function destinationStatus(
   // A broadcast delay fills before any process exists, by design (#11). With no
   // process yet, that is a filling state, not a stopped one.
   if (!state && delayPhase === "buffering") return reading("wave3.bugs.delayFilling", "warn");
-  return processStatus(state);
+  // A running destination is ON AIR, not merely running: the tally lamp.
+  return lamp(processStatus(state));
 }
 
 /** A broadcast-delay buffer phase (types.ts DelayStatus). Buffering is filling
@@ -84,7 +96,7 @@ export function destinationStatus(
 export function delayStatus(phase: "buffering" | "on-air" | "draining"): StatusReading {
   switch (phase) {
     case "on-air":
-      return reading("state.live", "ok");
+      return lamp(reading("state.live", "ok"));
     case "draining":
       return reading("state.draining", "warn");
     default:
@@ -107,7 +119,8 @@ export function renditionStatus(state: "ready" | "transcoding" | "attention"): S
 /** The recorder. A null recorder means recording is switched off, which is an
  *  operator choice and reads as Off, not as Offline or Failed. */
 export function recorderStatus(recorder?: ProcessStatus | null): StatusReading {
-  return recorder ? processStatus(recorder.state) : reading("state.off", "idle");
+  // A running recorder is recording: the REC lamp.
+  return recorder ? lamp(processStatus(recorder.state)) : reading("state.off", "idle");
 }
 
 /** The clip replay buffer (ClipStatus in the API). Running means it is holding
