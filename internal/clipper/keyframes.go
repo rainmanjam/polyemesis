@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -354,6 +355,20 @@ func (f FFprobe) Keyframes(ctx context.Context, path string, from, window time.D
 // runCommand is the default process runner, shared by the prober and the cutter.
 func runCommand(ctx context.Context, name string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(string(out)), 400))
+	}
+	return out, nil
+}
+
+// RunLowPriority is runCommand with the child created below normal priority
+// where the OS needs telling (Windows; elsewhere the governor's nice wrapper
+// in the command line does it). The runner for every background child: the
+// cutter under WithNice, the editor's keyframe probe, the highlight scan.
+func RunLowPriority(ctx context.Context, name string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	jobs.LowerPriority(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(string(out)), 400))

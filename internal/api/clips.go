@@ -530,8 +530,15 @@ func (s *Server) clipProber() clipper.Prober {
 		bin = tools.FFprobe
 	}
 	// An empty Bin means "ffprobe, off PATH", which is the right answer on a
-	// machine where nothing was pinned.
-	return clipper.FFprobe{Bin: bin}
+	// machine where nothing was pinned. The probe runs under the governor's
+	// priority wrapper like every child an export starts: planning a cut while
+	// a broadcast is going out must not compete with it either.
+	return clipper.FFprobe{Bin: bin, Run: func(ctx context.Context, name string, args []string) ([]byte, error) {
+		if s.gov != nil {
+			name, args = s.gov.NiceCommand(name, args...)
+		}
+		return clipper.RunLowPriority(ctx, name, args)
+	}}
 }
 
 // ------------------------------------------------------------- plan and export

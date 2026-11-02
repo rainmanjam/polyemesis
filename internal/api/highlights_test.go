@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -637,5 +639,28 @@ func TestTheSameShortQueuedTwiceGetsTwoNames(t *testing.T) {
 	}
 	if len(paths) != 2 {
 		t.Errorf("two queued shorts share a path: %v", paths)
+	}
+}
+
+// THE EDITOR'S PROBE YIELDS TOO. The keyframe ffprobe a plan runs on the
+// request goes through the governor's priority wrapper, like every child the
+// export job starts. Observed through the failure of a probe that cannot run:
+// the wrapper's name is in it when there is a wrapper.
+//
+// MUTATION: clipProber runs ffprobe directly. Observed: FAIL, no "nice".
+func TestTheEditorsProbeRunsUnderTheGovernor(t *testing.T) {
+	_, _, srv, _ := highlightFixture(t)
+	srv.gov = jobs.NewGovernor(slog.New(slog.NewTextHandler(io.Discard, nil)), srv.jobq)
+	wrapped, _ := srv.gov.NiceCommand("polyemesis-no-such-probe")
+	p, ok := srv.clipProber().(clipper.FFprobe)
+	if !ok || p.Run == nil {
+		t.Fatalf("clipProber %T has no runner of its own", srv.clipProber())
+	}
+	_, err := p.Run(context.Background(), "polyemesis-no-such-probe", nil)
+	if err == nil {
+		t.Fatal("a probe that cannot run reported success")
+	}
+	if wrapped != "polyemesis-no-such-probe" && !strings.Contains(err.Error(), filepath.Base(wrapped)) {
+		t.Errorf("the probe ran outside the wrapper %q: %v", wrapped, err)
 	}
 }

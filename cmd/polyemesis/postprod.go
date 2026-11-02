@@ -482,6 +482,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 			}
 			var stderr bytes.Buffer
 			cmd := exec.CommandContext(ctx, name, args...)
+			jobs.LowerPriority(cmd)
 			cmd.Stderr = &stderr
 			pipe, err := cmd.StdoutPipe()
 			if err != nil {

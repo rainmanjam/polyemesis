@@ -48,6 +48,9 @@ type Cutter struct {
 	prober  Prober
 	run     func(ctx context.Context, name string, args []string) ([]byte, error)
 	nice    func(name string, args []string) (string, []string)
+	// customRunner is set by WithRunner, so WithNice knows whether the runner
+	// is its own to lower in priority.
+	customRunner bool
 }
 
 // Option customises a Cutter, chiefly for tests.
@@ -56,7 +59,7 @@ type Option func(*Cutter)
 // WithRunner replaces the process runner, so the command lines can be asserted
 // on without spawning FFmpeg.
 func WithRunner(fn func(ctx context.Context, name string, args []string) ([]byte, error)) Option {
-	return func(c *Cutter) { c.run = fn }
+	return func(c *Cutter) { c.run, c.customRunner = fn, true }
 }
 
 // WithProber replaces the keyframe prober, so planning can be driven from a
@@ -84,6 +87,11 @@ func New(log *slog.Logger, ffmpegBin, ffprobeBin string, opts ...Option) *Cutter
 		opt(c)
 	}
 	if c.nice != nil {
+		if !c.customRunner {
+			// The child is created below normal priority as well as wrapped:
+			// Windows has no nice for the wrapper to use.
+			c.run = RunLowPriority
+		}
 		inner, nice := c.run, c.nice
 		c.run = func(ctx context.Context, name string, args []string) ([]byte, error) {
 			n, a := nice(name, args)

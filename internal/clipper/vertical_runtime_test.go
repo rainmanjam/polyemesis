@@ -120,6 +120,10 @@ func TestTheWorkerCaptionsAShortFromTheTranscriptAtRunTime(t *testing.T) {
 	}
 
 	drawn = nil
+	// The first run published the short; a short never replaces a file.
+	if err := os.Remove(out); err != nil {
+		t.Fatal(err)
+	}
 	rep := &workerReporter{}
 	if err := NewWorker(c, nil).Run(context.Background(), jobs.Job{Kind: JobKind, Params: raw}, rep); err != nil {
 		t.Fatalf("Run without a source: %v", err)
