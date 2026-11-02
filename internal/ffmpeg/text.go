@@ -158,17 +158,62 @@ func drawtextFilter(t *TextSpec, out frameSize) string {
 //
 // A literal backslash needs four, for the same reason: two passes halve it
 // twice.
-var lavfiArgEscaper = strings.NewReplacer(
-	`\`, `\\\\`,
-	`:`, `\\:`,
-	`,`, `\\,`,
-	`'`, `\\'`,
-	`[`, `\\[`,
-	`]`, `\\]`,
-	`;`, `\\;`,
-)
+//
+// The two passes do NOT share a set of metacharacters, so the value is escaped
+// once for EACH level, innermost first -- the order FFmpeg's filters
+// documentation gives under "Notes on filtergraph escaping":
+//
+//   - the OPTION level, a filter's arguments split into key=value pairs, where
+//     the metacharacters are \ ' :
+//   - the GRAPH level, the description split into chains and filters, which
+//     runs first and whose metacharacters are \ ' [ ] , ;
+//
+// This used to be ONE replacer that doubled the escape on every metacharacter.
+// That is right for \ and :, which the two forms render identically, and wrong
+// for everything else: a doubled escape on ',' leaves the graph pass with a
+// literal backslash and a BARE comma, which splits the filter in two -- "No
+// option name near ...", exit 234 -- and a doubled escape on ' leaves a bare
+// quote that swallows the rest of the chain. A data directory, a fonts
+// directory, a caption file or overlay text containing any of ' , [ ] ; broke
+// the live rendition. See TestFilterArgumentsSurviveTheRealParser.
+//
+// BOUNDARY WHITESPACE is the one thing neither replacer can see. FFmpeg's
+// tokenizer skips unescaped leading whitespace and trims unescaped trailing
+// whitespace at BOTH levels, so overlay text " LIVE " drew as "LIVE", shifted
+// left and with no error. Interior whitespace is literal and stays as it is,
+// which keeps every ordinary value byte-identical. Each leading and trailing
+// whitespace character is escaped once per level -- `\ ` for the option pass,
+// and both of those characters again for the graph pass -- because escaping it
+// at the option level alone leaves the graph pass an unescaped space after an
+// escaped backslash, which it trims when the value is the last option before
+// a ','. Measured: see TestEscapeLavfiArgRoundTripsThroughTheRealParser.
+//
+// Shared with internal/clipper (GraphArgPath) so the vertical export and the
+// live overlay cannot drift apart again.
+func escapeLavfiArg(v string) string {
+	core := strings.TrimLeft(v, filterWhitespace)
+	lead := v[:len(v)-len(core)]
+	core = strings.TrimRight(core, filterWhitespace)
+	trail := v[len(lead)+len(core):]
+	return escapeBoundaryWhitespace(lead) +
+		graphLevelEscaper.Replace(optionLevelEscaper.Replace(core)) +
+		escapeBoundaryWhitespace(trail)
+}
 
-func escapeLavfiArg(v string) string { return lavfiArgEscaper.Replace(v) }
+// filterWhitespace is the set FFmpeg's av_get_token trims (WHITESPACES in
+// libavutil/avstring.c).
+const filterWhitespace = " \n\t\r"
+
+// escapeBoundaryWhitespace escapes each whitespace character for both levels:
+// `\ ` at the option level, then `\\` and `\ ` at the graph level.
+func escapeBoundaryWhitespace(ws string) string {
+	var b strings.Builder
+	for _, r := range ws {
+		b.WriteString(`\\\`)
+		b.WriteRune(r)
+	}
+	return b.String()
+}
 
 // filterPath renders a filesystem path for use INSIDE a filter argument.
 //
@@ -288,42 +333,16 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// FilterPath is filterPath for callers outside this package: a filesystem path
-// rendered for use INSIDE a filter argument, slashes converted and escaped at
-// both levels a filtergraph unescapes. Exported so a second graph builder (the
-// clipper's vertical export) uses the SAME escaping the overlay does rather
-// than re-deriving it -- the Windows failure filterPath documents is what a
-// re-derivation would reintroduce.
-func FilterPath(p string) string { return filterPath(p) }
-
-// EscapeFilterArg is escapeLavfiArg for callers outside this package. See there
-// for why one level of escaping is not enough.
-func EscapeFilterArg(v string) string { return escapeLavfiArg(v) }
-
 // GraphArgPath renders a filesystem path for use inside a filter option in a
-// filtergraph, escaped once for EACH of the two levels FFmpeg unescapes, in the
-// order it unescapes them:
-//
-//   - the GRAPH description is split into chains and filters first, and its
-//     metacharacters are \ ' [ ] , ;
-//   - each filter's arguments are then split into options, and an option
-//     value's metacharacters are \ ' :
-//
-// So the value is escaped for the option level and the result for the graph
-// level. filterPath's single replacer instead doubles the escape on EVERY
-// character, which is right for \ and : (members of both levels) and wrong
-// for the rest: a doubled escape on ',' survives the graph pass as a literal
-// backslash and the comma then splits the graph. Measured with directories
-// named a'b, a,b, a[b]c and a;b, every one of which filterPath fails and this
-// opens; see TestGraphArgPathSurvivesEveryMetacharacter.
-//
-// The live overlay and slate still use filterPath. Their paths are the data
-// directory's fonts and the operator's own text, and changing an escaper on
-// the live encode path is a separate change with its own blast radius.
-func GraphArgPath(p string) string {
-	return graphLevelEscaper.Replace(optionLevelEscaper.Replace(filepath.ToSlash(p)))
-}
+// filtergraph: separators converted as filterPath describes, then escaped for
+// the option level and the graph level in that order (see escapeLavfiArg). It
+// is filterPath under an exported name, for graph builders outside this package
+// -- the clipper's vertical export -- so there is ONE escaper for every
+// filtergraph this program writes.
+func GraphArgPath(p string) string { return filterPath(p) }
 
+// The two levels escapeLavfiArg composes. See there for which characters
+// belong to which level and why the order matters.
 var (
 	optionLevelEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `:`, `\:`)
 	graphLevelEscaper  = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `[`, `\[`, `]`, `\]`, `,`, `\,`, `;`, `\;`)
