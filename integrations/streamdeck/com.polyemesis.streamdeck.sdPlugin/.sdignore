@@ -1,0 +1,8 @@
+# Kept out of the .streamDeckPlugin by `streamdeck pack` (gitignore syntax).
+# The CLI already drops .git, .env files, logs and source maps; this adds what
+# a developer machine leaves behind. Sources, tests and node_modules live
+# outside this folder and never reach the package.
+.DS_Store
+Thumbs.db
+*.map
+.sdignore

@@ -1888,6 +1888,26 @@ jobs:
         run: npm test
       - if: needs.changes.outputs.code == 'true'
         run: npm run build
+      # Elgato's own validator (@elgato/cli, pinned in package.json) against the
+      # built folder: manifest schema, every image path a state or action names,
+      # the Version format. It exits 1 on any error, which fails this job.
+      # --no-update-check (inside the script) keeps it on the schemas bundled
+      # with the pinned CLI, so a schema Elgato publishes tomorrow cannot turn a
+      # green commit red.
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run validate
+      # pack validates again and refuses on error; the .streamDeckPlugin it
+      # writes is the file the release attaches, built the same way.
+      - if: needs.changes.outputs.code == 'true'
+        run: npm run pack
+      - name: Upload the packaged plugin
+        if: needs.changes.outputs.code == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: com.polyemesis.streamdeck.streamDeckPlugin
+          path: integrations/streamdeck/dist/com.polyemesis.streamdeck.streamDeckPlugin
+          if-no-files-found: error
+          retention-days: 7
 
   # THE WORKFLOWS THEMSELVES WERE NEVER CHECKED.
   #
