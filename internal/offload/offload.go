@@ -55,7 +55,12 @@ type Client interface {
 	Put(ctx context.Context, key string, body io.ReadSeeker, size int64, sha256Hex, md5B64 string, meta map[string]string) (string, error)
 	Head(ctx context.Context, key string) (objstore.ObjectInfo, error)
 	Get(ctx context.Context, key string) (io.ReadCloser, objstore.ObjectInfo, error)
+	GetFrom(ctx context.Context, key string, offset int64) (io.ReadCloser, objstore.ObjectInfo, bool, error)
 	Delete(ctx context.Context, key string) error
+	CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error)
+	UploadPart(ctx context.Context, key, uploadID string, n int, body io.ReadSeeker, size int64, sha256Hex, md5B64 string) (string, error)
+	CompleteMultipart(ctx context.Context, key, uploadID string, parts []objstore.Part) (string, error)
+	AbortMultipart(ctx context.Context, key, uploadID string) error
 }
 
 // Recordings is what offload needs from recording.Manager.
@@ -95,6 +100,19 @@ type Service struct {
 
 	passMu sync.Mutex
 
+	stuckMu sync.Mutex
+	onStuck func(StuckEvent)
+
+	// Multipart: files above mpThreshold go up in parts of partSize, each
+	// part tried partTries times with backoff starting at partBackoff.
+	mpThreshold int64
+	partSize    int64
+	partTries   int
+	partBackoff time.Duration
+	// fetchTries and fetchBackoff are fetch-back's attempts, resumed by Range.
+	fetchTries   int
+	fetchBackoff time.Duration
+
 	fetchMu sync.Mutex
 	fetches map[string]*FetchState
 	baseCtx context.Context
@@ -108,6 +126,25 @@ func WithClientFactory(fn func(t db.StorageTarget) (Client, error)) Option {
 	return func(s *Service) { s.newClient = fn }
 }
 
+// Multipart defaults. 64 MiB is where a single PUT's all-or-nothing retry
+// starts to cost real bandwidth; 16 MiB parts keep a resume cheap and stay
+// above every service's 5 MiB minimum part size.
+const (
+	DefaultMultipartThreshold int64 = 64 << 20
+	DefaultPartSize           int64 = 16 << 20
+)
+
+// WithMultipart sets the multipart threshold and part size (tests use small
+// ones against the fake; the MinIO suite uses 5 MiB parts, MinIO's minimum).
+func WithMultipart(threshold, partSize int64) Option {
+	return func(s *Service) { s.mpThreshold, s.partSize = threshold, partSize }
+}
+
+// WithRetryPacing sets part and fetch-back retry backoff (tests: near zero).
+func WithRetryPacing(d time.Duration) Option {
+	return func(s *Service) { s.partBackoff, s.fetchBackoff = d, d }
+}
+
 // WithClock replaces time.Now (tests).
 func WithClock(fn func() time.Time) Option { return func(s *Service) { s.now = fn } }
 
@@ -115,7 +152,9 @@ func WithClock(fn func() time.Time) Option { return func(s *Service) { s.now = f
 // so the Library refreshes over the recordings event.
 func New(log *slog.Logger, store *db.DB, box *secrets.Box, rec Recordings, onChange func(), opts ...Option) *Service {
 	s := &Service{log: log, store: store, box: box, rec: rec, onChange: onChange, now: time.Now,
-		newClient: NewClient, fetches: map[string]*FetchState{}, baseCtx: context.Background()}
+		newClient: NewClient, fetches: map[string]*FetchState{}, baseCtx: context.Background(),
+		mpThreshold: DefaultMultipartThreshold, partSize: DefaultPartSize, partTries: 3, partBackoff: time.Second,
+		fetchTries: 3, fetchBackoff: time.Second}
 	s.segSecs = func() int {
 		st, err := store.GetSettings()
 		if err != nil {
@@ -172,12 +211,28 @@ func (g guarded) Get(ctx context.Context, key string) (io.ReadCloser, objstore.O
 	return g.c.Get(g.ctx(ctx), key)
 }
 func (g guarded) Delete(ctx context.Context, key string) error { return g.c.Delete(g.ctx(ctx), key) }
+func (g guarded) GetFrom(ctx context.Context, key string, off int64) (io.ReadCloser, objstore.ObjectInfo, bool, error) {
+	return g.c.GetFrom(g.ctx(ctx), key, off)
+}
+func (g guarded) CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error) {
+	return g.c.CreateMultipart(g.ctx(ctx), key, meta)
+}
+func (g guarded) UploadPart(ctx context.Context, key, id string, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
+	return g.c.UploadPart(g.ctx(ctx), key, id, n, body, size, sh, mb)
+}
+func (g guarded) CompleteMultipart(ctx context.Context, key, id string, parts []objstore.Part) (string, error) {
+	return g.c.CompleteMultipart(g.ctx(ctx), key, id, parts)
+}
+func (g guarded) AbortMultipart(ctx context.Context, key, id string) error {
+	return g.c.AbortMultipart(g.ctx(ctx), key, id)
+}
 
 // Run ticks until ctx ends.
 func (s *Service) Run(ctx context.Context) {
 	s.fetchMu.Lock()
 	s.baseCtx = ctx
 	s.fetchMu.Unlock()
+	s.Recover(ctx)
 	t := time.NewTicker(tickEvery)
 	defer t.Stop()
 	for {
@@ -283,6 +338,11 @@ func (s *Service) Pass(ctx context.Context) {
 				it.Attempts = 0
 				it.NextAttemptAt = time.Time{}
 			}
+			if ok && it.State == db.OffloadStuck {
+				// Stuck stays stuck until Retry now: retrying a refused
+				// credential every hour is noise, not progress.
+				continue
+			}
 			if ok && it.State == db.OffloadFailed && s.now().Before(it.NextAttemptAt) {
 				continue
 			}
@@ -338,10 +398,9 @@ func (s *Service) keyConflict(t db.StorageTarget, it db.OffloadItem, holder stri
 func (s *Service) unkeyed(t db.StorageTarget, it db.OffloadItem, why error) db.OffloadItem {
 	it.Key = unkeyedPrefix + it.RelPath
 	it.Attempts++
-	it.State = db.OffloadFailed
-	it.LastError = clipErr(why)
-	it.NextAttemptAt = s.now().Add(backoffCap)
-	s.log.Warn("offload: file has no usable object key", "target", t.Name, "file", it.RelPath, "err", it.LastError)
+	s.log.Warn("offload: file has no usable object key", "target", t.Name, "file", it.RelPath, "err", clipErr(why))
+	// No key is a configuration fault: waiting will not give the file one.
+	it = s.fail(t, it, why, true)
 	if err := s.store.PutOffloadItem(it); err != nil {
 		s.log.Warn("offload: persist item", "file", it.RelPath, "err", err)
 	}
@@ -493,9 +552,6 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		if n != before.Size() {
 			return errors.New("file changed while it was being hashed")
 		}
-		if n > objstore.MaxSinglePut {
-			return fmt.Errorf("file is %d bytes, over the %d-byte single upload limit; shorten the recording segment length", n, objstore.MaxSinglePut)
-		}
 		it.Bytes, it.SHA256 = n, sh
 		it.State = db.OffloadUploading
 		// Claimed in the database BEFORE the PUT: the UNIQUE(target_id,
@@ -504,11 +560,22 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		if err := s.store.PutOffloadItem(it); err != nil {
 			return fmt.Errorf("claim object key %s: %w", it.Key, err)
 		}
-		body := io.NewSectionReader(f, 0, n)
-		if _, err := c.Put(ctx, it.Key, body, n, sh, mb, map[string]string{"sha256": sh}); err != nil {
-			return err
+		var wantETag string
+		if n > s.mpThreshold {
+			composite, err := s.putMultipart(ctx, t, c, f, it, n, sh)
+			if err != nil {
+				return err
+			}
+			wantETag = composite
+		} else {
+			body := io.NewSectionReader(f, 0, n)
+			if _, err := c.Put(ctx, it.Key, body, n, sh, mb, map[string]string{"sha256": sh}); err != nil {
+				return err
+			}
+			raw, _ := base64.StdEncoding.DecodeString(mb)
+			wantETag = hex.EncodeToString(raw)
 		}
-		if err := verify(ctx, c, t, it.Key, n, sh, mb); err != nil {
+		if err := verify(ctx, c, t, it.Key, n, sh, wantETag); err != nil {
 			return err
 		}
 		after, err := os.Stat(cand.path)
@@ -520,13 +587,23 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		}
 		return nil
 	}()
-	if err != nil {
-		it.Attempts++
+	switch {
+	case err != nil && ctx.Err() != nil:
+		// Shutdown, not a fault of the file or the target: failed and due
+		// again at once, without spending an attempt.
 		it.State = db.OffloadFailed
 		it.LastError = clipErr(err)
-		it.NextAttemptAt = s.now().Add(backoff(it.Attempts, retryable(err)))
-		s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", it.LastError)
-	} else {
+		it.NextAttemptAt = time.Time{}
+	case err != nil:
+		it.Attempts++
+		s.log.Warn("offload upload failed", "target", t.Name, "file", it.RelPath, "attempt", it.Attempts, "err", clipErr(err))
+		it = s.fail(t, it, err, !retryable(err))
+		if it.State == db.OffloadStuck {
+			// Giving up: the parts already sent are abandoned on the service
+			// too, not left to bill until a lifecycle rule notices.
+			s.abortUpload(ctx, c, t.ID, it.RelPath)
+		}
+	default:
 		it.State = db.OffloadVerified
 		it.LastError = ""
 		it.NextAttemptAt = time.Time{}
@@ -537,6 +614,79 @@ func (s *Service) upload(ctx context.Context, t db.StorageTarget, c Client, it d
 		s.log.Warn("offload: persist item", "file", it.RelPath, "err", perr)
 	}
 	return it
+}
+
+// StuckEvent is what the alert, webhook and event-stream paths are told when
+// an item stops retrying on its own.
+type StuckEvent struct {
+	TargetID   int64
+	TargetName string
+	RelPath    string
+	Kind       string
+	Attempts   int
+	Error      string
+}
+
+// WithStuckHook registers the callback raised once, on the transition, when an
+// item becomes stuck.
+func WithStuckHook(fn func(StuckEvent)) Option { return func(s *Service) { s.onStuck = fn } }
+
+// SetStuckHook is WithStuckHook after construction: the API server that owns
+// the alert and webhook paths is built after the service.
+func (s *Service) SetStuckHook(fn func(StuckEvent)) {
+	s.stuckMu.Lock()
+	s.onStuck = fn
+	s.stuckMu.Unlock()
+}
+
+// fail records a failed attempt: retried later with backoff, or stuck when it
+// was the target's last allowed attempt or the error is permanent.
+func (s *Service) fail(t db.StorageTarget, it db.OffloadItem, err error, permanent bool) db.OffloadItem {
+	it.LastError = clipErr(err)
+	limit := t.MaxAttempts
+	if limit <= 0 {
+		limit = db.DefaultOffloadMaxAttempts
+	}
+	if permanent || it.Attempts >= limit {
+		was := it.State
+		it.State = db.OffloadStuck
+		it.NextAttemptAt = time.Time{}
+		if was != db.OffloadStuck {
+			s.raiseStuck(StuckEvent{TargetID: t.ID, TargetName: t.Name, RelPath: it.RelPath, Kind: it.Kind,
+				Attempts: it.Attempts, Error: it.LastError})
+		}
+		return it
+	}
+	it.State = db.OffloadFailed
+	it.NextAttemptAt = s.now().Add(backoff(it.Attempts, true))
+	return it
+}
+
+func (s *Service) raiseStuck(ev StuckEvent) {
+	s.stuckMu.Lock()
+	fn := s.onStuck
+	s.stuckMu.Unlock()
+	s.log.Warn("offload: item stuck; it will not be retried until Retry now", "target", ev.TargetName,
+		"file", ev.RelPath, "attempts", ev.Attempts, "err", ev.Error)
+	if fn != nil {
+		fn(ev)
+	}
+}
+
+// Retry puts failed and stuck items back in the queue with attempts reset --
+// every item of target when rel is "", one file's items on every target when
+// target is 0 -- and starts a pass. It returns how many items moved.
+func (s *Service) Retry(target int64, rel string) (int64, error) {
+	n, err := s.store.RetryOffloadItems(target, rel)
+	if err != nil || n == 0 {
+		return n, err
+	}
+	s.onChange()
+	s.fetchMu.Lock()
+	ctx := s.baseCtx
+	s.fetchMu.Unlock()
+	go s.Pass(ctx)
+	return n, nil
 }
 
 func retryable(err error) bool {
@@ -550,8 +700,15 @@ func retryable(err error) bool {
 	return true
 }
 
-// verify confirms the stored object is the bytes that were sent.
-func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size int64, sh, mb string) error {
+// compositeETag is the shape of a multipart object's ETag.
+var compositeETag = regexp.MustCompile(`^[0-9a-f]{32}-[0-9]+$`)
+
+// verify confirms the stored object is the bytes that were sent. wantETag is
+// the hex MD5 of the body for a single PUT, or the composite
+// md5(part MD5s)-N for a multipart upload; an ETag of neither shape (SSE-KMS,
+// some gateways) is no evidence either way, and the SHA-256 metadata and the
+// optional read-back carry the check.
+func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size int64, sh, wantETag string) error {
 	info, err := c.Head(ctx, key)
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
@@ -559,11 +716,8 @@ func verify(ctx context.Context, c Client, t db.StorageTarget, key string, size 
 	if info.Size != size {
 		return fmt.Errorf("%w: stored %d bytes, sent %d", ErrChecksumMismatch, info.Size, size)
 	}
-	if etag := strings.ToLower(info.ETag); hexMD5.MatchString(etag) {
-		raw, _ := base64.StdEncoding.DecodeString(mb)
-		if etag != hex.EncodeToString(raw) {
-			return fmt.Errorf("%w: stored ETag %s is not the MD5 that was sent", ErrChecksumMismatch, etag)
-		}
+	if etag := strings.ToLower(info.ETag); (hexMD5.MatchString(etag) || compositeETag.MatchString(etag)) && etag != wantETag {
+		return fmt.Errorf("%w: stored ETag %s is not the %s that was sent", ErrChecksumMismatch, etag, wantETag)
 	}
 	if got, ok := info.Meta["sha256"]; ok && got != sh {
 		return fmt.Errorf("%w: stored sha256 metadata differs", ErrChecksumMismatch)

@@ -122,3 +122,54 @@ func TestLiveWrongSecretIsRefusedAndNeverEchoed(t *testing.T) {
 		t.Fatal("error echoes a secret")
 	}
 }
+
+func TestLiveMultipartAndRangedGet(t *testing.T) {
+	c := liveClient(t)
+	ctx := context.Background()
+	part := bytes.Repeat([]byte("0123456789abcdef"), (5<<20)/16) // 5 MiB, MinIO's minimum part
+	tail := []byte("the short last part")
+	key := "mp/large object.mkv"
+	id, err := c.CreateMultipart(ctx, key, map[string]string{"sha256": "recorded-by-the-caller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []Part
+	for i, b := range [][]byte{part, tail} {
+		sh, mb := digests(b)
+		etag, err := c.UploadPart(ctx, key, id, i+1, bytes.NewReader(b), int64(len(b)), sh, mb)
+		if err != nil {
+			t.Fatalf("part %d: %v", i+1, err)
+		}
+		parts = append(parts, Part{Number: i + 1, ETag: etag, MD5: mb, Size: int64(len(b))})
+	}
+	etag, err := c.CompleteMultipart(ctx, key, id, parts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := CompositeETag(parts)
+	if etag != want {
+		t.Fatalf("composite etag %q, predicted %q", etag, want)
+	}
+	info, err := c.Head(ctx, key)
+	if err != nil || info.ETag != want || info.Size != int64(len(part)+len(tail)) || info.Meta["sha256"] != "recorded-by-the-caller" {
+		t.Fatalf("head %+v %v", info, err)
+	}
+	off := int64(len(part)) + 4
+	rc, rinfo, partial, err := c.GetFrom(ctx, key, off)
+	if err != nil || !partial || rinfo.Size != info.Size {
+		t.Fatalf("ranged get partial=%v %+v %v", partial, rinfo, err)
+	}
+	got, _ := io.ReadAll(rc)
+	rc.Close()
+	if string(got) != string(tail[4:]) {
+		t.Fatalf("ranged body %q", got)
+	}
+	// Abort of an upload, and of one that no longer exists, both succeed.
+	id2, _ := c.CreateMultipart(ctx, "mp/abandoned", nil)
+	if err := c.AbortMultipart(ctx, "mp/abandoned", id2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AbortMultipart(ctx, "mp/abandoned", id2); err != nil {
+		t.Fatalf("second abort: %v", err)
+	}
+}

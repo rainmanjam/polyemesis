@@ -25,7 +25,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
@@ -211,6 +213,146 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, ObjectInfo
 	return resp.Body, infoFrom(resp), nil
 }
 
+// GetFrom opens the object from byte offset on, for resuming a download.
+// partial reports whether the server honoured the range (206); a server that
+// answers 200 sent the whole object, and the caller must start over. Size in
+// the returned info is the WHOLE object's length either way.
+func (c *Client) GetFrom(ctx context.Context, key string, offset int64) (io.ReadCloser, ObjectInfo, bool, error) {
+	if offset <= 0 {
+		body, info, err := c.Get(ctx, key)
+		return body, info, false, err
+	}
+	h := http.Header{}
+	h.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
+	resp, err := c.do(ctx, "GetObject", http.MethodGet, key, h, nil, 0, emptySHA256)
+	if err != nil {
+		return nil, ObjectInfo{}, false, err
+	}
+	info := infoFrom(resp)
+	if resp.StatusCode != http.StatusPartialContent {
+		return resp.Body, info, false, nil
+	}
+	// Content-Range: bytes <first>-<last>/<total>
+	cr := resp.Header.Get("Content-Range")
+	i := strings.LastIndexByte(cr, '/')
+	total, perr := strconv.ParseInt(cr[i+1:], 10, 64)
+	if i < 0 || perr != nil || !strings.HasPrefix(cr, "bytes "+strconv.FormatInt(offset, 10)+"-") {
+		_ = resp.Body.Close()
+		return nil, ObjectInfo{}, false, fmt.Errorf("objstore: GetObject: unusable Content-Range %q", cr)
+	}
+	info.Size = total
+	return resp.Body, info, true, nil
+}
+
+// Part is one completed part of a multipart upload.
+type Part struct {
+	Number int    `json:"n"`
+	ETag   string `json:"etag"`
+	// MD5 is the part's raw MD5, base64, kept so the composite ETag of the
+	// completed object can be predicted and checked.
+	MD5  string `json:"md5"`
+	Size int64  `json:"size"`
+}
+
+// CreateMultipart starts a multipart upload and returns its upload id.
+func (c *Client) CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error) {
+	h := http.Header{}
+	h.Set("Content-Type", "application/octet-stream")
+	for k, v := range meta {
+		h.Set("X-Amz-Meta-"+k, v)
+	}
+	resp, err := c.doQ(ctx, "CreateMultipartUpload", http.MethodPost, key, url.Values{"uploads": {""}}, h, nil, 0, emptySHA256)
+	if err != nil {
+		return "", err
+	}
+	defer drain(resp)
+	var x struct {
+		UploadID string `xml:"UploadId"`
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err := xml.Unmarshal(raw, &x); err != nil || x.UploadID == "" {
+		return "", fmt.Errorf("objstore: CreateMultipartUpload: no upload id in the answer")
+	}
+	return x.UploadID, nil
+}
+
+// UploadPart sends one part. Like Put, the service recomputes both digests.
+func (c *Client) UploadPart(ctx context.Context, key, uploadID string, n int, body io.ReadSeeker, size int64, sha256Hex, md5B64 string) (string, error) {
+	h := http.Header{}
+	h.Set("Content-MD5", md5B64)
+	q := url.Values{"partNumber": {strconv.Itoa(n)}, "uploadId": {uploadID}}
+	resp, err := c.doQ(ctx, "UploadPart", http.MethodPut, key, q, h, body, size, sha256Hex)
+	if err != nil {
+		return "", err
+	}
+	defer drain(resp)
+	return strings.Trim(resp.Header.Get("ETag"), `"`), nil
+}
+
+// CompleteMultipart assembles the parts. S3 can answer 200 and still carry an
+// <Error> in the body, so the body is read either way.
+func (c *Client) CompleteMultipart(ctx context.Context, key, uploadID string, parts []Part) (string, error) {
+	var b bytes.Buffer
+	b.WriteString("<CompleteMultipartUpload>")
+	for _, p := range parts {
+		fmt.Fprintf(&b, "<Part><PartNumber>%d</PartNumber><ETag>\"%s\"</ETag></Part>", p.Number, p.ETag)
+	}
+	b.WriteString("</CompleteMultipartUpload>")
+	body := b.Bytes()
+	sum := sha256.Sum256(body)
+	h := http.Header{}
+	h.Set("Content-Type", "application/xml")
+	resp, err := c.doQ(ctx, "CompleteMultipartUpload", http.MethodPost, key, url.Values{"uploadId": {uploadID}}, h,
+		bytes.NewReader(body), int64(len(body)), hex.EncodeToString(sum[:]))
+	if err != nil {
+		return "", err
+	}
+	defer drain(resp)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	var x struct {
+		XMLName xml.Name
+		ETag    string `xml:"ETag"`
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+	}
+	if err := xml.Unmarshal(raw, &x); err != nil {
+		return "", fmt.Errorf("objstore: CompleteMultipartUpload: unreadable answer")
+	}
+	if x.XMLName.Local == "Error" {
+		return "", &Error{Op: "CompleteMultipartUpload", StatusCode: http.StatusInternalServerError, Code: clip(x.Code, 64), Message: clip(x.Message, 200)}
+	}
+	return strings.Trim(x.ETag, `"`), nil
+}
+
+// AbortMultipart discards an unfinished upload and its parts. An upload the
+// service no longer knows is already gone, which is the goal: not an error.
+func (c *Client) AbortMultipart(ctx context.Context, key, uploadID string) error {
+	resp, err := c.doQ(ctx, "AbortMultipartUpload", http.MethodDelete, key, url.Values{"uploadId": {uploadID}}, nil, nil, 0, emptySHA256)
+	if err != nil {
+		var se *Error
+		if errors.As(err, &se) && (se.StatusCode == http.StatusNotFound || se.Code == "NoSuchUpload") {
+			return nil
+		}
+		return err
+	}
+	drain(resp)
+	return nil
+}
+
+// CompositeETag is the ETag S3-compatible services give a multipart object:
+// the hex MD5 of the concatenated part MD5s, a dash, and the part count.
+func CompositeETag(parts []Part) (string, error) {
+	h := md5.New()
+	for _, p := range parts {
+		raw, err := base64.StdEncoding.DecodeString(p.MD5)
+		if err != nil || len(raw) != md5.Size {
+			return "", fmt.Errorf("objstore: part %d has no usable MD5", p.Number)
+		}
+		h.Write(raw)
+	}
+	return hex.EncodeToString(h.Sum(nil)) + "-" + strconv.Itoa(len(parts)), nil
+}
+
 // Delete removes the object. S3 answers 204 whether or not it existed.
 func (c *Client) Delete(ctx context.Context, key string) error {
 	resp, err := c.do(ctx, "DeleteObject", http.MethodDelete, key, nil, nil, 0, emptySHA256)
@@ -291,6 +433,10 @@ func (c *Client) objectURL(key string) (*url.URL, string) {
 }
 
 func (c *Client) do(ctx context.Context, op, method, key string, hdr http.Header, body io.ReadSeeker, size int64, payloadSHA string) (*http.Response, error) {
+	return c.doQ(ctx, op, method, key, nil, hdr, body, size, payloadSHA)
+}
+
+func (c *Client) doQ(ctx context.Context, op, method, key string, query url.Values, hdr http.Header, body io.ReadSeeker, size int64, payloadSHA string) (*http.Response, error) {
 	if key == "" || strings.HasPrefix(key, "/") {
 		return nil, fmt.Errorf("objstore: %s: key must be non-empty and relative", op)
 	}
@@ -309,6 +455,8 @@ func (c *Client) do(ctx context.Context, op, method, key string, hdr http.Header
 	// Keep the path exactly as it was signed; net/http would otherwise
 	// re-escape characters S3 and SigV4 treat differently.
 	req.URL.Opaque = "//" + u.Host + canonPath
+	// Encoded exactly as the signature's canonical query encodes it.
+	req.URL.RawQuery = canonicalQuery(query)
 	if body != nil {
 		req.ContentLength = size
 		req.GetBody = func() (io.ReadCloser, error) {

@@ -42,6 +42,10 @@ func (o oversized) Get(context.Context, string) (io.ReadCloser, objstore.ObjectI
 	return io.NopCloser(o.body), objstore.ObjectInfo{Size: o.declared}, nil
 }
 
+func (o oversized) GetFrom(context.Context, string, int64) (io.ReadCloser, objstore.ObjectInfo, bool, error) {
+	return io.NopCloser(o.body), objstore.ObjectInfo{Size: o.declared}, false, nil
+}
+
 func evictedFixture(t *testing.T) (*fixture, string, db.OffloadItem) {
 	t.Helper()
 	f := newFixture(t)
@@ -166,7 +170,7 @@ func TestAKeyAnotherFileOwnsIsRefusedNotOverwritten(t *testing.T) {
 		t.Fatalf("the owner's object was overwritten with %q", got)
 	}
 	it, ok := f.item(id, name)
-	if !ok || it.State != db.OffloadFailed || !strings.Contains(it.LastError, "already held by elsewhere.mkv") {
+	if !ok || it.State != db.OffloadStuck || !strings.Contains(it.LastError, "already held by elsewhere.mkv") {
 		t.Fatalf("%+v", it)
 	}
 	if !f.local(name) {
@@ -198,7 +202,7 @@ func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
 	}
 	f.svc.Pass(context.Background())
 	bad, ok := f.item(id, `clips/bad\name.ts`)
-	if !ok || bad.State != db.OffloadFailed || !strings.Contains(bad.LastError, "invalid file path") {
+	if !ok || bad.State != db.OffloadStuck || !strings.Contains(bad.LastError, "invalid file path") {
 		t.Fatalf("bad file: %+v ok=%v", bad, ok)
 	}
 	good, ok := f.item(id, "clips/good.ts")

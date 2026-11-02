@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -134,18 +135,15 @@ func (s *Service) FetchNow(ctx context.Context, name string) error {
 	return lastErr
 }
 
+// fetchOne brings one object into final: into a temporary file beside it,
+// with up to fetchTries attempts that RESUME from the bytes already received
+// (HTTP Range) rather than starting over, a running SHA-256 over the whole
+// file, and a rename only once the size and digest are the uploaded ones.
+//
+// The size cap holds on every attempt: an object declaring any other total is
+// refused before a byte is written, and no attempt reads more than one byte
+// past what remains.
 func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, final string) error {
-	body, info, err := c.Get(ctx, it.Key)
-	if err != nil {
-		return err
-	}
-	defer body.Close()
-	// Refuse before writing a byte: the object's declared length must be the
-	// length that was uploaded. A broken or hostile endpoint must not be able
-	// to fill the recordings volume ahead of the digest check below.
-	if info.Size != it.Bytes {
-		return fmt.Errorf("%w: object declares %d bytes, %d were uploaded", ErrChecksumMismatch, info.Size, it.Bytes)
-	}
 	tmp, err := os.CreateTemp(filepath.Dir(final), ".offload-fetch-*")
 	if err != nil {
 		return err
@@ -153,28 +151,40 @@ func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, fin
 	tmpName := tmp.Name()
 	keep := false
 	defer func() {
+		_ = tmp.Close()
 		if !keep {
 			_ = os.Remove(tmpName)
 		}
 	}()
 	h := sha256.New()
-	// And never trust the declaration either: at most one byte past the
-	// uploaded length is ever read, which is enough to tell "longer" apart.
-	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(body, it.Bytes+1))
-	if err == nil && n > it.Bytes {
-		err = fmt.Errorf("%w: object is longer than the %d bytes uploaded", ErrChecksumMismatch, it.Bytes)
+	var got int64
+	wait := s.fetchBackoff
+	for try := 0; ; try++ {
+		err = s.fetchAttempt(ctx, c, it, tmp, h, &got)
+		if err == nil {
+			break
+		}
+		// A declared length or digest that is wrong will not become right by
+		// asking again, and a cancelled context means stop.
+		if errors.Is(err, ErrChecksumMismatch) || ctx.Err() != nil || try+1 >= s.fetchTries || !retryable(err) {
+			return err
+		}
+		s.log.Warn("offload: fetch-back attempt failed; resuming", "file", it.RelPath, "have", got, "err", clipErr(err))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		wait *= 2
 	}
-	if err == nil {
-		err = tmp.Sync()
+	if got != it.Bytes || hex.EncodeToString(h.Sum(nil)) != it.SHA256 {
+		return fmt.Errorf("%w: fetched copy is not the uploaded bytes", ErrChecksumMismatch)
 	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if err := tmp.Sync(); err != nil {
 		return err
 	}
-	if n != it.Bytes || hex.EncodeToString(h.Sum(nil)) != it.SHA256 {
-		return fmt.Errorf("%w: fetched copy is not the uploaded bytes", ErrChecksumMismatch)
+	if err := tmp.Close(); err != nil {
+		return err
 	}
 	if _, err := os.Stat(final); err == nil {
 		return errors.New("a local file already exists under this name")
@@ -183,5 +193,40 @@ func (s *Service) fetchOne(ctx context.Context, c Client, it db.OffloadItem, fin
 		return err
 	}
 	keep = true
+	return nil
+}
+
+// fetchAttempt appends what the service sends from *got on to tmp and h.
+func (s *Service) fetchAttempt(ctx context.Context, c Client, it db.OffloadItem, tmp *os.File, h hash.Hash, got *int64) error {
+	body, info, partial, err := c.GetFrom(ctx, it.Key, *got)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	if info.Size != it.Bytes {
+		return fmt.Errorf("%w: object declares %d bytes, %d were uploaded", ErrChecksumMismatch, info.Size, it.Bytes)
+	}
+	if *got > 0 && !partial {
+		// The service ignored the Range and sent everything: start over.
+		if err := tmp.Truncate(0); err != nil {
+			return err
+		}
+		h.Reset()
+		*got = 0
+	}
+	if _, err := tmp.Seek(*got, io.SeekStart); err != nil {
+		return err
+	}
+	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(body, it.Bytes-*got+1))
+	*got += n
+	if *got > it.Bytes {
+		return fmt.Errorf("%w: object is longer than the %d bytes uploaded", ErrChecksumMismatch, it.Bytes)
+	}
+	if err != nil {
+		return err
+	}
+	if *got < it.Bytes {
+		return fmt.Errorf("fetch ended after %d of %d bytes", *got, it.Bytes)
+	}
 	return nil
 }

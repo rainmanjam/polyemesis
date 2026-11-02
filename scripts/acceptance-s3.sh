@@ -65,7 +65,8 @@ grep -E '^(=== RUN|--- |ok|FAIL|panic)' "$out" || true
 # A mistyped -run exits 0 having run nothing; insist on the cases by name.
 for want in TestLiveRoundTripWithAKeyThatNeedsEscaping TestLiveServerRefusesABodyThatIsNotTheSignedDigest \
 	TestLiveWrongSecretIsRefusedAndNeverEchoed TestLiveMoveModeUploadsVerifiesEvictsAndFetchesBack \
-	TestLiveProbeRunsPutGetDelete; do
+	TestLiveProbeRunsPutGetDelete TestLiveMultipartAndRangedGet \
+	TestLiveMultipartResumesAcrossARestartAndFetchesBack; do
 	if ! grep -q -- "--- PASS: $want " "$out"; then
 		echo "FAIL: $want did not pass" >&2
 		status=1

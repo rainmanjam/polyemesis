@@ -772,6 +772,7 @@ CREATE TABLE IF NOT EXISTS storage_targets (
     verify_download      INTEGER NOT NULL DEFAULT 0,
     allow_private_target INTEGER NOT NULL DEFAULT 0,
     enabled              INTEGER NOT NULL DEFAULT 1,
+    max_attempts         INTEGER NOT NULL DEFAULT 8,     -- consecutive failures before an item is stuck
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL
 );
@@ -788,7 +789,7 @@ CREATE TABLE IF NOT EXISTS offload_items (
     object_key      TEXT    NOT NULL,
     bytes           INTEGER NOT NULL DEFAULT 0,
     sha256          TEXT    NOT NULL DEFAULT '',
-    state           TEXT    NOT NULL DEFAULT 'pending',   -- pending | uploading | verified | failed
+    state           TEXT    NOT NULL DEFAULT 'pending',   -- pending | uploading | verified | failed | stuck
     attempts        INTEGER NOT NULL DEFAULT 0,
     next_attempt_at INTEGER NOT NULL DEFAULT 0,
     last_error      TEXT    NOT NULL DEFAULT '',
@@ -802,3 +803,20 @@ CREATE INDEX IF NOT EXISTS idx_offload_items_rel ON offload_items(rel_path);
 -- One object key, one file, per target: a second file whose rendered key
 -- collides is refused here rather than overwriting what may be the only copy.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_offload_items_key ON offload_items(target_id, object_key);
+
+-- A multipart upload in progress, so a retry or a restart resumes it rather
+-- than starting over. parts is the JSON list of completed parts (number, ETag,
+-- MD5, size). A row whose upload is abandoned is aborted on the service and
+-- deleted: on giving up, on target delete, and by the startup sweep.
+CREATE TABLE IF NOT EXISTS offload_multipart (
+    target_id   INTEGER NOT NULL,
+    rel_path    TEXT    NOT NULL,
+    object_key  TEXT    NOT NULL,
+    upload_id   TEXT    NOT NULL,
+    part_size   INTEGER NOT NULL,
+    bytes       INTEGER NOT NULL,
+    sha256      TEXT    NOT NULL,
+    parts       TEXT    NOT NULL DEFAULT '[]',
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (target_id, rel_path)
+);

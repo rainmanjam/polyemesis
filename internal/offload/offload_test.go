@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -33,11 +34,22 @@ const (
 
 // memStore is an in-memory bucket that can be told to misbehave.
 type memStore struct {
-	mu      sync.Mutex
-	objs    map[string][]byte
-	meta    map[string]map[string]string
-	putErr  error
-	headErr error
+	mu    sync.Mutex
+	objs  map[string][]byte
+	etags map[string]string
+	meta  map[string]map[string]string
+	// multipart
+	uploads  map[string]map[int][]byte
+	nextID   int
+	partErrs map[int]int // part number -> failures still to inject
+	partPuts int
+	aborted  []string
+	// getCuts makes the next GetFrom calls stop after this many bytes with an
+	// error; getOffsets records the offset each GetFrom asked for.
+	getCuts    []int64
+	getOffsets []int64
+	putErr     error
+	headErr    error
 	// corrupt flips a byte of every stored object, so the stored copy is not
 	// the bytes that were sent -- what verification exists to catch.
 	corrupt bool
@@ -47,7 +59,8 @@ type memStore struct {
 }
 
 func newMem() *memStore {
-	return &memStore{objs: map[string][]byte{}, meta: map[string]map[string]string{}}
+	return &memStore{objs: map[string][]byte{}, meta: map[string]map[string]string{}, etags: map[string]string{},
+		uploads: map[string]map[int][]byte{}, partErrs: map[int]int{}}
 }
 
 func (m *memStore) Put(_ context.Context, key string, body io.ReadSeeker, size int64, sh, mb string, meta map[string]string) (string, error) {
@@ -67,12 +80,16 @@ func (m *memStore) Put(_ context.Context, key string, body io.ReadSeeker, size i
 	}
 	m.objs[key] = b
 	m.meta[key] = meta
+	delete(m.etags, key)
 	return m.etag(key), nil
 }
 
 func (m *memStore) etag(key string) string {
 	if m.lieETag {
 		return strings.Repeat("ab", 16)
+	}
+	if e, ok := m.etags[key]; ok {
+		return e
 	}
 	s := md5.Sum(m.objs[key])
 	return hex.EncodeToString(s[:])
@@ -99,6 +116,102 @@ func (m *memStore) Get(_ context.Context, key string) (io.ReadCloser, objstore.O
 		return nil, objstore.ObjectInfo{}, &objstore.Error{Op: "GetObject", StatusCode: 404}
 	}
 	return io.NopCloser(bytes.NewReader(b)), objstore.ObjectInfo{Size: int64(len(b))}, nil
+}
+
+type cutReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *cutReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, errors.New("connection reset by the fake")
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
+}
+
+func (m *memStore) GetFrom(_ context.Context, key string, off int64) (io.ReadCloser, objstore.ObjectInfo, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.getOffsets = append(m.getOffsets, off)
+	b, ok := m.objs[key]
+	if !ok {
+		return nil, objstore.ObjectInfo{}, false, &objstore.Error{Op: "GetObject", StatusCode: 404}
+	}
+	var r io.Reader = bytes.NewReader(b[off:])
+	if len(m.getCuts) > 0 {
+		r = &cutReader{r: r, left: m.getCuts[0]}
+		m.getCuts = m.getCuts[1:]
+	}
+	return io.NopCloser(r), objstore.ObjectInfo{Size: int64(len(b))}, off > 0, nil
+}
+
+func (m *memStore) CreateMultipart(_ context.Context, key string, meta map[string]string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextID++
+	id := key + "#" + strconv.Itoa(m.nextID)
+	m.uploads[id] = map[int][]byte{}
+	m.meta[key] = meta
+	return id, nil
+}
+
+func (m *memStore) UploadPart(_ context.Context, _ string, id string, n int, body io.ReadSeeker, size int64, _, _ string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.partPuts++
+	if m.partErrs[n] > 0 {
+		m.partErrs[n]--
+		return "", &objstore.Error{Op: "UploadPart", StatusCode: 503}
+	}
+	up, ok := m.uploads[id]
+	if !ok {
+		return "", &objstore.Error{Op: "UploadPart", StatusCode: 404, Code: "NoSuchUpload"}
+	}
+	b, _ := io.ReadAll(body)
+	if int64(len(b)) != size {
+		return "", errors.New("short part")
+	}
+	up[n] = b
+	sum := md5.Sum(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (m *memStore) CompleteMultipart(_ context.Context, key, id string, parts []objstore.Part) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	up, ok := m.uploads[id]
+	if !ok {
+		return "", &objstore.Error{Op: "CompleteMultipartUpload", StatusCode: 404, Code: "NoSuchUpload"}
+	}
+	var all []byte
+	h := md5.New()
+	for _, p := range parts {
+		b := up[p.Number]
+		all = append(all, b...)
+		sum := md5.Sum(b)
+		h.Write(sum[:])
+	}
+	if m.corrupt && len(all) > 0 {
+		all[0] ^= 0xff
+	}
+	m.objs[key] = all
+	m.etags[key] = hex.EncodeToString(h.Sum(nil)) + "-" + strconv.Itoa(len(parts))
+	delete(m.uploads, id)
+	return m.etags[key], nil
+}
+
+func (m *memStore) AbortMultipart(_ context.Context, _ string, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.aborted = append(m.aborted, id)
+	delete(m.uploads, id)
+	return nil
 }
 
 func (m *memStore) Delete(_ context.Context, key string) error {
@@ -538,7 +651,7 @@ func TestCredentialsNeverReachLogsOrStoredErrors(t *testing.T) {
 	f.segment(time.Minute, "newest", true)
 	f.svc.Pass(context.Background())
 	it, _ := f.item(id, name)
-	if it.State != db.OffloadFailed || !strings.Contains(it.LastError, "InvalidAccessKeyId") {
+	if it.State != db.OffloadStuck || !strings.Contains(it.LastError, "InvalidAccessKeyId") {
 		t.Fatalf("%+v", it)
 	}
 	tg, _ := f.store.GetStorageTarget(f.svc.box, id)

@@ -437,6 +437,7 @@ var leafSensitivity = map[string]sensitivity{
 	"storageTarget.verifyDownload":                 sPublic,
 	"storageTarget.allowPrivateTarget":             sPublic,
 	"storageTarget.enabled":                        sPublic,
+	"storageTarget.maxAttempts":                    sPublic,
 	"storageTarget.createdAt":                      sPublic,
 	"storageTarget.updatedAt":                      sPublic,
 }

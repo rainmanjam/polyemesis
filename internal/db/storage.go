@@ -37,7 +37,15 @@ const (
 	OffloadUploading = "uploading"
 	OffloadVerified  = "verified"
 	OffloadFailed    = "failed"
+	// OffloadStuck is a failure offload stopped retrying on its own: too many
+	// consecutive attempts, or an error waiting cannot cure (a refused
+	// credential, a missing bucket, a key the file cannot have). It moves only
+	// when an operator presses Retry now.
+	OffloadStuck = "stuck"
 )
+
+// DefaultOffloadMaxAttempts is how many consecutive failures make an item stuck.
+const DefaultOffloadMaxAttempts = 8
 
 // Offload item kinds.
 const (
@@ -74,17 +82,19 @@ type StorageTarget struct {
 	HasSecret       bool   `json:"hasSecret"`
 	// SecretUnreadable is set when a sealed secret exists but this machine's
 	// key cannot open it (a restored database without its key file).
-	SecretUnreadable   bool      `json:"secretUnreadable,omitempty"`
-	Mode               string    `json:"mode"`
-	KeepLocalHours     int       `json:"keepLocalHours"`
-	OffloadStems       bool      `json:"offloadStems"`
-	OffloadTranscripts bool      `json:"offloadTranscripts"`
-	OffloadClips       bool      `json:"offloadClips"`
-	VerifyDownload     bool      `json:"verifyDownload"`
-	AllowPrivateTarget bool      `json:"allowPrivateTarget"`
-	Enabled            bool      `json:"enabled"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	SecretUnreadable   bool   `json:"secretUnreadable,omitempty"`
+	Mode               string `json:"mode"`
+	KeepLocalHours     int    `json:"keepLocalHours"`
+	OffloadStems       bool   `json:"offloadStems"`
+	OffloadTranscripts bool   `json:"offloadTranscripts"`
+	OffloadClips       bool   `json:"offloadClips"`
+	VerifyDownload     bool   `json:"verifyDownload"`
+	AllowPrivateTarget bool   `json:"allowPrivateTarget"`
+	Enabled            bool   `json:"enabled"`
+	// MaxAttempts is how many consecutive failures make an item stuck.
+	MaxAttempts int       `json:"maxAttempts"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // DefaultOffloadPrefix is the key prefix a target with no template uses.
@@ -116,7 +126,7 @@ var ErrStorageTargetHoldsOnlyCopies = fmt.Errorf("%w: this target holds the only
 
 const storageTargetCols = `id, name, provider, endpoint, bucket, region, prefix_template, path_style,
 	access_key_id, secret_enc, mode, keep_local_hours, offload_stems, offload_transcripts,
-	offload_clips, verify_download, allow_private_target, enabled, created_at, updated_at`
+	offload_clips, verify_download, allow_private_target, enabled, max_attempts, created_at, updated_at`
 
 func scanStorageTarget(box *secrets.Box, row interface{ Scan(...any) error }) (StorageTarget, error) {
 	var t StorageTarget
@@ -125,7 +135,7 @@ func scanStorageTarget(box *secrets.Box, row interface{ Scan(...any) error }) (S
 	err := row.Scan(&t.ID, &t.Name, &t.Provider, &t.Endpoint, &t.Bucket, &t.Region, &t.PrefixTemplate,
 		&t.PathStyle, &t.AccessKeyID, &enc, &t.Mode, &t.KeepLocalHours, &t.OffloadStems,
 		&t.OffloadTranscripts, &t.OffloadClips, &t.VerifyDownload, &t.AllowPrivateTarget, &t.Enabled,
-		&created, &updated)
+		&t.MaxAttempts, &created, &updated)
 	if err != nil {
 		return t, err
 	}
@@ -192,11 +202,11 @@ func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, erro
 	now := time.Now().Unix()
 	res, err := d.sql.Exec(`INSERT INTO storage_targets (name, provider, endpoint, bucket, region,
 		prefix_template, path_style, access_key_id, secret_enc, mode, keep_local_hours, offload_stems,
-		offload_transcripts, offload_clips, verify_download, allow_private_target, enabled, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		offload_transcripts, offload_clips, verify_download, allow_private_target, enabled, max_attempts, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.Name, t.Provider, t.Endpoint, t.Bucket, t.Region, t.PrefixTemplate, t.PathStyle, t.AccessKeyID,
 		enc, t.Mode, t.KeepLocalHours, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
-		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, now, now)
+		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, maxAttemptsOr(t.MaxAttempts), now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -209,10 +219,10 @@ func (d *DB) CreateStorageTarget(box *secrets.Box, t StorageTarget) (int64, erro
 func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
 	q := `UPDATE storage_targets SET name=?, provider=?, endpoint=?, bucket=?, region=?, prefix_template=?,
 		path_style=?, access_key_id=?, mode=?, keep_local_hours=?, offload_stems=?, offload_transcripts=?,
-		offload_clips=?, verify_download=?, allow_private_target=?, enabled=?, updated_at=?`
+		offload_clips=?, verify_download=?, allow_private_target=?, enabled=?, max_attempts=?, updated_at=?`
 	args := []any{t.Name, t.Provider, t.Endpoint, t.Bucket, t.Region, t.PrefixTemplate, t.PathStyle,
 		t.AccessKeyID, t.Mode, t.KeepLocalHours, t.OffloadStems, t.OffloadTranscripts, t.OffloadClips,
-		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, time.Now().Unix()}
+		t.VerifyDownload, t.AllowPrivateTarget, t.Enabled, maxAttemptsOr(t.MaxAttempts), time.Now().Unix()}
 	if t.SecretAccessKey != "" {
 		enc, err := sealTargetSecret(box, t.SecretAccessKey)
 		if err != nil {
@@ -233,6 +243,50 @@ func (d *DB) UpdateStorageTarget(box *secrets.Box, t StorageTarget) error {
 	return nil
 }
 
+func maxAttemptsOr(n int) int {
+	if n <= 0 {
+		return DefaultOffloadMaxAttempts
+	}
+	return n
+}
+
+// RetryOffloadItems puts failed and stuck items back in the queue with their
+// attempt count reset: the operator's Retry now. target 0 means every target;
+// rel "" means every file. It returns how many items moved.
+func (d *DB) RetryOffloadItems(target int64, rel string) (int64, error) {
+	q := `UPDATE offload_items SET state = ?, attempts = 0, next_attempt_at = 0, updated_at = ?
+		WHERE state IN (?, ?)`
+	args := []any{OffloadPending, time.Now().Unix(), OffloadFailed, OffloadStuck}
+	if target != 0 {
+		q += ` AND target_id = ?`
+		args = append(args, target)
+	}
+	if rel != "" {
+		q += ` AND rel_path = ?`
+		args = append(args, rel)
+	}
+	res, err := d.sql.Exec(q, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// StorageTargetDeletable answers DeleteStorageTarget's refusal without
+// deleting, so the caller can abort the target's multipart uploads first.
+func (d *DB) StorageTargetDeletable(id int64) error {
+	var only int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM offload_items i WHERE i.target_id = ? AND i.evicted = 1
+		AND NOT EXISTS (SELECT 1 FROM offload_items o WHERE o.rel_path = i.rel_path AND o.target_id != i.target_id
+			AND o.state = 'verified')`, id).Scan(&only); err != nil {
+		return err
+	}
+	if only > 0 {
+		return ErrStorageTargetHoldsOnlyCopies
+	}
+	return nil
+}
+
 // DeleteStorageTarget removes a target and its item rows, unless it holds the
 // only copy of an evicted file.
 func (d *DB) DeleteStorageTarget(id int64) error {
@@ -249,6 +303,9 @@ func (d *DB) DeleteStorageTarget(id int64) error {
 	}
 	if only > 0 {
 		return ErrStorageTargetHoldsOnlyCopies
+	}
+	if _, err := tx.Exec(`DELETE FROM offload_multipart WHERE target_id = ?`, id); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM offload_items WHERE target_id = ?`, id); err != nil {
 		return err
