@@ -135,7 +135,7 @@ const (
 )
 
 // WithMultipart sets the multipart threshold and part size (tests use small
-// ones against the fake; the MinIO suite uses 5 MiB parts, MinIO's minimum).
+// ones against the fake; the live S3 suite uses 5 MiB parts, the S3 minimum).
 func WithMultipart(threshold, partSize int64) Option {
 	return func(s *Service) { s.mpThreshold, s.partSize = threshold, partSize }
 }

@@ -1,8 +1,11 @@
 //go:build s3integration
 
-// Offload end to end against a real MinIO: upload, verify, evict, fetch back,
-// and the Test button's three steps. Built only with -tags s3integration; see
-// scripts/acceptance-s3.sh. Fails, never skips, when the endpoint is missing.
+// Offload end to end against a real S3-compatible server: upload, verify,
+// evict, multipart resume across a restart, fetch back, and the Test button's
+// three steps. Built only with -tags s3integration and configured by the same
+// environment as internal/objstore's live tests (endpoint, keys, bucket,
+// region, path style, create-bucket); scripts/acceptance-s3.sh runs it against
+// RustFS. Fails, never skips, when the endpoint is missing.
 package offload
 
 import (
@@ -19,23 +22,39 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/objstore"
 )
 
+func envOr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
+// liveTarget saves a target for the configured server. bucket overrides the
+// configured bucket (the Test case's missing-bucket check); "" uses it. Each
+// test's objects live under a prefix named for the test.
 func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.StorageTarget {
 	t.Helper()
-	ep := os.Getenv("POLYEMESIS_S3_ENDPOINT")
-	if ep == "" {
-		t.Fatal("POLYEMESIS_S3_ENDPOINT is unset; run scripts/acceptance-s3.sh, which starts MinIO and sets it")
+	ep, ak, sk := os.Getenv("POLYEMESIS_S3_ENDPOINT"), os.Getenv("POLYEMESIS_S3_ACCESS_KEY"), os.Getenv("POLYEMESIS_S3_SECRET_KEY")
+	if ep == "" || ak == "" || sk == "" {
+		t.Fatal("POLYEMESIS_S3_ENDPOINT, _ACCESS_KEY and _SECRET_KEY must be set; scripts/acceptance-s3.sh starts RustFS and sets them")
 	}
-	tg := db.StorageTarget{Name: "minio", Provider: db.StorageProviderMinIO, Endpoint: ep, Bucket: bucket,
-		Region: "us-east-1", PathStyle: true, AccessKeyID: os.Getenv("POLYEMESIS_S3_ACCESS_KEY"),
-		SecretAccessKey: os.Getenv("POLYEMESIS_S3_SECRET_KEY"), Mode: mode, Enabled: true,
-		AllowPrivateTarget: true, VerifyDownload: true, PrefixTemplate: "live/{kind}/{yyyy}"}
-	c, err := objstore.New(objstore.Config{Endpoint: ep, Bucket: bucket, Region: "us-east-1", PathStyle: true,
-		AccessKeyID: tg.AccessKeyID, SecretAccessKey: tg.SecretAccessKey})
-	if err != nil {
-		t.Fatal(err)
+	if bucket == "" {
+		bucket = envOr("POLYEMESIS_S3_BUCKET", "polyemesis-s3-suite")
 	}
-	if err := c.MakeBucket(context.Background()); err != nil {
-		t.Fatal(err)
+	region := envOr("POLYEMESIS_S3_REGION", "us-east-1")
+	pathStyle := os.Getenv("POLYEMESIS_S3_PATH_STYLE") != "0"
+	tg := db.StorageTarget{Name: "live", Provider: db.StorageProviderS3, Endpoint: ep, Bucket: bucket,
+		Region: region, PathStyle: pathStyle, AccessKeyID: ak, SecretAccessKey: sk, Mode: mode, Enabled: true,
+		AllowPrivateTarget: true, VerifyDownload: true, PrefixTemplate: "offload/" + t.Name() + "/{kind}/{yyyy}"}
+	if os.Getenv("POLYEMESIS_S3_CREATE_BUCKET") == "1" {
+		c, err := objstore.New(objstore.Config{Endpoint: ep, Bucket: bucket, Region: region, PathStyle: pathStyle,
+			AccessKeyID: ak, SecretAccessKey: sk})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.MakeBucket(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	id, err := f.store.CreateStorageTarget(f.svc.box, tg)
 	if err != nil {
@@ -51,7 +70,7 @@ func liveTarget(t *testing.T, f *fixture, bucket string, mode string) db.Storage
 func TestLiveMoveModeUploadsVerifiesEvictsAndFetchesBack(t *testing.T) {
 	f := newFixture(t)
 	f.svc.newClient = NewClient
-	tg := liveTarget(t, f, "offload-live-move", db.OffloadMove)
+	tg := liveTarget(t, f, "", db.OffloadMove)
 	name := f.segment(5*time.Hour, "real footage bytes for the live suite", true)
 	f.segment(time.Minute, "newest", true)
 
@@ -74,7 +93,7 @@ func TestLiveMoveModeUploadsVerifiesEvictsAndFetchesBack(t *testing.T) {
 
 func TestLiveProbeRunsPutGetDelete(t *testing.T) {
 	f := newFixture(t)
-	tg := liveTarget(t, f, "offload-live-probe", db.OffloadMirror)
+	tg := liveTarget(t, f, "", db.OffloadMirror)
 	res := Probe(context.Background(), tg, nil)
 	if !res.OK || len(res.Steps) != 3 {
 		t.Fatalf("%+v", res)
@@ -103,7 +122,7 @@ func (p *partFailer) UploadPart(ctx context.Context, key, id string, n int, body
 
 func TestLiveMultipartResumesAcrossARestartAndFetchesBack(t *testing.T) {
 	f := newFixture(t)
-	tg := liveTarget(t, f, "offload-live-multipart", db.OffloadMove)
+	tg := liveTarget(t, f, "", db.OffloadMove)
 	real, err := NewClient(tg)
 	if err != nil {
 		t.Fatal(err)

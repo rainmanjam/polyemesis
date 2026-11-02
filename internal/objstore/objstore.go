@@ -365,7 +365,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 
 // MakeBucket creates the configured bucket. Offload never calls it -- a
 // target names a bucket the operator already made, with the lifecycle rules
-// they chose -- but the MinIO integration suite needs a bucket to exist.
+// they chose -- but the live S3 suite can be asked to create its bucket.
 // An "already owned" answer is success.
 func (c *Client) MakeBucket(ctx context.Context) error {
 	u := *c.base
