@@ -186,6 +186,9 @@ func (h *Hub) recordAutomod(s *automodState, m Message, v automod.Verdict) {
 			"checker", f.Checker, "action", f.Action, "reason", f.Reason,
 			"acting", len(v.Act) > 0)
 	}
+	// And held, so the Chat page can show it (UX Council A48): the log alone
+	// was a review queue nobody on the console could read.
+	h.noteFlag(m, v.Findings)
 	for _, f := range v.Act {
 		h.enqueueAutomod(s, automodJob{
 			gen: s.gen, platform: m.Platform, account: m.Account,
@@ -271,6 +274,9 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
 	} else {
 		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+	}
+	if v.Flagged() {
+		h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), v.Findings)
 	}
 	for _, f := range v.Act {
 		h.enqueueAutomod(s, automodJob{
@@ -367,6 +373,8 @@ func (h *Hub) performAutomod(ctx context.Context, s *automodState, job automodJo
 			"platform", job.platform, "action", job.finding.Action, "err", err)
 		return
 	}
+	// The review list says it was acted on only now, when it was (#945 review).
+	h.markFlagActed(job.platform, job.account, job.msgID)
 	// Both: what the operator's own record says, and what the platform was
 	// actually told. They differ by design now, and an audit that showed only
 	// one of them could not answer either question.

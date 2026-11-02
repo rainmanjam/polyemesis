@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { displayTimeZone, setDisplayTimeZone, timestamp } from "./format";
+import { clockTime, dayAwareTime, displayTimeZone, setDisplayTimeZone, timestamp } from "./format";
 
 describe("timestamp and the zero time", () => {
   it("renders nothing for Go's unset time rather than a date in the year 1", () => {
@@ -57,5 +57,31 @@ describe("the install display time zone", () => {
     setDisplayTimeZone("Mars/Olympus_Mons");
     expect(displayTimeZone()).toBe("UTC");
     expect(() => timestamp("2026-08-27T05:51:00Z")).not.toThrow();
+  });
+});
+
+describe("dayAwareTime (A48 review #2)", () => {
+  afterEach(() => setDisplayTimeZone("UTC"));
+  const now = new Date("2026-11-01T12:00:00Z");
+
+  it("is the bare clock on today's date", () => {
+    expect(dayAwareTime("2026-11-01T18:10:00Z", now)).toBe(clockTime("2026-11-01T18:10:00Z"));
+  });
+
+  it("carries the date on any other day, before or after", () => {
+    expect(dayAwareTime("2026-11-02T00:05:00Z", now)).toBe(timestamp("2026-11-02T00:05:00Z"));
+    expect(dayAwareTime("2026-10-25T09:15:00Z", now)).toBe(timestamp("2026-10-25T09:15:00Z"));
+    expect(dayAwareTime("2026-10-25T09:15:00Z", now)).not.toBe(clockTime("2026-10-25T09:15:00Z"));
+  });
+
+  it("judges 'today' in the console's zone, not UTC", () => {
+    setDisplayTimeZone("America/Los_Angeles");
+    // 03:00 UTC on 2 Nov is still 1 Nov in Los Angeles, where it is now noon-ish.
+    expect(dayAwareTime("2026-11-02T03:00:00Z", now)).toBe(clockTime("2026-11-02T03:00:00Z"));
+  });
+
+  it("is empty for nothing", () => {
+    expect(dayAwareTime("", now)).toBe("");
+    expect(dayAwareTime("0001-01-01T00:00:00Z", now)).toBe("");
   });
 });
