@@ -1,0 +1,49 @@
+# RESTORE-ONLY twin of actions/setup-go's built-in cache.
+#
+# Caches are saved on refs/heads/main only (CONTRIBUTING.md, "CI caches and
+# artifacts"). Every other ref -- pull requests above all -- calls setup-go with
+# `cache: false` and then this, which restores main's entry through GitHub's
+# base-branch fallback and never writes one. setup-go has no restore-only mode:
+# `cache: true` always saves on a miss, which is how every pull request that
+# touched go.mod used to leave its own 170-330 MB copy per OS behind.
+#
+# THE KEY AND THE PATHS ARE setup-go's, BYTE FOR BYTE, or main's entry is never
+# found. A cache matches on key AND on a version hashed from the path strings in
+# order, so both are reproduced exactly (setup-go v7, src/cache-restore.ts):
+#
+#   key   setup-go-${RUNNER_OS}-${arch}-${ImageOS-, Linux only}go-${version}-${hashFiles(go.mod)}
+#   paths `go env GOMODCACHE`, then `go env GOCACHE`, verbatim
+#
+# arch is node's process.arch (x64/arm64), which is runner.arch lowercased.
+# version is the installed toolchain without its "go" prefix, as setup-go
+# reports it. Run AFTER setup-go, so `go` is the toolchain it installed.
+#
+# restore-keys adds what setup-go's own restore never had: a pull request that
+# changes go.mod still starts from main's modules and build cache for the same
+# toolchain instead of from nothing.
+name: restore Go cache (read-only)
+description: Restore setup-go's main-branch module and build cache without ever saving one.
+runs:
+  using: composite
+  steps:
+    - id: go
+      shell: bash
+      run: |
+        set -euo pipefail
+        ver="$(go env GOVERSION)"
+        imageos=""
+        # "undefined" is what setup-go's `${process.env.ImageOS}-` writes if the
+        # runner ever stops setting it, so the two keys still agree.
+        if [ "$RUNNER_OS" = "Linux" ]; then imageos="${ImageOS:-undefined}-"; fi
+        {
+          echo "mod=$(go env GOMODCACHE)"
+          echo "build=$(go env GOCACHE)"
+          echo "prefix=setup-go-${RUNNER_OS}-$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')-${imageos}go-${ver#go}-"
+        } >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.go.outputs.mod }}
+          ${{ steps.go.outputs.build }}
+        key: ${{ steps.go.outputs.prefix }}${{ hashFiles('go.mod') }}
+        restore-keys: ${{ steps.go.outputs.prefix }}

@@ -111,7 +111,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
 
       # THE HOST'S FFMPEG IS PART OF THE MEASUREMENT, not a dependency to get
       # over. polyemesis's ingest child demuxes what OBS sent; if that FFmpeg
@@ -130,7 +133,8 @@ jobs:
       # key is copied deliberately: a matching key restores that cache instead
       # of writing a second copy of a 130 MB download.
       - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -176,6 +180,12 @@ jobs:
           sudo install -m 0755 "$FFCACHE/ffprobe" /usr/local/bin/ffprobe
           ffmpeg  -hide_banner -version | head -1
           ffprobe -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       # lsof, and only lsof. poly_port_holders in lib-cleanup.sh reads it to
       # answer "is anything actually listening on 1935 yet", which is the check
@@ -251,4 +261,4 @@ jobs:
           name: obs-multitrack-logs
           path: /tmp/polyemesis-acceptance-obs/server.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
