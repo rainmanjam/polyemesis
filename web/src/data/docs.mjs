@@ -314,6 +314,10 @@ const WITHHELD_ROWS = [
     "RELEASE-RUNBOOK.md",
     "How a maintainer cuts a polyemesis release: rehearse with dry_run, what each release gate refuses, and why a wrong CHANGELOG date is fixed by re-dating on main and re-cutting the tag on that new commit with scripts/cut-release.sh -- re-pushing it to the same commit changes nothing. It is about publishing this project, not about running it, so it is for whoever holds the tag-push -- and UPGRADING.md is the half a reader of this site actually needs.",
   ],
+  [
+    "STREAMDECK-HARDWARE-CHECK.md",
+    "The maintainer's checklist for trying the packaged Stream Deck plugin on a real Stream Deck and Stream Deck+ before a release: install, pair, hold-to-confirm, dials, reconnect. It is a release step for whoever holds the tag-push, like RELEASE-RUNBOOK.md, and STREAM-DECK.md is the half a reader of this site needs.",
+  ],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];
 

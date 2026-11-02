@@ -13,8 +13,10 @@ plugin version (Stream Deck app, **Preferences > Plugins**) next to the result.
 
 - [ ] Download `com.polyemesis.streamdeck.streamDeckPlugin` from the GitHub
       release, or from the `com.polyemesis.streamdeck.streamDeckPlugin` artifact
-      of the pull request's `streamdeck typecheck, test, build` CI job. To build
-      it yourself: `cd integrations/streamdeck && npm ci && npm run build && npm run pack`
+      of the pull request's `streamdeck typecheck, test, build` CI job. A CI
+      artifact downloads as a `.zip`: unzip it first, the plugin file is inside.
+      To build it yourself:
+      `cd integrations/streamdeck && npm ci && npm run build && npm run pack`
       writes it to `dist/`.
 - [ ] For a release download, check it against `SHA256SUMS`
       (`sha256sum -c SHA256SUMS --ignore-missing`).
@@ -49,7 +51,7 @@ plugin version (Stream Deck app, **Preferences > Plugins**) next to the result.
       type: it is already paired, without pasting the token again.
 - [ ] Export the profile (**Preferences > Profiles**, the profile's menu,
       **Export**). Unzip the `.streamDeckProfile` and search it for the token:
-      `unzip -o profile.streamDeckProfile -d p && grep -rF '<first 8 chars of token>' p`.
+      `unzip -o profile.streamDeckProfile -d p && grep -rF '<12 characters from the middle of the token>' p`.
       **No match.** A match means the token travelled with the profile.
 - [ ] Delete the unzipped folder and the export afterwards.
 
@@ -63,9 +65,12 @@ For each key action, on the hardware rather than the app's preview:
       not collide with the title.
 - [ ] Idle, live and error faces are told apart by colour **and** label, not by
       colour alone.
-- [ ] With the read token, every admin-only key shows the violet padlock
-      **Needs admin token** face and a press sends nothing (check the install's
-      log: no write request).
+- [ ] With the read token, admin-only keys that have no state of their own (Go
+      live, Stop all, Stop destination, Routing preset, Chat poll) show the violet padlock
+      **Needs admin token** face at rest. Keys that show state (Destination,
+      Failover, Record, Mute track) keep showing it, and switch to the padlock
+      face with an alert when pressed. Either way a press sends nothing (check
+      the install's log: no write request).
 - [ ] Record shows **Recording** / **Record off** / **Not running** correctly. If
       you can trigger the free-space floor on a test install, it shows
       **HALTED: DISK** on crimson with a drive.
