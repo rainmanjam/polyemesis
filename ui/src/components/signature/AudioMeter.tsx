@@ -370,6 +370,7 @@ export function AudioMeter({
     <div className={cn("flex items-start gap-2", className)}>
       {labels && (
         <div
+          data-part="meter-labels"
           className="flex shrink-0 flex-col text-[9px] font-mono leading-none text-muted-foreground"
           style={{ gap: `${barGap}px` }}
         >
@@ -400,7 +401,7 @@ export function AudioMeter({
           {t("signature.meter.clip")}
         </span>
       </div>
-      <div className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
+      <div data-part="meter-db" className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
         {rms.map((_, i) => (
           <button
             key={i}

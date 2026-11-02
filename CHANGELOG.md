@@ -742,7 +742,10 @@ its first tagged release.
   info icons, switches and "Show log" links have 24px targets. Pages share one right edge whether
   or not they scroll, the programme switcher shows the programme's name instead of cutting it to
   ten characters (on a phone, the part before the dash, with the wordmark giving way to the logo), headings and help text wrap evenly, and Routing no longer scrolls sideways on a
-  phone. The Dashboard's compact chat Send button has a name, and the Sources ingest fields are
+  phone. Routing's mute-and-gain rows stack below about 42rem (name, role and channels; the meter
+  with its own L/R and dB readouts; then gain and Mute) instead of drawing the readouts over the
+  slider, and a long role wraps rather than being cut. The Sources card header, its publish rows
+  and the Renditions card header and buttons stack on a phone as well. The Dashboard's compact chat Send button has a name, and the Sources ingest fields are
   tied to their captions for screen readers. The sign-in screen names the server it is signing in
   to and whether that server answers (degraded only on the health check's own 503), from the
   browser's own address and the public health check only; it shows no build or version, which

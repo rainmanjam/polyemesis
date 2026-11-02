@@ -439,11 +439,15 @@ export function SourceCard({
 
   return (
     <Card className={source.running ? undefined : "border-warn/40"}>
-      <CardHeader className="flex-row items-start justify-between gap-2">
+      {/* Stacks below sm. Side by side at 390px, the Accepting block took
+          its 16rem and the programme's name was squeezed to nothing beside
+          the RUNNING badge; the badges now wrap under the name, and the switch
+          block sits under the title instead of beside it. */}
+      <CardHeader className="flex-col items-stretch justify-between gap-2 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <RadioTower className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{source.name}</span>
+            <span className="min-w-0 truncate" data-testid="source-name">{source.name}</span>
             {source.isDefault && <Badge variant="outline">{t("sources.default")}</Badge>}
             <Badge variant={source.running ? "live" : "warn"}>
               {source.running ? t("sources.running") : t("sources.notRunning")}
@@ -488,7 +492,7 @@ export function SourceCard({
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           {/* A33: the state in words and the consequence beside the switch. The
               aria-label names the switch; the visible text says what it does. */}
-          <div className="flex max-w-64 flex-col items-end gap-0.5 text-right">
+          <div className="flex flex-col items-start gap-0.5 sm:max-w-64 sm:items-end sm:text-right">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">
                 {source.enabled ? t("sources.acceptingLabel") : t("state.off")}
@@ -798,8 +802,11 @@ export function SourceCard({
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
-            <div key={proto} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-sm uppercase tracking-wider text-muted-foreground">
+            // Wraps below sm: the label takes its own line, so the address, the
+            // masked credential and the two buttons get the full width. At
+            // 360px the SRT credential was squeezed to a single dot.
+            <div key={proto} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="w-full shrink-0 text-sm uppercase tracking-wider text-muted-foreground sm:w-20">
                 {proto}
               </span>
               {/* Gated on what the string CARRIES, not on the row's label.
