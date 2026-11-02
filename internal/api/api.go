@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
+	"github.com/rainmanjam/polyemesis/internal/analytics"
 	"github.com/rainmanjam/polyemesis/internal/auth"
 	"github.com/rainmanjam/polyemesis/internal/automod"
 	"github.com/rainmanjam/polyemesis/internal/chat"
@@ -399,6 +400,12 @@ type Server struct {
 	verticalHalfLive    func(ids ...int64) bool
 	verticalNow         func() time.Time
 	verticalChargeQuota func(cost int) bool
+	// audience is the cross-platform analytics sampler (Wave 4 #4), nil without a store. analyticsRunning,
+	// analyticsChargeQuota and analyticsNow are its test seams; nil in production. See analytics.go.
+	audience             *analytics.Sampler
+	analyticsRunning     func() map[int64]bool
+	analyticsChargeQuota func(accountRef string, cost int) bool
+	analyticsNow         func() time.Time
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status
 	// reads stored rows too, so it cannot tell a reconciled create from an unreconciled one.
 	reconciled func()
@@ -865,6 +872,7 @@ func New(o Options) *Server {
 		s.lifecycle.airing = func(id int64) bool { return s.mgr != nil && s.mgr.DelayAiring(id) }
 	}
 	if o.DB != nil {
+		s.audience = s.newAudienceSampler()
 		s.rollover = newRolloverCoordinator(o.Log, o.DB, rolloverHost{
 			tokenFor:    s.tokenFor,
 			restart:     s.restartDestinationForRollover,
@@ -1491,6 +1499,13 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// Live viewer count, for the platforms that publish one. Absent is
 			// a 200 saying so rather than a 404; see handleAccountStats.
 			r.Get("/platforms/accounts/{id}/stats", s.handleAccountStats)
+			// Cross-platform analytics (Wave 4 #4): the live audience picture
+			// and the per-stream reports. Reads of what the sampler stored --
+			// none calls a platform -- and every one is denied to a read
+			// token; see analytics.go and readScopeDeniedPatterns.
+			r.Get("/analytics/live", s.handleAnalyticsLive)
+			r.Get("/analytics/streams", s.handleAnalyticsStreams)
+			r.Get("/analytics/streams/{id}", s.handleAnalyticsStream)
 
 			// Facebook's broadcast surface, scoped to a DESTINATION rather
 			// than an account: one account can hold several broadcasts, and
@@ -2168,6 +2183,13 @@ var readScopeDeniedPatterns = map[string]bool{
 	// UX Council A48: automod's review list carries each flagged message's
 	// text, which is the scrollback again under another name.
 	"/api/v1/chat/flags": true,
+	// Wave 4 #4: cross-platform analytics is admin-only. The reports name the
+	// stream's top chatters -- who spoke, a cut of the scrollback -- and every
+	// analytics read names the operator's connected channels. The scrape gives
+	// a read-scoped dashboard the counts without either.
+	"/api/v1/analytics/live":         true,
+	"/api/v1/analytics/streams":      true,
+	"/api/v1/analytics/streams/{id}": true,
 }
 
 // obsScopePatterns is everything an "obs" token may reach: one route, keyed by

@@ -107,5 +107,14 @@
   "streamdeck.pi.issues": "当前问题",
   "streamdeck.pi.noIssues": "此目标没有报告任何问题。",
   "streamdeck.issue.verticalHalfFailed": "竖屏部分失败",
-  "streamdeck.issue.verticalHalfDown": "竖屏部分已停止"
+  "streamdeck.issue.verticalHalfDown": "竖屏部分已停止",
+  "streamdeck.viewers.total": "观众",
+  "streamdeck.viewers.notReported": "未报告",
+  "streamdeck.viewers.offAir": "未在直播",
+  "streamdeck.viewers.off": "分析已关闭",
+  "streamdeck.viewers.player": "播放器",
+  "streamdeck.pi.viewersPlatform": "显示",
+  "streamdeck.pi.viewersTotal": "总计(所有平台)",
+  "streamdeck.pi.viewersHint": "在有推流目标运行时统计的所有平台观众。平台未报告的人数显示为“未报告”,而不是 0。需要管理员令牌。",
+  "streamdeck.pi.viewersPlayer": "公共播放器"
 }

@@ -28,7 +28,7 @@ install the socket interleaves every programme's meters.
 
 1. In the install's Settings, create an API token. A read token is enough to
    show state. Start, stop, failover, record, preset, track mute and track gain
-   controls need an **admin**
+   controls, and the Viewers key, need an **admin**
    token, and the plugin says so on the key instead of failing with a 403. A
    read token sends no write request at all.
 2. In the Stream Deck app, open any polyemesis action and paste the server
@@ -56,6 +56,7 @@ action settings, so it does not travel with a profile export.
 | Failover | Shows which source is on air. Tap to hand control back to automatic. Needs admin. |
 | Mute track | Shows whether one audio track is muted on one destination: **MUTED** (red, a crossed speaker) or **Unmuted**. Tap to switch. Shows **Not available** for a destination that passes its audio through unchanged (audio copy), and for any change the server refuses, with the server's reason. Needs admin to switch. |
 | Track gain (dial) | One audio track's gain on one destination. Turn for 0.5 dB a step, push to mute or unmute, touch the strip for 0 dB. The strip shows the destination and track, the level in dB and a bar, and **MUTED**, **NO FEED** or **matrix: use UI**. Needs admin to change. |
+| Viewers (key or dial) | The audience across every platform, or one platform's (YouTube, Twitch, Kick or the public player) picked in the key's settings, from the install's analytics sampler. **Off air** while no destination runs; **Not reported** -- never 0 -- when the platform sent no count. On a dial the strip shows the platform and its count. Install-wide, so it takes no programme. Needs admin to show: a read token shows **Needs admin token**. |
 | Meter (dial) | The loudest channel on this install's meters, read from `GET /levels` for the key's programme. Shows NO FEED when the server reports the feed stale or unreachable. |
 
 Record is a tap, not a hold, so one press starts or stops recording for every

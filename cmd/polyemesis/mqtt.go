@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -77,6 +78,11 @@ type mqttRunner struct {
 	version string
 	started time.Time
 
+	// audience is the analytics sampler's viewer picture, nil until the API
+	// server exists (it is built after this runner starts) and for a test that
+	// does not set it. See mqttAudienceFeed.
+	audience *mqttAudienceFeed
+
 	mu     sync.Mutex
 	client *mqtt.Client
 	cancel context.CancelFunc
@@ -91,10 +97,11 @@ type mqttRunner struct {
 // It never returns an error, and never blocks on the broker. A publisher that
 // refused to start because the broker was rebooting would take the rest of
 // polyemesis with it, and the entire design assumes the link comes and goes.
-func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets.Box, eng *engine.Manager, version string) func(context.Context) {
+func startMQTT(ctx context.Context, log *slog.Logger, store *db.DB, box *secrets.Box, eng *engine.Manager, version string,
+	audience *mqttAudienceFeed) func(context.Context) {
 	r := &mqttRunner{
 		log: log, store: store, box: box, engines: managerEngines(eng),
-		version: version, started: time.Now(),
+		version: version, started: time.Now(), audience: audience,
 	}
 	go r.watch(ctx)
 	return r.stop
@@ -406,5 +413,34 @@ func (r *mqttRunner) snapshot() mqtt.Snapshot {
 		item.State = src
 		snap.Sources = append(snap.Sources, item)
 	}
+	snap.Audience = r.audience.state()
 	return snap
+}
+
+// mqttAudienceFeed hands the analytics sampler's picture to the MQTT runner.
+//
+// A holder rather than a function argument because of construction order: the
+// runner starts before the API server that owns the sampler is built, and the
+// feed is filled in once it is. Until then -- and on a runner a test built
+// without one -- the snapshot carries no audience and nothing is published
+// for it.
+type mqttAudienceFeed struct {
+	fn atomic.Pointer[func() *mqtt.AudienceState]
+}
+
+func (f *mqttAudienceFeed) set(fn func() *mqtt.AudienceState) {
+	if f != nil {
+		f.fn.Store(&fn)
+	}
+}
+
+func (f *mqttAudienceFeed) state() *mqtt.AudienceState {
+	if f == nil {
+		return nil
+	}
+	fn := f.fn.Load()
+	if fn == nil {
+		return nil
+	}
+	return (*fn)()
 }

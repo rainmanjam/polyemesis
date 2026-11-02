@@ -139,3 +139,26 @@ type RenditionState struct {
 	Error       string    `json:"error,omitempty"`
 	At          time.Time `json:"at"`
 }
+
+// AudienceState is the cross-platform viewer picture (Wave 4 #4), published on
+// one install-wide topic.
+//
+// A COUNT THAT WAS NOT REPORTED IS ABSENT, NOT 0. Each platform field is a
+// pointer and omitempty: a hidden YouTube count or a Kick streamer who opted
+// out leaves the key out, and the Home Assistant entity reads "unknown" rather
+// than graphing an audience of none. Total is the sum of what did report,
+// absent when nothing did. The public player is its own field and is counted
+// in Total once.
+//
+// One field per platform rather than a map, because a map would let a new key
+// reach a retained topic without passing approvedFields.
+type AudienceState struct {
+	OnAir    bool      `json:"onAir"`
+	Total    *int      `json:"total,omitempty"`
+	Reported int       `json:"reported"`
+	YouTube  *int      `json:"youtube,omitempty"`
+	Twitch   *int      `json:"twitch,omitempty"`
+	Kick     *int      `json:"kick,omitempty"`
+	Player   *int      `json:"player,omitempty"`
+	At       time.Time `json:"at"`
+}

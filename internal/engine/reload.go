@@ -259,9 +259,13 @@ var settingsReload = map[string]ReloadRule{
 	// ------------------------------------------------------------ chat + automod
 	"chatCommands.enabled":  {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
 	"chatCommands.sourceId": {ClassLive, "startChatCommands", "the handler reads the stored settings on every chat message"},
-	"chat.retentionHours":   {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
-	"chat.keepMessages":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
-	"chat.purgeMinutes":     {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	// Wave 4 #4: the audience sampler reads its settings at every tick.
+	"analytics.enabled":         {ClassLive, "AnalyticsLoop", "the sampler reads the stored settings at every tick"},
+	"analytics.intervalSeconds": {ClassLive, "AnalyticsLoop", "re-read after every tick, so the next wait uses it"},
+	"analytics.retentionDays":   {ClassLive, "AnalyticsLoop", "the hourly prune reads it at every tick"},
+	"chat.retentionHours":       {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band by handlePutSettings"},
+	"chat.keepMessages":         {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
+	"chat.purgeMinutes":         {ClassLive, "ApplyChatRetention", "pushed into the Hub out of band"},
 
 	// THIS TABLE IS WHY THESE TWO ARE LIVE. #732 wired the operator's allowance
 	// into NewYouTube, which is read once per adapter, and chatAdapter runs once

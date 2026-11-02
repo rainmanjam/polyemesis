@@ -41,7 +41,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty `GET`s among the twenty-two refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-three `GET`s among the twenty-five refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -133,10 +133,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-two routes are refused outright**, for three different reasons. Masking
+**Twenty-five routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last thirteen are `403` because of what
+are `403` because of what they *do*. The last sixteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -163,6 +163,9 @@ are `403` because of what they *do*. The last thirteen are `403` because of what
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
+| `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
+| `GET /analytics/streams` | each past stream's broadcast title |
+| `GET /analytics/streams/{id}` | the stream report names its top chatters |
 
 Chat is refused on the WebSocket as well: a `read` token may open `/ws`, and it
 is sent every event type except `chat` (connection state and retractions still
@@ -1471,6 +1474,7 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
 | `POST` | `/chat/messages/hide` |
@@ -1704,6 +1708,49 @@ One deletion trap is worth stating because the platform's own API hides it:
 `DELETE /helix/moderation/chat` with **no** `message_id` deletes every message in
 the channel and returns success. polyemesis refuses an empty id before the URL
 is built.
+
+### Cross-platform analytics
+
+| Method | Path |
+|---|---|
+| `GET` | `/analytics/live` |
+| `GET` | `/analytics/streams` |
+| `GET` | `/analytics/streams/{id}` |
+
+Admin-only: all three are refused to a `read` token (see the table near the top).
+None of them calls a platform. They read what the audience sampler stored: while
+any destination is running it asks each connected account that a running
+destination streams to for its viewer count, every `analytics.intervalSeconds`
+(default 60, 30–900). A YouTube read is three list calls and is charged to the
+chat quota pacer for that account; a refused charge is a reading with
+`reason: "quota"`, not a stale number. Finished streams are kept for
+`analytics.retentionDays` (default 90).
+
+**A count the platform did not report is absent, never `0`.** A reading carries
+`viewers` only when the platform sent one; otherwise `reason` says why —
+`offline`, `hidden` (live, no count: a hidden YouTube count, a Kick streamer who
+opted out, Twitch sending none), `quota` or `error`. `total` sums the readings
+that carried a count and is absent when none did; `reported` says how many did.
+
+`/analytics/live` is the panel: `onAir`, the open `stream` (`id`, `startedAt`),
+the last tick's `readings`, `total`, `reported`, a sparkline of tick totals in
+`points` (a tick at which nothing reported has no `total`, so the line has a
+gap), and `player` — the public player's QoE since the stream began (sessions,
+startups, rebuffers, `sessionsWithErrors`, the startup histogram). The public
+player is a reading of its own with `platform: "player"`, counted from the
+playout origin's session table and added to the total once.
+
+`/analytics/streams` lists the newest 100 streams with `peakTotal` and
+`averageTotal`. `/analytics/streams/{id}` is the report: per account `samples`,
+`reported`, `peak` and `average` (over the samples that reported only), the
+stream's `peakTotal` (the highest single-tick total, not a sum of per-platform
+peaks), chat messages per platform, the ten `topChatters`, the player's QoE over
+the stream, and the `recordings` and `clips` made during it. `?format=csv`
+returns the same report as CSV, where a count nobody sent reads `not reported`
+and a cell a spreadsheet would run as a formula is prefixed with `'`.
+
+Watch time and unique viewers are not reported: no platform here exposes them
+live, and polyemesis does not estimate them.
 
 ### Chat polls
 

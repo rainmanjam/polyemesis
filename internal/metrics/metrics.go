@@ -84,6 +84,30 @@ type Snapshot struct {
 	// and the QoE the players beaconed. Nil when no playout manager is running,
 	// and then the families are omitted rather than published as zeros.
 	Playout *Playout
+
+	// Audience is the cross-platform viewer sampler's last tick (Wave 4 #4).
+	// Nil when no sampler runs, and then the families are omitted.
+	Audience *Audience
+}
+
+// Audience is the last sampled viewer count per platform and in total.
+//
+// A PLATFORM THAT DID NOT REPORT A COUNT HAS NO SAMPLE, and that is the whole
+// design rather than a gap: a hidden YouTube count or a Kick streamer who opted
+// out is not an audience of 0, and a gauge set to 0 would be graphed as one.
+// polyemesis_platform_viewers_reported says which platforms were asked and
+// whether each answered, so an absent viewers sample can be told from a
+// platform that was never sampled.
+//
+// The public player is not a platform here: polyemesis_playout_viewers already
+// carries it. It IS in the total, counted once.
+type Audience struct {
+	// Platforms maps a platform to its summed count, nil when none of its
+	// accounts reported one. Empty while nothing is on air.
+	Platforms map[string]*int
+	// Total is every reported count, the player's included; nil when nothing
+	// reported.
+	Total *int
 }
 
 // Playout is the public origin's viewer and QoE numbers. Counters are since
@@ -300,6 +324,7 @@ func Render(s Snapshot) string {
 	renderHost(&d, s.Host)
 	renderAlerts(&d, s.Alerts)
 	renderPlayout(&d, s.Playout)
+	renderAudience(&d, s.Audience)
 
 	return d.b.String()
 }
@@ -761,6 +786,40 @@ func renderPlayout(d *doc, p *Playout) {
 		"Median latency to the live edge across active sessions; absent when none reported one.")
 	if p.LatencySeconds != nil {
 		d.sample("polyemesis_playout_qoe_latency_seconds", *p.LatencySeconds)
+	}
+}
+
+func renderAudience(d *doc, a *Audience) {
+	if a == nil {
+		return
+	}
+	names := make([]string, 0, len(a.Platforms))
+	for n := range a.Platforms {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	d.family("polyemesis_platform_viewers", "gauge",
+		"Viewers each platform reported at the last analytics sample, summed over its accounts; "+
+			"absent when the platform did not report a count.")
+	for _, n := range names {
+		if v := a.Platforms[n]; v != nil {
+			d.sample("polyemesis_platform_viewers", float64(*v), label{"platform", n})
+		}
+	}
+	d.family("polyemesis_platform_viewers_reported", "gauge",
+		"1 when the platform reported a viewer count at the last analytics sample, 0 when it was asked and did not.")
+	for _, n := range names {
+		v := 0.0
+		if a.Platforms[n] != nil {
+			v = 1
+		}
+		d.sample("polyemesis_platform_viewers_reported", v, label{"platform", n})
+	}
+	d.family("polyemesis_audience_viewers", "gauge",
+		"Viewers across every platform that reported plus the public player, at the last analytics sample; "+
+			"absent when nothing reported.")
+	if a.Total != nil {
+		d.sample("polyemesis_audience_viewers", float64(*a.Total))
 	}
 }
 

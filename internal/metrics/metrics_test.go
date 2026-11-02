@@ -65,8 +65,11 @@ func testSnapshot() Snapshot {
 			ActiveSessions: 2, ByVariant: map[string]int{"720p": 2},
 			StartupBounds: []float64{0.5, 1}, StartupBuckets: []int64{1, 2, 2}, SessionsWithErrors: 1,
 		},
+		Audience: &Audience{Platforms: map[string]*int{"twitch": &twitchViewers, "kick": nil}, Total: &audienceTotal},
 	}
 }
+
+var twitchViewers, audienceTotal = 40, 42
 
 // parse turns exposition text into a lookup keyed by the full series
 // identifier, i.e. the whole line up to the value.

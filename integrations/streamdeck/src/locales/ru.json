@@ -107,5 +107,14 @@
   "streamdeck.pi.issues": "Текущие проблемы",
   "streamdeck.pi.noIssues": "Для этого назначения ничего не сообщается.",
   "streamdeck.issue.verticalHalfFailed": "Вертикальная часть: сбой",
-  "streamdeck.issue.verticalHalfDown": "Вертикальная часть остановлена"
+  "streamdeck.issue.verticalHalfDown": "Вертикальная часть остановлена",
+  "streamdeck.viewers.total": "Зрители",
+  "streamdeck.viewers.notReported": "Нет данных",
+  "streamdeck.viewers.offAir": "Не в эфире",
+  "streamdeck.viewers.off": "Аналитика выкл.",
+  "streamdeck.viewers.player": "Плеер",
+  "streamdeck.pi.viewersPlatform": "Показывать",
+  "streamdeck.pi.viewersTotal": "Всего, все платформы",
+  "streamdeck.pi.viewersHint": "Аудитория всех платформ, замеряется, пока работает направление. Число, которое платформа не сообщает, показывается как «Нет данных», а не 0. Нужен токен администратора.",
+  "streamdeck.pi.viewersPlayer": "Публичный плеер"
 }

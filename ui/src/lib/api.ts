@@ -12,6 +12,9 @@ import type {
   CaptionExportSource,
   RenditionConcern,
   AccountStats,
+  AnalyticsLive,
+  AnalyticsReport,
+  AnalyticsStream,
   AcmePreflight,
   ApiToken,
   TokenScope,
@@ -1504,6 +1507,15 @@ export const api = {
    *  zero when the platform declined to say; see AccountStats. */
   accountStats: (id: number) =>
     get<AccountStats>(`/platforms/accounts/${id}/stats`),
+  /** Cross-platform analytics (Wave 4 #4). Admin-only: a read token is
+   *  refused. None of these calls a platform; they read what the sampler kept. */
+  analytics: {
+    live: () => get<AnalyticsLive>("/analytics/live"),
+    streams: () => get<{ streams: AnalyticsStream[] }>("/analytics/streams"),
+    report: (id: number) => get<AnalyticsReport>(`/analytics/streams/${id}`),
+    /** A download link, not XHR: the browser saves the file. */
+    csvUrl: (id: number) => `${BASE}/analytics/streams/${id}?format=csv`,
+  },
   /** A full-page navigation, not XHR: the platform's consent screen owns the tab. */
   connectUrl: (platform: string) => `${BASE}/oauth/${platform}/start`,
 

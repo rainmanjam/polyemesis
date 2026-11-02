@@ -93,6 +93,10 @@ func (t *Topics) Status() string { return t.join("status") }
 // State is the host-level snapshot.
 func (t *Topics) State() string { return t.join("state") }
 
+// Audience is the cross-platform viewer count. Install-wide, beside state:
+// chat and its audience belong to the install, not to one programme.
+func (t *Topics) Audience() string { return t.join("audience") }
+
 // Source is one programme's state topic.
 func (t *Topics) Source(source string) string {
 	return t.join("source", source, "state")

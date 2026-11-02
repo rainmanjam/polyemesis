@@ -12,10 +12,10 @@
   "guardedFloor": 29,
   "shapesNotInspectedCeiling": 3,
   "totals": {
-    "methodPatternPairs": 281,
+    "methodPatternPairs": 284,
     "swept": 77,
     "excused": 60,
-    "denied": 144,
+    "denied": 147,
     "nonTrieProbes": 12,
     "shapesEmitted": 29,
     "shapesNotInspected": 3
@@ -68,6 +68,24 @@
       "method": "POST",
       "pattern": "/api/v1/alerts/rules/{id}/test",
       "coverage": "denied-by-method",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/analytics/live",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/analytics/streams",
+      "coverage": "denied",
+      "zeroSource": "unguarded"
+    },
+    {
+      "method": "GET",
+      "pattern": "/api/v1/analytics/streams/{id}",
+      "coverage": "denied",
       "zeroSource": "unguarded"
     },
     {
@@ -2264,6 +2282,36 @@
         "anonMatchesRead": true
       },
       "counterpart": "notFoundSurfaceIsPrincipalIndependent"
+    },
+    {
+      "route": "GET /api/v1/analytics/live",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "analyticsLive"
+    },
+    {
+      "route": "GET /api/v1/analytics/streams",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "analyticsStreams"
+    },
+    {
+      "route": "GET /api/v1/analytics/streams/{id}",
+      "scope": "route",
+      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "want": {
+        "as": "read",
+        "status": 403
+      },
+      "counterpart": "analyticsReport"
     },
     {
       "route": "GET /api/v1/auth/tokens",

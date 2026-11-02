@@ -1187,6 +1187,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// The public player's viewers and QoE. Nil without a playout manager, and
 	// then the families are omitted rather than published as zeros.
 	snap.Playout = s.playoutMetrics()
+	snap.Audience = s.audienceMetrics()
 
 	sys := s.hostSystem()
 	snap.Host = metrics.Host{

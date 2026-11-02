@@ -107,5 +107,14 @@
   "streamdeck.pi.issues": "現在の問題",
   "streamdeck.pi.noIssues": "この配信先に報告はありません。",
   "streamdeck.issue.verticalHalfFailed": "縦型の配信が失敗",
-  "streamdeck.issue.verticalHalfDown": "縦型の配信が停止中"
+  "streamdeck.issue.verticalHalfDown": "縦型の配信が停止中",
+  "streamdeck.viewers.total": "視聴者",
+  "streamdeck.viewers.notReported": "未報告",
+  "streamdeck.viewers.offAir": "オフエア",
+  "streamdeck.viewers.off": "分析オフ",
+  "streamdeck.viewers.player": "プレーヤー",
+  "streamdeck.pi.viewersPlatform": "表示",
+  "streamdeck.pi.viewersTotal": "合計(全プラットフォーム)",
+  "streamdeck.pi.viewersHint": "配信先が動作している間に計測した全プラットフォームの視聴者数です。プラットフォームが報告しない人数は 0 ではなく「未報告」と表示します。管理者トークンが必要です。",
+  "streamdeck.pi.viewersPlayer": "公開プレーヤー"
 }

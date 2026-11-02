@@ -107,5 +107,14 @@
   "streamdeck.pi.issues": "Problemas atuais",
   "streamdeck.pi.noIssues": "Nada relatado para este destino.",
   "streamdeck.issue.verticalHalfFailed": "Metade vertical com falha",
-  "streamdeck.issue.verticalHalfDown": "Metade vertical parada"
+  "streamdeck.issue.verticalHalfDown": "Metade vertical parada",
+  "streamdeck.viewers.total": "Espectadores",
+  "streamdeck.viewers.notReported": "Não informado",
+  "streamdeck.viewers.offAir": "Fora do ar",
+  "streamdeck.viewers.off": "Análise desligada",
+  "streamdeck.viewers.player": "Player",
+  "streamdeck.pi.viewersPlatform": "Mostrar",
+  "streamdeck.pi.viewersTotal": "Total, todas as plataformas",
+  "streamdeck.pi.viewersHint": "O público de todas as plataformas, amostrado enquanto um destino está ativo. Uma contagem que a plataforma não informa aparece como Não informado, nunca 0. Precisa de um token de administrador.",
+  "streamdeck.pi.viewersPlayer": "Player público"
 }

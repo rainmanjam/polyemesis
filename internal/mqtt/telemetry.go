@@ -19,6 +19,9 @@ import (
 type Snapshot struct {
 	Host    HostState
 	Sources []SourceSnapshot
+	// Audience is the viewer picture, nil when no analytics sampler runs, and
+	// then neither the topic nor its entities are published.
+	Audience *AudienceState
 }
 
 // SourceSnapshot is one programme and everything beneath it.
@@ -125,6 +128,9 @@ func (t *Telemetry) Publish(ctx context.Context, snap Snapshot) error {
 	}
 
 	send(t.topics.State(), snap.Host)
+	if snap.Audience != nil {
+		send(t.topics.Audience(), snap.Audience)
+	}
 	for _, s := range snap.Sources {
 		src := s.State.Slug
 		send(t.topics.Source(src), s.State)
