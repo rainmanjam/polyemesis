@@ -335,7 +335,7 @@ func run(h *hooks) error {
 	// After the engine, because the governor's sensors read from it, and before
 	// the API, which cannot be given a queue after its handlers are built.
 	h.progress("starting the background job queue")
-	pp := startPostProd(ctx, log, cfg, store, eng, tools)
+	pp := startPostProd(ctx, log, cfg, store, box, eng, tools)
 
 	// Retained MQTT telemetry. Started unconditionally and inert until an
 	// operator switches it on: the runner watches the stored settings, so

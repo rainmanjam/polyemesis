@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Running a cut is deliberately the smallest part of this package.
@@ -45,6 +49,10 @@ type Cutter struct {
 	ffprobe string
 	prober  Prober
 	run     func(ctx context.Context, name string, args []string) ([]byte, error)
+	nice    func(name string, args []string) (string, []string)
+	// customRunner is set by WithRunner, so WithNice knows whether the runner
+	// is its own to lower in priority.
+	customRunner bool
 }
 
 // Option customises a Cutter, chiefly for tests.
@@ -53,7 +61,7 @@ type Option func(*Cutter)
 // WithRunner replaces the process runner, so the command lines can be asserted
 // on without spawning FFmpeg.
 func WithRunner(fn func(ctx context.Context, name string, args []string) ([]byte, error)) Option {
-	return func(c *Cutter) { c.run = fn }
+	return func(c *Cutter) { c.run, c.customRunner = fn, true }
 }
 
 // WithProber replaces the keyframe prober, so planning can be driven from a
@@ -79,6 +87,18 @@ func New(log *slog.Logger, ffmpegBin, ffprobeBin string, opts ...Option) *Cutter
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.nice != nil {
+		if !c.customRunner {
+			// The child is created below normal priority as well as wrapped:
+			// Windows has no nice for the wrapper to use.
+			c.run = RunLowPriority
+		}
+		inner, nice := c.run, c.nice
+		c.run = func(ctx context.Context, name string, args []string) ([]byte, error) {
+			n, a := nice(name, args)
+			return inner(ctx, n, a)
+		}
 	}
 	if c.prober == nil {
 		c.prober = FFprobe{Bin: ffprobeBin, Run: c.run}
@@ -152,7 +172,14 @@ func (c *Cutter) Execute(ctx context.Context, p Plan, progress ProgressFunc) (Re
 	if err != nil {
 		return Result{}, fmt.Errorf("clipper: FFmpeg reported success but wrote no clip: %w", err)
 	}
-	if err := os.Rename(staged.OutPath, p.OutPath); err != nil {
+	if p.Vertical != nil {
+		// A short is published without replacing anything: two jobs that
+		// were handed one name must not have the second silently overwrite
+		// the first. (A straight cut keeps its long-standing replace.)
+		if err := publishNoReplace(staged.OutPath, p.OutPath); err != nil {
+			return Result{}, err
+		}
+	} else if err := os.Rename(staged.OutPath, p.OutPath); err != nil {
 		return Result{}, fmt.Errorf("clipper: publish %s: %w", p.OutPath, err)
 	}
 	report(progress, 1, "done")
@@ -188,10 +215,110 @@ func (c *Cutter) runStep(ctx context.Context, cmd Command) error {
 		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, context.Canceled) {
 			return ctxErr
 		}
-		return fmt.Errorf("clipper: %s step: %w", cmd.Name, err)
+		return fmt.Errorf("clipper: %s step: %w", cmd.Name, scrubbed{err})
 	}
 	return nil
 }
+
+// failureLimit bounds how much of FFmpeg's output a job's error carries.
+const failureLimit = 400
+
+// ffmpegFailure is the part of FFmpeg's output that says why it failed, fit to
+// be a job's error -- which any token allowed to list jobs can read, including
+// one that may never read a transcript.
+//
+// The subtitles filter's lines are dropped whole: libass logs one line per
+// caption character no font has, naming its code point, plus a line for every
+// non-font file in the fonts directory, and it may echo an event. None of it
+// is why an encode failed, and the code points ARE the captions. What is left
+// is kept from the END, because FFmpeg says why last.
+func ffmpegFailure(out string) string {
+	var keep []string
+	dropped := false
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		// A wrapped error's first line is "exit status N: " and then FFmpeg's
+		// first line: what comes before the filter's prefix is ours, and is
+		// kept whatever the line goes on to say.
+		head, tail := "", line
+		if i := strings.Index(line, "[Parsed_subtitles"); i > 0 {
+			head, tail = line[:i], line[i:]
+		}
+		if captionChatter(tail) {
+			dropped = true
+			if head = strings.TrimSpace(head); head != "" {
+				keep = append(keep, head)
+			}
+			continue
+		}
+		keep = append(keep, line)
+	}
+	msg := strings.TrimSpace(strings.Join(keep, "\n"))
+	if dropped && (msg == "" || !strings.Contains(msg, "\n") && strings.HasSuffix(msg, ":")) {
+		// Everything FFmpeg said came from the caption renderer: say that
+		// much, and nothing it named.
+		return strings.TrimSpace(msg + " the caption renderer failed (its messages name caption text and are not shown)")
+	}
+	if len(msg) > failureLimit {
+		msg = "..." + msg[len(msg)-failureLimit:]
+		if !utf8.ValidString(msg) {
+			msg = strings.ToValidUTF8(msg, "")
+		}
+	}
+	return msg
+}
+
+// captionChatter is a line of FFmpeg output that comes from the caption
+// renderer, or names a glyph -- either can carry what was said -- unless it is
+// one of the subtitles filter's own failures, which say why it could not run.
+func captionChatter(line string) bool {
+	if subtitlesFailure(line) {
+		return false
+	}
+	return strings.Contains(line, "[Parsed_subtitles") || strings.Contains(line, "fontselect") ||
+		strings.Contains(line, "glyph 0x") || strings.Contains(line, "libass")
+}
+
+// subtitlesFailures are the messages FFmpeg's subtitles filter itself logs
+// when it cannot start (libavfilter/vf_subtitles.c). They name libass, a
+// codec or a FILE -- the script this server wrote -- and never a caption, so
+// they are kept: without them a failed short says only "Error initializing
+// filters". Everything else from the filter is libass talking, and is not.
+var subtitlesFailures = []string{
+	"Could not initialize libass",
+	"Could not create a libass track",
+	"Unable to open ",
+	"Unable to locate subtitle stream",
+	"Failed to find subtitle codec",
+	"Could not open subtitle codec",
+	"Only text based subtitles are currently supported",
+}
+
+// subtitlesFailure reports whether line is the subtitles filter's own
+// failure: one of subtitlesFailures, straight after the filter's prefix, and
+// with nothing about fonts or glyphs in it.
+func subtitlesFailure(line string) bool {
+	_, msg, ok := strings.Cut(line, "] ")
+	if !ok || !strings.HasPrefix(line, "[Parsed_subtitles") {
+		return false
+	}
+	if strings.Contains(msg, "glyph") || strings.Contains(msg, "font") {
+		return false
+	}
+	for _, f := range subtitlesFailures {
+		if strings.HasPrefix(msg, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// scrubbed is a step's error with the caption renderer's chatter taken out of
+// its text, whichever runner produced it. It still unwraps to the original, so
+// a caller can match on what went wrong.
+type scrubbed struct{ err error }
+
+func (s scrubbed) Error() string { return ffmpegFailure(s.err.Error()) }
+func (s scrubbed) Unwrap() error { return s.err }
 
 func report(fn ProgressFunc, fraction float64, msg string) {
 	if fn == nil {
@@ -204,4 +331,46 @@ func report(fn ProgressFunc, fraction float64, msg string) {
 		fraction = 1
 	}
 	fn(fraction, msg)
+}
+
+// WithNice runs every child the Cutter starts -- every cut step and every
+// keyframe probe -- through nice, which is how the job governor lowers a
+// child's CPU and I/O priority (jobs.Governor.NiceCommand). A clip export,
+// and a vertical one above all, is a full encode that may run while a
+// broadcast is going out; it must yield to the live stream rather than
+// compete with it. Applied after every other option, so it wraps whatever
+// runner the Cutter ends up with.
+func WithNice(nice func(name string, args []string) (string, []string)) Option {
+	return func(c *Cutter) { c.nice = nice }
+}
+
+// VerticalThreads is the thread cap a vertical export gets when the request
+// names none: half the machine, at least one. A short is a full-frame encode,
+// and a broadcast going out at the same time needs the other half.
+func VerticalThreads() int { return max(1, runtime.NumCPU()/2) }
+
+// ErrOutputExists is a short whose file name is already taken on disk.
+var ErrOutputExists = errors.New("clipper: the output file already exists; nothing was replaced")
+
+// publishNoReplace moves src to dst only if dst does not exist. A hard link is
+// the atomic form -- it fails with EEXIST rather than replacing -- and the
+// staged file is in the same directory, so the link never crosses a device.
+// Where the filesystem has no hard links the check-then-rename fallback has a
+// window, but the export names are already reserved at submit, so it is the
+// last line of defence rather than the only one.
+func publishNoReplace(src, dst string) error {
+	err := os.Link(src, dst)
+	if err == nil {
+		return os.Remove(src)
+	}
+	if errors.Is(err, fs.ErrExist) {
+		return ErrOutputExists
+	}
+	if _, serr := os.Lstat(dst); serr == nil {
+		return ErrOutputExists
+	}
+	if rerr := os.Rename(src, dst); rerr != nil {
+		return fmt.Errorf("clipper: publish %s: %w", dst, rerr)
+	}
+	return nil
 }
