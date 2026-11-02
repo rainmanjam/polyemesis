@@ -177,10 +177,42 @@ func drawtextFilter(t *TextSpec, out frameSize) string {
 // directory, a caption file or overlay text containing any of ' , [ ] ; broke
 // the live rendition. See TestFilterArgumentsSurviveTheRealParser.
 //
+// BOUNDARY WHITESPACE is the one thing neither replacer can see. FFmpeg's
+// tokenizer skips unescaped leading whitespace and trims unescaped trailing
+// whitespace at BOTH levels, so overlay text " LIVE " drew as "LIVE", shifted
+// left and with no error. Interior whitespace is literal and stays as it is,
+// which keeps every ordinary value byte-identical. Each leading and trailing
+// whitespace character is escaped once per level -- `\ ` for the option pass,
+// and both of those characters again for the graph pass -- because escaping it
+// at the option level alone leaves the graph pass an unescaped space after an
+// escaped backslash, which it trims when the value is the last option before
+// a ','. Measured: see TestEscapeLavfiArgRoundTripsThroughTheRealParser.
+//
 // Shared with internal/clipper (GraphArgPath) so the vertical export and the
 // live overlay cannot drift apart again.
 func escapeLavfiArg(v string) string {
-	return graphLevelEscaper.Replace(optionLevelEscaper.Replace(v))
+	core := strings.TrimLeft(v, filterWhitespace)
+	lead := v[:len(v)-len(core)]
+	core = strings.TrimRight(core, filterWhitespace)
+	trail := v[len(lead)+len(core):]
+	return escapeBoundaryWhitespace(lead) +
+		graphLevelEscaper.Replace(optionLevelEscaper.Replace(core)) +
+		escapeBoundaryWhitespace(trail)
+}
+
+// filterWhitespace is the set FFmpeg's av_get_token trims (WHITESPACES in
+// libavutil/avstring.c).
+const filterWhitespace = " \n\t\r"
+
+// escapeBoundaryWhitespace escapes each whitespace character for both levels:
+// `\ ` at the option level, then `\\` and `\ ` at the graph level.
+func escapeBoundaryWhitespace(ws string) string {
+	var b strings.Builder
+	for _, r := range ws {
+		b.WriteString(`\\\`)
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // filterPath renders a filesystem path for use INSIDE a filter argument.

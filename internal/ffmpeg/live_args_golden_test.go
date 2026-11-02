@@ -1,7 +1,7 @@
 package ffmpeg
 
 import (
-	"strings"
+	"slices"
 	"testing"
 )
 
@@ -54,7 +54,7 @@ func TestLiveArgsForOrdinaryPathsAreUnchanged(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		want string
+		want []string
 	}{
 		{"rendition with image overlay and boxed text", RenditionArgs(overlayAndText), goldenOverlayAndText},
 		{"rendition burning live captions", RenditionArgs(captions), goldenCaptions},
@@ -67,8 +67,10 @@ func TestLiveArgsForOrdinaryPathsAreUnchanged(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := strings.Join(c.args, "\n"); got != c.want {
-				t.Errorf("the live argv changed for an ordinary configuration.\n--- got\n%s\n--- want\n%s", got, c.want)
+			// Compared as a slice, not joined: ["-map", "0:a"] and ["-map\n0:a"]
+			// join to the same string and are different commands.
+			if !slices.Equal(c.args, c.want) {
+				t.Errorf("the live argv changed for an ordinary configuration.\n--- got\n%q\n--- want\n%q", c.args, c.want)
 			}
 		})
 	}

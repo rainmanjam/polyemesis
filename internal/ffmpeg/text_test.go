@@ -379,6 +379,39 @@ func TestFilterArgumentsSurviveTheRealParser(t *testing.T) {
 			})
 		})
 	}
+
+	// Boundary whitespace in the overlay text. FFmpeg's tokenizer trims
+	// unescaped leading and trailing whitespace at BOTH levels, so " LIVE "
+	// used to draw as "LIVE" -- shifted left, with no error. The oracle is the
+	// same as above: a textfile is read raw, and it must also differ from the
+	// trimmed text, or the comparison proves nothing.
+	t.Run("boundary whitespace in the overlay text", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), FontsDirName)
+		if err := EnsureFonts(dir); err != nil {
+			t.Fatal(err)
+		}
+		font, err := FontPath(dir, DefaultFont)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame := frameSize{W: 480, H: 120}
+		draw := func(spec *TextSpec) []byte {
+			spec.FontFile, spec.SizePct, spec.Color = font, 0.3, "white"
+			return grayFrame(t, bin, renderDrawtext(t, bin, spec, frame))
+		}
+		for _, v := range []string{"  LIVE", "LIVE  ", "  LIVE  "} {
+			viaText := draw(&TextSpec{Text: v})
+			viaFile := draw(&TextSpec{TextFile: writeFile(t, filepath.Join(t.TempDir(), "raw.txt"), v)})
+			trimmed := draw(&TextSpec{Text: "LIVE"})
+			if !bytes.Equal(viaText, viaFile) {
+				t.Errorf("text=%q drew a different frame from a file holding the same bytes; "+
+					"its boundary whitespace was trimmed on the way through the filtergraph", v)
+			}
+			if strings.HasPrefix(v, " ") && bytes.Equal(viaFile, trimmed) {
+				t.Errorf("%q and %q draw the same frame, so this case cannot see a trim", v, "LIVE")
+			}
+		}
+	})
 }
 
 // A font written by EnsureFonts must survive the round trip into a real

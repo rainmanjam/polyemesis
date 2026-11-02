@@ -71,10 +71,14 @@ func TestEscapeLavfiArgEscapesEachCharacterForItsOwnLevels(t *testing.T) {
 		{`]`, `\]`, "graph level only"},
 		{`;`, `\;`, "graph level only"},
 		{`%`, `%`, "not a filtergraph character; drawtext's expansion=none is what disarms it"},
-		{` `, ` `, "interior whitespace is literal at both levels"},
+		{`a b`, `a b`, "interior whitespace is literal at both levels"},
 		{`"`, `"`, "FFmpeg quotes with ' only"},
 		{`ü日本`, `ü日本`, "non-ASCII passes through as bytes"},
 		{`=`, `=`, "only the FIRST = separates key from value, so a later one is literal"},
+		{` a `, `\\\ a\\\ `, "BOUNDARY whitespace is trimmed at both levels unless escaped at both"},
+		{"\tTab\t", "\\\\\\\tTab\\\\\\\t", "a tab is whitespace to FFmpeg's tokenizer too"},
+		{`  `, `\\\ \\\ `, "a value that is all whitespace is all boundary"},
+		{`a  b`, `a  b`, "interior whitespace stays as it was, so ordinary text is unchanged"},
 	}
 	for _, c := range cases {
 		if got := escapeLavfiArg(c.in); got != c.want {
@@ -98,6 +102,47 @@ func TestEscapeLavfiArgOnlyChangesValuesWithGraphOnlyMetacharacters(t *testing.T
 	} {
 		if got, was := escapeLavfiArg(v), old.Replace(v); got != was {
 			t.Errorf("escapeLavfiArg(%q) = %q, and it used to be %q; an ordinary value must not change", v, got, was)
+		}
+	}
+}
+
+// Every value, round-tripped through FFmpeg's own filtergraph parser and read
+// back out of it. The metadata filter is in every build: one instance stores
+// the escaped value under a key, a second prints what it received, so the test
+// compares the string FFmpeg PARSED with the string that went in -- not a
+// rendering of it. The value is tried both as the LAST option before the ','
+// (where the graph level trims trailing whitespace) and in the MIDDLE of the
+// options (where only the option level does).
+//
+// MUTATION: escape boundary whitespace at only one level, or not at all, and
+// " LIVE " comes back as "LIVE" or " LIVE\".
+func TestEscapeLavfiArgRoundTripsThroughTheRealParser(t *testing.T) {
+	bin := testenv.FFmpegBinary(t, "ffmpeg", "without ffmpeg the filtergraph parser cannot be measured")
+	values := append([]string{" LIVE ", "  two  ", "\tTab\t", " ", "a  b", "Tom's Show, [LIVE]; 12:30 \\o/ 100%"}, hostileNames...)
+	for _, v := range values {
+		for _, pos := range []struct{ name, filter string }{
+			{"last", "metadata=mode=add:key=k:value=" + escapeLavfiArg(v)},
+			{"middle", "metadata=key=k:value=" + escapeLavfiArg(v) + ":mode=add"},
+		} {
+			graph := "color=s=16x16:d=0.04," + pos.filter + ",metadata=mode=print"
+			out, err := exec.Command(bin, "-hide_banner", "-loglevel", "info", "-f", "lavfi", "-i", graph,
+				"-frames:v", "1", "-f", "null", "-").CombinedOutput()
+			if err != nil {
+				t.Errorf("%q (%s): FFmpeg rejected the graph: %v\n%s\ngraph: %s", v, pos.name, err, out, graph)
+				continue
+			}
+			got, found := "", false
+			for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+				if i := strings.Index(line, "] k="); i >= 0 {
+					got, found = line[i+len("] k="):], true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%q (%s): the metadata filter printed no value\n%s", v, pos.name, out)
+			} else if got != v {
+				t.Errorf("%q (%s): FFmpeg parsed it as %q\ngraph: %s", v, pos.name, got, graph)
+			}
 		}
 	}
 }
