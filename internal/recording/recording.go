@@ -268,8 +268,9 @@ func (m *Manager) Scan() (bool, error) {
 	// manager scanning this same directory, or anything else that indexes a
 	// file it has just written -- was in the index but not in the listing,
 	// and was de-indexed as "disappeared from disk" with its file sitting
-	// there. The row came back on the next scan, but unmeasured, with its
-	// session, upload state and transcript links gone. Index first, a row
+	// there. The row came back on the next scan under a new id and unmeasured
+	// (so the offloader skipped it), and the delete cascaded its session
+	// membership, metadata and transcripts away. Index first, a row
 	// that arrives late is simply not judged until the next scan, and a row
 	// that was already there had its file there too.
 	indexed, err := m.store.ListRecordings()

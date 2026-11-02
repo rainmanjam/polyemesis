@@ -353,28 +353,35 @@ func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
 	// still landing in the kernel and no deadline was ever needed. With the
 	// second now closing the connection by itself, that version would pass
 	// even with the deadline gone, on any host whose socket buffers held the
-	// backlog. Here the buffer is far deeper than this loop can fill, and the
-	// loop keeps publishing until the connection closes: however much the
-	// host's buffers hold, they fill, a write blocks, and only its deadline
-	// can unblock it. No fixed byte count to guess per OS.
-	hub, closed := stuckEventsClient(t, 1<<16, 4096)
+	// backlog. Here the hub holds up to 1024 events and the loop publishes at
+	// most that many, 64 KiB each: 64 MiB, eight times what macOS lets two
+	// sockets buffer (kern.ipc.maxsockbuf is 8 MiB each) and well past Linux's
+	// defaults. It stops early once the connection closes, so a -race run --
+	// where redaction makes each publish slow -- does not pay for all of it.
+	// However much the host buffers, it fills, a write blocks, and only that
+	// write's deadline can unblock it.
+	hub, closed := stuckEventsClient(t, 1024, 4096)
 
 	big := strings.Repeat("x", 64<<10)
 	limit := writeWait + 50*time.Second
-	for start := time.Now(); ; {
+	timeout := time.After(limit)
+	for i := 0; i < 1024; i++ {
 		select {
 		case <-closed:
-			if hub.Kicked() != 0 {
-				t.Fatal("the hub dropped the client; this test is about the write deadline alone")
-			}
-			return
 		default:
+			hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: big})
+			continue
 		}
-		if time.Since(start) > limit {
-			t.Fatalf("the server still held the connection %s after the client stopped reading; "+
-				"the per-write deadline is not reaching the connection", limit)
-		}
-		hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: big})
+		break
+	}
+	select {
+	case <-closed:
+	case <-timeout:
+		t.Fatalf("the server still held the connection %s after the client stopped reading; "+
+			"the per-write deadline is not reaching the connection", limit)
+	}
+	if hub.Kicked() != 0 {
+		t.Fatal("the hub dropped the client; this test is about the write deadline alone")
 	}
 }
 
