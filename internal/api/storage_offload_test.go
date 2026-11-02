@@ -160,12 +160,20 @@ func TestTheLibraryShowsEachRecordingsUploadState(t *testing.T) {
 		}
 		return nil
 	}
-	var page struct {
+	type libraryPage struct {
+		Sessions []struct {
+			ID int64 `json:"id"`
+		} `json:"sessions"`
 		Ungrouped []listed `json:"ungrouped"`
 	}
-	if err := json.Unmarshal([]byte(storageBody(t, h, sign, "/api/v1/library")), &page); err != nil {
-		t.Fatal(err)
+	readLibrary := func() libraryPage {
+		var page libraryPage
+		if err := json.Unmarshal([]byte(storageBody(t, h, sign, "/api/v1/library")), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page
 	}
+	page := readLibrary()
 	got, where := find(page.Ungrouped), "the library's ungrouped list"
 	if got == nil {
 		recs, err := store.ListRecordings()
@@ -181,6 +189,17 @@ func TestTheLibraryShowsEachRecordingsUploadState(t *testing.T) {
 		sess, err := store.SessionForRecording(id)
 		if err != nil {
 			t.Fatalf("recording missing from the library: not ungrouped, and in no session (id %d): %v", id, err)
+		}
+		// The Library itself must list that session, not only the store: a
+		// page that dropped it would hide the recording however its own
+		// session view read. Read again, because the session may have been
+		// made after the read above.
+		listedSession := false
+		for _, ls := range readLibrary().Sessions {
+			listedSession = listedSession || ls.ID == sess.ID
+		}
+		if !listedSession {
+			t.Fatalf("recording missing from the library: its session %d is not on the Library page", sess.ID)
 		}
 		var segs struct {
 			Recordings []listed `json:"recordings"`

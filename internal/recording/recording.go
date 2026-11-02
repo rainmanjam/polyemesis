@@ -254,6 +254,11 @@ func (m *Manager) setStorage(st StorageState) bool {
 	return true
 }
 
+// scanBetweenReads runs, when set, between Scan's two snapshots -- the window
+// in which another writer can add a file and its row. Nil outside tests; it
+// pins the order of the reads rather than waiting for a loaded host to hit it.
+var scanBetweenReads func()
+
 // Scan indexes every .mkv in the recordings directory and drops index rows
 // whose file has disappeared. Filesystem is the source of truth: a user who
 // deletes a file by hand should not be left with a phantom row.
@@ -276,6 +281,9 @@ func (m *Manager) Scan() (bool, error) {
 	indexed, err := m.store.ListRecordings()
 	if err != nil {
 		return false, err
+	}
+	if scanBetweenReads != nil {
+		scanBetweenReads()
 	}
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {

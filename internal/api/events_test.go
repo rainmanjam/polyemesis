@@ -353,19 +353,18 @@ func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
 	// still landing in the kernel and no deadline was ever needed. With the
 	// second now closing the connection by itself, that version would pass
 	// even with the deadline gone, on any host whose socket buffers held the
-	// backlog. Here the hub holds up to 1024 events and the loop publishes at
-	// most that many, 64 KiB each: 64 MiB, eight times what macOS lets two
-	// sockets buffer (kern.ipc.maxsockbuf is 8 MiB each) and well past Linux's
-	// defaults. It stops early once the connection closes, so a -race run --
-	// where redaction makes each publish slow -- does not pay for all of it.
-	// However much the host buffers, it fills, a write blocks, and only that
-	// write's deadline can unblock it.
+	// backlog. Here the hub holds 1024 events and the loop publishes at most
+	// 128, so it never drops this client; stuckEventsClient shrinks the
+	// server's send buffer, so the backlog that blocks a write is small
+	// (about half a megabyte here) and 128 x 64 KiB -- 8 MiB, past even an
+	// autotuned 4 MiB receive window -- is far more than enough. The loop
+	// stops as soon as the connection closes.
 	hub, closed := stuckEventsClient(t, 1024, 4096)
 
 	big := strings.Repeat("x", 64<<10)
-	limit := writeWait + 50*time.Second
+	limit := writeWait + 10*time.Second
 	timeout := time.After(limit)
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < 128; i++ {
 		select {
 		case <-closed:
 		default:
@@ -431,8 +430,18 @@ func stuckEventsClient(t *testing.T, hubBuffer, readBuffer int) (*eventstream.Hu
 	closed := make(chan struct{})
 	srv := httptest.NewUnstartedServer(s.Handler())
 	var once sync.Once
-	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
-		if st == http.StateClosed {
+	srv.Config.ConnState = func(c net.Conn, st http.ConnState) {
+		switch st {
+		case http.StateNew:
+			// A small send buffer on the server's side of the connection, so
+			// a client that stops reading blocks a write after a small
+			// backlog rather than after whatever the host autotunes to. Set
+			// explicitly it is honoured on every OS this runs on (macOS
+			// floors it near 300 KiB with the client's window).
+			if tc, ok := c.(*net.TCPConn); ok {
+				_ = tc.SetWriteBuffer(4096)
+			}
+		case http.StateClosed:
 			once.Do(func() { close(closed) })
 		}
 	}
