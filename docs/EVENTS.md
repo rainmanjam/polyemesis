@@ -122,8 +122,8 @@ current state over REST (`GET /status`, `GET /timeline`).
 
 ### Slow clients are disconnected, not skipped
 
-Each connection may fall **256 events** behind. Past that, polyemesis ends the
-response instead of silently dropping events. A client that skipped one would
+Each connection may fall **256 events** behind. Past that, polyemesis closes the
+connection (on HTTP/2, resets the stream) instead of silently dropping events. A client that skipped one would
 have no way to know. When `EventSource` reconnects with `Last-Event-ID`, the
 replay fills the gap. A client that keeps being disconnected is not reading
 fast enough. The server log says so: `events stream: disconnected a client that
