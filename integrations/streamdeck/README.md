@@ -137,10 +137,15 @@ The icons are drawn by `scripts/icons.mjs` from shapes, with no image library, a
 the PNGs are committed. Each key action has eleven faces at 72 and 144 px, one per
 state in `KEY_STATE` order (`src/render.ts`): a tile in the state colour with the
 action's glyph in the corner, clear of the title. The tile colours are in
-`scripts/keyPalette.mjs`. Live, warn and held take the hues of the UI's `--live`,
-`--warn` and `--primary`, darkened so the white title reads at 4.5:1 or better
-everywhere on the tile; `test/keyContrast.test.ts` checks every state colour and
-every committed face against that. Five states draw a status mark instead of the action glyph, so they
+`scripts/keyPalette.mjs`, and so is each state's title colour. The plugin sets
+only the title's text (`setTitle`). Stream Deck draws it in the `TitleColor` the
+manifest gives the key's current state, and every key state sets one. Titles are
+white, except on warn: that tile is the UI's bright `--warn` amber, with a
+near-black title (`--background`) and a dark corner glyph. Live, held and restarted
+take the hues of `--live`, `--primary` and a burnt orange, darkened so a white title
+reads at 4.5:1 or better everywhere on the tile. `test/keyContrast.test.ts` checks
+that every manifest `TitleColor` matches the palette, and that every state colour
+and every committed face gives its own title 4.5:1. Five states draw a status mark instead of the action glyph, so they
 can never be mistaken for another state: **HALTED: DISK** (a drive, on crimson; only
 the Record key uses it), **Needs admin token** (a padlock, on violet), and three
 that only the Mute track key uses: **MUTED** (a crossed speaker, on red),

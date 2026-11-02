@@ -65,6 +65,13 @@ For each key action, on the hardware rather than the app's preview:
       not collide with the title.
 - [ ] Idle, live and error faces are told apart by colour **and** label, not by
       colour alone.
+- [ ] A warning face (e.g. a destination reconnecting) is bright amber with a
+      **near-black** title and corner glyph; every other face has a white title.
+      The burnt-orange **Applied by restart** face (white title, circular arrow)
+      is plainly not the warning amber. The title colour comes from the manifest's
+      per-state `TitleColor`. If a key that was already on the deck before an
+      upgrade still shows a white title on amber, remove it and drag it on again,
+      and note that here: it means the app kept the old state style.
 - [ ] With the read token, admin-only keys that have no state of their own (Go
       live, Stop all, Stop destination, Routing preset, Chat poll) show the violet padlock
       **Needs admin token** face at rest. Keys that show state (Destination,

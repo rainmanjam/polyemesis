@@ -9,7 +9,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
-import { KEY_COLOURS, SHADE_SLOPE, SHADE_TOP } from "./keyPalette.mjs";
+import { KEY_COLOURS, SHADE_SLOPE, SHADE_TOP, TITLE_COLOURS } from "./keyPalette.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "com.polyemesis.streamdeck.sdPlugin", "imgs");
 
@@ -326,7 +326,9 @@ function write(rel, size, paint) {
 const KEY_ACTIONS = ["destination", "go-live", "stop-all", "stop-destination", "record", "preset", "failover", "track-mute", "poll"];
 const BADGE = { x: 0.06, y: 0.06, s: 0.3 };
 
-function badged(base, shape) {
+// The badge is drawn most of the way toward the state's TITLE colour, so on the bright
+// warn tile it is dark like its title, and light on every other tile.
+function badged(base, shape, ink) {
   const tile = keyTile(base);
   return (x, y) => {
     const c = tile(x, y);
@@ -334,7 +336,7 @@ function badged(base, shape) {
     const bx = (x - BADGE.x) / BADGE.s;
     const by = (y - BADGE.y) / BADGE.s;
     if (bx >= 0 && bx <= 1 && by >= 0 && by <= 1 && shape(bx, by)) {
-      return c.map((v) => Math.round(v + (255 - v) * 0.85));
+      return c.map((v, i) => Math.round(v + (ink[i] - v) * 0.85));
     }
     return c;
   };
@@ -343,8 +345,8 @@ function badged(base, shape) {
 for (const action of KEY_ACTIONS) {
   for (const [state, colour] of Object.entries(KEY_COLOURS)) {
     const shape = STATUS_GLYPH[state] ?? GLYPH[action];
-    write(`keys/${action}/${state}.png`, 72, badged(colour, shape));
-    write(`keys/${action}/${state}@2x.png`, 144, badged(colour, shape));
+    write(`keys/${action}/${state}.png`, 72, badged(colour, shape, TITLE_COLOURS[state]));
+    write(`keys/${action}/${state}@2x.png`, 144, badged(colour, shape, TITLE_COLOURS[state]));
   }
 }
 
