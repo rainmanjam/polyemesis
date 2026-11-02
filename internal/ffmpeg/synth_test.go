@@ -792,7 +792,12 @@ func TestSlateArgsColourEscaping(t *testing.T) {
 		// into a parse error the operator cannot connect to what they typed.
 		{"a colon survives both unescape passes", "a:b", `color=c=a\\:b:`},
 		{"a backslash is escaped first so it cannot double-escape", `a\b`, `color=c=a\\\\b:`},
-		{"a comma cannot end the filter", "a,b", `color=c=a\\,b:`},
+		// ONE backslash, not two. ',' is a graph-level metacharacter only, so
+		// it is escaped once, for the graph pass; the doubled form this case
+		// used to expect leaves that pass a literal backslash and a BARE comma,
+		// which splits the source in two. See escapeLavfiArg.
+		{"a comma cannot end the filter", "a,b", `color=c=a\,b:`},
+		{"an apostrophe cannot open a quote", "a'b", `color=c=a\\\'b:`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -158,17 +158,30 @@ func drawtextFilter(t *TextSpec, out frameSize) string {
 //
 // A literal backslash needs four, for the same reason: two passes halve it
 // twice.
-var lavfiArgEscaper = strings.NewReplacer(
-	`\`, `\\\\`,
-	`:`, `\\:`,
-	`,`, `\\,`,
-	`'`, `\\'`,
-	`[`, `\\[`,
-	`]`, `\\]`,
-	`;`, `\\;`,
-)
-
-func escapeLavfiArg(v string) string { return lavfiArgEscaper.Replace(v) }
+//
+// The two passes do NOT share a set of metacharacters, so the value is escaped
+// once for EACH level, innermost first -- the order FFmpeg's filters
+// documentation gives under "Notes on filtergraph escaping":
+//
+//   - the OPTION level, a filter's arguments split into key=value pairs, where
+//     the metacharacters are \ ' :
+//   - the GRAPH level, the description split into chains and filters, which
+//     runs first and whose metacharacters are \ ' [ ] , ;
+//
+// This used to be ONE replacer that doubled the escape on every metacharacter.
+// That is right for \ and :, which the two forms render identically, and wrong
+// for everything else: a doubled escape on ',' leaves the graph pass with a
+// literal backslash and a BARE comma, which splits the filter in two -- "No
+// option name near ...", exit 234 -- and a doubled escape on ' leaves a bare
+// quote that swallows the rest of the chain. A data directory, a fonts
+// directory, a caption file or overlay text containing any of ' , [ ] ; broke
+// the live rendition. See TestFilterArgumentsSurviveTheRealParser.
+//
+// Shared with internal/clipper (GraphArgPath) so the vertical export and the
+// live overlay cannot drift apart again.
+func escapeLavfiArg(v string) string {
+	return graphLevelEscaper.Replace(optionLevelEscaper.Replace(v))
+}
 
 // filterPath renders a filesystem path for use INSIDE a filter argument.
 //
@@ -287,3 +300,18 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+// GraphArgPath renders a filesystem path for use inside a filter option in a
+// filtergraph: separators converted as filterPath describes, then escaped for
+// the option level and the graph level in that order (see escapeLavfiArg). It
+// is filterPath under an exported name, for graph builders outside this package
+// -- the clipper's vertical export -- so there is ONE escaper for every
+// filtergraph this program writes.
+func GraphArgPath(p string) string { return filterPath(p) }
+
+// The two levels escapeLavfiArg composes. See there for which characters
+// belong to which level and why the order matters.
+var (
+	optionLevelEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `:`, `\:`)
+	graphLevelEscaper  = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `[`, `\[`, `]`, `\]`, `,`, `\,`, `;`, `\;`)
+)
