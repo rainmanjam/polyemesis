@@ -170,9 +170,10 @@ ARG FFMPEG_VERSION=7:8.0.1-3ubuntu2
 #   mesa-va-drivers — radeonsi, which is the AMD encode path on Linux.
 #   vainfo — 4 MB that turns "it does not work" into a readable answer from
 #     inside the container. Worth it; see docs/HARDWARE.md.
-#   fontconfig + Noto core and colour emoji — the fallback fonts libass draws a
-#     vertical short's captions with when the bundled Inter lacks a glyph. CJK
-#     (fonts-noto-cjk) is not included by default; see the main Dockerfile.
+#   fontconfig + DejaVu — the fallback font libass draws a vertical short's
+#     captions with when the bundled Inter lacks a glyph (Arabic, Hebrew,
+#     symbols). CJK (fonts-noto-cjk) is not included by default; see the main
+#     Dockerfile for why DejaVu rather than Noto core.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       "ffmpeg=${FFMPEG_VERSION}" \
@@ -181,7 +182,7 @@ RUN apt-get update \
       mesa-va-drivers \
       libva-drm2 \
       vainfo \
-      fontconfig fonts-noto-core fonts-noto-color-emoji \
+      fontconfig fonts-dejavu-core \
       ca-certificates tzdata wget \
  && rm -rf /var/lib/apt/lists/* \
  # `grep srt` would pass on every build, because `srtp` is always listed. -x

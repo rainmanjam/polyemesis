@@ -160,13 +160,17 @@ ARG FFMPEG_VERSION=8.1.3-r0
 # CAPTION FONTS. Burned captions on a vertical short are drawn by libass, which
 # picks fonts through fontconfig: the bundled Inter first (the server points
 # libass at its fonts directory), then any INSTALLED font for a glyph Inter
-# lacks. Alpine installs no font at all, so without these a Hebrew, Arabic or
-# emoji caption draws as boxes. Noto core + Arabic + Hebrew + emoji is about
-# 39 MiB. CJK is a further 88 MiB and is left out of the default; add it with
-#   docker build --build-arg CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji font-noto-cjk" .
+# lacks. Alpine installs no font at all, so without one a Hebrew or Arabic
+# caption draws as boxes. DejaVu (about 10 MiB) covers Arabic, Hebrew and
+# monochrome symbols, and was MEASURED to render them shaped: font-noto's core
+# package was tried first and is worse, because its Noto Sans Math claims the
+# Arabic code points to fontconfig and then draws them as boxes. Colour emoji
+# fonts are not used at all -- libass draws outline glyphs only. CJK is 88 MiB
+# and left out of the default; add it with
+#   docker build --build-arg CAPTION_FONTS="fontconfig font-dejavu font-noto-cjk" .
 # or drop a .ttf/.otf into <data>/fonts. An empty value builds an image with no
 # fallback fonts, whose captions are Latin, Greek and Cyrillic only.
-ARG CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji"
+ARG CAPTION_FONTS="fontconfig font-dejavu"
 RUN if ! apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata ${CAPTION_FONTS}; then \
       echo "FFMPEG_VERSION=${FFMPEG_VERSION} is not in this Alpine branch any more." >&2; \
       echo "It now serves:" >&2; \

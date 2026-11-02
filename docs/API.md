@@ -1381,11 +1381,13 @@ already in the fonts directory (`<data>/fonts`); its own family and weight are
 what libass is asked for. libass looks in that directory first and then, for
 any glyph the chosen font lacks, at every font **installed on the machine**
 through fontconfig -- so what a CJK, Arabic, Hebrew or emoji caption looks
-like depends on the fonts installed. The Docker image installs fontconfig with
-Noto (Latin, Greek, Cyrillic), Noto Arabic, Noto Hebrew and Noto emoji; CJK is
-not in the default image (88 MiB) and is added with
-`--build-arg CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji font-noto-cjk"`
-or by dropping a `.ttf`/`.otf` that has the glyphs into `<data>/fonts`. On a
+like depends on the fonts installed. The Docker images install fontconfig with
+DejaVu, which draws Arabic and Hebrew (shaped, right to left) and monochrome
+symbols; CJK is not in the default image (88 MiB) and is added with
+`--build-arg CAPTION_FONTS="fontconfig font-dejavu font-noto-cjk"` or by
+dropping a `.ttf`/`.otf` that has the glyphs into `<data>/fonts`. libass draws
+outline glyphs only, so a colour emoji font is never used: an emoji draws from
+a monochrome font that has it (DejaVu has some) or as a box. On a
 host install, install fonts the usual way for the OS. The plan warns, naming
 the script (never a character of what was said), when captions need glyphs
 the bundled Inter does not have. An empty `style.outline` is the default

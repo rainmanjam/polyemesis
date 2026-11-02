@@ -599,6 +599,13 @@ func TestARealVerticalExportDrawsHostileTextAsText(t *testing.T) {
 	if h := got[len(got)-1][1] - got[0][0]; h > 400 {
 		t.Errorf("the caption is %d px tall: an override in the text was obeyed", h)
 	}
+	// Text inside braces is DRAWN: unescaped, libass reads it as an override
+	// block and draws nothing at all.
+	// MUTATION: braces not escaped. Observed: FAIL, the braced caption is blank.
+	braced, _ := captionedShort(t, "braced", []Cue{{StartMS: 500, EndMS: 3500, Text: "{HIDDEN WORDS}"}}, CaptionStyle{})
+	if n := whiteIn(frameRGB(t, bin, braced, 2*time.Second), 1200, 1600); n < 800 {
+		t.Errorf("a caption in braces drew %d px; libass swallowed it as an override block", n)
+	}
 }
 
 // OTHER SCRIPTS. Rendered for the evidence directory -- whether a glyph is a
