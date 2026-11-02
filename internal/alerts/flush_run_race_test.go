@@ -178,3 +178,36 @@ func TestFlushFromTheRuleSourceBeforeRunCannotDeadlock(t *testing.T) {
 	go func() { defer close(done); n.Flush(time.Now().Add(time.Hour)) }()
 	waitOrDeadlock(t, done, "an inline Flush whose rule source calls Flush")
 }
+
+// TestARequestQueuedDuringAnInlinePassIsServedBeforeFlushReturns: before Run
+// starts, a rule source that calls Flush with a NEWER time from inside the
+// outer inline pass cannot take runMu, so it queues. Nobody else will serve
+// that queue until Run starts -- possibly never -- so the outer Flush must
+// drain it before returning. Here the outer time is too early for the debounce
+// and only the inner, later time makes the delivery due.
+func TestARequestQueuedDuringAnInlinePassIsServedBeforeFlushReturns(t *testing.T) {
+	rule := testRule(func(r *Rule) { r.DebounceSeconds = 1 })
+	var n *Notifier
+	var armed atomic.Bool
+	n = New(quietLog(), RuleFunc(func() ([]Rule, error) {
+		if armed.CompareAndSwap(true, false) {
+			n.Flush(base.Add(time.Hour))
+		}
+		return []Rule{rule}, nil
+	}), WithDoer(&fakeDoer{replies: []reply{{status: 200}}}), WithRulesTTL(0))
+
+	n.co.Add([]Rule{rule}, downEvent("1", base), base)
+	armed.Store(true)
+	done := make(chan struct{})
+	go func() { defer close(done); n.Flush(base) }() // not yet due on its own
+	waitOrDeadlock(t, done, "an inline Flush whose rule source calls Flush")
+
+	select {
+	case d := <-n.send:
+		if len(d.Items) != 1 {
+			t.Fatalf("delivery = %+v, want the one pending subject", d.Items)
+		}
+	default:
+		t.Fatal("the newer Flush requested from inside the inline pass was never served")
+	}
+}

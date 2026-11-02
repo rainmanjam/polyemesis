@@ -341,11 +341,9 @@ func (n *Notifier) Run(ctx context.Context) {
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
 		case <-n.flushKick:
-			n.flushMu.Lock()
-			at := n.flushAt
-			n.flushAt = time.Time{}
-			n.flushMu.Unlock()
-			if !at.IsZero() {
+			// Also serves any request queued before Run started: its kick
+			// is still in the buffer.
+			if at := n.takeFlush(); !at.IsZero() {
 				n.flush(n.currentRules(), at)
 			}
 		}
@@ -389,28 +387,42 @@ func (n *Notifier) flush(rules []Rule, now time.Time) {
 // Flush is the test and shutdown entry point into one coalescing pass.
 //
 // co is single-goroutine (see coalescer), so Flush never walks it beside a
-// live Run. Before Run starts it runs the pass inline and synchronously, so
-// the caller can read n.send straight after. Once Run has started it only
-// REQUESTS the pass -- the latest requested time wins -- and returns without
-// waiting: the run loop does it on its own goroutine. Waiting would deadlock
-// whenever the caller is something Run is itself waiting on (a delivery
-// during the shutdown drain) or is Run's own goroutine (a rule source read
-// during a pass). After Run has stopped the request is simply never served.
+// live Run. Every call first records a request (the latest requested time
+// wins) and kicks the run loop. Once Run has started that is all it does: the
+// run loop serves the request on its own goroutine and Flush returns without
+// waiting. Waiting would deadlock whenever the caller is something Run is
+// itself waiting on (a delivery during the shutdown drain) or is Run's own
+// goroutine (a rule source read during a pass). After Run has stopped the
+// request is simply never served.
 //
-// TryLock rather than Lock for the same reason: if runMu is held, either
+// Before Run starts there is no run loop, so whoever holds runMu serves the
+// queue inline, synchronously, until it is empty -- the caller can read
+// n.send straight after. TryLock rather than Lock: if runMu is held, either
 // another inline pass is in progress -- possibly this goroutine's own, when a
-// rule source calls Flush from inside it -- or Run is starting. Either way the
-// request is left for the run loop instead of waiting on the lock.
+// rule source calls Flush from inside it -- or Run is starting, and either
+// way the holder serves this request. After unlocking, the holder looks once
+// more, so a request that lost the TryLock race in that last moment is not
+// stranded.
 func (n *Notifier) Flush(now time.Time) {
-	if n.runMu.TryLock() {
-		if !n.running {
-			n.flush(n.currentRules(), now)
+	n.requestFlush(now)
+	for n.runMu.TryLock() {
+		if n.running {
 			n.runMu.Unlock()
 			return
 		}
+		at := n.takeFlush()
+		if !at.IsZero() {
+			n.flush(n.currentRules(), at)
+		}
 		n.runMu.Unlock()
+		if !n.flushPending() {
+			return
+		}
 	}
+}
 
+// requestFlush records a request for a pass at now and kicks the run loop.
+func (n *Notifier) requestFlush(now time.Time) {
 	n.flushMu.Lock()
 	if now.After(n.flushAt) {
 		n.flushAt = now
@@ -421,6 +433,21 @@ func (n *Notifier) Flush(now time.Time) {
 	default:
 		// A kick is already pending; it will read the flushAt set above.
 	}
+}
+
+// takeFlush claims the pending request, if any; zero means none.
+func (n *Notifier) takeFlush() time.Time {
+	n.flushMu.Lock()
+	defer n.flushMu.Unlock()
+	at := n.flushAt
+	n.flushAt = time.Time{}
+	return at
+}
+
+func (n *Notifier) flushPending() bool {
+	n.flushMu.Lock()
+	defer n.flushMu.Unlock()
+	return !n.flushAt.IsZero()
 }
 
 // Test delivers one synthetic event to a single rule immediately, skipping the
