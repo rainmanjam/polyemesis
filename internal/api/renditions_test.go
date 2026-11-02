@@ -80,6 +80,20 @@ func renditionServer(t *testing.T, tools *ffmpeg.Tools) (http.Handler, *db.DB, f
 // set; anything else the caller passes is kept.
 func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.Handler, *db.DB, func(*http.Request)) {
 	t.Helper()
+	return engineServerWithSettings(t, tools, o, nil)
+}
+
+// engineServerWithSettings is engineServer with a chance to change the stored
+// settings BEFORE the engine starts.
+//
+// Before, not after, because Start launches the engine's recording manager,
+// whose first sweep runs straight away on the settings snapshot it read at
+// startup. A test that wants that sweep to agree with it -- a free-space floor
+// no volume can clear, say -- has to have written the value before the
+// snapshot is taken; written afterwards, a sweep already in flight still acts
+// on the old one, whenever it happens to land.
+func engineServerWithSettings(t *testing.T, tools *ffmpeg.Tools, o Options, mutate func(*db.Settings)) (*Server, http.Handler, *db.DB, func(*http.Request)) {
+	t.Helper()
 
 	dir := t.TempDir()
 	store := dbtest.OpenCheapAt(t, filepath.Join(dir, "polyemesis.db"))
@@ -112,6 +126,9 @@ func engineServer(t *testing.T, tools *ffmpeg.Tools, o Options) (*Server, http.H
 		t.Fatalf("GetSettings: %v", err)
 	}
 	st.Listeners.SRTPort = freeUDPPort(t)
+	if mutate != nil {
+		mutate(&st)
+	}
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}

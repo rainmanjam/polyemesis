@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,7 +105,7 @@ func TestAFinishedNormalisationReconcilesTheEngine(t *testing.T) {
 		default:
 		}
 		return nil
-	})
+	}, nil)
 	if err := q.Register(playlistmedia.KindNormalise, 1,
 		jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil })); err != nil {
 		t.Fatalf("register: %v", err)
@@ -153,7 +154,7 @@ func TestOnlyAFinishedNormalisationReconciles(t *testing.T) {
 			reconcileOnNormalise(wiringLogger(), func() error {
 				fired <- struct{}{}
 				return nil
-			})(tc.job)
+			}, nil)(tc.job)
 
 			var got bool
 			select {
@@ -180,22 +181,112 @@ func TestOnlyAFinishedNormalisationReconciles(t *testing.T) {
 //
 // The mutation: delete the registerProcessors call in startPostProd and this
 // fails.
-func TestStartPostProdRegistersItsProcessors(t *testing.T) {
-	store, dir := wiringStore(t)
+// startStoppablePostProd runs startPostProd against store, and on cleanup
+// cancels it and WAITS for its loops before the store closes -- registered
+// after wiringStore's cleanup, so it runs first. A test that only cancelled
+// closed the store under a loop still mid-query, whose connection then held
+// the database file open past t.TempDir's RemoveAll: on Windows, "The process
+// cannot access the file because it is being used by another process".
+func startStoppablePostProd(t *testing.T, store *db.DB, dir string) postProd {
+	t.Helper()
 	log := wiringLogger()
-
 	cfg := config.Config{DataDir: dir}
-	bus := events.NewBroker()
 	// NewManager and not Start: the manager is inert until Start, which binds a
 	// real listener. startPostProd only captures its method values.
-	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, bus)
-
+	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	pp := startPostProd(ctx, log, cfg, store, nil, eng, &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
 	})
+	t.Cleanup(func() {
+		cancel()
+		stopPostProd(t, pp)
+	})
+	return pp
+}
+
+// stopPostProd waits for pp's loops within engine.ShutdownBudget -- the budget
+// production gives them -- so this fails exactly when a real shutdown would
+// leave the store open rather than close it under a running loop.
+func stopPostProd(t *testing.T, pp postProd) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), engine.ShutdownBudget)
+	defer cancel()
+	if !pp.waitWithin(ctx) {
+		t.Fatalf("startPostProd's loops did not return within the %v shutdown budget after "+
+			"their context was cancelled; production would leave the store open", engine.ShutdownBudget)
+	}
+}
+
+// THE STORE IS RELEASED WHEN POST-PRODUCTION STOPS. Cancel, wait, close: after
+// that nothing may still hold a connection to the database -- which is what
+// kept test.db open on Windows past TempDir's cleanup. Measured on the pool,
+// which counts a connection a goroutine is still using even after Close, and
+// on Linux and macOS additionally on the process's own open files.
+//
+// Mutation: make waitWithin return at once. Observed: an open connection
+// after Close in every run, because the startup sweeps are still mid-query.
+func TestStartPostProdReleasesTheDatabaseWhenItStops(t *testing.T) {
+	store, dir := wiringStore(t)
+	log := wiringLogger()
+	cfg := config.Config{DataDir: dir}
+	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
+	ctx, cancel := context.WithCancel(context.Background())
+	pp := startPostProd(ctx, log, cfg, store, nil, eng, &ffmpeg.Tools{
+		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
+		FFprobe: filepath.Join(dir, "no-ffprobe"),
+	})
+
+	cancel()
+	stopPostProd(t, pp)
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if n := store.SQL().Stats().OpenConnections; n != 0 {
+		t.Errorf("%d connection(s) to the database still open after post-production "+
+			"stopped and the store closed; on Windows that open file fails the "+
+			"data directory's removal", n)
+	}
+	if held := openFilesUnder(t, dir); len(held) > 0 {
+		t.Errorf("the process still holds files in the data directory open: %v", held)
+	}
+}
+
+// A RECONCILE STILL RUNNING KEEPS THE TIER RUNNING. reconcileOnNormalise
+// starts the reconcile on its own goroutine, which reads the store, so the
+// group the caller waits on before closing it has to count that goroutine from
+// before it starts until it returns.
+//
+// The reconcile here blocks until the test releases it, so the group cannot
+// legitimately drain first: the 100ms window can only produce a false pass,
+// never a false failure. Mutation: drop track.Add (and its Done) -- observed to
+// fail here.
+func TestAReconcileStartedByAFinishedNormalisationIsWaitedFor(t *testing.T) {
+	var track sync.WaitGroup
+	entered, release := make(chan struct{}), make(chan struct{})
+	reconcileOnNormalise(wiringLogger(), func() error {
+		close(entered)
+		<-release
+		return nil
+	}, &track)(jobs.Job{Kind: playlistmedia.KindNormalise, State: jobs.StateDone})
+	<-entered
+
+	drained := make(chan struct{})
+	go func() { track.Wait(); close(drained) }()
+	select {
+	case <-drained:
+		t.Fatal("the tier reported its goroutines finished while a reconcile was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-drained
+}
+
+func TestStartPostProdRegistersItsProcessors(t *testing.T) {
+	store, dir := wiringStore(t)
+
+	pp := startStoppablePostProd(t, store, dir)
 	if pp.queue == nil {
 		t.Fatal("startPostProd returned no queue")
 	}

@@ -156,6 +156,12 @@ type Manager struct {
 	retiring      map[*alerts.Notifier]struct{}
 	ctx           context.Context
 	started       bool
+	// stopped is set by StopWithin and cleared by Start, under mu. It is not
+	// !started: a Manager that was never started still binds on Reconcile, as
+	// it always has; one that has been STOPPED must not, because a reconcile
+	// arriving late -- a job finishing during shutdown -- would re-bind the
+	// shared listeners StopWithin just closed. See reconcileSharedIngest.
+	stopped bool
 
 	// settings is every Manager-level setting that has to reach an engine.
 	//
@@ -447,6 +453,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	m.ctx = ctx
 	m.started = true
+	m.stopped = false
 	m.hostStop = stopHost
 	m.mu.Unlock()
 
@@ -607,6 +614,17 @@ func (m *Manager) reconcileSharedIngest() {
 	// each start a listener while only one survives in the field.
 	m.syncMu.Lock()
 	defer m.syncMu.Unlock()
+
+	// A STOPPED MANAGER BINDS NOTHING. Checked under syncMu, which StopWithin
+	// also takes to set the flag, so a reconcile is either wholly before the
+	// stop (and its listeners are the ones StopWithin closes) or wholly after
+	// it (and does nothing) -- never one that binds after the close.
+	m.mu.RLock()
+	stopped := m.stopped
+	m.mu.RUnlock()
+	if stopped {
+		return
+	}
 
 	st, err := m.store.GetSettings()
 	if err != nil {
@@ -1208,6 +1226,16 @@ func (m *Manager) Stop() {
 
 // StopWithin tears every engine down inside the caller's deadline.
 func (m *Manager) StopWithin(ctx context.Context) {
+	// Under syncMu, so a reconcileSharedIngest already binding finishes first
+	// and every later one sees the flag. syncMu is held only by Sync and
+	// reconcileSharedIngest, neither of which calls this, so it cannot
+	// deadlock against its own caller.
+	m.syncMu.Lock()
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.syncMu.Unlock()
+
 	m.mu.Lock()
 	// Captured here, stopped at the BOTTOM of this function. The ordering is
 	// the whole point and it is not obvious, so:

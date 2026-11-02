@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/api"
@@ -45,6 +46,38 @@ type postProd struct {
 	queue   *jobs.Queue
 	gov     *jobs.Governor
 	whisper *transcribe.Tools
+	// done closes once every loop startPostProd started has returned -- which
+	// for the queue includes its in-flight workers -- after ctx is cancelled.
+	done <-chan struct{}
+}
+
+// waitWithin blocks until the loops startPostProd started have returned, or
+// ctx ends, and reports which.
+//
+// THE DATABASE MAY NOT BE CLOSED BEFORE THIS. sql.DB.Close closes only idle
+// connections; one a loop is still querying on stays open until that query
+// returns. Closing the store straight after cancelling the loops therefore left
+// the database file open on a connection nobody would release in time: on
+// Windows that made the test's TempDir cleanup fail ("being used by another
+// process"), and at shutdown it meant a job worker could still be writing its
+// last row after the store had been closed underneath it.
+func (p postProd) waitWithin(ctx context.Context) bool {
+	if p.done == nil {
+		return true
+	}
+	// Stopped already wins over a spent budget: with both ready, select would
+	// pick one at random and report a clean stop as an overrun half the time.
+	select {
+	case <-p.done:
+		return true
+	default:
+	}
+	select {
+	case <-p.done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // startPostProd builds the queue, the governor and every processor, and starts
@@ -74,7 +107,10 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 		log.Info("whisper detected", "path", whisper.Binary, "version", whisper.Version)
 	}
 
-	q := newJobQueue(log, store, settings.PostProd.Concurrency, eng.Reconcile)
+	// Every goroutine this tier starts is counted here: the three loops below,
+	// and each reconcile a finished normalisation starts. See waitWithin.
+	var loops sync.WaitGroup
+	q := newJobQueue(log, store, settings.PostProd.Concurrency, eng.Reconcile, &loops)
 
 	// The governor comes first because the processors need its NiceCommand.
 	gov := jobs.NewGovernor(log, q,
@@ -104,24 +140,23 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
-	go q.Run(ctx)
-	go gov.Run(ctx)
+	//
+	// Tracked, so the caller can wait for them before closing the store. See
+	// postProd.waitWithin.
+	loops.Add(3)
+	go func() { defer loops.Done(); q.Run(ctx) }()
+	go func() { defer loops.Done(); gov.Run(ctx) }()
 
 	// The stored history bound, applied once at startup. Nothing else calls
 	// Purge, and a job row is tiny — but "tiny forever" is still a leak.
 	// Re-read every sweep rather than captured here: see purgeJobHistoryLoop.
 	exportDir := clipper.ExportDirIn(cfg.RecordingsDir())
-	go purgeJobHistoryLoop(ctx, log, q, func() db.PostProdSettings {
-		s, err := store.GetSettings()
-		if err != nil {
-			// Keep-forever is the safe answer to an unreadable settings row.
-			// Purging on a guess would delete history the operator may have
-			// asked to keep, and unlike a missed sweep that is not recoverable.
-			log.Warn("cannot read job retention settings; skipping this sweep", "err", err)
-			return db.PostProdSettings{}
-		}
-		return s.PostProd
-	}, exportDir, jobPurgeEvery)
+	go func() {
+		defer loops.Done()
+		purgeJobHistoryLoop(ctx, log, q, jobRetentionSettings(log, store), exportDir, jobPurgeEvery)
+	}()
+	done := make(chan struct{})
+	go func() { loops.Wait(); close(done) }()
 
 	// Existing installs get their sessions built from the recordings already
 	// indexed, so upgrading does not look like losing your history. Idempotent
@@ -134,7 +169,23 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// the CPU, which is the one thing this whole tier exists to prevent.
 	eng.SetTranscriber(whisper, cfg.ModelsDir(), niceWrapper(gov))
 
-	return postProd{queue: q, gov: gov, whisper: whisper}
+	return postProd{queue: q, gov: gov, whisper: whisper, done: done}
+}
+
+// jobRetentionSettings re-reads the stored history bound on every sweep: see
+// purgeJobHistoryLoop.
+func jobRetentionSettings(log *slog.Logger, store *db.DB) func() db.PostProdSettings {
+	return func() db.PostProdSettings {
+		s, err := store.GetSettings()
+		if err != nil {
+			// Keep-forever is the safe answer to an unreadable settings row.
+			// Purging on a guess would delete history the operator may have
+			// asked to keep, and unlike a missed sweep that is not recoverable.
+			log.Warn("cannot read job retention settings; skipping this sweep", "err", err)
+			return db.PostProdSettings{}
+		}
+		return s.PostProd
+	}
 }
 
 // registerProcessors wires every worker into the queue.
@@ -275,13 +326,16 @@ func uploadResolver(s *uploads.Store) playlistmedia.Resolver {
 // with its own options would prove the callback works and prove nothing about
 // whether the server ever attaches it, which is the exact shape of defect this
 // sub-project has now produced four times.
-func newJobQueue(log *slog.Logger, store *db.DB, concurrency int, reconcile func() error) *jobs.Queue {
+//
+// track, when not nil, counts the reconciles a finished job starts, so whoever
+// waits for this tier to stop waits for them too. See reconcileOnNormalise.
+func newJobQueue(log *slog.Logger, store *db.DB, concurrency int, reconcile func() error, track *sync.WaitGroup) *jobs.Queue {
 	return jobs.New(log, store,
 		jobs.WithConcurrency(concurrency),
 		// A finished normalisation has to reach the engine, or the playlist tier
 		// it unblocks stays off air until something unrelated happens to
 		// reconcile. See reconcileOnNormalise.
-		jobs.WithOnChange(reconcileOnNormalise(log, reconcile)),
+		jobs.WithOnChange(reconcileOnNormalise(log, reconcile, track)),
 	)
 }
 
@@ -304,12 +358,22 @@ func newJobQueue(log *slog.Logger, store *db.DB, concurrency int, reconcile func
 // On its own goroutine because WithOnChange's contract is that the callback does
 // not block: it is called from the queue's per-job goroutine, and a reconcile
 // stops and starts supervised processes.
-func reconcileOnNormalise(log *slog.Logger, reconcile func() error) func(jobs.Job) {
+func reconcileOnNormalise(log *slog.Logger, reconcile func() error, track *sync.WaitGroup) func(jobs.Job) {
 	return func(j jobs.Job) {
 		if j.Kind != playlistmedia.KindNormalise || j.State != jobs.StateDone {
 			return
 		}
+		// Counted BEFORE the goroutine starts, and from the queue's per-job
+		// goroutine -- which the queue's Run is still waiting for -- so the
+		// tier cannot be reported stopped between the job finishing and its
+		// reconcile beginning. The reconcile reads the store.
+		if track != nil {
+			track.Add(1)
+		}
 		go func() {
+			if track != nil {
+				defer track.Done()
+			}
 			if err := reconcile(); err != nil {
 				log.Warn("a normalised playlist item did not reach the engine",
 					"job", j.ID, "upload", j.Target, "error", err)

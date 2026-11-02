@@ -51,6 +51,30 @@ func sendAll(t *testing.T, l *Line, n int) []time.Time {
 	return sent
 }
 
+// sendWithin is sendAll that stops early, after at least two datagrams, once
+// sending has taken budget -- for a test whose assertion depends on the first
+// datagram not yet being due when sending ends.
+func sendWithin(t *testing.T, l *Line, n int, budget time.Duration) []time.Time {
+	t.Helper()
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: l.Port()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	sent := make([]time.Time, 0, n)
+	for i := range n {
+		if i >= 2 && time.Since(sent[0]) >= budget {
+			break
+		}
+		sent = append(sent, time.Now())
+		if _, err := conn.Write(datagram(uint64(i))); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(200 * time.Microsecond) // paced, as in sendAll
+	}
+	return sent
+}
+
 func newTestLine(t *testing.T, delay time.Duration, rec *recorder, onDue func()) *Line {
 	t.Helper()
 	lim := Limits{MemBudget: DefaultMemBudget, DiskBudget: DiskBudgetFor(delay),
@@ -211,8 +235,33 @@ func TestStatusReportsFillWhileBufferingAndTimeLeftWhileDraining(t *testing.T) {
 	const delay = 2 * time.Second
 	rec := &recorder{}
 	l := newTestLine(t, delay, rec, nil)
-	sendAll(t, l, 1500) // ~0.3 s of datagrams at 200 µs
-	st := l.Status()
+	// SENT FOR A SHARE OF THE DELAY, NOT A COUNT. This was 1500 datagrams at
+	// 200 µs, ~0.3 s here -- but each sleep is a floor, and on a loaded CI
+	// runner the 1500 of them took past the whole 2 s delay. The first datagram
+	// was then due, the line was releasing, and "a line still inside its delay
+	// says it is releasing" failed a line that was correctly NOT inside its
+	// delay any more. Stopping at a quarter of the delay keeps the status read
+	// below well inside it however slow the sender is.
+	sent := sendWithin(t, l, 1500, delay/4)
+	// A UDP write only queues the datagram; wait for the LINE to hold at least
+	// two of them, and assert on that same snapshot. The premise is checked
+	// after each read rather than assumed: Releasing is only wrong while the
+	// first datagram is not yet due, and the earliest it may go is its delay
+	// less releaseSlack -- counted from when it was sent, which is no later
+	// than when the line received it.
+	var st Status
+	for {
+		st = l.Status()
+		if since := time.Since(sent[0]); since >= delay-releaseSlack {
+			t.Fatalf("the status was read %v after the first datagram, past the earliest "+
+				"it may be released (%v), so this line was never observed inside its delay "+
+				"(last status %+v)", since, delay-releaseSlack, st)
+		}
+		if st.Packets >= 2 && st.Span > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if st.Releasing {
 		t.Fatal("a line still inside its delay says it is releasing")
 	}
