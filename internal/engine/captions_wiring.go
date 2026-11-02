@@ -106,17 +106,26 @@ func (e *Engine) captionIntentNow() (captionIntent, error) {
 		// The delay polyemesis applies to the output, which the cue must wait
 		// for. A youtube_post destination's is 0: YouTube holds the delay, and its
 		// cues go at once, stamped with when the words were spoken (captionSink).
-		// Less anything dumped from the running line: after a dump the
-		// pictures reach the audience that much sooner, and so must the words.
 		in.targets = append(in.targets, captions.CueTarget{
 			ID:    d.ID,
-			Delay: time.Duration(d.OutputDelaySeconds())*time.Second - e.delayDumped(d.ID),
+			Delay: time.Duration(d.OutputDelaySeconds()) * time.Second,
 		})
 	}
 	in.on = len(in.targets) > 0 || len(in.burns) > 0
 	sort.Strings(in.burns)
 	sort.Slice(in.targets, func(i, j int) bool { return in.targets[i].ID < in.targets[j].ID })
+	// The signature is taken from the CONFIGURED delays: it stands for what
+	// the operator saved, and a change in it re-arms the captioner. A dump is
+	// not a save, so it must not re-arm anything.
 	in.sig = intentSig(in)
+	// What the route uses is the delay the audience has: less anything
+	// dumped from the running line, because after a dump the pictures reach
+	// the audience that much sooner, and so must the words. The route's
+	// SetTargets cancels every cue queued at the old delay, which includes
+	// the cues for the words that were dumped.
+	for i := range in.targets {
+		in.targets[i].Delay -= e.delayDumped(in.targets[i].ID)
+	}
 	return in, nil
 }
 

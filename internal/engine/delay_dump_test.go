@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,35 @@ func TestDumpingARunningDelayedDestinationShortensItsDelayAndAnnouncesIt(t *test
 	}
 	if env.Destination == nil || env.Destination.ID != row.ID {
 		t.Errorf("destination.delay dumped names %+v", env.Destination)
+	}
+
+	// CAPTIONS follow the shorter delay, and a dump is not an operator save:
+	// the cue target's delay is the delay the audience has, while the intent's
+	// signature -- which re-arms the captioner when it changes -- is still
+	// taken from the configured delay. (The row is captioned in the store
+	// only; nothing restarts the running destination.)
+	row.Platform, row.CaptionMode = db.PlatformTwitch, "sei"
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	in, err := e.captionIntentNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target *time.Duration
+	for _, tg := range in.targets {
+		if tg.ID == row.ID {
+			target = &tg.Delay
+		}
+	}
+	if target == nil {
+		t.Fatalf("the captioned destination is not a cue target: %+v", in.targets)
+	}
+	if d := *target - res.After; d > time.Millisecond || d < -time.Millisecond {
+		t.Errorf("cue delay %s; the audience's delay after the dump is %s", *target, res.After)
+	}
+	if !strings.Contains(in.sig, "delay=6s") {
+		t.Errorf("caption intent signature %q is not the configured 6 s: a dump would re-arm the captioner", in.sig)
 	}
 }
 

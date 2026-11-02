@@ -891,3 +891,63 @@ func TestADumpAcrossThePTSWrapKeepsTheClocksContinuous(t *testing.T) {
 		t.Errorf("%d continuity breaks", rep.ccBreaks)
 	}
 }
+
+// dumpable says what Dump will do. After a dump has taken everything down to
+// the margin, the status must not offer another: the console's button and the
+// deck's face both key on it, and a press would only be refused.
+//
+// Mutation: compute Spliceable as "any unreleased cut point" again.
+func TestSpliceableAgreesWithWhatDumpWillDo(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(15 * time.Second)
+	if !r.b.Stats().Spliceable {
+		t.Fatal("a full 12 s buffer of IDR GOPs is not spliceable")
+	}
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 0, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(17 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	spliceable := r.b.Stats().Spliceable
+	_, err = r.b.Dump(r.epoch.Add(17*time.Second), 0, DumpMargin)
+	if spliceable != (err == nil) {
+		t.Fatalf("Stats says spliceable=%t, and Dump answered %v", spliceable, err)
+	}
+	if spliceable {
+		t.Fatal("right after a dump down to the margin, another is offered")
+	}
+}
+
+// A source clock that steps backwards just after a resume must not stop the
+// video. Every picture then reads as "before the splice"; without a bound on
+// the gate it would drop them all until the clock climbed back past the floor
+// -- twenty seconds of nothing here.
+//
+// Mutation: drop the `r.left < 0` case in rewrite.
+func TestAClockThatStepsBackAfterAResumeDoesNotStopTheVideo(t *testing.T) {
+	g := delaytest.New(60)
+	g.StepFrom, g.Step = 16500*time.Millisecond, -20*90000
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(40*time.Second))
+	r.run(15 * time.Second)
+	ticket, err := r.b.Dump(r.epoch.Add(15*time.Second), 2*time.Second, DumpMargin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.run(40 * time.Second)
+	if !ticket.Result().Complete {
+		t.Fatal("did not resume")
+	}
+	rep := readOut(t, r.out, r.outAt, false)
+	// The step is at picture 495; the gate looks at 64 PES starts at most.
+	resumedBy := 495 + 2*64
+	for _, v := range rep.video {
+		if v.index > resumedBy {
+			return
+		}
+	}
+	t.Fatalf("no picture after #%d was released: a backward clock step after the resume stopped the video", resumedBy)
+}

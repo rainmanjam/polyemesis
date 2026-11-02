@@ -50,6 +50,11 @@ type Synth struct {
 	// Origin, when set, is picture 0's DTS and audio frame 0's PTS in place
 	// of PTSBase: set it near 2^33 to put the 33-bit wrap in the run.
 	Origin int64
+	// StepFrom, when set, steps every timestamp of programme from that time
+	// on by Step ticks: a source clock jumping, as an encoder reconnecting
+	// without the selector in front does.
+	StepFrom time.Duration
+	Step     int64
 	// Leading, on an HEVC stream, follows every key picture with a RADL
 	// picture: decoded after it and shown before it. Its slice carries
 	// LeadingIndex plus the key's number.
@@ -207,7 +212,7 @@ func (g *Synth) picture(n int) []byte {
 	for len(es) < size {
 		es = append(es, 0xAB)
 	}
-	pts := (g.origin() + int64(n*FrameTicks)) & tsMask
+	pts := g.at(int64(n * FrameTicks))
 	hdr := []byte{0, 0, 1, 0xE0, 0, 0, 0x80, 0xC0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	putTS(hdr[9:], 3, (pts+FrameTicks)&tsMask) // a B-frame-shaped stream: PTS one frame after DTS
 	putTS(hdr[14:], 1, pts)
@@ -215,7 +220,7 @@ func (g *Synth) picture(n int) []byte {
 }
 
 func (g *Synth) audioFrame(m int) []byte {
-	pts := (g.origin() + int64(m*AudioTicks)) & tsMask
+	pts := g.at(int64(m * AudioTicks))
 	es := make([]byte, 0, 400)
 	var idx [4]byte
 	binary.BigEndian.PutUint32(idx[:], uint32(m))
@@ -249,6 +254,15 @@ func (g *Synth) origin() int64 {
 		return g.Origin
 	}
 	return PTSBase
+}
+
+// at is the timestamp of programme time t ticks in, stepped if asked.
+func (g *Synth) at(ticks int64) int64 {
+	v := g.origin() + ticks
+	if g.StepFrom > 0 && Ticks(ticks) >= g.StepFrom {
+		v += g.Step
+	}
+	return v & tsMask
 }
 
 // leading is the RADL picture after key picture n: DTS half a frame after the

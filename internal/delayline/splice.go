@@ -134,7 +134,18 @@ type pidRewrite struct {
 	// and a leading picture after it (an HEVC RADL, shown before it) must
 	// still be dropped.
 	sticky bool
+	// left is how many more PES starts the gate may look at before it lifts
+	// whatever their PTS. A source whose clock steps backwards just after a
+	// resume (an encoder reconnecting without the selector in front) would
+	// otherwise have every PES read as "before the splice" and dropped until
+	// its clock climbed back past the floor.
+	left int
 }
+
+// gateLimit is the PES starts a gate looks at: two seconds of 30 fps video,
+// about a second and a half of AAC -- far more than any splice overlap or run
+// of leading pictures.
+const gateLimit = 64
 
 // stickyClear is how far past its floor a sticky gate's PTS must be before
 // the gate lifts: ten seconds, far beyond any reorder depth, and far short of
@@ -490,7 +501,10 @@ func (ts *tsState) rewrite(p []byte) (keep bool, pts int64, hasPTS bool) {
 	}
 	if r != nil && r.gated {
 		if pes {
+			r.left--
 			switch {
+			case r.left < 0:
+				r.gated, r.dropping = false, false
 			case hasPTS && !ptsAfter(pts, r.floor):
 				r.dropping = true
 			case r.sticky && hasPTS && !ptsAfter(pts, wrap(r.floor+stickyClear)):
@@ -944,7 +958,7 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 		r := ts.rwFor(pid)
 		r.awaitStart = true
 		if o.ptsSeen {
-			r.gated, r.floor = true, o.pts
+			r.gated, r.floor, r.left = true, o.pts, gateLimit
 		}
 	}
 	// Video: drop only pictures SHOWN before the resume picture; the resume
@@ -952,7 +966,7 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 	if ts.codec != codecNone {
 		r := ts.rwFor(ts.videoPID)
 		r.awaitStart = true
-		r.gated, r.floor, r.sticky = true, wrap(m.pts-1), true
+		r.gated, r.floor, r.sticky, r.left = true, wrap(m.pts-1), true, gateLimit
 	}
 	ts.resync, ts.holding, ts.splice = false, false, nil
 	if t := ts.ticket; t != nil {

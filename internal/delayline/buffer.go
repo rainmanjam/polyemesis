@@ -424,8 +424,12 @@ func (b *Buffer) Stats() Stats {
 	st := b.stats
 	st.Dumped = b.shift
 	st.Dumping = b.ts.resync
-	st.Spliceable = b.ts.codec != codecNone && len(b.marks) > 0 &&
-		len(b.queue) > 0 && b.marks[len(b.marks)-1].at >= b.queue[0].first
+	// Dump's own rule: a cut point at least the margin plus one GOP behind
+	// the head. The newest is the one to ask about -- marks are in order --
+	// and it is never behind the last dump point, so a default dump agrees.
+	st.Spliceable = b.ts.codec != codecNone && !b.ts.resync && len(b.marks) > 0 &&
+		len(b.queue) > 0 &&
+		b.marks[len(b.marks)-1].at >= b.queue[0].first+int64(DumpMargin+b.gopLocked())
 	if len(b.queue) > 0 {
 		newest := b.queue[len(b.queue)-1].last
 		st.Span = time.Duration(newest - b.queue[0].first)

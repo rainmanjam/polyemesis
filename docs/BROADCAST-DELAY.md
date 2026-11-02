@@ -81,8 +81,10 @@ does.
   the delay still never drops below 2 s.
 - **It cuts at keyframes.** The cut is at the start of a keyframe in the buffer,
   and the stream resumes at the next keyframe that arrives. So a dump takes a
-  little more than you asked for, up to one GOP (usually 2 s) more, and takes up
-  to one GOP to finish. The platform receives every picture whole, with no
+  little more than you asked for: up to about two GOPs more (usually up to 4 s),
+  one for rounding the cut back to a keyframe and one for waiting for the next.
+  Asking for 5 s with 2 s GOPs typically dumps 7 to 8 s. A dump takes up to one
+  GOP to finish. The platform receives every picture whole, with no
   corrupt frames, and its timestamps run on without a jump or a gap. The audio
   carries on the same way.
 - **Captions** follow the shorter delay. Captions still queued for this
