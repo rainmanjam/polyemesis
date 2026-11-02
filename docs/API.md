@@ -1370,13 +1370,19 @@ refused.
 the picture: the words come from the stored transcript, never from the
 request, and follow the chosen tracks. A recording with a gap keeps each
 caption on its own picture, the short is the length of the picture it
-contains, and an in-point inside a gap moves to where the recording resumes
-(the plan says so).
+contains -- the re-encoded length and the 60-second warning are measured on
+that, not on the span -- and an in-point inside a gap moves to where the
+recording resumes (the plan says so).
 
 **Caption fonts.** Captions are an ASS subtitle script burned in by libass
 (FFmpeg's `subtitles` filter), which shapes right-to-left and complex scripts,
 wraps, keeps text inside the frame, and stacks captions spoken at the same
-time instead of drawing them over each other. `style.font` names a font FILE
+time on DIFFERENT tracks instead of drawing them over each other. On one
+track a line ends where the next begins, so a transcriber's few-millisecond
+overlaps do not make the next line jump. Each caption's paragraph direction
+comes from its own text, so a Hebrew or Arabic sentence ends -- punctuation
+included -- at the left. A failed short's job error is FFmpeg's own reason,
+without libass's lines, which name caption characters. `style.font` names a font FILE
 already in the fonts directory (`<data>/fonts`); its own family and weight are
 what libass is asked for. libass looks in that directory first and then, for
 any glyph the chosen font lacks, at every font **installed on the machine**
@@ -1437,7 +1443,7 @@ a second accept, or one after a dismiss, is `409`. `…/dismiss` decides it the
 other way and queues nothing.
 
 **Templates.** `GET /clipper/templates` lists saved `{id, name, vertical}`
-templates beside `layouts`, `fonts`, `drawText`, `maxShortSeconds` and
+templates beside `layouts`, `fonts`, `burnCaptions`, `maxShortSeconds` and
 `defaultStyle`. `POST` saves `{name, vertical}`, replacing one of the same name
 (1 to 60 characters, at most 100 templates); the whole template is validated,
 caption style included even when captions are off in it, and a font it names

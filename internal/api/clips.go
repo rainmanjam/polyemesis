@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -884,6 +885,16 @@ func (s *Server) submitClipExport(plan clipper.Plan, tl clipTimeline) (*jobs.Job
 	if err != nil {
 		return nil, err
 	}
+	if plan.Vertical != nil {
+		// Choosing a free name and queueing the job that holds it are one
+		// step: the name the plan was given may have been taken since by a
+		// request planned at the same moment, which saw the same names free.
+		// Only this pick and the Submit run under the lock -- the plan, with
+		// its probe, does not.
+		s.exportNamesMu.Lock()
+		defer s.exportNamesMu.Unlock()
+		plan.OutPath = s.reserveShortName(plan.OutPath)
+	}
 	params, err := json.Marshal(clipper.JobParams{
 		Request: clipper.Request{
 			In:           plan.RequestedIn,
@@ -1143,6 +1154,22 @@ func freeExportName(dir, base, ext string, taken map[string]bool) string {
 		}
 	}
 	return first
+}
+
+// shortName splits a short's file name into the name clipOutPath built and
+// the "-N" freeExportName may have added: the name always ends in the
+// settings tag, "-<layout>-<8 hex digits>".
+var shortName = regexp.MustCompile(`^(.*-vertical-.+-[0-9a-f]{8})(?:-[0-9]+)?\.mp4$`)
+
+// reserveShortName is the free name for the short planned as path, checked
+// again against the disk and every active export -- under exportNamesMu, so
+// the answer still holds when the job is queued.
+func (s *Server) reserveShortName(path string) string {
+	m := shortName.FindStringSubmatch(filepath.Base(path))
+	if m == nil {
+		return path
+	}
+	return freeExportName(filepath.Dir(path), m[1], ".mp4", s.activeExportPaths())
 }
 
 // activeExportPaths is every output path a queued, deferred or running clip

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -539,7 +540,7 @@ func captionedShort(t *testing.T, name string, cues []Cue, style CaptionStyle) (
 func TestARealVerticalExportStacksConcurrentCaptions(t *testing.T) {
 	out, burn := captionedShort(t, "stacked-cues", []Cue{
 		{StartMS: 500, EndMS: 3500, Text: "FIRST SPEAKER"},
-		{StartMS: 700, EndMS: 3500, Text: "SECOND SPEAKER"},
+		{StartMS: 700, EndMS: 3500, Text: "SECOND SPEAKER", Track: 1},
 	}, CaptionStyle{})
 	if !burn {
 		return
@@ -553,6 +554,110 @@ func TestARealVerticalExportStacksConcurrentCaptions(t *testing.T) {
 		if got[i][0] < got[i-1][1] {
 			t.Errorf("bands overlap: %v", got)
 		}
+	}
+}
+
+// ONE SPEAKER'S LINES DO NOT JUMP. Adjacent cues on one track that overlap by
+// a few milliseconds -- as a transcriber's do -- draw the second line exactly
+// where it sits alone, and a chain of them stays on one band.
+//
+// MUTATION: no same-track clamp. Observed: FAIL, the second line sits a line
+// higher (y 1261 against 1355) for its whole span.
+func TestARealVerticalExportKeepsOneSpeakersLinesInPlace(t *testing.T) {
+	alone, burn := captionedShort(t, "line-alone", []Cue{{StartMS: 500, EndMS: 3500, Text: "second line"}}, CaptionStyle{})
+	if !burn {
+		return
+	}
+	bin, _ := integrationTools(t)
+	want := bands(litRows(frameRGB(t, bin, alone, 2500*time.Millisecond)), 6)
+	if len(want) == 0 {
+		t.Fatal("the lone caption drew nothing")
+	}
+	for _, ov := range []int64{20, 200} {
+		out, _ := captionedShort(t, fmt.Sprintf("line-overlap%d", ov), []Cue{
+			{StartMS: 200, EndMS: 1500 + ov, Text: "first line"},
+			{StartMS: 1500, EndMS: 3800, Text: "second line"},
+		}, CaptionStyle{})
+		got := bands(litRows(frameRGB(t, bin, out, 2500*time.Millisecond)), 6)
+		if len(got) == 0 || got[0][0] != want[0][0] {
+			t.Errorf("overlap %d ms: the second line is at %v, alone it is at %v", ov, got, want)
+		}
+	}
+	var chain []Cue
+	for i := 0; i < 5; i++ {
+		chain = append(chain, Cue{StartMS: int64(200 + 700*i), EndMS: int64(200 + 700*(i+1) + 20), Text: fmt.Sprintf("line %d", i)})
+	}
+	out, _ := captionedShort(t, "line-chain", chain, CaptionStyle{})
+	var tops []int
+	for i := 0; i < 5; i++ {
+		b := bands(litRows(frameRGB(t, bin, out, time.Duration(200+700*i+400)*time.Millisecond)), 6)
+		if len(b) != 1 {
+			t.Errorf("chain cue %d drew bands %v, want one", i, b)
+			continue
+		}
+		tops = append(tops, b[0][0])
+	}
+	for i := 1; i < len(tops); i++ {
+		if d := tops[i] - tops[0]; d < -6 || d > 6 {
+			t.Errorf("a chain of one speaker's lines bounces: tops %v", tops)
+			break
+		}
+	}
+}
+
+// edgeHeight is how many rows are lit in the n columns at one end of the lit
+// span of rows [y0, y1): tall for a letter's stem, short for a full stop.
+func edgeHeight(f []byte, y0, y1, n int, left bool) int {
+	x0, x1 := VerticalWidth, -1
+	for y := y0; y < y1; y++ {
+		for x := 0; x < VerticalWidth; x++ {
+			if r, g, b := pixel(f, x, y); r > 215 && g > 215 && b > 215 {
+				x0, x1 = min(x0, x), max(x1, x)
+			}
+		}
+	}
+	if x1 < 0 {
+		return 0
+	}
+	from, to := x0, x0+n
+	if !left {
+		from, to = x1-n+1, x1+1
+	}
+	h := 0
+	for y := y0; y < y1; y++ {
+		for x := from; x < to; x++ {
+			if r, g, b := pixel(f, x, y); r > 215 && g > 215 && b > 215 {
+				h++
+				break
+			}
+		}
+	}
+	return h
+}
+
+// A RIGHT-TO-LEFT CAPTION READS RIGHT TO LEFT. The paragraph direction comes
+// from the text, so a Hebrew sentence's full stop is drawn at its LEFT end,
+// where a reader of Hebrew finishes -- not at the right, as a left-to-right
+// paragraph would put it.
+//
+// MUTATION: the style forces Encoding 1 (left-to-right base). Observed: FAIL,
+// the full stop at the right end.
+func TestARealVerticalExportPutsRightToLeftPunctuationAtTheLeft(t *testing.T) {
+	out, burn := captionedShort(t, "rtl-stop", []Cue{{StartMS: 500, EndMS: 3500, Text: "שלום עולם."}}, CaptionStyle{SizePct: 8})
+	if !burn {
+		return
+	}
+	bin, _ := integrationTools(t)
+	f := frameRGB(t, bin, out, 2*time.Second)
+	b := bands(litRows(f), 6)
+	if len(b) != 1 {
+		t.Fatalf("bands %v, want one line", b)
+	}
+	left, right := edgeHeight(f, b[0][0], b[0][1]+1, 8, true), edgeHeight(f, b[0][0], b[0][1]+1, 8, false)
+	// A full stop is the shortest thing at either end; ש's right edge and ם's
+	// left edge are both taller (measured: stop 20 rows, ש 36, ם 71).
+	if left >= right {
+		t.Errorf("the left end is %d rows tall and the right %d: the full stop is not at the left", left, right)
 	}
 }
 
@@ -608,21 +713,106 @@ func TestARealVerticalExportDrawsHostileTextAsText(t *testing.T) {
 	}
 }
 
-// OTHER SCRIPTS. Rendered for the evidence directory -- whether a glyph is a
-// letter or a box depends on the fonts installed, which is the point of the
-// fontconfig fallback -- and asserted only to draw something.
+// tofuOf is text with every character but a space replaced by one no font
+// has, so libass draws each as the missing-glyph box: what text whose script
+// has no font looks like.
+func tofuOf(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' {
+			return r
+		}
+		return '\U0010FFFD'
+	}, text)
+}
+
+// litDiff is how many pixels are lit in one frame and not the other, over how
+// many are lit in a.
+func litDiff(a, b []byte) (diff, lit int) {
+	for y := 0; y < VerticalHeight; y++ {
+		for x := 0; x < VerticalWidth; x++ {
+			ra, ga, ba := pixel(a, x, y)
+			rb, gb, bb := pixel(b, x, y)
+			la := ra > 215 && ga > 215 && ba > 215
+			lb := rb > 215 && gb > 215 && bb > 215
+			if la {
+				lit++
+			}
+			if la != lb {
+				diff++
+			}
+		}
+	}
+	return diff, lit
+}
+
+// OTHER SCRIPTS ARE LETTERS, NOT BOXES. Each script is rendered beside the same
+// number of characters no font has; a script whose font fallback failed draws
+// exactly those boxes, so its frame matches the boxes' and the test fails.
+// Latin comes from the bundled font, Arabic and Hebrew from DejaVu through
+// fontconfig -- which the shipping image installs and CI's Linux job installs,
+// so there they are asserted. CJK and emoji are opt-in fonts: they are
+// rendered for the evidence directory and logged.
+//
+// MUTATION: no fallback font (the image without DejaVu). Observed: FAIL,
+// arabic and hebrew match their boxes.
 func TestARealVerticalExportOfOtherScripts(t *testing.T) {
-	for name, text := range map[string]string{
-		"latin": "Café déjà vu", "cjk": "你好，世界 こんにちは 안녕하세요", "arabic": "مرحبا بالعالم",
-		"hebrew": "שלום עולם", "emoji": "GG 🎮🔥😀",
+	for _, tc := range []struct {
+		name, text string
+		asserted   bool
+	}{
+		{"latin", "Café déjà vu", true}, {"arabic", "مرحبا بالعالم", true}, {"hebrew", "שלום עולם", true},
+		{"cjk", "你好，世界 こんにちは 안녕하세요", false}, {"emoji", "GG 🎮🔥😀", false},
 	} {
-		out, burn := captionedShort(t, name, []Cue{{StartMS: 500, EndMS: 3500, Text: text}}, CaptionStyle{})
+		out, burn := captionedShort(t, tc.name, []Cue{{StartMS: 500, EndMS: 3500, Text: tc.text}}, CaptionStyle{})
 		if !burn {
 			continue
 		}
 		bin, _ := integrationTools(t)
-		if n := whiteIn(frameRGB(t, bin, out, 2*time.Second), 1200, 1600); n < 200 {
-			t.Errorf("%s drew %d px", name, n)
+		boxes, _ := captionedShort(t, tc.name+"-boxes", []Cue{{StartMS: 500, EndMS: 3500, Text: tofuOf(tc.text)}}, CaptionStyle{})
+		f := frameRGB(t, bin, out, 2*time.Second)
+		diff, lit := litDiff(f, frameRGB(t, bin, boxes, 2*time.Second))
+		t.Logf("%s: %d lit px, %d differ from the same count of missing-glyph boxes", tc.name, lit, diff)
+		if lit < 200 {
+			t.Errorf("%s drew %d px", tc.name, lit)
+			continue
+		}
+		if tc.asserted && runtime.GOOS == "linux" && diff*4 < lit {
+			t.Errorf("%s drew boxes, not letters: only %d of %d lit px differ from missing-glyph boxes "+
+				"(is fontconfig with DejaVu installed? the shipping image and CI install it)", tc.name, diff, lit)
+		}
+	}
+}
+
+// A REAL CAPTIONED ENCODE THAT FAILS says FFmpeg's reason and nothing libass
+// said: libass, given the fonts directory, complains about every file in it
+// that is not a font, and about every caption character no font has.
+func TestARealFailedCaptionedEncodeSaysWhyWithoutLibassChatter(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	if !hasLibass(t, bin) {
+		return
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	verticalFixture(t, bin, src)
+	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
+	if err := ffmpeg.EnsureFonts(fonts); err != nil {
+		t.Fatal(err)
+	}
+	font, _ := ffmpeg.FontPath(fonts, DefaultCaptionFont)
+	tl, _ := NewTimeline([]Segment{{Path: src, Duration: 12 * time.Second}})
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{Cues: []Cue{
+		{StartMS: 100, EndMS: 3900, Text: "你好世界 GG"}}, FontFile: font, Burn: true}}
+	_, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: 0, Out: 4 * time.Second,
+		OutPath: filepath.Join(dir, "f.mp4"), Mode: ModePrecise, VideoEncoder: "h264_nonexistent264", Vertical: &v}, nil)
+	if err == nil {
+		t.Fatal("an encode with no encoder succeeded")
+	}
+	if !strings.Contains(err.Error(), "h264_nonexistent264") {
+		t.Errorf("the error lost FFmpeg's reason: %q", err)
+	}
+	for _, leak := range []string{"Parsed_subtitles", "glyph", "LICENSE", "fontselect"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("the error carries %q: %q", leak, err)
 		}
 	}
 }

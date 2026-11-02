@@ -394,3 +394,32 @@ func entryNames(entries []os.DirEntry) []string {
 	}
 	return out
 }
+
+// A NAME TAKEN ON DISK IS NOT RETRIED. A short whose file name is already
+// taken fails as a PERMANENT error: another attempt would encode the whole
+// short again only to find the same file there.
+//
+// MUTATION: ErrOutputExists returned as is. Observed: FAIL, retryable.
+func TestAShortWhoseNameIsTakenIsNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "short.mp4")
+	if err := os.WriteFile(out, []byte("an earlier short"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := newTestCutter(t, &fakeFFmpeg{}, gop(60, 2*time.Second))
+	job := jobFor(t, JobParams{
+		Segments: []Segment{{Path: "/rec/seg0.mkv", Duration: time.Hour}},
+		Request: verticalReq(5*time.Second, 15*time.Second, Vertical{Layout: LayoutCenter, Focus: 0.5},
+			func(r *Request) { r.OutPath = out }),
+	})
+	err := NewWorker(c, nil).Run(context.Background(), job, &fakeReporter{})
+	if !errors.Is(err, ErrOutputExists) {
+		t.Fatalf("Run = %v, want ErrOutputExists", err)
+	}
+	if !jobs.IsPermanent(err) {
+		t.Errorf("a taken name is retryable: %v", err)
+	}
+	if b, _ := os.ReadFile(out); string(b) != "an earlier short" {
+		t.Errorf("the earlier short was replaced")
+	}
+}

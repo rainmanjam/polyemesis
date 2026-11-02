@@ -384,8 +384,9 @@ func TestACaptionedShortsJobCarriesNoTranscriptText(t *testing.T) {
 	// Nor the server's fonts directory, nor what this FFmpeg can do: the job
 	// names the font, and the worker resolves it when it runs.
 	// MUTATION: the job keeps FontFile. Observed: FAIL, the fonts path in params.
+	// MUTATION: the job keeps Burn. Observed: FAIL, "burn":true in params.
 	if strings.Contains(string(j.Params), "fontFile") || strings.Contains(string(j.Params), srv.cfg.FontsDir()) ||
-		strings.Contains(string(j.Params), "drawText") {
+		strings.Contains(string(j.Params), `"burn"`) {
 		t.Errorf("the job's params carry the server's font path or capability: %s", j.Params)
 	}
 	var params clipper.JobParams

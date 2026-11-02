@@ -173,6 +173,7 @@ func PlanCut(tl Timeline, kf Keyframes, req Request) (Plan, error) {
 	}
 	if p.Vertical != nil {
 		p.startOnPicture()
+		p.measureVertical()
 		p.warnCaptions()
 	}
 	if err := p.resolveAudio(); err != nil {

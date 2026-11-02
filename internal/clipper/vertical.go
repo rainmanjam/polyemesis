@@ -158,6 +158,10 @@ type Cue struct {
 	StartMS int64  `json:"startMs"`
 	EndMS   int64  `json:"endMs"`
 	Text    string `json:"text"`
+	// Track is the audio track the cue was spoken on. Cues on one track are
+	// one speaker's lines and follow each other; cues on different tracks
+	// may truly overlap, and are stacked.
+	Track int `json:"track,omitempty"`
 	// Words, when present, time the caption word by word: chunks of
 	// MaxWords are shown from their first word's start to their last word's
 	// end. Absent, the cue's own span is used, which is what every transcript
@@ -460,16 +464,46 @@ func screens(c Captions, style CaptionStyle, clock func(time.Duration) time.Dura
 		}
 		out = append(out, pages(from, to, lines, style.MaxLines)...)
 	}
-	for _, cue := range c.Cues {
+	ends := followingStarts(c.Cues)
+	for i, cue := range c.Cues {
+		end := ms(min(cue.EndMS, ends[i]))
 		if len(cue.Words) > 0 {
 			for _, ch := range wordChunks(cue.Words, style.MaxWords) {
-				add(ch.from, ch.to, styleText(ch.text, style))
+				add(ch.from, min(ch.to, end), styleText(ch.text, style))
 			}
 			continue
 		}
-		add(ms(cue.StartMS), ms(cue.EndMS), styleText(cue.Text, style))
+		add(ms(cue.StartMS), end, styleText(cue.Text, style))
 	}
 	return out
+}
+
+// followingStarts is, for each cue, the start of the next cue on the SAME
+// track -- where it has to give way -- or its own end when none follows. A
+// transcriber's adjacent lines often overlap by a few milliseconds; drawn as
+// they come, libass would stack the next line above the last for its whole
+// life, and a run of them would bounce. Cues on different tracks are
+// different speakers and keep their overlap, so they stack.
+func followingStarts(cues []Cue) []int64 {
+	order := make([]int, len(cues))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return cues[order[a]].StartMS < cues[order[b]].StartMS })
+	ends := make([]int64, len(cues))
+	next := map[int]int64{} // track -> start of the latest-starting cue seen so far
+	for k := len(order) - 1; k >= 0; k-- {
+		i := order[k]
+		cue := cues[i]
+		ends[i] = cue.EndMS
+		if n, ok := next[cue.Track]; ok && n > cue.StartMS && n < ends[i] {
+			ends[i] = n
+		}
+		if n, ok := next[cue.Track]; !ok || cue.StartMS < n {
+			next[cue.Track] = cue.StartMS
+		}
+	}
+	return ends
 }
 
 func ms(v int64) time.Duration { return time.Duration(v) * time.Millisecond }
@@ -661,7 +695,9 @@ var assEscaper = strings.NewReplacer(`\`, `\`+wordJoiner, `{`, `\{`, `}`, `\}`)
 // margin in the 1080x1920 script. Above the middle the block hangs from the top
 // at PositionPct, so concurrent captions stack DOWNWARDS; below it the block
 // stands on the bottom, so they stack upwards. Either way a stack grows away
-// from the nearer edge, and libass keeps it in the frame.
+// from the nearer edge. libass keeps an ordinary stack in the frame; under
+// heavy overload -- more concurrent captions than the frame has lines -- it
+// can still push lines off the far edge, where they are lost.
 func captionPlacement(style CaptionStyle) (alignment, marginV int) {
 	half := fontPx(style) / 2
 	centre := int(math.Round(float64(VerticalHeight) * style.PositionPct / 100))
@@ -709,7 +745,10 @@ func assScript(scr []captionScreen, style CaptionStyle, family string, bold bool
 	b.WriteString("[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, " +
 		"Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, " +
 		"MarginL, MarginR, MarginV, Encoding\n")
-	fmt.Fprintf(&b, "Style: Caption,%s,%d,%s,&H000000FF,%s,%s,%d,0,0,0,100,100,0,0,%d,%d,0,%d,%d,%d,%d,1\n\n",
+	// Encoding -1: libass takes each event's base direction from its own
+	// text, so a Hebrew or Arabic sentence ends at the left, punctuation
+	// included. 1 (the usual default) would force a left-to-right paragraph.
+	fmt.Fprintf(&b, "Style: Caption,%s,%d,%s,&H000000FF,%s,%s,%d,0,0,0,100,100,0,0,%d,%d,0,%d,%d,%d,%d,-1\n\n",
 		strings.NewReplacer(",", " ").Replace(family), size, assColour(style.Color, 1), outlineColour, backColour,
 		boldFlag, borderStyle, outline, align, marginH, marginH, marginV)
 	b.WriteString("[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
@@ -993,11 +1032,19 @@ func (p *Plan) planVertical(v *Vertical) {
 	if p.HeadThreads == 0 {
 		p.HeadThreads = VerticalThreads()
 	}
-	if p.Duration() > ShortMaxDuration {
+}
+
+// measureVertical settles a short's length once its sources are known and its
+// in-point is on picture: what PLAYS, the files laid back to back, not Out-In.
+// A gap takes no time in the short, so it neither counts as re-encoded nor
+// toward the 60 s guard.
+func (p *Plan) measureVertical() {
+	p.HeadDuration = p.played(p.Out) - p.played(p.In)
+	if p.HeadDuration > ShortMaxDuration {
 		p.warn("this short is %s long; YouTube Shorts, Reels and TikTok's short format expect "+
-			"%s or less, and a longer upload may be published as a regular video", round(p.Duration()), ShortMaxDuration)
+			"%s or less, and a longer upload may be published as a regular video", round(p.HeadDuration), ShortMaxDuration)
 	}
-	if c := v.Captions; c != nil && len(c.Cues) > 0 && !c.Burn {
+	if c := p.Vertical.Captions; c != nil && len(c.Cues) > 0 && !c.Burn {
 		p.warn("this FFmpeg cannot burn captions (it has no subtitles filter -- it was built without " +
 			"libass), so the captions were not burned in; the short is otherwise complete")
 	}
@@ -1051,7 +1098,7 @@ func CaptionCues(segs []Segment, src TranscriptSource, in, out time.Duration, tr
 			if len(only) > 0 && !only[l.Track] {
 				continue
 			}
-			cues = append(cues, Cue{StartMS: start, EndMS: end, Text: l.Text})
+			cues = append(cues, Cue{StartMS: start, EndMS: end, Text: l.Text, Track: l.Track})
 		}
 	}
 	sort.SliceStable(cues, func(i, j int) bool { return cues[i].StartMS < cues[j].StartMS })

@@ -109,6 +109,11 @@ func NewWorker(c *Cutter, resolve Resolver, opts ...WorkerOption) jobs.Worker {
 		}
 
 		res, err := c.Execute(ctx, plan, jobProgress(rep))
+		if errors.Is(err, ErrOutputExists) {
+			// Another attempt would encode the whole short again only to
+			// find the same file there.
+			return jobs.Permanent(err)
+		}
 		if err != nil {
 			return err
 		}

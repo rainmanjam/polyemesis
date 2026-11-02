@@ -31,6 +31,16 @@ func TestClipperHelperProcess(t *testing.T) {
 	case "fail":
 		fmt.Fprintln(os.Stderr, "Invalid data found when processing input")
 		os.Exit(1)
+	case "libass":
+		// A captioned encode failing late: a screenful of libass chatter
+		// naming caption code points, then FFmpeg's reason.
+		for i := 0; i < 40; i++ {
+			fmt.Fprintf(os.Stderr, "[Parsed_subtitles_4 @ 0x1] fontselect: failed to find any fallback with glyph 0x%X for font: (Inter, 700, 0)\n", 0x4F60+i)
+		}
+		fmt.Fprintln(os.Stderr, "[Parsed_subtitles_4 @ 0x1] Error opening memory font 'LICENSE-Inter.txt'")
+		fmt.Fprintln(os.Stderr, "[vost#0:0 @ 0x2] Unknown encoder 'h264_nonexistent264'")
+		fmt.Fprintln(os.Stderr, "Error opening output files: Encoder not found")
+		os.Exit(8)
 	}
 }
 
@@ -95,5 +105,31 @@ func TestAFailedClipperChildCarriesItsOutput(t *testing.T) {
 	}
 	if _, err := runCommand(context.Background(), filepath.Join(t.TempDir(), "no-such-ffmpeg"), nil); err == nil {
 		t.Error("a binary that does not exist reported success")
+	}
+}
+
+// A FAILED ENCODE SAYS WHY, NOT WHAT WAS CAPTIONED. The child's error keeps
+// FFmpeg's real failure -- the last thing it said, however much came before --
+// and none of the caption renderer's lines, which name caption code points.
+//
+// MUTATION: the old head-cut output. Observed: FAIL, glyph lines and no
+// "Encoder not found".
+func TestAFailedEncodesErrorIsItsReasonWithoutCaptionChatter(t *testing.T) {
+	_, err := RunLowPriority(context.Background(), os.Args[0], []string{"-test.run=^TestClipperHelperProcess$", "clipper-helper", "libass"})
+	if err == nil {
+		t.Fatal("a failed encode reported success")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Encoder not found") {
+		t.Errorf("the error lost FFmpeg's reason: %q", msg)
+	}
+	for _, leak := range []string{"glyph", "0x4F60", "Parsed_subtitles", "LICENSE-Inter"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("the error carries %q: %q", leak, msg)
+		}
+	}
+	long := strings.Repeat("Last message repeated\n", 100) + "Conversion failed!"
+	if got := ffmpegFailure(long); len(got) > failureLimit+3 || !strings.HasSuffix(got, "Conversion failed!") {
+		t.Errorf("a long failure is not its tail: %d bytes, %q", len(got), got[max(0, len(got)-40):])
 	}
 }

@@ -414,6 +414,10 @@ type Server struct {
 	// ytVideos is each YouTube account's live video, remembered by the
 	// sampler so a tick is one videos.list. See analytics.go.
 	ytQuotaShared *chat.YouTubeQuota
+	// exportNamesMu makes picking a short's free file name and queueing its
+	// job one step (submitClipExport), so concurrent exports of one span get
+	// a file each.
+	exportNamesMu sync.Mutex
 	ytVideosMu    sync.Mutex
 	ytVideos      map[int64]ytLiveVideo
 	// reconciled, when set, is told each time reconcile runs. A test seam: the engine's own status

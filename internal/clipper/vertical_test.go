@@ -209,6 +209,43 @@ func TestTheSixtySecondGuardWarnsWithoutBlocking(t *testing.T) {
 	}
 }
 
+// A SHORT IS AS LONG AS ITS PICTURE. Across a gap -- the recorder stopped and
+// resumed -- the short is the picture on either side, not the wall-clock span:
+// the re-encoded length and the 60 s guard are measured on what plays.
+//
+// MUTATION: HeadDuration and the guard taken from Out-In. Observed: FAIL,
+// 80s re-encoded and a false 60 s warning for 50 s of picture.
+func TestAShortsLengthIsItsPictureNotItsSpan(t *testing.T) {
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5}
+	for name, tc := range map[string]struct {
+		segs     []Segment
+		in, out  time.Duration
+		playable time.Duration
+	}{
+		"in-point in a gap": {[]Segment{{Path: "/a.mkv", Start: 30 * time.Second, Duration: 70 * time.Second}},
+			0, 80 * time.Second, 50 * time.Second},
+		"gap inside": {[]Segment{{Path: "/a.mkv", Duration: 30 * time.Second},
+			{Path: "/b.mkv", Start: 50 * time.Second, Duration: 60 * time.Second}}, 0, 75 * time.Second, 55 * time.Second},
+	} {
+		tl, err := NewTimeline(tc.segs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := PlanCut(tl, Keyframes{}, verticalReq(tc.in, tc.out, v))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if p.HeadDuration != tc.playable {
+			t.Errorf("%s: re-encodes %s, want the %s of picture", name, p.HeadDuration, tc.playable)
+		}
+		for _, w := range p.Warnings {
+			if strings.Contains(w, "Shorts") {
+				t.Errorf("%s: %s of picture was warned as over 60 s: %q", name, tc.playable, w)
+			}
+		}
+	}
+}
+
 func captioned(cues ...Cue) *Captions {
 	return &Captions{Cues: cues, FontFile: filepath.Join(testClipDir, "Inter-Bold.ttf"), Burn: true}
 }
@@ -611,11 +648,38 @@ func TestThePlanWarnsWhenTheBundledFontCannotDrawTheCaptions(t *testing.T) {
 func TestConcurrentCuesAreConcurrentEvents(t *testing.T) {
 	c := onlyCommand(t, mustPlan(t, oneHourTimeline(t), gop(1000, 2*time.Second),
 		verticalReq(0, 10*time.Second, Vertical{Layout: LayoutBlur, Captions: captioned(
-			Cue{StartMS: 1000, EndMS: 3000, Text: "one"}, Cue{StartMS: 1500, EndMS: 3500, Text: "two"})})))
+			Cue{StartMS: 1000, EndMS: 3000, Text: "one"}, Cue{StartMS: 1500, EndMS: 3500, Text: "two", Track: 1})})))
 	ass := assOf(t, c)
 	if !strings.Contains(ass, "Dialogue: 0,0:00:01.00,0:00:03.00,Caption,,0,0,0,,one") ||
 		!strings.Contains(ass, "Dialogue: 0,0:00:01.50,0:00:03.50,Caption,,0,0,0,,two") {
 		t.Errorf("concurrent cues:\n%s", ass)
+	}
+}
+
+// ONE SPEAKER'S LINES FOLLOW EACH OTHER. A transcriber's adjacent cues on one
+// track often overlap by a few milliseconds; drawn as they come, the next line
+// would stack above the last for its whole life and a run of them would
+// bounce. On one track a cue ends where the next begins; across tracks
+// concurrency is real and is kept (above).
+//
+// MUTATION: no clamp. Observed: FAIL, "first" ends at 1.52 and 1.70.
+func TestOneTracksOverlappingCuesFollowEachOther(t *testing.T) {
+	for _, ov := range []int64{20, 200} {
+		c := onlyCommand(t, mustPlan(t, oneHourTimeline(t), gop(1000, 2*time.Second),
+			verticalReq(0, 10*time.Second, Vertical{Layout: LayoutBlur, Captions: captioned(
+				Cue{StartMS: 1500, EndMS: 3800, Text: "second", Track: 2},
+				Cue{StartMS: 200, EndMS: 1500 + ov, Text: "first", Track: 2},
+				Cue{StartMS: 1000, EndMS: 4000, Text: "other mic", Track: 0})})))
+		ass := assOf(t, c)
+		for _, want := range []string{
+			"Dialogue: 0,0:00:00.20,0:00:01.50,Caption,,0,0,0,,first",
+			"Dialogue: 0,0:00:01.50,0:00:03.80,Caption,,0,0,0,,second",
+			"Dialogue: 0,0:00:01.00,0:00:04.00,Caption,,0,0,0,,other mic",
+		} {
+			if !strings.Contains(ass, want) {
+				t.Errorf("overlap %d ms: no %q in\n%s", ov, want, ass)
+			}
+		}
 	}
 }
 
@@ -689,4 +753,22 @@ func TestAnInPointInsideAGapStartsWhereTheRecordingResumes(t *testing.T) {
 	if !moved || p.In != 20*time.Second {
 		t.Errorf("In=%s warnings=%v, want the start moved to 20s and said so", p.In, p.Warnings)
 	}
+}
+
+// The caption style lets libass take each event's paragraph direction from its
+// text (Encoding -1); rendered and measured in
+// TestARealVerticalExportPutsRightToLeftPunctuationAtTheLeft.
+//
+// MUTATION: Encoding 1. Observed: FAIL.
+func TestTheCaptionStyleTakesItsDirectionFromTheText(t *testing.T) {
+	ass := assScript(nil, DefaultCaptionStyle(), "Inter", true)
+	for _, line := range strings.Split(ass, "\n") {
+		if strings.HasPrefix(line, "Style: Caption,") {
+			if !strings.HasSuffix(line, ",-1") {
+				t.Errorf("style %q does not end in Encoding -1", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("no caption style in\n%s", ass)
 }

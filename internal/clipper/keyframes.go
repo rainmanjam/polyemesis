@@ -386,7 +386,7 @@ func runChild(ctx context.Context, name string, args []string, lower bool) ([]by
 	err := cmd.Wait()
 	childcensus.Discharge(cmd.Process.Pid)
 	if err != nil {
-		return out.Bytes(), fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(out.String()), 400))
+		return out.Bytes(), fmt.Errorf("%w: %s", err, ffmpegFailure(out.String()))
 	}
 	return out.Bytes(), nil
 }

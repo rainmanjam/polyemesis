@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Running a cut is deliberately the smallest part of this package.
@@ -213,10 +215,55 @@ func (c *Cutter) runStep(ctx context.Context, cmd Command) error {
 		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, context.Canceled) {
 			return ctxErr
 		}
-		return fmt.Errorf("clipper: %s step: %w", cmd.Name, err)
+		return fmt.Errorf("clipper: %s step: %w", cmd.Name, scrubbed{err})
 	}
 	return nil
 }
+
+// failureLimit bounds how much of FFmpeg's output a job's error carries.
+const failureLimit = 400
+
+// ffmpegFailure is the part of FFmpeg's output that says why it failed, fit to
+// be a job's error -- which any token allowed to list jobs can read, including
+// one that may never read a transcript.
+//
+// The subtitles filter's lines are dropped whole: libass logs one line per
+// caption character no font has, naming its code point, plus a line for every
+// non-font file in the fonts directory, and it may echo an event. None of it
+// is why an encode failed, and the code points ARE the captions. What is left
+// is kept from the END, because FFmpeg says why last.
+func ffmpegFailure(out string) string {
+	var keep []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if captionChatter(line) {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	msg := strings.TrimSpace(strings.Join(keep, "\n"))
+	if len(msg) > failureLimit {
+		msg = "..." + msg[len(msg)-failureLimit:]
+		if !utf8.ValidString(msg) {
+			msg = strings.ToValidUTF8(msg, "")
+		}
+	}
+	return msg
+}
+
+// captionChatter is a line of FFmpeg output that comes from the caption
+// renderer, or names a glyph -- either can carry what was said.
+func captionChatter(line string) bool {
+	return strings.Contains(line, "[Parsed_subtitles") || strings.Contains(line, "fontselect") ||
+		strings.Contains(line, "glyph 0x") || strings.Contains(line, "libass")
+}
+
+// scrubbed is a step's error with the caption renderer's chatter taken out of
+// its text, whichever runner produced it. It still unwraps to the original, so
+// a caller can match on what went wrong.
+type scrubbed struct{ err error }
+
+func (s scrubbed) Error() string { return ffmpegFailure(s.err.Error()) }
+func (s scrubbed) Unwrap() error { return s.err }
 
 func report(fn ProgressFunc, fraction float64, msg string) {
 	if fn == nil {
