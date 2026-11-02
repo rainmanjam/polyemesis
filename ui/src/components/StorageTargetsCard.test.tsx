@@ -18,8 +18,6 @@ const target = (over: Partial<StorageTarget> = {}): StorageTarget => ({
   pathStyle: false,
   accessKeyId: "fake-access-key",
   hasSecret: true,
-  mode: "move",
-  keepLocalHours: 12,
   offloadStems: false,
   offloadTranscripts: false,
   offloadClips: false,
@@ -30,7 +28,6 @@ const target = (over: Partial<StorageTarget> = {}): StorageTarget => ({
   createdAt: "",
   updatedAt: "",
   counts: { verified: 3, failed: 1, stuck: 2 },
-  evicted: 1,
   ...over,
 });
 
@@ -46,7 +43,6 @@ describe("StorageTargetsCard", () => {
     render(<StorageTargetsCard />);
     const row = await screen.findByTestId("storage-target");
     expect(row.textContent).toContain("archive");
-    expect(row.textContent).toContain("12");
     expect(row.textContent).toContain("3");
     fireEvent.click(within(row).getAllByRole("button")[0]);
     await waitFor(() => expect(retry).toHaveBeenCalledWith(1));
@@ -85,7 +81,7 @@ describe("StorageTargetsCard", () => {
     expect(test.mock.calls[0][0]).not.toHaveProperty("secretAccessKey");
 
     fireEvent.click(save);
-    await waitFor(() => expect(update).toHaveBeenCalledWith(1, expect.objectContaining({ mode: "move", maxAttempts: 8 })));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(1, expect.objectContaining({ bucket: "media", maxAttempts: 8 })));
   });
 
   it("says so when the read failed rather than showing an empty list", async () => {

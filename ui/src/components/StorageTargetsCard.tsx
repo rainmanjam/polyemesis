@@ -23,7 +23,6 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { useT, type TranslationKey } from "@/lib/i18n";
 import type {
-  OffloadMode,
   StorageProvider,
   StorageTarget,
   StorageTargetBody,
@@ -76,8 +75,6 @@ interface Draft {
   pathStyle: boolean;
   accessKeyId: string;
   secret: string;
-  mode: OffloadMode;
-  keepLocalHours: number;
   offloadStems: boolean;
   offloadTranscripts: boolean;
   offloadClips: boolean;
@@ -97,8 +94,6 @@ const blankDraft = (): Draft => ({
   pathStyle: false,
   accessKeyId: "",
   secret: "",
-  mode: "mirror",
-  keepLocalHours: 24,
   offloadStems: false,
   offloadTranscripts: false,
   offloadClips: false,
@@ -120,6 +115,7 @@ export function secretRequired(saved: StorageTarget | undefined, d: Draft): { re
   const rebind =
     normalEndpoint(saved.endpoint) !== normalEndpoint(d.endpoint) ||
     saved.bucket !== d.bucket.trim() ||
+    saved.pathStyle !== d.pathStyle ||
     saved.allowPrivateTarget !== d.allowPrivateTarget;
   return { required: rebind || !saved.hasSecret || !!saved.secretUnreadable, rebind };
 }
@@ -134,8 +130,6 @@ function bodyOf(d: Draft): StorageTargetBody {
     prefixTemplate: d.prefixTemplate.trim(),
     pathStyle: d.pathStyle,
     accessKeyId: d.accessKeyId.trim(),
-    mode: d.mode,
-    keepLocalHours: d.keepLocalHours,
     offloadStems: d.offloadStems,
     offloadTranscripts: d.offloadTranscripts,
     offloadClips: d.offloadClips,
@@ -255,15 +249,7 @@ export function StorageTargetsCard() {
           <div key={x.id} className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2" data-testid="storage-target">
             <span className="font-mono text-tiny">{x.name}</span>
             <Badge variant="outline">{PROVIDER_LABEL[x.provider] ?? x.provider}</Badge>
-            {x.enabled ? (
-              <Badge variant={x.mode === "move" ? "armed" : "default"}>
-                {x.mode === "move"
-                  ? t("storage.badgeMove", { hours: x.keepLocalHours })
-                  : t("storage.badgeMirror")}
-              </Badge>
-            ) : (
-              <Badge variant="outline">{t("storage.badgeOff")}</Badge>
-            )}
+            {!x.enabled && <Badge variant="outline">{t("storage.badgeOff")}</Badge>}
             {x.secretUnreadable && <Badge variant="down">{t("storage.secretUnreadable")}</Badge>}
             {(x.counts.verified ?? 0) > 0 && (
               <Badge variant="live">{t("storage.countVerified", { n: x.counts.verified ?? 0 })}</Badge>
@@ -279,7 +265,6 @@ export function StorageTargetsCard() {
                 {t("storage.countPending", { n: (x.counts.pending ?? 0) + (x.counts.uploading ?? 0) })}
               </Badge>
             )}
-            {x.evicted > 0 && <Badge variant="armed">{t("storage.countEvicted", { n: x.evicted })}</Badge>}
             <span className="ml-auto flex items-center gap-0.5">
               {(x.counts.failed ?? 0) + (x.counts.stuck ?? 0) > 0 && (
                 <Button variant="ghost" size="sm" onClick={() => void retry(x)}>
@@ -393,34 +378,6 @@ export function StorageTargetsCard() {
                   {t("storage.secretRebind")}
                 </p>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="grid gap-1">
-                  <Label htmlFor="st-mode">{t("storage.mode")}</Label>
-                  <Select value={draft.mode} onValueChange={(v) => set("mode", v as OffloadMode)}>
-                    <SelectTrigger id="st-mode">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mirror">{t("storage.modeMirror")}</SelectItem>
-                      <SelectItem value="move">{t("storage.modeMove")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {draft.mode === "move" && (
-                  <div className="grid gap-1">
-                    <Label htmlFor="st-keep">{t("storage.keepLocal")}</Label>
-                    <Input
-                      id="st-keep"
-                      type="number"
-                      min={0}
-                      max={8760}
-                      value={draft.keepLocalHours}
-                      onChange={(e) => set("keepLocalHours", Math.max(0, Number(e.target.value) || 0))}
-                    />
-                  </div>
-                )}
-              </div>
-              {draft.mode === "move" && <p className="text-tiny text-muted-foreground">{t("storage.keepLocalHint")}</p>}
               <fieldset className="flex flex-wrap items-center gap-3">
                 <legend className="mb-1 text-tiny text-muted-foreground">{t("storage.extras")}</legend>
                 {(

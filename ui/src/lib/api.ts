@@ -109,7 +109,6 @@ import type {
   HookTestResult,
   HookCreated,
   HookTrigger,
-  OffloadFetchState,
   StorageTarget,
   StorageTargetBody,
   StorageTargetList,
@@ -1509,9 +1508,6 @@ export const api = {
   /** Retry now for one recording's failed or stuck uploads, on every target. */
   retryRecordingOffload: (id: number) =>
     post<{ retried: number }>(`/library/recordings/${id}/offload/retry`, {}),
-  /** Bring an offloaded recording (and its session's other offloaded segments) back. */
-  fetchRecording: (id: number) =>
-    post<{ fetch: Record<string, OffloadFetchState> }>(`/library/recordings/${id}/fetch`, {}),
 };
 
 /** What the install says about a token: see GET /auth/connection. */

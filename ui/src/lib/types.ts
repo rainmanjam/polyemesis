@@ -3975,7 +3975,6 @@ export interface RolloverView {
 // ---------------------------------------------------------------- offload
 
 export type StorageProvider = "s3" | "r2" | "b2" | "minio" | "wasabi";
-export type OffloadMode = "mirror" | "move";
 /** stuck: offload stopped retrying on its own; nothing moves until Retry now. */
 export type OffloadState = "pending" | "uploading" | "verified" | "failed" | "stuck";
 
@@ -3994,8 +3993,6 @@ export interface StorageTarget {
   accessKeyId: string;
   hasSecret: boolean;
   secretUnreadable?: boolean;
-  mode: OffloadMode;
-  keepLocalHours: number;
   offloadStems: boolean;
   offloadTranscripts: boolean;
   offloadClips: boolean;
@@ -4007,8 +4004,6 @@ export interface StorageTarget {
   createdAt: string;
   updatedAt: string;
   counts: Partial<Record<OffloadState, number>>;
-  /** Recordings whose only copy is on this target. */
-  evicted: number;
 }
 
 export interface StorageTargetList {
@@ -4019,7 +4014,7 @@ export interface StorageTargetList {
 /** A save or a Test body. secretAccessKey is sent only when typed; id, on the
  *  Test route, reuses a saved target's secret for the address it was saved for. */
 export type StorageTargetBody = Partial<
-  Omit<StorageTarget, "id" | "hasSecret" | "secretUnreadable" | "createdAt" | "updatedAt" | "counts" | "evicted">
+  Omit<StorageTarget, "id" | "hasSecret" | "secretUnreadable" | "createdAt" | "updatedAt" | "counts">
 > & { secretAccessKey?: string; id?: number };
 
 export interface StorageTestStep {
@@ -4036,12 +4031,6 @@ export interface StorageTestResult {
   failedStep?: "put" | "get" | "delete";
 }
 
-export interface OffloadFetchState {
-  state: "fetching" | "done" | "failed";
-  error?: string;
-  since: string;
-}
-
 export interface RecordingOffloadOn {
   targetId: number;
   targetName: string;
@@ -4052,8 +4041,5 @@ export interface RecordingOffloadOn {
 }
 
 export interface RecordingOffload {
-  /** Move mode removed the local copy; it is fetched back on demand. */
-  evicted: boolean;
-  fetch?: OffloadFetchState;
   targets: RecordingOffloadOn[];
 }
