@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -51,6 +52,42 @@ type skipCensus struct {
 	ByImport map[string]int `json:"byPackage"`
 }
 
+// THE CENSUS COUNTS WHAT `go test ./...` CAN RUN, and nothing else.
+//
+// The go tool's ./... pattern never descends into a directory whose name
+// starts with "." or "_", nor into testdata or vendor. A _test.go file in one
+// of those is not a test of this module, so a skip in it is not a skip this
+// ratchet has jurisdiction over. Hard-coding names did not hold:
+//
+//   - .claude/worktrees holds FULL CHECKOUTS OF THIS MODULE, one per agent
+//     branch in flight. Counting them multiplied the census by the number of
+//     worktrees and reported every package as new at "committed count is 0".
+//   - scripts/test-in-docker.sh bind-mounts its module and build caches at
+//     .docker-gomod/ and .docker-gocache/ (gitignored). After one run, every
+//     dependency's tests were counted -- uuid, mediacommon -- and the ratchet
+//     failed on a clean checkout with a failure no commit could fix.
+//
+// Both are dot directories, and so is the next one somebody invents. The rule
+// is the go tool's own, so it cannot hide a test that would actually run.
+func goIgnoresDir(name string) bool {
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") ||
+		name == "testdata" || name == "vendor"
+}
+
+// goModCache is GOMODCACHE as the go tool would resolve it without shelling
+// out: the variable if set, else the first GOPATH entry's pkg/mod. Only matters
+// if somebody points it inside the checkout under a name the rule above lets
+// through -- a module cache is never this module's tests either.
+func goModCache() string {
+	if mc := os.Getenv("GOMODCACHE"); mc != "" {
+		return filepath.Clean(mc)
+	}
+	if gp := filepath.SplitList(build.Default.GOPATH); len(gp) > 0 && gp[0] != "" {
+		return filepath.Clean(filepath.Join(gp[0], "pkg", "mod"))
+	}
+	return ""
+}
+
 // walkSkips counts calls to t.Skip, t.Skipf, t.SkipNow and testing.Short()
 // across the repository, by package directory, excluding internal/testenv --
 // which is the one place a skip is allowed to live, and whose own Quarantine
@@ -60,6 +97,7 @@ func walkSkips(t *testing.T, root string) (map[string]int, map[string]int, []str
 	skips := map[string]int{}
 	shorts := map[string]int{}
 	var quarantineIDs []string
+	modCache := goModCache()
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -75,19 +113,13 @@ func walkSkips(t *testing.T, root string) (map[string]int, map[string]int, []str
 			// comparing the census against origin/main and finding the
 			// difference two short of the conversions actually made.
 			switch rel {
-			case ".git", "node_modules", "ui", "web":
-				return filepath.SkipDir
-			// .claude/worktrees holds FULL CHECKOUTS OF THIS MODULE, one per
-			// agent branch in flight. Counting them multiplies the census by
-			// the number of worktrees on the machine and reports every package
-			// in each as a brand-new one at "committed count is 0" -- a
-			// failure about the developer's working tree that no commit can
-			// fix and no reviewer can reproduce. Every guard here that walks
-			// the repo has to skip it for the same reason.
-			case ".claude":
+			case "node_modules", "ui", "web":
 				return filepath.SkipDir
 			}
-			if info.Name() == "testdata" {
+			if rel != "." && goIgnoresDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			if modCache != "" && filepath.Clean(path) == modCache {
 				return filepath.SkipDir
 			}
 			return nil
@@ -484,5 +516,56 @@ func TestRegeneratingAnAbsentCensusStillWritesOne(t *testing.T) {
 	}
 	if c.Total != 12 || c.ByImport["internal/db"] != 2 || c.Note != "the fresh note" {
 		t.Fatalf("bootstrap census is %+v", c)
+	}
+}
+
+// THE CENSUS IGNORES WHAT THE GO TOOL IGNORES, AND ONLY THAT.
+//
+// A synthetic repository: one real package with one skip, then the trees that
+// broke the ratchet in a working checkout (test-in-docker.sh's module and build
+// caches, an underscore dir, a vendor tree, a module cache under GOMODCACHE)
+// each holding a skipping _test.go. The census must not move when they appear,
+// and the real package must still be counted -- an exclusion that swallowed
+// internal/ would pass the first half and fail the second.
+func TestSkipCensusIgnoresTreesGoTestDoesNotRun(t *testing.T) {
+	root := t.TempDir()
+	const skipping = "package p\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) { t.Skip(\"env\") }\n"
+	write := func(rel string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(skipping), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	modCache := filepath.Join(root, "gomodcache")
+	t.Setenv("GOMODCACHE", modCache)
+
+	write("internal/real/a_test.go")
+	before, _, _ := walkSkips(t, root)
+	if len(before) != 1 || before["internal/real"] != 1 {
+		t.Fatalf("baseline census = %v, want exactly internal/real:1", before)
+	}
+
+	write(".docker-gomod/github.com/google/uuid@v1.6.0/uuid_test.go")
+	write(".docker-gocache/x/y_test.go")
+	write("_scratch/z_test.go")
+	write("vendor/example.com/dep/dep_test.go")
+	write("gomodcache/example.com/mod@v1.0.0/mod_test.go")
+	write("internal/real/testdata/fixture_test.go")
+
+	after, _, _ := walkSkips(t, root)
+	if len(after) != 1 || after["internal/real"] != 1 {
+		t.Errorf("census after adding ignored trees = %v, want it unchanged at internal/real:1", after)
+	}
+
+	// POSITIVE CONTROL: a second real package is still found. Proves the walk
+	// is not simply stopping early.
+	write("cmd/tool/b_test.go")
+	ctl, _, _ := walkSkips(t, root)
+	if ctl["cmd/tool"] != 1 || ctl["internal/real"] != 1 || len(ctl) != 2 {
+		t.Errorf("census with a second real package = %v, want internal/real:1 and cmd/tool:1", ctl)
 	}
 }

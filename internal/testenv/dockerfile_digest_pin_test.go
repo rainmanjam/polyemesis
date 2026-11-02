@@ -24,9 +24,13 @@ import (
 // reader, nothing to compare against.
 //
 // Scope: the Dockerfiles at the repository root, which are what release.yml
-// publishes. web/Dockerfile and scripts/obs/Dockerfile are not published and
-// dependabot is not pointed at their directories, so a digest there would
-// only go stale.
+// publishes, and web/Dockerfile, the documentation site's image. The site
+// image was left floating at first on the grounds that dependabot did not
+// watch web/ and a digest there would only go stale; dependabot now has a
+// docker entry for "/web" as well, so the same reasoning that pins the release
+// images applies to it. scripts/obs/Dockerfile is still out of scope: it is a
+// local test harness, nothing builds it on a schedule, and dependabot does not
+// watch it.
 func TestPublishedDockerfilesPinBaseImagesByDigest(t *testing.T) {
 	root := repoRootFromTest(t)
 	matches, err := filepath.Glob(filepath.Join(root, "Dockerfile*"))
@@ -39,42 +43,62 @@ func TestPublishedDockerfilesPinBaseImagesByDigest(t *testing.T) {
 			"(Dockerfile, Dockerfile.cuda, Dockerfile.vaapi)", len(matches))
 	}
 
-	fromRe := regexp.MustCompile(`(?i)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
-	pinned := regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$`)
 	froms := 0
 	for _, path := range matches {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		name := filepath.Base(path)
-		stages := map[string]bool{}
-		for i, line := range strings.Split(string(b), "\n") {
-			m := fromRe.FindStringSubmatch(strings.TrimSpace(line))
-			if m == nil {
-				continue
-			}
-			froms++
-			ref := m[1]
-			// FROM <earlier stage> and FROM scratch name no registry image.
-			isStage := stages[strings.ToLower(ref)] || ref == "scratch"
-			if m[2] != "" {
-				stages[strings.ToLower(m[2])] = true
-			}
-			if isStage {
-				continue
-			}
-			if !pinned.MatchString(ref) {
-				t.Errorf("%s:%d: FROM %s is not pinned as name:tag@sha256:<digest>. A "+
-					"floating tag lets the same commit build from different bytes; pin the "+
-					"digest and let dependabot propose the next one.", name, i+1, ref)
-			}
-		}
+		froms += checkDockerfileDigestPins(t, root, path)
 	}
 	if froms < 9 {
 		t.Errorf("parsed only %d FROM lines across the root Dockerfiles, expected at least 9 "+
 			"(three stages each); the FROM pattern has stopped matching", froms)
 	}
+
+	// web/Dockerfile is named explicitly rather than by widening the glob, so
+	// the root count above keeps meaning "the three release images".
+	// POSITIVE CONTROL: two stages, build and runtime.
+	if n := checkDockerfileDigestPins(t, root, filepath.Join(root, "web", "Dockerfile")); n < 2 {
+		t.Errorf("parsed only %d FROM lines in web/Dockerfile, expected at least 2 "+
+			"(build and runtime); the file moved or the FROM pattern has stopped matching", n)
+	}
+}
+
+// checkDockerfileDigestPins reports every registry FROM in path that is not
+// name:tag@sha256:<digest>, and returns how many FROM lines it parsed.
+func checkDockerfileDigestPins(t *testing.T, root, path string) int {
+	t.Helper()
+	fromRe := regexp.MustCompile(`(?i)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
+	pinned := regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$`)
+	froms := 0
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := filepath.Rel(root, path)
+	if err != nil {
+		name = filepath.Base(path)
+	}
+	stages := map[string]bool{}
+	for i, line := range strings.Split(string(b), "\n") {
+		m := fromRe.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		froms++
+		ref := m[1]
+		// FROM <earlier stage> and FROM scratch name no registry image.
+		isStage := stages[strings.ToLower(ref)] || ref == "scratch"
+		if m[2] != "" {
+			stages[strings.ToLower(m[2])] = true
+		}
+		if isStage {
+			continue
+		}
+		if !pinned.MatchString(ref) {
+			t.Errorf("%s:%d: FROM %s is not pinned as name:tag@sha256:<digest>. A "+
+				"floating tag lets the same commit build from different bytes; pin the "+
+				"digest and let dependabot propose the next one.", name, i+1, ref)
+		}
+	}
+	return froms
 }
 
 // THE COMMENT ABOVE A PINNED FROM DESCRIBES THE PIN.

@@ -194,8 +194,8 @@ jobs:
 
       - name: Install osv-scanner (pinned, checksummed)
         env:
-          OSV_VERSION: 2.5.1
-          OSV_SHA256: f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be
+          OSV_VERSION: 2.7.0
+          OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
         run: |
           set -euo pipefail
           curl -sSfL --proto '=https' --tlsv1.2 \
