@@ -468,6 +468,23 @@ export function AutomodConfig({
               enableLabel="automod.modelEnabled"
               enableNote="automod.modelEnabledNote"
             />
+            {/* Its own consent: scoring sends what was SAID ON STREAM to this
+                provider, which switching the model on for chat does not. */}
+            <div className="flex items-start gap-2 pt-1">
+              <Switch
+                id="automod-highlight-scoring"
+                checked={automod.highlightScoring === true}
+                onCheckedChange={(v) =>
+                  onChange({ ...settings, automod: { ...automod!, highlightScoring: v } })
+                }
+              />
+              <div className="grid gap-0.5">
+                <Label htmlFor="automod-highlight-scoring" className="text-xs">
+                  {t("automod.highlightScoring")}
+                </Label>
+                <p className="text-xs text-muted-foreground">{t("automod.highlightScoringNote")}</p>
+              </div>
+            </div>
           </section>
 
           {secondary && (

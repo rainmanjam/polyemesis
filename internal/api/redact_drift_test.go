@@ -184,6 +184,7 @@ var leafSensitivity = map[string]sensitivity{
 	"destination.vodProfile.tracks.track":            sPublic,
 	"settings.alerts.retryAttempts":                  sPublic,
 	"settings.automod.enabled":                       sPublic,
+	"settings.automod.highlightScoring":              sPublic,
 	"settings.automod.history.action":                sPublic,
 	"settings.automod.history.idleEvictionSeconds":   sPublic,
 	"settings.automod.history.maxCapsRatio":          sPublic,

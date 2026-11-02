@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Der Vorschlag konnte nicht angenommen werden",
   "clipedit.highlights.dismissFailed": "Der Vorschlag konnte nicht verworfen werden",
   "clipedit.highlights.acceptUsesSettings": "„Annehmen“ exportiert mit den Schnitteinstellungen oben, inklusive vertikalem Layout, wenn es aktiv ist.",
-  "clipedit.highlights.range": "{start} bis {end}"
+  "clipedit.highlights.range": "{start} bis {end}",
+  "automod.highlightScoring": "KI für die Highlight-Bewertung verwenden",
+  "automod.highlightScoringNote": "Erlaubt dem Clip-Editor, Transkriptauszüge an den Anbieter oben zu senden, wenn eine Highlight-Suche eine Bewertung anfordert. Unabhängig von der Chat-Moderation; standardmäßig aus."
 }

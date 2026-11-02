@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "その候補を承認できませんでした",
   "clipedit.highlights.dismissFailed": "その候補を却下できませんでした",
   "clipedit.highlights.acceptUsesSettings": "承認すると、上のカット設定（有効なら縦型レイアウトも）で書き出します。",
-  "clipedit.highlights.range": "{start} 〜 {end}"
+  "clipedit.highlights.range": "{start} 〜 {end}",
+  "automod.highlightScoring": "ハイライトの採点に AI を使う",
+  "automod.highlightScoringNote": "ハイライト解析が採点を求めたとき、クリップエディターが文字起こしの抜粋を上のプロバイダーに送れるようにします。チャットのモデレーションとは別で、既定ではオフです。"
 }

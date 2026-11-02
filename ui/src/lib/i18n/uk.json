@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Не вдалося прийняти пропозицію",
   "clipedit.highlights.dismissFailed": "Не вдалося відхилити пропозицію",
   "clipedit.highlights.acceptUsesSettings": "Прийняття експортує з налаштуваннями нарізки вище, включно з вертикальним макетом, якщо він увімкнений.",
-  "clipedit.highlights.range": "з {start} до {end}"
+  "clipedit.highlights.range": "з {start} до {end}",
+  "automod.highlightScoring": "Використовувати ШІ для оцінки яскравих моментів",
+  "automod.highlightScoringNote": "Дозволяє редактору кліпів надсилати уривки розшифровки провайдеру вище, коли пошук моментів запитує оцінку. Окремо від модерації чату; типово вимкнено."
 }

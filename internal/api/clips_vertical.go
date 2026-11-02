@@ -193,7 +193,7 @@ func (s *Server) handlePutClipTemplate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("a template needs a name of 1 to %d characters", maxTemplateName))
 		return
 	}
-	if err := body.Vertical.layout().ValidateLayout(); err != nil {
+	if err := s.validateTemplate(body.Vertical); err != nil {
 		s.writeClipError(w, err)
 		return
 	}
@@ -261,4 +261,24 @@ func ClipTranscriptSource(store *db.DB) clipper.TranscriptSource {
 		}
 		return out, nil
 	}
+}
+
+// validateTemplate checks a template WHOLE: the layout, and the caption style
+// whether or not captions are switched on in it -- applying the template is
+// what switches them on, and a style stored unchecked would fail then, in the
+// editor, far from where it was saved. A font it names must be one this server
+// has.
+func (s *Server) validateTemplate(b clipVerticalBody) error {
+	if err := b.layout().ValidateLayout(); err != nil {
+		return err
+	}
+	if b.Captions == nil {
+		return nil
+	}
+	style := b.Captions.Style
+	if err := style.Validate(); err != nil {
+		return err
+	}
+	_, err := s.captionFont(style.Normalized().Font)
+	return err
 }

@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "No se pudo aceptar la sugerencia",
   "clipedit.highlights.dismissFailed": "No se pudo descartar la sugerencia",
   "clipedit.highlights.acceptUsesSettings": "Aceptar exporta con los ajustes de corte de arriba, incluido el diseño vertical si está activo.",
-  "clipedit.highlights.range": "{start} a {end}"
+  "clipedit.highlights.range": "{start} a {end}",
+  "automod.highlightScoring": "Usar IA para puntuar los momentos destacados",
+  "automod.highlightScoringNote": "Permite que el editor de clips envíe extractos de la transcripción al proveedor de arriba cuando una búsqueda de destacados pide puntuación. Independiente de la moderación del chat; desactivado por defecto."
 }

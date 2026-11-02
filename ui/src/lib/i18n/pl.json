@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Nie udało się zaakceptować propozycji",
   "clipedit.highlights.dismissFailed": "Nie udało się odrzucić propozycji",
   "clipedit.highlights.acceptUsesSettings": "Akceptacja eksportuje z ustawieniami cięcia powyżej, w tym z układem pionowym, jeśli jest włączony.",
-  "clipedit.highlights.range": "{start} do {end}"
+  "clipedit.highlights.range": "{start} do {end}",
+  "automod.highlightScoring": "Używaj AI do oceny najlepszych momentów",
+  "automod.highlightScoringNote": "Pozwala edytorowi klipów wysyłać fragmenty transkrypcji do dostawcy powyżej, gdy wyszukiwanie momentów prosi o ocenę. Niezależne od moderacji czatu; domyślnie wyłączone."
 }

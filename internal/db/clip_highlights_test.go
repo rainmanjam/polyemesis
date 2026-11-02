@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"testing"
 	"time"
 )
@@ -208,5 +209,33 @@ func TestARescanDoesNotReofferADecidedMomentInsideALongerSpan(t *testing.T) {
 	n, err := d.ReplacePendingHighlights(rec, []Highlight{{StartMS: 90_000, EndMS: 150_000, Signals: []byte(`[]`)}})
 	if err != nil || n != 0 {
 		t.Errorf("a 60 s span around a dismissed 15 s moment was offered again (stored %d, %v)", n, err)
+	}
+}
+
+// A queued job's params can be upgraded; a running one's cannot -- the worker
+// already read them.
+//
+// MUTATION: the UPDATE drops its state condition. Observed: FAIL, a running
+// job's params changed under its worker.
+func TestOnlyAJobThatHasNotStartedCanHaveItsParamsUpgraded(t *testing.T) {
+	d := testDB(t)
+	j, err := d.EnqueueJob(jobs.Job{Kind: "highlights.scan", Target: "recording:1", Params: []byte(`{"useModel":false}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := d.UpgradeQueuedJobParams(j.ID, []byte(`{"useModel":true}`))
+	if err != nil || !ok {
+		t.Fatalf("a queued job was not upgraded: %v %v", ok, err)
+	}
+	got, _ := d.GetJob(j.ID)
+	if string(got.Params) != `{"useModel":true}` {
+		t.Errorf("params %s", got.Params)
+	}
+	if _, err := d.ClaimJob([]jobs.Kind{"highlights.scan"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = d.UpgradeQueuedJobParams(j.ID, []byte(`{"useModel":false}`))
+	if err != nil || ok {
+		t.Errorf("a running job's params were changed: %v %v", ok, err)
 	}
 }

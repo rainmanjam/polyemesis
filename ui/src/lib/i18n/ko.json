@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "그 제안을 수락하지 못했습니다",
   "clipedit.highlights.dismissFailed": "그 제안을 무시하지 못했습니다",
   "clipedit.highlights.acceptUsesSettings": "수락하면 위의 자르기 설정(켜져 있으면 세로 레이아웃 포함)으로 내보냅니다.",
-  "clipedit.highlights.range": "{start} ~ {end}"
+  "clipedit.highlights.range": "{start} ~ {end}",
+  "automod.highlightScoring": "하이라이트 점수에 AI 사용",
+  "automod.highlightScoringNote": "하이라이트 분석이 점수를 요청하면 클립 편집기가 대본 발췌를 위 제공자에게 보낼 수 있게 합니다. 채팅 검토와는 별개이며 기본값은 꺼짐입니다."
 }

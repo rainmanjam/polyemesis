@@ -30,8 +30,9 @@ import (
 const highlightModelTimeout = 60 * time.Second
 
 // HighlightModel returns the scan's model factory: the operator's PRIMARY
-// automod connector when it is switched on and speaks the OpenAI-compatible
-// protocol, charged to budget -- the scan's own, so a post-pass over a
+// automod connector -- its endpoint, model and key -- when the separate
+// "Use AI for highlight scoring" switch is on and the connector speaks the
+// OpenAI-compatible protocol, charged to budget -- the scan's own, so a post-pass over a
 // recording can never spend the allowance live moderation runs on.
 //
 // Exported because the scan worker is wired in cmd/polyemesis, and the
@@ -61,8 +62,10 @@ func highlightModelConfig(store *db.DB, box *secrets.Box, log *slog.Logger) (aut
 	}
 	conn := settings.Automod.Model
 	switch {
-	case !conn.Enabled:
-		return automod.ModelConfig{}, "the model checker in Automod is switched off"
+	case !settings.Automod.HighlightScoring:
+		// Its own consent (owner decision D): the Automod model block being on
+		// for chat says nothing about sending what was said on stream.
+		return automod.ModelConfig{}, "AI highlight scoring is switched off in Automod settings"
 	case protocolOf(conn) == automod.ProtocolJev:
 		return automod.ModelConfig{}, "the Automod model uses the Jev protocol, which answers moderation questions only"
 	case conn.Endpoint == "":
@@ -119,14 +122,29 @@ func (s *Server) handleScanHighlights(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	job, _, err := s.jobq.Submit(jobs.Job{
+	scan := jobs.Job{
 		Kind:   highlights.JobKind,
 		Target: jobs.RecordingTarget(tl.highlightKey()),
 		Params: raw,
 		// Unique: pressing Scan twice is one scan.
 		Unique:   true,
 		Priority: jobs.PriorityUser,
-	})
+	}
+	job, created, err := s.jobq.Submit(scan)
+	if err == nil && !created && body.UseModel && !scanUsesModel(job.Params) {
+		// The press asked for scoring and found a plain scan already active.
+		// A scan that has not started is upgraded in place; one already
+		// running has read its params, so scoring gets a scan of its own.
+		var upgraded bool
+		if upgraded, err = s.store.UpgradeQueuedJobParams(job.ID, raw); err == nil {
+			if upgraded {
+				job.Params = raw
+			} else {
+				scan.Unique = false
+				job, _, err = s.jobq.Submit(scan)
+			}
+		}
+	}
 	if err != nil {
 		s.writeClipError(w, err)
 		return
@@ -272,3 +290,9 @@ func (s *Server) handleDismissHighlight(w http.ResponseWriter, r *http.Request) 
 // the same id -- the file that happened to be opened would give each file a
 // queue of its own, and a second scan that the Unique fold could not see.
 func (t clipTimeline) highlightKey() int64 { return t.parts[0].rec.ID }
+
+// scanUsesModel reports whether a scan job's params ask for model scoring.
+func scanUsesModel(raw json.RawMessage) bool {
+	var p highlights.JobParams
+	return json.Unmarshal(raw, &p) == nil && p.UseModel
+}

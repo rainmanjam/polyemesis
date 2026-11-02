@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Öneri kabul edilemedi",
   "clipedit.highlights.dismissFailed": "Öneri yoksayılamadı",
   "clipedit.highlights.acceptUsesSettings": "Kabul, dikey düzen açıksa o da dahil, yukarıdaki kesim ayarlarıyla dışa aktarır.",
-  "clipedit.highlights.range": "{start} - {end} arası"
+  "clipedit.highlights.range": "{start} - {end} arası",
+  "automod.highlightScoring": "Öne çıkanları puanlamak için yapay zekâ kullan",
+  "automod.highlightScoringNote": "Bir öne çıkan taraması puan istediğinde klip düzenleyicinin döküm alıntılarını yukarıdaki sağlayıcıya göndermesine izin verir. Sohbet moderasyonundan ayrıdır; varsayılan olarak kapalıdır."
 }

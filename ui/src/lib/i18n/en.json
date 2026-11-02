@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "That suggestion could not be accepted",
   "clipedit.highlights.dismissFailed": "That suggestion could not be dismissed",
   "clipedit.highlights.acceptUsesSettings": "Accept exports with the cut settings above, including the vertical layout when it is on.",
-  "clipedit.highlights.range": "{start} to {end}"
+  "clipedit.highlights.range": "{start} to {end}",
+  "automod.highlightScoring": "Use AI for highlight scoring",
+  "automod.highlightScoringNote": "Lets the clip editor send transcript excerpts to the provider above when a highlight scan asks for scoring. Separate from moderating chat; off by default."
 }

@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Die suggestie kon niet worden geaccepteerd",
   "clipedit.highlights.dismissFailed": "Die suggestie kon niet worden verworpen",
   "clipedit.highlights.acceptUsesSettings": "Accepteren exporteert met de knipinstellingen hierboven, inclusief de verticale indeling als die aan staat.",
-  "clipedit.highlights.range": "{start} tot {end}"
+  "clipedit.highlights.range": "{start} tot {end}",
+  "automod.highlightScoring": "AI gebruiken om hoogtepunten te beoordelen",
+  "automod.highlightScoringNote": "Laat de clipeditor transcriptfragmenten naar de aanbieder hierboven sturen wanneer een zoekactie naar hoogtepunten om een beoordeling vraagt. Los van chatmoderatie; standaard uit."
 }

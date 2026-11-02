@@ -3822,5 +3822,7 @@
   "clipedit.highlights.acceptFailed": "Impossibile accettare il suggerimento",
   "clipedit.highlights.dismissFailed": "Impossibile scartare il suggerimento",
   "clipedit.highlights.acceptUsesSettings": "Accetta esporta con le impostazioni di taglio qui sopra, compreso il layout verticale se attivo.",
-  "clipedit.highlights.range": "da {start} a {end}"
+  "clipedit.highlights.range": "da {start} a {end}",
+  "automod.highlightScoring": "Usa l'IA per valutare i momenti salienti",
+  "automod.highlightScoringNote": "Consente all'editor di clip di inviare estratti della trascrizione al fornitore qui sopra quando una ricerca di momenti salienti chiede una valutazione. Separato dalla moderazione della chat; disattivato per impostazione predefinita."
 }

@@ -134,7 +134,7 @@ func TestDismissingAHighlightClipsNothing(t *testing.T) {
 		len(list.Suggestions[0].Signals) != 1 || list.Suggestions[0].Signals[0].Kind != highlights.KindChat {
 		t.Errorf("review queue %+v", list)
 	}
-	if list.ModelAvailable || !strings.Contains(list.ModelReason, "switched off") {
+	if list.ModelAvailable || !strings.Contains(list.ModelReason, "highlight scoring") {
 		t.Errorf("default settings have no model: %+v", list)
 	}
 }
@@ -312,7 +312,7 @@ func TestClipTemplatesAreSavedValidatedAndListedWithTheEditorsOptions(t *testing
 func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	_, _, srv, _ := highlightFixture(t)
 	model := HighlightModel(srv.store, srv.box, automod.NewBudget(), nil)
-	if c, why := model(); c != nil || !strings.Contains(why, "switched off") {
+	if c, why := model(); c != nil || !strings.Contains(why, "highlight scoring") {
 		t.Errorf("default settings: %v %q", c != nil, why)
 	}
 
@@ -326,7 +326,11 @@ func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	defer fake.Close()
 
 	set := func(m db.AutomodModel) {
-		if _, err := srv.store.UpdateSettings(func(s *db.Settings) error { s.Automod.Model = m; return nil }); err != nil {
+		if _, err := srv.store.UpdateSettings(func(s *db.Settings) error {
+			s.Automod.Model = m
+			s.Automod.HighlightScoring = true
+			return nil
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -334,7 +338,12 @@ func TestTheHighlightModelIsTheAutomodPrimaryConnector(t *testing.T) {
 	if c, why := model(); c != nil || !strings.Contains(why, "Jev") {
 		t.Errorf("a Jev primary: %v %q", c != nil, why)
 	}
-	set(db.AutomodModel{Enabled: true, Endpoint: fake.URL, Model: "fake-model", MinConfidence: 0.8})
+	// OWNER DECISION D: scoring is its own switch. The Automod model block need
+	// not be on -- moderation and highlight scoring are separate consents over
+	// one provider configuration.
+	// MUTATION: availability still requires the model block's Enabled.
+	// Observed: FAIL, "switched off".
+	set(db.AutomodModel{Enabled: false, Endpoint: fake.URL, Model: "fake-model", MinConfidence: 0.8})
 	c, why := model()
 	if c == nil {
 		t.Fatalf("an OpenAI-compatible primary is a model: %q", why)
@@ -556,4 +565,52 @@ func TestShortsOfTheSameSpanDoNotShareAFile(t *testing.T) {
 	if again == center || filepath.Dir(again) != filepath.Dir(center) {
 		t.Errorf("a name already on disk was reused: %q", again)
 	}
+}
+
+// ASKING FOR THE MODEL UPGRADES A WAITING SCAN. A plain scan already queued for
+// the recording is folded into by the next press of Scan; when that press asks
+// for model scoring, the queued scan is upgraded to include it rather than the
+// request being silently dropped.
+//
+// MUTATION: the fold returns the existing job untouched. Observed: FAIL, the
+// queued scan still has useModel false.
+func TestAScoringRequestUpgradesAQueuedPlainScan(t *testing.T) {
+	h, sign, srv, rec := highlightFixture(t)
+	send(t, h, sign, http.MethodPost, recPath(rec, "/highlights/scan"), map[string]any{"useModel": false}, http.StatusAccepted)
+	send(t, h, sign, http.MethodPost, recPath(rec, "/highlights/scan"), map[string]any{"useModel": true}, http.StatusAccepted)
+	scans := jobsOfKind(t, srv.store, highlights.JobKind)
+	if len(scans) != 1 {
+		t.Fatalf("%d scans, want the one, upgraded", len(scans))
+	}
+	var p highlights.JobParams
+	_ = json.Unmarshal(scans[0].Params, &p)
+	if !p.UseModel {
+		t.Error("the queued scan was not upgraded to include scoring")
+	}
+	// A later plain request does not downgrade it.
+	send(t, h, sign, http.MethodPost, recPath(rec, "/highlights/scan"), map[string]any{"useModel": false}, http.StatusAccepted)
+	scans = jobsOfKind(t, srv.store, highlights.JobKind)
+	_ = json.Unmarshal(scans[0].Params, &p)
+	if len(scans) != 1 || !p.UseModel {
+		t.Errorf("a plain request downgraded the scan: %d jobs, useModel=%v", len(scans), p.UseModel)
+	}
+}
+
+// A TEMPLATE IS VALIDATED WHOLE. Its caption style is checked whether or not
+// captions are switched on in it -- applying the template is what switches them
+// on -- and a font it names must be one this server has.
+//
+// MUTATION: only the layout is validated. Observed: FAIL, 200 for "red".
+func TestATemplateIsValidatedWhole(t *testing.T) {
+	h, sign, _, _ := highlightFixture(t)
+	for name, captions := range map[string]map[string]any{
+		"bad colour, captions off": {"enabled": false, "style": map[string]any{"color": "red"}},
+		"missing font":             {"enabled": true, "style": map[string]any{"font": "Missing.ttf"}},
+	} {
+		send(t, h, sign, http.MethodPost, "/api/v1/clipper/templates",
+			map[string]any{"name": name, "vertical": map[string]any{"layout": "blur", "captions": captions}}, http.StatusBadRequest)
+	}
+	send(t, h, sign, http.MethodPost, "/api/v1/clipper/templates", map[string]any{"name": "fine",
+		"vertical": map[string]any{"layout": "blur", "captions": map[string]any{"enabled": false, "style": map[string]any{"color": "#ffcc00"}}}},
+		http.StatusOK)
 }

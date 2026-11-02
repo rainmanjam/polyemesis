@@ -277,6 +277,7 @@ var settingsReload = map[string]ReloadRule{
 	"chat.youtubeQuotaReserve": {ClassLive, "ApplyYouTubeQuota", "the floor held back for sends, pushed with the allowance so the two can never disagree"},
 
 	"automod.enabled":              {ClassLive, "ApplyAutomod", "rebuilds the automod engine out of band"},
+	"automod.highlightScoring":     {ClassOnDemand, "highlightModelConfig", "read when a highlight scan asks for scoring; nothing running holds it"},
 	"automod.platformEnabled":      {ClassLive, "ApplyAutomod", "rebuilds the automod engine"},
 	"automod.on":                   {ClassLive, "ApplyAutomod", "rebuilds the matrix"},
 	"automod.rules.id":             {ClassLive, "ApplyAutomod", "recompiles the patterns"},
