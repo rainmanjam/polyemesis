@@ -1,6 +1,7 @@
 package highlights
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -62,14 +63,14 @@ func scanDeps(t *testing.T) (Deps, *[]Suggestion, *[][]string) {
 	chat = append(chat, burst(360_000+100_000, 10_000, 40)...)
 	return Deps{
 		FFmpeg: "ffmpeg",
-		Run: func(_ context.Context, name string, args []string) ([]byte, error) {
+		Run: func(_ context.Context, name string, args []string, stdout func(io.Reader) error) error {
 			ran = append(ran, args)
 			for i, a := range args {
 				if a == "-i" && args[i+1] == "/rec/a.mkv" {
-					return ebur128Fixture(300, 100), nil
+					return stdout(bytes.NewReader(ebur128Fixture(300, 100)))
 				}
 			}
-			return ebur128Fixture(300, -10), nil
+			return stdout(bytes.NewReader(ebur128Fixture(300, -10)))
 		},
 		ChatTimes: func(from, to int64) ([]int64, error) {
 			var out []int64
@@ -176,7 +177,9 @@ func hasWarning(r JobResult, s string) bool {
 // A part whose measurement fails costs its loudness signal, not the scan.
 func TestAFailedMeasurementIsAWarningNotAFailedScan(t *testing.T) {
 	d, saved, _ := scanDeps(t)
-	d.Run = func(context.Context, string, []string) ([]byte, error) { return nil, errors.New("ffmpeg exploded") }
+	d.Run = func(context.Context, string, []string, func(io.Reader) error) error {
+		return errors.New("ffmpeg exploded")
+	}
 	res, err := Scan(context.Background(), d, scanParams(false), &fakeReporter{})
 	if err != nil {
 		t.Fatal(err)

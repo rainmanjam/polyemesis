@@ -877,7 +877,7 @@ func (s *Server) submitClipExport(plan clipper.Plan, tl clipTimeline) (*jobs.Job
 			VideoEncoder: plan.VideoEncoder,
 			// The words stay out of the job: its params are readable by any
 			// token that may list jobs. The worker reads them at run time.
-			Vertical: plan.Vertical.WithoutCues(),
+			Vertical: plan.Vertical.ForJob(),
 		},
 		// The segments travel with the job so a re-index between submission and
 		// execution cannot change what gets cut out from under the user.

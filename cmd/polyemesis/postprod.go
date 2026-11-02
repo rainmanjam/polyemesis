@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -179,9 +180,12 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 		log.Error("cannot register the derived-media job kinds", "error", err)
 	}
 
-	cutter := clipper.New(log, tools.FFmpeg, tools.FFprobe)
+	cutter := newCutter(log, tools, gov)
 	resolve := recordingTimeline(store, cfg.RecordingsDir())
-	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve, clipper.WithTranscript(api.ClipTranscriptSource(store)))))
+	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve,
+		clipper.WithTranscript(api.ClipTranscriptSource(store)),
+		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
+		clipper.WithDrawText(tools.HasFilter("drawtext")))))
 
 	// Highlight scans (Wave 4 #5a). Niced like every other derived-media
 	// child: measuring loudness decodes the whole recording's audio. The
@@ -357,8 +361,9 @@ func recordingTimeline(store *db.DB, recordingsDir string) clipper.Resolver {
 			return clipper.Timeline{}, err
 		}
 		return clipper.NewTimeline([]clipper.Segment{{
-			Path:     filepath.Join(recordingsDir, rec.Filename),
-			Duration: time.Duration(rec.DurationMS) * time.Millisecond,
+			RecordingID: rec.ID,
+			Path:        filepath.Join(recordingsDir, rec.Filename),
+			Duration:    time.Duration(rec.DurationMS) * time.Millisecond,
 		}})
 	}
 }
@@ -472,17 +477,28 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 	}
 	return highlights.Deps{
 		FFmpeg: ffmpegBin,
-		Run: func(ctx context.Context, name string, args []string) ([]byte, error) {
+		Run: func(ctx context.Context, name string, args []string, stdout func(io.Reader) error) error {
 			if gov != nil {
 				name, args = gov.NiceCommand(name, args...)
 			}
-			var stdout, stderr bytes.Buffer
+			var stderr bytes.Buffer
 			cmd := exec.CommandContext(ctx, name, args...)
-			cmd.Stdout, cmd.Stderr = &stdout, &stderr
-			if err := cmd.Run(); err != nil {
-				return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(lastLine(stderr.String())))
+			cmd.Stderr = &stderr
+			pipe, err := cmd.StdoutPipe()
+			if err != nil {
+				return err
 			}
-			return stdout.Bytes(), nil
+			if err := cmd.Start(); err != nil {
+				return err
+			}
+			perr := stdout(pipe)
+			// Drain whatever the parser left, so FFmpeg is never blocked on a
+			// full pipe while Wait waits for it.
+			_, _ = io.Copy(io.Discard, pipe)
+			if err := cmd.Wait(); err != nil {
+				return fmt.Errorf("%w: %s", err, strings.TrimSpace(lastLine(stderr.String())))
+			}
+			return perr
 		},
 		ChatTimes: store.ChatTimesBetween,
 		Transcript: func(recordingID int64) ([]highlights.Line, error) {
@@ -522,4 +538,34 @@ func lastLine(s string) string {
 		return s[i+1:]
 	}
 	return s
+}
+
+// newCutter is the production clip cutter: every FFmpeg and ffprobe it starts
+// runs under the governor's priority wrapper, as derived-media jobs already
+// do, so a clip export -- a full 1080x1920 encode for a vertical short --
+// yields the CPU to a live broadcast instead of competing with it. The
+// governor's own policy still decides WHEN the job runs.
+func newCutter(log *slog.Logger, tools *ffmpeg.Tools, gov *jobs.Governor, opts ...clipper.Option) *clipper.Cutter {
+	if gov != nil {
+		opts = append(opts, clipper.WithNice(niceWrapper(gov)))
+	}
+	return clipper.New(log, tools.FFmpeg, tools.FFprobe, opts...)
+}
+
+// captionFontIn resolves a caption font name to a file in dir. The name is
+// matched against the directory's own listing and the path built from the
+// listed name, so a name from a job's params never becomes a path by itself.
+func captionFontIn(dir string) func(name string) (string, error) {
+	return func(name string) (string, error) {
+		names, err := ffmpeg.ListFonts(dir)
+		if err != nil {
+			return "", err
+		}
+		for _, n := range names {
+			if n == name {
+				return ffmpeg.FontPath(dir, n)
+			}
+		}
+		return "", fmt.Errorf("font %q is not in the fonts directory", name)
+	}
 }

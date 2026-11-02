@@ -53,7 +53,7 @@ func TestCaptionCuesRebasesEachSegmentsTranscript(t *testing.T) {
 		t.Error("a transcript that cannot be read is an error")
 	}
 	v := &Vertical{Layout: LayoutBlur, Captions: &Captions{Cues: cues, Tracks: []int{0}}}
-	if w := v.WithoutCues(); len(w.Captions.Cues) != 0 || len(v.Captions.Cues) != 2 || w.Captions.Tracks[0] != 0 {
+	if w := v.ForJob(); len(w.Captions.Cues) != 0 || len(v.Captions.Cues) != 2 || w.Captions.Tracks[0] != 0 {
 		t.Errorf("WithoutCues must drop the words from a copy, not the original: %+v / %+v", w.Captions, v.Captions)
 	}
 }
@@ -103,9 +103,15 @@ func TestTheWorkerCaptionsAShortFromTheTranscriptAtRunTime(t *testing.T) {
 			{Track: 1, StartMS: 12_000, EndMS: 14_000, Text: "the other mic"}}, nil
 	}
 
+	params.Request.Vertical.Captions.FontFile = ""
+	params.Request.Vertical.Captions.DrawText = false
+	params.Request.Vertical.Captions.Style.Font = "Inter-Bold.ttf"
+	raw, _ = json.Marshal(params)
+	fonts := func(name string) (string, error) { return filepath.Join(dir, "fonts", name), nil }
+
 	var drawn []string
 	c := New(testLog(), "ffmpeg", "ffprobe", WithRunner(captionRunner(&drawn)), WithProber(stubProber{}))
-	if err := NewWorker(c, nil, WithTranscript(src)).Run(context.Background(),
+	if err := NewWorker(c, nil, WithTranscript(src), WithCaptionFonts(fonts), WithDrawText(true)).Run(context.Background(),
 		jobs.Job{Kind: JobKind, Params: raw}, &workerReporter{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -127,4 +133,35 @@ type stubProber struct{}
 
 func (stubProber) Keyframes(context.Context, string, time.Duration, time.Duration) (Keyframes, error) {
 	return NewKeyframes(nil), nil
+}
+
+// THE CUTTER YIELDS TO THE LIVE STREAM. WithNice routes every child -- the cut
+// and the keyframe probe alike -- through the priority wrapper the governor
+// hands out, and a vertical export with no thread cap gets one.
+//
+// MUTATION: WithNice ignored. Observed: FAIL, the runner sees "ffmpeg".
+// MUTATION: no default thread cap. Observed: FAIL, no -threads.
+func TestTheCutterRunsItsChildrenThroughTheNiceWrapper(t *testing.T) {
+	var names []string
+	rec := func(_ context.Context, name string, args []string) ([]byte, error) {
+		names = append(names, name)
+		return nil, os.WriteFile(args[len(args)-1], []byte("x"), 0o644)
+	}
+	nice := func(name string, args []string) (string, []string) {
+		return "nice", append([]string{"-n", "10", name}, args...)
+	}
+	dir := t.TempDir()
+	c := New(testLog(), "ffmpeg", "ffprobe", WithRunner(rec), WithNice(nice), WithProber(stubProber{}))
+	tl, _ := NewTimeline([]Segment{{Path: filepath.Join(dir, "src.mkv"), Duration: time.Minute}})
+	res, err := c.Cut(context.Background(), tl, Request{In: time.Second, Out: 5 * time.Second,
+		OutPath: filepath.Join(dir, "short.mp4"), Mode: ModePrecise, Vertical: &Vertical{Layout: LayoutBlur}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 || names[0] != "nice" {
+		t.Errorf("children ran as %q, want them under the nice wrapper", names)
+	}
+	if res.Plan.HeadThreads != VerticalThreads() || VerticalThreads() < 1 {
+		t.Errorf("a vertical export's threads = %d, want the default cap %d", res.Plan.HeadThreads, VerticalThreads())
+	}
 }

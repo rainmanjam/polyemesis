@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -96,11 +97,57 @@ func TestAScanThroughTheRealWiringStoresSuggestions(t *testing.T) {
 	}
 
 	// A measurement that fails says why, from FFmpeg's own last line.
-	if _, err := deps.Run(context.Background(), bin, []string{"-hide_banner", "-i", filepath.Join(dir, "missing.mkv")}); err == nil ||
+	if err := deps.Run(context.Background(), bin, []string{"-hide_banner", "-i", filepath.Join(dir, "missing.mkv")},
+		func(r io.Reader) error { return nil }); err == nil ||
 		!strings.Contains(err.Error(), "exit status") || strings.HasSuffix(strings.TrimSpace(err.Error()), ":") {
 		t.Errorf("a failed run = %v, want the exit status and FFmpeg's reason after it", err)
 	}
 	if got := lastLine("first\nsecond\n"); got != "second" {
 		t.Errorf("lastLine = %q", got)
+	}
+}
+
+// The production cutter is the governor's: every FFmpeg it starts is wrapped
+// exactly as the governor's NiceCommand wraps it.
+func TestTheProductionCutterGoesThroughTheGovernor(t *testing.T) {
+	store, dir := wiringStore(t)
+	log := wiringLogger()
+	gov := jobs.NewGovernor(log, jobs.New(log, store))
+	var got []string
+	rec := clipper.WithRunner(func(_ context.Context, name string, args []string) ([]byte, error) {
+		got = append([]string{name}, args...)
+		return nil, nil
+	})
+	c := newCutter(log, &ffmpeg.Tools{FFmpeg: "ffmpeg", FFprobe: "ffprobe"}, gov, rec)
+	tl, _ := clipper.NewTimeline([]clipper.Segment{{Path: filepath.Join(dir, "a.mkv"), Duration: time.Minute}})
+	_, _ = c.Cut(context.Background(), tl, clipper.Request{In: time.Second, Out: 2 * time.Second, OutPath: filepath.Join(dir, "o.mkv")}, nil)
+	if len(got) == 0 {
+		t.Fatal("the cutter ran nothing")
+	}
+	wantName, _ := gov.NiceCommand("ffmpeg")
+	if got[0] != wantName {
+		t.Errorf("the cutter started %q, want the governor's %q", got[0], wantName)
+	}
+	if wantName == "ffmpeg" {
+		t.Log("this machine has no priority tool, so the wrapper is the identity here")
+	}
+}
+
+// The resolver a job falls back to names each segment's recording, so a job
+// whose params carry no segments can still be captioned at run time.
+//
+// MUTATION: recordingTimeline drops the id. Observed: FAIL, RecordingID 0.
+func TestTheRecordingResolverNamesTheRecording(t *testing.T) {
+	store, dir := wiringStore(t)
+	if err := store.UpsertRecording(&db.Recording{Filename: "r.mkv", DurationMS: 60_000}); err != nil {
+		t.Fatal(err)
+	}
+	recs, _ := store.ListRecordings()
+	tl, err := recordingTimeline(store, dir)(context.Background(), jobs.RecordingTarget(recs[0].ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if segs := tl.Segments(); len(segs) != 1 || segs[0].RecordingID != recs[0].ID {
+		t.Errorf("segments %+v do not name recording %d", segs, recs[0].ID)
 	}
 }

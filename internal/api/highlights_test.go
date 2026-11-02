@@ -239,8 +239,11 @@ func TestAVerticalExportCarriesTheLayoutAndTheTranscriptsCaptions(t *testing.T) 
 	if cues := planned.Captions.Cues; len(cues) != 1 || cues[0].StartMS != 12_000 || cues[0].Text != "hello there" {
 		t.Fatalf("cues %+v (want only track 0's line inside 10s..40s, on the timeline)", cues)
 	}
-	if filepath.Dir(c.FontFile) != mustAbs(t, srv.cfg.FontsDir()) || filepath.Base(c.FontFile) != clipper.DefaultCaptionFont {
-		t.Errorf("font %q is not the fonts directory's %s", c.FontFile, clipper.DefaultCaptionFont)
+	if f := planned.Captions.FontFile; filepath.Dir(f) != mustAbs(t, srv.cfg.FontsDir()) || filepath.Base(f) != clipper.DefaultCaptionFont {
+		t.Errorf("the planned font %q is not the fonts directory's %s", f, clipper.DefaultCaptionFont)
+	}
+	if c.FontFile != "" || c.Style.Font != clipper.DefaultCaptionFont {
+		t.Errorf("the job names its font (%q) and carries no path to it (%q)", c.Style.Font, c.FontFile)
 	}
 
 	// Planned at 70 seconds: still 200, still a short, and warned.
@@ -365,6 +368,13 @@ func TestACaptionedShortsJobCarriesNoTranscriptText(t *testing.T) {
 	}
 	if strings.Contains(string(j.Params), "hello there") {
 		t.Errorf("the job's params carry transcript text: %s", j.Params)
+	}
+	// Nor the server's fonts directory, nor what this FFmpeg can do: the job
+	// names the font, and the worker resolves it when it runs.
+	// MUTATION: the job keeps FontFile. Observed: FAIL, the fonts path in params.
+	if strings.Contains(string(j.Params), "fontFile") || strings.Contains(string(j.Params), srv.cfg.FontsDir()) ||
+		strings.Contains(string(j.Params), "drawText") {
+		t.Errorf("the job's params carry the server's font path or capability: %s", j.Params)
 	}
 	var params clipper.JobParams
 	if err := json.Unmarshal(j.Params, &params); err != nil {

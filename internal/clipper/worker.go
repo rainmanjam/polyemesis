@@ -66,6 +66,8 @@ type WorkerOption func(*workerConfig)
 
 type workerConfig struct {
 	transcript TranscriptSource
+	fonts      func(name string) (string, error)
+	drawText   bool
 }
 
 // WithTranscript lets the worker caption a vertical export. A job carries the
@@ -90,7 +92,7 @@ func NewWorker(c *Cutter, resolve Resolver, opts ...WorkerOption) jobs.Worker {
 		if err != nil {
 			return jobs.Permanent(err)
 		}
-		params.Request.Vertical = captionsAtRunTime(params.Request, tl, cfg.transcript, rep)
+		params.Request.Vertical = captionsAtRunTime(params.Request, tl, cfg, rep)
 		plan, err := planForJob(ctx, c, tl, params.Request)
 		if err != nil {
 			return err
@@ -195,26 +197,54 @@ func permanentPlanError(err error) bool {
 		errors.Is(err, ErrNoWorkDir)
 }
 
-// captionsAtRunTime fills a captioned short's cues from the transcript store.
-// A transcript that cannot be read costs the captions, not the short: the job
-// log says so and the render goes ahead.
-func captionsAtRunTime(req Request, tl Timeline, src TranscriptSource, rep jobs.Reporter) *Vertical {
+// captionsAtRunTime completes a captioned short from what the job did not
+// carry: the words (from the transcript store), the font file (from the font's
+// name) and whether this FFmpeg can draw at all. A transcript or font that
+// cannot be read costs the captions, not the short: the job log says so and
+// the render goes ahead.
+func captionsAtRunTime(req Request, tl Timeline, cfg workerConfig, rep jobs.Reporter) *Vertical {
 	v := req.Vertical
-	if v == nil || v.Captions == nil || len(v.Captions.Cues) > 0 {
-		return v
-	}
-	if src == nil {
-		rep.Logf("captions were asked for but this worker has no transcript source; rendering without them")
-		return v
-	}
-	cues, err := CaptionCues(tl.Segments(), src, req.In, req.Out, v.Captions.Tracks)
-	if err != nil {
-		rep.Logf("the transcript could not be read (%v); rendering without captions", err)
+	if v == nil || v.Captions == nil {
 		return v
 	}
 	out := *v
 	c := *v.Captions
-	c.Cues = cues
 	out.Captions = &c
+	if c.FontFile == "" && cfg.fonts != nil {
+		path, err := cfg.fonts(c.Style.Normalized().Font)
+		if err != nil {
+			rep.Logf("the caption font could not be found (%v); rendering without captions", err)
+			c.Cues, c.DrawText = nil, false
+			return &out
+		}
+		c.FontFile = path
+		c.DrawText = cfg.drawText
+	}
+	if len(c.Cues) > 0 {
+		return &out
+	}
+	if cfg.transcript == nil {
+		rep.Logf("captions were asked for but this worker has no transcript source; rendering without them")
+		return &out
+	}
+	cues, err := CaptionCues(tl.Segments(), cfg.transcript, req.In, req.Out, c.Tracks)
+	if err != nil {
+		rep.Logf("the transcript could not be read (%v); rendering without captions", err)
+		return &out
+	}
+	c.Cues = cues
 	return &out
+}
+
+// WithCaptionFonts resolves a caption font NAME to a file when the job runs. A
+// job names its font rather than carrying the server's path to it -- see
+// Vertical.ForJob.
+func WithCaptionFonts(resolve func(name string) (string, error)) WorkerOption {
+	return func(c *workerConfig) { c.fonts = resolve }
+}
+
+// WithDrawText tells the worker whether this FFmpeg can draw text, which is a
+// fact about the machine the job runs on rather than about the request.
+func WithDrawText(ok bool) WorkerOption {
+	return func(c *workerConfig) { c.drawText = ok }
 }

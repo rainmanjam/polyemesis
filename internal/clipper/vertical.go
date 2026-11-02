@@ -879,6 +879,9 @@ func (p *Plan) planVertical(v *Vertical) {
 	p.HeadSeek = p.In
 	p.HeadTrim = 0
 	p.TailDuration = 0
+	if p.HeadThreads == 0 {
+		p.HeadThreads = VerticalThreads()
+	}
 	if p.Duration() > ShortMaxDuration {
 		p.warn("this short is %s long; YouTube Shorts, Reels and TikTok's short format expect "+
 			"%s or less, and a longer upload may be published as a regular video", round(p.Duration()), ShortMaxDuration)
@@ -944,15 +947,18 @@ func CaptionCues(segs []Segment, src TranscriptSource, in, out time.Duration, tr
 	return cues, nil
 }
 
-// WithoutCues is a copy of v whose captions carry no words, for storing in a
-// job: what a job's params hold is readable by any token allowed to list jobs.
-func (v *Vertical) WithoutCues() *Vertical {
+// ForJob is a copy of v fit to store in a job, whose params are readable by any
+// token allowed to list jobs: the captions keep their tracks and style and lose
+// the words, the server's absolute font path and the FFmpeg capability. The
+// worker restores all three when it runs (WithTranscript, WithCaptionFonts,
+// WithDrawText).
+func (v *Vertical) ForJob() *Vertical {
 	if v == nil || v.Captions == nil {
 		return v
 	}
 	out := *v
 	c := *v.Captions
-	c.Cues = nil
+	c.Cues, c.FontFile, c.DrawText = nil, "", false
 	out.Captions = &c
 	return &out
 }

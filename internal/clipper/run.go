@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -45,6 +46,7 @@ type Cutter struct {
 	ffprobe string
 	prober  Prober
 	run     func(ctx context.Context, name string, args []string) ([]byte, error)
+	nice    func(name string, args []string) (string, []string)
 }
 
 // Option customises a Cutter, chiefly for tests.
@@ -79,6 +81,13 @@ func New(log *slog.Logger, ffmpegBin, ffprobeBin string, opts ...Option) *Cutter
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.nice != nil {
+		inner, nice := c.run, c.nice
+		c.run = func(ctx context.Context, name string, args []string) ([]byte, error) {
+			n, a := nice(name, args)
+			return inner(ctx, n, a)
+		}
 	}
 	if c.prober == nil {
 		c.prober = FFprobe{Bin: ffprobeBin, Run: c.run}
@@ -205,3 +214,19 @@ func report(fn ProgressFunc, fraction float64, msg string) {
 	}
 	fn(fraction, msg)
 }
+
+// WithNice runs every child the Cutter starts -- every cut step and every
+// keyframe probe -- through nice, which is how the job governor lowers a
+// child's CPU and I/O priority (jobs.Governor.NiceCommand). A clip export,
+// and a vertical one above all, is a full encode that may run while a
+// broadcast is going out; it must yield to the live stream rather than
+// compete with it. Applied after every other option, so it wraps whatever
+// runner the Cutter ends up with.
+func WithNice(nice func(name string, args []string) (string, []string)) Option {
+	return func(c *Cutter) { c.nice = nice }
+}
+
+// VerticalThreads is the thread cap a vertical export gets when the request
+// names none: half the machine, at least one. A short is a full-frame encode,
+// and a broadcast going out at the same time needs the other half.
+func VerticalThreads() int { return max(1, runtime.NumCPU()/2) }

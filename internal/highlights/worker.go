@@ -1,11 +1,11 @@
 package highlights
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
@@ -74,8 +74,10 @@ type Completer func(ctx context.Context, system, user string) (string, error)
 // like nor how the governor nices a child.
 type Deps struct {
 	FFmpeg string
-	// Run executes FFmpeg and returns its standard output.
-	Run func(ctx context.Context, name string, args []string) ([]byte, error)
+	// Run executes FFmpeg and hands its standard output to stdout AS IT
+	// ARRIVES. A loudness pass over hours of audio is ten readings a second;
+	// streaming them into the parser keeps memory flat however long it is.
+	Run func(ctx context.Context, name string, args []string, stdout func(io.Reader) error) error
 	// ChatTimes is every viewer message's arrival in [fromMS, toMS), Unix ms.
 	ChatTimes func(fromMS, toMS int64) ([]int64, error)
 	// Transcript is a recording's lines in that recording's own milliseconds.
@@ -123,14 +125,19 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 		}
 		rep.Progress(float64(i) / float64(len(p.Parts)+1))
 		if part.Path != "" && d.Run != nil {
-			out, err := d.Run(ctx, d.FFmpeg, LoudnessArgs(part.Path))
+			var got []Sample
+			err := d.Run(ctx, d.FFmpeg, LoudnessArgs(part.Path), func(r io.Reader) error {
+				var perr error
+				got, perr = ParseMomentary(r, part.StartMS)
+				return perr
+			})
 			if err != nil {
 				if ctx.Err() != nil {
 					return res, ctx.Err()
 				}
 				res.Warnings = append(res.Warnings, fmt.Sprintf("the loudness of part %d could not be measured: %v", i+1, err))
-			} else if s, err := ParseMomentary(bytes.NewReader(out), part.StartMS); err == nil && len(s) > 0 {
-				samples = append(samples, s...)
+			} else if len(got) > 0 {
+				samples = append(samples, got...)
 				res.LoudnessMeasured = true
 			}
 		}
