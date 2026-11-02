@@ -1,7 +1,13 @@
 # syntax=docker/dockerfile:1
 
+# Both FROMs are tag@sha256 (multi-arch index digests, checked 2026-11-02), like
+# the root Dockerfiles: one commit always builds from the same bytes. Upstream
+# fixes arrive as dependabot digest bumps (.github/dependabot.yml, docker,
+# directory "/web"). Keep the tag when bumping by hand -- dependabot reads it.
+# internal/testenv/dockerfile_digest_pin_test.go fails a FROM without a digest.
+
 # --- build ------------------------------------------------------------------
-FROM node:24-alpine AS build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 WORKDIR /app
 
 # Dependencies first so a content edit does not invalidate the install layer.
@@ -25,7 +31,7 @@ RUN npm run build
 # breaks both with permission errors that only surface at run time. This variant
 # is built to run rootless and defaults to 8080, which is also what Cloud Run
 # wants.
-FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e AS runtime
 
 # Cloud Run sends SIGTERM and expects the process to go. nginx's default is a
 # graceful stop on SIGQUIT and a FAST stop on SIGTERM, which is what we want

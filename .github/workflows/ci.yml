@@ -1835,8 +1835,8 @@ jobs:
           set -uo pipefail
           curl -sSfL --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors \
             --retry-delay 5 --max-time 120 -o /tmp/osv-scanner \
-            "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64"
-          echo "f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  /tmp/osv-scanner" | sha256sum -c -
+            "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64"
+          echo "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b  /tmp/osv-scanner" | sha256sum -c -
           chmod +x /tmp/osv-scanner
           out=$(/tmp/osv-scanner scan source --lockfile ui/package-lock.json 2>&1); rc=$?
           printf '%s\n' "$out"

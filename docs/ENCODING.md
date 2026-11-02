@@ -93,7 +93,7 @@ that count.
 One thing is deliberately *not* checked when you save: whether the output
 container can carry the ingest's *audio* codec. Nothing has connected at save
 time, so that codec is simply not known — guessing would either refuse
-combinations that work (FFmpeg 8.1.2 muxes two copied AAC tracks into flv,
+combinations that work (FFmpeg 8.1.3 muxes two copied AAC tracks into flv,
 mpegts, matroska and mp4 without complaint) or bless ones that do not. A bad
 combination fails loudly at start instead.
 
