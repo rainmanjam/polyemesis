@@ -179,6 +179,14 @@ type Notifier struct {
 	// what it costs a test to break it.
 	co *coalescer
 
+	// flushes is how an exported Flush reaches co while Run is live: the run
+	// loop does the pass on its own goroutine and closes the request's done.
+	// runMu guards running, the switch between that and doing it inline;
+	// Flush holds it across an inline pass so Run cannot start mid-pass.
+	flushes chan flushReq
+	runMu   sync.Mutex
+	running bool
+
 	mu        sync.Mutex
 	stats     Stats
 	cache     []Rule
@@ -205,6 +213,7 @@ func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
 		send:       make(chan Delivery, defaultSendDepth),
 		record:     make(chan Event, defaultRecordDepth),
 		co:         newCoalescer(),
+		flushes:    make(chan flushReq),
 		done:       make(chan struct{}),
 	}
 	n.sleep = sleepCtx
@@ -264,6 +273,11 @@ func (n *Notifier) SetTap(fn func(Event)) {
 // which coalesces, and one sender, which is the only thing that ever waits on
 // the network.
 func (n *Notifier) Run(ctx context.Context) {
+	// From here on co belongs to this goroutine; Flush must ask, not touch.
+	n.runMu.Lock()
+	n.running = true
+	n.runMu.Unlock()
+
 	var wg sync.WaitGroup
 	if n.recorder != nil {
 		// Detached on purpose: a sink wedged on a slow write must not hold
@@ -321,6 +335,9 @@ func (n *Notifier) Run(ctx context.Context) {
 			}
 		case <-tick.C:
 			n.flush(n.currentRules(), n.now())
+		case req := <-n.flushes:
+			n.flush(n.currentRules(), req.now)
+			close(req.done)
 		}
 	}
 }
@@ -359,8 +376,35 @@ func (n *Notifier) flush(rules []Rule, now time.Time) {
 	n.bump(func(s *Stats) { s.Pending = pending })
 }
 
+// flushReq asks the run loop for one coalescing pass at now.
+type flushReq struct {
+	now  time.Time
+	done chan struct{}
+}
+
 // Flush is the test and shutdown entry point into one coalescing pass.
-func (n *Notifier) Flush(now time.Time) { n.flush(n.currentRules(), now) }
+//
+// co is single-goroutine (see coalescer), so Flush never walks it beside a
+// live Run: it hands the pass to the run loop and waits for it. Before Run
+// starts it runs the pass inline, synchronously, so the caller can read
+// n.send straight after. After Run has stopped it does nothing -- send is
+// closed and there is no sender left to deliver to.
+func (n *Notifier) Flush(now time.Time) {
+	n.runMu.Lock()
+	if !n.running {
+		n.flush(n.currentRules(), now)
+		n.runMu.Unlock()
+		return
+	}
+	n.runMu.Unlock()
+
+	req := flushReq{now: now, done: make(chan struct{})}
+	select {
+	case n.flushes <- req:
+		<-req.done
+	case <-n.done:
+	}
+}
 
 // Test delivers one synthetic event to a single rule immediately, skipping the
 // queue, the subscription filter and the debounce.
