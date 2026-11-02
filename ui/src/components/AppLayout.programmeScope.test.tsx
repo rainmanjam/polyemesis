@@ -169,8 +169,16 @@ describe("the header live badge counts and names the selected programme", () => 
     render(layout());
     const chip = screen.getByTestId("mobile-on-air");
     expect(chip.className).toContain("whitespace-nowrap");
-    expect(chip.className).toContain("min-w-0");
+    // Shrinks, but never below the status dot (min-w-1.5, the dot's 6px):
+    // at 360px a min-w-0 chip collapsed to nothing beside the switcher.
+    expect(chip.className.split(/\s+/)).toContain("min-w-1.5");
     expect(chip.lastElementChild?.className).toContain("truncate");
-    expect(chip.getAttribute("title")).toBe(chip.textContent);
+    // The whole scoped sentence is in the title and, for a screen reader, in
+    // the sr-only text; the visible part is the state alone, because the
+    // programme switcher beside it already names the programme (2026-11).
+    const sr = chip.querySelector(".sr-only")?.textContent ?? "";
+    expect(chip.getAttribute("title")).toBe(sr);
+    expect(sr).toMatch(/^.+: /); // "<programme>: Off air"
+    expect(chip.lastElementChild?.textContent).toBe(translate("en", "onAir.offAir"));
   });
 });

@@ -741,7 +741,7 @@ its first tagged release.
   pressed, and text fields have a visible edge (3.66:1 against a card, from 1.24:1). Monitoring's
   info icons, switches and "Show log" links have 24px targets. Pages share one right edge whether
   or not they scroll, the programme switcher shows the programme's name instead of cutting it to
-  ten characters (on a phone, the part before the dash, with the wordmark giving way to the logo), headings and help text wrap evenly, and Routing no longer scrolls sideways on a
+  ten characters (on a phone, the part before the dash, with the wordmark giving way to the logo, and the on-air chip beside it keeping only its dot and state words so the programme is named once), headings and help text wrap evenly, and Routing no longer scrolls sideways on a
   phone. Routing's mute-and-gain rows stack below about 42rem (name, role and channels; the meter
   with its own L/R and dB readouts; then gain and Mute) instead of drawing the readouts over the
   slider, and a long role wraps rather than being cut. The Sources card header, its publish rows

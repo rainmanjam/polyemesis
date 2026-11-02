@@ -226,6 +226,8 @@ export function AppLayout({
   const live = headerLive({ destinations: status?.destinations, programme, programmes, sourceCount });
   const liveCount = live.count;
   const liveLabel = t(live.key, live.params);
+  // Scoped to one named programme: exactly when the programme switcher shows.
+  const programmeScoped = live.key === "chrome.liveCountProgramme";
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
@@ -278,13 +280,35 @@ export function AppLayout({
             the title. */}
         <span
           data-testid="mobile-on-air"
-          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden"
+          className="flex min-w-1.5 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden"
           title={liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
         >
-          <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
-          <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
-            {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
+          {/* shrink-0: at 360px the chip is squeezed beside the switcher, and
+              the dot is the part that must survive. */}
+          <span className="flex shrink-0">
+            <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
           </span>
+          {/* NAMED ONCE. When the count is scoped to a programme, the
+              programme switcher beside this already shows its name, so the
+              chip printed it twice on a phone ("● Main Pr…" and "Main
+              Programme"). The chip keeps the state words ("3 live", "Off
+              air"); the scoped sentence, programme included, stays for a
+              screen reader. */}
+          {programmeScoped ? (
+            <>
+              <span className="sr-only">{liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}</span>
+              <span
+                aria-hidden="true"
+                className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}
+              >
+                {liveCount > 0 ? t("chrome.liveCount", { count: liveCount }) : t("onAir.offAir")}
+              </span>
+            </>
+          ) : (
+            <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
+              {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
+            </span>
+          )}
         </span>
 
         {/* No tinted tile behind it: the site sets the mark straight on the
