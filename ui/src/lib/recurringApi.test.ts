@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
 import {
-  getDestinationSourceId,
   getRollover,
   getTemplate,
   listOccurrences,
@@ -120,12 +119,5 @@ describe("rollover calls", () => {
       "PUT /api/v1/destinations/7/rollover?source=3",
       "POST /api/v1/destinations/7/rollover/run",
     ]);
-  });
-
-  it("reads the programme from the destination, and null when it carries none", async () => {
-    stubFetch(200, { sourceId: 5 });
-    await expect(getDestinationSourceId(7)).resolves.toBe(5);
-    stubFetch(200, {});
-    await expect(getDestinationSourceId(7)).resolves.toBeNull();
   });
 });

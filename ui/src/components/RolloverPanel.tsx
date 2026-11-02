@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { countdownFor, formatRemaining } from "@/lib/rolloverCountdown";
 import { classifyRun } from "@/lib/recurringOutcome";
-import { getDestinationSourceId, getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
+import { getRollover, runRollover, saveRollover } from "@/lib/recurringApi";
 import { useT } from "@/lib/i18n";
 import type { DestStatus, RolloverSettings, RolloverView } from "@/lib/types";
 
@@ -66,25 +66,13 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [runOpen, setRunOpen] = useState(false);
-  // The programme the destination carries. Resolved once, because the rollover routes are programme-scoped.
-  const [sourceId, setSourceId] = useState<number | null | undefined>(undefined);
-
-  useEffect(() => {
-    let live = true;
-    getDestinationSourceId(dest.id)
-      .then((id) => {
-        if (live) setSourceId(id);
-      })
-      .catch((err: unknown) => {
-        if (live) setNotice({ tone: "bad", text: messageOf(err) });
-      });
-    return () => {
-      live = false;
-    };
-  }, [dest.id]);
+  // The programme the destination carries, read off the status row the card is drawn from. It is NOT fetched:
+  // a lookup of its own put a second round trip between the card mounting and the rollover read, and a row
+  // deleted inside that gap answered the read 404 (the browser suite's intermittent console error). The field
+  // is omitempty on the wire, so "no programme" arrives as undefined and is sent as no ?source at all.
+  const sourceId = dest.sourceId ?? null;
 
   const load = useCallback(async () => {
-    if (sourceId === undefined) return;
     try {
       const v = await getRollover(dest.id, sourceId);
       setView(v);

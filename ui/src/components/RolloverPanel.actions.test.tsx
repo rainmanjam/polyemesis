@@ -14,7 +14,6 @@ import type { DestStatus, RolloverView } from "@/lib/types";
  * running" and "this destination is gone" call for different things from the operator. */
 
 const mocks = vi.hoisted(() => ({
-  getDestinationSourceId: vi.fn(),
   getRollover: vi.fn(),
   saveRollover: vi.fn(),
   runRollover: vi.fn(),
@@ -30,7 +29,7 @@ afterEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
 });
 
-const dest = { id: 7, name: "YouTube main", platform: "youtube", enabled: true } as unknown as DestStatus;
+const dest = { id: 7, name: "YouTube main", platform: "youtube", enabled: true, sourceId: 3 } as unknown as DestStatus;
 
 function view(over: Partial<RolloverView> = {}): RolloverView {
   return {
@@ -46,7 +45,6 @@ function view(over: Partial<RolloverView> = {}): RolloverView {
 }
 
 async function openPanel() {
-  mocks.getDestinationSourceId.mockResolvedValue(3);
   mocks.getRollover.mockResolvedValue(view());
   render(<RolloverPanel dest={dest} />);
   await screen.findByRole("button", { name: "Rollover settings" });

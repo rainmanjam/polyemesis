@@ -13,22 +13,21 @@ import type { DestStatus, RolloverView } from "@/lib/types";
  * number at all. */
 
 const mocks = vi.hoisted(() => ({
-  getDestinationSourceId: vi.fn(),
   getRollover: vi.fn(),
 }));
 
 vi.mock("@/lib/recurringApi", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/recurringApi")>();
-  return { ...real, getDestinationSourceId: mocks.getDestinationSourceId, getRollover: mocks.getRollover };
+  return { ...real, getRollover: mocks.getRollover };
 });
 
 afterEach(() => {
   cleanup();
-  mocks.getDestinationSourceId.mockReset();
   mocks.getRollover.mockReset();
+  vi.unstubAllGlobals();
 });
 
-const dest = { id: 7, name: "Twitch main", platform: "twitch", enabled: true } as unknown as DestStatus;
+const dest = { id: 7, name: "Twitch main", platform: "twitch", enabled: true, sourceId: 3 } as unknown as DestStatus;
 
 function view(over: Partial<RolloverView>): RolloverView {
   return {
@@ -48,9 +47,28 @@ function view(over: Partial<RolloverView>): RolloverView {
   };
 }
 
+describe("RolloverPanel's read", () => {
+  /* ONE READ, AT MOUNT, NAMING THE PROGRAMME THE CARD ALREADY HAS.
+   * The panel used to resolve the programme with its own GET /destinations/{id} and only then read the rollover.
+   * That second hop went out a round trip after the card mounted, so a row deleted in between answered it 404 --
+   * a console error on the card, caught intermittently by the browser suite. The hop was also reading
+   * `sourceId` off the top level of an envelope that carries it under `destination`, so it always came back null.
+   * The status row the card is drawn from carries `sourceId` itself. */
+  it("reads the rollover once at mount with the card's own programme, and asks for nothing else", async () => {
+    const network = vi.fn();
+    vi.stubGlobal("fetch", network);
+    mocks.getRollover.mockResolvedValue(view({}));
+
+    render(<RolloverPanel dest={dest} />);
+
+    await waitFor(() => expect(mocks.getRollover).toHaveBeenCalledTimes(1));
+    expect(mocks.getRollover).toHaveBeenCalledWith(7, 3);
+    expect(network, "the panel made a request of its own besides the rollover read").not.toHaveBeenCalled();
+  });
+});
+
 describe("RolloverPanel countdown", () => {
   it("counts down to a verified cutoff and labels the cap as reported", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     const cutoff = new Date(Date.now() + 2 * 3_600_000).toISOString();
     mocks.getRollover.mockResolvedValue(view({ cutoffAt: cutoff }));
 
@@ -63,16 +81,16 @@ describe("RolloverPanel countdown", () => {
   });
 
   it("waits for the platform's start when delivering with no cutoff yet", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(null);
     mocks.getRollover.mockResolvedValue(view({ cutoffAt: undefined }));
 
-    render(<RolloverPanel dest={dest} />);
+    // A row carrying no programme (omitempty on the wire) reads with no ?source rather than not at all.
+    render(<RolloverPanel dest={{ ...dest, sourceId: undefined }} />);
 
     await waitFor(() => expect(screen.getByText(/Waiting for the platform/)).toBeTruthy());
+    expect(mocks.getRollover).toHaveBeenCalledWith(7, null);
   });
 
   it("shows no number for an unverified cap, only the reason", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockResolvedValue(
       view({
         cutoffAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -87,7 +105,6 @@ describe("RolloverPanel countdown", () => {
   });
 
   it("shows no countdown while the destination is not delivering", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockResolvedValue(view({ delivering: false }));
 
     render(<RolloverPanel dest={dest} />);
@@ -98,7 +115,6 @@ describe("RolloverPanel countdown", () => {
   // A countdown-only platform (Twitch, Facebook) cannot be rolled over by polyemesis: the
   // server only counts the time down. Offering "Roll over now" there invites a refusal.
   it("offers Roll over now only on a platform polyemesis can roll over automatically", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockResolvedValue(view({ action: "countdown" }));
 
     render(<RolloverPanel dest={dest} />);
@@ -108,7 +124,6 @@ describe("RolloverPanel countdown", () => {
   });
 
   it("offers Roll over now on an automatic platform while it is delivering", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockResolvedValue(view({ action: "automatic", platform: "youtube" }));
 
     render(<RolloverPanel dest={dest} />);
@@ -119,7 +134,6 @@ describe("RolloverPanel countdown", () => {
   // A read that fails leaves no view to draw, but the failure itself must still be shown:
   // returning nothing would make a broken read look like a platform with no cap.
   it("shows a failed read as a notice rather than rendering nothing", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockRejectedValue(new ApiError(500, "the rollover store could not be read"));
 
     render(<RolloverPanel dest={dest} />);
@@ -127,16 +141,7 @@ describe("RolloverPanel countdown", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("rollover store could not be read"));
   });
 
-  it("shows a failed programme lookup as a notice rather than rendering nothing", async () => {
-    mocks.getDestinationSourceId.mockRejectedValue(new Error("the destination could not be read"));
-
-    render(<RolloverPanel dest={dest} />);
-
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("destination could not be read"));
-  });
-
   it("renders nothing for a platform with no cap", async () => {
-    mocks.getDestinationSourceId.mockResolvedValue(3);
     mocks.getRollover.mockResolvedValue(view({ limit: undefined }));
 
     const { container } = render(<RolloverPanel dest={dest} />);

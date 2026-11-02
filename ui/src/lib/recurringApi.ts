@@ -97,13 +97,6 @@ export function retitleOccurrence(id: number, title: string): Promise<{ id: numb
   return autoApi.post<{ id: number; title: string }>(`/recurring/occurrences/${id}/title`, { title });
 }
 
-/** The programme a destination carries. The destination GET is not programme-scoped, so it is the one
- *  read that can name the source the rollover calls then need. */
-export async function getDestinationSourceId(destinationId: number): Promise<number | null> {
-  const d = await autoApi.get<{ sourceId?: number | null }>(`/destinations/${destinationId}`);
-  return d.sourceId ?? null;
-}
-
 export function getRollover(destinationId: number, sourceId: number | null | undefined): Promise<RolloverView> {
   return autoApi.get<RolloverView>(`/destinations/${destinationId}/rollover${sourceParam(sourceId)}`);
 }
