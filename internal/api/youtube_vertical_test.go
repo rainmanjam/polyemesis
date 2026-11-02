@@ -257,7 +257,7 @@ func vertIDListed(ids []string, want string) bool {
 func verticalServer(t *testing.T, base string) (*Server, http.Handler, *db.DB) {
 	t.Helper()
 	dir := t.TempDir()
-	store := dbtest.OpenAt(t, filepath.Join(dir, "polyemesis.db"))
+	store := dbtest.OpenCheapAt(t, filepath.Join(dir, "polyemesis.db"))
 	if _, err := store.CreateUser("admin", testPassword); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
