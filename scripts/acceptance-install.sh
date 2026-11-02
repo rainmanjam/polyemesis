@@ -1867,6 +1867,153 @@ got="$(resolve "")"; st=$?
   && ok "with no --version, the latest release is still what installs" \
   || bad "with no --version, resolved '$got' (exit $st), want v9.9.8"
 
+step "27. Caption fonts: CJK by default, an opt-out that keeps DejaVu, and never fatal"
+#
+# Burned-in captions are drawn with the host's fonts in binary mode, so
+# install_caption_fonts puts fontconfig, DejaVu and Noto CJK there. apt-get,
+# fc-list and fc-cache are stubbed: apt-get logs what it was asked and fails
+# the CJK package on request, fc-list answers from STUB_FONTS. The real thing
+# is proved per distribution in one-shot containers (see the PR that added
+# this); what is pinned here is the decision logic.
+fonts_stub="$work/fonts-bin"; mkdir -p "$fonts_stub"
+cat > "$fonts_stub/apt-get" <<'APTSTUB'
+#!/usr/bin/env bash
+echo "apt-get $*" >> "$STUB_PKG_LOG"
+case " $* " in
+  *" fonts-noto-cjk "*) [ "${STUB_FAIL_CJK:-false}" != true ] || { echo "E: Unable to locate package fonts-noto-cjk"; exit 100; } ;;
+esac
+exit 0
+APTSTUB
+cat > "$fonts_stub/fc-list" <<'FCSTUB'
+#!/usr/bin/env bash
+case "$*" in
+  *"DejaVu Sans"*) case " ${STUB_FONTS:-} " in *" base "*) echo "DejaVu Sans" ;; esac ;;
+  *":lang=ja"*)    case " ${STUB_FONTS:-} " in *" cjk "*)  echo "Noto Sans CJK JP" ;; esac ;;
+esac
+exit 0
+FCSTUB
+printf '#!/usr/bin/env bash\necho "fc-cache $*" >> "$STUB_PKG_LOG"\n' > "$fonts_stub/fc-cache"
+chmod +x "$fonts_stub/apt-get" "$fonts_stub/fc-list" "$fonts_stub/fc-cache"
+
+fonts_run() { # fonts_run <log> <cjk yes|no> <present fonts> [fail-cjk] -> output; status of install_caption_fonts
+  local log="$1" cjk="$2" present="$3" failcjk="${4:-false}"
+  : > "$log"
+  ( load_install_defs || exit 1
+    # shellcheck disable=SC2034 # read by install_caption_fonts, via the eval
+    CAPTION_FONTS_CJK="$cjk"
+    export STUB_PKG_LOG="$log" STUB_FONTS="$present" STUB_FAIL_CJK="$failcjk"
+    PATH="$fonts_stub:$PATH"
+    echo "PLAN: $(caption_fonts_plan)"
+    install_caption_fonts; st=$?
+    echo "RESULT: $CAPTION_FONTS_RESULT"
+    exit "$st" ) 2>&1
+}
+
+log="$work/fonts-default.log"
+out="$(fonts_run "$log" yes "")"; st=$?
+[ "$st" -eq 0 ] && ok "a fresh host: install_caption_fonts returns 0" || bad "a fresh host: install_caption_fonts exited $st"
+grep -q 'install .*fontconfig fonts-dejavu-core' "$log" \
+  && ok "by default it installs fontconfig and fonts-dejavu-core" \
+  || bad "by default it never asked apt-get for fontconfig fonts-dejavu-core: $(tr '\n' ';' < "$log")"
+grep -q 'install .*fonts-noto-cjk' "$log" \
+  && ok "by default it installs fonts-noto-cjk (CJK is on unless declined)" \
+  || bad "by default it never asked apt-get for fonts-noto-cjk: $(tr '\n' ';' < "$log")"
+grep -q '^fc-cache -f' "$log" \
+  && ok "it rebuilds the system font cache (fc-cache -f) afterwards" \
+  || bad "it never ran fc-cache -f, so the sandboxed service starts without a cache"
+case "$out" in
+  *"PLAN: will install fontconfig + DejaVu (about 3 MB), Noto CJK (about 60 MB) with apt-get"*)
+    ok "the plan names both sets and the CJK download size before anything runs" ;;
+  *) bad "the plan line does not name the sets and size: $(printf '%s' "$out" | grep PLAN)" ;;
+esac
+
+log="$work/fonts-nocjk.log"
+out="$(fonts_run "$log" no "")"; st=$?
+if [ "$st" -eq 0 ] && grep -q 'fonts-dejavu-core' "$log" && ! grep -q 'fonts-noto-cjk' "$log"; then
+  ok "--no-cjk-fonts still installs fontconfig + DejaVu and never asks for Noto CJK"
+else
+  bad "--no-cjk-fonts: exit $st, apt-get saw: $(tr '\n' ';' < "$log")"
+fi
+case "$out" in
+  *"CJK skipped (--no-cjk-fonts)"*) ok "the opt-out is stated in the plan and the result" ;;
+  *) bad "the opt-out is not stated: $out" ;;
+esac
+
+log="$work/fonts-failcjk.log"
+out="$(fonts_run "$log" yes "" true)"; st=$?
+if [ "$st" -eq 0 ]; then
+  ok "a CJK package that will not install does not fail the step"
+else
+  bad "a CJK package that will not install made install_caption_fonts exit $st"
+fi
+case "$out" in
+  *"[warn]"*"no CJK font installed"*"RESULT: fontconfig + DejaVu, CJK MISSING"*)
+    ok "it warns, shows apt-get's error, and the summary line says CJK is MISSING" ;;
+  *) bad "a failed CJK install was not reported as a warning with a MISSING result: $out" ;;
+esac
+case "$out" in
+  *"Unable to locate package fonts-noto-cjk"*) ok "the warning carries the package manager's own error" ;;
+  *) bad "the warning dropped the package manager's error: $out" ;;
+esac
+
+log="$work/fonts-present.log"
+out="$(fonts_run "$log" yes "base cjk")"; st=$?
+if [ "$st" -eq 0 ] && ! grep -q '^apt-get' "$log"; then
+  ok "fonts already present: no package manager runs at all (not even apt-get update)"
+else
+  bad "fonts already present, yet apt-get ran: $(tr '\n' ';' < "$log")"
+fi
+case "$out" in
+  *"PLAN: already present"*) ok "and the plan says so" ;;
+  *) bad "the plan for a host that has the fonts: $(printf '%s' "$out" | grep PLAN)" ;;
+esac
+
+# dnf names the CJK package differently on Fedora and EL9; the second name has
+# to be tried when the first is not in the repositories. caption_font_manager
+# is overridden rather than PATH-stubbed: a CI runner has a real apt-get, which
+# that function would rightly prefer.
+got="$( ( load_install_defs || exit 1
+  caption_font_manager() { echo dnf; }
+  caption_fonts_have_base() { return 0; }
+  caption_fonts_have_cjk() { return 1; }
+  caption_font_install() { echo "try $*"; [ "$2" = google-noto-sans-cjk-ttc-fonts ]; }
+  install_caption_fonts ) 2>&1)"
+case "$got" in
+  *"try dnf google-noto-sans-cjk-fonts"*"try dnf google-noto-sans-cjk-ttc-fonts"*"google-noto-sans-cjk-ttc-fonts installed"*)
+    ok "dnf: falls back from google-noto-sans-cjk-fonts (Fedora) to -ttc-fonts (EL9)" ;;
+  *) bad "dnf CJK fallback did not try both names in order: $got" ;;
+esac
+
+got="$( ( load_install_defs || exit 1; parse_args --no-cjk-fonts; echo "$CAPTION_FONTS_CJK" ) 2>&1 | tail -1)"
+[ "$got" = no ] && ok "--no-cjk-fonts is a flag install.sh accepts, and it turns CJK off" \
+  || bad "--no-cjk-fonts did not set CAPTION_FONTS_CJK=no (got: $got)"
+got="$( ( load_install_defs || exit 1; parse_args; echo "$CAPTION_FONTS_CJK" ) 2>&1 | tail -1)"
+[ "$got" = yes ] && ok "with no flag, CJK fonts are on" || bad "with no flag, CAPTION_FONTS_CJK=$got"
+
+# The upgrade path. The choice is baked into update.sh, the font step sits
+# after every refusal and before the stop, and a non-root run (this suite)
+# reaches no package manager.
+root="$work/fonts-update"; mkdir -p "$root"
+( load_install_defs || exit 1
+  # shellcheck disable=SC2034 # read by write_binary_update_script, via the eval
+  INSTALL_DIR="$root/opt"; DATA_DIR="$root/data"; BIN_PATH="$root/polyemesis"; CAPTION_FONTS_CJK=no
+  write_binary_update_script )
+upd="$root/opt/update.sh"
+grep -qx 'CAPTION_FONTS_CJK="no"' "$upd" \
+  && ok "update.sh keeps the --no-cjk-fonts choice it was installed with" \
+  || bad "update.sh does not carry the install-time CJK choice"
+grep -q -- '--no-cjk-fonts) CAPTION_FONTS_CJK=no' "$upd" \
+  && ok "update.sh accepts --no-cjk-fonts itself" \
+  || bad "update.sh has no --no-cjk-fonts flag"
+call="$(grep -n '^  install_caption_fonts$' "$upd" | head -1 | cut -d: -f1)"
+refuse="$(grep -n 'already exists. Refusing to upgrade' "$upd" | head -1 | cut -d: -f1)"
+stop="$(grep -n 'sudo systemctl stop' "$upd" | head -1 | cut -d: -f1)"
+if [ -n "$call" ] && [ -n "$refuse" ] && [ -n "$stop" ] && [ "$refuse" -lt "$call" ] && [ "$call" -lt "$stop" ]; then
+  ok "update.sh checks the fonts after its refusals and before it stops the service"
+else
+  bad "update.sh font step is misplaced (refusal line ${refuse:-?}, fonts ${call:-?}, stop ${stop:-?})"
+fi
+
 # ------------------------------------------------------------- vacuity guard
 #
 # THE VERDICT ABOVE IS DERIVED FROM COUNTERS, AND COUNTERS CANNOT SEE A STEP

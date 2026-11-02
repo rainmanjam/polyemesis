@@ -70,7 +70,8 @@ flowchart TD
 
     mode -- binary --> b1["install_binary_mode"]
     b1 --> b2["check_ffmpeg<br/><i>see the gate below</i>"]
-    b2 --> b3["verify SHA256SUMS<br/>then install unit"]
+    b2 --> bf["install_caption_fonts<br/>fontconfig · DejaVu · Noto CJK<br/><i>warns, never fails</i>"]
+    bf --> b3["verify SHA256SUMS<br/>then install unit"]
     b3 --> fw
 
     fw["configure_firewall<br/><b>udp</b>/6000 for SRT"] --> ver["verify"]
@@ -181,6 +182,55 @@ shape the audio router compiles) and `-progress` emitting the fields the engine
 reads. A build whose version cannot be parsed but which passes the probe is
 accepted on the measurement; one that fails it is refused and offered a
 replacement, instead of being assumed fine.
+
+### Caption fonts
+
+Burned-in captions are drawn by FFmpeg's libass, which finds its fonts through
+fontconfig — so in binary mode they use the **host's** fonts. In binary mode
+the installer sets those up for you, and captions in Chinese, Japanese and
+Korean render out of the box:
+
+| Set | Covers | Download |
+|---|---|---|
+| fontconfig + DejaVu | Latin, Greek, Cyrillic, Arabic, Hebrew | about 3 MB |
+| Noto CJK (Sans) | Chinese, Japanese, Korean | about 60 MB (apt), 95 MB (apk), 130 MB (dnf), 190 MB (pacman) |
+
+The packages, by package manager:
+
+| Package manager | fontconfig + DejaVu | CJK |
+|---|---|---|
+| apt-get (Debian, Ubuntu) | `fontconfig fonts-dejavu-core` | `fonts-noto-cjk` |
+| dnf (Fedora) | `fontconfig dejavu-sans-fonts` | `google-noto-sans-cjk-fonts` |
+| dnf (Rocky, Alma, RHEL 9) | `fontconfig dejavu-sans-fonts` | `google-noto-sans-cjk-ttc-fonts` |
+| apk (Alpine) | `fontconfig font-dejavu` | `font-noto-cjk` |
+| pacman (Arch) | `fontconfig ttf-dejavu` | `noto-fonts-cjk` |
+
+The plan the installer shows before it changes anything has a `caption fonts`
+line naming what it will install and the download size. It then runs
+`fc-cache -f`, so the service — which cannot write a font cache of its own
+under the unit's sandboxing — starts with one already built.
+
+- **`--no-cjk-fonts`** skips the CJK set and still installs fontconfig and
+  DejaVu. Chinese, Japanese and Korean captions then show as empty boxes.
+- **Already there?** Nothing is installed. Presence is asked of fontconfig
+  (`fc-list :lang=ja`), so any CJK font you already have counts.
+- **It never stops the install.** polyemesis streams without a single font;
+  only captions need them. A package that will not install is a warning that
+  names it, and the summary's `Captions` line says what is missing. On Arch the
+  installer runs `pacman -S`, never `-Sy`; if the package database is stale,
+  run `pacman -Syu` and re-run.
+- **`--check`** reports the line and installs nothing.
+- **Upgrades keep them.** The generated `update.sh` checks again before it
+  stops the service and installs whatever has gone missing, respecting the
+  choice you installed with; `update.sh --no-cjk-fonts` declines CJK for that
+  run. When the fonts are present it runs no package manager at all.
+- **Docker mode** installs nothing on the host: the container draws captions
+  with the image's own fonts, chosen by the Dockerfile's `CAPTION_FONTS`
+  build argument.
+
+The installer is Linux-only, so none of this applies on macOS, where the
+system fonts already cover CJK. If you install the binary by hand on Linux,
+install the packages in the table yourself and run `sudo fc-cache -f`.
 
 ### Verifying the download
 

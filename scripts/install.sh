@@ -1016,6 +1016,213 @@ check_ffmpeg() {
   return 0
 }
 
+# ------------------------------------------------------------- caption fonts
+#
+# BURNED-IN CAPTIONS ARE DRAWN WITH THIS HOST'S FONTS. FFmpeg's subtitles
+# filter renders through libass, and libass finds its fonts through fontconfig,
+# so in binary mode the glyphs on air are whatever the host has installed. A
+# minimal server image has no fontconfig and no fonts at all, and a caption
+# line in Japanese then renders as a row of empty boxes -- on a live stream,
+# where nobody gets to fix it before the audience sees it.
+#
+# Docker mode never calls any of this: the image carries fontconfig and DejaVu,
+# with CJK behind a build argument.
+#
+# Two sets, installed separately so one cannot block the other:
+#   base  fontconfig + DejaVu: Latin, Greek, Cyrillic, Arabic, Hebrew. ~3 MB.
+#   cjk   Noto CJK: Chinese, Japanese, Korean. Tens of MB, which is why it has
+#         an opt-out (--no-cjk-fonts) and why a failure there only warns.
+#
+# NEITHER IS FATAL. polyemesis starts and streams without a single font; only
+# captions need them. An install that stopped because a font mirror was down
+# would be refusing the operator something to protect a feature they may never
+# turn on.
+#
+# PRESENCE IS ASKED OF FONTCONFIG, NOT THE PACKAGE DATABASE. A host that
+# already has some other CJK font (a different Noto build, WenQuanYi, a font
+# the operator copied in by hand) needs nothing from us, and a package-name
+# check would install a second copy anyway. That is also what makes this cheap
+# to run on every update.sh: when the fonts are there, no package manager runs.
+#
+# The `[ -n "$(fc-list ...)" ]` shape is deliberate: `fc-list | grep -q .`
+# under pipefail can SIGPIPE fc-list on the first match and read as "absent".
+CAPTION_FONTS_CJK=yes      # --no-cjk-fonts sets "no"
+CAPTION_FONTS_RESULT=""    # one line for print_summary
+CAPTION_FONTS_ERR=""       # the tail of the last failed package-manager run
+
+# caption_font_manager prints the package manager to use, by what is on PATH
+# rather than by /etc/os-release, so derivatives (Mint, Pop!_OS, Manjaro,
+# AlmaLinux, ...) take the same path as their parent.
+caption_font_manager() {
+  local m
+  for m in apt-get dnf apk pacman; do
+    if command -v "$m" >/dev/null 2>&1; then echo "$m"; return 0; fi
+  done
+  echo ""
+}
+
+# caption_font_pkgs <manager> base|cjk
+#
+# base: every name listed is installed together.
+# cjk:  ALTERNATIVES, tried in order until one installs. Fedora names the Noto
+#       CJK Sans package google-noto-sans-cjk-fonts; EL9 (Rocky, Alma, RHEL)
+#       still calls it google-noto-sans-cjk-ttc-fonts.
+caption_font_pkgs() {
+  case "$1:$2" in
+    apt-get:base) echo "fontconfig fonts-dejavu-core" ;;
+    apt-get:cjk)  echo "fonts-noto-cjk" ;;
+    dnf:base)     echo "fontconfig dejavu-sans-fonts" ;;
+    dnf:cjk)      echo "google-noto-sans-cjk-fonts google-noto-sans-cjk-ttc-fonts" ;;
+    apk:base)     echo "fontconfig font-dejavu" ;;
+    apk:cjk)      echo "font-noto-cjk" ;;
+    pacman:base)  echo "fontconfig ttf-dejavu" ;;
+    pacman:cjk)   echo "noto-fonts-cjk" ;;
+    *)            echo "" ;;
+  esac
+}
+
+# caption_font_cjk_size <manager> -- the CJK download, measured in a clean
+# container of each family (2026-11). Stated rather than computed: asking apt
+# for the real figure would mean an `apt-get update` before the operator has
+# said yes to anything.
+caption_font_cjk_size() {
+  case "$1" in
+    apt-get) echo "about 60 MB" ;;
+    dnf)     echo "about 130 MB" ;;
+    apk)     echo "about 95 MB" ;;
+    pacman)  echo "about 190 MB" ;;
+    *)       echo "size unknown" ;;
+  esac
+}
+
+caption_fonts_have_base() {
+  command -v fc-list >/dev/null 2>&1 && [ -n "$(fc-list 'DejaVu Sans' family 2>/dev/null)" ]
+}
+
+caption_fonts_have_cjk() {
+  command -v fc-list >/dev/null 2>&1 && [ -n "$(fc-list :lang=ja family 2>/dev/null)" ]
+}
+
+# caption_fonts_plan prints the one line confirm_plan shows. It reads only: no
+# package manager runs before the operator has answered "Proceed?".
+caption_fonts_plan() {
+  local mgr want=""
+  mgr="$(caption_font_manager)"
+  caption_fonts_have_base || want="fontconfig + DejaVu (about 3 MB)"
+  if [ "$CAPTION_FONTS_CJK" = yes ] && ! caption_fonts_have_cjk; then
+    want="${want:+$want, }Noto CJK ($(caption_font_cjk_size "$mgr"))"
+  fi
+  if [ -z "$want" ]; then
+    want="already present"
+  elif [ -z "$mgr" ]; then
+    want="missing, and no apt-get/dnf/apk/pacman to install them with"
+  else
+    want="will install ${want} with ${mgr}"
+  fi
+  [ "$CAPTION_FONTS_CJK" = yes ] || want="${want}; CJK skipped (--no-cjk-fonts)"
+  echo "$want"
+}
+
+# caption_font_install <manager> <package...> installs quietly and returns the
+# package manager's status. On failure the last lines of its output are kept in
+# CAPTION_FONTS_ERR for the caller's warning.
+#
+# pacman gets -S and never -Sy: a database refresh without the upgrade that
+# goes with it is a partial upgrade, which Arch does not support. A stale
+# database fails here instead, and the warning says to run `pacman -Syu`.
+caption_font_install() {
+  local mgr="$1" log rc=0
+  shift
+  log="$(mktemp)"
+  case "$mgr" in
+    apt-get)
+      # Once per run. On a fresh host (or a container) the lists are empty and
+      # every install fails until this has run; on an old one they are stale.
+      if [ "${CAPTION_FONTS_APT_UPDATED:-false}" != true ]; then
+        apt-get update -qq >"$log" 2>&1 || true
+        CAPTION_FONTS_APT_UPDATED=true
+      fi
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$@" >>"$log" 2>&1 || rc=$? ;;
+    dnf)    dnf install -y -q --setopt=install_weak_deps=False "$@" >>"$log" 2>&1 || rc=$? ;;
+    apk)    apk add --no-cache -q "$@" >>"$log" 2>&1 || rc=$? ;;
+    pacman) pacman -S --needed --noconfirm --noprogressbar "$@" >>"$log" 2>&1 || rc=$? ;;
+    *)      rc=1 ;;
+  esac
+  CAPTION_FONTS_ERR="$(tail -n 4 "$log" 2>/dev/null || true)"
+  rm -f "$log"
+  return "$rc"
+}
+
+# install_caption_fonts is the step itself. It ALWAYS returns 0: see "NEITHER
+# IS FATAL" above. Shared verbatim with the generated update.sh, which is why
+# it speaks only through info/ok/warn and the variables declared above.
+install_caption_fonts() {
+  local mgr p got="" base_ok=true cjk_state base_pkgs
+  mgr="$(caption_font_manager)"
+  # An array, because the base set is several names that go to one command.
+  read -r -a base_pkgs <<< "$(caption_font_pkgs "$mgr" base)"
+
+  if caption_fonts_have_base; then
+    ok "caption fonts: fontconfig and DejaVu already present"
+  elif [ -z "$mgr" ]; then
+    base_ok=false
+    warn "caption fonts: no apt-get, dnf, apk or pacman here to install fontconfig and DejaVu with."
+    echo "     Captions need fontconfig and at least one font; install them by hand."
+  else
+    info "caption fonts: installing ${base_pkgs[*]} with $mgr"
+    if caption_font_install "$mgr" "${base_pkgs[@]}"; then
+      ok "caption fonts: fontconfig and DejaVu installed"
+    else
+      base_ok=false
+      warn "caption fonts: could not install ${base_pkgs[*]}. Captions may not render."
+      [ -z "$CAPTION_FONTS_ERR" ] || printf '%s\n' "$CAPTION_FONTS_ERR" | sed 's/^/       /'
+      [ "$mgr" != pacman ] || echo "     On Arch, run \`pacman -Syu\` first: a stale package database fails this."
+    fi
+  fi
+
+  if [ "$CAPTION_FONTS_CJK" != yes ]; then
+    cjk_state="skipped (--no-cjk-fonts)"
+    info "caption fonts: CJK skipped (--no-cjk-fonts). Chinese, Japanese and Korean captions will show as empty boxes."
+  elif caption_fonts_have_cjk; then
+    cjk_state="present"
+    ok "caption fonts: a CJK font is already present"
+  elif [ -z "$mgr" ]; then
+    cjk_state="MISSING"
+    warn "caption fonts: no CJK font, and no package manager this script knows to install one with."
+  else
+    info "caption fonts: installing Noto CJK ($(caption_font_cjk_size "$mgr") download) with $mgr"
+    for p in $(caption_font_pkgs "$mgr" cjk); do
+      if caption_font_install "$mgr" "$p"; then got="$p"; break; fi
+    done
+    if [ -n "$got" ]; then
+      cjk_state="installed"
+      ok "caption fonts: $got installed"
+    else
+      cjk_state="MISSING"
+      warn "caption fonts: no CJK font installed (tried: $(caption_font_pkgs "$mgr" cjk))."
+      [ -z "$CAPTION_FONTS_ERR" ] || printf '%s\n' "$CAPTION_FONTS_ERR" | sed 's/^/       /'
+      echo "     Everything else works. Chinese, Japanese and Korean captions will show as"
+      echo "     empty boxes until a CJK font is installed and \`fc-cache -f\` has run."
+      [ "$mgr" != pacman ] || echo "     On Arch, run \`pacman -Syu\` first: a stale package database fails this."
+    fi
+  fi
+
+  # The system cache, built as root. The unit runs with ProtectSystem=strict and
+  # ProtectHome, so /var/cache/fontconfig is read-only to the service and it has
+  # no home to keep a cache of its own in: without this, every
+  # FFmpeg it starts rescans every font file before it draws the first caption.
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f >/dev/null 2>&1 || warn "caption fonts: \`fc-cache -f\` failed; libass will scan fonts at each start"
+  fi
+
+  if [ "$base_ok" = true ]; then
+    CAPTION_FONTS_RESULT="fontconfig + DejaVu, CJK ${cjk_state}"
+  else
+    CAPTION_FONTS_RESULT="fontconfig/DejaVu MISSING, CJK ${cjk_state}"
+  fi
+  return 0
+}
+
 install_docker() {
   if command -v docker >/dev/null 2>&1; then
     ok "docker present: $(docker --version)"
@@ -1612,6 +1819,8 @@ confirm_plan() {
   echo "  data          ${DATA_DIR}"
   echo "  install dir   ${INSTALL_DIR}"
   [ "$CONFIGURE_FIREWALL" = yes ] && echo "  firewall      will open the ports above"
+  # Binary mode only: the image carries its own fonts.
+  [ "$MODE" = binary ] && echo "  caption fonts $(caption_fonts_plan)"
   echo
   local go
   ask_yn "Proceed?" "y" go
@@ -1856,6 +2065,9 @@ refuse_version_in_docker_mode() {
 
 install_binary_mode() {
   check_ffmpeg || die "FFmpeg preflight failed — fix the above, or re-run and choose docker."
+  # After the operator said yes to the plan, which named these and their size.
+  # Never fatal: see install_caption_fonts.
+  install_caption_fonts
 
   local tag asset url tmp
   tag="$(resolve_release_tag)" || exit 1
@@ -2131,14 +2343,18 @@ REPO="$REPO"
 # unit is Type=simple, so \`systemctl start\` returns before the server has read
 # its config; a binary that exits at once is only visible a moment later.
 SETTLE_SECONDS="\${SETTLE_SECONDS:-5}"
+# Whether to keep the CJK caption fonts installed: the choice install.sh was
+# run with (--no-cjk-fonts writes "no"), so an upgrade never undoes an opt-out.
+CAPTION_FONTS_CJK="$CAPTION_FONTS_CJK"
 
 FORCE=false
 NEW_BINARY=""
 WANT_VERSION=""
 SUMS_FILE=""
 usage() {
-	echo "usage: update.sh [--force] [--binary PATH --version vX.Y.Z[-rc.N] [--sums FILE]]"
+	echo "usage: update.sh [--force] [--no-cjk-fonts] [--binary PATH --version vX.Y.Z[-rc.N] [--sums FILE]]"
 	echo "  --force           do not refuse while a broadcast is on air"
+	echo "  --no-cjk-fonts    do not install the CJK caption fonts if they are missing"
 	echo "  --binary PATH     after the verified backup, install PATH and start the service."
 	echo "                    Refused unless its sha256 matches the release's SHA256SUMS"
 	echo "                    for this host's architecture and PATH -version prints the tag."
@@ -2149,6 +2365,7 @@ usage() {
 while [ \$# -gt 0 ]; do
 	case "\$1" in
 		--force) FORCE=true; shift ;;
+		--no-cjk-fonts) CAPTION_FONTS_CJK=no; shift ;;
 		--binary)  [ \$# -ge 2 ] || { echo "missing value for --binary" >&2; exit 2; }; NEW_BINARY="\$2"; shift 2 ;;
 		--version) [ \$# -ge 2 ] || { echo "missing value for --version" >&2; exit 2; }; WANT_VERSION="\$2"; shift 2 ;;
 		--sums)    [ \$# -ge 2 ] || { echo "missing value for --sums" >&2; exit 2; }; SUMS_FILE="\$2"; shift 2 ;;
@@ -2300,6 +2517,28 @@ if [ -e "\$dest" ]; then
   echo "ERROR: \$dest already exists. Refusing to upgrade: cp would nest the copy" >&2
   echo "inside it and the checks below would pass against the wrong directory." >&2
   exit 1
+fi
+
+# CAPTION FONTS, IF THEY HAVE GONE MISSING OR PREDATE THIS SCRIPT. Burned-in
+# captions are drawn with the host's fonts, through fontconfig. When they are
+# present this asks fontconfig and runs no package manager at all; when they are
+# not, it installs them, and a failure only warns -- the upgrade is not refused
+# over fonts. Here, after every refusal above and before the service stops, so
+# a refused upgrade changes nothing and a slow mirror adds no downtime.
+#
+# The functions are install.sh's own, copied in when this file was written.
+info() { echo "[info] \$*"; }
+ok()   { echo "[ ok ] \$*"; }
+warn() { echo "[warn] \$*"; }
+CAPTION_FONTS_RESULT=""
+CAPTION_FONTS_ERR=""
+$(declare -f caption_font_manager caption_font_pkgs caption_font_cjk_size \
+  caption_fonts_have_base caption_fonts_have_cjk caption_font_install install_caption_fonts)
+if [ "\$(id -u)" = 0 ]; then
+  install_caption_fonts
+  echo "caption fonts: \$CAPTION_FONTS_RESULT"
+else
+  echo "not root: skipped the caption-font check (run this with sudo)"
 fi
 
 # STOP BEFORE COPYING. cp -a of a live WAL database copies a moving target:
@@ -3280,6 +3519,7 @@ print_summary() {
     echo "  Data        $DATA_DIR  ${YELLOW}(back this up)${NC}"
     echo "  Update      sudo $INSTALL_DIR/update.sh"
     echo "  Uninstall   sudo $INSTALL_DIR/uninstall.sh"
+    [ -z "$CAPTION_FONTS_RESULT" ] || echo "  Captions    ${CAPTION_FONTS_RESULT}"
   fi
   echo
   echo "  The data directory holds secret.key, which decrypts your stored platform"
@@ -3325,6 +3565,11 @@ Options:
                          /usr/local/bin when the host's is below the 8.0
                          floor, has no libsrt, or is missing entirely.
                          Never installs under --check.
+  --no-cjk-fonts         binary mode: skip the Chinese/Japanese/Korean caption
+                         fonts (Noto CJK, about 60-190 MB depending on the
+                         distribution). fontconfig and DejaVu (about 3 MB,
+                         Latin/Greek/Cyrillic/Arabic/Hebrew) are still
+                         installed. Burned-in captions use these host fonts.
   --allow-unverified     install a release binary even when the release has no
                          published SHA256SUMS to check it against
   --version vX.Y.Z[-rc.N]
@@ -3384,6 +3629,7 @@ parse_args() {
                     case "$2" in ask|skip|force) FFMPEG_UPGRADE="$2" ;;
                       *) die "--ffmpeg takes ask, skip or force" ;; esac; shift 2 ;;
       --allow-unverified) ALLOW_UNVERIFIED=true; shift ;;
+      --no-cjk-fonts) CAPTION_FONTS_CJK=no; shift ;;
       --version)    [ $# -ge 2 ] || die "missing value for --version"; VERSION_PIN="$2"; shift 2 ;;
       --version=*)  VERSION_PIN="${1#*=}"; shift ;;
       -y|--yes)    ASSUME_YES=true; shift ;;
@@ -3445,6 +3691,8 @@ main() {
     if [ "${MODE:-docker}" = "binary" ]; then
       check_ffmpeg || rc=1
       require_systemd || rc=1
+      # Reported, never installed, and never a failure: see install_caption_fonts.
+      info "caption fonts: $(caption_fonts_plan)"
     else
       info "docker mode: the image carries FFmpeg, so no host FFmpeg is required"
       require_systemd || rc=1
