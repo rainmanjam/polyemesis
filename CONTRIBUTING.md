@@ -162,8 +162,9 @@ them when you add a job.
     `if: github.ref == 'refs/heads/main' && steps.<id>.outputs.cache-hit != 'true'`.
   - Release image builds pass `cache-to` only on `main`.
 - **Artifacts exist to be read, and they expire quickly.** Suite logs upload
-  `if: failure()` and are kept for 3 days. Nothing downloads an artifact in a
-  later job or run. A file you want to keep belongs on its issue.
+  `if: failure()` and are kept for 3 days. The weekly acceptance-longrun keeps
+  its logs for 7 days. Nothing downloads an artifact in a later job or run. A
+  file you want to keep belongs on its issue.
 
 The daily `prune actions caches` workflow (`scripts/prune-actions-caches.sh`)
 deletes what is left behind: caches of closed or merged pull requests, tags,
