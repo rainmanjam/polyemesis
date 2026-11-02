@@ -51,6 +51,12 @@ const (
 	ModelFailed      = "failed"
 )
 
+// ChatStamp is one viewer message: its stored id and its arrival, Unix ms.
+type ChatStamp struct {
+	ID   int64
+	AtMS int64
+}
+
 // JobResult is what a scan reports.
 type JobResult struct {
 	Suggestions int `json:"suggestions"`
@@ -78,8 +84,10 @@ type Deps struct {
 	// ARRIVES. A loudness pass over hours of audio is ten readings a second;
 	// streaming them into the parser keeps memory flat however long it is.
 	Run func(ctx context.Context, name string, args []string, stdout func(io.Reader) error) error
-	// ChatTimes is every viewer message's arrival in [fromMS, toMS), Unix ms.
-	ChatTimes func(fromMS, toMS int64) ([]int64, error)
+	// ChatTimes is every viewer message in [fromMS, toMS), Unix ms, with its
+	// id: two recording files whose wall-clock spans overlap ask for the same
+	// messages, and a message counted twice is a burst that never happened.
+	ChatTimes func(fromMS, toMS int64) ([]ChatStamp, error)
 	// Transcript is a recording's lines in that recording's own milliseconds.
 	Transcript func(recordingID int64) ([]Line, error)
 	// Save stores the scan's suggestions against the anchor recording and
@@ -119,6 +127,7 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 	var chat []int64
 	var lines []Line
 	unplaced := 0
+	seenChat := map[int64]bool{}
 	for i, part := range p.Parts {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -141,17 +150,24 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 				res.LoudnessMeasured = true
 			}
 		}
-		if part.StartedAtMS > 0 && d.ChatTimes != nil {
+		switch {
+		case part.StartedAtMS <= 0:
+			unplaced++
+		case d.ChatTimes != nil:
 			res.ChatAvailable = true
 			times, err := d.ChatTimes(part.StartedAtMS, part.StartedAtMS+part.DurationMS)
 			if err != nil {
 				return res, fmt.Errorf("highlights: read chat: %w", err)
 			}
-			for _, at := range times {
-				chat = append(chat, part.StartMS+at-part.StartedAtMS)
+			for _, m := range times {
+				// Counted once, on the first file that contains it: two
+				// files whose clocks overlap return the same messages.
+				if seenChat[m.ID] {
+					continue
+				}
+				seenChat[m.ID] = true
+				chat = append(chat, part.StartMS+m.AtMS-part.StartedAtMS)
 			}
-		} else {
-			unplaced++
 		}
 		if d.Transcript != nil {
 			ls, err := d.Transcript(part.RecordingID)
@@ -164,11 +180,13 @@ func Scan(ctx context.Context, d Deps, p JobParams, rep jobs.Reporter) (JobResul
 		}
 	}
 	res.ChatMessages = len(chat)
-	switch {
-	case unplaced > 0:
+	// Independent: some files may have no start time while the rest have
+	// no chat, and the operator is owed both facts.
+	if unplaced > 0 {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d of %d recording files have no recorded start time, "+
 			"so chat could not be lined up with them", unplaced, len(p.Parts)))
-	case res.ChatAvailable && len(chat) == 0:
+	}
+	if res.ChatAvailable && len(chat) == 0 {
 		res.Warnings = append(res.Warnings, "no chat was stored for this recording's time -- chat was not "+
 			"connected, or its history has since been pruned -- so chat did not contribute")
 	}
@@ -205,6 +223,10 @@ func scoreWithModel(ctx context.Context, d Deps, sugs []Suggestion, res *JobResu
 		return sugs
 	}
 	scored, err := Score(ctx, complete, sugs)
+	if errors.Is(err, ErrNothingToScore) {
+		res.Model, res.ModelNote = ModelUnavailable, "no suggestion had any transcript to score, so the model was not asked"
+		return sugs
+	}
 	if err != nil {
 		// FAIL OPEN, LOUDLY: the signals' suggestions stand, and the job says
 		// the model did not help rather than silently ranking without it.
@@ -214,6 +236,9 @@ func scoreWithModel(ctx context.Context, d Deps, sugs []Suggestion, res *JobResu
 	res.Model = ModelUsed
 	return scored
 }
+
+// ErrNothingToScore is a scoring request with no transcript excerpt to send.
+var ErrNothingToScore = errors.New("highlights: no candidate has any transcript to score")
 
 // ModelCandidates bounds how many suggestions one scan asks about, which bounds
 // both the prompt and what leaves the building.
@@ -235,7 +260,7 @@ func Score(ctx context.Context, complete Completer, sugs []Suggestion) ([]Sugges
 		cands = cands[:ModelCandidates]
 	}
 	if len(cands) == 0 {
-		return sugs, nil
+		return sugs, ErrNothingToScore
 	}
 	user, err := json.Marshal(map[string]any{"candidates": cands})
 	if err != nil {

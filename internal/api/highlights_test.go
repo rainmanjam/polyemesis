@@ -465,3 +465,57 @@ func TestClipTemplatesReplaceByNameAndSurviveAnUnreadableRow(t *testing.T) {
 		t.Errorf("templates %+v", list.Templates)
 	}
 }
+
+// A SESSION IS ONE REVIEW QUEUE. A stream recorded as hourly files is one
+// session; scanning it from its second file and reading it from its first must
+// meet the same suggestions, and pressing Scan on either is one scan.
+//
+// MUTATION: the queue keyed by the file that was opened. Observed: FAIL, the
+// first file's queue is empty.
+func TestASessionHasOneReviewQueueWhicheverFileIsOpened(t *testing.T) {
+	h, sign, srv, first := highlightFixture(t)
+	dir := srv.eng().Recordings().Dir()
+	const second = "rec-20261102-100000.mkv"
+	if err := os.WriteFile(filepath.Join(dir, second), []byte("MASTER"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firstRec, _ := srv.store.GetRecording(first)
+	if err := srv.store.UpsertRecording(&db.Recording{Filename: second, StartedAt: firstRec.StartedAt.Add(10 * time.Minute),
+		DurationMS: 600_000}); err != nil {
+		t.Fatal(err)
+	}
+	var secondID int64
+	recs, _ := srv.store.ListRecordings()
+	for _, r := range recs {
+		if r.Filename == second {
+			secondID = r.ID
+		}
+	}
+	sess, err := srv.store.CreateSession(db.Metadata{Title: "one stream"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetSessionRecordings(sess.ID, []int64{first, secondID}); err != nil {
+		t.Fatal(err)
+	}
+
+	send(t, h, sign, http.MethodPost, recPath(secondID, "/highlights/scan"), nil, http.StatusAccepted)
+	send(t, h, sign, http.MethodPost, recPath(first, "/highlights/scan"), nil, http.StatusAccepted)
+	scans := jobsOfKind(t, srv.store, highlights.JobKind)
+	if len(scans) != 1 {
+		t.Fatalf("%d scans for one session, want one", len(scans))
+	}
+	var p highlights.JobParams
+	_ = json.Unmarshal(scans[0].Params, &p)
+	if p.RecordingID != first || len(p.Parts) != 2 {
+		t.Errorf("the scan is keyed %d over %d parts, want the session's first file %d over both", p.RecordingID, len(p.Parts), first)
+	}
+	plantHighlight(t, srv.store, p.RecordingID, 650_000, 680_000)
+	for _, id := range []int64{first, secondID} {
+		var v highlightsView
+		decodeInto(t, send(t, h, sign, http.MethodGet, recPath(id, "/highlights"), nil, http.StatusOK), &v)
+		if len(v.Suggestions) != 1 {
+			t.Errorf("opened from recording %d, the queue shows %d suggestions, want the session's 1", id, len(v.Suggestions))
+		}
+	}
+}

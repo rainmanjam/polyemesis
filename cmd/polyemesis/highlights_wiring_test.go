@@ -151,3 +151,19 @@ func TestTheRecordingResolverNamesTheRecording(t *testing.T) {
 		t.Errorf("segments %+v do not name recording %d", segs, recs[0].ID)
 	}
 }
+
+// A transcript the store cannot read is an error the scan reports, not an
+// empty transcript: "no words" and "could not look" are different answers.
+//
+// MUTATION: the dep returns nil, nil for any error. Observed: FAIL.
+func TestTheScanSeesATranscriptReadFailure(t *testing.T) {
+	store, _ := wiringStore(t)
+	deps := highlightDeps(wiringLogger(), store, nil, nil, &ffmpeg.Tools{FFmpeg: "ffmpeg"})
+	if lines, err := deps.Transcript(12345); err != nil || len(lines) != 0 {
+		t.Fatalf("a recording with no transcript = %v, %v; want none and no error", lines, err)
+	}
+	store.Close()
+	if _, err := deps.Transcript(12345); err == nil {
+		t.Error("a closed store answered with an empty transcript instead of an error")
+	}
+}

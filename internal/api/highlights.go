@@ -106,7 +106,7 @@ func (s *Server) handleScanHighlights(w http.ResponseWriter, r *http.Request) {
 		s.writeClipError(w, err)
 		return
 	}
-	params := highlights.JobParams{RecordingID: tl.anchor.ID, UseModel: body.UseModel}
+	params := highlights.JobParams{RecordingID: tl.highlightKey(), UseModel: body.UseModel}
 	for _, p := range tl.parts {
 		part := highlights.Part{RecordingID: p.rec.ID, Path: p.path, StartMS: p.startMS, DurationMS: p.rec.DurationMS}
 		if !p.rec.StartedAt.IsZero() {
@@ -121,7 +121,7 @@ func (s *Server) handleScanHighlights(w http.ResponseWriter, r *http.Request) {
 	}
 	job, _, err := s.jobq.Submit(jobs.Job{
 		Kind:   highlights.JobKind,
-		Target: jobs.RecordingTarget(tl.anchor.ID),
+		Target: jobs.RecordingTarget(tl.highlightKey()),
 		Params: raw,
 		// Unique: pressing Scan twice is one scan.
 		Unique:   true,
@@ -166,7 +166,7 @@ func (s *Server) handleListHighlights(w http.ResponseWriter, r *http.Request) {
 		s.writeClipError(w, err)
 		return
 	}
-	list, err := s.store.ListHighlights(tl.anchor.ID)
+	list, err := s.store.ListHighlights(tl.highlightKey())
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -265,3 +265,10 @@ func (s *Server) handleDismissHighlight(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, highlightDecisionView{Highlight: viewOfHighlight(h)})
 }
+
+// highlightKey is the recording a timeline's suggestions are stored under: its
+// FIRST file. A stream recorded as hourly files is one session and one review
+// queue, so opening it from any of its files must scan, store and list under
+// the same id -- the file that happened to be opened would give each file a
+// queue of its own, and a second scan that the Unique fold could not see.
+func (t clipTimeline) highlightKey() int64 { return t.parts[0].rec.ID }

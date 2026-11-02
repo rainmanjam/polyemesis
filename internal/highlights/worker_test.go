@@ -72,11 +72,11 @@ func scanDeps(t *testing.T) (Deps, *[]Suggestion, *[][]string) {
 			}
 			return stdout(bytes.NewReader(ebur128Fixture(300, -10)))
 		},
-		ChatTimes: func(from, to int64) ([]int64, error) {
-			var out []int64
-			for _, c := range chat {
+		ChatTimes: func(from, to int64) ([]ChatStamp, error) {
+			var out []ChatStamp
+			for i, c := range chat {
 				if at := startedAt + c; at >= from && at < to {
-					out = append(out, at)
+					out = append(out, ChatStamp{ID: int64(i + 1), AtMS: at})
 				}
 			}
 			return out, nil
@@ -158,7 +158,7 @@ func TestChatIsReportedUnavailableNotQuietWhenItCannotBePlaced(t *testing.T) {
 		t.Errorf("result %+v, want chat unavailable with a reason", res)
 	}
 
-	d.ChatTimes = func(int64, int64) ([]int64, error) { return nil, nil }
+	d.ChatTimes = func(int64, int64) ([]ChatStamp, error) { return nil, nil }
 	res, _ = Scan(context.Background(), d, scanParams(false), &fakeReporter{})
 	if !res.ChatAvailable || res.ChatMessages != 0 || !hasWarning(res, "no chat") {
 		t.Errorf("an empty chat should be reported as such: %+v", res)
@@ -288,5 +288,75 @@ func TestTheWorkerReadsItsParams(t *testing.T) {
 	empty, _ := json.Marshal(JobParams{RecordingID: 1})
 	if err := w.Run(context.Background(), jobs.Job{Kind: JobKind, Params: empty}, &fakeReporter{}); err == nil {
 		t.Error("a scan with no parts must fail")
+	}
+}
+
+// TWO FILES WHOSE CLOCKS OVERLAP ASK FOR THE SAME MESSAGES. A message is counted
+// once however many recording files' wall-clock spans contain it.
+//
+// MUTATION: no dedupe by id. Observed: FAIL, 60 messages where there are 40.
+func TestAMessageInOverlappingFilesIsCountedOnce(t *testing.T) {
+	d, _, _ := scanDeps(t)
+	var msgs []ChatStamp
+	for i := 0; i < 40; i++ {
+		msgs = append(msgs, ChatStamp{ID: int64(i + 1), AtMS: startedAt + 250_000 + int64(i)*1000})
+	}
+	d.ChatTimes = func(from, to int64) ([]ChatStamp, error) {
+		var out []ChatStamp
+		for _, m := range msgs {
+			if m.AtMS >= from && m.AtMS < to {
+				out = append(out, m)
+			}
+		}
+		return out, nil
+	}
+	p := scanParams(false)
+	// Part B's clock starts 50 s before part A's ends: the last 50 s overlap.
+	p.Parts[1].StartedAtMS = startedAt + 250_000
+	res, err := Scan(context.Background(), d, p, &fakeReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ChatMessages != 40 {
+		t.Errorf("%d chat messages counted, want the 40 there are", res.ChatMessages)
+	}
+}
+
+// A model asked for over a recording with no transcript is not asked: there is
+// nothing to judge, and "used" would claim a scoring that never happened.
+//
+// MUTATION: Score's no-candidate path reports success. Observed: FAIL, "used".
+func TestTheModelIsNotUsedWhenThereAreNoWordsToJudge(t *testing.T) {
+	d, _, _ := scanDeps(t)
+	d.Transcript = func(int64) ([]Line, error) { return nil, nil }
+	called := false
+	d.Model = func() (Completer, string) {
+		return func(context.Context, string, string) (string, error) { called = true; return "", nil }, ""
+	}
+	res, err := Scan(context.Background(), d, scanParams(true), &fakeReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || res.Model != ModelUnavailable || !strings.Contains(res.ModelNote, "transcript") {
+		t.Errorf("model called=%v result %q %q, want it not asked and the reason given", called, res.Model, res.ModelNote)
+	}
+}
+
+// The warnings say what actually happened: a part with no start time is named
+// as such, and an empty chat on the parts that do have one is still reported.
+//
+// MUTATION: the warnings are a switch again. Observed: FAIL, the empty-chat
+// warning is lost.
+func TestTheChatWarningsAreIndependent(t *testing.T) {
+	d, _, _ := scanDeps(t)
+	d.ChatTimes = func(int64, int64) ([]ChatStamp, error) { return nil, nil }
+	p := scanParams(false)
+	p.Parts[1].StartedAtMS = 0
+	res, err := Scan(context.Background(), d, p, &fakeReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasWarning(res, "1 of 2 recording files") || !hasWarning(res, "no chat was stored") {
+		t.Errorf("warnings %q", res.Warnings)
 	}
 }

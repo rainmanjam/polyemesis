@@ -174,6 +174,10 @@ func (d *DB) ReplacePendingHighlights(recordingID int64, hs []Highlight) (int, e
 	return stored, tx.Commit()
 }
 
+// sameMoment reports whether h is mostly a moment already decided. The
+// overlap is measured against the SHORTER of the two spans: a dismissed 15 s
+// moment wholly inside a new 60 s suggestion is that moment, though it is only
+// a quarter of the new span.
 func sameMoment(h Highlight, decided [][2]int64) bool {
 	span := h.EndMS - h.StartMS
 	if span <= 0 {
@@ -181,7 +185,8 @@ func sameMoment(h Highlight, decided [][2]int64) bool {
 	}
 	for _, d := range decided {
 		overlap := min(h.EndMS, d[1]) - max(h.StartMS, d[0])
-		if overlap > 0 && float64(overlap)/float64(span) >= decidedOverlap {
+		shorter := min(span, d[1]-d[0])
+		if overlap > 0 && shorter > 0 && float64(overlap)/float64(shorter) >= decidedOverlap {
 			return true
 		}
 	}
@@ -253,23 +258,30 @@ func (d *DB) ReopenHighlight(id int64) error {
 	return err
 }
 
-// ChatTimesBetween is the arrival time, in Unix milliseconds, of every chat
-// message in [fromMS, toMS) -- the chat detector's whole input. Messages
-// polyemesis relayed itself are not viewers reacting, and are left out.
-func (d *DB) ChatTimesBetween(fromMS, toMS int64) ([]int64, error) {
-	rows, err := d.sql.Query(`SELECT at_ms FROM chat_messages
-		WHERE at_ms >= ? AND at_ms < ? AND echo = 0 ORDER BY at_ms`, fromMS, toMS)
+// ChatStamp is one stored chat message's id and arrival time, Unix ms.
+type ChatStamp struct {
+	ID   int64
+	AtMS int64
+}
+
+// ChatStampsBetween is every chat message in [fromMS, toMS) -- the chat
+// detector's whole input -- with its id, so a caller asking about overlapping
+// spans can count each message once. Messages polyemesis relayed itself are
+// not viewers reacting, and are left out.
+func (d *DB) ChatStampsBetween(fromMS, toMS int64) ([]ChatStamp, error) {
+	rows, err := d.sql.Query(`SELECT id, at_ms FROM chat_messages
+		WHERE at_ms >= ? AND at_ms < ? AND echo = 0 ORDER BY at_ms, id`, fromMS, toMS)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []int64
+	var out []ChatStamp
 	for rows.Next() {
-		var at int64
-		if err := rows.Scan(&at); err != nil {
+		var c ChatStamp
+		if err := rows.Scan(&c.ID, &c.AtMS); err != nil {
 			return nil, err
 		}
-		out = append(out, at)
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

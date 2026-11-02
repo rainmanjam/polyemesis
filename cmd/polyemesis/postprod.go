@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -500,18 +499,24 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 			}
 			return perr
 		},
-		ChatTimes: store.ChatTimesBetween,
-		Transcript: func(recordingID int64) ([]highlights.Line, error) {
-			tr, err := store.GetTranscript(recordingID)
-			if errors.Is(err, db.ErrNotFound) || tr == nil {
-				return nil, nil
+		ChatTimes: func(fromMS, toMS int64) ([]highlights.ChatStamp, error) {
+			rows, err := store.ChatStampsBetween(fromMS, toMS)
+			out := make([]highlights.ChatStamp, len(rows))
+			for i, r := range rows {
+				out[i] = highlights.ChatStamp{ID: r.ID, AtMS: r.AtMS}
 			}
+			return out, err
+		},
+		// The same adapter the clip worker reads captions through: a missing
+		// transcript is none, and a store that cannot be read is an error.
+		Transcript: func(recordingID int64) ([]highlights.Line, error) {
+			lines, err := api.ClipTranscriptSource(store)(recordingID)
 			if err != nil {
 				return nil, err
 			}
-			var out []highlights.Line
-			for _, seg := range tr.Merged() {
-				out = append(out, highlights.Line{StartMS: seg.StartMS, EndMS: seg.EndMS, Text: seg.Text})
+			out := make([]highlights.Line, 0, len(lines))
+			for _, l := range lines {
+				out = append(out, highlights.Line{StartMS: l.StartMS, EndMS: l.EndMS, Text: l.Text})
 			}
 			return out, nil
 		},

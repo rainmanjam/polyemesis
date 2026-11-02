@@ -389,3 +389,53 @@ func TestModelScoresBlendAndReorder(t *testing.T) {
 		}
 	}
 }
+
+// WINDOWS ARE MERGED AFTER THEY ARE SHAPED. Two loudness peaks whose raw
+// windows do not touch, but which overlap once each is padded to the minimum
+// length, are one suggestion -- not two overlapping ones. And a merge never
+// grows past a short's length: a far peak that would push the union past it
+// starts a suggestion of its own instead of being cut off and still listed.
+//
+// MUTATION: merge before padding. Observed: FAIL, overlapping suggestions.
+// MUTATION: merge regardless of the union's length. Observed: FAIL, a signal
+// outside its suggestion's window.
+func TestWindowsAreShapedThenMergedAndNeverHideASignal(t *testing.T) {
+	p := DefaultBuildParams()
+	a := Signal{Kind: KindLoudness, StartMS: 100_000, EndMS: 101_000, Strength: 0.5}
+	b := Signal{Kind: KindLoudness, StartMS: 114_500, EndMS: 115_000, Strength: 0.5}
+	got := Build([]Signal{a, b}, nil, 600_000, p)
+	for i := range got {
+		for j := i + 1; j < len(got); j++ {
+			if got[i].StartMS < got[j].EndMS && got[j].StartMS < got[i].EndMS {
+				t.Errorf("suggestions overlap: %d..%d and %d..%d", got[i].StartMS, got[i].EndMS, got[j].StartMS, got[j].EndMS)
+			}
+		}
+	}
+
+	long := Signal{Kind: KindChat, StartMS: 100_000, EndMS: 200_000, Strength: 0.4}
+	late := Signal{Kind: KindLoudness, StartMS: 150_000, EndMS: 151_000, Strength: 0.9}
+	inside := Signal{Kind: KindLoudness, StartMS: 140_000, EndMS: 141_000, Strength: 0.3}
+	got = Build([]Signal{long, late, inside}, nil, 600_000, p)
+	foundLate := false
+	for i := range got {
+		for j := i + 1; j < len(got); j++ {
+			if got[i].StartMS < got[j].EndMS && got[j].StartMS < got[i].EndMS {
+				t.Errorf("suggestions overlap: %d..%d and %d..%d", got[i].StartMS, got[i].EndMS, got[j].StartMS, got[j].EndMS)
+			}
+		}
+	}
+	for _, s := range got {
+		if d := s.EndMS - s.StartMS; d > p.MaxMS {
+			t.Errorf("a suggestion of %d ms is longer than a short", d)
+		}
+		for _, sig := range s.Signals {
+			if sig.EndMS <= s.StartMS || sig.StartMS >= s.EndMS {
+				t.Errorf("signal %d..%d is listed on a suggestion of %d..%d it is not inside", sig.StartMS, sig.EndMS, s.StartMS, s.EndMS)
+			}
+			foundLate = foundLate || sig.StartMS == 150_000
+		}
+	}
+	if !foundLate {
+		t.Errorf("the late peak vanished: %+v", got)
+	}
+}

@@ -137,7 +137,7 @@ func TestSuggestionsGoWithTheirRecording(t *testing.T) {
 
 // The chat detector's input: arrival times inside a window, echoes of the
 // broadcaster's own relayed messages excluded.
-func TestChatTimesBetweenReturnsArrivalsInTheWindow(t *testing.T) {
+func TestChatStampsBetweenReturnsArrivalsInTheWindow(t *testing.T) {
 	d := testDB(t)
 	base := time.UnixMilli(1_800_000_000_000)
 	var msgs []ChatMessage
@@ -149,7 +149,7 @@ func TestChatTimesBetweenReturnsArrivalsInTheWindow(t *testing.T) {
 	if _, err := d.AppendChatMessages(msgs); err != nil {
 		t.Fatal(err)
 	}
-	got, err := d.ChatTimesBetween(base.UnixMilli(), base.UnixMilli()+10_000)
+	got, err := d.ChatStampsBetween(base.UnixMilli(), base.UnixMilli()+10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestChatTimesBetweenReturnsArrivalsInTheWindow(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 	for i := range want {
-		if got[i] != base.UnixMilli()+want[i] {
+		if got[i].AtMS != base.UnixMilli()+want[i] || got[i].ID == 0 {
 			t.Errorf("got %v, want offsets %v", got, want)
 		}
 	}
@@ -186,5 +186,27 @@ func TestClipTemplatesAreUpsertedByName(t *testing.T) {
 	}
 	if err := d.DeleteClipTemplate(a.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleting twice = %v, want ErrNotFound", err)
+	}
+}
+
+// A DECIDED MOMENT INSIDE A LONGER NEW SUGGESTION IS STILL THAT MOMENT. A
+// dismissed 15 s span wholly inside a new 60 s one is only 25% of the new span,
+// which the old rule offered again; measured against the decided span it is
+// 100%.
+//
+// MUTATION: overlap measured against the new span only. Observed: FAIL.
+func TestARescanDoesNotReofferADecidedMomentInsideALongerSpan(t *testing.T) {
+	d := testDB(t)
+	rec := highlightRecording(t, d)
+	if _, err := d.ReplacePendingHighlights(rec, []Highlight{{StartMS: 100_000, EndMS: 115_000, Signals: []byte(`[]`)}}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := d.ListHighlights(rec)
+	if _, err := d.DecideHighlight(list[0].ID, HighlightDismissed); err != nil {
+		t.Fatal(err)
+	}
+	n, err := d.ReplacePendingHighlights(rec, []Highlight{{StartMS: 90_000, EndMS: 150_000, Signals: []byte(`[]`)}})
+	if err != nil || n != 0 {
+		t.Errorf("a 60 s span around a dismissed 15 s moment was offered again (stored %d, %v)", n, err)
 	}
 }

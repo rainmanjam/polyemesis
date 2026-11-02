@@ -328,34 +328,62 @@ func Build(signals []Signal, lines []Line, durMS int64, p BuildParams) []Suggest
 		start, end int64
 		sigs       []Signal
 	}
+	// Each signal's window is SHAPED first -- lead and tail, clamped to the
+	// recording, padded to the minimum, cut to a short's length -- and only
+	// then merged, so two windows that touch only once padded are one
+	// suggestion rather than two overlapping ones.
 	var wins []win
 	for _, s := range signals {
 		lead := p.LoudLeadMS
 		if s.Kind == KindChat {
 			lead = p.ChatLeadMS
 		}
-		wins = append(wins, win{start: max(0, s.StartMS-lead), end: min(durMS, s.EndMS+p.TailMS), sigs: []Signal{s}})
+		start, end := max(0, s.StartMS-lead), min(durMS, s.EndMS+p.TailMS)
+		if end-start < p.MinMS {
+			end = min(durMS, start+p.MinMS)
+			start = max(0, end-p.MinMS)
+		}
+		if end-start > p.MaxMS {
+			// The lead is shorter than a short, so the cut keeps the signal.
+			end = start + p.MaxMS
+		}
+		wins = append(wins, win{start: start, end: end, sigs: []Signal{s}})
 	}
 	sort.Slice(wins, func(i, j int) bool { return wins[i].start < wins[j].start })
+	// A merge never grows past a short's length: a window that would push the
+	// union past it starts a suggestion of its own. Cutting the union instead
+	// left the later signal listed -- and scored -- on a span that no longer
+	// contained it.
 	var merged []win
 	for _, w := range wins {
-		if k := len(merged) - 1; k >= 0 && w.start < merged[k].end {
+		k := len(merged) - 1
+		if k < 0 || w.start >= merged[k].end {
+			merged = append(merged, w)
+			continue
+		}
+		if max(merged[k].end, w.end)-merged[k].start <= p.MaxMS {
 			merged[k].end = max(merged[k].end, w.end)
 			merged[k].sigs = append(merged[k].sigs, w.sigs...)
 			continue
+		}
+		// Overlapping, but the union would be too long for a short.
+		if sig := w.sigs[0]; sig.EndMS <= merged[k].end {
+			// The signal itself is already on screen in the earlier window:
+			// it belongs there, not in a window of its own.
+			merged[k].sigs = append(merged[k].sigs, sig)
+			continue
+		}
+		// Otherwise it starts a suggestion where the earlier one ends, so the
+		// two never overlap, padded back to the minimum if that shortened it.
+		w.start = merged[k].end
+		if w.end-w.start < p.MinMS {
+			w.end = min(durMS, w.start+p.MinMS)
 		}
 		merged = append(merged, w)
 	}
 	out := make([]Suggestion, 0, len(merged))
 	for _, w := range merged {
 		start, end := w.start, w.end
-		if end-start > p.MaxMS {
-			end = start + p.MaxMS
-		}
-		if end-start < p.MinMS {
-			end = min(durMS, start+p.MinMS)
-			start = max(0, end-p.MinMS)
-		}
 		score := noisyOR(w.sigs)
 		sort.Slice(w.sigs, func(i, j int) bool { return w.sigs[i].StartMS < w.sigs[j].StartMS })
 		out = append(out, Suggestion{
