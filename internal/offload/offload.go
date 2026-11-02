@@ -254,6 +254,12 @@ func (s *Service) Pass(ctx context.Context) {
 		if c == nil {
 			continue
 		}
+		// A bad template is the target's fault and stops only that target;
+		// a key one file cannot have is that file's fault and stops only it.
+		if err := ValidatePrefixTemplate(t.PrefixTemplate); err != nil {
+			s.log.Warn("offload: prefix template; skipping target", "target", t.Name, "err", err)
+			continue
+		}
 		for _, cand := range cands {
 			if ctx.Err() != nil {
 				return
@@ -278,14 +284,15 @@ func (s *Service) Pass(ctx context.Context) {
 			if ok && it.State == db.OffloadFailed && s.now().Before(it.NextAttemptAt) {
 				continue
 			}
-			if !ok || strings.HasPrefix(it.Key, conflictKeyPrefix) {
-				key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, cand.rel)
-				if kerr != nil {
-					s.log.Warn("offload: prefix template", "target", t.Name, "err", kerr)
-					break
-				}
+			if !ok || strings.HasPrefix(it.Key, unkeyedPrefix) {
 				if !ok {
 					it = db.OffloadItem{TargetID: t.ID, RelPath: cand.rel, Kind: cand.kind, State: db.OffloadPending}
+				}
+				key, kerr := ObjectKey(t.PrefixTemplate, cand.kind, cand.source, cand.at, cand.rel)
+				if kerr != nil {
+					byKey[itemKey(t.ID, cand.rel)] = s.unkeyed(t, it, kerr)
+					changed = true
+					continue
 				}
 				it.Key = key
 				// One object, one file. A key another file already owns on
@@ -309,24 +316,30 @@ func (s *Service) Pass(ctx context.Context) {
 	}
 }
 
-// conflictKeyPrefix marks the stored key of an item that was refused because
-// its rendered key belongs to another file. It is unique per file (the
-// rel_path follows it), so the refusal can be stored and shown without taking
-// the contested key; the key is rendered and checked again on every attempt.
-const conflictKeyPrefix = "conflict:"
+// unkeyedPrefix marks the stored key of an item that has no usable object
+// key: its rendered key belongs to another file, or the file's path cannot be
+// a key at all. It is unique per file (the rel_path follows it), so the
+// refusal can be stored and shown without taking anyone's key; the key is
+// rendered and checked again on every attempt.
+const unkeyedPrefix = "unkeyed:"
 
 func (s *Service) keyConflict(t db.StorageTarget, it db.OffloadItem, holder string, herr error) db.OffloadItem {
 	contested := it.Key
-	it.Key = conflictKeyPrefix + it.RelPath
+	if herr == nil {
+		herr = fmt.Errorf("object key %s is already held by %s on this target; change the prefix template", contested, holder)
+	}
+	s.log.Warn("offload: object key conflict; not uploading", "target", t.Name, "file", it.RelPath, "holder", holder)
+	return s.unkeyed(t, it, herr)
+}
+
+// unkeyed records an item that cannot be uploaded under any key right now.
+func (s *Service) unkeyed(t db.StorageTarget, it db.OffloadItem, why error) db.OffloadItem {
+	it.Key = unkeyedPrefix + it.RelPath
 	it.Attempts++
 	it.State = db.OffloadFailed
-	if herr != nil {
-		it.LastError = clipErr(herr)
-	} else {
-		it.LastError = clipErr(fmt.Errorf("object key %s is already held by %s on this target; change the prefix template", contested, holder))
-	}
+	it.LastError = clipErr(why)
 	it.NextAttemptAt = s.now().Add(backoffCap)
-	s.log.Warn("offload: object key conflict; not uploading", "target", t.Name, "file", it.RelPath, "holder", holder)
+	s.log.Warn("offload: file has no usable object key", "target", t.Name, "file", it.RelPath, "err", it.LastError)
 	if err := s.store.PutOffloadItem(it); err != nil {
 		s.log.Warn("offload: persist item", "file", it.RelPath, "err", err)
 	}

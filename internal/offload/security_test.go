@@ -178,3 +178,53 @@ func TestAKeyAnotherFileOwnsIsRefusedNotOverwritten(t *testing.T) {
 		t.Fatal("two files stored under one key on one target")
 	}
 }
+
+// One file whose path cannot be an object key is marked failed with the
+// reason; it does not stop the files after it.
+func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
+	f := newFixture(t)
+	id, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "c", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, OffloadClips: true})
+	f.mems[id] = newMem()
+	_ = os.MkdirAll(filepath.Join(f.dir, "clips"), 0o755)
+	// A backslash is legal in a POSIX file name and never in an object key.
+	for i, name := range []string{`bad\name.ts`, "good.ts"} {
+		full := filepath.Join(f.dir, "clips", name)
+		if err := os.WriteFile(full, []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		at := f.now.Add(-time.Duration(3-i) * time.Hour) // the bad one sorts first
+		_ = os.Chtimes(full, at, at)
+	}
+	f.svc.Pass(context.Background())
+	bad, ok := f.item(id, `clips/bad\name.ts`)
+	if !ok || bad.State != db.OffloadFailed || !strings.Contains(bad.LastError, "invalid file path") {
+		t.Fatalf("bad file: %+v ok=%v", bad, ok)
+	}
+	good, ok := f.item(id, "clips/good.ts")
+	if !ok || good.State != db.OffloadVerified {
+		t.Fatalf("the good file after it was not uploaded: %+v ok=%v", good, ok)
+	}
+}
+
+// A bad template skips only its own target.
+func TestABadTemplateSkipsOnlyItsTarget(t *testing.T) {
+	f := newFixture(t)
+	good := f.target(db.OffloadMirror, 0)
+	bad, _ := f.store.CreateStorageTarget(db.StorageTarget{Name: "bad", Provider: "s3", Endpoint: "http://h.test", Bucket: "b",
+		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Mode: db.OffloadMirror, Enabled: true, PrefixTemplate: "{nope}"})
+	f.mems[bad] = newMem()
+	name := f.segment(5*time.Hour, "footage", true)
+	f.segment(time.Minute, "newest", true)
+	f.svc.Pass(context.Background())
+	if it, _ := f.item(good, name); it.State != db.OffloadVerified {
+		t.Fatalf("good target: %+v", it)
+	}
+	if f.mems[bad].puts != 0 {
+		t.Fatal("a target with an invalid template uploaded")
+	}
+	// A target-level fault is not smeared across every file as item errors.
+	if _, ok := f.item(bad, name); ok {
+		t.Fatal("a template error was recorded against a file")
+	}
+}
