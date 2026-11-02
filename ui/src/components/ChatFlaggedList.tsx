@@ -83,7 +83,7 @@ export function ChatFlaggedList({
                 {m.author.id ? (
                   <button
                     type="button"
-                    className="font-semibold text-primary underline-offset-2 hover:underline"
+                    className="font-semibold text-primary-bright underline-offset-2 hover:underline"
                     aria-label={t("chatFlags.openUser", { name })}
                     onClick={() => onOpenUser(m)}
                   >

@@ -106,6 +106,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
       # Pinned, like the gitleaks binary and the semgrep engine below, and for
       # the reason release.yml gives for pinning syft: SonarCloud flagged
       # `go install syft@v1.50.0` under githubactions:S8545, because a version

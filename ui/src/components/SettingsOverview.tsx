@@ -120,7 +120,7 @@ export function SettingsOverview({
         role="status"
         className={cn(
           "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2",
-          ready ? "border-live/40 bg-live-dim" : "border-border bg-card",
+          ready ? "border-ok/40 bg-ok-dim" : "border-border bg-card",
         )}
       >
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

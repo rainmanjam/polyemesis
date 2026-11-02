@@ -135,18 +135,18 @@ describe("ViewerReadoutLine", () => {
     );
     const unreadable = renderToStaticMarkup(<ViewerReadoutLine readout={{ kind: "unreadable" }} />);
     for (const html of [unsupported, unreadable]) {
-      expect(html).not.toMatch(/text-live|text-warn|text-down|text-armed/);
-      expect(html).not.toMatch(/bg-live|bg-warn|bg-down|bg-armed/);
+      expect(html).not.toMatch(/text-ok|text-warn|text-down|text-idle/);
+      expect(html).not.toMatch(/bg-ok|bg-warn|bg-down|bg-idle/);
     }
   });
 
   it("uses tokens for its colours rather than a hand-written class", () => {
-    // DestinationCard.tsx:302 records what a hand-written class costs: there is
-    // no `text-ok` token, so a healthy backup rendered invisible. Everything
-    // here resolves through toneForState/toneBadge, which can only produce the
-    // five that exist.
+    // DestinationCard.tsx:302 records what a hand-written class costs: there
+    // was no `text-ok` token then, so a healthy backup rendered invisible.
+    // Everything here resolves through toneForState/toneBadge, which can only
+    // produce tokens that exist.
     const html = renderToStaticMarkup(<ViewerReadoutLine readout={{ kind: "count", count: 7 }} />);
-    expect(html).not.toMatch(/text-ok|bg-ok|text-green|text-red|text-success/);
-    expect(html).toMatch(/text-live/);
+    expect(html).not.toMatch(/text-green|text-red|text-success|text-live\b/);
+    expect(html).toMatch(/text-ok/);
   });
 });

@@ -29,11 +29,11 @@ export function WaitingForEncoder() {
   return (
     <div
       role="status"
-      className="flex items-start gap-3 rounded-md border border-dashed border-armed/40 bg-armed-dim/20 px-3 py-2"
+      className="flex items-start gap-3 rounded-md border border-dashed border-idle/40 bg-idle-dim/20 px-3 py-2"
     >
-      <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-armed motion-safe:animate-pulse" />
+      <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rounded-full bg-idle motion-safe:animate-pulse" />
       <div className="min-w-0">
-        <p className="text-[12px] font-semibold text-armed">{t("sources.waitingForEncoder")}</p>
+        <p className="text-[12px] font-semibold text-idle">{t("sources.waitingForEncoder")}</p>
         <p className="text-[12px] text-muted-foreground">{t("sources.waitingForEncoderBody")}</p>
         {stuck && (
           <p className="mt-1 text-[12px] text-muted-foreground">

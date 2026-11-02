@@ -97,7 +97,7 @@ export function PollPanel({ twitchAvailable = false }: { twitchAvailable?: boole
         <div className="flex flex-col gap-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold">{t("polls.history")}</span>
-            <a className="inline-flex items-center gap-1 text-sm text-primary underline-offset-2 hover:underline" href={exportHref()} download>
+            <a className="inline-flex items-center gap-1 text-sm text-primary-bright underline-offset-2 hover:underline" href={exportHref()} download>
               <Download className="h-3 w-3" /> {t("polls.exportAll")}
             </a>
           </div>
@@ -382,7 +382,7 @@ function HistoryRow({ poll }: { poll: Poll }) {
         <span className="text-[11px] text-muted-foreground">{summary}</span>
       </div>
       <a
-        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary underline-offset-2 hover:underline"
+        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-primary-bright underline-offset-2 hover:underline"
         href={exportHref(poll.id)}
         download
         aria-label={t("polls.exportOneAria", { question: poll.question })}

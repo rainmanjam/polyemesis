@@ -751,11 +751,12 @@ for (const f of pages) {
 
 // 5. The amber reservation, enforced rather than merely documented.
 //
-//    Amber (--color-cross / #e8a33d) marks the signal path: a lit crosspoint,
-//    the route it feeds, and that route running hot. The rule drifted once
-//    already — it said "crosspoint and nothing else" while the hero's routes
-//    had always been amber, and a comparison-page callout had quietly picked it
-//    up as a general accent. Prose in a stylesheet did not stop that; this does.
+//    Amber (--warn / #e8a33d) means warn, on the site as in the app: in the
+//    matrix, a summed level running hot. It used to be the lit-crosspoint
+//    colour as well (--color-cross), until the 2026-11 palette moved
+//    crosspoints to the interaction blue. The rule drifted once already — a
+//    comparison-page callout had quietly picked amber up as a general accent.
+//    Prose in a stylesheet did not stop that; this does.
 const amberAllowed = {
   // Zero, since the hero stopped drawing the signal path. The three uses this
   // counted were the route lines and their junction dot in the old hero SVG,
@@ -780,11 +781,12 @@ for (const f of pages) {
       `If this is deliberate, update amberAllowed here and say why there.`,
     );
   }
-  // Utility-class amber on markup is always an accent use; the crosspoint gets
-  // its amber from the .xpt rules and the level readout from the matrix script.
-  for (const cls of ["border-cross", "bg-cross", "text-cross"]) {
+  // A crosspoint or warn utility on markup is always an accent use: the
+  // crosspoint gets its colour from the .xpt rules and the hot level readout
+  // its amber from the matrix script, never from a class in the page.
+  for (const cls of ["border-cross", "bg-cross", "text-cross", "text-warn", "bg-warn", "border-warn"]) {
     if (new RegExp(`class="[^"]*\\b${cls}\\b`).test(html)) {
-      fail.push(`${f}: \`${cls}\` on markup — amber is not a general accent. Use primary.`);
+      fail.push(`${f}: \`${cls}\` on markup — signal colours are not a general accent. Use primary.`);
     }
   }
 }

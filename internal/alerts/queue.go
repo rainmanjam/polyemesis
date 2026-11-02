@@ -79,8 +79,9 @@ type groupKey struct {
 //
 // So: a test that wants the run loop feeds it through Notifier.Publish and
 // lets Run own these maps. A test that wants the state machine calls these
-// methods and Notifier.Flush without starting Run, the way
-// TestFlushDeliversThroughTheWholePathOnce does. Choosing neither -- reaching
+// methods without starting Run, the way TestFlushDeliversThroughTheWholePathOnce
+// does. Notifier.Flush is safe either way: beside a live Run it asks the run loop
+// for the pass over a channel rather than touching these maps itself. Choosing neither -- reaching
 // past the channel beside a live Run -- is always wrong, and the fix for it is
 // never a mutex here: that would slow the real path to legalise a test.
 type coalescer struct {

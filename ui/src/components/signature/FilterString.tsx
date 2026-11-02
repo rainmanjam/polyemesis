@@ -39,7 +39,7 @@ export function FilterString({
           {t("signature.filter.generated")}
         </div>
         <Button variant="ghost" size="icon-sm" onClick={copy} aria-label={t("signature.filter.copyAria")}>
-          {copied ? <Check className="text-live" /> : <Copy />}
+          {copied ? <Check className="text-ok" /> : <Copy />}
         </Button>
       </div>
       <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all px-2 py-1.5 font-mono text-sm leading-relaxed text-muted-foreground">

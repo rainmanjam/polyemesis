@@ -130,10 +130,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore Go cache (read-only off main)
+        if: github.ref != 'refs/heads/main'
+        uses: ./.github/actions/restore-go-cache
 
       - name: Cache FFmpeg
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/ffcache
           key: ffmpeg-${{ runner.os }}-ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
@@ -182,6 +186,12 @@ jobs:
           ffmpeg -hide_banner -encoders | grep -qw flac
           ffmpeg -hide_banner -filters  | grep -qw sine
           ffprobe -hide_banner -version | head -1
+      - name: Save FFmpeg cache (main only)
+        if: github.ref == 'refs/heads/main' && steps.ffcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ffcache
+          key: ${{ steps.ffcache.outputs.cache-primary-key }}
 
       # whisper.cpp ships a prebuilt Linux x64 tarball on every release, so
       # there is no compiler here and no build variance -- the binary CI

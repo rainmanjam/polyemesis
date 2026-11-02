@@ -52,7 +52,7 @@ describe("DestinationCard: the per-card Start is not the filled primary (A9)", (
     const start = screen.getByRole("button", { name: /start/i });
     // The filled live variant is the one with the live background. The outline
     // variant carries a border and no fill.
-    expect(start.className).not.toContain("bg-live");
+    expect(start.className).not.toContain("bg-ok");
     expect(start.className).toContain("border-border-strong");
   });
 });

@@ -2049,7 +2049,7 @@ function MusicRightsCard({
                     : "route.musicTracksExcludedMany",
                   {
                     tracks: (
-                      <span className="text-live">
+                      <span className="text-ok">
                         {musicTracks
                           .map((n) => t("routing.overview.trackLabel", { n: n + 1 }))
                           .join(", ")}
@@ -2528,7 +2528,7 @@ function TrackChip({
         "flex items-center gap-1.5 rounded border px-2 py-1 text-sm transition-colors",
         active
           ? tone === "armed"
-            ? "border-armed/40 bg-armed-dim text-armed"
+            ? "border-idle/40 bg-idle-dim text-idle"
             : "border-warn/40 bg-warn-dim text-warn"
           : "border-border text-muted-foreground hover:border-border-strong hover:text-muted-foreground",
       )}

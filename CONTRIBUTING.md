@@ -143,6 +143,33 @@ description so it gets watched.
 If a test is flaky, say so rather than re-running until it passes. A flaky test
 is a bug report.
 
+### CI caches and artifacts
+
+Actions storage is small and shared, so the workflows follow two rules. Keep
+them when you add a job.
+
+- **Caches are written on `main` only.** Every other ref, pull requests and
+  release tags included, restores and never saves. GitHub falls back to the
+  default branch's caches, so a pull request still starts warm from `main`.
+  - setup-go and setup-node have no restore-only mode, so they are called with
+    `cache: ${{ github.ref == 'refs/heads/main' }}`. For setup-node that is
+    `&& 'npm' || ''`.
+  - Off `main`, the next step is `./.github/actions/restore-go-cache` or
+    `./.github/actions/restore-npm-cache`. These rebuild the actions' own key
+    and paths exactly, so they find the entries `main` saved.
+  - Any other cache is `actions/cache/restore`, with an `id`. Right after the
+    step that fills it, add `actions/cache/save` with
+    `if: github.ref == 'refs/heads/main' && steps.<id>.outputs.cache-hit != 'true'`.
+  - Release image builds pass `cache-to` only on `main`.
+- **Artifacts exist to be read, and they expire quickly.** Suite logs upload
+  `if: failure()` and are kept for 3 days. The weekly acceptance-longrun keeps
+  its logs for 7 days. Nothing downloads an artifact in a later job or run. A
+  file you want to keep belongs on its issue.
+
+The daily `prune actions caches` workflow (`scripts/prune-actions-caches.sh`)
+deletes what is left behind: caches of closed or merged pull requests, tags,
+deleted branches, and older copies of a key on `main`.
+
 ## Reporting bugs
 
 Use the issue templates. The most useful bug report for this project includes:

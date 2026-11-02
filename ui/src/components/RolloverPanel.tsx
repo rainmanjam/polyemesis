@@ -184,7 +184,7 @@ export function RolloverPanel({ dest }: { dest: DestStatus }) {
       <p className="text-xs text-muted-foreground">{t(actionKey)}</p>
 
       {notice ? (
-        <p role="status" className={notice.tone === "ok" ? "text-xs text-live" : notice.tone === "warn" ? "text-xs text-warn" : "text-xs text-down"}>
+        <p role="status" className={notice.tone === "ok" ? "text-xs text-ok" : notice.tone === "warn" ? "text-xs text-warn" : "text-xs text-down"}>
           {notice.text}
         </p>
       ) : null}

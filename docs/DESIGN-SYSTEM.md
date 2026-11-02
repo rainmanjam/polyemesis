@@ -52,9 +52,9 @@ hardcode one. That rule already held for colour. It now holds for type, motion
 and elevation too, which previously had **no tokens at all** — every size and
 duration was written inline at the point of use, which is how a scale drifts.
 
-### Colour — unchanged
+### Colour
 
-37 tokens carrying a literal colour, each mapped to a Tailwind name in the
+42 tokens carrying a literal colour, each mapped to a Tailwind name in the
 `@theme inline` block below. Count them with:
 
 ```sh
@@ -64,17 +64,88 @@ grep -cE '^\s*--[a-z-]+:\s*oklch\(' ui/src/index.css
 That command used to match `#`, and therefore counted zero: the palette has been
 written in `oklch()` since before this document existed. The number beside it
 was right and the way to check it was not, which is the same failure as the rest
-of this page in miniature.
+of this page in miniature. (It then said 37 while the file held 38, so run it
+rather than trusting the figure.)
 
-They were already correct and are unchanged. The rule that matters:
+Surfaces, text and the primary blue are the values they have always been. The
+signal tokens were reworked in the 2026-11 design review, because one green
+meant running, healthy and on air at once, the failed red sat next to where an
+on-air lamp has to go, and idle spent a cyan beside the interaction blue:
 
-> Saturated colour is **signal only**. Green is live, amber is reconnecting, red
-> is down or clipping, cyan is armed but idle. If everything is grey except the
-> thing that is wrong, the thing that is wrong is readable from across the room.
+| Token | Value | Meaning |
+|---|---|---|
+| `--ok`, `--ok-dim` | `oklch(75.6% 0.184 149.9)`, `oklch(32.4% 0.0629 154.8)` | Healthy, signal present. Was `--live`, same values |
+| `--warn`, `--warn-dim` | unchanged | Reconnecting, degraded, stale |
+| `--down`, `--down-dim` | `oklch(70% 0.175 33)`, `oklch(28% 0.06 33)` | Failed, clipping. Coral, lighter than the old red, so it is never read as the tally |
+| `--idle`, `--idle-dim` | `--muted-foreground`'s and `--muted`'s values | Configured but idle. Was `--armed` (cyan); neutral now, told apart by its hollow ring |
+| `--tally`, `--tally-foreground`, `--tally-dim` | `oklch(56.5% 0.23 28.5)`, `oklch(99% 0.004 28)`, `oklch(25% 0.07 28.5)` | ON AIR and REC. New |
+| `--cat-cyan`, `--cat-cyan-dim` | `oklch(72.1% 0.1065 216.8)`, `oklch(30.2% 0.0421 220.8)` | Identity, never status. New, carrying the old `--armed` cyan |
+| `--destructive`, `--destructive-foreground` | `= --down`, dark ink `oklch(15.9% 0.0091 264.3)` | White on the coral is 2.87:1; the dark ink is 6.76:1 |
+| `--meter-peak` | `= --down` | The meter's red zone and CLIP |
+| `--meter-high` | removed | Amber left the meter |
+| `--subtle-foreground` | `oklch(62.1% 0.0282 261.1)` | Placeholder, disabled. Was 51.2%, which was 3.41:1 on the shell; the website's value, now shared |
+| `--ring` | `--primary-bright`'s value | The focus ring. 7.13:1 on `--card` where `--primary` gave 4.49 |
 
-Nothing decorative may use `--live`, `--warn`, `--down` or `--armed`. The
-interactive accent is one desaturated slate blue, and it is the only colour a
-button may be.
+The rules that matter:
+
+> Saturated colour is **signal only**. Green is ok, amber is warn, coral is
+> down or clipping, and tally red is on air. Idle is not a colour. If
+> everything is grey except the thing that is wrong, the thing that is wrong is
+> readable from across the room.
+
+- **Tally is a lamp, never ink.** `--tally` appears only as a solid fill under
+  its own `--tally-foreground` label (4.97:1), for ON AIR and REC and nothing
+  else. As text it would be the on-air signal shrunk to a word, and at 3.47:1 on
+  `--card` it fails AA besides. The lamp's L 56.5% is the lightest a white label
+  survives: at L 63.5% white measures 3.67.
+- **Blue is interaction only:** links, focus and the primary button. Blue is
+  never a state, a chart series or decoration. `--primary` is **fill-only**
+  (buttons, checked controls, a lit crosspoint); every blue that is text is
+  `--primary-bright`, because `--primary` as text measures 4.49:1 on `--card`.
+- **Amber means warn only.** It is not a meter stop and not a crosspoint. The
+  meter is green, yellow and red; the website's lit crosspoint reads `--primary`.
+- **Identity colours are never status.** `--cat-cyan` tells one *thing* from
+  another: the Facebook chat accent, a hashed chat-author colour, the moderator
+  shield, caption speaker labels, the website's mic track chip. It never goes on
+  a status dot, pill or badge. It is held at 4.5:1 as text on every surface and
+  at least ΔEOK 0.10 from `--ok`, `--warn`, `--down` and `--tally`. The
+  Facebook filter chip differs on and off by text colour and border as well as
+  fill.
+- **Gradients appear only in the logo mark.** A colour fade anywhere else is
+  decoration. The website's hero sweep (a blue light crossing the grid) was
+  removed for this; the grid itself is 1px lines drawn with gradient syntax, a
+  pattern rather than a fade.
+- **Translucent text is measured, not assumed.** A `text-*/NN` opacity modifier
+  is a new colour; `palette-contrast.test.ts` composites each one over every
+  surface and fails it below 4.5:1. The same goes for a translucent hover fill,
+  which is why the primary button hovers to solid `--primary-bright` rather than
+  `bg-primary/85` (3.84:1).
+
+Nothing decorative may use `--ok`, `--warn`, `--down`, `--tally`, `--idle` or
+`--cat-cyan`.
+The interactive accent is one desaturated slate blue, and it is the only colour
+a button may be (apart from the start and stop actions, which carry their
+signal).
+
+`ui/src/lib/palette-contrast.test.ts` holds all of this to its numbers. It
+computes WCAG ratios from the token values (oklch to linear sRGB, clamped as a
+browser clamps) and fails below threshold: every text token on every surface at
+4.5:1, every pill's ink on its fill, ink on the inert fills, every Button
+variant at rest and on hover (read from `button.tsx`), the tally label on the
+lamp, and the focus ring, tally lamp and meter segments at 3:1. It asserts the
+decisions directly where a threshold would let an old value back in: the ring
+is `--primary-bright`, idle is low-chroma, `--destructive` and `--meter-peak`
+equal `--down`, `--down-dim` shares its hue, the site crosspoint reads
+`--primary`. It fails if the tally drifts within ΔEOK 0.1 of the failed,
+destructive or meter red, if any source paints text with `--primary`, uses
+`--tally` as ink, or dims a text token below AA with an opacity modifier.
+Reverting any one of the 2026-11 token changes fails it.
+
+One known gap it does not assert: a text field is drawn as `bg-background`
+with a `border-input` outline on a `--card`, and neither edge reaches the 3:1
+WCAG 1.4.11 asks of a component boundary (the border is 1.24:1 against the
+card, the fill 1.09:1; `--border-strong` would be 1.56:1). Fixing it means a
+lighter input edge, which is a design decision, not a token rename.
 
 ### Type scale
 
@@ -296,8 +367,7 @@ the value rather than left to a reader to infer:
 
 | Site token | Why it is not shared |
 |---|---|
-| `--color-cross` | Equal to the app's `--warn` by coincidence. A lit crosspoint and a degrading stream are unrelated states, and wiring them together would let a marketing retune move an operator's warning colour |
-| `--color-subtle` | The app's `--subtle-foreground` measures 3.41:1 on this page's ground. A placeholder in a dark control room and 11px body copy on a phone in daylight are not the same contrast problem |
+| `--color-cohost`, `--color-game` | Track colours for legend chips. A track is a label, not a state, so none may read a signal token (`--color-meter`, the mic chip, now reads the shared identity token `--cat-cyan`; it used to borrow `--armed`, which went grey). `--color-cohost` sat 9.5° from the meter's yellow. Co-host is a magenta chosen for distance from every signal, meter and track colour (nearest: `--color-game`, ΔEOK 0.18) |
 | `--color-primary-bright`, `--font-display`, `--motion-enter`, `--ease-breath` | Site-only; the console has nothing for them to do |
 
 Two site tokens read an app token of a **different name**, because the names
@@ -305,6 +375,12 @@ collide and the meanings do not. `--color-surface` is a card fill, so it reads
 `--card` rather than the app's `--surface`, which is a page. `--color-muted` is
 secondary text, so it reads `--muted-foreground` rather than the app's `--muted`,
 which is a slider track.
+
+`--color-cross`, the lit crosspoint on the site's patchbay, reads `--primary`
+(and `--color-cross-dim` reads `--primary-dim`). It used to be a literal kept
+equal to the app's `--warn`; a crosspoint is the on-state of a control the
+visitor toggles, so it takes the interaction colour, as the app's routing
+checkboxes do, and amber means warn on both surfaces.
 
 ## Component rules
 

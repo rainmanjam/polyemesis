@@ -3178,7 +3178,7 @@ export function PlatformCredCard({
                     <div className="flex items-center gap-2 rounded border border-border bg-background px-2 py-1.5">
                       <code className="min-w-0 flex-1 break-all font-mono text-sm">{guide.redirectPath}</code>
                       <Button variant="ghost" size="icon-sm" onClick={copyRedirect} aria-label={t("set.copy")}>
-                        {copied ? <Check className="text-live" /> : <Copy />}
+                        {copied ? <Check className="text-ok" /> : <Copy />}
                       </Button>
                     </div>
                     <span className="text-sm text-muted-foreground">{t("set.redirectNote")}</span>

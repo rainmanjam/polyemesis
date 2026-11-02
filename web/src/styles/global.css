@@ -32,36 +32,31 @@
    from ui/src/index.css, not an approximation, so a screenshot dropped on the
    page sits in its own colour space.
 
-   AMBER IS RESERVED — for the signal path, and for nothing else.
+   AMBER MEANS WARN, ON BOTH SURFACES.
 
-   The rule used to read "an active crosspoint and nothing else", which was
-   narrower than the design had ever actually been: the hero's route lines have
-   always been amber, and they are the same idea as a crosspoint seen from one
-   level up. A rule the code contradicts is not a rule, so this is the rule
-   corrected to what it was really doing.
+   This page used to reserve amber for the signal path: a lit crosspoint, the
+   route it fed, that route running hot. In the app the same amber means
+   "reconnecting / degraded", so a visitor who learned the matrix here met the
+   console's warning colour on a healthy, lit crosspoint. The design review
+   (2026-11) settled it: a crosspoint is the on-state of a control the visitor
+   toggles, so it takes the INTERACTION colour (--color-cross reads --primary,
+   as the app's routing checkboxes do), and amber is spent only where something
+   is wrong or close to it -- in the matrix, a summed level running hot above
+   -12 dBFS, which the matrix script paints with --color-warn.
 
-   Amber is permitted on exactly three things, and they are one thing:
-
-     1. a lit crosspoint            (.xpt:checked)
-     2. the route that crosspoint feeds  (the hero's SVG paths)
-     3. that route running hot      (a summed level above -12 dBFS)
-
-   Crosspoint, path, level: where audio is, and what it is doing. That is what
-   makes the page read as broadcast hardware rather than as a settings form.
-
-   What is still forbidden is the thing the original rule was written to
-   prevent: amber as a general-purpose accent. A callout border, a highlighted
-   paragraph, a "note" box — none of those carry signal, and every one of them
-   spends the colour that makes the matrix legible. Use primary for emphasis.
-   The comparison page's Restreamer callout was exactly this mistake and now
-   uses primary.
+   What is forbidden is amber, or any signal colour, as a general-purpose
+   accent. A callout border, a highlighted paragraph, a "note" box -- none of
+   those carry signal. Use primary for emphasis; blue that is TEXT is
+   --color-primary-bright, because --primary as text is 4.49:1 on a card.
+   web/scripts/check-build.mjs fails a build that puts the amber literal or a
+   cross/warn utility on markup.
 
    THIS IS ALSO 60-30-10. --color-ink/--color-surface/--color-raised and the
    text colours are the 60. --color-primary and its -bright/-dim variants are
-   the 30 — the one thing on this page that says "act here". --color-live,
-   --color-cross, --color-meter, --color-down, --color-cohost and --color-game
-   are the 10: saturated, and each one spends real meaning (see --color-cross's
-   own note below, and the track-colour note further down). A new saturated
+   the 30 — the one thing on this page that says "act here", and --color-cross
+   is one of its states. --color-ok, --color-warn, --color-down, --color-meter,
+   --color-cohost and --color-game are the 10: saturated, and each one spends
+   real meaning (see the track-colour note further down). A new saturated
    token belongs in that list by name, with its meaning stated, not slipped in
    as a one-off hex value on a component.
 
@@ -91,8 +86,6 @@
        than merely wrong. The app token that means what this one means is
        --muted-foreground.
 
-   --color-cross is deliberately NOT read from the app's --warn, even though the
-   two are equal today — see its own note below.
    --------------------------------------------------------------------------- */
 
 @theme {
@@ -129,25 +122,14 @@
      card and 5.41 on a raised card, so the WCAG headroom the note below insists
      on for --color-subtle holds here too. */
   --color-muted: var(--muted-foreground);
-  /* WCAG AA, and it was not. Lighthouse (desktop, 2026-08-16) failed
-     color-contrast on twelve nodes: #6b7686 measured 4.22 against --color-bg
-     #0b0d11 and 4.13 against the raised #0e1015, where 4.5 is required for text
-     under 18pt. Every one of them is small type -- 10px and 11px mono labels,
-     14px body -- so none qualified for the 3:1 large-text allowance.
-
-     #7d8798 is not the minimum that passes. #727c8b clears it at 4.60/4.50,
-     and 4.50 is the threshold itself: any later darkening of a background, or a
-     browser rounding differently, puts it back in breach. This value measures
-     5.36 and 5.25, which leaves room to move without re-failing.
-
-     SITE-ONLY FOR THAT REASON. The app's token of this meaning is
-     --subtle-foreground, and it is oklch 51.2%, which measures 3.41:1 on this
-     page's ground — a contrast failure on a marketing site that is read at
-     arm's length on a phone in daylight, not in a dark control room where it
-     is a placeholder in a form the operator is already looking at. This is the
-     one place the two products are allowed to disagree about a neutral, and
-     the disagreement is a measurement rather than a preference. */
-  --color-subtle: oklch(62.1% 0.0282 261.1);
+  /* Shared now. Lighthouse (desktop, 2026-08-16) failed color-contrast on
+     twelve nodes of small type at #6b7686, and this page moved to oklch(62.1%
+     0.0282 261.1) on its own -- 5.36:1 on --color-ink, not the 4.5 minimum, so
+     a later darkening or a rounding difference cannot put it back in breach.
+     The app's placeholder token was 51.2% (3.41:1) and has now taken the same
+     value, so the one neutral the two products disagreed about is a var()
+     like every other. */
+  --color-subtle: var(--subtle-foreground);
 
   /* --- 30 / THE ONE ACCENT --- */
   --color-primary: var(--primary);
@@ -161,43 +143,42 @@
      the reservation at the top of this file and the track-colour note further
      down — so a new one here is a decision about a new kind of state, not a
      free accent colour. --- */
-  --color-live: var(--live);
-  --color-live-dim: var(--live-dim);
-  /* active crosspoint ONLY (see the reservation above). THE ONE SIGNAL COLOUR
-     THAT IS DELIBERATELY NOT READ FROM THE SHARED BLOCK, and the literal is the
-     point: it is bit-for-bit the app's --warn (ui/src/index.css — "reconnecting,
-     degraded, near clip"), and that is a coincidence rather than a shared brand
-     fact — a crosspoint being lit and a stream degrading are unrelated states
-     that happened to land on the same oklch literal. Writing `var(--warn)` here
-     would make the coincidence structural, and the next person to retune a
-     crosspoint on a marketing page would move an operator's degraded-stream
-     colour without ever opening the app. The duplication is the safety. If a
-     future pass proposes folding these two into one token, that is the mistake
-     -- refuse it here, and note that ui/src/lib/design-tokens.test.ts does not
-     require this line to be a var() for exactly this reason. */
-  --color-cross: oklch(76.5% 0.1399 72.9);
-  --color-cross-dim: oklch(31.4% 0.0482 83.5);
-  --color-meter: var(--armed);
-  /* WAS oklch(64.7% 0.1678 23.0) — a near-miss of the app's --down that no
-     decision ever produced. The app's value is the one the product ships in
-     every failed-destination badge, so it is the one that is right, and it is
-     what a reader compares a screenshot against. Measured where this token is
-     actually used before taking it: 4.98:1 on --color-ink (the calculator's
-     hard-warning box) and 4.55:1 on --color-surface (the matrix's "silent"
-     readout), both above the 4.5 small-text floor. It would NOT clear it on
-     --color-raised at 4.22, so if a red label ever lands on a raised card, that
-     is the case to measure rather than assume. */
+  --color-ok: var(--ok);
+  --color-ok-dim: var(--ok-dim);
+  /* Warn, as in the app, and only that: in the matrix, a summed level running
+     hot above -12 dBFS. */
+  --color-warn: var(--warn);
+  /* The lit crosspoint. It READS THE INTERACTION COLOUR: a crosspoint is the
+     on-state of a control the visitor toggles, and the app's routing
+     checkboxes are --primary when checked. This used to be a literal equal to
+     the app's --warn, kept apart on purpose -- which made a healthy lit
+     crosspoint the colour of an operator's degraded-stream warning. 4.49:1
+     against a card as a non-text fill, where 3:1 is required. */
+  --color-cross: var(--primary);
+  --color-cross-dim: var(--primary-dim);
+  /* Was oklch(64.7% 0.1678 23.0), a near-miss of the app's --down; it reads the
+     shared value now. The app's --down moved to coral (70% 0.175 33) in the
+     2026-11 palette, which measures 6.76:1 on --color-ink, 6.18 on
+     --color-surface and 5.73 on --color-raised -- the raised case that failed
+     at 4.22 before now clears 4.5 too. */
   --color-down: var(--down);
-  /* Two more TRACK colours. The hero panel names four tracks at once — mic,
-     music, co-host, game — and the palette had only two that read as signal, so
-     three of the four chips would have had to share one.
+  /* TRACK colours: legend chips and the loudness bars, one per track kind.
+     A track colour is a label, not a state, so none of them may read a signal
+     token. --color-meter used to be var(--armed); the app's idle state went
+     neutral, and a chip that borrowed it would have gone grey with it. It
+     reads the shared IDENTITY token --cat-cyan instead (the same cyan), which
+     exists for exactly this: telling one thing from another, never status.
+     Co-host and game stay site-only literals: the console has no use for them.
 
-     NOT --color-cross for either: that is documented above as the active
-     crosspoint and nothing else, and borrowing it here would make a legend
-     swatch and a matrix cell mean the same thing while meaning different
-     things. Violet rather than a second blue for `game`, because --color-meter
-     is already cyan and two blues at 20px wide are one colour. */
-  --color-cohost: oklch(84.7% 0.1501 101.1);
+     --color-cohost was oklch(84.7% 0.1501 101.1), 9.5° from the meter's yellow
+     (ΔEOK 0.031: the same colour at chip size). It is a magenta now, chosen by
+     maximising its smallest ΔEOK to every signal, meter and track colour on
+     the page: 0.18 to --color-game (the nearest), 0.20 to --color-primary-
+     bright, 0.22 to --color-down, 0.34 to the meter yellow. 8.8:1 against a
+     card. Violet rather than a second blue for `game`, because --color-meter is
+     already cyan and two blues at 20px wide are one colour. */
+  --color-meter: var(--cat-cyan);
+  --color-cohost: oklch(80.0% 0.1900 328.0);
   --color-game: oklch(65.7% 0.1262 298.0);
 
   --radius-token: 0.5rem;
@@ -286,35 +267,11 @@
     overflow: hidden;
   }
 
-  .signal-grid::after {
-    content: "";
-    position: absolute;
-    inset: 0 -60%;
-    pointer-events: none;
-    /* Primary blue, not amber. Amber means an active crosspoint and nothing
-       else; spending it on decoration would cost the matrix its meaning. */
-    background: linear-gradient(
-      100deg,
-      transparent 0%,
-      rgb(91 127 199 / 0.05) 42%,
-      rgb(120 166 232 / 0.08) 50%,
-      rgb(91 127 199 / 0.05) 58%,
-      transparent 100%
-    );
-    will-change: transform;
-    animation: bus-sweep 19s cubic-bezier(0.6, 0, 0.4, 1) infinite;
-  }
-
-  /* 19s, and deliberately not linear. A constant-speed sweep reads as a loading
-     shimmer — the exact thing this must not look like. Easing in and out makes
-     it a slow pass that most readers will never consciously notice, which is
-     the point of a background. */
-  @keyframes bus-sweep {
-    0%        { transform: translate3d(-55%, 0, 0); }
-    /* Sits off-screen for a third of the cycle. Without the hold it sweeps
-       continuously and becomes a pattern the eye starts tracking. */
-    70%, 100% { transform: translate3d(55%, 0, 0); }
-  }
+  /* No sweep. A blue light used to pass across this grid every 19 seconds: a
+     linear-gradient on ::after. Gradients appear only in the logo mark
+     (docs/DESIGN-SYSTEM.md), and blue is for interaction, so a decorative blue
+     fade is both rules broken at once. The grid itself is 1px lines drawn
+     with gradient syntax, a pattern rather than a colour fade, and stays. */
 
   .card {
     border: 1px solid var(--color-line);
@@ -554,8 +511,8 @@
      shift on a small control is easy to miss and says nothing to a screen
      reader -- the label itself changing is announced. */
   .code-copy[data-copied="true"] {
-    color: var(--color-live);
-    border-color: var(--color-live);
+    color: var(--color-ok);
+    border-color: var(--color-ok);
   }
 
   /* --- the announcement bar --------------------------------------------- */
@@ -703,7 +660,7 @@
   .xpt:checked {
     background: var(--color-cross-dim);
     border-color: var(--color-cross);
-    box-shadow: inset 0 0 0 1px rgb(232 163 61 / 0.35);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-cross) 35%, transparent);
   }
   .xpt:checked::after {
     content: "";
@@ -813,7 +770,7 @@
 
   /* A blockquote in these documents is almost always a caveat or a measured
      result, never a quotation. A left rule in primary says "read this"; amber
-     would say "signal", which it is not -- see the reservation at the top. */
+     would say "warning", which it is not -- see the note at the top. */
   .doc-prose blockquote {
     margin-block: 1.25rem;
     padding: 0.25rem 0 0.25rem 1.125rem;

@@ -107,7 +107,7 @@ const DESTS = [
             {
               DESTS.map((d, i) => (
                 <td class={`c${i + 1} px-3 py-3 text-center`}>
-                  <span class="font-mono text-base text-live" data-out={d.id}>—</span>
+                  <span class="font-mono text-base text-ok" data-out={d.id}>—</span>
                   <span class="block font-mono text-[10px] text-subtle">dBFS</span>
                 </td>
               ))
@@ -211,7 +211,7 @@ const DESTS = [
       el.textContent = v.toFixed(1);
       // Past −12 dBFS a summed programme is running hot enough that a limiter
       // starts doing real work. Colour says so; a bare number would not.
-      el.className = v > -12 ? "font-mono text-base text-cross" : "font-mono text-base text-live";
+      el.className = v > -12 ? "font-mono text-base text-warn" : "font-mono text-base text-ok";
     };
 
     if (to === null) {

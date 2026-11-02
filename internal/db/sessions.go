@@ -890,11 +890,18 @@ func (d *DB) backfillAmbiguous(g []Recording, owned map[int64]int64, res *Backfi
 	return nil
 }
 
+// assignBeforeClaim runs, when set, between AssignRecording's "is it grouped
+// yet?" check and its claim -- the window a concurrent grouping lands in. Nil
+// outside tests; it exists so that interleaving can be pinned rather than
+// waited for.
+var assignBeforeClaim func(recordingID int64)
+
 // AssignRecording places a newly indexed recording: into the session of the
 // recording it chains from, or into a new one. This is the live path the
 // recorder calls; BackfillSessions is the same decision applied to history.
 //
-// A recording that already belongs somewhere is left alone.
+// A recording that already belongs somewhere is left alone -- including one
+// grouped while this was deciding (see claimUngrouped).
 func (d *DB) AssignRecording(recordingID int64, rules SessionRules) (*Session, error) {
 	rules = rules.normalized()
 	rec, err := d.GetRecording(recordingID)
@@ -914,8 +921,15 @@ func (d *DB) AssignRecording(recordingID int64, rules SessionRules) (*Session, e
 	if prev != nil && rules.Chains(*prev, *rec) {
 		if s, err := d.SessionForRecording(prev.ID); err == nil {
 			if rules.MaxSpan == 0 || rec.StartedAt.Sub(s.StartedAt) <= rules.MaxSpan {
-				if err := d.AddRecordingToSession(s.ID, rec.ID); err != nil {
+				if assignBeforeClaim != nil {
+					assignBeforeClaim(rec.ID)
+				}
+				claimed, err := d.claimUngrouped(s.ID, rec.ID)
+				if err != nil {
 					return nil, err
+				}
+				if !claimed {
+					return d.SessionForRecording(rec.ID)
 				}
 				return d.GetSession(s.ID)
 			}
@@ -928,10 +942,56 @@ func (d *DB) AssignRecording(recordingID int64, rules SessionRules) (*Session, e
 	if err != nil {
 		return nil, err
 	}
-	if err := d.AddRecordingToSession(s.ID, rec.ID); err != nil {
+	if assignBeforeClaim != nil {
+		assignBeforeClaim(rec.ID)
+	}
+	claimed, err := d.claimUngrouped(s.ID, rec.ID)
+	if err != nil {
 		return nil, err
 	}
+	if !claimed {
+		// Grouped by someone else since the check. The session made for it
+		// holds nothing; leaving it would put an empty broadcast in the
+		// Library until the next prune.
+		if err := d.DeleteSession(s.ID); err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+		return d.SessionForRecording(rec.ID)
+	}
 	return d.GetSession(s.ID)
+}
+
+// claimUngrouped puts a recording into a session only if it is in none, and
+// reports whether it did. AssignRecording's decision was made on a read that
+// is stale by the time it acts, so the claim itself is the check: a grouping
+// made in between -- by a person, the API, or another engine's sweep -- wins,
+// where AddRecordingToSession's upsert would have moved the recording out of
+// it.
+func (d *DB) claimUngrouped(sessionID, recordingID int64) (bool, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	if err := requireSession(tx, sessionID); err != nil {
+		return false, err
+	}
+	res, err := tx.Exec(`INSERT INTO session_recordings (recording_id, session_id, position)
+		VALUES (?,?,0) ON CONFLICT(recording_id) DO NOTHING`, recordingID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
+	}
+	if err := renumberSession(tx, sessionID); err != nil {
+		return false, err
+	}
+	if err := recalcSessionTx(tx, sessionID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // recordingBefore is the recording immediately preceding this one in time.

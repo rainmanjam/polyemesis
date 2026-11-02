@@ -711,6 +711,21 @@ its first tagged release.
 
 ### Changed
 
+- **Broadcast palette, in the console and on the website.** Failed is a lighter coral, so it can
+  no longer be mistaken for an on-air lamp, and it reads better: the failed badge goes from 4.55:1
+  to 6.18:1 on a card, failed text on a raised card from 4.22:1 to 5.73:1, and the destructive
+  button from 4.98:1 to 6.76:1. Placeholder and disabled text goes from 3.41:1 to 5.36:1. The focus
+  ring is the brighter blue (4.49:1 to 7.13:1 on a card), and so is the primary button's hover,
+  which composited to 3.84:1 at 85% opacity. Blue text is always the brighter blue. Idle is neutral
+  grey instead of cyan; the Facebook chat accent, author colours, the moderator shield and caption
+  speaker labels keep their cyan as an identity colour that never means a state. The audio meter has
+  no amber stop: amber means a warning, everywhere. On the website, a lit crosspoint is blue, like
+  the console's routing checkboxes, and the hero's decorative light sweep is gone. New ON AIR and REC
+  tally tokens are in place for the next console change. For anyone styling against the tokens:
+  `--live` is `--ok`, `--armed` is `--idle`, `--meter-high` is gone, and `--cat-cyan` is new. A test
+  computes the contrast of the palette's text, fill, button and indicator pairs from the token
+  values, and fails a change that drops one below WCAG AA.
+
 - **YouTube captions by HTTP POST: the delay is applied once, by YouTube (#8).** A YouTube
   destination on *caption ingestion (HTTP POST)* still needs a 30 s or 60 s delay, and it is
   still sent as the broadcast's `broadcastStreamDelayMs`. polyemesis no longer holds that

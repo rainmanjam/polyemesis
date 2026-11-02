@@ -407,7 +407,7 @@ export function ExposureBanner({
       >
         {state(true)}
         <span className="flex items-center gap-1.5">
-          <Lock className="h-3.5 w-3.5 shrink-0 text-live" />
+          <Lock className="h-3.5 w-3.5 shrink-0 text-ok" />
           <span>
             <span className="font-medium">{t("play.private")}</span>{" "}
             <span className="text-muted-foreground">
