@@ -50,7 +50,7 @@ action settings, so it does not travel with a profile export.
 | Go live | Starts every destination on the key's programme. Needs admin. |
 | Stop all | Hold to stop every destination on the key's programme. Shows how many YouTube broadcasts a stop would end, and refuses if that count cannot be loaded. Needs admin. |
 | Stop destination | Hold to stop one destination. Shows how many YouTube broadcasts that stop would end, read from the server for that destination, and refuses if the count cannot be loaded or the destination is unknown. With **Cut the delayed tail** ticked, the hold also cuts the destination's broadcast delay buffer (see below). Needs admin. |
-| Dump delay | Hold to drop the newest part of a delayed destination's buffer while it is on the air (see below). Leave the destination empty to dump every delayed destination of the key's programme. Needs admin. |
+| Dump delay | Hold to drop the newest part of a delayed destination's buffer while it is on the air (see below). Leave the destination empty to dump every delayed destination of the key's programme; on an install with more than one programme the key must then name its programme. Needs admin. |
 | Record | Shows the install-wide recording switch: **Recording**, **Record off**, **Not running**, or **HALTED: DISK** with the reason when the free-space floor stopped it. Tap to switch. Recording is not per programme, so the key does not take a programme. Needs admin to switch. |
 | Routing preset | Hold to apply a routing preset to the key's programme. The preset list comes from the install. Applying can restart that programme's destinations. Shows **No ingest** when the install has no programme to apply to. Needs admin. |
 | Chat poll | Starts the chat poll set on the key (a question, two to six options, one per line, and a duration), announced in every connected chat. While a poll runs the key shows **Poll on** with the votes so far and the time left, then **Counting** while the last votes are judged; hold it to end the poll early. Counts only: the key never names a voter. Install-wide, so it takes no programme. Needs admin to start or end. |
@@ -87,17 +87,30 @@ starts**: there is no rebuild while it is on the air. The key shows the delay as
 runs, **Delay 18/30s** after a dump (running/configured) or **Delay 30s** before
 one. It says when a dump would be refused: **Buffering delay** while the buffer
 fills, **Airing delay tail** after a stop, **Nothing to dump**, or **No delay**.
-After a hold it shows **Dumped 12s** (what the server dropped, which can be a
-little more than asked, because the cut is at a keyframe) for three seconds; when
-the server has nothing to dump it alerts and keeps its face.
+The server answers a dump only once the stream resumes at the next keyframe, which
+can take up to 12 seconds, so the key waits up to 20 seconds for it (other keys
+give up after 5) and shows **Dumping…** from the end of the hold until the answer.
+A second hold while it shows **Dumping…** does nothing. Then it shows **Dumped
+12s** (what the server dropped, which can be a little more than asked, because
+the cut is at a keyframe) for three seconds; when the server has nothing to dump
+it alerts and goes back to its face.
 
-- **Seconds to dump**: empty drops everything since the last dump point. Otherwise
-  a whole number from 1 to 900; any other value is refused on the key (**Seconds:
-  1–900**), never read as empty, because empty is the larger dump.
+- **Seconds to dump**: empty uses the destination's own default dump seconds
+  (its `delayDumpSeconds`, kept on the server); a destination with none drops
+  everything since the last dump point. Otherwise a whole number from 1 to 900; any other value
+  is refused on the key (**Seconds: 1–900**), never read as empty, because empty can
+  be the larger dump.
 - **Destination ID**: empty dumps every delayed destination of the programme in
   one request (`POST /destinations/delay/dump-all`). The key then shows how many
   are ready to dump, and after a hold how many were dumped. It alerts if any of
-  them failed.
+  them failed. At key down it reads the status fresh and arms only if at least one
+  destination of the programme is ready to dump now; the held key shows that count
+  (**Hold to dump all / 2 delayed**). If that read fails, or nothing is ready, it
+  alerts and does not arm.
+- **Programme ID** with an empty Destination ID: on an install with more than one
+  programme the key must name one. With none it alerts with **Set a programme** and
+  does not arm, and it does the same when it cannot read the programme list. The
+  key never asks the server to dump every programme at once.
 
 ## Track mute and gain
 

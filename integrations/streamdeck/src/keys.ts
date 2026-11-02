@@ -60,6 +60,7 @@ export const STREAM_DECK_KEYS = [
   "streamdeck.dump.dumped",
   "streamdeck.dump.dumpedAll",
   "streamdeck.dump.badSeconds",
+  "streamdeck.dump.needsProgramme",
   "streamdeck.record.on",
   "streamdeck.record.off",
   "streamdeck.record.notRunning",

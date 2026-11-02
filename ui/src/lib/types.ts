@@ -288,6 +288,10 @@ export interface Destination {
   /** Broadcast delay in seconds, 0 to 900 (#11). Absent or 0 is off. Changing
    *  it while live restarts this destination. */
   delaySeconds?: number;
+  /** How much a Dump drops when the request names no seconds, 0 to 900.
+   *  Absent or 0 is "everything since the last dump point". A request that
+   *  names seconds, 0 included, overrides it. Only meaningful with a delay. */
+  delayDumpSeconds?: number;
   /** Output audio encoding. Always present in a server response and empty for
    *  a destination that has not opted in. */
   audio?: AudioEncoding;
@@ -918,6 +922,10 @@ export interface DestStatus {
   enabled: boolean;
   /** The configured broadcast delay, whenever the row has one. */
   delaySeconds?: number;
+  /** The row's Dump default (Destination.delayDumpSeconds), so the card's
+   *  Dump dialog can preselect it. Absent or 0 is "everything since the last
+   *  dump point". */
+  delayDumpSeconds?: number;
   /** The live buffer, while there is one. A draining destination is disabled
    *  and still on the air; this is the only field that says so. */
   delay?: DelayStatus | null;

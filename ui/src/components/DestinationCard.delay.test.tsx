@@ -174,14 +174,47 @@ describe("dumping a delayed destination", () => {
     expect(dump).not.toHaveBeenCalled();
   });
 
-  it("dumps everything since the last dump point by default, with no seconds", async () => {
+  // An explicit 0, not "no seconds": with no seconds the server applies the
+  // destination's own dump default, which is not what this option says.
+  it("dumps everything since the last dump point by default, as an explicit 0", async () => {
     const dump = vi.fn(async () => answer());
     draw({ delay: delay({}) }, undefined, dump);
     openDump();
+    expect((dialog().getByTestId("delay-dump-mode-since") as HTMLInputElement).checked).toBe(true);
     expect(dialog().getByTestId("delay-dump-after").textContent).toContain("2 s");
     confirm();
     await waitFor(() => expect(dump).toHaveBeenCalledTimes(1));
-    expect(dump).toHaveBeenCalledWith(undefined);
+    expect(dump).toHaveBeenCalledWith(0);
+  });
+
+  it("preselects the destination's own dump default", async () => {
+    const dump = vi.fn(async () => answer({ requestedSeconds: 8 }));
+    draw({ delayDumpSeconds: 8, delay: delay({}) }, undefined, dump);
+    openDump();
+    expect((dialog().getByTestId("delay-dump-mode-seconds") as HTMLInputElement).checked).toBe(true);
+    expect((dialog().getByTestId("delay-dump-seconds") as HTMLInputElement).value).toBe("8");
+    expect(dialog().getByTestId("delay-dump-after").textContent).toContain("22 s");
+    confirm();
+    await waitFor(() => expect(dump).toHaveBeenCalledTimes(1));
+    expect(dump).toHaveBeenCalledWith(8);
+  });
+
+  it("still sends 0 when the operator overrides a default with everything since the last dump point", async () => {
+    const dump = vi.fn(async () => answer());
+    draw({ delayDumpSeconds: 8, delay: delay({}) }, undefined, dump);
+    openDump();
+    fireEvent.click(dialog().getByTestId("delay-dump-mode-since"));
+    confirm();
+    await waitFor(() => expect(dump).toHaveBeenCalledTimes(1));
+    expect(dump).toHaveBeenCalledWith(0);
+  });
+
+  it("warns that a dump can take up to about two keyframe intervals more than asked", () => {
+    draw({ delay: delay({}) }, undefined, vi.fn());
+    openDump();
+    expect(dialog().getByTestId("delay-dump-overshoot").textContent).toContain("two keyframe intervals");
+    fireEvent.click(dialog().getByTestId("delay-dump-mode-seconds"));
+    expect(dialog().getByTestId("delay-dump-overshoot")).toBeTruthy();
   });
 
   it("dumps a number of seconds when one is chosen, and estimates what is left", async () => {

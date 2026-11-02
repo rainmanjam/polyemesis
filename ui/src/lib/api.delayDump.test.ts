@@ -4,10 +4,11 @@ import { asDestinationId, asSourceId } from "./types";
 
 // THE DUMP'S BODY IS THE CHOICE THE CONFIRM DIALOG MADE.
 //
-// No body means "everything since the last dump point"; {"seconds": N} means
-// at least the newest N s. Sending {"seconds": undefined} or {"seconds": 0}
-// for the first would happen to mean the same thing today, but the server
-// documents the absent body, so that is what the console sends. Dump-all
+// No body means "this destination's own dump default" (which is "everything
+// since the last dump point" when it has none); {"seconds": N} overrides it,
+// and {"seconds": 0} is "everything since the last dump point" even on a
+// destination with a default. So 0 has to travel: dropping it as falsy would
+// quietly turn the operator's choice into the stored default. Dump-all
 // carries the confirmation the server refuses it without, scoped to one
 // programme like stop-all.
 
@@ -29,12 +30,18 @@ const sent = () => {
 };
 
 describe("dumping a destination's delay", () => {
-  it("sends no body for everything since the last dump point", async () => {
+  it("sends no body when no seconds are given, leaving the destination's default", async () => {
     const { api } = await import("./api");
     await api.dumpDestinationDelay(asDestinationId(7));
     const { url, body } = sent();
     expect(url).toContain("/destinations/7/delay/dump");
     expect(body).toBeUndefined();
+  });
+
+  it("sends an explicit 0, which overrides the destination's default", async () => {
+    const { api } = await import("./api");
+    await api.dumpDestinationDelay(asDestinationId(7), 0);
+    expect(JSON.parse(String(sent().body))).toEqual({ seconds: 0 });
   });
 
   it("sends the number of seconds when one was chosen", async () => {

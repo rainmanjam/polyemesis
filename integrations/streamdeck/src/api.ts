@@ -27,7 +27,16 @@ export interface TransportRequest {
   url: URL;
   headers: Record<string, string>;
   body?: string;
+  /** How long to wait for the answer. Unset: the transport's own default. */
+  timeoutMs?: number;
 }
+
+/**
+ * How long the two dump calls wait. The server holds a dump's answer until the stream resumes at the
+ * next keyframe, up to 12 s; a transport that gave up first would make a dump that went through look
+ * failed, and the operator would hold again.
+ */
+export const DUMP_TIMEOUT_MS = 20_000;
 
 export interface TransportResponse {
   status: number;
@@ -89,6 +98,17 @@ export class PolyemesisClient {
   /** What this token is and may do. Answers for this token only. Any scope may call it. */
   connection(): Promise<ConnectionInfo> {
     return this.call<ConnectionInfo>("GET", "/auth/connection");
+  }
+
+  /** The install's programmes, ids only. Install-wide: never scoped by ?source=. */
+  async sources(): Promise<{ id: number }[]> {
+    const body = await this.call<unknown>("GET", "/sources");
+    if (!Array.isArray(body)) throw new ApiError("malformed", 200, "the programme list is not a list");
+    return body.map((row) => {
+      const id = (row as { id?: unknown } | null)?.id;
+      if (!Number.isSafeInteger(id)) throw new ApiError("malformed", 200, "a programme carries no id");
+      return { id: id as number };
+    });
   }
 
   /** Destination state and the failover selector, scoped to one programme when given. */
@@ -221,8 +241,10 @@ export class PolyemesisClient {
 
   /**
    * Drops the newest part of one delayed destination's buffer; the stream keeps running and the delay
-   * stays shorter until the destination next starts. With no seconds, everything since the last dump
-   * point goes. The server answers 409 when there is nothing to dump. Needs an admin token.
+   * stays shorter until the destination next starts. With no seconds the server uses the destination's
+   * own default (delayDumpSeconds), else everything since the last dump point goes. It answers only once
+   * the stream resumes at the next keyframe, hence DUMP_TIMEOUT_MS, and 409 when there is nothing to
+   * dump. Needs an admin token.
    */
   async dumpDelay(id: number, seconds?: number, sourceId?: number): Promise<DumpResult> {
     const out = await this.call<{ id?: unknown; name?: unknown; dumpedSeconds?: unknown }>(
@@ -230,6 +252,8 @@ export class PolyemesisClient {
       `/destinations/${id}/delay/dump`,
       sourceId,
       seconds === undefined ? undefined : { seconds },
+      undefined,
+      DUMP_TIMEOUT_MS,
     );
     return {
       id: Number.isSafeInteger(out?.id) ? (out.id as number) : id,
@@ -238,11 +262,22 @@ export class PolyemesisClient {
     };
   }
 
-  /** Dumps every enabled, delayed destination of the programme. The server refuses without confirm. */
+  /**
+   * Dumps every enabled, delayed destination of the programme. The server refuses without confirm, and
+   * refuses a call with no programme on a multi-programme install unless the body says allProgrammes:
+   * the deck never sends that, so a key with no programme only works on a single-programme install.
+   */
   async dumpAll(sourceId?: number, seconds?: number): Promise<DumpAllRow[]> {
     const body: { confirm: true; seconds?: number } = { confirm: true };
     if (seconds !== undefined) body.seconds = seconds;
-    const out = await this.call<{ results?: unknown }>("POST", "/destinations/delay/dump-all", sourceId, body);
+    const out = await this.call<{ results?: unknown }>(
+      "POST",
+      "/destinations/delay/dump-all",
+      sourceId,
+      body,
+      undefined,
+      DUMP_TIMEOUT_MS,
+    );
     if (!Array.isArray(out?.results)) throw new ApiError("malformed", 200, "the dump answer carries no results");
     return (out.results as Record<string, unknown>[]).map((r) => {
       const outcome = r?.outcome === "dumped" || r?.outcome === "skipped" ? r.outcome : "failed";
@@ -342,6 +377,7 @@ export class PolyemesisClient {
     sourceId?: number,
     body?: unknown,
     query?: Record<string, string>,
+    timeoutMs?: number,
   ): Promise<T> {
     const url = new URL(this.base.toString());
     url.pathname = `${this.base.pathname.replace(/\/$/, "")}/api/v1${path}`;
@@ -358,7 +394,9 @@ export class PolyemesisClient {
 
     let res: TransportResponse;
     try {
-      res = await this.transport.send({ method, url, headers, body: payload });
+      const req: TransportRequest = { method, url, headers, body: payload };
+      if (timeoutMs !== undefined) req.timeoutMs = timeoutMs;
+      res = await this.transport.send(req);
     } catch (err) {
       if (err instanceof TransportError) {
         throw new ApiError(err.kind, undefined, err.message);

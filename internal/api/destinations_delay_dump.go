@@ -163,12 +163,7 @@ func (s *Server) handleDumpDestinationDelay(w http.ResponseWriter, r *http.Reque
 		writeError(w, code, msg)
 		return
 	}
-	// The audit record is written when the stream has resumed, from the final
-	// figures -- after this answer when the resume is late.
-	addr := s.clientIP(r)
-	res, err := s.dumper().DumpDelay(id, want, func(final delayline.DumpResult) {
-		s.publishAudit(auditDelayDumped(row, final, addr))
-	})
+	res, err := s.dumpAudited(s.dumper(), row, want, s.clientIP(r))
 	if err != nil {
 		code, msg := dumpRefusal(err)
 		writeError(w, code, msg)
@@ -262,9 +257,7 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(i int, row *db.Destination) {
 			defer wg.Done()
-			res, err := d.DumpDelay(row.ID, req.wantFor(row, want), func(final delayline.DumpResult) {
-				s.publishAudit(auditDelayDumped(row, final, addr))
-			})
+			res, err := s.dumpAudited(d, row, req.wantFor(row, want), addr)
 			if err != nil {
 				_, msg := dumpRefusal(err)
 				outcome := dumpAllFailed
@@ -288,14 +281,69 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 // purpose, and the delay is shorter for it. The record says which
 // destination, how much, and who asked -- never what was dumped.
 func auditDelayDumped(row *db.Destination, res delayline.DumpResult, address string) alerts.Event {
+	text := fmt.Sprintf("%.1f s of programme was dropped from %s's broadcast delay and will not air there. "+
+		"Its delay is now %.1f s, and returns to %d s when it next starts.",
+		res.Dumped.Seconds(), row.Name, res.After.Seconds(), row.OutputDelaySeconds())
+	status := "final"
+	switch {
+	case res.Aborted:
+		status = "aborted"
+		text = fmt.Sprintf("A dump cut at least %.1f s of programme from %s's broadcast delay, which will not "+
+			"air there, and the destination was stopped or restarted before the stream resumed.",
+			res.Dumped.Seconds(), row.Name)
+	case !res.Complete:
+		status = "provisional"
+		text += " Provisional: the stream resumes at the next keyframe, and a final record follows."
+	}
 	return alerts.Event{
 		Type:     alerts.TypeDelayDumped,
 		Severity: alerts.SeverityWarning,
 		Title:    "Broadcast delay dumped",
-		Text: fmt.Sprintf("%.1f s of programme was dropped from %s's broadcast delay and will not air there. "+
-			"Its delay is now %.1f s, and returns to %d s when it next starts.",
-			res.Dumped.Seconds(), row.Name, res.After.Seconds(), row.OutputDelaySeconds()),
+		Text:     text,
 	}.
 		WithField(fieldDestination, row.Name).
+		WithField(fieldDumpStatus, status).
 		WithField(fieldAddress, address)
+}
+
+// dumpAudited runs one dump and audits it. EVERY ACCEPTED DUMP LEAVES A RECORD
+// at once -- final when the stream resumed inside the answer, provisional
+// otherwise -- and a provisional one is followed by the outcome: the final
+// figures at the resume, or "aborted" when the line was cut first. The
+// completion can arrive before the answer does, so the two are ordered here.
+func (s *Server) dumpAudited(d delayDumper, row *db.Destination, want time.Duration, addr string) (delayline.DumpResult, error) {
+	var (
+		mu        sync.Mutex
+		accepted  bool
+		finalSeen bool
+		pending   *delayline.DumpResult
+	)
+	followUp := func(out delayline.DumpResult) {
+		if finalSeen && out.Complete {
+			return // the record written at acceptance was already final
+		}
+		s.publishAudit(auditDelayDumped(row, out, addr))
+	}
+	res, err := d.DumpDelay(row.ID, want, func(out delayline.DumpResult) {
+		mu.Lock()
+		if !accepted {
+			pending = &out
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+		followUp(out)
+	})
+	if err != nil {
+		return res, err
+	}
+	s.publishAudit(auditDelayDumped(row, res, addr))
+	mu.Lock()
+	accepted, finalSeen = true, res.Complete
+	out := pending
+	mu.Unlock()
+	if out != nil {
+		followUp(*out)
+	}
+	return res, nil
 }

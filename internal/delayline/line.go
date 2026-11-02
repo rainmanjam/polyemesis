@@ -318,11 +318,14 @@ const MaxDumpWait = 12 * time.Second
 // resume at the next keyframe. The result says whether it did: Complete is
 // false when the wait ran out, and the resume then still happens, later.
 // See splice.go.
-func (l *Line) Dump(want time.Duration) (DumpResult, error) {
+//
+// done, when not nil, runs once with the final result: at the resume, or
+// aborted when the line is cut first. It is bound to this dump's ticket.
+func (l *Line) Dump(want time.Duration, done func(DumpResult)) (DumpResult, error) {
 	if !l.releasing.Load() || l.draining.Load() {
 		return DumpResult{}, ErrNotOnAir
 	}
-	t, err := l.buf.Dump(time.Now(), want, DumpMargin)
+	t, err := l.buf.DumpWith(time.Now(), want, DumpMargin, done)
 	if err != nil {
 		return DumpResult{}, err
 	}

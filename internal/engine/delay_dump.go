@@ -39,9 +39,11 @@ const MaxDumpRequest = delayline.MaxDelay
 // want 0, everything since its last dump point. It waits, a GOP or so, for
 // the stream to resume, and reports what it did.
 //
-// done, when not nil, is called once with the FINAL figures when the stream
-// has resumed -- after DumpDelay returns when the resume is late. The audit
-// record is written from it, so it never carries provisional numbers.
+// done, when not nil, is called once with the outcome: the final figures when
+// the stream has resumed (after DumpDelay returns, when the resume is late),
+// or an aborted result when the line is cut first (Stop now, a restart, the
+// end of a drain, shutdown). It is bound to this dump's own ticket, so a
+// concurrent second dump -- refused as pending -- cannot replace it.
 func (e *Engine) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
 	e.mu.RLock()
 	d := e.dests[id]
@@ -49,14 +51,8 @@ func (e *Engine) DumpDelay(id int64, want time.Duration, done func(delayline.Dum
 	if d == nil || d.delay == nil {
 		return delayline.DumpResult{}, ErrNotDelayed
 	}
-	d.delay.mu.Lock()
-	d.delay.onDumped = done
-	d.delay.mu.Unlock()
-	res, err := d.delay.line.Dump(want)
+	res, err := d.delay.line.Dump(want, done)
 	if err != nil {
-		d.delay.mu.Lock()
-		d.delay.onDumped = nil
-		d.delay.mu.Unlock()
 		return res, err
 	}
 	e.log.Warn("broadcast delay: dumped the newest part of the buffer",
@@ -93,13 +89,6 @@ func (e *Engine) delayDumped(id int64) time.Duration {
 
 // onDelayDumped is a line's OnDumped: the dump has resumed at its keyframe.
 func (e *Engine) onDelayDumped(row *db.Destination, dd *destDelay, res delayline.DumpResult) {
-	dd.mu.Lock()
-	done := dd.onDumped
-	dd.onDumped = nil
-	dd.mu.Unlock()
-	if done != nil {
-		done(res)
-	}
 	e.streamDelayWith(row, dd, delayEventDumped, "", map[string]any{
 		"dumpSeconds":         res.Dumped.Seconds(),
 		"requestedSeconds":    res.Requested.Seconds(),

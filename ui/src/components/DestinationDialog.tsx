@@ -626,6 +626,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // destination.
   const [delaySeconds, setDelaySeconds] = useState(0);
   const [loadedDelay, setLoadedDelay] = useState(0);
+  const [delayDumpSeconds, setDelayDumpSeconds] = useState(0);
   // Output audio encoding. Empty is AAC stereo.
   const [audio, setAudio] = useState<AudioEncoding>({});
   // Copying audio is offered only where the receiver is not a platform ingest.
@@ -824,6 +825,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setResilience(destination.resilience ?? {});
       setDelaySeconds(destination.delaySeconds ?? 0);
       setLoadedDelay(destination.delaySeconds ?? 0);
+      setDelayDumpSeconds(destination.delayDumpSeconds ?? 0);
       setAudio(destination.audio ?? {});
       setCompliance(destination.compliance ?? {});
       setFacebook(destination.facebook ?? {});
@@ -848,6 +850,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
       setResilience({});
       setDelaySeconds(0);
       setLoadedDelay(0);
+      setDelayDumpSeconds(0);
       setAudio({});
       setCompliance({});
       setFacebook({});
@@ -1093,6 +1096,9 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
         transport,
         resilience,
         delaySeconds,
+        // Sent every save, 0 included: the PUT is decoded over the stored row,
+        // so a cleared default that did not travel would never clear.
+        delayDumpSeconds,
         // copyOn rather than audio.copy: switching the transport to RTMP has to
         // drop the flag here, or the operator gets a save error about a control
         // that is no longer on screen to turn off.
@@ -2537,6 +2543,31 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">{t("delay.help")}</span>
+                {/* What Dump drops when nobody says. Only meaningful with a
+                    delay, so it is offered only beside one. Changing it
+                    restarts nothing: it is read when a Dump is asked for. */}
+                {delaySeconds > 0 && (
+                  <>
+                    <Label htmlFor="dest-delay-dump" className="mt-2">
+                      {t("delay.dumpDefaultField")}
+                    </Label>
+                    <Input
+                      id="dest-delay-dump"
+                      type="number"
+                      min={0}
+                      max={900}
+                      step={1}
+                      value={delayDumpSeconds}
+                      onChange={(e) =>
+                        setDelayDumpSeconds(
+                          Math.max(0, Math.min(900, Math.round(Number(e.target.value) || 0))),
+                        )
+                      }
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">{t("delay.dumpDefaultHelp")}</span>
+                  </>
+                )}
                 {/* Said BEFORE the save: a delay cannot be stretched on a
                     running buffer, so the destination restarts and refills.
                     A YouTube caption POST destination's delay is YouTube's,

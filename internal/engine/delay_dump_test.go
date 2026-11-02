@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -166,5 +167,84 @@ func TestDumpingADestinationWithoutADelayIsRefused(t *testing.T) {
 	}
 	if e.DelayDumpable(saved.ID) {
 		t.Fatal("an undelayed destination reported dumpable")
+	}
+}
+
+// TWO DUMPS AT ONCE, THEN A STOP BEFORE THE RESUME. The feed has stopped, so
+// the dump that is accepted can only wait; the other is refused as pending and
+// must not take over the accepted one's callback. When the engine then stops
+// (the line is cut), the accepted dump's callback reports it aborted -- which
+// is what the audit's outcome record is written from.
+//
+// Mutations: keep the callback in a per-destination slot that the second call
+// overwrites; don't fire on abandon.
+func TestConcurrentDumpsKeepTheirOwnCallbacksAndAStopReportsTheAbort(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := dumpRow(t, e, 6)
+	row.DelayDumpSeconds = 4
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	stop := make(chan struct{})
+	go feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop)
+	eventually(t, "the delayed feed to go on air", 10*time.Second, func() bool {
+		d := statusFor(t, e, row.ID).Delay
+		return d != nil && d.Phase == DelayOnAir && d.Dumpable
+	})
+	if got := statusFor(t, e, row.ID).DelayDumpSeconds; got != 4 {
+		t.Errorf("status delayDumpSeconds %d, want the row's 4", got)
+	}
+	close(stop) // no resume keyframe will come
+
+	type call struct {
+		res delayline.DumpResult
+		err error
+		cb  chan delayline.DumpResult
+	}
+	calls := make([]call, 2)
+	var wg sync.WaitGroup
+	for i := range calls {
+		calls[i].cb = make(chan delayline.DumpResult, 2)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cb := calls[i].cb
+			calls[i].res, calls[i].err = e.DumpDelay(row.ID, time.Second, func(r delayline.DumpResult) { cb <- r })
+		}(i)
+	}
+	wg.Wait()
+	accepted, refused := 0, 0
+	for i, c := range calls {
+		switch {
+		case c.err == nil:
+			accepted = i
+		case errors.Is(c.err, delayline.ErrDumpPending):
+			refused = i
+		default:
+			t.Fatalf("dump %d: %v", i, c.err)
+		}
+	}
+	if accepted == refused {
+		t.Fatalf("want one dump accepted and one refused as pending: %+v", calls)
+	}
+	if calls[accepted].res.Complete {
+		t.Fatal("the dump completed with the feed stopped")
+	}
+	e.Stop()
+	select {
+	case r := <-calls[accepted].cb:
+		if !r.Aborted {
+			t.Fatalf("the accepted dump's callback got %+v after a stop, want aborted", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the accepted dump's callback never ran after the stop")
+	}
+	select {
+	case r := <-calls[refused].cb:
+		t.Fatalf("the refused dump's callback ran: %+v", r)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

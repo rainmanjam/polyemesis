@@ -698,6 +698,12 @@ func (ts *tsState) finishTrim(pid uint16, r *pidRewrite) []pkt {
 type DumpTicket struct {
 	b    *Buffer
 	done chan struct{}
+	// onDone is the caller's, set with the dump under the buffer's lock, so a
+	// second dump (refused as pending) can never replace it. It runs once,
+	// on its own goroutine: with the final result at the resume, or with an
+	// aborted one when the line is cut first.
+	onDone func(DumpResult)
+	fired  bool
 	// Set under Buffer.mu at the resume, read after done closes.
 	result DumpResult
 }
@@ -725,6 +731,10 @@ type DumpResult struct {
 	// Recovery is true when no IDR picture came for several GOPs and the
 	// stream resumed at another random-access picture instead.
 	Recovery bool `json:"recovery,omitempty"`
+	// Aborted is true when the line was cut (Stop now, a restart, a stop's
+	// drain ending, shutdown) before the resume: the cut had already removed
+	// programme, and the stream never resumed in this line.
+	Aborted bool `json:"aborted,omitempty"`
 	// CutFrom and CutTo are the wall-clock arrival times of the dumped
 	// programme: what arrived in [CutFrom, CutTo) never airs.
 	CutFrom time.Time `json:"-"`
@@ -992,6 +1002,11 @@ func (b *Buffer) spliceableLocked() bool {
 // The cut happens now; the resume when the next IDR picture arrives. The
 // ticket's Done closes then.
 func (b *Buffer) Dump(now time.Time, want, margin time.Duration) (*DumpTicket, error) {
+	return b.DumpWith(now, want, margin, nil)
+}
+
+// DumpWith is Dump with a completion callback: see DumpTicket.onDone.
+func (b *Buffer) DumpWith(now time.Time, want, margin time.Duration, done func(DumpResult)) (*DumpTicket, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	ts := &b.ts
@@ -1047,7 +1062,7 @@ func (b *Buffer) Dump(now time.Time, want, margin time.Duration) (*DumpTicket, e
 	if err := b.truncateLocked(pick); err != nil {
 		return nil, err
 	}
-	t := &DumpTicket{b: b, done: make(chan struct{})}
+	t := &DumpTicket{b: b, done: make(chan struct{}), onDone: done}
 	// Provisional until the resume: what has been cut so far.
 	cut := time.Duration(vnow - pick.at)
 	t.result = DumpResult{Requested: want, Clamped: clamped, Before: before, Dumped: cut, After: before - cut,
@@ -1282,6 +1297,7 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 		t.result.Recovery = !ts.cls.key
 		t.result.CutTo = now
 		close(t.done)
+		t.fireLocked()
 		b.resumed.Store(t)
 		ts.ticket = nil
 	}
@@ -1291,9 +1307,20 @@ func (b *Buffer) decideResumeLocked(now time.Time) bool {
 // abandonDumpLocked ends a dump that will not resume: the line is being cut.
 func (b *Buffer) abandonDumpLocked() {
 	if t := b.ts.ticket; t != nil {
+		t.result.Aborted = true
 		close(t.done)
+		t.fireLocked()
 		b.ts.ticket = nil
 	}
+}
+
+// fireLocked runs the caller's callback once, off the buffer's lock.
+func (t *DumpTicket) fireLocked() {
+	if t.onDone == nil || t.fired {
+		return
+	}
+	t.fired = true
+	go t.onDone(t.result)
 }
 
 // takeResumed hands over a dump that completed since the last call, once.

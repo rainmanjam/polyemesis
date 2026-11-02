@@ -1436,3 +1436,62 @@ func TestAfterAResumeANewPIDWaitsForItsStartAndThePSIComesFirst(t *testing.T) {
 		}
 	}
 }
+
+// A DUMP'S CALLBACK IS ITS OWN AND RUNS ONCE WITH THE OUTCOME: the final
+// result at the resume, an aborted one when the line is cut first. A second
+// dump while one waits is refused before it can touch the first's callback.
+//
+// Mutations: don't fire on abandon (the aborted case never reports); attach
+// the callback after the pending check fails (the refused second dump
+// replaces the first's).
+func TestADumpsCallbackRunsOnceWithItsOutcome(t *testing.T) {
+	wait := func(t *testing.T, ch chan DumpResult) DumpResult {
+		t.Helper()
+		select {
+		case r := <-ch:
+			return r
+		case <-time.After(2 * time.Second):
+			t.Fatal("the dump's callback never ran")
+			return DumpResult{}
+		}
+	}
+	t.Run("resumed", func(t *testing.T) {
+		g := delaytest.New(60)
+		r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+		r.run(18 * time.Second)
+		first, second := make(chan DumpResult, 2), make(chan DumpResult, 2)
+		if _, err := r.b.DumpWith(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin,
+			func(res DumpResult) { first <- res }); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.b.DumpWith(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin,
+			func(res DumpResult) { second <- res }); !errors.Is(err, ErrDumpPending) {
+			t.Fatalf("a second dump while one waits: %v, want ErrDumpPending", err)
+		}
+		r.run(40 * time.Second)
+		if res := wait(t, first); !res.Complete || res.Aborted {
+			t.Fatalf("the first dump's callback got %+v, want a completed dump", res)
+		}
+		select {
+		case res := <-first:
+			t.Fatalf("the callback ran twice: %+v", res)
+		case res := <-second:
+			t.Fatalf("the refused dump's callback ran: %+v", res)
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+	t.Run("cut before the resume", func(t *testing.T) {
+		g := delaytest.New(60)
+		r := newRig(t, 12*time.Second, memLimits(), g.Mux(40*time.Second))
+		r.run(18 * time.Second)
+		got := make(chan DumpResult, 2)
+		if _, err := r.b.DumpWith(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin,
+			func(res DumpResult) { got <- res }); err != nil {
+			t.Fatal(err)
+		}
+		r.b.Discard() // Stop now, a restart, shutdown: the line is closed
+		if res := wait(t, got); !res.Aborted || res.Complete || res.Dumped <= 0 {
+			t.Fatalf("the callback got %+v, want an aborted dump that says what it cut", res)
+		}
+	})
+}

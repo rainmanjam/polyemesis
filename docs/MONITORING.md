@@ -665,7 +665,7 @@ server itself, and they answer one question: *was that me?*
 | `clip.captured` | `info` | a clip was cut from the replay buffer |
 | `alerts.rule_changed` | `warning`, or `critical` for a delete | an alert rule was created, edited or deleted; names the rule, never its URL. **A deleted rule is sent this event itself**, on its way out, if it was enabled and would have wanted it |
 | `mcp.action` | `warning` for a stop, `info` otherwise | an AI assistant connected over [MCP](MCP.md) used a write tool; names the tool, the API token, the target and the outcome. See [MCP.md](MCP.md#the-audit-trail) |
-| `delay.dumped` | `warning` | part of a destination's [broadcast delay](BROADCAST-DELAY.md#dump) was dumped: that programme never aired there. Names the destination, how much was dumped and the delay left, and is written when the stream has resumed, with the final figures; never the content |
+| `delay.dumped` | `warning` | part of a destination's [broadcast delay](BROADCAST-DELAY.md#dump) was dumped: that programme never aired there. Names the destination, how much was dumped and the delay left, and is written as soon as a dump is accepted. Its `Dump` field is `final` when the stream had already resumed, and `provisional` otherwise, followed by a second record with the final figures or `aborted` if the destination was stopped or restarted first. Never the content |
 
 **The five `critical` ones are what belong on a phone**, and they are one story
 rather than five. (Deleting an alert rule is `critical` too; it is covered

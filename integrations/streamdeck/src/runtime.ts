@@ -60,12 +60,18 @@ interface Armed {
   pollId?: number;
   /** A stop-one key's ?now=true: cut the delayed tail. Read at key down, like the destination. */
   cutTail?: boolean;
-  /** A dump key's seconds; undefined is "since the last dump point". */
+  /** A dump key's seconds; undefined lets the server choose: the destination's default, else "since the last dump point". */
   dumpSeconds?: number;
 }
 
 /** A preset has no broadcast count to load. The hold loader only has to answer so the hold arms. */
 const NO_COUNT: StopImpact = { destinations: 0, youtubeBroadcasts: 0 };
+
+/** A dump-all key with no programme, on an install with more than one: it would dump every programme. */
+class DumpNeedsProgramme extends Error {}
+
+/** A dump-all key whose fresh status read shows nothing dumpable on its programme. */
+class DumpNothingReady extends Error {}
 
 /** One key or dial on the device, as the runtime sees it. */
 export interface Surface {
@@ -219,6 +225,11 @@ export class Runtime {
    * timer clears it, so a restart is not painted over before the operator has seen it.
    */
   private readonly flashes = new Map<string, () => void>();
+  /**
+   * Dump keys whose dump has been sent and not yet answered: the server holds the answer until the next
+   * keyframe. The key shows "Dumping…" until then, and a second hold does nothing.
+   */
+  private readonly dumpsInFlight = new Set<string>();
   /** A track control the server refused (409, 400, 404), with its words. Cleared by the next press. */
   private readonly levelRefused = new Map<string, KeyFace>();
   /** Each gain dial's turn in progress. */
@@ -257,6 +268,7 @@ export class Runtime {
     this.levelRefused.clear();
     for (const cancel of this.flashes.values()) cancel();
     this.flashes.clear();
+    this.dumpsInFlight.clear();
     this.dialNotices.clear();
     for (const turn of this.turns.values()) turn.cancel?.();
     this.turns.clear();
@@ -321,6 +333,7 @@ export class Runtime {
     this.lastIssues.delete(id);
     this.flashes.get(id)?.();
     this.flashes.delete(id);
+    this.dumpsInFlight.delete(id);
     this.levelRefused.delete(id);
     this.dialNotices.delete(id);
     this.turns.get(id)?.cancel?.();
@@ -520,6 +533,7 @@ export class Runtime {
       if (s.kind === "meter") continue;
       if (this.holds.has(s.id) && this.holdInProgress(s.id)) continue;
       if (this.flashes.has(s.id)) continue;
+      if (this.dumpsInFlight.has(s.id)) continue;
       if (s.kind === "trackGain") {
         await this.paintGainDial(s);
         continue;
@@ -911,11 +925,19 @@ export class Runtime {
    * is read NOW and held in the armed target, and only a hold of HOLD_MS sends it. A key bound to a
    * destination follows the stop-one key's ownership rule; a seconds value that is not 1 to 900 is refused
    * here, never read as "everything since the last dump".
+   *
+   * A key with no destination dumps every delayed destination of its programme, so like the stop-all key
+   * it counts them FRESH before it arms, and a failed read or a count of 0 refuses. With no programme
+   * either, it arms only on a single-programme install: on any other it would dump every programme, so it
+   * asks for a programme instead, and refuses too when the programme list cannot be read.
+   *
+   * While a dump is in flight (the server answers at the next keyframe) a press does nothing.
    */
   async pressDumpDown(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     const hold = this.holds.get(id);
     if (!s || !hold || !this.client) return;
+    if (this.dumpsInFlight.has(id)) return;
     // A press during the last dump's flash ends the flash: otherwise a release before the hold completes
     // could not repaint (the flash owns the face) and the key would look armed with nothing armed.
     this.flashes.get(id)?.();
@@ -933,20 +955,60 @@ export class Runtime {
       return;
     }
     this.armed.set(id, { destinationId, sourceId, dumpSeconds });
-    const result = await hold.press(async () => NO_COUNT);
-    if (!result.superseded && result.phase === "arming") {
-      const what =
-        dumpSeconds === undefined
-          ? t(this.locale, "streamdeck.dump.sinceMark")
-          : t(this.locale, "streamdeck.dump.lastSeconds", { seconds: dumpSeconds });
-      await s.setState(KEY_STATE.held);
-      await s.setTitle(
-        titleFor(
-          { tone: "held", label: destinationId === undefined ? "streamdeck.dump.holdAll" : "streamdeck.dump.hold", detail: what },
-          this.locale,
-        ),
-      );
+    const all = destinationId === undefined;
+    // Both reads run inside the hold's loader, so a release while either is in flight cannot arm the key.
+    const result = await hold.press(all ? () => this.countDumpAll(sourceId) : async () => NO_COUNT);
+    if (result.superseded) return;
+    if (result.phase === "refused") {
+      const title =
+        result.error instanceof DumpNeedsProgramme
+          ? t(this.locale, "streamdeck.dump.needsProgramme")
+          : result.error instanceof DumpNothingReady
+            ? t(this.locale, "streamdeck.dump.notReady")
+            : [t(this.locale, "streamdeck.dump.holdAll"), t(this.locale, "streamdeck.stop.countFailed")].join("\n");
+      await s.setTitle(title);
+      await s.showAlert();
+      return;
     }
+    if (result.phase !== "arming") return;
+    const what =
+      dumpSeconds === undefined
+        ? t(this.locale, "streamdeck.dump.sinceMark")
+        : t(this.locale, "streamdeck.dump.lastSeconds", { seconds: dumpSeconds });
+    const face: KeyFace = all
+      ? {
+          tone: "held",
+          label: "streamdeck.dump.holdAll",
+          reason: "streamdeck.dump.count",
+          reasonVars: { count: result.impact?.destinations ?? 0 },
+          detail: what,
+        }
+      : { tone: "held", label: "streamdeck.dump.hold", detail: what };
+    await s.setState(KEY_STATE.held);
+    await s.setTitle(titleFor(face, this.locale));
+  }
+
+  /**
+   * What a dump-all key would dump, read fresh: the delayed destinations of the programme that are
+   * dumpable now. Throws, so the hold refuses, when the key names no programme on an install with more
+   * than one, when either read fails, and when the count is 0.
+   */
+  private async countDumpAll(sourceId: number | undefined): Promise<StopImpact> {
+    const client = this.client!;
+    if (sourceId === undefined) {
+      const programmes = await client.sources();
+      if (programmes.length > 1) throw new DumpNeedsProgramme();
+    }
+    const payload = await client.status(sourceId);
+    const programme = sourceId ?? payload.source?.id;
+    const ready = (payload.destinations ?? []).filter(
+      (d) =>
+        (programme === undefined || d.sourceId === programme) &&
+        (d.delay?.seconds ?? 0) > 0 &&
+        d.delay?.dumpable === true,
+    ).length;
+    if (ready === 0) throw new DumpNothingReady();
+    return { destinations: ready, youtubeBroadcasts: 0 };
   }
 
   /**
@@ -1083,8 +1145,9 @@ export class Runtime {
     const s = this.surfaces.get(id);
     this.holds.get(id)?.release();
     if (!s) return;
-    // A dump that completed during the hold is showing what it dropped: letting go must not paint over it.
-    if (this.flashes.has(id)) return;
+    // A dump that completed during the hold is showing what it dropped, or one still waiting for its
+    // keyframe says "Dumping…": letting go must not paint over either.
+    if (this.flashes.has(id) || this.dumpsInFlight.has(id)) return;
     await this.paintFace(s, this.faceFor(s));
   }
 
@@ -1113,6 +1176,23 @@ export class Runtime {
    * others flashes the count AND alerts, because one of them did not go.
    */
   private async dumpArmed(s: Surface, target: Armed): Promise<void> {
+    // The server answers at the next keyframe, up to 12 s on: until then the key says the dump is under
+    // way, and the repaint, a key up and a second hold all leave it alone.
+    this.dumpsInFlight.add(s.id);
+    try {
+      await this.paintFace(s, { tone: "held", label: "streamdeck.dump.dumping" });
+      await this.sendDump(s, target);
+    } finally {
+      this.dumpsInFlight.delete(s.id);
+    }
+    // A refused dump does not flash: put the key's own face back over "Dumping…" now, not at the next tick.
+    if (!this.flashes.has(s.id) && !this.holdInProgress(s.id)) {
+      const current = this.surfaces.get(s.id);
+      if (current) await this.paintFace(current, this.faceFor(current));
+    }
+  }
+
+  private async sendDump(s: Surface, target: Armed): Promise<void> {
     let face: KeyFace;
     let failed = false;
     try {

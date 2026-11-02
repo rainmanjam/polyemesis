@@ -31,8 +31,8 @@ export function DelayPanel({
   dest: DestStatus;
   /** Discards the buffered tail. Absent for a card that cannot act. */
   onCutNow?: () => void;
-  /** Dumps the newest part of the buffer; no `seconds` is "everything since
-   *  the last dump point". Resolves with the server's answer and rejects with
+  /** Dumps the newest part of the buffer; `seconds` 0 is "everything since
+   *  the last dump point", and no `seconds` is the destination's default. Resolves with the server's answer and rejects with
    *  its reason. Absent for a card that cannot act. */
   onDump?: (seconds?: number) => Promise<DelayDumpResult>;
   busy?: boolean;
@@ -131,9 +131,12 @@ export function DelayPanel({
     return badge;
   }
 
+  // The destination's own Dump default is preselected, so the usual dump is
+  // one confirm away; without one, "everything since the last dump point".
+  const preset = Math.round(dest.delayDumpSeconds ?? 0);
   const ask = () => {
-    setMode("since");
-    setAmount("10");
+    setMode(preset > 0 ? "seconds" : "since");
+    setAmount(preset > 0 ? String(preset) : "10");
     setResult(null);
     setAsking(true);
   };
@@ -141,7 +144,9 @@ export function DelayPanel({
   const dump = async () => {
     if (!onDump) return;
     try {
-      const answer = await onDump(mode === "seconds" ? n : undefined);
+      // "Everything since the last dump point" is an explicit 0: with no
+      // seconds the server would apply the destination's default instead.
+      const answer = await onDump(mode === "seconds" ? n : 0);
       setResult({ ok: true, answer });
     } catch (err) {
       setResult({
@@ -252,6 +257,9 @@ export function DelayPanel({
                 {mode === "seconds"
                   ? t("delay.dumpAfterEstimate", { seconds: estimate })
                   : t("delay.dumpAfterAll")}
+              </span>
+              <span data-testid="delay-dump-overshoot" className="text-muted-foreground">
+                {t("delay.dumpOvershoot")}
               </span>
             </span>
           }

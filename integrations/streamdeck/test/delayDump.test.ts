@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TransportRequest } from "../src/api.js";
 import { dumpSeconds, keySettings } from "../src/config.js";
 import type { StatusPayload } from "../src/model.js";
 import { KEY_STATE } from "../src/render.js";
@@ -52,7 +53,8 @@ const ALL_DUMPED: Route = json(200, {
 });
 
 async function deck(token: Route, extra: Record<string, Route> = {}) {
-  const env = runtimeFor({
+  // Routes are looked up at send time, so a test can change one after the first tick.
+  const routes: Record<string, Route> = {
     "GET /api/v1/auth/connection": token,
     "GET /api/v1/status": json(200, STATUS),
     "GET /api/v1/destinations/stop-impact": json(200, { destinations: 1, youtubeBroadcasts: 0 }),
@@ -61,10 +63,29 @@ async function deck(token: Route, extra: Record<string, Route> = {}) {
     "POST /api/v1/destinations/5/stop": json(200, {}),
     "POST /api/v1/destinations/6/stop": json(200, {}),
     ...extra,
-  });
+  };
+  const env = runtimeFor(routes);
   env.rt.configure(PAIRED);
   await env.rt.verify();
-  return env;
+  return { ...env, routes };
+}
+
+/** A route that answers only when the test says so: a request still in flight. */
+function deferred(answer: Route) {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  const route = ((req: TransportRequest) => gate.then(() => answer(req))) as unknown as Route;
+  return { route, release };
+}
+
+/** STATUS with only these destinations dumpable now. */
+function statusDumpable(ids: number[]): StatusPayload {
+  return {
+    ...STATUS,
+    destinations: STATUS.destinations!.map((d) =>
+      d.delay ? { ...d, delay: { ...d.delay, dumpable: ids.includes(d.id) } } : d,
+    ),
+  };
 }
 
 const body = (req: { body?: string }) => (req.body === undefined ? undefined : JSON.parse(req.body));
@@ -377,6 +398,265 @@ describe("dump key flash", () => {
     await settle();
     expect(b.alerts).toBe(1);
     expect(none.sched.pending(FLASH_MS)).toBe(0);
+  });
+});
+
+// A dump of all with no programme is a dump across every programme on the install. The key never asks
+// for that: on a multi-programme install it must name a programme, and what it counts is read fresh at
+// key down, so a failed or stale read can never arm it.
+describe("dump of all: scoped and counted fresh at key down", () => {
+  it("refuses to arm with no programme on an install with more than one, sending nothing", async () => {
+    const { rt, net, sched } = await deck(ADMIN, {
+      "GET /api/v1/sources": json(200, [{ id: 7 }, { id: 9 }]),
+    });
+    const key = surface("a", "dump", {});
+    rt.add(key);
+    await rt.tick();
+
+    await rt.pressDumpDown("a");
+    expect(key.alerts).toBe(1);
+    expect(key.titles.at(-1)).toBe("Set a programme");
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("refuses to arm with no programme when the programme list cannot be read", async () => {
+    const { rt, net, sched } = await deck(ADMIN, {
+      "GET /api/v1/sources": json(500, { error: "store down" }),
+    });
+    const key = surface("a", "dump", {});
+    rt.add(key);
+    await rt.tick();
+
+    await rt.pressDumpDown("a");
+    expect(key.alerts).toBe(1);
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("arms with no programme on a single-programme install, and sends neither ?source= nor allProgrammes", async () => {
+    const { rt, net, sched } = await deck(ADMIN, {
+      "GET /api/v1/sources": json(200, [{ id: 7 }]),
+    });
+    rt.add(surface("a", "dump", {}));
+    await rt.tick();
+
+    await rt.pressDumpDown("a");
+    expect(sched.pending(HOLD_MS)).toBe(1);
+    sched.fire(HOLD_MS);
+    await settle();
+    const writes = net.writes();
+    expect(writes.map((r) => r.url.pathname)).toEqual(["/api/v1/destinations/delay/dump-all"]);
+    expect(writes[0]!.url.searchParams.has("source")).toBe(false);
+    expect(body(writes[0]!)).toEqual({ confirm: true });
+  });
+
+  it("does not read the programme list when the key names a programme", async () => {
+    const { rt, net } = await deck(ADMIN, {
+      "GET /api/v1/sources": json(200, [{ id: 7 }, { id: 9 }]),
+    });
+    rt.add(surface("a", "dump", { sourceId: 7 }));
+    await rt.tick();
+    await rt.pressDumpDown("a");
+    expect(net.sent.some((r) => r.url.pathname === "/api/v1/sources")).toBe(false);
+  });
+
+  it("reads the status fresh at key down, scoped to the key's programme, and shows that count while held", async () => {
+    const { rt, net, routes } = await deck(ADMIN);
+    const key = surface("a", "dump", { sourceId: 7 });
+    rt.add(key);
+    await rt.tick();
+    expect(key.titles.at(-1)).toBe("Hold to dump all\n2 delayed");
+
+    // Between the last tick and the press, Facebook stopped being dumpable.
+    routes["GET /api/v1/status"] = json(200, statusDumpable([5]));
+    const before = net.sent.length;
+    await rt.pressDumpDown("a");
+    const read = net.sent.slice(before).find((r) => r.url.pathname === "/api/v1/status");
+    expect(read?.url.searchParams.get("source")).toBe("7");
+    expect(key.states.at(-1)).toBe(KEY_STATE.held);
+    expect(key.titles.at(-1)).toBe("Hold to dump all\n1 delayed\nSince last dump");
+  });
+
+  it("refuses to arm when the fresh status read fails, whatever the last tick showed", async () => {
+    const { rt, net, sched, routes } = await deck(ADMIN);
+    const key = surface("a", "dump", { sourceId: 7 });
+    rt.add(key);
+    await rt.tick();
+
+    routes["GET /api/v1/status"] = json(500, { error: "boom" });
+    await rt.pressDumpDown("a");
+    expect(key.alerts).toBe(1);
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("refuses to arm when nothing on the programme is dumpable now", async () => {
+    const { rt, net, sched, routes } = await deck(ADMIN);
+    const key = surface("a", "dump", { sourceId: 7 });
+    rt.add(key);
+    await rt.tick();
+
+    // Only programme 9's destination is dumpable: it must not count for programme 7.
+    routes["GET /api/v1/status"] = json(200, statusDumpable([9]));
+    await rt.pressDumpDown("a");
+    expect(key.alerts).toBe(1);
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("does not arm when the key is let go while the programme list is still loading", async () => {
+    const slow = deferred(json(200, [{ id: 7 }]));
+    const { rt, net, sched } = await deck(ADMIN, { "GET /api/v1/sources": slow.route });
+    rt.add(surface("a", "dump", {}));
+    await rt.tick();
+
+    const pressing = rt.pressDumpDown("a");
+    await settle();
+    await rt.pressHoldUp("a");
+    slow.release();
+    await pressing;
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(0);
+  });
+});
+
+// The server holds a dump's answer until the stream resumes at the next keyframe, up to 12 s. A
+// transport that gave up first would make a dump that went through look failed, and the operator would
+// hold again; so the two dump calls wait longer than that, and the key says the dump is under way.
+describe("dump in flight", () => {
+  it("gives the two dump calls a timeout above the server's 12 s keyframe wait, and no other call", async () => {
+    const { rt, net, sched } = await deck(ADMIN);
+    rt.add(surface("k", "dump", { sourceId: 7, destinationId: 5 }));
+    rt.add(surface("a", "dump", { sourceId: 7 }));
+    rt.add(surface("s", "stopOne", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
+    await rt.pressDumpDown("k");
+    await rt.pressDumpDown("a");
+    await rt.pressStopOneDown("s");
+    sched.fire(HOLD_MS);
+    await settle();
+
+    const dumps = net.sent.filter((r) => r.url.pathname.includes("/delay/dump"));
+    expect(dumps.map((r) => r.url.pathname).sort()).toEqual([
+      "/api/v1/destinations/5/delay/dump",
+      "/api/v1/destinations/delay/dump-all",
+    ]);
+    for (const r of dumps) expect(r.timeoutMs, r.url.pathname).toBeGreaterThan(12_000);
+    const others = net.sent.filter((r) => !r.url.pathname.includes("/delay/dump"));
+    expect(others.map((r) => r.url.pathname)).toContain("/api/v1/destinations/5/stop");
+    for (const r of others) expect(r.timeoutMs, r.url.pathname).toBeUndefined();
+  });
+
+  it("shows Dumping… from the confirm until the answer, through a key up and a tick", async () => {
+    const slow = deferred(DUMPED);
+    const { rt, sched } = await deck(ADMIN, { "POST /api/v1/destinations/5/delay/dump": slow.route });
+    const key = surface("k", "dump", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+
+    await rt.pressDumpDown("k");
+    sched.fire(HOLD_MS);
+    await settle();
+    expect(key.titles.at(-1)).toBe("Dumping…");
+    await rt.pressHoldUp("k");
+    await rt.tick();
+    expect(key.titles.at(-1)).toBe("Dumping…");
+
+    slow.release();
+    await settle();
+    expect(key.titles.at(-1)).toBe("Dumped 12s");
+  });
+
+  it("shows Dumping… on a dump of all too", async () => {
+    const slow = deferred(ALL_DUMPED);
+    const { rt, sched } = await deck(ADMIN, { "POST /api/v1/destinations/delay/dump-all": slow.route });
+    const key = surface("a", "dump", { sourceId: 7 });
+    rt.add(key);
+    await rt.tick();
+    await rt.pressDumpDown("a");
+    sched.fire(HOLD_MS);
+    await settle();
+    expect(key.titles.at(-1)).toBe("Dumping…");
+    await rt.pressHoldUp("a");
+    expect(key.titles.at(-1)).toBe("Dumping…");
+    slow.release();
+    await settle();
+    expect(key.titles.at(-1)).toBe("2 dumped");
+  });
+
+  it("a second hold while a dump is in flight does nothing", async () => {
+    const slow = deferred(DUMPED);
+    const { rt, net, sched } = await deck(ADMIN, { "POST /api/v1/destinations/5/delay/dump": slow.route });
+    const key = surface("k", "dump", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    await rt.pressDumpDown("k");
+    sched.fire(HOLD_MS);
+    await settle();
+    await rt.pressHoldUp("k");
+
+    const before = net.sent.length;
+    await rt.pressDumpDown("k");
+    expect(net.sent.length).toBe(before);
+    expect(sched.pending(HOLD_MS)).toBe(0);
+    expect(key.alerts).toBe(0);
+    expect(key.titles.at(-1)).toBe("Dumping…");
+    sched.fireAll();
+    await settle();
+    expect(net.writes()).toHaveLength(1);
+
+    slow.release();
+    await settle();
+    expect(net.writes()).toHaveLength(1);
+  });
+
+  it("puts its own face back as soon as a refusal answers, when the key was let go mid-dump", async () => {
+    const slow = deferred(json(409, { error: "nothing to dump" }));
+    const { rt, sched } = await deck(ADMIN, { "POST /api/v1/destinations/5/delay/dump": slow.route });
+    const key = surface("k", "dump", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    await rt.pressDumpDown("k");
+    sched.fire(HOLD_MS);
+    await settle();
+    await rt.pressHoldUp("k");
+    expect(key.titles.at(-1)).toBe("Dumping…");
+
+    slow.release();
+    await settle();
+    expect(key.alerts).toBe(1);
+    expect(key.titles.at(-1)).toBe("Hold to dump\nTwitch\nDelay 18/30s");
+  });
+
+  it("arms again once a refused dump has answered", async () => {
+    const { rt, net, sched } = await deck(ADMIN, {
+      "POST /api/v1/destinations/5/delay/dump": json(409, { error: "nothing to dump" }),
+    });
+    const key = surface("k", "dump", { sourceId: 7, destinationId: 5 });
+    rt.add(key);
+    await rt.tick();
+    await rt.pressDumpDown("k");
+    sched.fire(HOLD_MS);
+    await settle();
+    await rt.pressHoldUp("k");
+    expect(key.alerts).toBe(1);
+
+    await rt.pressDumpDown("k");
+    expect(sched.pending(HOLD_MS)).toBe(1);
+    sched.fire(HOLD_MS);
+    await settle();
+    expect(net.writes()).toHaveLength(2);
   });
 });
 

@@ -810,7 +810,9 @@ export const api = {
    *  The delay stays shorter until the destination next starts. 409, with the
    *  server's reason as the message, when there is nothing to dump. */
   dumpDestinationDelay: (id: DestinationId, seconds?: number) =>
-    post<DelayDumpResult>(`/destinations/${id}/delay/dump`, seconds ? { seconds } : undefined),
+    // 0 travels: it is "everything since the last dump point" and overrides
+    // the destination's own default, which an absent body would apply.
+    post<DelayDumpResult>(`/destinations/${id}/delay/dump`, seconds === undefined ? undefined : { seconds }),
   /** Live per-track mute or gain (I4). Writes the STORED live mix and
    *  reconciles, so a level-only change reaches the running FFmpeg without a
    *  restart. `applied` says which happened and `reason` why. 409 for an

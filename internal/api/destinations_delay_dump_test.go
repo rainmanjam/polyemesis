@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +27,9 @@ type fakeDumper struct {
 	dumpable map[int64]bool
 	err      map[int64]error
 	late     bool
+	// abort: the line is cut before the resume -- the callback reports an
+	// aborted dump after the answer.
+	abort bool
 }
 
 func (f *fakeDumper) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
@@ -38,8 +40,19 @@ func (f *fakeDumper) DumpDelay(id int64, want time.Duration, done func(delayline
 	}
 	f.dumped = append(f.dumped, id)
 	f.want = append(f.want, want)
-	late := f.late
+	late, abort := f.late, f.abort
 	f.mu.Unlock()
+	if abort {
+		if done != nil {
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				done(delayline.DumpResult{Requested: want, Dumped: 4 * time.Second, Before: 30 * time.Second,
+					After: 26 * time.Second, Aborted: true})
+			}()
+		}
+		return delayline.DumpResult{Requested: want, Dumped: 4 * time.Second, Before: 30 * time.Second,
+			After: 26 * time.Second}, nil
+	}
 	final := delayline.DumpResult{Requested: want, Dumped: 10 * time.Second, Before: 30 * time.Second,
 		After: 20 * time.Second, Complete: true}
 	if late {
@@ -292,26 +305,56 @@ func TestADumpWithoutSecondsUsesTheDestinationsDefault(t *testing.T) {
 	}
 }
 
-// THE AUDIT RECORD CARRIES THE FINAL FIGURES. When the resume misses the
-// answer, the answer is provisional; the audit is written when the dump
-// completes, from what it actually did.
+// EVERY DUMP LEAVES AN AUDIT RECORD, AND THE OUTCOME FOLLOWS. Resumed inside
+// the answer: one final record. Resumed after it: a provisional record at
+// once, then the final figures. Cut before it resumed (stopped, restarted):
+// a provisional record, then an aborted one -- programme was removed either way.
 //
-// Mutation: publish the audit from the handler's own result again.
-func TestTheDumpAuditRecordsTheFinalFigures(t *testing.T) {
-	s, h, _, sign := managerServer(t, defaultTools())
-	row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
-	fake := &fakeDumper{dumpable: map[int64]bool{row.ID: true}, late: true}
-	s.delayDumper = fake
-	var mu sync.Mutex
-	var audit []alerts.Event
-	s.auditSink = func(ev alerts.Event) { mu.Lock(); audit = append(audit, ev); mu.Unlock() }
-	body := send(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/destinations/%d/delay/dump", row.ID), nil, http.StatusOK)
-	if !strings.Contains(string(body), `"complete":false`) {
-		t.Fatalf("the fixture's dump was meant to answer before completing: %s", body)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(audit) != 1 || !strings.Contains(audit[0].Text, "10.0 s") || !strings.Contains(audit[0].Text, "20.0 s") {
-		t.Fatalf("audit %+v: want one record with the final 10.0 s dumped and 20.0 s left", audit)
+// Mutations: drop the acceptance record in dumpAudited (the on-time and
+// aborted cases lose their only or first record); drop the follow-up (the
+// late and aborted cases never record the outcome).
+func TestEveryDumpLeavesAnAuditRecordAndTheOutcomeFollows(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		late, abort bool
+		want        []string
+	}{
+		{"on time", false, false, []string{"final"}},
+		{"late", true, false, []string{"provisional", "final"}},
+		{"stopped before the resume", false, true, []string{"provisional", "aborted"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, h, _, sign := managerServer(t, defaultTools())
+			row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
+			s.delayDumper = &fakeDumper{dumpable: map[int64]bool{row.ID: true}, late: tc.late, abort: tc.abort}
+			var mu sync.Mutex
+			var got []string
+			s.auditSink = func(ev alerts.Event) {
+				mu.Lock()
+				defer mu.Unlock()
+				for _, f := range ev.Fields {
+					if f.Name == fieldDumpStatus {
+						got = append(got, f.Value)
+					}
+				}
+			}
+			send(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/destinations/%d/delay/dump", row.ID), nil, http.StatusOK)
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				mu.Lock()
+				n := len(got)
+				mu.Unlock()
+				if n >= len(tc.want) || time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			time.Sleep(50 * time.Millisecond)
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("audit records %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
