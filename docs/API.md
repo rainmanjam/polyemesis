@@ -1354,29 +1354,55 @@ never moves or deletes the local file. See [STORAGE.md](STORAGE.md).
 **Vertical shorts.** `/plan` and `/export` take an optional `vertical` object,
 and with it the export is a 9:16 short: 1080x1920 H.264 (yuv420p) with one
 stereo AAC track, in MP4. Its file name carries the layout and a digest of its
-settings (`…-vertical-stacked-1a2b3c4d.mp4`), and a name already on disk gets
-`-2`, `-3`, so shorts of one span in different layouts are separate files.
+settings (`…-vertical-stacked-1a2b3c4d.mp4`), and a name already on disk or
+held by a queued export gets `-2`, `-3`, so shorts of one span in different
+layouts, or the same short queued twice, are separate files; a short is never
+published over an existing file.
 `layout` is `center` (a 9:16 crop; `focus` 0..1 pans it, default 0.5),
 `stacked` (`face` is the face-cam box and `game` the gameplay box, each
 `{x, y, w, h}` as fractions of the source frame; `faceShare` 0.2..0.6 is the
 face panel's share of the height, default 0.4; `faceBottom` puts it under the
 gameplay) or `blur` (the whole frame fitted across the width over a blurred
-copy of itself). Crops are never smaller than 2 px or odd, whatever the source.
+copy of itself). Crops are never smaller than 2 px or odd, whatever the source:
+a box that would be smaller on a tiny master is rounded UP to 2 px rather than
+refused.
 `captions: {enabled, style}` burns the transcript over the clip's span into
 the picture: the words come from the stored transcript, never from the
-request, and follow the chosen tracks; captions spoken at the same time are
-stacked; a recording with a gap keeps each caption on its own picture, and the
-short is the length of the picture it contains. `style.font` must be a font
-already in the fonts directory; the bundled Inter draws Latin, Greek and
-Cyrillic, and the plan warns, naming a character, when a caption needs a font
-it does not have (add one to the fonts directory and choose it). An empty
-`style.outline` is the default 6 px; `-1` is none. At most 600 caption lines
-are drawn per short, with a warning for the rest. Every frame is re-encoded,
-so the in-point is exact whatever `mode` says; the encode runs under the job
-governor's priority wrapper and, unless the request caps it, on half the
-machine's threads, so it yields to a live broadcast. A short longer than 60
-seconds is planned and exported with a warning, not refused. Without FFmpeg's
-`drawtext` filter the short is made without captions and the plan says so.
+request, and follow the chosen tracks. A recording with a gap keeps each
+caption on its own picture, the short is the length of the picture it
+contains, and an in-point inside a gap moves to where the recording resumes
+(the plan says so).
+
+**Caption fonts.** Captions are an ASS subtitle script burned in by libass
+(FFmpeg's `subtitles` filter), which shapes right-to-left and complex scripts,
+wraps, keeps text inside the frame, and stacks captions spoken at the same
+time instead of drawing them over each other. `style.font` names a font FILE
+already in the fonts directory (`<data>/fonts`); its own family and weight are
+what libass is asked for. libass looks in that directory first and then, for
+any glyph the chosen font lacks, at every font **installed on the machine**
+through fontconfig -- so what a CJK, Arabic, Hebrew or emoji caption looks
+like depends on the fonts installed. The Docker image installs fontconfig with
+Noto (Latin, Greek, Cyrillic), Noto Arabic, Noto Hebrew and Noto emoji; CJK is
+not in the default image (88 MiB) and is added with
+`--build-arg CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji font-noto-cjk"`
+or by dropping a `.ttf`/`.otf` that has the glyphs into `<data>/fonts`. On a
+host install, install fonts the usual way for the OS. The plan warns, naming
+the script (never a character of what was said), when captions need glyphs
+the bundled Inter does not have. An empty `style.outline` is the default
+6 px; `-1` is none. A short carries at most 2000 caption events, with a
+warning for the rest. Without libass (a Homebrew FFmpeg has none) the short is
+made without captions and the plan says so.
+
+**Load.** Every frame is re-encoded, so the in-point is exact whatever `mode`
+says. The encode and every probe it runs are started below normal priority --
+through `nice`/`ionice` on Linux and macOS, and in the `BELOW_NORMAL`
+priority class on Windows -- so a live broadcast's encoders win the CPU. The
+encoder's thread count is capped at half the cores unless the request sets
+one; that bounds how many cores a short occupies at once, not its share of a
+busy machine, which is what the priority is for. The job governor decides
+when an export STARTS; one already running is not paused if a broadcast
+begins. A short longer than 60 seconds is planned and exported with a
+warning, not refused.
 The job stores the caption tracks, style and font NAME -- never the words,
 the font's path or the server's capabilities, because `/jobs` is readable by
 a read token -- and the worker resolves them when it runs. A finished short's

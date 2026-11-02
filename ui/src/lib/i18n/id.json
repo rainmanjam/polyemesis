@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Tanamkan teks",
   "clipedit.vertical.captionsBody": "Dari transkrip rekaman ini, diatur waktunya per baris, untuk trek yang dibawa short.",
   "clipedit.vertical.noTranscript": "Rekaman ini tidak punya transkrip, jadi tidak ada yang bisa diberi teks.",
-  "clipedit.vertical.noDrawtext": "FFmpeg di server ini tidak bisa menggambar teks, jadi teks akan dilewati.",
   "clipedit.vertical.font": "Fon",
   "clipedit.vertical.size": "Ukuran teks",
   "clipedit.vertical.position": "Tinggi di layar",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Terima mengekspor dengan pengaturan potong di atas, termasuk tata letak vertikal bila aktif.",
   "clipedit.highlights.range": "{start} sampai {end}",
   "automod.highlightScoring": "Gunakan AI untuk menilai sorotan",
-  "automod.highlightScoringNote": "Mengizinkan editor klip mengirim cuplikan transkrip ke penyedia di atas saat pemindaian sorotan meminta penilaian. Terpisah dari moderasi obrolan; nonaktif secara bawaan."
+  "automod.highlightScoringNote": "Mengizinkan editor klip mengirim cuplikan transkrip ke penyedia di atas saat pemindaian sorotan meminta penilaian. Terpisah dari moderasi obrolan; nonaktif secara bawaan.",
+  "clipedit.vertical.noLibass": "FFmpeg di server ini tidak punya libass (filter subtitles), jadi teks akan dilewati."
 }

@@ -286,8 +286,8 @@ export function VerticalExportPanel({
                   </span>
                 </span>
               </Label>
-              {spec.captions.enabled && options && !options.drawText && (
-                <p role="status" className="text-tiny text-warn">{t("clipedit.vertical.noDrawtext")}</p>
+              {spec.captions.enabled && options && !options.burnCaptions && (
+                <p role="status" className="text-tiny text-warn">{t("clipedit.vertical.noLibass")}</p>
               )}
               {spec.captions.enabled && (
                 <div className="grid grid-cols-2 gap-2">

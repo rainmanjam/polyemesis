@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Untertitel einbrennen",
   "clipedit.vertical.captionsBody": "Aus dem Transkript dieser Aufnahme, zeilengenau getaktet, für die Spuren des Shorts.",
   "clipedit.vertical.noTranscript": "Diese Aufnahme hat kein Transkript, es gibt also nichts zu untertiteln.",
-  "clipedit.vertical.noDrawtext": "Das FFmpeg dieses Servers kann keinen Text zeichnen, Untertitel werden daher übersprungen.",
   "clipedit.vertical.font": "Schriftart",
   "clipedit.vertical.size": "Textgröße",
   "clipedit.vertical.position": "Höhe im Bild",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "„Annehmen“ exportiert mit den Schnitteinstellungen oben, inklusive vertikalem Layout, wenn es aktiv ist.",
   "clipedit.highlights.range": "{start} bis {end}",
   "automod.highlightScoring": "KI für die Highlight-Bewertung verwenden",
-  "automod.highlightScoringNote": "Erlaubt dem Clip-Editor, Transkriptauszüge an den Anbieter oben zu senden, wenn eine Highlight-Suche eine Bewertung anfordert. Unabhängig von der Chat-Moderation; standardmäßig aus."
+  "automod.highlightScoringNote": "Erlaubt dem Clip-Editor, Transkriptauszüge an den Anbieter oben zu senden, wenn eine Highlight-Suche eine Bewertung anfordert. Unabhängig von der Chat-Moderation; standardmäßig aus.",
+  "clipedit.vertical.noLibass": "Das FFmpeg dieses Servers hat kein libass (den subtitles-Filter), Untertitel werden daher übersprungen."
 }

@@ -157,7 +157,17 @@ LABEL org.opencontainers.image.title="polyemesis" \
 # an image whose multitrack SRT ingest cannot work. `grep srt` would be no check
 # at all — every build lists `srtp`, which is a different protocol.
 ARG FFMPEG_VERSION=8.1.3-r0
-RUN if ! apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata; then \
+# CAPTION FONTS. Burned captions on a vertical short are drawn by libass, which
+# picks fonts through fontconfig: the bundled Inter first (the server points
+# libass at its fonts directory), then any INSTALLED font for a glyph Inter
+# lacks. Alpine installs no font at all, so without these a Hebrew, Arabic or
+# emoji caption draws as boxes. Noto core + Arabic + Hebrew + emoji is about
+# 39 MiB. CJK is a further 88 MiB and is left out of the default; add it with
+#   docker build --build-arg CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji font-noto-cjk" .
+# or drop a .ttf/.otf into <data>/fonts. An empty value builds an image with no
+# fallback fonts, whose captions are Latin, Greek and Cyrillic only.
+ARG CAPTION_FONTS="fontconfig font-noto font-noto-arabic font-noto-hebrew font-noto-emoji"
+RUN if ! apk add --no-cache "ffmpeg=${FFMPEG_VERSION}" ca-certificates tzdata ${CAPTION_FONTS}; then \
       echo "FFMPEG_VERSION=${FFMPEG_VERSION} is not in this Alpine branch any more." >&2; \
       echo "It now serves:" >&2; \
       apk --no-cache policy ffmpeg >&2 || true; \

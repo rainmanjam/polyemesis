@@ -3,6 +3,7 @@ package clipper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,10 +28,10 @@ import (
 // Every render is checked with ffprobe for what a short platform requires:
 // 1080x1920, H.264 in yuv420p, an AAC track, and the duration asked for.
 //
-// THE CAPTION CHECK HAS TWO BRANCHES AND NEITHER IS A SKIP. With drawtext (the
+// THE CAPTION CHECK HAS TWO BRANCHES AND NEITHER IS A SKIP. With libass (the
 // shipping Alpine image, CI's FFmpeg) the caption band is lit inside the cue's
-// window and dark outside it. Without it (a Homebrew FFmpeg has no libfreetype)
-// the export must still succeed, carry the warning, and draw nothing.
+// window and dark outside it. Without it (a Homebrew FFmpeg has no libass) the
+// export must still succeed, carry the warning, and draw nothing.
 //
 // Set POLYEMESIS_VERTICAL_EVIDENCE to a directory to keep one frame per layout
 // and the ffprobe report there.
@@ -52,13 +53,15 @@ func verticalFixture(t *testing.T, bin, path string) {
 	}
 }
 
-func hasDrawtext(t *testing.T, bin string) bool {
+// hasLibass reports whether this FFmpeg has the subtitles filter, which is
+// what burns captions.
+func hasLibass(t *testing.T, bin string) bool {
 	t.Helper()
 	out, err := exec.Command(bin, "-hide_banner", "-filters").Output()
 	if err != nil {
 		t.Fatalf("ffmpeg -filters: %v", err)
 	}
-	return strings.Contains(string(out), " drawtext ")
+	return strings.Contains(string(out), " subtitles ")
 }
 
 // frameRGB decodes one frame of a render at an output time as raw RGB.
@@ -164,7 +167,7 @@ func TestARealVerticalExportOfEachLayout(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.mkv")
 	verticalFixture(t, bin, src)
-	drawtext := hasDrawtext(t, bin)
+	drawtext := hasLibass(t, bin)
 
 	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
 	if err := ffmpeg.EnsureFonts(fonts); err != nil {
@@ -187,7 +190,7 @@ func TestARealVerticalExportOfEachLayout(t *testing.T) {
 			Cues:     []Cue{{StartMS: 3000, EndMS: 5000, Text: "HELLO SHORTS"}},
 			Style:    CaptionStyle{Box: false},
 			FontFile: font,
-			DrawText: drawtext,
+			Burn:     drawtext,
 		}
 	}
 	type probe struct {
@@ -284,7 +287,7 @@ func TestARealVerticalExportAcrossASegmentBoundaryKeepsCaptionsInPlace(t *testin
 	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
 	verticalFixture(t, bin, a)
 	verticalFixture(t, bin, b)
-	drawtext := hasDrawtext(t, bin)
+	drawtext := hasLibass(t, bin)
 	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
 	if err := ffmpeg.EnsureFonts(fonts); err != nil {
 		t.Fatal(err)
@@ -301,7 +304,7 @@ func TestARealVerticalExportAcrossASegmentBoundaryKeepsCaptionsInPlace(t *testin
 	path := filepath.Join(dir, "seam.mp4")
 	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{
 		// 10.0-11.0s on the timeline: 2.0-3.0s into a short that starts at 8s.
-		Cues: []Cue{{StartMS: 10000, EndMS: 11000, Text: "ACROSS THE SEAM"}}, FontFile: font, DrawText: drawtext,
+		Cues: []Cue{{StartMS: 10000, EndMS: 11000, Text: "ACROSS THE SEAM"}}, FontFile: font, Burn: drawtext,
 	}}
 	res, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{
 		In: 8 * time.Second, Out: 16 * time.Second, OutPath: path, Mode: ModePrecise, Vertical: &v,
@@ -380,7 +383,7 @@ func TestARealVerticalExportAcrossAGapKeepsCaptionsOnTheirPicture(t *testing.T) 
 	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
 	verticalFixture(t, bin, a)
 	verticalFixture(t, bin, b)
-	drawtext := hasDrawtext(t, bin)
+	drawtext := hasLibass(t, bin)
 	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
 	if err := ffmpeg.EnsureFonts(fonts); err != nil {
 		t.Fatal(err)
@@ -391,7 +394,7 @@ func TestARealVerticalExportAcrossAGapKeepsCaptionsOnTheirPicture(t *testing.T) 
 		t.Fatal(err)
 	}
 	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{
-		Cues: []Cue{{StartMS: 21_000, EndMS: 22_000, Text: "AFTER THE GAP"}}, FontFile: font, DrawText: drawtext}}
+		Cues: []Cue{{StartMS: 21_000, EndMS: 22_000, Text: "AFTER THE GAP"}}, FontFile: font, Burn: drawtext}}
 	out := filepath.Join(dir, "gap.mp4")
 	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: 10 * time.Second, Out: 26 * time.Second,
 		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
@@ -418,7 +421,7 @@ func TestARealCaptionedShortFromADirectoryWithGraphMetacharacters(t *testing.T) 
 	}
 	src := filepath.Join(root, "src.mkv")
 	verticalFixture(t, bin, src)
-	drawtext := hasDrawtext(t, bin)
+	drawtext := hasLibass(t, bin)
 	fonts := filepath.Join(root, ffmpeg.FontsDirName)
 	if err := ffmpeg.EnsureFonts(fonts); err != nil {
 		t.Fatal(err)
@@ -429,7 +432,7 @@ func TestARealCaptionedShortFromADirectoryWithGraphMetacharacters(t *testing.T) 
 		t.Fatal(err)
 	}
 	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{
-		Cues: []Cue{{StartMS: 2000, EndMS: 4000, Text: "it's [odd]; but, fine"}}, FontFile: font, DrawText: drawtext}}
+		Cues: []Cue{{StartMS: 2000, EndMS: 4000, Text: "it's [odd]; but, fine"}}, FontFile: font, Burn: drawtext}}
 	out := filepath.Join(root, "short.mp4")
 	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: time.Second, Out: 5 * time.Second,
 		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
@@ -462,4 +465,157 @@ func TestARealVerticalExportStartingInAGap(t *testing.T) {
 	}
 	rep, _ := probeShort(t, ffprobe, out)
 	assertShort(t, rep, 4*time.Second)
+}
+
+// litRows is, for each row of a frame, whether it holds a near-white pixel.
+func litRows(f []byte) []bool {
+	rows := make([]bool, VerticalHeight)
+	for y := 0; y < VerticalHeight; y++ {
+		for x := 0; x < VerticalWidth; x++ {
+			if r, g, b := pixel(f, x, y); r > 215 && g > 215 && b > 215 {
+				rows[y] = true
+				break
+			}
+		}
+	}
+	return rows
+}
+
+// bands are the runs of lit rows, merging runs closer than gap rows: a caption
+// line is one band, two stacked captions are two.
+func bands(rows []bool, gap int) [][2]int {
+	var out [][2]int
+	for y := 0; y < len(rows); y++ {
+		if !rows[y] {
+			continue
+		}
+		start := y
+		for y < len(rows) && rows[y] {
+			y++
+		}
+		if k := len(out) - 1; k >= 0 && start-out[k][1] <= gap {
+			out[k][1] = y
+			continue
+		}
+		out = append(out, [2]int{start, y})
+	}
+	return out
+}
+
+// captionedShort renders a 4 s centre-crop short of the blue/red fixture with
+// cues and a style, returning the path and whether libass was there to burn.
+func captionedShort(t *testing.T, name string, cues []Cue, style CaptionStyle) (string, bool) {
+	t.Helper()
+	bin, ffprobe := integrationTools(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mkv")
+	verticalFixture(t, bin, src)
+	burn := hasLibass(t, bin)
+	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
+	if err := ffmpeg.EnsureFonts(fonts); err != nil {
+		t.Fatal(err)
+	}
+	font, _ := ffmpeg.FontPath(fonts, DefaultCaptionFont)
+	tl, _ := NewTimeline([]Segment{{Path: src, Duration: 12 * time.Second}})
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{Cues: cues, Style: style, FontFile: font, Burn: burn}}
+	out := filepath.Join(dir, name+".mp4")
+	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: 0, Out: 4 * time.Second,
+		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
+		t.Fatalf("Cut: %v", err)
+	}
+	rep, raw := probeShort(t, ffprobe, out)
+	assertShort(t, rep, 4*time.Second)
+	if ev := os.Getenv("POLYEMESIS_VERTICAL_EVIDENCE"); ev != "" {
+		keepEvidence(t, bin, out, raw, filepath.Join(ev, "caption-"+name))
+	}
+	return out, burn
+}
+
+// CONCURRENT CAPTIONS STACK. Two cues on screen at once are two separate
+// bands of text, not one drawn over the other -- libass's collision handling,
+// measured in the rendered pixels.
+//
+// MUTATION: every event pinned to one spot (\pos). Observed: FAIL, one band.
+func TestARealVerticalExportStacksConcurrentCaptions(t *testing.T) {
+	out, burn := captionedShort(t, "stacked-cues", []Cue{
+		{StartMS: 500, EndMS: 3500, Text: "FIRST SPEAKER"},
+		{StartMS: 700, EndMS: 3500, Text: "SECOND SPEAKER"},
+	}, CaptionStyle{})
+	if !burn {
+		return
+	}
+	bin, _ := integrationTools(t)
+	got := bands(litRows(frameRGB(t, bin, out, 2*time.Second)), 8)
+	if len(got) < 2 {
+		t.Errorf("concurrent captions drew %d band(s) %v, want two stacked", len(got), got)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i][0] < got[i-1][1] {
+			t.Errorf("bands overlap: %v", got)
+		}
+	}
+}
+
+// CAPTIONS STAY IN THE FRAME at the extremes of the position slider: at 5% the
+// text hangs from near the top, at 95% it stands near the bottom, and two
+// lines at either end are drawn whole.
+func TestARealVerticalExportKeepsCaptionsInTheFrame(t *testing.T) {
+	two := "A CAPTION LONG ENOUGH TO TAKE TWO LINES AT THIS SIZE"
+	for _, pos := range []float64{5, 95} {
+		out, burn := captionedShort(t, fmt.Sprintf("pos%.0f", pos), []Cue{{StartMS: 500, EndMS: 3500, Text: two}},
+			CaptionStyle{PositionPct: pos})
+		if !burn {
+			continue
+		}
+		bin, _ := integrationTools(t)
+		got := bands(litRows(frameRGB(t, bin, out, 2*time.Second)), 40)
+		if len(got) == 0 {
+			t.Fatalf("position %.0f%%: nothing drawn", pos)
+		}
+		first, last := got[0][0], got[len(got)-1][1]
+		if first <= 0 || last >= VerticalHeight {
+			t.Errorf("position %.0f%%: text runs to the frame's edge (%d..%d)", pos, first, last)
+		}
+		if pos == 5 && first > VerticalHeight/4 || pos == 95 && last < VerticalHeight*3/4 {
+			t.Errorf("position %.0f%%: text at %d..%d, not near its edge", pos, first, last)
+		}
+	}
+}
+
+// HOSTILE TEXT IS DRAWN AS TEXT. An override block, a backslash-N, a percent
+// expansion and quotes in what somebody said render as those characters at the
+// caption size; none of them changes the size, breaks the line or expands.
+func TestARealVerticalExportDrawsHostileTextAsText(t *testing.T) {
+	out, burn := captionedShort(t, "hostile", []Cue{{StartMS: 500, EndMS: 3500,
+		Text: `{\fs400}BIG it's "x" a\Nb 100% %{pts}`}}, CaptionStyle{})
+	if !burn {
+		return
+	}
+	bin, _ := integrationTools(t)
+	got := bands(litRows(frameRGB(t, bin, out, 2*time.Second)), 30)
+	if len(got) == 0 {
+		t.Fatal("nothing drawn")
+	}
+	if h := got[len(got)-1][1] - got[0][0]; h > 400 {
+		t.Errorf("the caption is %d px tall: an override in the text was obeyed", h)
+	}
+}
+
+// OTHER SCRIPTS. Rendered for the evidence directory -- whether a glyph is a
+// letter or a box depends on the fonts installed, which is the point of the
+// fontconfig fallback -- and asserted only to draw something.
+func TestARealVerticalExportOfOtherScripts(t *testing.T) {
+	for name, text := range map[string]string{
+		"latin": "Café déjà vu", "cjk": "你好，世界 こんにちは 안녕하세요", "arabic": "مرحبا بالعالم",
+		"hebrew": "שלום עולם", "emoji": "GG 🎮🔥😀",
+	} {
+		out, burn := captionedShort(t, name, []Cue{{StartMS: 500, EndMS: 3500, Text: text}}, CaptionStyle{})
+		if !burn {
+			continue
+		}
+		bin, _ := integrationTools(t)
+		if n := whiteIn(frameRGB(t, bin, out, 2*time.Second), 1200, 1600); n < 200 {
+			t.Errorf("%s drew %d px", name, n)
+		}
+	}
 }

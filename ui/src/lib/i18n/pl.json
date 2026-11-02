@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Wtop napisy",
   "clipedit.vertical.captionsBody": "Z transkrypcji tego nagrania, zsynchronizowane z każdym wierszem, dla ścieżek w shorcie.",
   "clipedit.vertical.noTranscript": "To nagranie nie ma transkrypcji, więc nie ma czego podpisać.",
-  "clipedit.vertical.noDrawtext": "FFmpeg na tym serwerze nie potrafi rysować tekstu, więc napisy zostaną pominięte.",
   "clipedit.vertical.font": "Czcionka",
   "clipedit.vertical.size": "Rozmiar tekstu",
   "clipedit.vertical.position": "Wysokość na ekranie",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Akceptacja eksportuje z ustawieniami cięcia powyżej, w tym z układem pionowym, jeśli jest włączony.",
   "clipedit.highlights.range": "{start} do {end}",
   "automod.highlightScoring": "Używaj AI do oceny najlepszych momentów",
-  "automod.highlightScoringNote": "Pozwala edytorowi klipów wysyłać fragmenty transkrypcji do dostawcy powyżej, gdy wyszukiwanie momentów prosi o ocenę. Niezależne od moderacji czatu; domyślnie wyłączone."
+  "automod.highlightScoringNote": "Pozwala edytorowi klipów wysyłać fragmenty transkrypcji do dostawcy powyżej, gdy wyszukiwanie momentów prosi o ocenę. Niezależne od moderacji czatu; domyślnie wyłączone.",
+  "clipedit.vertical.noLibass": "FFmpeg na tym serwerze nie ma libass (filtra subtitles), więc napisy zostaną pominięte."
 }

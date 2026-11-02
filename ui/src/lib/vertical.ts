@@ -61,7 +61,8 @@ export interface ClipTemplatesView {
   templates: ClipTemplate[];
   layouts: VerticalLayout[];
   fonts: string[];
-  drawText: boolean;
+  /** Whether this FFmpeg has the libass subtitles filter that burns captions. */
+  burnCaptions: boolean;
   maxShortSeconds: number;
   defaultStyle: CaptionStyle;
 }

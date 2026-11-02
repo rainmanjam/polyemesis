@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "烧录字幕",
   "clipedit.vertical.captionsBody": "来自本录像的转写文本，逐行计时，仅含短视频所带音轨。",
   "clipedit.vertical.noTranscript": "此录像没有转写文本，因此无可添加字幕。",
-  "clipedit.vertical.noDrawtext": "此服务器的 FFmpeg 无法绘制文字，因此将跳过字幕。",
   "clipedit.vertical.font": "字体",
   "clipedit.vertical.size": "文字大小",
   "clipedit.vertical.position": "屏幕高度位置",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "接受将使用上方的剪辑设置导出，若已开启则包括竖屏布局。",
   "clipedit.highlights.range": "{start} 至 {end}",
   "automod.highlightScoring": "使用 AI 为精彩片段评分",
-  "automod.highlightScoringNote": "允许剪辑编辑器在精彩片段扫描请求评分时，将转写摘录发送给上方的服务商。与聊天审核分开；默认关闭。"
+  "automod.highlightScoringNote": "允许剪辑编辑器在精彩片段扫描请求评分时，将转写摘录发送给上方的服务商。与聊天审核分开；默认关闭。",
+  "clipedit.vertical.noLibass": "此服务器的 FFmpeg 没有 libass（subtitles 滤镜），因此将跳过字幕。"
 }

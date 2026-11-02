@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Вшити субтитри",
   "clipedit.vertical.captionsBody": "З розшифровки цього запису, за часом кожного рядка, для доріжок шортса.",
   "clipedit.vertical.noTranscript": "Цей запис не має розшифровки, тому субтитрувати нічого.",
-  "clipedit.vertical.noDrawtext": "FFmpeg цього сервера не вміє малювати текст, тому субтитри буде пропущено.",
   "clipedit.vertical.font": "Шрифт",
   "clipedit.vertical.size": "Розмір тексту",
   "clipedit.vertical.position": "Висота на екрані",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Прийняття експортує з налаштуваннями нарізки вище, включно з вертикальним макетом, якщо він увімкнений.",
   "clipedit.highlights.range": "з {start} до {end}",
   "automod.highlightScoring": "Використовувати ШІ для оцінки яскравих моментів",
-  "automod.highlightScoringNote": "Дозволяє редактору кліпів надсилати уривки розшифровки провайдеру вище, коли пошук моментів запитує оцінку. Окремо від модерації чату; типово вимкнено."
+  "automod.highlightScoringNote": "Дозволяє редактору кліпів надсилати уривки розшифровки провайдеру вище, коли пошук моментів запитує оцінку. Окремо від модерації чату; типово вимкнено.",
+  "clipedit.vertical.noLibass": "У FFmpeg цього сервера немає libass (фільтра subtitles), тому субтитри буде пропущено."
 }

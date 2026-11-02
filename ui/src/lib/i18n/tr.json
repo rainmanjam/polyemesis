@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Altyazıları göm",
   "clipedit.vertical.captionsBody": "Bu kaydın dökümünden, her satıra göre zamanlanmış, kısa videodaki izler için.",
   "clipedit.vertical.noTranscript": "Bu kaydın dökümü yok, bu yüzden altyazı eklenecek bir şey yok.",
-  "clipedit.vertical.noDrawtext": "Bu sunucunun FFmpeg'i metin çizemiyor, bu yüzden altyazılar atlanacak.",
   "clipedit.vertical.font": "Yazı tipi",
   "clipedit.vertical.size": "Metin boyutu",
   "clipedit.vertical.position": "Ekrandaki yükseklik",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Kabul, dikey düzen açıksa o da dahil, yukarıdaki kesim ayarlarıyla dışa aktarır.",
   "clipedit.highlights.range": "{start} - {end} arası",
   "automod.highlightScoring": "Öne çıkanları puanlamak için yapay zekâ kullan",
-  "automod.highlightScoringNote": "Bir öne çıkan taraması puan istediğinde klip düzenleyicinin döküm alıntılarını yukarıdaki sağlayıcıya göndermesine izin verir. Sohbet moderasyonundan ayrıdır; varsayılan olarak kapalıdır."
+  "automod.highlightScoringNote": "Bir öne çıkan taraması puan istediğinde klip düzenleyicinin döküm alıntılarını yukarıdaki sağlayıcıya göndermesine izin verir. Sohbet moderasyonundan ayrıdır; varsayılan olarak kapalıdır.",
+  "clipedit.vertical.noLibass": "Bu sunucunun FFmpeg'inde libass (subtitles filtresi) yok, bu yüzden altyazılar atlanacak."
 }

@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Gravar legendas",
   "clipedit.vertical.captionsBody": "Da transcrição desta gravação, sincronizada a cada linha, para as faixas do short.",
   "clipedit.vertical.noTranscript": "Esta gravação não tem transcrição, então não há o que legendar.",
-  "clipedit.vertical.noDrawtext": "O FFmpeg deste servidor não consegue desenhar texto, então as legendas serão ignoradas.",
   "clipedit.vertical.font": "Fonte",
   "clipedit.vertical.size": "Tamanho do texto",
   "clipedit.vertical.position": "Altura na tela",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Aceitar exporta com as configurações de corte acima, incluindo o layout vertical quando ativo.",
   "clipedit.highlights.range": "{start} a {end}",
   "automod.highlightScoring": "Usar IA para pontuar destaques",
-  "automod.highlightScoringNote": "Permite que o editor de clipes envie trechos da transcrição ao provedor acima quando uma busca de destaques pede pontuação. Separado da moderação do chat; desativado por padrão."
+  "automod.highlightScoringNote": "Permite que o editor de clipes envie trechos da transcrição ao provedor acima quando uma busca de destaques pede pontuação. Separado da moderação do chat; desativado por padrão.",
+  "clipedit.vertical.noLibass": "O FFmpeg deste servidor não tem libass (o filtro subtitles), então as legendas serão ignoradas."
 }

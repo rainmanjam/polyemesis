@@ -95,7 +95,7 @@ func (s *Server) clipVertical(tl clipTimeline, body clipRequestBody) (*clipper.V
 		Tracks:   tracks,
 		Style:    style,
 		FontFile: font,
-		DrawText: s.tools().HasFilter("drawtext"),
+		Burn:     s.tools().HasFilter("subtitles"),
 	}
 	return &v, nil
 }
@@ -131,10 +131,11 @@ const (
 // to offer: the layouts, the fonts, whether captions can be drawn at all, and
 // the short length the 60-second guard warns past.
 type clipTemplatesView struct {
-	Templates       []clipTemplateView   `json:"templates"`
-	Layouts         []string             `json:"layouts"`
-	Fonts           []string             `json:"fonts"`
-	DrawText        bool                 `json:"drawText"`
+	Templates []clipTemplateView `json:"templates"`
+	Layouts   []string           `json:"layouts"`
+	Fonts     []string           `json:"fonts"`
+	// BurnCaptions is whether this FFmpeg has the libass subtitles filter.
+	BurnCaptions    bool                 `json:"burnCaptions"`
 	MaxShortSeconds float64              `json:"maxShortSeconds"`
 	DefaultStyle    clipper.CaptionStyle `json:"defaultStyle"`
 }
@@ -159,7 +160,7 @@ func (s *Server) handleListClipTemplates(w http.ResponseWriter, r *http.Request)
 	view := clipTemplatesView{
 		Templates:       make([]clipTemplateView, 0, len(list)),
 		Fonts:           fonts,
-		DrawText:        s.tools().HasFilter("drawtext"),
+		BurnCaptions:    s.tools().HasFilter("subtitles"),
 		MaxShortSeconds: clipper.ShortMaxDuration.Seconds(),
 		DefaultStyle:    clipper.DefaultCaptionStyle(),
 	}

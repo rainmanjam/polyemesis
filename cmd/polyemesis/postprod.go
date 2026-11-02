@@ -184,7 +184,7 @@ func registerProcessors(log *slog.Logger, cfg config.Config, store *db.DB, box *
 	reg(clipper.JobKind, q.Register(clipper.JobKind, 1, clipper.NewWorker(cutter, resolve,
 		clipper.WithTranscript(api.ClipTranscriptSource(store)),
 		clipper.WithCaptionFonts(captionFontIn(cfg.FontsDir())),
-		clipper.WithDrawText(tools.HasFilter("drawtext")))))
+		clipper.WithCaptionBurn(tools.HasFilter("subtitles")))))
 
 	// Highlight scans (Wave 4 #5a). Niced like every other derived-media
 	// child: measuring loudness decodes the whole recording's audio. The

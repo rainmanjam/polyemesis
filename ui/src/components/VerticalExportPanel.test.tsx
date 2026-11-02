@@ -23,7 +23,7 @@ const OPTIONS: ClipTemplatesView = {
   templates: [{ id: 3, name: "Face top", updatedAt: "", vertical: { layout: "stacked", face: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, faceShare: 0.3 } }],
   layouts: ["center", "stacked", "blur"],
   fonts: ["Inter-Bold.ttf", "Inter-Regular.ttf"],
-  drawText: false,
+  burnCaptions: false,
   maxShortSeconds: 60,
   defaultStyle: { font: "Inter-Bold.ttf", sizePct: 4.2 },
 };
@@ -73,10 +73,10 @@ describe("VerticalExportPanel", () => {
     expect(onEnabled).toHaveBeenCalledWith(true);
   });
 
-  it("says when this FFmpeg cannot draw captions", () => {
+  it("says when this FFmpeg cannot burn captions", () => {
     const spec = { ...defaultVerticalSpec(), captions: { enabled: true, style: {} } };
     renderPanel(spec, 30_000);
-    expect(screen.getByRole("status").textContent).toMatch(/cannot draw text/);
+    expect(screen.getByRole("status").textContent).toMatch(/libass/);
   });
 
   it("draws the face box by dragging on the frame, locked to the panel's shape", () => {

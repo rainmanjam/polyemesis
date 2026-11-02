@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -70,11 +69,11 @@ func captionRunner(drawn *[]string) func(context.Context, string, []string) ([]b
 	return func(_ context.Context, _ string, args []string) ([]byte, error) {
 		for i, a := range args {
 			if a == "-/filter_complex" {
-				files, _ := filepath.Glob(filepath.Join(filepath.Dir(args[i+1]), "caption-*.txt"))
-				sort.Strings(files)
-				for _, f := range files {
-					b, _ := os.ReadFile(f)
-					*drawn = append(*drawn, string(b))
+				b, _ := os.ReadFile(filepath.Join(filepath.Dir(args[i+1]), "captions.ass"))
+				for _, line := range strings.Split(string(b), "\n") {
+					if rest, ok := strings.CutPrefix(line, "Dialogue: "); ok {
+						*drawn = append(*drawn, strings.SplitN(rest, ",", 10)[9])
+					}
 				}
 			}
 		}
@@ -94,7 +93,7 @@ func TestTheWorkerCaptionsAShortFromTheTranscriptAtRunTime(t *testing.T) {
 	params := JobParams{
 		Request: Request{In: 10 * time.Second, Out: 20 * time.Second, OutPath: out, Mode: ModePrecise,
 			Vertical: &Vertical{Layout: LayoutBlur, Captions: &Captions{Tracks: []int{0},
-				FontFile: filepath.Join(dir, "font.ttf"), DrawText: true}}},
+				FontFile: filepath.Join(dir, "font.ttf"), Burn: true}}},
 		Segments: []Segment{{RecordingID: 7, Path: filepath.Join(dir, "src.mkv"), Start: 0, Duration: time.Minute}},
 	}
 	raw, _ := json.Marshal(params)
@@ -104,14 +103,14 @@ func TestTheWorkerCaptionsAShortFromTheTranscriptAtRunTime(t *testing.T) {
 	}
 
 	params.Request.Vertical.Captions.FontFile = ""
-	params.Request.Vertical.Captions.DrawText = false
+	params.Request.Vertical.Captions.Burn = false
 	params.Request.Vertical.Captions.Style.Font = "Inter-Bold.ttf"
 	raw, _ = json.Marshal(params)
 	fonts := func(name string) (string, error) { return filepath.Join(dir, "fonts", name), nil }
 
 	var drawn []string
 	c := New(testLog(), "ffmpeg", "ffprobe", WithRunner(captionRunner(&drawn)), WithProber(stubProber{}))
-	if err := NewWorker(c, nil, WithTranscript(src), WithCaptionFonts(fonts), WithDrawText(true)).Run(context.Background(),
+	if err := NewWorker(c, nil, WithTranscript(src), WithCaptionFonts(fonts), WithCaptionBurn(true)).Run(context.Background(),
 		jobs.Job{Kind: JobKind, Params: raw}, &workerReporter{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Incrustar subtítulos",
   "clipedit.vertical.captionsBody": "Del transcrito de esta grabación, sincronizado con cada línea, para las pistas del short.",
   "clipedit.vertical.noTranscript": "Esta grabación no tiene transcripción, así que no hay nada que subtitular.",
-  "clipedit.vertical.noDrawtext": "El FFmpeg de este servidor no puede dibujar texto, así que se omitirán los subtítulos.",
   "clipedit.vertical.font": "Fuente",
   "clipedit.vertical.size": "Tamaño del texto",
   "clipedit.vertical.position": "Altura en pantalla",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Aceptar exporta con los ajustes de corte de arriba, incluido el diseño vertical si está activo.",
   "clipedit.highlights.range": "{start} a {end}",
   "automod.highlightScoring": "Usar IA para puntuar los momentos destacados",
-  "automod.highlightScoringNote": "Permite que el editor de clips envíe extractos de la transcripción al proveedor de arriba cuando una búsqueda de destacados pide puntuación. Independiente de la moderación del chat; desactivado por defecto."
+  "automod.highlightScoringNote": "Permite que el editor de clips envíe extractos de la transcripción al proveedor de arriba cuando una búsqueda de destacados pide puntuación. Independiente de la moderación del chat; desactivado por defecto.",
+  "clipedit.vertical.noLibass": "El FFmpeg de este servidor no tiene libass (el filtro subtitles), así que se omitirán los subtítulos."
 }

@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Ondertitels inbranden",
   "clipedit.vertical.captionsBody": "Uit het transcript van deze opname, per regel getimed, voor de sporen in de short.",
   "clipedit.vertical.noTranscript": "Deze opname heeft geen transcript, dus er valt niets te ondertitelen.",
-  "clipedit.vertical.noDrawtext": "De FFmpeg van deze server kan geen tekst tekenen, dus ondertitels worden overgeslagen.",
   "clipedit.vertical.font": "Lettertype",
   "clipedit.vertical.size": "Tekstgrootte",
   "clipedit.vertical.position": "Hoogte in beeld",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Accepteren exporteert met de knipinstellingen hierboven, inclusief de verticale indeling als die aan staat.",
   "clipedit.highlights.range": "{start} tot {end}",
   "automod.highlightScoring": "AI gebruiken om hoogtepunten te beoordelen",
-  "automod.highlightScoringNote": "Laat de clipeditor transcriptfragmenten naar de aanbieder hierboven sturen wanneer een zoekactie naar hoogtepunten om een beoordeling vraagt. Los van chatmoderatie; standaard uit."
+  "automod.highlightScoringNote": "Laat de clipeditor transcriptfragmenten naar de aanbieder hierboven sturen wanneer een zoekactie naar hoogtepunten om een beoordeling vraagt. Los van chatmoderatie; standaard uit.",
+  "clipedit.vertical.noLibass": "De FFmpeg van deze server heeft geen libass (het subtitles-filter), dus ondertitels worden overgeslagen."
 }

@@ -70,7 +70,7 @@ type WorkerOption func(*workerConfig)
 type workerConfig struct {
 	transcript TranscriptSource
 	fonts      func(name string) (string, error)
-	drawText   bool
+	burn       bool
 }
 
 // WithTranscript lets the worker caption a vertical export. A job carries the
@@ -218,11 +218,11 @@ func captionsAtRunTime(req Request, tl Timeline, cfg workerConfig, rep jobs.Repo
 		path, err := cfg.fonts(c.Style.Normalized().Font)
 		if err != nil {
 			rep.Logf("the caption font could not be found (%v); rendering without captions", err)
-			c.Cues, c.DrawText = nil, false
+			c.Cues, c.Burn = nil, false
 			return &out
 		}
 		c.FontFile = path
-		c.DrawText = cfg.drawText
+		c.Burn = cfg.burn
 	}
 	if len(c.Cues) > 0 {
 		return &out
@@ -247,8 +247,9 @@ func WithCaptionFonts(resolve func(name string) (string, error)) WorkerOption {
 	return func(c *workerConfig) { c.fonts = resolve }
 }
 
-// WithDrawText tells the worker whether this FFmpeg can draw text, which is a
-// fact about the machine the job runs on rather than about the request.
-func WithDrawText(ok bool) WorkerOption {
-	return func(c *workerConfig) { c.drawText = ok }
+// WithCaptionBurn tells the worker whether this FFmpeg can burn captions -- it
+// has the libass subtitles filter -- which is a fact about the machine the job
+// runs on rather than about the request.
+func WithCaptionBurn(ok bool) WorkerOption {
+	return func(c *workerConfig) { c.burn = ok }
 }

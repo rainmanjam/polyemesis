@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Burn in captions",
   "clipedit.vertical.captionsBody": "From this recording's transcript, timed to each line, for the tracks the short carries.",
   "clipedit.vertical.noTranscript": "This recording has no transcript, so there is nothing to caption.",
-  "clipedit.vertical.noDrawtext": "This server's FFmpeg cannot draw text, so captions will be skipped.",
   "clipedit.vertical.font": "Font",
   "clipedit.vertical.size": "Text size",
   "clipedit.vertical.position": "Height on screen",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Accept exports with the cut settings above, including the vertical layout when it is on.",
   "clipedit.highlights.range": "{start} to {end}",
   "automod.highlightScoring": "Use AI for highlight scoring",
-  "automod.highlightScoringNote": "Lets the clip editor send transcript excerpts to the provider above when a highlight scan asks for scoring. Separate from moderating chat; off by default."
+  "automod.highlightScoringNote": "Lets the clip editor send transcript excerpts to the provider above when a highlight scan asks for scoring. Separate from moderating chat; off by default.",
+  "clipedit.vertical.noLibass": "This server's FFmpeg has no libass (the subtitles filter), so captions will be skipped."
 }

@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "Imprimi i sottotitoli",
   "clipedit.vertical.captionsBody": "Dalla trascrizione di questa registrazione, a tempo con ogni riga, per le tracce dello short.",
   "clipedit.vertical.noTranscript": "Questa registrazione non ha una trascrizione, quindi non c'è nulla da sottotitolare.",
-  "clipedit.vertical.noDrawtext": "L'FFmpeg di questo server non può disegnare testo, quindi i sottotitoli verranno saltati.",
   "clipedit.vertical.font": "Carattere",
   "clipedit.vertical.size": "Dimensione del testo",
   "clipedit.vertical.position": "Altezza sullo schermo",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "Accetta esporta con le impostazioni di taglio qui sopra, compreso il layout verticale se attivo.",
   "clipedit.highlights.range": "da {start} a {end}",
   "automod.highlightScoring": "Usa l'IA per valutare i momenti salienti",
-  "automod.highlightScoringNote": "Consente all'editor di clip di inviare estratti della trascrizione al fornitore qui sopra quando una ricerca di momenti salienti chiede una valutazione. Separato dalla moderazione della chat; disattivato per impostazione predefinita."
+  "automod.highlightScoringNote": "Consente all'editor di clip di inviare estratti della trascrizione al fornitore qui sopra quando una ricerca di momenti salienti chiede una valutazione. Separato dalla moderazione della chat; disattivato per impostazione predefinita.",
+  "clipedit.vertical.noLibass": "L'FFmpeg di questo server non ha libass (il filtro subtitles), quindi i sottotitoli verranno saltati."
 }

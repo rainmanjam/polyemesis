@@ -3784,7 +3784,6 @@
   "clipedit.vertical.captions": "자막 입히기",
   "clipedit.vertical.captionsBody": "이 녹화의 대본에서, 줄마다 시간을 맞춰, 쇼츠에 포함된 트랙에 대해 표시합니다.",
   "clipedit.vertical.noTranscript": "이 녹화에는 대본이 없어 자막으로 넣을 내용이 없습니다.",
-  "clipedit.vertical.noDrawtext": "이 서버의 FFmpeg는 텍스트를 그릴 수 없어 자막을 건너뜁니다.",
   "clipedit.vertical.font": "글꼴",
   "clipedit.vertical.size": "글자 크기",
   "clipedit.vertical.position": "화면 내 높이",
@@ -3824,5 +3823,6 @@
   "clipedit.highlights.acceptUsesSettings": "수락하면 위의 자르기 설정(켜져 있으면 세로 레이아웃 포함)으로 내보냅니다.",
   "clipedit.highlights.range": "{start} ~ {end}",
   "automod.highlightScoring": "하이라이트 점수에 AI 사용",
-  "automod.highlightScoringNote": "하이라이트 분석이 점수를 요청하면 클립 편집기가 대본 발췌를 위 제공자에게 보낼 수 있게 합니다. 채팅 검토와는 별개이며 기본값은 꺼짐입니다."
+  "automod.highlightScoringNote": "하이라이트 분석이 점수를 요청하면 클립 편집기가 대본 발췌를 위 제공자에게 보낼 수 있게 합니다. 채팅 검토와는 별개이며 기본값은 꺼짐입니다.",
+  "clipedit.vertical.noLibass": "이 서버의 FFmpeg에는 libass(subtitles 필터)가 없어 자막을 건너뜁니다."
 }
