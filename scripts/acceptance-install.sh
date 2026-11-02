@@ -1576,6 +1576,22 @@ case "$out" in
   *"$root/opt/rollback.sh "*) ok "the printed way back is rollback.sh, not an rm -rf of the data directory" ;;
   *) bad "update.sh no longer prints a way back at all" ;;
 esac
+# The "Next time" hint names a command in backticks. Inside a double-quoted
+# echo those backticks RAN it (`update.sh: command not found`, then a line with
+# a hole in it). It must print verbatim, from single quotes.
+hint='(Next time, `update.sh --binary ./polyemesis --version vX.Y.Z` checks the file'
+if printf '%s\n' "$out" | grep -qxF -- "$hint"; then
+  ok "the happy path prints the --binary hint verbatim, backticks included"
+else
+  bad "the --binary hint did not print verbatim: $(printf '%s\n' "$out" | grep -F 'Next time' || echo '(absent)')"
+fi
+case "$out" in
+  *"command not found"*) bad "update.sh ran something that does not exist: $(printf '%s\n' "$out" | grep -F 'command not found')" ;;
+  *) ok "and no command substitution ran there (no 'command not found')" ;;
+esac
+grep -qxF -- "echo '$hint'" "$root/opt/update.sh" \
+  && ok "the generated update.sh holds the hint in single quotes" \
+  || bad "the generated update.sh no longer single-quotes the --binary hint"
 dest="$(printf '%s\n' "$out" | sed -n 's/^backing up .* to //p' | head -1)"
 
 # (d) The upgrade "happens": the database changes, a WAL appears, a recording is

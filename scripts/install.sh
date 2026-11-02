@@ -2694,7 +2694,11 @@ echo
 echo "    sudo install -m 0755 ./polyemesis \$BIN_PATH"
 echo "    sudo systemctl start \$SERVICE_NAME"
 echo
-echo "(Next time, \`update.sh --binary ./polyemesis --version vX.Y.Z\` checks the file"
+# SINGLE QUOTES, NOT DOUBLE. This was a double-quoted echo, and backticks inside
+# double quotes are a command substitution: every run executed \`update.sh
+# --binary ...\` (command not found) and printed the hint with a hole in it.
+# shellcheck disable=SC2016 # the backticks are meant to print literally
+echo '(Next time, \`update.sh --binary ./polyemesis --version vX.Y.Z\` checks the file'
 echo "against the release before it installs it, and starts the service for you.)"
 echo
 # THE WAY BACK IS A SCRIPT, NOT A PASTE. This printed
