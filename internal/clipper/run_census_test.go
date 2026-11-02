@@ -128,6 +128,12 @@ func TestAFailedEncodesErrorIsItsReasonWithoutCaptionChatter(t *testing.T) {
 			t.Errorf("the error carries %q: %q", leak, msg)
 		}
 	}
+	// Nothing but the renderer's lines: the error says the renderer failed,
+	// and still names nothing it said.
+	only := "[Parsed_subtitles_4 @ 0x1] fontselect: failed to find any fallback with glyph 0x4F60 for font: (Inter, 700, 0)"
+	if got := ffmpegFailure(only); strings.Contains(got, "0x4F60") || !strings.Contains(got, "caption renderer") {
+		t.Errorf("an all-renderer failure reads %q", got)
+	}
 	long := strings.Repeat("Last message repeated\n", 100) + "Conversion failed!"
 	if got := ffmpegFailure(long); len(got) > failureLimit+3 || !strings.HasSuffix(got, "Conversion failed!") {
 		t.Errorf("a long failure is not its tail: %d bytes, %q", len(got), got[max(0, len(got)-40):])

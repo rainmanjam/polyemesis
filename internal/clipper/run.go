@@ -234,13 +234,20 @@ const failureLimit = 400
 // is kept from the END, because FFmpeg says why last.
 func ffmpegFailure(out string) string {
 	var keep []string
+	dropped := false
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if captionChatter(line) {
+			dropped = true
 			continue
 		}
 		keep = append(keep, line)
 	}
 	msg := strings.TrimSpace(strings.Join(keep, "\n"))
+	if msg == "" && dropped {
+		// Everything FFmpeg said came from the caption renderer: say that
+		// much, and nothing it named.
+		return "the caption renderer failed (its messages name caption text and are not shown)"
+	}
 	if len(msg) > failureLimit {
 		msg = "..." + msg[len(msg)-failureLimit:]
 		if !utf8.ValidString(msg) {
