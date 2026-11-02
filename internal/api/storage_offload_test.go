@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -137,23 +138,64 @@ func TestTheLibraryShowsEachRecordingsUploadState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, old.Filename)); err != nil {
 		t.Fatalf("mirror mode touched the local file: %v", err)
 	}
-	var view struct {
-		Ungrouped []struct {
-			Filename string            `json:"filename"`
-			Offload  *recordingOffload `json:"offload"`
-		} `json:"ungrouped"`
+	// WHEREVER THE LIBRARY PUTS IT. sourceServer's engine is running its
+	// recording manager underneath this test, and that manager's sweep -- once
+	// the moment the engine starts, then every 30s -- ends by grouping every
+	// ungrouped recording into a session, which is what it is for. When the
+	// startup sweep lands after the rows above, this recording is a session
+	// segment by now, not an ungrouped one; on a loaded macOS runner it did,
+	// and "recording missing from the library" was the product working. Both
+	// places carry the upload state, so the test asks the one that holds it.
+	// Grouping only ever goes one way, so a recording absent from Ungrouped
+	// is in a session by the time it is looked up.
+	type listed struct {
+		Filename string            `json:"filename"`
+		Offload  *recordingOffload `json:"offload"`
 	}
-	if err := json.Unmarshal([]byte(storageBody(t, h, sign, "/api/v1/library")), &view); err != nil {
+	find := func(rs []listed) *listed {
+		for i := range rs {
+			if rs[i].Filename == old.Filename {
+				return &rs[i]
+			}
+		}
+		return nil
+	}
+	var page struct {
+		Ungrouped []listed `json:"ungrouped"`
+	}
+	if err := json.Unmarshal([]byte(storageBody(t, h, sign, "/api/v1/library")), &page); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range view.Ungrouped {
-		if r.Filename == old.Filename {
-			if r.Offload == nil || len(r.Offload.Targets) != 1 || r.Offload.Targets[0].State != db.OffloadVerified ||
-				r.Offload.Targets[0].TargetName != "archive" {
-				t.Fatalf("library offload view %+v", r.Offload)
+	got, where := find(page.Ungrouped), "the library's ungrouped list"
+	if got == nil {
+		recs, err := store.ListRecordings()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var id int64
+		for _, r := range recs {
+			if r.Filename == old.Filename {
+				id = r.ID
 			}
-			return
+		}
+		sess, err := store.SessionForRecording(id)
+		if err != nil {
+			t.Fatalf("recording missing from the library: not ungrouped, and in no session (id %d): %v", id, err)
+		}
+		var segs struct {
+			Recordings []listed `json:"recordings"`
+		}
+		path := fmt.Sprintf("/api/v1/library/sessions/%d", sess.ID)
+		if err := json.Unmarshal([]byte(storageBody(t, h, sign, path)), &segs); err != nil {
+			t.Fatal(err)
+		}
+		got, where = find(segs.Recordings), "its session's segment list"
+		if got == nil {
+			t.Fatalf("recording missing from the library: its session %d does not list it", sess.ID)
 		}
 	}
-	t.Fatal("recording missing from the library")
+	if o := got.Offload; o == nil || len(o.Targets) != 1 || o.Targets[0].State != db.OffloadVerified ||
+		o.Targets[0].TargetName != "archive" {
+		t.Fatalf("library offload view in %s: %+v", where, got.Offload)
+	}
 }

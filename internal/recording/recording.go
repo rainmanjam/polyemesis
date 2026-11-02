@@ -261,6 +261,21 @@ func (m *Manager) setStorage(st StorageState) bool {
 // Finished segments are also measured once, so the index can report how long
 // each one runs and how many audio tracks it kept.
 func (m *Manager) Scan() (bool, error) {
+	// THE INDEX FIRST, THEN THE DIRECTORY. The loop at the bottom drops every
+	// row whose file this listing did not see, so the two reads must be in the
+	// order that makes "not on disk" true. Read the other way round, a segment
+	// whose file and row both appeared between them -- another engine's
+	// manager scanning this same directory, or anything else that indexes a
+	// file it has just written -- was in the index but not in the listing,
+	// and was de-indexed as "disappeared from disk" with its file sitting
+	// there. The row came back on the next scan, but unmeasured, with its
+	// session, upload state and transcript links gone. Index first, a row
+	// that arrives late is simply not judged until the next scan, and a row
+	// that was already there had its file there too.
+	indexed, err := m.store.ListRecordings()
+	if err != nil {
+		return false, err
+	}
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -269,10 +284,6 @@ func (m *Manager) Scan() (bool, error) {
 		return false, err
 	}
 
-	indexed, err := m.store.ListRecordings()
-	if err != nil {
-		return false, err
-	}
 	measured := map[string]bool{}
 	for _, r := range indexed {
 		measured[r.Filename] = r.DurationMS > 0

@@ -345,9 +345,79 @@ func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
 	// NOT in the parallel set (parallel_test.go), though it was briefly: it
 	// asserts a wall-clock bound on a socket deadline, and beside the other
 	// parallel tests on a macOS runner the close took longer than its 20s.
+	//
+	// THE HUB NEVER DROPS THIS CLIENT, so the deadline is the only way out.
+	// It used to share a 4-event buffer with the test below and publish until
+	// the hub let go, which could end two ways: a write blocked and its
+	// deadline fired, or the hub dropped the client while every write was
+	// still landing in the kernel and no deadline was ever needed. With the
+	// second now closing the connection by itself, that version would pass
+	// even with the deadline gone, on any host whose socket buffers held the
+	// backlog. Here the buffer is far deeper than this loop can fill, and the
+	// loop keeps publishing until the connection closes: however much the
+	// host's buffers hold, they fill, a write blocks, and only its deadline
+	// can unblock it. No fixed byte count to guess per OS.
+	hub, closed := stuckEventsClient(t, 1<<16, 4096)
+
+	big := strings.Repeat("x", 64<<10)
+	limit := writeWait + 50*time.Second
+	for start := time.Now(); ; {
+		select {
+		case <-closed:
+			if hub.Kicked() != 0 {
+				t.Fatal("the hub dropped the client; this test is about the write deadline alone")
+			}
+			return
+		default:
+		}
+		if time.Since(start) > limit {
+			t.Fatalf("the server still held the connection %s after the client stopped reading; "+
+				"the per-write deadline is not reaching the connection", limit)
+		}
+		hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: big})
+	}
+}
+
+// TestAClientTheHubDropsLosesItsConnection is the other way the test above can
+// end, pinned so it no longer depends on the host's socket buffers.
+//
+// The hub drops a client for being 4 events behind, not for being blocked: a
+// publisher that outruns the handler fills the buffer while every write is
+// still landing in the kernel. On a macOS runner, where loopback buffers took
+// the whole backlog, that is how the test above ended -- no write ever blocked,
+// so no deadline ever fired, the handler returned cleanly, and net/http kept
+// the connection for the next request on keep-alive. The server had let go of
+// the subscriber and kept the socket, and the test waited out its 20s.
+//
+// Here the events are small, so no write can block and the deadline is never
+// involved: only aborting the response closes the connection. Until it did,
+// this failed every time.
+func TestAClientTheHubDropsLosesItsConnection(t *testing.T) {
+	hub, closed := stuckEventsClient(t, 4, 1<<20)
+
+	for i := 0; hub.Kicked() == 0 && i < 1_000_000; i++ {
+		hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: "small"})
+	}
+	if hub.Kicked() == 0 {
+		t.Fatal("the hub never dropped a client that was outrun a million times over")
+	}
+	select {
+	case <-closed:
+	case <-time.After(writeWait + 10*time.Second):
+		t.Fatalf("the hub dropped the client, but the server still held its connection %s later",
+			writeWait+10*time.Second)
+	}
+}
+
+// stuckEventsClient opens GET /api/v1/events on a raw connection that is never
+// read, with the given receive buffer, against a hub that drops a client
+// hubBuffer events behind. closed is closed when the server closes that connection --
+// measured on the connection itself, not on the hub.
+func stuckEventsClient(t *testing.T, hubBuffer, readBuffer int) (*eventstream.Hub, <-chan struct{}) {
+	t.Helper()
 	h, _, sign := renditionServer(t, defaultTools())
 	s := serverUnderTest(t, h)
-	hub := eventstream.NewHub(eventstream.WithClientBuffer(4))
+	hub := eventstream.NewHub(eventstream.WithClientBuffer(hubBuffer))
 	s.stream = hub
 	tok := createScopedToken(t, h, sign, "stuck", db.ScopeAdmin)
 
@@ -362,26 +432,15 @@ func TestAClientThatStopsReadingDoesNotHoldItsConnectionForever(t *testing.T) {
 	srv.Start()
 	t.Cleanup(srv.Close)
 
-	// A raw connection with a tiny receive buffer that is never read.
 	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	_ = conn.(*net.TCPConn).SetReadBuffer(4096)
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.(*net.TCPConn).SetReadBuffer(readBuffer)
 	_, _ = conn.Write([]byte("GET /api/v1/events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + tok + "\r\n\r\n"))
 	waitForListener(t, hub)
-
-	big := strings.Repeat("x", 64<<10)
-	for i := 0; hub.HasSubscribers() && i < 100_000; i++ {
-		hub.Publish(eventstream.Envelope{Type: eventstream.TypeIngestPublished, Reason: big})
-	}
-	select {
-	case <-closed:
-	case <-time.After(writeWait + 10*time.Second):
-		t.Fatalf("the server still held the connection %s after the client stopped reading; "+
-			"the per-write deadline is not reaching the connection", writeWait+10*time.Second)
-	}
+	return hub, closed
 }
 
 // ------------------------------------------------- go-live, stop and the fault
