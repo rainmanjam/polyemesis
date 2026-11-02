@@ -117,7 +117,7 @@ export function DelayPanel({
       data-testid="delay-badge"
       className={cn(
         "inline-flex w-fit items-center gap-1 rounded border px-1.5 py-0.5 text-[11px]",
-        onAir ? "border-primary/40 text-primary" : "border-border text-muted-foreground",
+        onAir ? "border-primary/40 text-primary-bright" : "border-border text-muted-foreground",
       )}
     >
       <Timer className="h-3 w-3" />

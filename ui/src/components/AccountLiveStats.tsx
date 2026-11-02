@@ -20,8 +20,8 @@ import { VIEWER_POLL_MS, viewerReadout, type ViewerReadout } from "@/lib/viewerC
    skeleton that never resolves is indistinguishable from a broken panel.
 
    COLOUR RESOLVES THROUGH toneForState/toneBadge, never a hand-written class.
-   DestinationCard.tsx:302 records what happens otherwise: `text-ok` is not a
-   token, so a healthy backup rendered invisible.
+   DestinationCard.tsx:302 records what happens otherwise: `text-ok` was not a
+   token at the time, so a healthy backup rendered invisible.
 
    AND THE TWO NEUTRAL CASES STAY NEUTRAL. "polyemesis cannot ask this platform"
    and "the poll failed" are properties of the READ, not of the broadcast. The

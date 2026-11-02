@@ -40,18 +40,18 @@ export function labelForState(state?: ProcessState | null): string {
 }
 
 export const toneText: Record<SignalTone, string> = {
-  live: "text-live",
+  live: "text-ok",
   warn: "text-warn",
   down: "text-down",
-  armed: "text-armed",
+  armed: "text-idle",
   idle: "text-muted-foreground",
 };
 
 export const toneBg: Record<SignalTone, string> = {
-  live: "bg-live",
+  live: "bg-ok",
   warn: "bg-warn",
   down: "bg-down",
-  armed: "bg-armed",
+  armed: "bg-idle",
   idle: "bg-subtle-foreground",
 };
 
@@ -95,7 +95,7 @@ export const toneMark: Record<
 > = {
   // Solid disc. The only tone that fills its box completely, which is what
   // makes "on air" the heaviest mark on the screen at a glance.
-  live: { shape: "rounded-full bg-live", hollow: false , title: "signal.live" },
+  live: { shape: "rounded-full bg-ok", hollow: false , title: "signal.live" },
   // Diamond. scale-90 trims it back toward the optical weight of the disc
   // beside it: a square turned 45° has a 1.41x diagonal, so at full size a
   // reconnecting dot reads as a bigger mark than a live one — which is a
@@ -105,6 +105,6 @@ export const toneMark: Record<
   down: { shape: "rounded-[1px] bg-down", hollow: false , title: "state.failed" },
   // Hollow: nothing is flowing through it yet. Reads as "loaded, not firing"
   // without needing its hue.
-  armed: { shape: "rounded-full border-armed", hollow: true , title: "signal.armed" },
+  armed: { shape: "rounded-full border-idle", hollow: true , title: "signal.armed" },
   idle: { shape: "rounded-[1px] border-subtle-foreground", hollow: true , title: "signal.idle" },
 };

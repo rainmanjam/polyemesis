@@ -23,7 +23,7 @@ export function CaptionExportLinks({
       {FORMATS.map((f) => (
         <a
           key={f}
-          className="font-mono text-tiny text-primary hover:underline"
+          className="font-mono text-tiny text-primary-bright hover:underline"
           href={api.captionExportUrl(recordingId, f, source)}
           download
         >

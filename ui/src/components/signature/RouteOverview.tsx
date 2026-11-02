@@ -189,7 +189,7 @@ function RightsChip({ state }: { state: MusicRights }) {
   }
   if (state === "blocked") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-primary">
+      <span className="inline-flex items-center gap-1 text-xs text-primary-bright">
         <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
         {t("routing.overview.rights.blocked")}
       </span>

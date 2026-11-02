@@ -158,7 +158,7 @@ describe("the app and the website hold one set of design tokens", () => {
     /* Stronger than the two assertions above, and deliberately so. The
      * reasoning attached to a token is the most useful thing about it, and a
      * reader who meets the palette in a website stylesheet has nowhere else to
-     * find out why --warn must not be folded into --color-cross. A copy that
+     * find out why --tally must never be used as ink. A copy that
      * keeps the values and drops the arguments is how the next person makes the
      * same mistake with the same confidence. */
     const block = rootBlock(appCss, "ui/src/index.css");
@@ -212,14 +212,14 @@ describe("the app and the website hold one set of design tokens", () => {
 /** Tokens the website is allowed to hold as its own literal even though the
  *  same value exists in the shared block.
  *
- *  ONE ENTRY, AND IT IS A DECISION RATHER THAN AN EXCEPTION. --color-cross is
- *  bit-for-bit the app's --warn and must stay a duplicate: the app's token
- *  means "reconnecting / degraded / near clip" to an operator watching a live
- *  broadcast, and the website's means "this crosspoint is lit". Wiring them
- *  together would let a designer retuning a marketing page move the colour an
- *  operator reads a failing stream by. Both stylesheets carry the long form of
- *  this note beside the value. */
-const DUPLICATE_ON_PURPOSE = new Set(["--color-cross", "--color-cross-dim"]);
+ *  EMPTY, AND THAT IS THE POINT. It held --color-cross and --color-cross-dim,
+ *  a literal kept equal to the app's --warn on purpose so a lit crosspoint and
+ *  a degrading stream would not share a variable. The 2026-11 palette settled
+ *  it the other way: a crosspoint is the on-state of a control, so it reads
+ *  --primary, and amber means warn on both surfaces. An entry here now has to
+ *  argue its case from scratch, with the reason beside the value in both
+ *  stylesheets. */
+const DUPLICATE_ON_PURPOSE = new Set<string>([]);
 
 describe("the website reads shared values rather than restating them", () => {
   it("holds no second copy of an app literal", () => {

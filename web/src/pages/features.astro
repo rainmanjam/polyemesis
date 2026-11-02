@@ -521,7 +521,7 @@ const rooms = [
               {r.note && <p class="mt-3 text-sm text-subtle">{r.note}</p>}
               {r.link && (
                 <p class="mt-2 text-sm">
-                  <a href={r.link.href} class="text-primary underline-offset-4 hover:underline">{r.link.text}</a>
+                  <a href={r.link.href} class="text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
                 </p>
               )}
             </article>
@@ -569,7 +569,7 @@ const rooms = [
           <div>
             <h3 class="text-sm font-medium text-fg">{x.h}</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted">{x.p}</p>
-            <a href={x.href} class="mt-2 inline-block text-sm text-primary underline-offset-4 hover:underline">Docs →</a>
+            <a href={x.href} class="mt-2 inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs →</a>
           </div>
         ))}
       </div>
@@ -610,14 +610,14 @@ const rooms = [
           a door to the page that carries the evidence. The claim still appears
           on this page; the argument now lives in exactly one place. */}
       <div class="mt-8 rounded-token border border-line bg-ink/40 p-6">
-        <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-primary">
+        <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-primary-bright">
           The row that matters
         </p>
         <p class="mt-3 text-balance text-lg leading-snug text-fg">
           Per-destination audio mix from one multitrack ingest.
         </p>
         <p class="mt-2 text-sm leading-relaxed text-muted">
-          polyemesis <span class="font-mono text-[13px] text-live">Yes</span> ·
+          polyemesis <span class="font-mono text-[13px] text-ok">Yes</span> ·
           Restreamer <span class="font-mono text-[13px] text-subtle">No</span> ·
           restream.io <span class="font-mono text-[13px] text-subtle">No</span>
         </p>
@@ -628,7 +628,7 @@ const rooms = [
           the full mix, from a single upload and without re-encoding the picture.
         </p>
         <p class="mt-5">
-          <a href="/comparison" class="inline-block py-1 text-sm text-primary underline-offset-4 hover:underline">
+          <a href="/comparison" class="inline-block py-1 text-sm text-primary-bright underline-offset-4 hover:underline">
             All eight capabilities, against five products →
           </a>
         </p>

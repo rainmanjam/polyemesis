@@ -30,7 +30,7 @@ const TONES: SignalTone[] = ["live", "warn", "down", "armed", "idle"];
  *  these simulates the colour-blind reader, the washed-out screen and the
  *  greyscale print at once. */
 const COLOUR_ONLY =
-  /^(?:bg|text|border|ring|fill|stroke)-(?:live|warn|down|armed|idle|foreground|muted-foreground|subtle-foreground)$/;
+  /^(?:bg|text|border|ring|fill|stroke)-(?:ok|warn|down|idle|tally|tally-foreground|foreground|muted-foreground|subtle-foreground)$/;
 
 function silhouette(tone: SignalTone): string {
   const { container } = render(<StatusDot tone={tone} />);

@@ -1853,7 +1853,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                     {platformVideo && (
                       <button
                         type="button"
-                        className="mt-2 text-left text-sm text-primary underline hover:opacity-80"
+                        className="mt-2 text-left text-sm text-primary-bright underline hover:opacity-80"
                         onClick={() => {
                           // The TOP of the range, not the bottom.
                           //

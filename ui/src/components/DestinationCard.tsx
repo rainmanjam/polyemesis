@@ -595,7 +595,8 @@ export function DestinationCard({
             <span>{t("i18nSweep.backupFeed")}</span>
             {/* Through toneForState, like every other state in the app. The
                 two hand-written classes this replaced were `text-ok` and
-                `text-warn`: there is no --color-ok token, so Tailwind never
+                `text-warn`: there was no --color-ok token then (--ok, the
+                old --live renamed, arrived in 2026-11), so Tailwind never
                 emitted the first one and a *healthy* backup rendered in plain
                 body text while an unhealthy one was amber — the two states
                 were told apart only by the presence of colour, and the good

@@ -9,7 +9,7 @@
 // actions set UserTitleEnabled: false, so the title is the plugin's alone.
 // test/keyContrast.test.ts fails if a manifest TitleColor and TITLE_COLOURS disagree.
 //
-// White titles on the UI's signal colours at full lightness (--live, --primary)
+// White titles on the UI's signal colours at full lightness (--ok, --primary)
 // failed AA: those tokens are built to sit ON the dark surface, not UNDER white
 // text. So live, held and restarted keep their token's HUE (and as much chroma as
 // sRGB allows) from web/src/styles/tokens.css and ui/src/index.css, and drop the
@@ -78,7 +78,7 @@ export const SHADE_SLOPE = 0.12;
 /** Key face colours by state, in the order KEY_STATE in src/render.ts defines them. */
 export const KEY_COLOURS = {
   idle: [58, 63, 71],
-  // --live's hue (149.9), darkened from L 75.6% so a white title reads on it.
+  // --ok's hue (149.9), darkened from L 75.6% so a white title reads on it.
   live: oklch(0.52, 0.14, 149.9),
   // --warn itself, bright, under a near-black title (TITLE_COLOURS).
   warn: oklch(0.765, 0.1399, 72.9),

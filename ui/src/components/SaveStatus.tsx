@@ -33,7 +33,7 @@ export function SaveStatus({ state, className }: Readonly<{ state: SaveState; cl
       data-save-state={state}
       className={cn(
         "inline-flex items-center gap-1.5 text-sm",
-        failed ? "text-down" : state === "saved" ? "text-live" : "text-muted-foreground",
+        failed ? "text-down" : state === "saved" ? "text-ok" : "text-muted-foreground",
         className,
       )}
     >

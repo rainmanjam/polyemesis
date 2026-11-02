@@ -375,7 +375,7 @@ export function ChatPage() {
           {configured && statuses.length === 0 && (
             <p className="rounded-md border border-border bg-card px-2 py-1.5 text-sm leading-relaxed text-muted-foreground">
               {t("chatpage.noAccount")}{" "}
-              <Link to="/settings?tab=platforms" className="text-primary underline-offset-2 hover:underline">
+              <Link to="/settings?tab=platforms" className="text-primary-bright underline-offset-2 hover:underline">
                 {t("chatpage.openCredentials")}
               </Link>
             </p>

@@ -11,8 +11,8 @@ import { join } from "node:path";
  * what colour it was supposed to be.
  *
  * It had already happened twice when this test was written. `text-ok` (no --ok
- * token) marked a *healthy* backup feed, so the good state rendered as plain
- * body text while the bad state was amber — the two were distinguished only by
+ * token yet: --ok is the 2026-11 rename of --live) marked a *healthy* backup
+ * feed, so the good state rendered as plain body text while the bad state was amber — the two were distinguished only by
  * the presence of colour, and the good one was the invisible half. `danger`
  * (no --danger token) coloured the banner warning that a stream is public to
  * the internet, whose own comment reads "the one thing on this page that must
@@ -100,7 +100,7 @@ describe("colour utilities name a declared token", () => {
   it("index.css declares the signal tokens the app is built on", () => {
     // Guards the guard: if the parse silently returned nothing, every
     // assertion below would pass vacuously.
-    for (const t of ["live", "warn", "down", "destructive", "primary", "muted"]) {
+    for (const t of ["ok", "warn", "down", "idle", "tally", "destructive", "primary", "muted"]) {
       expect(declared, `--color-${t} should be declared`).toContain(t);
     }
   });
@@ -211,7 +211,7 @@ describe("motion is a signal, not decoration", () => {
 
 /** No raw Tailwind signal colours in application code.
  *
- *  The app encodes state in five tokens — live, warn, down, armed, idle. A raw
+ *  The app encodes state in tokens — ok, warn, down, idle, and tally for on air. A raw
  *  `amber-500` or `red-500` beside them is a second vocabulary for the same
  *  idea: `red-500` is ΔE 8.11 from `--down`, which is to say indistinguishable,
  *  so a reader cannot tell whether a red thing is a failed destination or just
@@ -244,7 +244,7 @@ describe("state colour comes from tokens, not the Tailwind palette", () => {
     }
     expect(
       offenders,
-      "use the semantic tokens (text-warn, text-down, text-live…) so a colour " +
+      "use the semantic tokens (text-warn, text-down, text-ok…) so a colour " +
         "keeps meaning one thing. If a use is genuinely outside the state " +
         "vocabulary, add it to EXEMPT with the reason.",
     ).toEqual([]);

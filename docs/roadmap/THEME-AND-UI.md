@@ -20,8 +20,9 @@ omission:
 > - Surfaces are near-black and low-contrast so the room can be dark.
 > - Exactly one desaturated accent carries interaction (slate blue).
 > - Saturated colour is reserved for SIGNAL ONLY:
->     green = live / healthy · amber = reconnecting · red = down / clipping ·
->     cyan = armed but idle
+>     green = ok / healthy · amber = warn · coral = down / clipping ·
+>     tally red = on air and recording, as a solid lamp only.
+>     Idle is neutral, not a hue.
 >   **If everything is grey except the thing that is wrong, then the thing that
 >   is wrong is readable from across the room.**
 > - Dark is the only theme in v1. There is deliberately no light-mode block.

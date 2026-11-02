@@ -285,7 +285,7 @@ export function LibraryPage() {
                 href={WHISPER_DOCS_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                className="inline-flex items-center gap-1 text-primary-bright underline-offset-2 hover:underline"
               >
                 {t("lib.installWhisper")}
                 <ExternalLink aria-hidden="true" className="h-3 w-3" />
@@ -596,7 +596,7 @@ function HitRow({
       >
         <div className="flex flex-wrap items-baseline gap-2">
           {hit.speaker && (
-            <span className="text-tiny font-semibold text-primary">{hit.speaker}</span>
+            <span className="text-tiny font-semibold text-primary-bright">{hit.speaker}</span>
           )}
           <span className="tnum font-mono text-micro text-muted-foreground">
             {offsetLabel(hit.startMs)}
@@ -920,7 +920,7 @@ function RecordingList({
                 aria-hidden="true"
                 className={cn(
                   "h-4 w-4 shrink-0",
-                  r.assets.proxy ? "text-primary" : "text-muted-foreground",
+                  r.assets.proxy ? "text-primary-bright" : "text-muted-foreground",
                 )}
               />
               <span className="min-w-0">
@@ -1276,7 +1276,7 @@ export function PlayerDialog({
                     <span className="tnum font-mono">{bytes(rec.bytes)}</span>
                     {rec.tracks > 0 && <span>{t("lib.audioTracksInMaster", { n: rec.tracks })}</span>}
                     <a
-                      className="ml-auto text-primary hover:underline"
+                      className="ml-auto text-primary-bright hover:underline"
                       href={api.downloadUrl(rec.id)}
                       download
                     >
@@ -1367,7 +1367,7 @@ export function PlayerDialog({
                       >
                         <span className="flex items-baseline gap-2">
                           {seg.speaker && (
-                            <span className="shrink-0 font-semibold text-primary">
+                            <span className="shrink-0 font-semibold text-primary-bright">
                               {seg.speaker}
                             </span>
                           )}

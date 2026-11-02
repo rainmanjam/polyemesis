@@ -205,7 +205,7 @@ export function AuthScreen({
                                   ? "bg-down"
                                   : strength.score === 2
                                     ? "bg-warn"
-                                    : "bg-live"
+                                    : "bg-ok"
                                 : "bg-border"
                             }`}
                           />

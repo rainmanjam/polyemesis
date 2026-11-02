@@ -8,7 +8,7 @@ import en from "./i18n/en.json";
 
 describe("musicRailMark", () => {
   it("gives the excluded-music mark a word and a neutral tone", () => {
-    // It used to be a bare `text-live` note glyph with no title, no aria-label
+    // It used to be a bare `text-ok` note glyph with no title, no aria-label
     // and no text, in a rail where green means ON AIR everywhere else on the
     // product — so the mark for "this destination excludes music" read as "this
     // destination is live".
@@ -38,9 +38,9 @@ describe("RoutingPage's destination rail", () => {
     const src = readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "utf8");
     expect(src).toContain("musicRailMark(guarded, pol?.exclude ?? false)");
     expect(src).toContain("{t(mark.label)}");
-    // The unlabelled glyphs this replaced. `text-live` on a note icon, in a
+    // The unlabelled glyphs this replaced. `text-ok` on a note icon, in a
     // rail whose every other green thing means on air.
-    expect(src).not.toContain('<Music className="ml-auto h-3 w-3 shrink-0 text-live" />');
+    expect(src).not.toContain('<Music className="ml-auto h-3 w-3 shrink-0 text-ok" />');
     expect(src).not.toContain('<Music className="ml-auto h-3 w-3 shrink-0 text-warn" />');
   });
 });

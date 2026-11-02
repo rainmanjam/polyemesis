@@ -66,7 +66,7 @@ export function Stat({
       <div
         className={cn(
           "tnum font-mono text-[13px] leading-none",
-          tone === "live" && "text-live",
+          tone === "live" && "text-ok",
           tone === "warn" && "text-warn",
           tone === "down" && "text-down",
           tone === "muted" && "text-muted-foreground",
