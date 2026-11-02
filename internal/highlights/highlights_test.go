@@ -334,9 +334,9 @@ func TestWindowsAreClampedAndPadded(t *testing.T) {
 }
 
 func TestTheExcerptIsBoundedAndClean(t *testing.T) {
-	long := []Line{{StartMS: 0, EndMS: 1000, Text: strings.Repeat("palabra ", 100) + "x"}}
+	long := []Line{{StartMS: 0, EndMS: 1000, Text: strings.Repeat("palabra ", 100) + "\ue000x\ue001"}}
 	ex := Excerpt(long, 0, 1000, 50)
-	if n := len([]rune(ex)); n > 50 || !strings.HasSuffix(ex, "…") || strings.ContainsAny(ex, "") {
+	if n := len([]rune(ex)); n > 50 || !strings.HasSuffix(ex, "…") || strings.ContainsAny(ex, "\ue000\ue001") {
 		t.Errorf("excerpt %q (%d runes)", ex, n)
 	}
 }

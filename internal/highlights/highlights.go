@@ -414,7 +414,7 @@ func clean(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case r == '', r == '':
+		case r == '\ue000', r == '\ue001':
 		case unicode.IsControl(r), unicode.IsSpace(r):
 			b.WriteByte(' ')
 		default:

@@ -299,3 +299,32 @@ func FilterPath(p string) string { return filterPath(p) }
 // EscapeFilterArg is escapeLavfiArg for callers outside this package. See there
 // for why one level of escaping is not enough.
 func EscapeFilterArg(v string) string { return escapeLavfiArg(v) }
+
+// GraphArgPath renders a filesystem path for use inside a filter option in a
+// filtergraph, escaped once for EACH of the two levels FFmpeg unescapes, in the
+// order it unescapes them:
+//
+//   - the GRAPH description is split into chains and filters first, and its
+//     metacharacters are \ ' [ ] , ;
+//   - each filter's arguments are then split into options, and an option
+//     value's metacharacters are \ ' :
+//
+// So the value is escaped for the option level and the result for the graph
+// level. filterPath's single replacer instead doubles the escape on EVERY
+// character, which is right for \ and : (members of both levels) and wrong
+// for the rest: a doubled escape on ',' survives the graph pass as a literal
+// backslash and the comma then splits the graph. Measured with directories
+// named a'b, a,b, a[b]c and a;b, every one of which filterPath fails and this
+// opens; see TestGraphArgPathSurvivesEveryMetacharacter.
+//
+// The live overlay and slate still use filterPath. Their paths are the data
+// directory's fonts and the operator's own text, and changing an escaper on
+// the live encode path is a separate change with its own blast radius.
+func GraphArgPath(p string) string {
+	return graphLevelEscaper.Replace(optionLevelEscaper.Replace(filepath.ToSlash(p)))
+}
+
+var (
+	optionLevelEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `:`, `\:`)
+	graphLevelEscaper  = strings.NewReplacer(`\`, `\\`, `'`, `\'`, `[`, `\[`, `]`, `\]`, `,`, `\,`, `;`, `\;`)
+)

@@ -323,3 +323,121 @@ func TestARealVerticalExportAcrossASegmentBoundaryKeepsCaptionsInPlace(t *testin
 		t.Errorf("no drawtext, yet %d caption pixels", during)
 	}
 }
+
+// SOURCES THAT ARE NOT A CLEAN 16:9. An odd-sized master, a portrait one, an
+// ultrawide one and one far too small to crop a 2% box out of, through every
+// layout with the face box hard against the corner: each must still produce a
+// 1080x1920 yuv420p short. A crop that rounds to zero or to an odd size is an
+// FFmpeg error, not a picture.
+//
+// MUTATION: cropTo without the even, at-least-2 floor. Observed: FAIL on the
+// 35x19 source ("Invalid too big or non positive size").
+func TestARealVerticalExportOfAwkwardSources(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	dir := t.TempDir()
+	corner := Rect{X: 0.98, Y: 0.98, W: 0.02, H: 0.02}
+	layouts := map[string]Vertical{
+		"center":  {Layout: LayoutCenter, Focus: 1},
+		"blur":    {Layout: LayoutBlur, Focus: 0.5},
+		"stacked": {Layout: LayoutStacked, Face: corner, Game: corner, FaceShare: 0.6, FaceBottom: true},
+	}
+	c := New(testLog(), bin, ffprobe)
+	for _, size := range []string{"1279x719", "1080x1920", "3440x1440", "35x19"} {
+		src := filepath.Join(dir, size+".mkv")
+		gen := exec.Command(bin, "-hide_banner", "-loglevel", "error", "-y",
+			"-f", "lavfi", "-i", "testsrc2=s="+size+":r=30",
+			"-f", "lavfi", "-i", "sine=f=440:r=48000",
+			"-t", "3", "-map", "0:v", "-map", "1:a",
+			"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv444p",
+			"-c:a", "aac", "-f", "matroska", src)
+		if out, err := gen.CombinedOutput(); err != nil {
+			t.Fatalf("fixture %s: %v\n%s", size, err, out)
+		}
+		tl, err := NewTimeline([]Segment{{Path: src, Duration: 3 * time.Second}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, v := range layouts {
+			v := v
+			t.Run(size+"/"+name, func(t *testing.T) {
+				out := filepath.Join(dir, size+"-"+name+".mp4")
+				if _, err := c.Cut(context.Background(), tl, Request{In: 500 * time.Millisecond, Out: 2500 * time.Millisecond,
+					OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
+					t.Fatalf("Cut: %v", err)
+				}
+				rep, _ := probeShort(t, ffprobe, out)
+				assertShort(t, rep, 2*time.Second)
+			})
+		}
+	}
+}
+
+// The same gap, rendered: the short is 8 s, and the caption spoken 1 s into
+// the second file is lit 3 s into the short (2 s of the first file, then 1 s).
+func TestARealVerticalExportAcrossAGapKeepsCaptionsOnTheirPicture(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.mkv"), filepath.Join(dir, "b.mkv")
+	verticalFixture(t, bin, a)
+	verticalFixture(t, bin, b)
+	drawtext := hasDrawtext(t, bin)
+	fonts := filepath.Join(dir, ffmpeg.FontsDirName)
+	if err := ffmpeg.EnsureFonts(fonts); err != nil {
+		t.Fatal(err)
+	}
+	font, _ := ffmpeg.FontPath(fonts, DefaultCaptionFont)
+	tl, err := NewTimeline([]Segment{{Path: a, Start: 0, Duration: 12 * time.Second}, {Path: b, Start: 20 * time.Second, Duration: 12 * time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{
+		Cues: []Cue{{StartMS: 21_000, EndMS: 22_000, Text: "AFTER THE GAP"}}, FontFile: font, DrawText: drawtext}}
+	out := filepath.Join(dir, "gap.mp4")
+	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: 10 * time.Second, Out: 26 * time.Second,
+		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
+		t.Fatalf("Cut: %v", err)
+	}
+	rep, _ := probeShort(t, ffprobe, out)
+	assertShort(t, rep, 8*time.Second)
+	lit := whiteIn(frameRGB(t, bin, out, 3500*time.Millisecond), 1300, 1470)
+	early := whiteIn(frameRGB(t, bin, out, 1500*time.Millisecond), 1300, 1470)
+	if drawtext && (lit < 800 || early > 50) {
+		t.Errorf("caption lit %d px at 3.5 s and %d at 1.5 s; want it only on its own picture", lit, early)
+	}
+}
+
+// A captioned short whose fonts and work directories sit under a name carrying
+// every filtergraph metacharacter a POSIX or Windows directory can hold. The
+// font path and every caption sidecar go through GraphArgPath; with the
+// single-level escaper this exited 234 before drawing a frame.
+func TestARealCaptionedShortFromADirectoryWithGraphMetacharacters(t *testing.T) {
+	bin, ffprobe := integrationTools(t)
+	root := filepath.Join(t.TempDir(), "it's,[all];here")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(root, "src.mkv")
+	verticalFixture(t, bin, src)
+	drawtext := hasDrawtext(t, bin)
+	fonts := filepath.Join(root, ffmpeg.FontsDirName)
+	if err := ffmpeg.EnsureFonts(fonts); err != nil {
+		t.Fatal(err)
+	}
+	font, _ := ffmpeg.FontPath(fonts, DefaultCaptionFont)
+	tl, err := NewTimeline([]Segment{{Path: src, Duration: 12 * time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: &Captions{
+		Cues: []Cue{{StartMS: 2000, EndMS: 4000, Text: "it's [odd]; but, fine"}}, FontFile: font, DrawText: drawtext}}
+	out := filepath.Join(root, "short.mp4")
+	if _, err := New(testLog(), bin, ffprobe).Cut(context.Background(), tl, Request{In: time.Second, Out: 5 * time.Second,
+		OutPath: out, Mode: ModePrecise, Vertical: &v}, nil); err != nil {
+		t.Fatalf("Cut: %v", err)
+	}
+	rep, _ := probeShort(t, ffprobe, out)
+	assertShort(t, rep, 4*time.Second)
+	if lit := whiteIn(frameRGB(t, bin, out, 2*time.Second), 1300, 1470); drawtext && lit < 800 {
+		t.Errorf("the caption drew %d px from a hostile directory", lit)
+	}
+}

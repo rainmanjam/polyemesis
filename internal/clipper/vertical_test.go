@@ -73,9 +73,9 @@ func TestTheFaceBoxIsTheCropTheFacePanelIsCutFrom(t *testing.T) {
 		verticalReq(10*time.Second, 40*time.Second, v))))
 
 	for _, want := range []string{
-		"[fa]crop=w=iw*0.250000:h=ih*0.300000:x=iw*0.700000:y=ih*0.050000," +
+		"[fa]crop=w='max(2,trunc(iw*0.250000/2)*2)':h='max(2,trunc(ih*0.300000/2)*2)':x=iw*0.700000:y=ih*0.050000," +
 			"scale=w=1080:h=576:force_original_aspect_ratio=increase,crop=w=1080:h=576[face]",
-		"[ga]crop=w=iw*0.600000:h=ih*0.750000:x=iw*0.100000:y=ih*0.200000," +
+		"[ga]crop=w='max(2,trunc(iw*0.600000/2)*2)':h='max(2,trunc(ih*0.750000/2)*2)':x=iw*0.100000:y=ih*0.200000," +
 			"scale=w=1080:h=1344:force_original_aspect_ratio=increase,crop=w=1080:h=1344[game]",
 		"[face][game]vstack=inputs=2[base]",
 	} {
@@ -107,7 +107,7 @@ func TestStackedPanelsAreEvenAndFillTheFrame(t *testing.T) {
 			t.Errorf("share %.2f: face panel %d is not an even height inside the frame", share, fh)
 		}
 		g := v.pictureGraph()
-		if strings.Contains(g, "[ga]crop=w=iw") {
+		if strings.Contains(g, "[ga]crop=") {
 			t.Errorf("share %.2f: a zero gameplay box must not crop: %s", share, g)
 		}
 		if !strings.Contains(g, "crop=w=1080:h="+strconv.Itoa(VerticalHeight-fh)+"[game]") {
@@ -315,7 +315,7 @@ func TestTimedWordsAreShownAFewAtATimeOnTheirOwnTiming(t *testing.T) {
 	}
 	c := Captions{Cues: []Cue{{StartMS: 1000, EndMS: 2900, Text: "one two three four", Words: words}}}
 	style := CaptionStyle{MaxWords: 3}.Normalized()
-	got := screens(c, style, 0, time.Minute, 0)
+	got := screens(c, style, func(t time.Duration) time.Duration { return t }, 0, time.Minute)
 	if len(got) != 2 || got[0].From != time.Second || got[0].To != 2*time.Second ||
 		got[0].Lines[0] != "one two three" || got[1].From != 2400*time.Millisecond || got[1].Lines[0] != "four" {
 		t.Errorf("word chunks: %+v", got)
@@ -327,7 +327,7 @@ func TestTimedWordsAreShownAFewAtATimeOnTheirOwnTiming(t *testing.T) {
 func TestALongCueBecomesPagesInsideItsOwnSpan(t *testing.T) {
 	style := CaptionStyle{MaxLines: 1, SizePct: 6}.Normalized()
 	long := strings.Repeat("word ", 30)
-	got := screens(Captions{Cues: []Cue{{StartMS: 0, EndMS: 9000, Text: long}}}, style, 0, time.Minute, 0)
+	got := screens(Captions{Cues: []Cue{{StartMS: 0, EndMS: 9000, Text: long}}}, style, func(t time.Duration) time.Duration { return t }, 0, time.Minute)
 	if len(got) < 2 {
 		t.Fatalf("expected several pages, got %+v", got)
 	}
@@ -362,11 +362,11 @@ func TestWithoutDrawtextTheShortIsMadeWithoutCaptionsAndSaysSo(t *testing.T) {
 }
 
 func TestCaptionTextIsCleanedAndStyled(t *testing.T) {
-	got := styleText("  ab\tc\n d  ", CaptionStyle{Uppercase: true})
+	got := styleText("  a\ue000b\ue001\tc\n d  ", CaptionStyle{Uppercase: true})
 	if got != "AB C D" {
 		t.Errorf("styleText = %q", got)
 	}
-	if lines := wrap("aa bb cc dddddddddd", 5); strings.Join(lines, "|") != "aa bb|cc|dddddddddd" {
+	if lines := wrap("aa bb cc dddddddddd", 5); strings.Join(lines, "|") != "aa bb|cc|ddddd|ddddd" {
 		t.Errorf("wrap = %q", lines)
 	}
 }
@@ -458,5 +458,161 @@ func TestAVerticalEncoderIsAlwaysH264(t *testing.T) {
 		if got := verticalEncoder(in); got != want {
 			t.Errorf("verticalEncoder(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A RECORDING WITH A GAP. Two files 0..12 s and 20..32 s on the timeline: the
+// concat demuxer plays them back to back, so timeline 21 s is 13 s into the
+// joined input, not 21. A short of 10..26 s is therefore 8 s of picture, and
+// a caption spoken at 21..22 s is on the filters' clock at 13..14 s.
+//
+// MUTATION: captions placed at timeline time. Observed: FAIL, gte(t,21.000).
+// MUTATION: -t is the requested span. Observed: FAIL, 16.000000.
+func TestCaptionsAndLengthFollowPlaybackAcrossAGap(t *testing.T) {
+	tl, err := NewTimeline([]Segment{
+		{Path: "/rec/a.mkv", Start: 0, Duration: 12 * time.Second},
+		{Path: "/rec/b.mkv", Start: 20 * time.Second, Duration: 12 * time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Vertical{Layout: LayoutCenter, Focus: 0.5, Captions: captioned(
+		Cue{StartMS: 11_000, EndMS: 11_500, Text: "before the gap"},
+		Cue{StartMS: 21_000, EndMS: 22_000, Text: "after the gap"},
+		Cue{StartMS: 15_000, EndMS: 16_000, Text: "inside the gap"},
+	)}
+	p := mustPlan(t, tl, gop(100, 2*time.Second), verticalReq(10*time.Second, 26*time.Second, v))
+	c := onlyCommand(t, p)
+	g := graphOf(t, c)
+	for _, want := range []string{"enable='gte(t,11.000)*lt(t,11.500)'", "enable='gte(t,13.000)*lt(t,14.000)'"} {
+		if !strings.Contains(g, want) {
+			t.Errorf("missing %s in\n%s", want, g)
+		}
+	}
+	if strings.Contains(g, "inside the gap") || len(captionTexts(c)) != 2 {
+		t.Errorf("a cue spoken during the gap has no picture to sit on: %q", captionTexts(c))
+	}
+	assertArgPair(t, c.Args, "-t", "8.000000")
+}
+
+// UNSPACED SCRIPTS WRAP. A Chinese or Japanese line has no spaces, so wrapping on
+// spaces left it one line thousands of pixels wide. A word longer than a line is
+// broken between characters instead.
+//
+// MUTATION: wrap keeps an over-long word whole. Observed: FAIL, one 40-rune line.
+func TestALineWithoutSpacesStillWraps(t *testing.T) {
+	cjk := strings.Repeat("字", 40)
+	lines := wrap(cjk, 10)
+	if len(lines) != 4 {
+		t.Fatalf("wrap(40 runes, 10) = %d lines %q", len(lines), lines)
+	}
+	for _, l := range lines {
+		if n := len([]rune(l)); n > 10 {
+			t.Errorf("a line of %d runes exceeds 10", n)
+		}
+	}
+	if got := wrap("short words stay whole", 10); strings.Join(got, "|") != "short|words stay|whole" {
+		t.Errorf("wrap of spaced text = %q", got)
+	}
+}
+
+// The bundled Inter has Latin, Greek and Cyrillic, and nothing for CJK, Arabic,
+// Hebrew or emoji: those draw as boxes. The plan says so, naming a character,
+// so the operator knows to add a font that has them -- and says nothing when
+// the operator already chose a font of their own.
+//
+// MUTATION: the glyph check is removed. Observed: FAIL, no warning.
+func TestThePlanWarnsWhenTheBundledFontCannotDrawTheCaptions(t *testing.T) {
+	plan := func(font, text string) Plan {
+		c := captioned(Cue{StartMS: 1000, EndMS: 3000, Text: text})
+		c.Style.Font = font
+		return mustPlan(t, oneHourTimeline(t), gop(1000, 2*time.Second),
+			verticalReq(0, 10*time.Second, Vertical{Layout: LayoutBlur, Captions: c}))
+	}
+	warned := func(p Plan) bool {
+		for _, w := range p.Warnings {
+			if strings.Contains(w, "boxes") {
+				return true
+			}
+		}
+		return false
+	}
+	if !warned(plan("", "你好 世界")) || !warned(plan("Inter-Regular.ttf", "مرحبا")) {
+		t.Error("CJK or Arabic under the bundled font said nothing")
+	}
+	if warned(plan("", "Hello, Привет, Γειά σου — 100%")) {
+		t.Error("Latin, Cyrillic and Greek are in Inter and must not warn")
+	}
+	if warned(plan("NotoSansCJK-Regular.otf", "你好")) {
+		t.Error("an operator's own font is not second-guessed")
+	}
+}
+
+// CONCURRENT CUES DO NOT DRAW OVER EACH OTHER. Two tracks speaking at once give
+// two captions with overlapping times; the second is stacked above the first
+// instead of on the same line. Captions that do not overlap share the line.
+//
+// MUTATION: every screen at lane zero. Observed: FAIL, equal y.
+func TestOverlappingCaptionsAreStackedNotDrawnOverEachOther(t *testing.T) {
+	style := CaptionStyle{}.Normalized()
+	ys := func(scr []captionScreen) []string {
+		f, _ := captionFilters(scr, style, "/fonts/f.ttf", testWorkDir)
+		var out []string
+		for _, s := range f {
+			i := strings.Index(s, ":y=")
+			out = append(out, s[i:i+strings.IndexByte(s[i+1:], ':')+1])
+		}
+		return out
+	}
+	both := ys([]captionScreen{{From: 0, To: 2 * time.Second, Lines: []string{"one"}},
+		{From: time.Second, To: 3 * time.Second, Lines: []string{"two"}}})
+	if len(both) != 2 || both[0] == both[1] {
+		t.Errorf("overlapping captions share a line: %q", both)
+	}
+	apart := ys([]captionScreen{{From: 0, To: time.Second, Lines: []string{"one"}},
+		{From: time.Second, To: 2 * time.Second, Lines: []string{"two"}}})
+	if len(apart) != 2 || apart[0] != apart[1] {
+		t.Errorf("consecutive captions should share the line: %q", apart)
+	}
+}
+
+// THE GRAPH IS BOUNDED. Thousands of cues used to become thousands of drawtext
+// filters and gigabytes of memory; past maxCaptionLines the rest are dropped
+// and the plan says how many.
+//
+// MUTATION: no cap. Observed: FAIL, 1500 drawtext filters.
+func TestTheCaptionGraphIsBounded(t *testing.T) {
+	var cues []Cue
+	for i := 0; i < 1500; i++ {
+		cues = append(cues, Cue{StartMS: int64(i * 200), EndMS: int64(i*200 + 150), Text: "w"})
+	}
+	p := mustPlan(t, oneHourTimeline(t), gop(1000, 2*time.Second),
+		verticalReq(0, 5*time.Minute, Vertical{Layout: LayoutBlur, Captions: captioned(cues...)}))
+	if n := strings.Count(graphOf(t, onlyCommand(t, p)), "drawtext="); n != maxCaptionLines {
+		t.Errorf("%d drawtext filters, want the %d cap", n, maxCaptionLines)
+	}
+	said := false
+	for _, w := range p.Warnings {
+		said = said || strings.Contains(w, "were not drawn")
+	}
+	if !said {
+		t.Errorf("dropped captions without saying so: %v", p.Warnings)
+	}
+}
+
+// An empty style is the default style, outline included; -1 is "no outline".
+//
+// MUTATION: Normalized leaves Outline at zero. Observed: FAIL, outline 0.
+func TestAnEmptyStyleHasTheDefaultOutline(t *testing.T) {
+	if got := (CaptionStyle{}).Normalized().Outline; got != DefaultCaptionStyle().Outline {
+		t.Errorf("empty style outline %d, want %d", got, DefaultCaptionStyle().Outline)
+	}
+	none := CaptionStyle{Outline: -1}.Normalized()
+	if err := none.Validate(); err != nil {
+		t.Fatalf("-1 is a valid outline: %v", err)
+	}
+	f, _ := captionFilters([]captionScreen{{From: 0, To: time.Second, Lines: []string{"x"}}}, none, "/f.ttf", testWorkDir)
+	if strings.Contains(f[0], "borderw") {
+		t.Errorf("outline -1 still drew one: %s", f[0])
 	}
 }

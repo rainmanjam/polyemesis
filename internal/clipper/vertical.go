@@ -247,6 +247,10 @@ func (s CaptionStyle) Normalized() CaptionStyle {
 	if s.MaxLines == 0 {
 		s.MaxLines = d.MaxLines
 	}
+	if s.Outline == 0 {
+		// Zero is "unset", like every other field here; -1 asks for none.
+		s.Outline = d.Outline
+	}
 	if s.MaxWords == 0 {
 		s.MaxWords = d.MaxWords
 	}
@@ -270,8 +274,8 @@ func (s CaptionStyle) Validate() error {
 			return fmt.Errorf("%w: caption %s %q is not #rrggbb", ErrInvalidRequest, name, c)
 		}
 	}
-	if n.Outline < 0 || n.Outline > 20 {
-		return fmt.Errorf("%w: caption outline %d is outside 0..20", ErrInvalidRequest, n.Outline)
+	if n.Outline < -1 || n.Outline > 20 {
+		return fmt.Errorf("%w: caption outline %d is outside -1..20", ErrInvalidRequest, n.Outline)
 	}
 	if n.BoxOpacity < 0 || n.BoxOpacity > 1 {
 		return fmt.Errorf("%w: caption box opacity is outside 0..1", ErrInvalidRequest)
@@ -360,8 +364,15 @@ func num(f float64) string { return strconv.FormatFloat(f, 'f', 6, 64) }
 // pixels: iw and ih are the source's width and height when the filter runs, so
 // a box placed on a 640-wide preview lands in the same place on a 3840-wide
 // master.
+//
+// Width and height are floored to an EVEN number of at least two pixels. A box
+// on a tiny or odd-sized master would otherwise round to an odd size, which a
+// 4:2:0 crop cannot cut, or to zero, which crop refuses outright -- measured on
+// a 35x19 source, where a 2% box is 0.7 x 0.38 pixels. The expressions are
+// quoted because their commas would otherwise split the graph.
 func cropTo(r Rect) string {
-	return fmt.Sprintf("crop=w=iw*%s:h=ih*%s:x=iw*%s:y=ih*%s", num(r.W), num(r.H), num(r.X), num(r.Y))
+	return fmt.Sprintf("crop=w='max(2,trunc(iw*%s/2)*2)':h='max(2,trunc(ih*%s/2)*2)':x=iw*%s:y=ih*%s",
+		num(r.W), num(r.H), num(r.X), num(r.Y))
 }
 
 // cover scales to fill w x h and trims the overhang, centred. It is the
@@ -414,31 +425,30 @@ type captionScreen struct {
 	Lines    []string
 }
 
+// maxCaptionLines bounds how many drawtext filters one short's graph carries.
+const maxCaptionLines = 600
+
 // minScreen drops a caption that would be on screen for less than a few
 // frames: it is a flicker, not a caption.
 const minScreen = 100 * time.Millisecond
 
-// screens turns the cues into what is drawn, rebased onto the clip.
+// screens turns the cues into what is drawn, on the FILTERS' clock.
 //
-// in is the timeline position of the clip's first frame and dur its length;
-// shift is added to every output time because the filtergraph's clock is not
-// always the clip's. A clip cut from one file is seeked on the INPUT, so its
-// frames reach the filters starting at zero and shift is zero. A clip that
-// spans two files is read through the concat demuxer, which cannot seek, so
-// the seek is on the OUTPUT side -- the filters see every frame from the start
-// of the first file and only then does FFmpeg discard the ones before the
-// in-point. There, shift is that discarded span, and without it every caption
-// would appear early by exactly that much.
-func screens(c Captions, style CaptionStyle, in, dur, shift time.Duration) []captionScreen {
+// clock maps a timeline position to that clock (see Plan.playback), and
+// [winFrom, winTo) is the short's own span on it: a caption is clamped to the
+// picture the short actually contains. A cue spoken while the recorder was
+// stopped maps to a single instant and is dropped -- there is no picture under
+// it to draw on.
+func screens(c Captions, style CaptionStyle, clock func(time.Duration) time.Duration, winFrom, winTo time.Duration) []captionScreen {
 	perLine := charsPerLine(style)
 	var out []captionScreen
 	add := func(from, to time.Duration, text string) {
-		from, to = from-in, to-in
-		if from < 0 {
-			from = 0
+		from, to = clock(from), clock(to)
+		if from < winFrom {
+			from = winFrom
 		}
-		if to > dur {
-			to = dur
+		if to > winTo {
+			to = winTo
 		}
 		if to-from < minScreen {
 			return
@@ -447,7 +457,7 @@ func screens(c Captions, style CaptionStyle, in, dur, shift time.Duration) []cap
 		if len(lines) == 0 {
 			return
 		}
-		out = append(out, pages(from+shift, to+shift, lines, style.MaxLines)...)
+		out = append(out, pages(from, to, lines, style.MaxLines)...)
 	}
 	for _, cue := range c.Cues {
 		if len(cue.Words) > 0 {
@@ -542,7 +552,7 @@ func styleText(s string, style CaptionStyle) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case r == '', r == '':
+		case r == '\ue000', r == '\ue001':
 			continue
 		case unicode.IsControl(r), unicode.IsSpace(r):
 			b.WriteByte(' ')
@@ -572,13 +582,27 @@ func charsPerLine(style CaptionStyle) int {
 	return max(8, int(0.88*float64(VerticalWidth)/(avgGlyphWidth*float64(fontPx(style)))))
 }
 
-// wrap breaks text into lines of at most width characters, on spaces. A word
-// longer than a line gets a line of its own rather than being cut.
+// wrap breaks text into lines of at most width characters, on spaces, and
+// between characters inside a word longer than a line.
 func wrap(text string, width int) []string {
 	var lines []string
 	var cur []rune
 	for _, word := range strings.Fields(text) {
 		w := []rune(word)
+		// A word longer than a line -- which is every line of a script
+		// written without spaces -- is broken between characters. Kept
+		// whole, a Chinese caption was one line thousands of pixels wide.
+		for len(w) > width {
+			if len(cur) > 0 {
+				lines = append(lines, string(cur))
+				cur = nil
+			}
+			lines = append(lines, string(w[:width]))
+			w = w[width:]
+		}
+		if len(w) == 0 {
+			continue
+		}
 		switch {
 		case len(cur) == 0:
 			cur = append(cur, w...)
@@ -610,22 +634,40 @@ func ffColor(hex string) string { return "0x" + strings.ToLower(strings.TrimPref
 // transcript is free text, and the only escaping that cannot be got wrong is
 // none at all; expansion=none for the reason internal/ffmpeg's drawtext gives
 // -- a '%' in what somebody said must not be read as a template.
+//
+// Captions on screen at the same time -- two tracks talking over each other --
+// are stacked: each takes the lowest LANE free for its whole span, and every
+// lane sits one full caption block above the one below it. No more than
+// maxCaptionLines lines are drawn; see captionLineCount for the warning.
 func captionFilters(scr []captionScreen, style CaptionStyle, font, workDir string) (filters []string, files []SidecarFile) {
 	size := fontPx(style)
 	lh := lineHeight(style)
 	centre := int(math.Round(float64(VerticalHeight) * style.PositionPct / 100))
+	laneStep := lh*style.MaxLines + lh/2
+	var laneEnds []time.Duration
 	for i, s := range scr {
-		top := centre - (lh*len(s.Lines))/2
+		lane := 0
+		for lane < len(laneEnds) && laneEnds[lane] > s.From {
+			lane++
+		}
+		if lane == len(laneEnds) {
+			laneEnds = append(laneEnds, 0)
+		}
+		laneEnds[lane] = s.To
+		top := centre - (lh*len(s.Lines))/2 - lane*laneStep
 		for j, line := range s.Lines {
+			if len(filters) >= maxCaptionLines {
+				return filters, files
+			}
 			path := filepath.Join(workDir, fmt.Sprintf("caption-%04d-%d.txt", i, j))
 			files = append(files, SidecarFile{Path: path, Content: line})
 			var b strings.Builder
 			b.WriteString("drawtext=fontfile=")
-			b.WriteString(ffmpeg.FilterPath(font))
+			b.WriteString(ffmpeg.GraphArgPath(font))
 			b.WriteString(":textfile=")
-			b.WriteString(ffmpeg.FilterPath(path))
+			b.WriteString(ffmpeg.GraphArgPath(path))
 			fmt.Fprintf(&b, ":fontsize=%d:fontcolor=%s:x=(w-text_w)/2:y=%d", size, ffColor(style.Color), top+j*lh)
-			if style.Outline > 0 {
+			if style.Outline > 0 { // -1 is "none"; Normalized turns 0 into the default
 				fmt.Fprintf(&b, ":borderw=%d:bordercolor=%s", style.Outline, ffColor(style.OutlineColor))
 			}
 			if style.Box {
@@ -692,13 +734,7 @@ func (p Plan) verticalCommand(in input, workDir string) (Command, error) {
 			return Command{}, ErrNoCaptionFont
 		}
 		style := c.Style.Normalized()
-		// The filters' clock: zero at the in-point for an input seek, the
-		// discarded span for an output one. See screens.
-		shift := time.Duration(0)
-		if p.Concat {
-			shift = p.HeadSeek
-		}
-		filters, capFiles := captionFilters(screens(*c, style, p.In, p.Duration(), shift), style, c.FontFile, workDir)
+		filters, capFiles := captionFilters(screens(*c, style, p.playback, p.playback(p.In), p.playback(p.Out)), style, c.FontFile, workDir)
 		for _, f := range filters {
 			graph += "," + f
 		}
@@ -717,7 +753,9 @@ func (p Plan) verticalCommand(in input, workDir string) (Command, error) {
 	args = append(args, pre...)
 	args = append(args, in.args...)
 	args = append(args, post...)
-	args = append(args, "-t", secs(p.Duration()))
+	// The picture the short contains, which is not Out-In when the recording
+	// has a gap: the concat demuxer plays the files back to back.
+	args = append(args, "-t", secs(p.playback(p.Out)-p.playback(p.In)))
 	args = append(args, "-/filter_complex", graphFile.Path, "-map", "[vout]")
 	args = append(args, audioMap...)
 	args = append(args, "-c:v", enc)
@@ -737,6 +775,97 @@ func (p Plan) verticalCommand(in input, workDir string) (Command, error) {
 	args = append(args, p.outputArgs(ContainerMP4, true)...)
 	args = append(args, p.OutPath)
 	return Command{Name: "vertical", Args: args, Output: p.OutPath, Files: files}, nil
+}
+
+// warnCaptions says what the burned captions will not show: lines past the
+// graph's bound, and characters the bundled font has no glyph for. It runs
+// after resolveSources, because placing a caption needs the files.
+func (p *Plan) warnCaptions() {
+	c := p.Vertical.Captions
+	if c == nil || !c.DrawText || len(c.Cues) == 0 {
+		return
+	}
+	style := c.Style.Normalized()
+	lines := 0
+	for _, s := range screens(*c, style, p.playback, p.playback(p.In), p.playback(p.Out)) {
+		lines += len(s.Lines)
+	}
+	if lines > maxCaptionLines {
+		p.warn("%d caption lines were not drawn: one short carries at most %d", lines-maxCaptionLines, maxCaptionLines)
+	}
+	if isBuiltinFont(style.Font) {
+		for _, cue := range c.Cues {
+			if r, ok := firstUndrawable(cue.Text); ok {
+				p.warn("the bundled Inter font has no glyph for %q and characters like it, so those captions "+
+					"will draw as boxes; add a font that has them to the fonts directory and choose it", string(r))
+				return
+			}
+		}
+	}
+}
+
+func isBuiltinFont(name string) bool {
+	for _, b := range ffmpeg.BuiltinFonts {
+		if name == b {
+			return true
+		}
+	}
+	return false
+}
+
+// interRanges are the Unicode blocks the bundled Inter draws: Latin with its
+// extensions and combining marks, Greek, Cyrillic, and the punctuation, currency
+// and symbol blocks around them. Anything else -- CJK, Arabic, Hebrew,
+// Devanagari, Thai, emoji -- has no glyph and renders as a box.
+var interRanges = [][2]rune{
+	{0x0000, 0x036F}, {0x0370, 0x03FF}, {0x0400, 0x052F}, {0x1E00, 0x1FFF},
+	{0x2000, 0x206F}, {0x20A0, 0x20CF}, {0x2100, 0x22FF},
+}
+
+// firstUndrawable is the first character of s the bundled font cannot draw.
+func firstUndrawable(s string) (rune, bool) {
+	for _, r := range s {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || r == '\ue000' || r == '\ue001' {
+			continue
+		}
+		in := false
+		for _, rg := range interRanges {
+			if r >= rg[0] && r <= rg[1] {
+				in = true
+				break
+			}
+		}
+		if !in {
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// playback maps a timeline position onto the clock the filtergraph sees.
+//
+// A short cut from one file is seeked on the INPUT, so its frames reach the
+// filters starting at zero: the clock is t - In. A short spanning several files
+// is read through the concat demuxer, which cannot seek and plays the files
+// BACK TO BACK, so the clock is the position in that joined input -- the
+// lengths of the earlier files plus the offset into this one. A gap in the
+// recording takes no time on it, which is why a caption after a recorder
+// restart has to be mapped through the files rather than by subtraction.
+func (p Plan) playback(t time.Duration) time.Duration {
+	if !p.Concat {
+		return t - p.In
+	}
+	var played time.Duration
+	for _, s := range p.Sources {
+		if t < s.Start {
+			return played
+		}
+		if t < s.End() {
+			return played + (t - s.Start)
+		}
+		played += s.Duration
+	}
+	return played
 }
 
 // planVertical is PlanCut's branch for a vertical export: no keyframe snap,
