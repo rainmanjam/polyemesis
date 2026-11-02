@@ -45,6 +45,18 @@ const fake = vi.hoisted(() => {
       this.src = s;
     }
     attachMedia() {}
+    /** What real hls.js does BEFORE MANIFEST_PARSED: drop every level whose
+     *  CODECS the browser refuses, and if none is left, fail fatally with
+     *  manifestIncompatibleCodecsError instead of parsing at all. */
+    parseManifest(levels: { name: string; height: number; url: string[]; codecs?: string }[], decodes: (c: string) => boolean) {
+      const kept = levels.filter((l) => !l.codecs || decodes(l.codecs));
+      if (kept.length === 0) {
+        this.emit("error", { fatal: true, type: "mediaError", details: "manifestIncompatibleCodecsError" });
+        return;
+      }
+      this.levels = kept;
+      this.emit("manifestParsed");
+    }
     removeLevel(i: number) {
       this.removed.push(i);
       this.levels.splice(i, 1);
@@ -90,6 +102,7 @@ const level = (name: string, height: number) => ({
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   fake.state.instances = [];
   fake.state.beacons = [];
   window.history.replaceState(null, "", "/");
@@ -252,3 +265,70 @@ function stubVideo(v: HTMLVideoElement, r: { start: number; end: number; at: num
   Object.defineProperty(v, "play", { configurable: true, value: () => Promise.resolve() });
   return v;
 }
+
+describe("hls.js filters first (#12)", () => {
+  it("removes nothing when hls.js already dropped the undecodable rung before MANIFEST_PARSED", async () => {
+    const hls = await mount([
+      { name: "hd", playlist: "/playout/hd/index.m3u8", height: 720, codec: "h264" },
+      { name: "uhd", playlist: "/playout/uhd/index.m3u8", height: 2160, codec: "hevc" },
+    ]);
+    act(() =>
+      hls.parseManifest(
+        [
+          { ...level("hd", 720), codecs: "avc1.64001F,mp4a.40.2" },
+          { ...level("uhd", 2160), codecs: "hvc1.2.4.L153.B0,mp4a.40.2" },
+        ],
+        (c) => !c.startsWith("hvc1"),
+      ),
+    );
+    // Removal is by NAME, so the page does not take hls.js's surviving H.264
+    // level for the HEVC one it was told about.
+    expect(hls.removed).toEqual([]);
+    expect(hls.levels.map((l) => l.name)).toEqual(["hd"]);
+    expect(screen.getByText(/this browser cannot play/)).toBeTruthy();
+  });
+
+  it("reports a ladder hls.js refused outright as codec_unsupported, and keeps trying", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const hls = await mount([{ name: "uhd", playlist: "/playout/uhd/index.m3u8", height: 2160, codec: "hevc" }]);
+    act(() => hls.parseManifest([{ ...level("uhd", 2160), codecs: "hvc1.2.4.L153.B0,mp4a.40.2" }], () => false));
+    expect(hls.destroyed).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(fake.state.instances.length).toBe(2);
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    expect(fake.state.beacons.find((x) => x.b.kind === "heartbeat")?.b.errors).toContain("codec_unsupported");
+  });
+});
+
+describe("a codec learned mid-play (#8)", () => {
+  it("drops the rung from the running player instead of rebuilding it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // A browser that decodes H.264 and nothing newer.
+    vi.stubGlobal("MediaSource", { isTypeSupported: (t: string) => t.includes("avc1") });
+    const hls = await mount([
+      // The passthrough rung before the ingest probe: no codec yet.
+      { name: "src", playlist: "/playout/src/index.m3u8", height: 2160 },
+      { name: "hd", playlist: "/playout/hd/index.m3u8", height: 720, codec: "h264" },
+    ]);
+    hls.levels = [level("src", 2160), level("hd", 720)];
+    act(() => hls.emit("manifestParsed"));
+    expect(hls.removed).toEqual([]);
+
+    // The probe lands: the source is HEVC, which this browser cannot decode.
+    currentView = liveView([
+      { name: "src", playlist: "/playout/src/index.m3u8", height: 2160, codec: "hevc" },
+      { name: "hd", playlist: "/playout/hd/index.m3u8", height: 720, codec: "h264" },
+    ]);
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+    });
+    await waitFor(() => expect(hls.removed).toEqual([0]));
+    expect(fake.state.instances.length).toBe(1);
+    expect(hls.destroyed).toBe(false);
+    expect(screen.getByText(/this browser cannot play/)).toBeTruthy();
+  });
+});

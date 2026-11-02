@@ -93,6 +93,12 @@ func provePlayoutBeaconGate(t *testing.T) proofResult {
 	r.RemoteAddr = "203.0.113.9:5555"
 	bearer(read)(r)
 	w := do(t, h, r)
+	// The class this route is in: a read token is a stranger, and a stranger
+	// on a published, protected stream is challenged. Anything else -- a 204
+	// above all -- means the token got past the gate.
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("a read token's beacon answered %d, want the stranger's 401", w.Code)
+	}
 	for _, c := range w.Result().Cookies() {
 		if c.Name == playoutTokenCookie {
 			t.Errorf("a read token's beacon was handed the playback cookie")

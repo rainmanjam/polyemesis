@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyHlsError, classifyMediaError, newSessionId, QoETracker } from "./qoeBeacon";
+import { classifyHlsError, classifyMediaError, MAX_STARTUP_MS, newSessionId, QoETracker } from "./qoeBeacon";
 import type { BeaconV1 } from "./types";
 
 function tracker() {
@@ -104,5 +104,32 @@ describe("newSessionId", () => {
     const id = newSessionId((n) => new Uint8Array(n).fill(0xab));
     expect(id).toBe("ab".repeat(16));
     expect(/^[A-Za-z0-9_-]{16,64}$/.test(newSessionId())).toBe(true);
+  });
+});
+
+describe("startup bound (#5)", () => {
+  it("leaves startupMs off when it is past the server's bound, and still reports the session as started", () => {
+    const { q, sent, advance } = tracker();
+    advance(MAX_STARTUP_MS + 1);
+    q.playing();
+    expect(q.started).toBe(true);
+    q.beacon("start");
+    expect(sent[0].startupMs).toBeUndefined();
+    // And the stall accounting carries on as normal after it.
+    q.waiting();
+    advance(200);
+    q.playing();
+    q.beacon("heartbeat");
+    expect(sent[1]).toMatchObject({ rebufferCount: 1, rebufferMs: 200 });
+  });
+
+  it("measures from the latest reset, so a retry loop before the broadcast is not startup", () => {
+    const { q, sent, advance } = tracker();
+    advance(60_000); // the page waited a minute for the broadcast
+    q.reset(); // the player was recreated when it could begin
+    advance(700);
+    q.playing();
+    q.beacon("start");
+    expect(sent[0].startupMs).toBe(700);
   });
 });

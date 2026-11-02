@@ -170,6 +170,11 @@ identifies a viewer.
 - `polyemesis_playout_qoe_startups_total` and
   `polyemesis_playout_qoe_startup_seconds_total`: divide for the mean time to
   first frame.
+- `polyemesis_playout_qoe_startup_bucket_total{le}`: startups at or under each
+  bound (0.5, 1, 2, 3, 5, 10 s, +Inf), cumulative -- a classic histogram for
+  `histogram_quantile`.
+- `polyemesis_playout_qoe_sessions_with_errors_total`: sessions that reported
+  at least one error, each counted once.
 - `polyemesis_playout_qoe_rebuffers_total` and
   `polyemesis_playout_qoe_rebuffer_seconds_total`: stalls after startup.
 - `polyemesis_playout_qoe_errors_total{code}`, one series per code
@@ -189,6 +194,8 @@ rate(polyemesis_playout_qoe_startup_seconds_total[15m])
 rate(polyemesis_playout_qoe_rebuffer_seconds_total[5m])
   / clamp_min(polyemesis_playout_qoe_sessions, 1)            # share of time each viewer spends stalled
 increase(polyemesis_playout_qoe_errors_total{code="codec_unsupported"}[1h]) > 0
+histogram_quantile(0.9,
+  rate(polyemesis_playout_qoe_startup_bucket_total[15m]))    # p90 time to first frame
 ```
 
 ## Queries to start from

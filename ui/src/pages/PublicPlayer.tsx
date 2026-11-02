@@ -6,7 +6,9 @@ import { useT } from "@/lib/i18n";
 import { type ClockAnchor, useLiveCaptionTrack } from "@/lib/liveCaptions";
 import {
   browserCodecEnv,
+  type CodecSupport,
   detectCodecSupport,
+  forSegments,
   nativeSource,
   playableVariants,
 } from "@/lib/playerCodecs";
@@ -214,9 +216,39 @@ function LivePlayer({
 
   const master = view.master;
   const variants = useMemo(() => view.variants ?? [], [view.variants]);
-  // Variant names as a stable key: the view is re-read every fifteen seconds,
-  // and a new array with the same rungs must not rebuild the player.
-  const ladderKey = variants.map((v) => `${v.name}:${v.codec ?? ""}`).join(",");
+  // Variant NAMES as the player's key: the view is re-read every fifteen
+  // seconds, and a new array with the same rungs must not rebuild the player.
+  // Codecs are deliberately not in it -- the source rung's codec arrives with
+  // the ingest probe, after viewers are already watching, and rebuilding every
+  // viewer's player to learn it would interrupt them all. A codec that becomes
+  // known is applied to the running player instead; see codecKey below.
+  const ladderKey = variants.map((v) => v.name).join(",");
+  const codecKey = variants.map((v) => `${v.name}:${v.codec ?? ""}`).join(",");
+  const trackerRef = useRef<QoETracker | null>(null);
+  const variantsRef = useRef(variants);
+  variantsRef.current = variants;
+  // What this browser decodes, read once per player.
+  const supportRef = useRef<CodecSupport | null>(null);
+  const fellBackReported = useRef(false);
+  const nativeSrcRef = useRef("");
+
+  /** Take rungs this browser cannot play out of a running hls.js, from the
+   *  ladder as the server describes it NOW. Called when the manifest is
+   *  parsed and again whenever a rung's codec becomes known. */
+  const applyLadder = useCallback((h: Hls) => {
+    const support = supportRef.current;
+    if (!support || h.levels.length === 0) return;
+    const ladder = playableVariants(variantsRef.current, forSegments(support, "mse"));
+    for (const i of levelsToRemove(h.levels, new Set(ladder.dropped.map((v) => v.name)))) h.removeLevel(i);
+    if (ladder.dropped.length > 0) {
+      setFellBack(true);
+      if (!fellBackReported.current) {
+        fellBackReported.current = true;
+        trackerRef.current?.error("codec_unsupported");
+      }
+    }
+    setQuality(qualityOptions(h.levels));
+  }, []);
 
   // The live caption sidecar sits beside the master playlist. It is fetched
   // under /playout/, so the playback cookie the manifest request earned covers it.
@@ -228,7 +260,6 @@ function LivePlayer({
   // so a remount (React's development double-mount, or the page flipping to
   // the offline card and back) starts a fresh session instead of reusing one
   // that has already sent `end`.
-  const trackerRef = useRef<QoETracker | null>(null);
   const sendBeacon = useCallback((kind: BeaconKind) => {
     const tracker = trackerRef.current;
     if (!tracker) return;
@@ -265,13 +296,16 @@ function LivePlayer({
     // playlist of relative segment URLs work at all.
     const q = token ? `?t=${encodeURIComponent(token)}` : "";
     const support = detectCodecSupport(browserCodecEnv(video));
-    const ladder = playableVariants(variants, support);
+    supportRef.current = support;
     let hls: Hls | null = null;
     let retry: number | undefined;
     clockRef.current = null;
-    trackerRef.current?.reset();
 
     const start = () => {
+      // Startup is measured from the attempt that played, not from the page
+      // load: a viewer who opened the link before the broadcast began has not
+      // been waiting on the player for that time (#5).
+      trackerRef.current?.reset();
       if (Hls.isSupported()) {
         hls = new Hls({
           // Conservative next to the dashboard's monitor feed. A viewer wants
@@ -293,19 +327,11 @@ function LivePlayer({
         hls.loadSource(master + q);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          const h = hls;
-          if (!h) return;
           // HEVC/AV1 fallback. hls.js filters on CODECS itself where the
           // master carries them; this is the same decision made from the
-          // server's own codec field, so a rung the browser cannot decode is
-          // never offered and never switched to.
-          const remove = levelsToRemove(h.levels, new Set(ladder.dropped.map((v) => v.name)));
-          for (const i of remove) h.removeLevel(i);
-          if (ladder.dropped.length > 0) {
-            setFellBack(true);
-            trackerRef.current?.error("codec_unsupported");
-          }
-          setQuality(qualityOptions(h.levels));
+          // server's own codec field and from what MPEG-TS segments allow,
+          // so a rung the browser cannot play is never offered or chosen.
+          if (hls) applyLadder(hls);
         });
         hls.on(Hls.Events.LEVELS_UPDATED, () => hls && setQuality(qualityOptions(hls.levels)));
         hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -329,8 +355,9 @@ function LivePlayer({
         // string and traded for a cookie. Native playback cannot be told to
         // skip a rung, so when the ladder holds one this browser cannot
         // decode, it loads the best H.264 rung's own playlist instead.
-        const src = nativeSource(master, variants, support);
+        const src = nativeSource(master, variantsRef.current, forSegments(support, "native"));
         if (src !== master) setFellBack(true);
+        nativeSrcRef.current = src;
         video.src = src + q;
       }
     };
@@ -343,7 +370,29 @@ function LivePlayer({
     };
     // ladderKey stands for `variants`; see its comment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, token, ladderKey, setPlaying]);
+  }, [master, token, ladderKey, setPlaying, applyLadder]);
+
+  // A rung's codec became known after the player started (#8). hls.js drops
+  // the rung in place; native HLS, which cannot be told to skip one, is moved
+  // to the H.264 rung only if that is now where it should be.
+  useEffect(() => {
+    const h = hlsRef.current;
+    if (h) {
+      applyLadder(h);
+      return;
+    }
+    const video = videoRef.current;
+    const support = supportRef.current;
+    if (!video || !support || !nativeSrcRef.current) return;
+    const src = nativeSource(master, variantsRef.current, forSegments(support, "native"));
+    if (src !== nativeSrcRef.current) {
+      nativeSrcRef.current = src;
+      setFellBack(src !== master);
+      video.src = src + (token ? `?t=${encodeURIComponent(token)}` : "");
+    }
+    // codecKey is what this effect is about; the refs carry the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codecKey]);
 
   // The DVR bar's model, refreshed from the element as it plays.
   const refreshRange = useCallback(() => {
@@ -581,7 +630,7 @@ export function OfflineCard({
             }}
           />
         )}
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-t from-black/80 via-black/40 to-black/20 p-6 text-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 p-6 text-center">
           <span className="rounded bg-black/60 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-neutral-300">
             {ended ? t("player.endedBadge") : t("player.offlineBadge")}
           </span>

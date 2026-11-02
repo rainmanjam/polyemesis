@@ -116,6 +116,13 @@ type Upstream struct {
 	// browser has to decode -- the master playlist advertises it so a player
 	// can skip a rung it cannot play.
 	Codec string
+	// Profile, Level and PixFmt describe the bitstream precisely enough to
+	// write an RFC 6381 codec string. Known for a probed ingest; empty for a
+	// rendition, whose level the encoder chooses, and then the master
+	// advertises no CODECS for the rung rather than a guess.
+	Profile string
+	Level   int
+	PixFmt  string
 }
 
 // Resolver maps a variant's rendition id — nil meaning the ingest itself — onto
@@ -154,6 +161,9 @@ type variant struct {
 	width     int
 	height    int
 	codec     string
+	// codecs is the rung's RFC 6381 CODECS value, empty when it cannot be
+	// stated exactly.
+	codecs string
 	// err is why this rung is not running, shown rather than swallowed.
 	err     string
 	startAt time.Time
@@ -305,7 +315,7 @@ func (m *Manager) Reconcile(s db.PlayoutSettings, resolve Resolver) error {
 			// Already running the right thing: carry the live process forward
 			// and drop the plan.
 			cur.bandwidth, cur.width, cur.height = w.bandwidth, w.width, w.height
-			cur.codec = w.codec
+			cur.codec, cur.codecs = w.codec, w.codecs
 			delete(want, name)
 			continue
 		}
@@ -346,6 +356,7 @@ func (m *Manager) plan(s db.PlayoutSettings, cfg db.PlayoutVariant, resolve Reso
 	v.hub = up.Hub
 	v.width, v.height = up.Width, up.Height
 	v.codec = normalizeCodec(up.Codec)
+	v.codecs = hlsCodecs(v.codec, up.Profile, up.Level, up.PixFmt)
 
 	kbps := up.VideoKbps
 	if kbps <= 0 {
@@ -561,7 +572,7 @@ func (m *Manager) refreshUpstreams() bool {
 
 	type meta struct {
 		width, height int
-		codec         string
+		codec, codecs string
 	}
 	fresh := make(map[*variant]meta, len(rungs))
 	for _, r := range rungs {
@@ -569,7 +580,8 @@ func (m *Manager) refreshUpstreams() bool {
 		if err != nil {
 			continue
 		}
-		fresh[r.v] = meta{up.Width, up.Height, normalizeCodec(up.Codec)}
+		c := normalizeCodec(up.Codec)
+		fresh[r.v] = meta{up.Width, up.Height, c, hlsCodecs(c, up.Profile, up.Level, up.PixFmt)}
 	}
 
 	changed := false
@@ -578,8 +590,8 @@ func (m *Manager) refreshUpstreams() bool {
 		if m.running[v.cfg.Name] != v {
 			continue // replaced while the lock was released
 		}
-		if v.width != md.width || v.height != md.height || v.codec != md.codec {
-			v.width, v.height, v.codec = md.width, md.height, md.codec
+		if v.width != md.width || v.height != md.height || v.codec != md.codec || v.codecs != md.codecs {
+			v.width, v.height, v.codec, v.codecs = md.width, md.height, md.codec, md.codecs
 			changed = true
 		}
 	}
@@ -808,7 +820,7 @@ func (m *Manager) writeMaster() error {
 		// CODECS only when the codec is known. It is what lets a browser that
 		// cannot decode HEVC or AV1 skip that rung instead of failing on it;
 		// a guessed value would make a player refuse a rung it could play.
-		if c := hlsCodecs(v.codec); c != "" {
+		if c := v.codecs; c != "" {
 			b.WriteString(",CODECS=\"" + c + "\"")
 		}
 		b.WriteString(",NAME=\"" + v.name + "\"\n")
@@ -834,6 +846,7 @@ type rungMeta struct {
 	width     int
 	height    int
 	codec     string
+	codecs    string
 	startAt   time.Time
 }
 
@@ -847,6 +860,7 @@ func (v *variant) meta() rungMeta {
 		width:     v.width,
 		height:    v.height,
 		codec:     v.codec,
+		codecs:    v.codecs,
 		startAt:   v.startAt,
 	}
 }

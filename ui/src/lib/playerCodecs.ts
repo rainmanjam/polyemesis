@@ -18,9 +18,10 @@ export interface CodecEnv {
   canPlayType: (type: string) => string;
 }
 
-/** The video codec strings, matching internal/playout/codecs.go's hlsCodecs.
- *  Asking with the same strings the master advertises is what makes the
- *  page's answer agree with the player's. */
+/** Representative strings for each codec FAMILY. The master playlist's CODECS
+ *  is now the stream's exact profile and level, or absent (see
+ *  internal/playout/codecs.go); this check answers the coarser question the
+ *  fallback needs -- can this browser decode the family at all. */
 const VIDEO_CODEC: Record<PlayoutCodec, string> = {
   h264: "avc1.640028",
   hevc: "hvc1.1.6.L120.90",
@@ -110,4 +111,26 @@ export function nativeSource(
   if (!ladder.fellBack || ladder.playable.length === 0) return master;
   const best = [...ladder.playable].sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0];
   return best.playlist;
+}
+
+/** Which path plays the segments: hls.js over MediaSource, or the browser's
+ *  own HLS (Safari, set-top boxes). */
+export type PlaybackPath = "mse" | "native";
+
+/** What the browser can decode, narrowed to what it can decode OUT OF THE
+ *  SEGMENTS THIS SERVER WRITES. The packager writes MPEG-TS, and a decoder is
+ *  not enough:
+ *
+ *   - AV1 in MPEG-TS has no demuxer anywhere a viewer is -- hls.js has none,
+ *     and no native HLS player accepts it -- so an AV1 rung is never playable.
+ *   - HEVC in HLS is fMP4-only on native players (Apple's HLS spec), so native
+ *     HLS cannot play an HEVC rung from TS even on a device that decodes HEVC.
+ *     hls.js's full build does demux HEVC from MPEG-TS, so through MSE it is
+ *     decided by the decoder alone. */
+export function forSegments(support: CodecSupport, path: PlaybackPath): CodecSupport {
+  return {
+    h264: support.h264,
+    hevc: path === "mse" && support.hevc,
+    av1: false,
+  };
 }

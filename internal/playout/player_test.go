@@ -24,17 +24,24 @@ func TestMasterPlaylistAdvertisesCodecsOnlyWhenKnown(t *testing.T) {
 		}
 		switch *id {
 		case 7:
-			return Upstream{Hub: h.rend, Label: "720p", Width: 1280, Height: 720, VideoKbps: 3000, Codec: "h264"}, nil
+			return Upstream{Hub: h.rend, Label: "720p", Width: 1280, Height: 720, VideoKbps: 3000,
+				Codec: "h264", Profile: "High", Level: 31}, nil
 		case 8:
-			return Upstream{Hub: newHub("hevc"), Label: "4k", Width: 3840, Height: 2160, VideoKbps: 12000, Codec: "hevc"}, nil
+			return Upstream{Hub: newHub("hevc"), Label: "4k", Width: 3840, Height: 2160, VideoKbps: 12000,
+				Codec: "hevc", Profile: "Main 10", Level: 153}, nil
+		case 9:
+			return Upstream{Hub: newHub("av1"), Label: "av1", VideoKbps: 2000,
+				Codec: "AV1", Profile: "Main", Level: 8, PixFmt: "yuv420p"}, nil
 		}
-		return Upstream{Hub: newHub("av1"), Label: "av1", VideoKbps: 2000, Codec: "AV1"}, nil
+		// A rendition: the family is known, the level is the encoder's choice.
+		return Upstream{Hub: newHub("rend"), Label: "rend", VideoKbps: 1000, Codec: "h264"}, nil
 	}
 	s := baseSettings(
 		db.PlayoutVariant{Name: "source", Enabled: true},
 		db.PlayoutVariant{Name: "hd", Enabled: true, RenditionID: rid(7)},
 		db.PlayoutVariant{Name: "uhd", Enabled: true, RenditionID: rid(8)},
 		db.PlayoutVariant{Name: "av", Enabled: true, RenditionID: rid(9)},
+		db.PlayoutVariant{Name: "rend", Enabled: true, RenditionID: rid(10)},
 	)
 	if err := h.Reconcile(s, resolve); err != nil {
 		t.Fatal(err)
@@ -47,8 +54,8 @@ func TestMasterPlaylistAdvertisesCodecsOnlyWhenKnown(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		"hd":  `CODECS="avc1.640028,mp4a.40.2"`,
-		"uhd": `CODECS="hvc1.1.6.L120.90,mp4a.40.2"`,
+		"hd":  `CODECS="avc1.64001F,mp4a.40.2"`,
+		"uhd": `CODECS="hvc1.2.4.L153.B0,mp4a.40.2"`,
 		"av":  `CODECS="av01.0.08M.08,mp4a.40.2"`,
 	}
 	for name, codecs := range want {
@@ -56,8 +63,10 @@ func TestMasterPlaylistAdvertisesCodecsOnlyWhenKnown(t *testing.T) {
 			t.Errorf("rung %s: want %s in %q", name, codecs, lines[name])
 		}
 	}
-	if strings.Contains(lines["source"], "CODECS") {
-		t.Errorf("guessed a CODECS value for a rung whose codec is unknown: %q", lines["source"])
+	for _, n := range []string{"source", "rend"} {
+		if strings.Contains(lines[n], "CODECS") {
+			t.Errorf("guessed a CODECS value for %s, whose profile and level are unknown: %q", n, lines[n])
+		}
 	}
 
 	st := h.Status()
@@ -200,12 +209,12 @@ func TestRefreshUpstreamsPicksUpALateProbe(t *testing.T) {
 	}
 	spawned := len(h.spawns.all())
 
-	probed = Upstream{Width: 1920, Height: 1080, Codec: "hevc"}
+	probed = Upstream{Width: 1920, Height: 1080, Codec: "hevc", Profile: "Main", Level: 120}
 	if !h.refreshUpstreams() {
 		t.Fatal("the probe's size and codec were not picked up")
 	}
 	got := readMaster(t, h.dir)
-	if !strings.Contains(got, `CODECS="hvc1.1.6.L120.90,mp4a.40.2"`) || !strings.Contains(got, "RESOLUTION=1920x1080") {
+	if !strings.Contains(got, `CODECS="hvc1.1.6.L120.B0,mp4a.40.2"`) || !strings.Contains(got, "RESOLUTION=1920x1080") {
 		t.Fatalf("master not rewritten with the probe:\n%s", got)
 	}
 	if n := len(h.spawns.all()); n != spawned {
@@ -255,5 +264,36 @@ func TestRefreshUpstreamsIsRaceFreeAgainstStatusAndReconcile(t *testing.T) {
 	got := readMaster(t, h.dir)
 	if !strings.HasPrefix(got, "#EXTM3U\n") || strings.Count(got, "#EXT-X-STREAM-INF") != 1 {
 		t.Fatalf("torn master playlist:\n%s", got)
+	}
+}
+
+// #7. CODECS is derived from what the probe saw, or omitted -- never a
+// representative guess that could misdescribe a stream-copied source.
+func TestHLSCodecsDeriveFromProfileAndLevelOrSayNothing(t *testing.T) {
+	cases := []struct {
+		codec, profile string
+		level          int
+		pix, want      string
+	}{
+		{"h264", "High", 40, "yuv420p", "avc1.640028,mp4a.40.2"},
+		{"h264", "Main", 31, "", "avc1.4D001F,mp4a.40.2"},
+		{"h264", "Constrained Baseline", 30, "", "avc1.42E01E,mp4a.40.2"},
+		{"h264", "High 10", 51, "yuv420p10le", "avc1.6E0033,mp4a.40.2"},
+		{"hevc", "Main", 120, "", "hvc1.1.6.L120.B0,mp4a.40.2"},
+		{"hevc", "Main 10", 153, "", "hvc1.2.4.L153.B0,mp4a.40.2"},
+		{"av1", "Main", 8, "yuv420p", "av01.0.08M.08,mp4a.40.2"},
+		{"av1", "Main", 13, "yuv420p10le", "av01.0.13M.10,mp4a.40.2"},
+		// Unknown pieces: nothing, rather than a lie.
+		{"h264", "", 40, "", ""},
+		{"h264", "High", 0, "", ""},
+		{"h264", "Something New", 40, "", ""},
+		{"hevc", "Rext", 120, "", ""},
+		{"av1", "Main", 8, "", ""},
+		{"", "High", 40, "", ""},
+	}
+	for _, c := range cases {
+		if got := hlsCodecs(c.codec, c.profile, c.level, c.pix); got != c.want {
+			t.Errorf("hlsCodecs(%q,%q,%d,%q) = %q, want %q", c.codec, c.profile, c.level, c.pix, got, c.want)
+		}
 	}
 }

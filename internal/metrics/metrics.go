@@ -100,6 +100,13 @@ type Playout struct {
 	StartupSeconds  float64
 	Rebuffers       int64
 	RebufferSeconds float64
+	// StartupBounds are the startup histogram's upper bounds in seconds, and
+	// StartupBuckets the CUMULATIVE count at or under each, then one more for
+	// +Inf. Empty omits the family.
+	StartupBounds  []float64
+	StartupBuckets []int64
+	// SessionsWithErrors is sessions that reported at least one error.
+	SessionsWithErrors int64
 	// Errors is keyed by beacon error code; ErrorCodes is the full enum, so
 	// every code has a series before its first occurrence.
 	Errors     map[string]int64
@@ -714,6 +721,21 @@ func renderPlayout(d *doc, p *Playout) {
 		"Player sessions that reached the first frame.", float64(p.Startups))
 	d.scalar("polyemesis_playout_qoe_startup_seconds_total", "counter",
 		"Summed time from player start to first frame; divide by startups_total for the mean.", p.StartupSeconds)
+	if len(p.StartupBuckets) == len(p.StartupBounds)+1 {
+		// A classic cumulative histogram written as a counter family with an
+		// le label, which is all histogram_quantile needs:
+		//   histogram_quantile(0.9, rate(polyemesis_playout_qoe_startup_bucket_total[15m]))
+		d.family("polyemesis_playout_qoe_startup_bucket_total", "counter",
+			"Startups at or under each bound (le, seconds), cumulative; feed it to histogram_quantile.")
+		for i, b := range p.StartupBounds {
+			d.sample("polyemesis_playout_qoe_startup_bucket_total", float64(p.StartupBuckets[i]),
+				label{"le", formatValue(b)})
+		}
+		d.sample("polyemesis_playout_qoe_startup_bucket_total",
+			float64(p.StartupBuckets[len(p.StartupBounds)]), label{"le", "+Inf"})
+	}
+	d.scalar("polyemesis_playout_qoe_sessions_with_errors_total", "counter",
+		"Player sessions that reported at least one error, each counted once.", float64(p.SessionsWithErrors))
 	d.scalar("polyemesis_playout_qoe_rebuffers_total", "counter",
 		"Stalls after startup, summed over sessions.", float64(p.Rebuffers))
 	d.scalar("polyemesis_playout_qoe_rebuffer_seconds_total", "counter",

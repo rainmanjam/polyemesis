@@ -15,6 +15,8 @@ func TestPlayoutQoEIsOnTheScrape(t *testing.T) {
 		Rejected:       map[string]int64{"rate_limited": 4},
 		ActiveSessions: 2, ByVariant: map[string]int{"720p": 2, `bad"name`: 1},
 		LatencySeconds: &lat,
+		StartupBounds:  []float64{0.5, 1}, StartupBuckets: []int64{1, 2, 3},
+		SessionsWithErrors: 2,
 	}})
 	for _, want := range []string{
 		"polyemesis_playout_viewers 3\n",
@@ -33,6 +35,10 @@ func TestPlayoutQoEIsOnTheScrape(t *testing.T) {
 		`polyemesis_playout_qoe_variant_sessions{variant="720p"} 2` + "\n",
 		`polyemesis_playout_qoe_variant_sessions{variant="bad\"name"} 1` + "\n",
 		"polyemesis_playout_qoe_latency_seconds 4.5\n",
+		`polyemesis_playout_qoe_startup_bucket_total{le="0.5"} 1` + "\n",
+		`polyemesis_playout_qoe_startup_bucket_total{le="1"} 2` + "\n",
+		`polyemesis_playout_qoe_startup_bucket_total{le="+Inf"} 3` + "\n",
+		"polyemesis_playout_qoe_sessions_with_errors_total 2\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("scrape is missing %q", want)

@@ -1148,6 +1148,12 @@ func (s *Server) handleResetPlayoutAnalytics(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	m.ResetAnalytics()
+	// The beacon endpoint's refusal counters live on the server rather than
+	// the manager, and "reset counters" means all of them: a scrape must not
+	// pair refusals from before a reset with beacons from after it.
+	g := s.beaconGate()
+	g.invalid.Store(0)
+	g.limited.Store(0)
 	writeJSON(w, http.StatusOK, m.Analytics())
 }
 

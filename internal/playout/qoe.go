@@ -150,9 +150,9 @@ func ValidateBeaconSchema(b Beacon) error {
 	default:
 		return invalid("kind must be start, heartbeat or end")
 	}
-	if b.StartupMs != nil && (*b.StartupMs < 0 || *b.StartupMs > MaxBeaconStartupMs) {
-		return invalid("startupMs out of range")
-	}
+	// startupMs out of range is NOT a refusal: the page repeats it on every
+	// beacon, so refusing would lose the whole session over one bad number.
+	// Record ignores it instead; see validStartup.
 	if b.RebufferCount < 0 || b.RebufferCount > MaxBeaconRebuffers {
 		return invalid("rebufferCount out of range")
 	}
@@ -201,9 +201,20 @@ type QoETotals struct {
 	// Errors counts each error code.
 	Errors map[BeaconError]int64 `json:"errors"`
 	// Untracked is beacons from sessions that arrived with the table full.
-	// Their errors still count; their cumulative counters cannot.
+	// Nothing else from them is counted: without a row a retry cannot be told
+	// from a new report.
 	Untracked int64 `json:"untracked"`
+	// StartupHistogram is CUMULATIVE counts of startups at or under each bound
+	// in StartupBucketsMs, then a final +Inf bucket equal to Startups -- the
+	// Prometheus histogram shape, so percentiles can be estimated.
+	StartupHistogram []int64 `json:"startupHistogram"`
+	// SessionsWithErrors is sessions that reported at least one error, each
+	// counted once however many errors it reported.
+	SessionsWithErrors int64 `json:"sessionsWithErrors"`
 }
+
+// StartupBucketsMs are the startup histogram's upper bounds, in milliseconds.
+var StartupBucketsMs = []int{500, 1000, 2000, 3000, 5000, 10000}
 
 // QoESummary is the aggregate the admin analytics and the metrics read.
 type QoESummary struct {
@@ -224,6 +235,7 @@ type qoeSession struct {
 	rebuffers  int
 	rebufferMs int
 	startup    bool
+	errored    bool
 	variant    string
 	latencyMs  int
 	hasLatency bool
@@ -258,7 +270,10 @@ func NewQoE(idle time.Duration, max int) *QoE {
 }
 
 func emptyTotals() QoETotals {
-	return QoETotals{Errors: map[BeaconError]int64{}}
+	return QoETotals{
+		Errors:           map[BeaconError]int64{},
+		StartupHistogram: make([]int64, len(StartupBucketsMs)+1),
+	}
 }
 
 // Record folds one VALIDATED beacon into the aggregate. It reports false when
@@ -273,12 +288,27 @@ func (q *QoE) Record(b Beacon, now time.Time) bool {
 	if !ok {
 		q.pruneLocked(now)
 		if len(q.sessions) >= q.max {
-			// The table is full. The errors are still a fact about this
-			// install's playback; the cumulative counters cannot be turned into
-			// deltas without a row, so they are not counted at all rather than
-			// counted as if this were the session's first report.
+			// The table is full. Without a row a keepalive retry cannot be
+			// told from a new report, so nothing from this beacon is counted
+			// -- not its cumulative counters, and not its errors either, which
+			// a retry would otherwise count again. Only that it arrived.
 			q.totals.Untracked++
-			q.countErrorsLocked(b.Errors)
+			return true
+		}
+		if b.Seq > 1 {
+			// A session this table has FORGOTTEN -- idle-evicted, cleared by a
+			// reset, or untracked while the table was full -- not a new one:
+			// the page's first beacon is seq 1. Its counters are cumulative and
+			// its startup was reported before, so this beacon sets the baseline
+			// and adds nothing. Its errors are the ones since its previous
+			// beacon, which nothing here has seen, so they count.
+			s = &qoeSession{
+				seq: b.Seq, rebuffers: b.RebufferCount, rebufferMs: b.RebufferMs,
+				startup: true,
+			}
+			q.sessions[b.SessionID] = s
+			q.noteErrorsLocked(s, b.Errors)
+			q.observeLocked(s, b, now)
 			return true
 		}
 		s = &qoeSession{seq: -1}
@@ -297,25 +327,48 @@ func (q *QoE) Record(b Beacon, now time.Time) bool {
 		q.totals.RebufferMs += int64(b.RebufferMs - s.rebufferMs)
 	}
 	s.rebuffers, s.rebufferMs = b.RebufferCount, b.RebufferMs
-	if b.StartupMs != nil && !s.startup {
+	if validStartup(b.StartupMs) && !s.startup {
 		s.startup = true
+		ms := *b.StartupMs
 		q.totals.Startups++
-		q.totals.StartupMs += int64(*b.StartupMs)
+		q.totals.StartupMs += int64(ms)
+		for i, bound := range StartupBucketsMs {
+			if ms <= bound {
+				q.totals.StartupHistogram[i]++
+			}
+		}
+		q.totals.StartupHistogram[len(StartupBucketsMs)]++
 	}
-	q.countErrorsLocked(b.Errors)
+	q.noteErrorsLocked(s, b.Errors)
 	s.seq = b.Seq
+	q.observeLocked(s, b, now)
+	return true
+}
+
+// validStartup reports whether a beacon's startupMs is one to count.
+func validStartup(ms *int) bool {
+	return ms != nil && *ms >= 0 && *ms <= MaxBeaconStartupMs
+}
+
+// observeLocked records the session's latest state: rung, latency, liveness.
+func (q *QoE) observeLocked(s *qoeSession, b Beacon, now time.Time) {
 	s.variant = b.Variant
 	if b.LatencyMs != nil {
 		s.latencyMs, s.hasLatency = *b.LatencyMs, true
 	}
 	s.lastSeen = now
 	s.ended = b.Kind == BeaconEnd
-	return true
 }
 
-func (q *QoE) countErrorsLocked(errs []BeaconError) {
+// noteErrorsLocked counts a beacon's errors and flags the session as one that
+// has seen an error, once.
+func (q *QoE) noteErrorsLocked(s *qoeSession, errs []BeaconError) {
 	for _, e := range errs {
 		q.totals.Errors[e]++
+	}
+	if len(errs) > 0 && !s.errored {
+		s.errored = true
+		q.totals.SessionsWithErrors++
 	}
 }
 
@@ -338,6 +391,7 @@ func (q *QoE) Summary(now time.Time) QoESummary {
 	for k, v := range q.totals.Errors {
 		out.Errors[k] = v
 	}
+	out.StartupHistogram = append([]int64(nil), q.totals.StartupHistogram...)
 	var lat []int
 	for _, s := range q.sessions {
 		if s.ended {

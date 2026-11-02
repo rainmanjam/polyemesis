@@ -1811,15 +1811,27 @@ func expectedMCPRefusal(r *http.Request, status int) bool {
 // A request that matched no route, or only a wildcard, has no pattern that
 // says anything, and there the raw path is logged: which unknown URL is being
 // asked for is the one thing a 404 line is for.
+// redactPathSecrets strips the two credentials a raw path can carry: an
+// overlay key, and the playback token in /watch/<token> -- the form of the
+// public player link an operator shares, and so the form most likely to be in
+// a request. /watch/* is a wildcard route, which is why the raw path is logged
+// at all.
+func redactPathSecrets(p string) string {
+	if strings.HasPrefix(p, WatchPath+"/") && len(p) > len(WatchPath)+1 {
+		p = WatchPath + "/[redacted]"
+	}
+	return redactOverlayKeys(p)
+}
+
 func loggedPath(r *http.Request) string {
 	rc := chi.RouteContext(r.Context())
 	if rc == nil {
-		return redactOverlayKeys(r.URL.Path)
+		return redactPathSecrets(r.URL.Path)
 	}
 	p := rc.RoutePattern()
 	if p == "" || strings.HasSuffix(p, "*") {
-		// The raw path, minus any overlay key somebody pasted into it.
-		return redactOverlayKeys(r.URL.Path)
+		// The raw path, minus any overlay key or playback token in it.
+		return redactPathSecrets(r.URL.Path)
 	}
 	return p
 }

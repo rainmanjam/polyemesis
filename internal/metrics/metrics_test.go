@@ -63,6 +63,7 @@ func testSnapshot() Snapshot {
 			Viewers: 2, Beacons: 10, Startups: 2, StartupSeconds: 1.5,
 			Errors: map[string]int64{"media": 1}, ErrorCodes: []string{"network", "media"},
 			ActiveSessions: 2, ByVariant: map[string]int{"720p": 2},
+			StartupBounds: []float64{0.5, 1}, StartupBuckets: []int64{1, 2, 2}, SessionsWithErrors: 1,
 		},
 	}
 }

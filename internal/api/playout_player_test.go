@@ -453,3 +453,47 @@ func TestPlayoutOfflineClipServesAChosenExport(t *testing.T) {
 		t.Fatalf("the public view still names a deleted clip: %q", v.Offline.Clip)
 	}
 }
+
+// /watch/<token> is a wildcard route, so the request log records the raw path --
+// which for the shared player link IS the playback token. A token in a log is a
+// credential handed to whoever reads the log.
+func TestTheWatchTokenNeverReachesTheRequestLog(t *testing.T) {
+	s, h := playoutTestServer(t, enabledPlayout(true),
+		playoutPublish{Protection: PlayoutProtectToken, Token: testToken})
+	var buf bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	for _, p := range []string{"/watch/" + testToken, "/watch/" + testToken + "/", "/watch/" + testToken + "?t=1793541600"} {
+		do(t, h, httptest.NewRequest(http.MethodGet, p, nil))
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/watch/") {
+		t.Fatalf("no /watch request was logged, so this proves nothing:\n%s", out)
+	}
+	if strings.Contains(out, testToken) {
+		t.Fatalf("the playback token reached the request log:\n%s", out)
+	}
+}
+
+// #10. "Reset counters" on the Playout page means every playout QoE counter,
+// the refusals included -- a scrape after a reset must not show refusals from
+// before it next to beacon counts from after.
+func TestResetPlayoutAnalyticsAlsoClearsBeaconRefusals(t *testing.T) {
+	s, h, sign := playoutOriginServer(t, enabledPlayout(true),
+		playoutPublish{Protection: PlayoutProtectToken, Token: testToken})
+	if w := do(t, h, beaconRequest(`{"v":9}`, withToken)); w.Code != http.StatusBadRequest {
+		t.Fatalf("setup: %d", w.Code)
+	}
+	if s.beaconGate().invalid.Load() != 1 {
+		t.Fatal("setup: the refusal was not counted")
+	}
+	s.beaconGate().limited.Store(3)
+	r := jsonRequest(t, http.MethodPost, "/api/v1/playout/analytics/reset", nil)
+	sign(r)
+	if w := do(t, h, r); w.Code != http.StatusOK {
+		t.Fatalf("reset: %d", w.Code)
+	}
+	if g := s.beaconGate(); g.invalid.Load() != 0 || g.limited.Load() != 0 {
+		t.Fatalf("refusals survived the reset: invalid=%d limited=%d", g.invalid.Load(), g.limited.Load())
+	}
+}

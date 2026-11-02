@@ -168,6 +168,12 @@ func (s *Server) playoutMetrics() *metrics.Playout {
 		},
 		ActiveSessions: q.Active,
 		ByVariant:      q.ByVariant,
+
+		StartupBuckets:     q.StartupHistogram,
+		SessionsWithErrors: q.SessionsWithErrors,
+	}
+	for _, ms := range playout.StartupBucketsMs {
+		p.StartupBounds = append(p.StartupBounds, float64(ms)/1000)
 	}
 	for _, c := range playout.BeaconErrors {
 		p.ErrorCodes = append(p.ErrorCodes, string(c))

@@ -9,6 +9,11 @@ import type { BeaconError, BeaconKind, BeaconV1 } from "./types";
  *  classes here, on the client, because an hls.js error carries the fragment
  *  URL and the fragment URL carries the playback token. */
 
+/** The server's bound on startupMs (internal/playout/qoe.go
+ *  MaxBeaconStartupMs). Past it the number is left off rather than sent: the
+ *  server would only ignore it. */
+export const MAX_STARTUP_MS = 10 * 60 * 1000;
+
 /** How often an open page reports. */
 export const HEARTBEAT_MS = 15_000;
 
@@ -69,6 +74,7 @@ export class QoETracker {
   private seq = 0;
   private createdAt: number;
   private startupMs?: number;
+  private hasStarted = false;
   private stalledSince?: number;
   private seeking = false;
   private rebufferCount = 0;
@@ -87,15 +93,17 @@ export class QoETracker {
 
   /** Restart the startup clock: the player was (re)created. */
   reset(): void {
-    if (this.startupMs === undefined) this.createdAt = this.now();
+    if (!this.hasStarted) this.createdAt = this.now();
   }
 
   /** The video is rendering frames. The first call fixes the startup time; a
    *  later one closes a stall. */
   playing(): void {
     const t = this.now();
-    if (this.startupMs === undefined) {
-      this.startupMs = Math.max(0, Math.round(t - this.createdAt));
+    if (!this.hasStarted) {
+      this.hasStarted = true;
+      const ms = Math.max(0, Math.round(t - this.createdAt));
+      if (ms <= MAX_STARTUP_MS) this.startupMs = ms;
       return;
     }
     if (this.stalledSince !== undefined) {
@@ -107,7 +115,7 @@ export class QoETracker {
   /** The video stopped for want of data. Only a stall after startup and not
    *  caused by the viewer seeking counts as a rebuffer. */
   waiting(): void {
-    if (this.startupMs === undefined || this.seeking || this.stalledSince !== undefined) return;
+    if (!this.hasStarted || this.seeking || this.stalledSince !== undefined) return;
     this.stalledSince = this.now();
     this.rebufferCount++;
   }
@@ -135,7 +143,7 @@ export class QoETracker {
 
   /** Whether a startup time is known; the page sends `start` once it is. */
   get started(): boolean {
-    return this.startupMs !== undefined;
+    return this.hasStarted;
   }
 
   /** Build and send one beacon. After `end`, nothing more is sent. */

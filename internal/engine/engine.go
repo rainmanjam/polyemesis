@@ -2992,6 +2992,7 @@ func (e *Engine) playoutUpstream(id *int64) (playout.Upstream, error) {
 			// AV1 ingest is advertised as such and a browser that cannot
 			// decode it can skip the rung.
 			up.Codec = v.Codec
+			up.Profile, up.Level, up.PixFmt = v.Profile, v.Level, v.PixFmt
 		}
 		return up, nil
 	}

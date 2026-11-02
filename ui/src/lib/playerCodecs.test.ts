@@ -3,6 +3,7 @@ import {
   type CodecEnv,
   codecMime,
   detectCodecSupport,
+  forSegments,
   nativeSource,
   playableVariants,
 } from "./playerCodecs";
@@ -106,5 +107,29 @@ describe("nativeSource", () => {
 
   it("plays the master when there is no ladder to choose from", () => {
     expect(nativeSource(master, [], { h264: true, hevc: false, av1: false })).toBe(master);
+  });
+});
+
+describe("forSegments (#6: the packager writes MPEG-TS)", () => {
+  const all = { h264: true, hevc: true, av1: true };
+
+  it("never offers AV1: neither hls.js nor any native player demuxes AV1 from MPEG-TS", () => {
+    expect(forSegments(all, "mse").av1).toBe(false);
+    expect(forSegments(all, "native").av1).toBe(false);
+  });
+
+  it("refuses HEVC on native HLS, which wants HEVC in fMP4, and keeps it for hls.js, which demuxes it", () => {
+    expect(forSegments(all, "native").hevc).toBe(false);
+    expect(forSegments(all, "mse").hevc).toBe(true);
+  });
+
+  it("never claims more than the browser does", () => {
+    expect(forSegments({ h264: false, hevc: false, av1: false }, "mse")).toEqual({ h264: false, hevc: false, av1: false });
+    expect(forSegments(all, "mse").h264).toBe(true);
+  });
+
+  it("sends native HLS to the H.264 rung when the ladder holds HEVC, even on a browser that decodes HEVC", () => {
+    const master = "/playout/master.m3u8";
+    expect(nativeSource(master, [h264, hevc], forSegments(all, "native"))).toBe(h264.playlist);
   });
 });

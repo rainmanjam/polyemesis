@@ -44,7 +44,7 @@ describe("QoEStats", () => {
   it("is absent until a player has reported", () => {
     const { container } = render(
       <QoEStats
-        qoe={{ beacons: 0, sessions: 0, startups: 0, startupMs: 0, rebuffers: 0, rebufferMs: 0, errors: {}, untracked: 0, active: 0, byVariant: {} }}
+        qoe={{ beacons: 0, sessions: 0, startups: 0, startupMs: 0, rebuffers: 0, rebufferMs: 0, errors: {}, untracked: 0, active: 0, byVariant: {}, startupHistogram: [], sessionsWithErrors: 0 }}
       />,
     );
     expect(container.textContent).toBe("");
@@ -56,6 +56,7 @@ describe("QoEStats", () => {
         qoe={{
           beacons: 9, sessions: 2, startups: 2, startupMs: 1800, rebuffers: 3, rebufferMs: 900,
           errors: { network: 1, media: 2 }, untracked: 0, active: 2, byVariant: {}, latencyMsMedian: 8000,
+          startupHistogram: [0, 1, 2, 2, 2, 2, 2], sessionsWithErrors: 1,
         }}
       />,
     );

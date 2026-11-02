@@ -220,6 +220,9 @@ export interface VideoStream {
   frameRate: number;
   bitrate: number;
   pixFmt: string;
+  /** ffprobe's profile name and level number; absent when unknown. */
+  profile?: string;
+  level?: number;
 }
 
 export interface SourceInfo {
@@ -1905,7 +1908,14 @@ export interface PlayoutQoETotals {
   rebuffers: number;
   rebufferMs: number;
   errors: Partial<Record<BeaconError, number>> | null;
+  /** Beacons that arrived with the session table full; nothing else from
+   *  them is counted. */
   untracked: number;
+  /** Cumulative startup counts at or under each bound of 500, 1000, 2000,
+   *  3000, 5000 and 10000 ms, then +Inf (= startups). */
+  startupHistogram: number[] | null;
+  /** Sessions that reported at least one error, each counted once. */
+  sessionsWithErrors: number;
 }
 
 export interface PlayoutQoESummary extends PlayoutQoETotals {
