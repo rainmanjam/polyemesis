@@ -480,6 +480,7 @@ func (b *Buffer) Discard() {
 	b.ts.resync, b.ts.holding, b.ts.held, b.ts.splice = false, false, nil, nil
 	clear(b.ts.split)
 	clear(b.ts.pending)
+	b.ts.audio = nil
 	b.stats.MemBytes = 0
 	b.stats.DiskBytes = 0
 	b.stats.Packets = 0

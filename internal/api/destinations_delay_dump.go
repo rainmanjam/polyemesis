@@ -30,7 +30,7 @@ import (
 // delayDumper is what the handlers need from the engine. The manager in
 // production; a fake in this package's tests, which have no engine.
 type delayDumper interface {
-	DumpDelay(id int64, want time.Duration) (delayline.DumpResult, error)
+	DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error)
 	DelayDumpable(id int64) bool
 }
 
@@ -47,6 +47,19 @@ func (s *Server) dumper() delayDumper {
 type dumpRequest struct {
 	Seconds *float64 `json:"seconds"`
 	Confirm bool     `json:"confirm"`
+	// AllProgrammes is dump-all's explicit "every programme on the install",
+	// required when no ?source= is named on an install with more than one.
+	AllProgrammes bool `json:"allProgrammes"`
+}
+
+// wantFor is the dump asked of one destination: the request's seconds when it
+// gave some (0 included: "since the last dump point"), the destination's own
+// default otherwise.
+func (q dumpRequest) wantFor(row *db.Destination, asked time.Duration) time.Duration {
+	if q.Seconds == nil && row.DelayDumpSeconds > 0 {
+		return time.Duration(row.DelayDumpSeconds) * time.Second
+	}
+	return asked
 }
 
 func (q dumpRequest) want() (time.Duration, error) {
@@ -94,6 +107,7 @@ func dumpBody(row *db.Destination, res delayline.DumpResult) map[string]any {
 		"delayAfterSeconds":   res.After.Seconds(),
 		"configuredSeconds":   row.OutputDelaySeconds(),
 		"restoresOnNextStart": true,
+		"recovery":            res.Recovery,
 	}
 }
 
@@ -123,7 +137,14 @@ func (s *Server) handleDumpDestinationDelay(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	_, want, ok := readDumpRequest(w, r)
+	req, want, ok := readDumpRequest(w, r)
+	if !ok {
+		return
+	}
+	// ?source= names the programme the caller means. A destination on another
+	// programme is not found there: an agent bound to programme A must not
+	// dump programme B's destination by its id.
+	sourceID, ok := s.namedSourceParam(w, r)
 	if !ok {
 		return
 	}
@@ -132,18 +153,27 @@ func (s *Server) handleDumpDestinationDelay(w http.ResponseWriter, r *http.Reque
 		writeStoreError(w, err)
 		return
 	}
+	if sourceID != nil && (row.SourceID == nil || *row.SourceID != *sourceID) {
+		writeError(w, http.StatusNotFound, "this destination is not on that programme")
+		return
+	}
+	want = req.wantFor(row, want)
 	if row.OutputDelaySeconds() <= 0 {
 		code, msg := dumpRefusal(engine.ErrNotDelayed)
 		writeError(w, code, msg)
 		return
 	}
-	res, err := s.dumper().DumpDelay(id, want)
+	// The audit record is written when the stream has resumed, from the final
+	// figures -- after this answer when the resume is late.
+	addr := s.clientIP(r)
+	res, err := s.dumper().DumpDelay(id, want, func(final delayline.DumpResult) {
+		s.publishAudit(auditDelayDumped(row, final, addr))
+	})
 	if err != nil {
 		code, msg := dumpRefusal(err)
 		writeError(w, code, msg)
 		return
 	}
-	s.publishAudit(auditDelayDumped(row, res, s.clientIP(r)))
 	writeJSON(w, http.StatusOK, dumpBody(row, res))
 }
 
@@ -187,6 +217,22 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// UNSCOPED ON A MULTI-PROGRAMME INSTALL IS A SEPARATE INTENT. Without
+	// ?source= this reaches every programme's delayed destinations, which a
+	// caller that simply forgot the parameter (a deck key whose programme
+	// lookup failed) must not do by accident.
+	if sourceID == nil && !req.AllProgrammes {
+		srcs, err := s.store.ListSources()
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if len(srcs) > 1 {
+			writeError(w, http.StatusBadRequest, "this install has more than one programme: name one with "+
+				`?source=<id>, or send "allProgrammes": true to dump every programme's delayed destinations`)
+			return
+		}
+	}
 	var (
 		rows []*db.Destination
 		err  error
@@ -203,6 +249,7 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 	targets := dumpAllTargets(rows)
 	results := make([]map[string]any, len(targets))
 	d := s.dumper()
+	addr := s.clientIP(r)
 	// In parallel: each dump waits up to a GOP for its own resume, and the
 	// lines are independent.
 	var wg sync.WaitGroup
@@ -215,7 +262,9 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(i int, row *db.Destination) {
 			defer wg.Done()
-			res, err := d.DumpDelay(row.ID, want)
+			res, err := d.DumpDelay(row.ID, req.wantFor(row, want), func(final delayline.DumpResult) {
+				s.publishAudit(auditDelayDumped(row, final, addr))
+			})
 			if err != nil {
 				_, msg := dumpRefusal(err)
 				outcome := dumpAllFailed
@@ -229,7 +278,6 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 			out := dumpBody(row, res)
 			out["outcome"] = dumpAllDumped
 			results[i] = out
-			s.publishAudit(auditDelayDumped(row, res, s.clientIP(r)))
 		}(i, row)
 	}
 	wg.Wait()

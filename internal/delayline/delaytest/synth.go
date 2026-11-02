@@ -59,6 +59,10 @@ type Synth struct {
 	// picture: decoded after it and shown before it. Its slice carries
 	// LeadingIndex plus the key's number.
 	Leading bool
+	// QuietPID lists a third elementary stream (a data PID, as captions or
+	// metadata ride on) that sends one PES with a PTS at the start and
+	// nothing after.
+	QuietPID bool
 	// SplitAudioHeaders puts only ten bytes of each audio PES in its first
 	// packet, so the PES header -- PTS included -- runs into the second.
 	SplitAudioHeaders bool
@@ -188,8 +192,12 @@ func (g *Synth) psi() []byte {
 	pmt := []byte{0, 0x02, 0xB0, 0x17, 0x00, 0x01, 0xC1, 0x00, 0x00,
 		0xE0 | VideoPID>>8, VideoPID & 0xFF, 0xF0, 0x00,
 		st, 0xE0 | VideoPID>>8, VideoPID & 0xFF, 0xF0, 0x00,
-		0x0F, 0xE0 | AudioPID>>8, AudioPID & 0xFF, 0xF0, 0x00,
-		0, 0, 0, 0}
+		0x0F, 0xE0 | AudioPID>>8, AudioPID & 0xFF, 0xF0, 0x00}
+	if g.QuietPID {
+		pmt[3] += 5
+		pmt = append(pmt, 0x06, 0xE0|QuietPIDNumber>>8, QuietPIDNumber&0xFF, 0xF0, 0x00)
+	}
+	pmt = append(pmt, 0, 0, 0, 0)
 	return append(g.packetize(0, pat, -1, false), g.packetize(PMTPID, pmt, -1, false)...)
 }
 
@@ -259,6 +267,9 @@ type Stream struct {
 	Pkts  [][]byte
 	Times []time.Duration
 }
+
+// QuietPIDNumber is the QuietPID stream's PID.
+const QuietPIDNumber = 0x102
 
 // LeadingIndex marks a leading picture's number: LeadingIndex + the key's.
 const LeadingIndex = 1_000_000
@@ -331,6 +342,11 @@ func (g *Synth) Mux(dur time.Duration) *Stream {
 		if vt <= at {
 			if v%g.GOP == 0 {
 				add(g.psi(), vt)
+				if g.QuietPID && v == 0 {
+					hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}
+					putTS(hdr[9:], 2, g.at(0))
+					add(g.packetize(QuietPIDNumber, hdr, -1, false), vt)
+				}
 				if g.ChurnPIDs {
 					g.churn++
 					hdr := []byte{0, 0, 1, 0xBD, 0, 8, 0x80, 0x80, 5, 0, 0, 0, 0, 0}

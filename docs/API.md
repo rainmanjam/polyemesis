@@ -969,8 +969,11 @@ request never sees. `start-all` takes no body.
 **Dump ([BROADCAST-DELAY.md](BROADCAST-DELAY.md#dump)).**
 `POST /destinations/{id}/delay/dump` drops the newest part of a delayed
 destination's buffer and keeps it on the air. That programme never airs there.
-The body is optional: `{"seconds": 10}` drops at least the newest 10 s, and no
-body (or `"seconds": 0`) drops everything since the last dump point. The cut is
+The body is optional: `{"seconds": 10}` drops at least the newest 10 s of
+programme, `"seconds": 0` drops everything since the last dump point, and no
+`seconds` uses the destination's `delayDumpSeconds` (0 to 900, 0 meaning
+"since the last dump point"). With `?source=<id>`, a destination on another
+programme is a `404`. The cut is
 at a keyframe, so a little more than asked for goes. `seconds` is 0 to 900;
 anything else, or an unknown field, is `400`. The answer:
 
@@ -982,7 +985,9 @@ anything else, or an unknown field, is `400`. The answer:
 
 The delay stays shorter by `dumpedSeconds` until the destination next starts.
 `clamped` is `true` when less could be dropped than asked, because a dump
-never leaves less than 2 s plus one GOP of delay. `complete` is `false` in the
+never leaves less than 2 s plus one GOP of delay. `recovery` is `true` when no
+IDR keyframe came for three GOPs and the stream resumed at another
+random-access picture. `complete` is `false` in the
 rare case the next keyframe had not arrived when the answer was written. The
 dump still completes, and the `destination.delay` event with reason `dumped`
 carries the final figures. `409` when there is nothing to dump: the
@@ -992,7 +997,9 @@ keyframe, or the stream has no IDR keyframes (an open-GOP encoder setting).
 `POST /destinations/delay/dump-all` dumps every enabled, delayed destination of
 the programme named by `?source=`, or of the install without it, like
 `stop-all`. It needs `{"confirm": true}` and takes the same optional `seconds`.
-It answers `{"action": "dump", "results": [...]}` with one row per delayed
+On an install with more than one programme and no `?source=`, it also needs
+`"allProgrammes": true`, and answers `400` without it. It answers
+`{"action": "dump", "results": [...]}` with one row per delayed
 destination: the fields above plus `"outcome": "dumped"`, or `"skipped"` or
 `"failed"` with a `message`. Undelayed destinations are not listed. Both routes
 need an admin token. Each dump raises the `delay.dumped` audit alert

@@ -267,7 +267,9 @@ delayed programme reached the platform.
   still on the air. `data.dumpSeconds` is what this dump took,
   `data.delayBeforeSeconds` and `data.delayAfterSeconds` the delay either side,
   `data.requestedSeconds` what was asked for (0 for "since the last dump"), and
-  `data.clamped` is `true` when the safety margin allowed less.
+  `data.clamped` is `true` when the safety margin allowed less, and
+  `data.recovery` is `true` when no IDR keyframe came and the stream resumed
+  at another random-access picture.
 
 ```json
 {"seconds": 30, "fill": 1, "bufferedSeconds": 29.98, "memBytes": 67108864,

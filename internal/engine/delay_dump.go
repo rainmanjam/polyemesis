@@ -38,15 +38,25 @@ const MaxDumpRequest = delayline.MaxDelay
 // DumpDelay drops the newest want of destination id's delay buffer, or, for
 // want 0, everything since its last dump point. It waits, a GOP or so, for
 // the stream to resume, and reports what it did.
-func (e *Engine) DumpDelay(id int64, want time.Duration) (delayline.DumpResult, error) {
+//
+// done, when not nil, is called once with the FINAL figures when the stream
+// has resumed -- after DumpDelay returns when the resume is late. The audit
+// record is written from it, so it never carries provisional numbers.
+func (e *Engine) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
 	e.mu.RLock()
 	d := e.dests[id]
 	e.mu.RUnlock()
 	if d == nil || d.delay == nil {
 		return delayline.DumpResult{}, ErrNotDelayed
 	}
+	d.delay.mu.Lock()
+	d.delay.onDumped = done
+	d.delay.mu.Unlock()
 	res, err := d.delay.line.Dump(want)
 	if err != nil {
+		d.delay.mu.Lock()
+		d.delay.onDumped = nil
+		d.delay.mu.Unlock()
 		return res, err
 	}
 	e.log.Warn("broadcast delay: dumped the newest part of the buffer",
@@ -83,6 +93,13 @@ func (e *Engine) delayDumped(id int64) time.Duration {
 
 // onDelayDumped is a line's OnDumped: the dump has resumed at its keyframe.
 func (e *Engine) onDelayDumped(row *db.Destination, dd *destDelay, res delayline.DumpResult) {
+	dd.mu.Lock()
+	done := dd.onDumped
+	dd.onDumped = nil
+	dd.mu.Unlock()
+	if done != nil {
+		done(res)
+	}
 	e.streamDelayWith(row, dd, delayEventDumped, "", map[string]any{
 		"dumpSeconds":         res.Dumped.Seconds(),
 		"requestedSeconds":    res.Requested.Seconds(),
@@ -91,9 +108,19 @@ func (e *Engine) onDelayDumped(row *db.Destination, dd *destDelay, res delayline
 		"delayAfterSeconds":   res.After.Seconds(),
 		"configuredSeconds":   row.OutputDelaySeconds(),
 		"restoresOnNextStart": true,
+		"recovery":            res.Recovery,
 	})
-	// Captions: the shorter delay, at once. A failed read leaves the route as
-	// it is until the next reconcile, which reads the same thing.
+	// Captions: the queued cues are re-timed first -- kept programme keeps
+	// its cues, the dumped words lose theirs, later cues move to the shorter
+	// delay -- so the SetTargets below sees the delay already changed and
+	// cancels nothing. A failed intent read leaves the route as it is until
+	// the next reconcile, which reads the same thing.
+	e.mu.RLock()
+	route := e.captRoute
+	e.mu.RUnlock()
+	if route != nil {
+		route.Dump(row.ID, res.CutFrom, res.CutTo, res.After)
+	}
 	if in, err := e.captionIntentNow(); err == nil {
 		e.applyCaptionIntent(in)
 		e.syncCaptionRoute(in.targets)
@@ -102,10 +129,10 @@ func (e *Engine) onDelayDumped(row *db.Destination, dd *destDelay, res delayline
 }
 
 // DumpDelay is DumpDelay on whichever engine carries destination id.
-func (m *Manager) DumpDelay(id int64, want time.Duration) (delayline.DumpResult, error) {
+func (m *Manager) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
 	for _, e := range m.Engines() {
 		if e.carriesDelay(id) {
-			return e.DumpDelay(id, want)
+			return e.DumpDelay(id, want, done)
 		}
 	}
 	return delayline.DumpResult{}, ErrNotDelayed

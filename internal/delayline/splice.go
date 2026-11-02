@@ -308,6 +308,12 @@ type audioCache struct {
 	partial []byte
 	want    int
 	got     int
+	// doneBytes is the bytes in done; budget is its ceiling.
+	doneBytes int
+	budget    int
+	// skipping: the PES being read went over trimHoldLimit and is dropped
+	// up to the next start.
+	skipping bool
 }
 
 // recentAudioPES bounds one PID's audioCache: far more than one GOP's wait.
@@ -316,6 +322,7 @@ const recentAudioPES = 64
 func (c *audioCache) push(p []byte) {
 	if pktPUSI(p) {
 		c.finish()
+		c.skipping = false
 		h, _ := parsePES(p, nil)
 		if !h.ok {
 			return
@@ -324,7 +331,16 @@ func (c *audioCache) push(p []byte) {
 		c.want, c.got = h.length, len(payloadOf(p))-6
 		return
 	}
-	if len(c.partial) == 0 || !pktHasPayload(p) {
+	if c.skipping || len(c.partial) == 0 || !pktHasPayload(p) {
+		return
+	}
+	// A bounded PES takes nothing past its length; any PES over the hold
+	// limit -- never completing, or never ending -- is dropped whole.
+	if c.want > 0 && c.got >= c.want {
+		return
+	}
+	if len(c.partial)+len(p) > trimHoldLimit {
+		c.partial, c.skipping = c.partial[:0], true
 		return
 	}
 	c.partial = append(c.partial, p...)
@@ -337,7 +353,10 @@ func (c *audioCache) push(p []byte) {
 func (c *audioCache) finish() {
 	if len(c.partial) > 0 && (c.want == 0 || c.got >= c.want) {
 		c.done = append(c.done, append([]byte(nil), c.partial...))
-		if len(c.done) > recentAudioPES {
+		c.doneBytes += len(c.partial)
+		// Oldest out, past either the count or the byte budget.
+		for len(c.done) > 0 && (len(c.done) > recentAudioPES || c.doneBytes > c.budget) {
+			c.doneBytes -= len(c.done[0])
 			c.done = c.done[1:]
 		}
 	}
@@ -868,22 +887,49 @@ func (b *Buffer) maybeAddMarkLocked() {
 			s.end, s.endKnown = o.pts, true
 			continue
 		}
-		ts.pending[s.pid] = append(ts.pending[s.pid], s)
+		list := ts.pending[s.pid]
+		if len(list) >= maxMarks {
+			list = list[1:]
+		}
+		ts.pending[s.pid] = append(list, s)
 	}
 	// Forget the cut points already released.
 	if len(b.queue) > 0 {
 		head := b.queue[0].first
 		i := 0
 		for i < len(b.marks) && b.marks[i].at < head {
+			b.forgetMarkLocked(b.marks[i])
 			i++
 		}
 		b.marks = b.marks[i:]
 	}
 	if len(b.marks) >= maxMarks {
+		b.forgetMarkLocked(b.marks[0])
 		b.marks = b.marks[1:]
 	}
 	b.marks = append(b.marks, c)
 	b.gopLocked()
+}
+
+// forgetMarkLocked takes a cut point that is going -- released, or evicted --
+// out of the snapshots waiting for a PES end: a quiet PID would otherwise
+// keep one per keyframe for good.
+func (b *Buffer) forgetMarkLocked(m *mark) {
+	for i := range m.out {
+		s := &m.out[i]
+		list := b.ts.pending[s.pid]
+		for j, p := range list {
+			if p == s {
+				list = append(list[:j], list[j+1:]...)
+				break
+			}
+		}
+		if len(list) == 0 {
+			delete(b.ts.pending, s.pid)
+		} else {
+			b.ts.pending[s.pid] = list
+		}
+	}
 }
 
 // gopLocked is the longest encoded GOP among recent cut points, by their
@@ -1111,7 +1157,7 @@ func (b *Buffer) resyncLocked(now time.Time, work []byte) (rest []byte, resumed 
 			}
 			c := ts.audio[pid]
 			if c == nil {
-				c = &audioCache{}
+				c = &audioCache{budget: audioCacheBudget(b.lim)}
 				ts.audio[pid] = c
 			}
 			c.push(p)
@@ -1265,3 +1311,7 @@ func (t *DumpTicket) Result() DumpResult {
 
 func truncateFile(path string, n int64) error { return os.Truncate(path, n) }
 func removeFile(path string) error            { return os.Remove(path) }
+
+// audioCacheBudget is the most complete audio the resync keeps per PID: two
+// spill segments, so it scales with the buffer's own granularity.
+func audioCacheBudget(lim Limits) int { return 2 * lim.SegmentBytes }

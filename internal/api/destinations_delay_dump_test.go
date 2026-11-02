@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,18 +27,34 @@ type fakeDumper struct {
 	want     []time.Duration
 	dumpable map[int64]bool
 	err      map[int64]error
+	late     bool
 }
 
-func (f *fakeDumper) DumpDelay(id int64, want time.Duration) (delayline.DumpResult, error) {
+func (f *fakeDumper) DumpDelay(id int64, want time.Duration, done func(delayline.DumpResult)) (delayline.DumpResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if err := f.err[id]; err != nil {
+		f.mu.Unlock()
 		return delayline.DumpResult{}, err
 	}
 	f.dumped = append(f.dumped, id)
 	f.want = append(f.want, want)
-	return delayline.DumpResult{Requested: want, Dumped: 10 * time.Second, Before: 30 * time.Second,
-		After: 20 * time.Second, Complete: true}, nil
+	late := f.late
+	f.mu.Unlock()
+	final := delayline.DumpResult{Requested: want, Dumped: 10 * time.Second, Before: 30 * time.Second,
+		After: 20 * time.Second, Complete: true}
+	if late {
+		// The resume misses the answer: the caller gets provisional figures,
+		// and the final ones arrive afterwards.
+		if done != nil {
+			defer done(final)
+		}
+		return delayline.DumpResult{Requested: want, Dumped: 4 * time.Second, Before: 30 * time.Second,
+			After: 26 * time.Second}, nil
+	}
+	if done != nil {
+		done(final)
+	}
+	return final, nil
 }
 
 func (f *fakeDumper) DelayDumpable(id int64) bool {
@@ -206,5 +223,95 @@ func TestAReadTokenCannotDump(t *testing.T) {
 	}
 	if c := fake.calls(); len(c) != 0 {
 		t.Fatalf("a read token dumped %v", c)
+	}
+}
+
+// ?source= NAMES THE PROGRAMME. An MCP agent bound to programme A naming
+// programme B's destination id must be refused, not handed B's dump.
+//
+// Mutation: drop the source check in handleDumpDestinationDelay.
+func TestADumpNamingAnotherProgrammeIsRefused(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	first := s.eng().SourceID()
+	second := secondProgramme(t, s)
+	theirs := dumpRowOn(t, s, "b delayed", second.ID, 30, true)
+	fake := &fakeDumper{dumpable: map[int64]bool{theirs.ID: true}}
+	s.delayDumper = fake
+	send(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/destinations/%d/delay/dump?source=%d", theirs.ID, first),
+		nil, http.StatusNotFound)
+	if c := fake.calls(); len(c) != 0 {
+		t.Fatalf("a dump naming programme %d dumped programme %d's destination", first, second.ID)
+	}
+	send(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/destinations/%d/delay/dump?source=%d", theirs.ID, second.ID),
+		nil, http.StatusOK)
+}
+
+// UNSCOPED DUMP-ALL ON A MULTI-PROGRAMME INSTALL NEEDS ITS OWN WORD. A caller
+// that dropped ?source= (a deck key whose programme read failed) must not
+// reach every programme by accident.
+//
+// Mutation: drop the multi-programme guard in handleDumpAllDelays.
+func TestAnUnscopedDumpAllOnAMultiProgrammeInstallNeedsAllProgrammes(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	first := s.eng().SourceID()
+	second := secondProgramme(t, s)
+	a := dumpRowOn(t, s, "a delayed", first, 30, true)
+	b := dumpRowOn(t, s, "b delayed", second.ID, 30, true)
+	fake := &fakeDumper{dumpable: map[int64]bool{a.ID: true, b.ID: true}}
+	s.delayDumper = fake
+	send(t, h, sign, http.MethodPost, "/api/v1/destinations/delay/dump-all",
+		map[string]any{"confirm": true}, http.StatusBadRequest)
+	if c := fake.calls(); len(c) != 0 {
+		t.Fatalf("an unscoped dump-all on two programmes dumped %v", c)
+	}
+	send(t, h, sign, http.MethodPost, "/api/v1/destinations/delay/dump-all",
+		map[string]any{"confirm": true, "allProgrammes": true}, http.StatusOK)
+	if c := fake.calls(); len(c) != 2 {
+		t.Fatalf("dump-all with allProgrammes dumped %v, want both programmes", c)
+	}
+}
+
+// A DESTINATION'S OWN DUMP DEFAULT is used when the request names no seconds;
+// a request that names any, 0 included, wins.
+func TestADumpWithoutSecondsUsesTheDestinationsDefault(t *testing.T) {
+	s, h, store, sign := managerServer(t, defaultTools())
+	_ = store
+	row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
+	row.DelayDumpSeconds = 7
+	if _, err := s.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDumper{dumpable: map[int64]bool{row.ID: true}}
+	s.delayDumper = fake
+	path := fmt.Sprintf("/api/v1/destinations/%d/delay/dump", row.ID)
+	send(t, h, sign, http.MethodPost, path, nil, http.StatusOK)
+	send(t, h, sign, http.MethodPost, path, map[string]any{"seconds": 0}, http.StatusOK)
+	send(t, h, sign, http.MethodPost, path, map[string]any{"seconds": 3}, http.StatusOK)
+	if want := []time.Duration{7 * time.Second, 0, 3 * time.Second}; !slices.Equal(fake.want, want) {
+		t.Fatalf("asked the engine for %v, want %v", fake.want, want)
+	}
+}
+
+// THE AUDIT RECORD CARRIES THE FINAL FIGURES. When the resume misses the
+// answer, the answer is provisional; the audit is written when the dump
+// completes, from what it actually did.
+//
+// Mutation: publish the audit from the handler's own result again.
+func TestTheDumpAuditRecordsTheFinalFigures(t *testing.T) {
+	s, h, _, sign := managerServer(t, defaultTools())
+	row := dumpRowOn(t, s, "delayed", s.eng().SourceID(), 30, true)
+	fake := &fakeDumper{dumpable: map[int64]bool{row.ID: true}, late: true}
+	s.delayDumper = fake
+	var mu sync.Mutex
+	var audit []alerts.Event
+	s.auditSink = func(ev alerts.Event) { mu.Lock(); audit = append(audit, ev); mu.Unlock() }
+	body := send(t, h, sign, http.MethodPost, fmt.Sprintf("/api/v1/destinations/%d/delay/dump", row.ID), nil, http.StatusOK)
+	if !strings.Contains(string(body), `"complete":false`) {
+		t.Fatalf("the fixture's dump was meant to answer before completing: %s", body)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(audit) != 1 || !strings.Contains(audit[0].Text, "10.0 s") || !strings.Contains(audit[0].Text, "20.0 s") {
+		t.Fatalf("audit %+v: want one record with the final 10.0 s dumped and 20.0 s left", audit)
 	}
 }

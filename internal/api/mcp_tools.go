@@ -1082,12 +1082,15 @@ func mcpCatalogue() []mcpTool {
 			description: "Dump every delayed destination of a programme at once: the newest part of each buffer is dropped and never airs, " +
 				"and each stays on the air with a shorter delay until it next starts. seconds as in dump_destination_delay. Undelayed " +
 				"destinations are not touched. Needs confirm:true; without it, answers with every delayed destination's delay now.",
-			props: map[string]any{"source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm},
+			props: map[string]any{"source": schemaSource, "seconds": schemaDumpSeconds, "confirm": schemaConfirm,
+				"allProgrammes": map[string]any{"type": "boolean",
+					"description": "With no source on an install with more than one programme: true to dump every programme's delayed destinations. Otherwise name the source."}},
 			run: func(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 				var a struct {
-					Source  *int64   `json:"source"`
-					Seconds *float64 `json:"seconds"`
-					Confirm bool     `json:"confirm"`
+					Source        *int64   `json:"source"`
+					Seconds       *float64 `json:"seconds"`
+					Confirm       bool     `json:"confirm"`
+					AllProgrammes bool     `json:"allProgrammes"`
 				}
 				if err := decodeArgs(raw, &a); err != nil {
 					return nil, err
@@ -1109,6 +1112,9 @@ func mcpCatalogue() []mcpTool {
 				body := map[string]any{"confirm": true}
 				if a.Seconds != nil {
 					body["seconds"] = *a.Seconds
+				}
+				if a.Source == nil && a.AllProgrammes {
+					body["allProgrammes"] = true
 				}
 				v, err := c.call(http.MethodPost, "/destinations/delay/dump-all", q, body)
 				if err != nil {

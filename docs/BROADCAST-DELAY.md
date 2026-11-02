@@ -76,19 +76,38 @@ does.
   safety margin.
 - **A number of seconds** drops at least that much of the newest programme.
 - **The safety margin.** A dump never leaves less than 2 s plus one GOP of
-  delay. If you ask for more than that allows, it dumps as much as it can and
-  says so ("clamped"). If the feed stalls while a dump waits for its keyframe,
-  the delay still never drops below 2 s.
+  delay. The cut itself leaves room for one more GOP, which is the wait for
+  the next keyframe, so an ordinary dump never comes near that floor. If you
+  ask for more than that allows, it dumps as much as it can and says so
+  ("clamped"). If the feed stalls while a dump waits for its keyframe, the
+  delay still never drops below 2 s plus one GOP.
+- **Seconds are programme time.** "10 seconds" means the newest 10 s of
+  programme by its timestamps. A stall in the feed just before the dump does
+  not count towards it.
+- **A default per destination.** **Dump default (seconds)** in the
+  destination's advanced settings (`delayDumpSeconds` over the API) is what a
+  dump with no seconds of its own uses: the card's dialog starts from it, and
+  so does a Stream Deck key with its seconds left empty. 0 is "everything
+  since the last dump point".
 - **It cuts at keyframes.** The cut is at the start of a keyframe in the buffer,
   and the stream resumes at the next keyframe that arrives. So a dump takes a
   little more than you asked for: up to about two GOPs more (usually up to 4 s),
   one for rounding the cut back to a keyframe and one for waiting for the next.
   Asking for 5 s with 2 s GOPs typically dumps 7 to 8 s. A dump takes up to one
-  GOP to finish. The platform receives every picture whole, with no
+  GOP to finish. The audio is cut at a frame boundary on both sides, so it
+  carries on without an overlap or a hole.
+- **No keyframe after the cut.** If no IDR keyframe arrives for three GOPs
+  (at least 6 s), for example after a failover to a source sending open-GOP
+  video, the stream resumes at the next random-access picture instead, and
+  the pictures that depend on the dumped part are dropped. The answer says
+  `"recovery": true`. The platform receives every picture whole, with no
   corrupt frames, and its timestamps run on without a jump or a gap. The audio
   carries on the same way.
-- **Captions** follow the shorter delay. Captions still queued for this
-  destination are dropped, including those for the words that were dumped.
+- **Captions** follow the shorter delay. Captions for programme still in the
+  buffer keep their time, captions for the dumped words are dropped, and
+  later captions move to the shorter delay. One thing a dump cannot reach:
+  CEA-608/708 captions your encoder embeds in the video itself. A pop-on
+  caption loaded just before the cut may appear after it.
 - **Not while filling or draining.** A destination that is still filling its
   delay, or that was stopped and is airing its tail, cannot be dumped. Use
   **Cut now** for a tail.

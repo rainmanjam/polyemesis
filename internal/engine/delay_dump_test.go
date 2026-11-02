@@ -65,7 +65,7 @@ func TestDumpingARunningDelayedDestinationShortensItsDelayAndAnnouncesIt(t *test
 	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
 		t.Fatalf("startDest: %v", err)
 	}
-	if _, err := e.DumpDelay(row.ID, time.Second); !errors.Is(err, delayline.ErrNotOnAir) {
+	if _, err := e.DumpDelay(row.ID, time.Second, nil); !errors.Is(err, delayline.ErrNotOnAir) {
 		t.Fatalf("a dump while the delay is still filling: %v, want ErrNotOnAir", err)
 	}
 
@@ -80,9 +80,20 @@ func TestDumpingARunningDelayedDestinationShortensItsDelayAndAnnouncesIt(t *test
 		t.Fatalf("before any dump: effective %v dumped %v, want 6 and 0", d.EffectiveSeconds, d.DumpedSeconds)
 	}
 
-	res, err := e.DumpDelay(row.ID, time.Second)
+	final := make(chan delayline.DumpResult, 2)
+	res, err := e.DumpDelay(row.ID, time.Second, func(r delayline.DumpResult) { final <- r })
 	if err != nil {
 		t.Fatalf("DumpDelay: %v", err)
+	}
+	// The final figures reach the caller's callback once, from the resume:
+	// what the audit record is written from.
+	select {
+	case got := <-final:
+		if !got.Complete || got.Dumped != res.Dumped || got.After != res.After {
+			t.Fatalf("the completion callback got %+v; the dump answered %+v", got, res)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the completion callback never ran")
 	}
 	if !res.Complete || res.Dumped < time.Second || res.After >= 6*time.Second || res.After < delayline.DumpMargin {
 		t.Fatalf("result %+v: want a complete dump of 1 s or more, leaving at least the margin", res)
@@ -150,7 +161,7 @@ func TestDumpingADestinationWithoutADelayIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DumpDelay(saved.ID, time.Second); !errors.Is(err, ErrNotDelayed) {
+	if _, err := e.DumpDelay(saved.ID, time.Second, nil); !errors.Is(err, ErrNotDelayed) {
 		t.Fatalf("DumpDelay on an undelayed destination: %v, want ErrNotDelayed", err)
 	}
 	if e.DelayDumpable(saved.ID) {

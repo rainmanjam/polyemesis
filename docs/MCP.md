@@ -141,7 +141,7 @@ is [fenced as untrusted](#untrusted-viewer-content).
 | `go_live` | Start every destination of a programme, paced | **yes** | `POST /destinations/start-all` |
 | `stop_all_destinations` | Stop every destination of a programme, cutting every broadcast delay | **yes** | `POST /destinations/stop-all` |
 | `dump_destination_delay` | Drop the newest part of one delayed destination's buffer and keep it on the air. `seconds` drops at least that much; without it, everything since the last dump. The delay stays shorter until the destination next starts | **yes** | `POST /destinations/{id}/delay/dump` |
-| `dump_all_delays` | The same for every delayed destination of a programme | **yes** | `POST /destinations/delay/dump-all` |
+| `dump_all_delays` | The same for every delayed destination of a programme. With no `source` on an install with more than one programme it needs `allProgrammes: true` | **yes** | `POST /destinations/delay/dump-all` |
 | `set_track_level` | Mute, unmute or set the gain of one track in one destination's live mix | | `POST /destinations/{id}/tracks/{track}/gain` |
 | `apply_routing_preset` | Replace a destination's live or VOD routing with a preset. Muted tracks stay muted | **yes** | `POST /routing/presets/{preset}`, `PUT /destinations/{id}` |
 | `set_recording` | Recording on or off | **yes, to turn off** | `POST /recording` |

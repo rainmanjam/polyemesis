@@ -603,9 +603,32 @@ func TestADiscardWhileADumpWaitsForItsKeyframeLeavesAUsableBuffer(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Audio that arrived during the resync is held for the resume.
+	var audioPkt []byte
+	for _, p := range g.Mux(15 * time.Second).Pkts {
+		if pktPID(p) == delaytest.AudioPID && pktPUSI(p) {
+			audioPkt = p
+			break
+		}
+	}
+	if err := r.b.Push(r.epoch.Add(15*time.Second), audioPkt); err != nil {
+		t.Fatal(err)
+	}
+	r.b.mu.Lock()
+	cached := r.b.ts.audio != nil
+	r.b.mu.Unlock()
+	if !cached {
+		t.Fatal("the fixture's audio did not reach the resync cache")
+	}
 	r.b.Discard()
 	if st := r.b.Stats(); st.Packets != 0 || st.Dumping {
 		t.Fatalf("after Discard: %d packets held, dumping %t", st.Packets, st.Dumping)
+	}
+	r.b.mu.Lock()
+	audio := r.b.ts.audio
+	r.b.mu.Unlock()
+	if audio != nil {
+		t.Fatal("Discard left the resync's audio cache behind")
 	}
 	// Done closes, so a waiter is not left to its timeout, and the result
 	// says the dump never completed.
@@ -1270,5 +1293,99 @@ func TestTheBiggestDumpLeavesTheMarginPlusAGOPWithoutAGapWhereverItIsPressed(t *
 				t.Fatalf("dump at %s: a %s gap on the wire at picture #%d", at, gap, rep.video[i].index)
 			}
 		}
+	}
+}
+
+// RESYNC AUDIO IS BOUNDED. While a dump waits for its keyframe the audio that
+// arrives is kept to be sent at the resume; an audio PES that never completes
+// -- a bounded one whose bytes never all arrive, or an unbounded one that
+// never ends -- must not grow that without limit, and neither may a stream of
+// complete ones.
+//
+// Mutation: drop the caps in audioCache.push and finish.
+func TestTheResyncAudioCacheStaysBounded(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(20*time.Second))
+	r.run(18 * time.Second)
+	if _, err := r.b.Dump(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin); err != nil {
+		t.Fatal(err)
+	}
+	pkt := func(pusi bool, length int, cc byte) []byte {
+		p := make([]byte, tsPacketSize)
+		p[0], p[1], p[2], p[3] = tsSyncByte, byte(delaytest.AudioPID>>8), byte(delaytest.AudioPID&0xFF), 0x10|cc&0x0F
+		if pusi {
+			p[1] |= 0x40
+			copy(p[4:], []byte{0, 0, 1, 0xC0, byte(length >> 8), byte(length), 0x80, 0x80, 5, 0x21, 0, 1, 0, 1})
+		}
+		return p
+	}
+	at := r.epoch.Add(18 * time.Second)
+	push := func(p []byte) {
+		if err := r.b.Push(at, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	size := func() (partial, done int) {
+		r.b.mu.Lock()
+		defer r.b.mu.Unlock()
+		c := r.b.ts.audio[delaytest.AudioPID]
+		if c == nil {
+			return 0, 0
+		}
+		for _, d := range c.done {
+			done += len(d)
+		}
+		return len(c.partial), done
+	}
+	// A bounded PES that never completes, then an unbounded one that never ends.
+	for _, length := range []int{0xFFFF, 0} {
+		push(pkt(true, length, 0))
+		for i := 0; i < 4000; i++ {
+			push(pkt(false, 0, byte(i+1)))
+		}
+		if partial, _ := size(); partial > trimHoldLimit {
+			t.Fatalf("PES length %d: the resync holds %d bytes of one audio PES, over %d", length, partial, trimHoldLimit)
+		}
+	}
+	// A bounded PES takes nothing past its length: a 1000-byte PES is six
+	// packets, and more continuation packets after it are not appended.
+	push(pkt(true, 1000, 0))
+	for i := 0; i < 50; i++ {
+		push(pkt(false, 0, byte(i+1)))
+	}
+	if partial, _ := size(); partial > 7*tsPacketSize {
+		t.Fatalf("a 1000-byte PES holds %d bytes: packets past its length were appended", partial)
+	}
+	// Many large complete PESs: about 55 KB each, far past the budget in all.
+	for i := 0; i < 100; i++ {
+		push(pkt(true, 300*184-0, 0))
+		for j := 0; j < 300; j++ {
+			push(pkt(false, 0, byte(j+1)))
+		}
+	}
+	if _, done := size(); done > audioCacheBudget(r.b.lim) {
+		t.Fatalf("the resync keeps %d bytes of complete audio, over its %d budget", done, audioCacheBudget(r.b.lim))
+	}
+}
+
+// CUT-POINT SNAPSHOTS DO NOT PILE UP ON A QUIET PID. A data PID that sent one
+// PES and then nothing never fills in when its last PES ends, so its waiting
+// snapshots must go with their cut points -- released, or evicted past
+// maxMarks -- instead of collecting one per keyframe for good.
+//
+// Mutation: stop removing a forgotten cut point's snapshots from ts.pending.
+func TestWaitingSnapshotsOnAQuietPIDGoWithTheirCutPoints(t *testing.T) {
+	g := delaytest.New(1) // every picture an IDR: 30 cut points a second
+	g.QuietPID, g.PictureBytes = true, 200
+	r := newRig(t, 10*time.Second, memLimits(), g.Mux(60*time.Second))
+	r.run(60 * time.Second)
+	r.b.mu.Lock()
+	defer r.b.mu.Unlock()
+	n := len(r.b.ts.pending[delaytest.QuietPIDNumber])
+	if n == 0 {
+		t.Fatal("the fixture's quiet PID has no waiting snapshot: it does not exercise the leak")
+	}
+	if n > len(r.b.marks) {
+		t.Fatalf("%d snapshots wait on the quiet PID for %d live cut points", n, len(r.b.marks))
 	}
 }

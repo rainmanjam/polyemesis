@@ -86,6 +86,9 @@ type destDelay struct {
 	due bool
 	// cut is set by Stop now, so the drain's end is reported as a cut.
 	cut atomic.Bool
+	// onDumped is the caller of a dump waiting for its final figures; see
+	// DumpDelay. Under mu.
+	onDumped func(delayline.DumpResult)
 }
 
 // delayDestSubName is the line's subscription on the upstream hub. A name of
