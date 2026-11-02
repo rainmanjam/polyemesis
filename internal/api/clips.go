@@ -537,9 +537,15 @@ func (s *Server) clipProber() clipper.Prober {
 		if s.gov != nil {
 			name, args = s.gov.NiceCommand(name, args...)
 		}
-		return clipper.RunLowPriority(ctx, name, args)
+		return runProbe(ctx, name, args)
 	}}
 }
+
+// runProbe starts the editor's probe once clipProber has wrapped it. A seam so
+// a test can see the exact argv the governor produced -- the wrapper chain is
+// different on every OS (ionice then nice on Linux, nice on macOS, a creation
+// flag and no wrapper on Windows), so only the argv itself says it was used.
+var runProbe = clipper.RunLowPriority
 
 // ------------------------------------------------------------- plan and export
 

@@ -102,9 +102,6 @@ func TestAScanThroughTheRealWiringStoresSuggestions(t *testing.T) {
 		!strings.Contains(err.Error(), "exit status") || strings.HasSuffix(strings.TrimSpace(err.Error()), ":") {
 		t.Errorf("a failed run = %v, want the exit status and FFmpeg's reason after it", err)
 	}
-	if got := lastLine("first\nsecond\n"); got != "second" {
-		t.Errorf("lastLine = %q", got)
-	}
 }
 
 // The production cutter is the governor's: every FFmpeg it starts is wrapped

@@ -1,11 +1,14 @@
 package clipper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rainmanjam/polyemesis/internal/childcensus"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -354,12 +357,7 @@ func (f FFprobe) Keyframes(ctx context.Context, path string, from, window time.D
 
 // runCommand is the default process runner, shared by the prober and the cutter.
 func runCommand(ctx context.Context, name string, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(string(out)), 400))
-	}
-	return out, nil
+	return runChild(ctx, name, args, false)
 }
 
 // RunLowPriority is runCommand with the child created below normal priority
@@ -367,13 +365,30 @@ func runCommand(ctx context.Context, name string, args []string) ([]byte, error)
 // in the command line does it). The runner for every background child: the
 // cutter under WithNice, the editor's keyframe probe, the highlight scan.
 func RunLowPriority(ctx context.Context, name string, args []string) ([]byte, error) {
+	return runChild(ctx, name, args, true)
+}
+
+// runChild starts one FFmpeg-family child, collects its output, and keeps it
+// in the process census for as long as it runs: a cut or a vertical encode is
+// minutes of work that could outlive a shutdown, and a child nobody enrolled
+// is invisible to the shutdown report (#717).
+func runChild(ctx context.Context, name string, args []string, lower bool) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	jobs.LowerPriority(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(string(out)), 400))
+	if lower {
+		jobs.LowerPriority(cmd)
 	}
-	return out, nil
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	childcensus.Enrol(cmd.Process.Pid, filepath.Base(name), "clipper")
+	err := cmd.Wait()
+	childcensus.Discharge(cmd.Process.Pid)
+	if err != nil {
+		return out.Bytes(), fmt.Errorf("%w: %s", err, truncate(strings.TrimSpace(out.String()), 400))
+	}
+	return out.Bytes(), nil
 }
 
 func truncate(s string, n int) string {

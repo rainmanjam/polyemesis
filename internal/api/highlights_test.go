@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -644,23 +645,39 @@ func TestTheSameShortQueuedTwiceGetsTwoNames(t *testing.T) {
 
 // THE EDITOR'S PROBE YIELDS TOO. The keyframe ffprobe a plan runs on the
 // request goes through the governor's priority wrapper, like every child the
-// export job starts. Observed through the failure of a probe that cannot run:
-// the wrapper's name is in it when there is a wrapper.
+// export job starts. Observed at the runner: the argv it is handed is exactly
+// the governor's wrapping of the probe, whatever that is on this OS (ionice
+// and nice on Linux, nice on macOS, the bare probe plus a creation flag on
+// Windows), and the probe and its arguments are inside it.
 //
-// MUTATION: clipProber runs ffprobe directly. Observed: FAIL, no "nice".
+// MUTATION: clipProber runs ffprobe directly. Observed: FAIL, argv
+// [ffprobe -v error] where the governor says [ionice ... nice ... ffprobe ...].
 func TestTheEditorsProbeRunsUnderTheGovernor(t *testing.T) {
 	_, _, srv, _ := highlightFixture(t)
 	srv.gov = jobs.NewGovernor(slog.New(slog.NewTextHandler(io.Discard, nil)), srv.jobq)
-	wrapped, _ := srv.gov.NiceCommand("polyemesis-no-such-probe")
+	var gotName string
+	var gotArgs []string
+	old := runProbe
+	runProbe = func(_ context.Context, name string, args []string) ([]byte, error) {
+		gotName, gotArgs = name, append([]string(nil), args...)
+		return nil, errors.New("recorded")
+	}
+	t.Cleanup(func() { runProbe = old })
+
 	p, ok := srv.clipProber().(clipper.FFprobe)
 	if !ok || p.Run == nil {
 		t.Fatalf("clipProber %T has no runner of its own", srv.clipProber())
 	}
-	_, err := p.Run(context.Background(), "polyemesis-no-such-probe", nil)
-	if err == nil {
-		t.Fatal("a probe that cannot run reported success")
+	if _, err := p.Run(context.Background(), "ffprobe", []string{"-v", "error"}); err == nil {
+		t.Fatal("the recording runner's error was swallowed")
 	}
-	if wrapped != "polyemesis-no-such-probe" && !strings.Contains(err.Error(), filepath.Base(wrapped)) {
-		t.Errorf("the probe ran outside the wrapper %q: %v", wrapped, err)
+	wantName, wantArgs := srv.gov.NiceCommand("ffprobe", "-v", "error")
+	got := append([]string{gotName}, gotArgs...)
+	want := append([]string{wantName}, wantArgs...)
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("the probe ran as %q, want the governor's %q", got, want)
+	}
+	if !strings.HasSuffix(strings.Join(got, " "), "ffprobe -v error") {
+		t.Errorf("the wrapped argv %q lost the probe or its arguments", got)
 	}
 }

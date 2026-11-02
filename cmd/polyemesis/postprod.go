@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -480,25 +478,7 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 			if gov != nil {
 				name, args = gov.NiceCommand(name, args...)
 			}
-			var stderr bytes.Buffer
-			cmd := exec.CommandContext(ctx, name, args...)
-			jobs.LowerPriority(cmd)
-			cmd.Stderr = &stderr
-			pipe, err := cmd.StdoutPipe()
-			if err != nil {
-				return err
-			}
-			if err := cmd.Start(); err != nil {
-				return err
-			}
-			perr := stdout(pipe)
-			// Drain whatever the parser left, so FFmpeg is never blocked on a
-			// full pipe while Wait waits for it.
-			_, _ = io.Copy(io.Discard, pipe)
-			if err := cmd.Wait(); err != nil {
-				return fmt.Errorf("%w: %s", err, strings.TrimSpace(lastLine(stderr.String())))
-			}
-			return perr
+			return highlights.RunStreaming(ctx, name, args, stdout)
 		},
 		ChatTimes: func(fromMS, toMS int64) ([]highlights.ChatStamp, error) {
 			rows, err := store.ChatStampsBetween(fromMS, toMS)
@@ -535,15 +515,6 @@ func highlightDeps(log *slog.Logger, store *db.DB, box *secrets.Box, gov *jobs.G
 		},
 		Model: api.HighlightModel(store, box, automod.NewBudget(), log),
 	}
-}
-
-// lastLine is the tail of FFmpeg's stderr, which is where it says why.
-func lastLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
-		return s[i+1:]
-	}
-	return s
 }
 
 // newCutter is the production clip cutter: every FFmpeg and ffprobe it starts
