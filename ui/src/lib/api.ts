@@ -109,6 +109,11 @@ import type {
   HookTestResult,
   HookCreated,
   HookTrigger,
+  OffloadFetchState,
+  StorageTarget,
+  StorageTargetBody,
+  StorageTargetList,
+  StorageTestResult,
   VersionInfo,
   UpgradePlan,
   UpgradeResult,
@@ -1490,6 +1495,23 @@ export const api = {
       ),
     deliveries: (id: number) => get<HookDelivery[]>(`/hooks/${id}/deliveries`),
   },
+
+  storage: {
+    list: () => get<StorageTargetList>("/storage/targets"),
+    create: (body: StorageTargetBody) => post<StorageTarget>("/storage/targets", body),
+    update: (id: number, body: StorageTargetBody) => put<StorageTarget>(`/storage/targets/${id}`, body),
+    remove: (id: number) => del<{ status: string }>(`/storage/targets/${id}`),
+    /** Session-only: put, get and delete a small object; reports the failed step. */
+    test: (body: StorageTargetBody) => post<StorageTestResult>("/storage/targets/test", body),
+    /** Retry now: every failed or stuck item on the target. */
+    retry: (id: number) => post<{ retried: number }>(`/storage/targets/${id}/retry`, {}),
+  },
+  /** Retry now for one recording's failed or stuck uploads, on every target. */
+  retryRecordingOffload: (id: number) =>
+    post<{ retried: number }>(`/library/recordings/${id}/offload/retry`, {}),
+  /** Bring an offloaded recording (and its session's other offloaded segments) back. */
+  fetchRecording: (id: number) =>
+    post<{ fetch: Record<string, OffloadFetchState> }>(`/library/recordings/${id}/fetch`, {}),
 };
 
 /** What the install says about a token: see GET /auth/connection. */

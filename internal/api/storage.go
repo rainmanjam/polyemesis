@@ -597,21 +597,27 @@ func (s *Server) retryOffload(w http.ResponseWriter, target int64, rel string) {
 	writeJSON(w, http.StatusOK, map[string]int64{"retried": n})
 }
 
+// auditOffloadStuck is the alert. OPERATIONAL, like broadcast.fault, so it
+// carries a coalescing Key: keyed by target, a bucket that refuses everything
+// is one message, not one per file. Error is service error text and goes
+// through the notifier's redaction like every other free-text field.
+func auditOffloadStuck(ev offload.StuckEvent) alerts.Event {
+	return alerts.Event{
+		Type:     alerts.TypeOffloadStuck,
+		Severity: alerts.SeverityWarning,
+		Key:      fmt.Sprintf("offload.stuck:%d", ev.TargetID),
+		Title:    fmt.Sprintf("%s: offload stopped retrying %s", ev.TargetName, ev.RelPath),
+		Text:     "Nothing more is uploaded for this file until Retry now. The local copy is untouched. " + ev.Error,
+	}.WithField("target", ev.TargetName).WithField("file", ev.RelPath)
+}
+
 // OffloadStuck fans one stuck item out to every surface a failure is raised
 // on: the alert notifier (and through it the events stream's alert row), the
 // lifecycle webhook offload.stuck, and the events stream's offload.stuck.
 // MQTT carries telemetry snapshots, not events, so there is no MQTT message.
 func (s *Server) OffloadStuck(ev offload.StuckEvent) {
 	reason := fmt.Sprintf("%s: %s gave up after %d attempt(s): %s", ev.TargetName, ev.RelPath, ev.Attempts, ev.Error)
-	s.publishAudit(alerts.Event{
-		Type:     alerts.TypeOffloadStuck,
-		Severity: alerts.SeverityWarning,
-		// Keyed by target, so a bucket that refuses everything coalesces into
-		// one message rather than one per file.
-		Key:   fmt.Sprintf("offload.stuck:%d", ev.TargetID),
-		Title: fmt.Sprintf("%s: offload stopped retrying %s", ev.TargetName, ev.RelPath),
-		Text:  "Nothing more is uploaded for this file until Retry now. The local copy is untouched. " + ev.Error,
-	}.WithField("target", ev.TargetName).WithField("file", ev.RelPath))
+	s.publishAudit(auditOffloadStuck(ev))
 	hev := hooks.Event{Trigger: hooks.TriggerOffloadStuck, Reason: reason, At: time.Now()}
 	if s.hooks != nil {
 		s.hooks.Publish(hev)

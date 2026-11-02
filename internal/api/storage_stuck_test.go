@@ -69,3 +69,24 @@ func TestRetryNowRoutesResetStuckItems(t *testing.T) {
 		t.Fatalf("missing target: %d", rec.Code)
 	}
 }
+
+func TestAnOffloadStuckAlertNeverCarriesASecret(t *testing.T) {
+	ev := auditOffloadStuck(offload.StuckEvent{TargetID: 3, TargetName: "archive", RelPath: "rec-a.mkv", Attempts: 8,
+		Error: "the service said: rtmps://live.twitch.tv/app/" + plantedSecret})
+	if ev.Key == "" {
+		t.Error("no coalescing key: a bucket refusing every file would be one message per file")
+	}
+	for _, format := range []alerts.Format{alerts.FormatJSON, alerts.FormatDiscord, alerts.FormatSlack} {
+		rule := alerts.Rule{ID: 1, Name: "ops", Enabled: true, URL: "https://example.test/hook", Format: format}
+		body, _, err := alerts.Encode(alerts.Delivery{Rule: rule.Normalized(), Items: []alerts.Item{{Event: ev.Redacted(), Count: 1}}})
+		if err != nil {
+			t.Fatalf("Encode(%s): %v", format, err)
+		}
+		if strings.Contains(string(body), plantedSecret) {
+			t.Fatalf("a %s offload.stuck alert carried a secret:\n%s", format, body)
+		}
+		if !strings.Contains(string(body), "rec-a.mkv") {
+			t.Errorf("a %s offload.stuck alert lost the file it is about:\n%s", format, body)
+		}
+	}
+}

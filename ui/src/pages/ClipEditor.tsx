@@ -37,6 +37,8 @@ import {
   type SpriteCue,
 } from "@/lib/timeline";
 import { autoApi } from "@/lib/autoApi";
+import { ApiError } from "@/lib/api";
+import { OffloadFetchNotice } from "@/components/OffloadStatus";
 import { bytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -191,6 +193,10 @@ export function ClipEditor() {
 
   const [source, setSource] = useState<ClipSource | null>(null);
   const [loadError, setLoadError] = useState("");
+  // Move-mode offload has this recording in a bucket: the editor waits for
+  // the fetch-back (OffloadFetchNotice) and then loads again.
+  const [offloaded, setOffloaded] = useState(false);
+  const [loadRound, setLoadRound] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [inMs, setInMs] = useState(0);
@@ -246,7 +252,12 @@ export function ClipEditor() {
         setTitle(s.recording.replace(/\.[^.]+$/, ""));
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(errText(err, t("clipedit.couldNotOpenThatRecording")));
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 409 && err.code === "offloaded") {
+          setOffloaded(true);
+          return;
+        }
+        setLoadError(errText(err, t("clipedit.couldNotOpenThatRecording")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -254,7 +265,7 @@ export function ClipEditor() {
     return () => {
       cancelled = true;
     };
-  }, [recordingId, t]);
+  }, [recordingId, t, loadRound]);
 
   useEffect(() => {
     if (!source?.hasTranscript) return;
@@ -622,6 +633,21 @@ export function ClipEditor() {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!source && offloaded) {
+    return (
+      <div className="flex flex-col gap-3 p-3">
+        <PageHeader title={t("clipedit.title")} subtitle={t("offload.inStorage")} />
+        <OffloadFetchNotice
+          recordingId={recordingId}
+          onReady={() => {
+            setOffloaded(false);
+            setLoading(true);
+            setLoadRound((n) => n + 1);
+          }}
+        />
       </div>
     );
   }

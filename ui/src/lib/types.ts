@@ -3290,6 +3290,8 @@ export interface LibraryRecording extends Recording {
   hasTranscript: boolean;
   assets: RecordingAssets;
   activeJobs?: JobView[];
+  /** Upload state per storage target; absent when no target has seen it. */
+  offload?: RecordingOffload;
 }
 
 export interface Session {
@@ -3730,7 +3732,10 @@ export type HookTrigger =
   | "destination.held"
   /** A programme's source selector put another source on air. A switch caused
    *  by a degraded link has a reason starting "degraded: ". */
-  | "failover.switched";
+  | "failover.switched"
+  /** Offload stopped retrying a file on a storage target; nothing moves
+   *  until Retry now. Sent once per item. */
+  | "offload.stuck";
 
 /** A stored lifecycle webhook. `url` is always masked and `secret` is never
  *  present: the plaintext key is returned once, by the create call, and cannot
@@ -3965,4 +3970,90 @@ export interface RolloverView {
   nextAt?: string;
   planReason?: string;
   reasonIfNone?: string;
+}
+
+// ---------------------------------------------------------------- offload
+
+export type StorageProvider = "s3" | "r2" | "b2" | "minio" | "wasabi";
+export type OffloadMode = "mirror" | "move";
+/** stuck: offload stopped retrying on its own; nothing moves until Retry now. */
+export type OffloadState = "pending" | "uploading" | "verified" | "failed" | "stuck";
+
+/** One S3-compatible bucket finished recordings are offloaded to. The secret
+ *  access key is write-only: the server reports hasSecret and never the key. */
+export interface StorageTarget {
+  id: number;
+  name: string;
+  provider: StorageProvider;
+  endpoint: string;
+  bucket: string;
+  region: string;
+  prefixTemplate: string;
+  pathStyle: boolean;
+  /** Blank for a read-scoped token. */
+  accessKeyId: string;
+  hasSecret: boolean;
+  secretUnreadable?: boolean;
+  mode: OffloadMode;
+  keepLocalHours: number;
+  offloadStems: boolean;
+  offloadTranscripts: boolean;
+  offloadClips: boolean;
+  verifyDownload: boolean;
+  allowPrivateTarget: boolean;
+  enabled: boolean;
+  /** Consecutive failures before an item is stuck (default 8). */
+  maxAttempts: number;
+  createdAt: string;
+  updatedAt: string;
+  counts: Partial<Record<OffloadState, number>>;
+  /** Recordings whose only copy is on this target. */
+  evicted: number;
+}
+
+export interface StorageTargetList {
+  targets: StorageTarget[];
+  available: boolean;
+}
+
+/** A save or a Test body. secretAccessKey is sent only when typed; id, on the
+ *  Test route, reuses a saved target's secret for the address it was saved for. */
+export type StorageTargetBody = Partial<
+  Omit<StorageTarget, "id" | "hasSecret" | "secretUnreadable" | "createdAt" | "updatedAt" | "counts" | "evicted">
+> & { secretAccessKey?: string; id?: number };
+
+export interface StorageTestStep {
+  step: "put" | "get" | "delete";
+  ok: boolean;
+  error?: string;
+  skipped?: boolean;
+}
+
+export interface StorageTestResult {
+  ok: boolean;
+  key?: string;
+  steps: StorageTestStep[];
+  failedStep?: "put" | "get" | "delete";
+}
+
+export interface OffloadFetchState {
+  state: "fetching" | "done" | "failed";
+  error?: string;
+  since: string;
+}
+
+export interface RecordingOffloadOn {
+  targetId: number;
+  targetName: string;
+  state: OffloadState;
+  attempts: number;
+  lastError?: string;
+  verifiedAt?: string;
+}
+
+export interface RecordingOffload {
+  /** Move mode removed the local copy; it is fetched back on demand. */
+  evicted: boolean;
+  fetch?: OffloadFetchState;
+  targets: RecordingOffloadOn[];
 }

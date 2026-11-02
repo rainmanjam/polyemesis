@@ -10,6 +10,23 @@ its first tagged release.
 
 ### Added
 
+- **S3-compatible offload of finished recordings, and a pull-CDN-ready player origin (Wave 4 #10).**
+  Storage targets (AWS S3, Cloudflare R2, Backblaze B2, MinIO, Wasabi) on the Recordings page and
+  under `/api/v1/storage/targets`: endpoint, bucket, region, a key-prefix template, path-style
+  addressing and a write-only secret sealed with the install's key and never returned. **Test**
+  writes, reads back and deletes a small object and names the step that failed. Only finished
+  segments are sent, each checked on receipt (signed SHA-256 and Content-MD5) and verified after
+  upload (size, ETag, SHA-256 metadata, optionally a read-back); files above 64 MiB go up in
+  resumable parts. **Mirror** keeps local retention as it was; **move** deletes a local recording
+  only after every enabled target verified it, keeps the last N hours local, and fetches older ones
+  back (resumed by Range, verified, three attempts) when the clipper or a job needs them, which
+  answer `409 offloaded` meanwhile. Stems, transcripts and clips can be offloaded too. Repeated or
+  permanent failures make an item **stuck**, raised as the `offload.stuck` alert, webhook and event,
+  with **Retry now** per target and per recording; the Library shows each recording's state. The
+  player origin now sends `public` caching only for an open stream (HLS segments numbered from the
+  wall clock, a year in the browser and the seekable window at the edge; one-second playlists),
+  `private`/`no-store` for anything token-gated or signed in, and an `ETag` on every file. See
+  docs/STORAGE.md and docs/CDN.md. In all 15 languages.
 - **X go-live announcement: once per show by default (#3, PROVISIONAL).** An X destination has a
   **Go-live announcement** setting in the X console (`xGoLiveTweet`): *on the first go-live of a
   show only* (the default), *on every go-live*, or *never*. A show lasts while the destination is
