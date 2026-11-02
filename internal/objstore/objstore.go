@@ -221,6 +221,37 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// MakeBucket creates the configured bucket. Offload never calls it -- a
+// target names a bucket the operator already made, with the lifecycle rules
+// they chose -- but the MinIO integration suite needs a bucket to exist.
+// An "already owned" answer is success.
+func (c *Client) MakeBucket(ctx context.Context) error {
+	u := *c.base
+	canon := u.Path + "/" + escapePath(c.cfg.Bucket)
+	if !c.cfg.PathStyle {
+		u.Host = c.cfg.Bucket + "." + u.Host
+		canon = u.Path + "/"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.Scheme+"://"+u.Host+canon, nil)
+	if err != nil {
+		return err
+	}
+	c.sign(req, canon, emptySHA256)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("objstore: CreateBucket: %w", err)
+	}
+	defer drain(resp)
+	if resp.StatusCode/100 == 2 {
+		return nil
+	}
+	e := parseError("CreateBucket", resp)
+	if se, ok := e.(*Error); ok && (se.Code == "BucketAlreadyOwnedByYou" || se.Code == "BucketAlreadyExists") {
+		return nil
+	}
+	return e
+}
+
 const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 func infoFrom(resp *http.Response) ObjectInfo {
