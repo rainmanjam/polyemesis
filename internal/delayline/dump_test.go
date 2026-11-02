@@ -1389,3 +1389,50 @@ func TestWaitingSnapshotsOnAQuietPIDGoWithTheirCutPoints(t *testing.T) {
 		t.Fatalf("%d snapshots wait on the quiet PID for %d live cut points", n, len(r.b.marks))
 	}
 }
+
+// A PID NEW SINCE THE CUT waits for its first start: a continuation of a PES
+// that began unseen during the resync must not reach the output. And the
+// resume re-sends the PAT and PMT ahead of the resume picture, so a reader
+// meets any change the resync carried before the PIDs it names.
+//
+// Mutation: create the new PID's rewrite without awaitStart in post.
+func TestAfterAResumeANewPIDWaitsForItsStartAndThePSIComesFirst(t *testing.T) {
+	g := delaytest.New(60)
+	r := newRig(t, 12*time.Second, memLimits(), g.Mux(30*time.Second))
+	r.run(18 * time.Second)
+	if _, err := r.b.Dump(r.epoch.Add(18*time.Second), 2*time.Second, DumpMargin); err != nil {
+		t.Fatal(err)
+	}
+	r.run(21 * time.Second)
+	mark := len(r.out)
+	stray := make([]byte, tsPacketSize)
+	stray[0], stray[1], stray[2], stray[3] = tsSyncByte, 0x03, 0x50, 0x15 // PID 0x350, payload, no PUSI
+	if err := r.b.Push(r.epoch.Add(21*time.Second), stray); err != nil {
+		t.Fatal(err)
+	}
+	r.run(30 * time.Second)
+	for off := mark; off+tsPacketSize <= len(r.out); off += tsPacketSize {
+		if pktPID(r.out[off:off+tsPacketSize]) == 0x350 {
+			t.Fatal("a continuation on a PID new since the cut reached the output")
+		}
+	}
+	// The PSI just before the resume picture.
+	rep := readOut(t, r.out, r.outAt, false)
+	at := spliceAt(t, rep.video)
+	sawPMT := false
+	for off := 0; off+tsPacketSize <= len(r.out); off += tsPacketSize {
+		p := r.out[off : off+tsPacketSize]
+		if pktPID(p) == delaytest.PMTPID {
+			sawPMT = true
+		}
+		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) && r.outAt[off/tsPacketSize] == rep.video[at].release {
+			if !sawPMT {
+				t.Fatal("no PMT before the resume picture")
+			}
+			break
+		}
+		if pktPID(p) == delaytest.VideoPID && pktPUSI(p) {
+			sawPMT = false
+		}
+	}
+}
