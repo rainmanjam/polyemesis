@@ -220,7 +220,8 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 	if n != 3 {
 		t.Fatalf("this test's literal floor assumes 3 destinations, got %d", n)
 	}
-	if got := timed("/api/v1/destinations/start-all"); got < want {
+	startTook := timed("/api/v1/destinations/start-all")
+	if got := startTook; got < want {
 		t.Errorf("starting %d destinations took %v, want at least %v. The starts are "+
 			"NOT being paced: %d children spawning inside one scheduler tick contend "+
 			"with the ingest that is already running, and the same connections arrive "+
@@ -248,10 +249,19 @@ func TestBulkStartIsPacedAndBulkStopIsNot(t *testing.T) {
 	// Zero gaps is exact and does not move with the speed of the box -- and,
 	// unlike a ceiling derived from bulkStartPacing, it does not shrink when the
 	// interval does.
-	timed("/api/v1/destinations/stop-all")
+	stopTook := timed("/api/v1/destinations/stop-all")
 	if got := gaps.Load(); got != 0 {
 		t.Errorf("stop-all left %d pacing gaps between %d destinations, want 0. Stops "+
 			"are deliberately not paced -- there is nothing for a gap to spread out.", got, n)
+	}
+	// AND RELATIVE TO START-ALL, which catches a delay that bypasses bulkPause
+	// -- a stray time.Sleep in the stop path -- without a hard-coded time. The
+	// same rows, the same writes and the same reconciles, so on any box a
+	// stop-all costs what a start-all costs less its (n-1) gaps; a stop-all
+	// that took as long as a paced start-all is spending the gaps somewhere.
+	if stopTook >= startTook {
+		t.Errorf("stop-all took %v, at least as long as the paced start-all (%v) over the "+
+			"same %d destinations: something in the stop path is waiting", stopTook, startTook, n)
 	}
 }
 

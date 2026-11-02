@@ -206,15 +206,16 @@ func startStoppablePostProd(t *testing.T, store *db.DB, dir string) postProd {
 	return pp
 }
 
-// stopPostProd waits for pp's loops, failing rather than hanging if they never
-// return. The bound is a hang guard only: the event waited on is the loops
-// returning, which takes milliseconds once ctx is cancelled.
+// stopPostProd waits for pp's loops within engine.ShutdownBudget -- the budget
+// production gives them -- so this fails exactly when a real shutdown would
+// leave the store open rather than close it under a running loop.
 func stopPostProd(t *testing.T, pp postProd) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), engine.ShutdownBudget)
 	defer cancel()
 	if !pp.waitWithin(ctx) {
-		t.Fatal("startPostProd's loops did not return after their context was cancelled")
+		t.Fatalf("startPostProd's loops did not return within the %v shutdown budget after "+
+			"their context was cancelled; production would leave the store open", engine.ShutdownBudget)
 	}
 }
 
