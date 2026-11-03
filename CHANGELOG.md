@@ -711,6 +711,16 @@ its first tagged release.
 
 ### Changed
 
+- **Website: every row of cards lines up.** Card rows on the home, features, comparison, download,
+  multistream, how-to, free restream and five comparison pages, and the previous/next cards on
+  every documentation page, now share one grid: card edges sit on the same lines as the headings,
+  one 24px gutter everywhere, cards in a row are the same height, and the link or note at the foot
+  of each card sits on the same line as its neighbours'. Sets of five fill their rows (three over
+  two, or two, two and one full-width) instead of leaving a lone card beside a gap, wide tables
+  reach the full width of the page, callouts match the paragraph they sit in, and the multistream,
+  Streamlabs and Twitch VOD pages use the same card style as the rest of the site. A browser check
+  in the site build measures this at four screen widths.
+
 - **Website: quicker to read, quicker to try.** On the home page the routing problem and the
   playable patchbay now come straight after the spec strip, before the hosted-pricing table. The
   hero has one copy action for the install command, no pill above the headline, and no colour in

@@ -100,7 +100,7 @@ const merits = [
       and before comparing anything it is worth knowing which one you are holding.
     </p>
 
-    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+    <div class="mt-8 max-w-2xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
       <p class="text-pretty leading-relaxed text-fg">
         <strong>Two facts settle most of this page:</strong> SE.Live is supported
         on Windows and not on macOS or Linux, and it publishes over RTMP and
@@ -118,7 +118,7 @@ const merits = [
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
         One company, two products, and only one of them touches video.
       </p>
-      <div class="mt-8 max-w-4xl space-y-4">
+      <div class="card-grid card-grid--2 mt-8">
         {
           whichOne.map((w) => (
             <div class="card p-6">
@@ -153,7 +153,7 @@ const merits = [
         against StreamElements' own documentation on{' '}
         <span class="font-mono text-[13px] text-fg">{CHECKED}</span>.
       </p>
-      <div class="mt-8 grid max-w-5xl gap-5 lg:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         <div class="card p-6">
           <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-subtle">
             Operating system
@@ -218,7 +218,7 @@ const merits = [
       <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
         Checked against StreamElements' own documentation and site on <span class="font-mono text-[13px] text-fg">{CHECKED}</span>.
       </p>
-      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           merits.map((m) => (
             <div class="card p-6">

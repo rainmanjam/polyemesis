@@ -326,7 +326,7 @@ const selectors = [
         the only cloud relay in the set -- the other four run on your own
         machine, as a plugin or a server -- so the card that looks different is
         the one that IS different. */}
-    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+    <div class="card-grid card-grid--2 mt-6">
       {
         [
           {
@@ -363,12 +363,12 @@ const selectors = [
         ].map((c) => (
           <a
             href={c.href}
-            class:list={["card block p-5 transition-colors hover:border-primary", c.wide && "sm:col-span-2"]}
+            class:list={["card p-6 transition-colors hover:border-primary", c.wide && "card-span-full"]}
           >
             <p class="font-medium text-fg">{c.name}</p>
             <p class="mt-1 font-mono text-[11px] text-subtle">{c.kind}</p>
             <p class="mt-3 text-sm leading-relaxed text-muted">{c.line}</p>
-            <p class="mt-4 text-sm text-primary-bright">Read the comparison</p>
+            <p class="card-foot text-sm text-primary-bright">Read the comparison</p>
           </a>
         ))
       }
@@ -385,7 +385,7 @@ const selectors = [
       One axis, and it is the one this project exists for. The shared ground
       (everything all three do) is in the table below this one.
     </p>
-    <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
+    <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
       <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
         <thead class="bg-surface">
           <tr class="border-b border-line">
@@ -461,10 +461,10 @@ const selectors = [
         decisions and the project's age, not from a roadmap, so the right tool
         for these jobs today is the one named.
       </p>
-      <div class="mt-8 grid gap-4 lg:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           losses.map((l) => (
-            <div class="card p-5">
+            <div class="card p-6">
               <h3 class="font-medium text-fg">Choose {l.who} for</h3>
               <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
               <dl class="mt-4 divide-y divide-line border-y border-line">
@@ -503,10 +503,10 @@ const selectors = [
       <em>which</em> track leaves for a destination. None of them decides what
       is in it.
     </p>
-    <div class="mt-6 grid gap-4 lg:grid-cols-3">
+    <div class="card-grid card-grid--3 mt-6">
       {
         selectors.map((s) => (
-          <div class="card p-5">
+          <div class="card p-6">
             <p class="font-medium text-fg">{s.name}</p>
             <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
             {s.src && <CodeBlock code={s.src} variant="quote" />}
@@ -547,7 +547,7 @@ const selectors = [
         plainly: it means the choice between these three comes down to the
         audio, and not to whether the fundamentals are there.
       </p>
-      <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
+      <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
         <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
           <thead class="bg-surface">
             <tr class="border-b border-line">

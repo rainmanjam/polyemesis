@@ -103,7 +103,7 @@ const CHECKED = "16 September 2026";
       that track gets made, and what it costs you to have more than one.
     </p>
 
-    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
+    <div class="mt-8 max-w-2xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
       <p class="text-pretty leading-relaxed text-fg">
         <strong>The difference in one sentence:</strong> Aitum selects a mix OBS
         has already built, so three different mixes means three track layouts
@@ -123,7 +123,7 @@ const CHECKED = "16 September 2026";
         finish this job, and comparing the routes is more useful than comparing
         a column of Yes against a column of No.
       </p>
-      <div class="mt-8 grid gap-5 lg:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           steps.map((s) => (
             <div class="card p-6">
@@ -159,7 +159,7 @@ const CHECKED = "16 September 2026";
         Not a capability difference. A location difference, and on a machine
         that is also running the game, location is the whole argument.
       </p>
-      <div class="mt-8 grid max-w-4xl gap-5 sm:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         <div class="card p-6">
           <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-subtle">
             Aitum Multistream
@@ -200,7 +200,7 @@ const CHECKED = "16 September 2026";
         Checked against Aitum's own repository and site on{' '}
         <span class="font-mono text-[13px] text-fg">15 August 2026</span>.
       </p>
-      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           merits.map((m) => (
             <div class="card p-6">

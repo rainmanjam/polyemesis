@@ -133,7 +133,7 @@ const merits = [
   <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Which one did you mean?</h2>
-      <div class="mt-8 grid gap-5 lg:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           products.map((p) => (
             <div class="card p-6">
@@ -173,7 +173,7 @@ const merits = [
         a track OBS mixed for them. Neither Restreamer nor restream.io can do
         even that.
       </p>
-      <div class="mt-8 grid max-w-5xl gap-5 lg:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         <div class="card p-6">
           <p class="font-medium text-fg">Restreamer</p>
           <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
@@ -244,7 +244,7 @@ const merits = [
         <span class="font-mono text-[13px] text-fg">{CHECKED}</span>. Tiers move.
         Check before deciding on the strength of a number here.
       </p>
-      <div class="scroll-hint mt-6 max-w-5xl overflow-x-auto rounded-token border border-line">
+      <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
         <table class="cmp w-full min-w-[52rem] border-collapse text-sm">
           <caption class="sr-only">
             Pricing for Restreamer, restream.io and polyemesis, checked on {CHECKED}
@@ -285,7 +285,7 @@ const merits = [
   <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">What they do well</h2>
-      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+      <div class="card-grid card-grid--2 mt-8">
         {
           merits.map((m) => (
             <div class="card p-6">
