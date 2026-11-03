@@ -91,6 +91,29 @@ describe("MobileOnAirChip", () => {
     expect(screen.getByTestId("mobile-on-air-words").getAttribute("aria-hidden")).toBe("true");
   });
 
+  // Row 10: on air is the tally lamp everywhere, and this dot is the phone's
+  // on-air mark. Green (--ok) means healthy / signal present, not on air.
+  it("lights the on-air dot in the tally red, not the healthy green", () => {
+    for (const live of [scoped(3), { count: 2, key: "chrome.liveCount", params: { count: 2 }, offKey: "onAir.offAir" } as HeaderLive]) {
+      const { unmount } = show(live);
+      const dot = screen.getByTestId("mobile-on-air-dot");
+      const cls = dot.className.split(/\s+/);
+      expect(cls).toContain("bg-tally");
+      expect(cls.some((c) => /^(bg|text|border)-ok\b/.test(c))).toBe(false);
+      // A filled disc: its shape, not only its hue, tells it from off air.
+      expect(cls).toContain("rounded-full");
+      expect(dot.getAttribute("data-tone")).toBe("tally");
+      unmount();
+    }
+  });
+
+  it("draws off air as the hollow idle ring, never the tally", () => {
+    show(scoped(0));
+    const dot = screen.getByTestId("mobile-on-air-dot");
+    expect(dot.className).not.toContain("bg-tally");
+    expect(dot.getAttribute("data-tone")).toBe("idle");
+  });
+
   it("does not measure, or name the programme twice, on a single-programme install", () => {
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
     show({ count: 0, key: "chrome.liveCount", params: { count: 0 }, offKey: "onAir.offAir" });

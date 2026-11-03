@@ -734,8 +734,8 @@ its first tagged release.
   that breaks where samples are missing, with the programme's degraded-link failover floor drawn
   as a dashed line when that failover is on. A running process is plain text with a small green
   dot instead of a filled green pill; filled pills stay for warnings and failures, and on air is a solid red tally lamp everywhere it
-  is shown: the header's live count, the Dashboard's ON AIR bar, a destination card's badge and the
-  Recordings page's running recorder. Form labels
+  is shown: the header's live count (and its dot on a phone), the Dashboard's ON AIR bar, a destination
+  card's badge and the Recordings page's running recorder. Form labels
   are sentence case instead of capitals. Every control draws the same 2px focus ring at a 2px
   offset (tab triggers and the dialog's close button drew none), buttons move down 1px when
   pressed, and text fields have a visible edge (3.66:1 against a card, from 1.24:1). Monitoring's

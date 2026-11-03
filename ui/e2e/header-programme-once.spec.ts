@@ -199,6 +199,24 @@ for (const width of [320, 360, 390]) {
       const sentence = state === "off" ? `${PROGRAMME} — Studio A: Off air` : `${PROGRAMME} — Studio A: ${LIVE} live`;
       await expect(chip.locator(".sr-only")).toHaveText(sentence);
       await expect(chip).toHaveAttribute("title", sentence);
+
+      // On air is the tally lamp (row 10): the dot is painted --tally, not
+      // the --ok green, compared as computed colours in the real page.
+      if (state === "live") {
+        const paint = await page.getByTestId("mobile-on-air-dot").evaluate((dot) => {
+          const probe = (v: string) => {
+            const p = document.createElement("span");
+            p.style.backgroundColor = `var(${v})`;
+            document.body.append(p);
+            const c = getComputedStyle(p).backgroundColor;
+            p.remove();
+            return c;
+          };
+          return { dot: getComputedStyle(dot).backgroundColor, tally: probe("--tally"), ok: probe("--ok") };
+        });
+        expect(paint.dot).toBe(paint.tally);
+        expect(paint.dot).not.toBe(paint.ok);
+      }
     });
   }
 }

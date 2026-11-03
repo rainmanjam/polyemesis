@@ -70,8 +70,24 @@ export function MobileOnAirChip({ live }: Readonly<{ live: HeaderLive }>) {
       title={sentence}
     >
       {/* shrink-0: the dot is the part that must survive any squeeze. */}
+      {/* On air is the tally lamp, as on the desktop live count, the ON AIR
+          bar and a destination card (row 10): a filled red disc. Green would
+          say "healthy", which is a different fact. Off air keeps the hollow
+          idle ring, so the two differ in shape as well as hue, and the words
+          beside them differ again. */}
       <span className="flex shrink-0">
-        <StatusDot tone={on ? "live" : "idle"} size="sm" />
+        {on ? (
+          <span
+            data-testid="mobile-on-air-dot"
+            data-tone="tally"
+            aria-hidden="true"
+            className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-tally"
+          />
+        ) : (
+          <span data-testid="mobile-on-air-dot" data-tone="idle" className="inline-flex">
+            <StatusDot tone="idle" size="sm" />
+          </span>
+        )}
       </span>
       {scoped ? (
         <>
