@@ -49,7 +49,7 @@ import {
 } from "@/lib/logSummary";
 import { cn } from "@/lib/utils";
 import { bitrateTrace } from "@/lib/bitrateTrace";
-import { cpuOver, memoryOver, monitorVerdict } from "@/lib/monitorVerdict";
+import { cpuOver, memoryOver, monitorVerdict, type MonitorVerdictTone } from "@/lib/monitorVerdict";
 import {
   asDestinationId,
   asSourceId,
@@ -507,6 +507,15 @@ function TileRemedy({
   );
 }
 
+/** The verdict sentence's colour: red for a failure, amber for a warning,
+ *  muted for everything calm. */
+const VERDICT_TONE_CLASS: Record<MonitorVerdictTone, string> = {
+  bad: "text-down",
+  warn: "text-warn",
+  ok: "text-muted-foreground",
+  idle: "text-muted-foreground",
+};
+
 export function MonitoringPage() {
   const t = useT();
   const {
@@ -735,7 +744,7 @@ export function MonitoringPage() {
       cancelled = true;
     };
   }, [programme, programmeKnown]);
-  const bitrateFloor = floorRead && floorRead.programme === programme ? floorRead.kbps : null;
+  const bitrateFloor = floorRead?.programme === programme ? floorRead.kbps : null;
 
   // localeCompare, not the default sort. Array.prototype.sort compares UTF-16
   // code units, which puts every capital before every lowercase: a filter list
@@ -805,14 +814,7 @@ export function MonitoringPage() {
         <p
           aria-live="polite"
           data-verdict-tone={pageVerdict.tone}
-          className={cn(
-            "mb-3 flex flex-wrap items-center gap-2 text-sm",
-            pageVerdict.tone === "bad"
-              ? "text-down"
-              : pageVerdict.tone === "warn"
-                ? "text-warn"
-                : "text-muted-foreground",
-          )}
+          className={cn("mb-3 flex flex-wrap items-center gap-2 text-sm", VERDICT_TONE_CLASS[pageVerdict.tone])}
         >
           <span>{verdictText}</span>
           {failedCount > 0 && (

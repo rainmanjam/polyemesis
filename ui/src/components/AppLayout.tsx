@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
+import { MobileOnAirChip } from "@/components/MobileOnAirChip";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
@@ -108,64 +109,6 @@ const NAV: NavItem[] = [
   { to: "/system", labelKey: "nav.system", icon: Cpu },
   { to: "/settings", labelKey: "nav.settings", icon: SettingsIcon },
 ];
-
-/** Whether the phone on-air chip's full words fit the room the header has.
- *
- *  The room is the header's content width minus every other item at its
- *  NATURAL width (scrollWidth, so a programme switcher that is currently
- *  squeezed still counts at the size it wants) and the gaps between them. The
- *  full words are read off an invisible yardstick span, so the answer does not
- *  depend on which form is on screen. Measured by a ResizeObserver, which also
- *  fires once on observe, so a change of width, of language or of count is
- *  re-measured and nothing is set synchronously during render or effect.
- *  Without a ResizeObserver (jsdom) it reports "fits": the full words. */
-function useChipFit(
-  chipRef: RefObject<HTMLSpanElement | null>,
-  measureRef: RefObject<HTMLSpanElement | null>,
-  active: boolean,
-  words: string,
-): boolean {
-  const [fits, setFits] = useState(true);
-  useEffect(() => {
-    const chip = chipRef.current;
-    const measure = measureRef.current;
-    const header = chip?.parentElement;
-    if (!active || !chip || !measure || !header || typeof ResizeObserver === "undefined") return;
-    const check = () => {
-      const cs = getComputedStyle(header);
-      const gap = parseFloat(cs.columnGap) || 0;
-      const others = Array.from(header.children).filter(
-        (c): c is HTMLElement => c !== chip && c instanceof HTMLElement && c.offsetWidth > 0,
-      );
-      // An item's natural width: what it occupies now plus whatever it is
-      // currently hiding behind an ellipsis, capped at its own max-width. A
-      // switcher squeezed to "Layout Check…" still wants its whole label.
-      const natural = (c: HTMLElement) => {
-        let hidden = Math.max(0, c.scrollWidth - c.clientWidth);
-        for (const d of Array.from(c.querySelectorAll<HTMLElement>("*"))) {
-          hidden = Math.max(hidden, d.scrollWidth - d.clientWidth);
-        }
-        const max = parseFloat(getComputedStyle(c).maxWidth);
-        return Math.min(c.offsetWidth + hidden, Number.isFinite(max) ? max : Infinity);
-      };
-      const taken = others.reduce((sum, c) => sum + natural(c), 0) + gap * others.length;
-      const room =
-        header.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - taken;
-      const dot = chip.firstElementChild instanceof HTMLElement ? chip.firstElementChild.offsetWidth : 0;
-      const chipGap = parseFloat(getComputedStyle(chip).columnGap) || 0;
-      setFits(dot + chipGap + measure.offsetWidth <= room);
-    };
-    // The header, the yardstick, and every item beside the chip: a switcher
-    // whose label settles after the programme list arrives changes the room
-    // without changing the header's own size.
-    const ro = new ResizeObserver(check);
-    ro.observe(header);
-    ro.observe(measure);
-    for (const c of Array.from(header.children)) if (c !== chip) ro.observe(c);
-    return () => ro.disconnect();
-  }, [chipRef, measureRef, active, words]);
-  return fits;
-}
 
 export function AppLayout({
   username,
@@ -284,14 +227,6 @@ export function AppLayout({
   const live = headerLive({ destinations: status?.destinations, programme, programmes, sourceCount });
   const liveCount = live.count;
   const liveLabel = t(live.key, live.params);
-  // Scoped to one named programme: exactly when the programme switcher shows.
-  const programmeScoped = live.key === "chrome.liveCountProgramme";
-  // The phone chip's words in that case, full and short.
-  const chipFull = liveCount > 0 ? t("chrome.liveCount", { count: liveCount }) : t("onAir.offAir");
-  const chipShort = liveCount > 0 ? t("chrome.liveCountShort", { count: liveCount }) : t("chrome.offAirShort");
-  const chipRef = useRef<HTMLSpanElement>(null);
-  const chipMeasureRef = useRef<HTMLSpanElement>(null);
-  const chipFits = useChipFit(chipRef, chipMeasureRef, programmeScoped, chipFull);
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
@@ -334,64 +269,9 @@ export function AppLayout({
           {mobileOpen ? <X /> : <Menu />}
         </Button>
 
-        {/* A78: below sm the header carried no on-air answer at all. This is the
-            phone's one answer to "am I on air?", beside the hamburger: the live
-            count when something is running, and the words Off air otherwise.
-            It reuses the strip's own wording, so the two cannot disagree. */}
-        {/* One line, always. With the programme in it ("Main: Off air") the
-            chip wrapped onto three lines beside the logo at 390px; it now
-            keeps to one line and truncates the text, with the whole of it in
-            the title. */}
-        <span
-          ref={chipRef}
-          data-testid="mobile-on-air"
-          className={cn(
-            "relative flex min-w-1.5 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden",
-            programmeScoped && "shrink-0",
-          )}
-          title={liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
-        >
-          {/* shrink-0: at 360px the chip is squeezed beside the switcher, and
-              the dot is the part that must survive. */}
-          <span className="flex shrink-0">
-            <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
-          </span>
-          {/* NAMED ONCE. When the count is scoped to a programme, the
-              programme switcher beside this already shows its name, so the
-              chip printed it twice on a phone ("● Main Pr…" and "Main
-              Programme"). The chip keeps the state words ("3 live", "Off
-              air"); the scoped sentence, programme included, stays for a
-              screen reader. */}
-          {/* NEVER CUT TO AN ELLIPSIS. "O…" said nothing. The words are
-              measured against the room the header actually has (useChipFit)
-              and, where the full words ("Off air", "3 live") do not fit, the
-              short form ("Off", "3 live") is printed instead -- whole. The
-              chip does not shrink; the programme switcher beside it is what
-              gives way, and it already names the programme in full in its
-              menu. */}
-          {programmeScoped ? (
-            <>
-              <span className="sr-only">{liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}</span>
-              <span
-                aria-hidden="true"
-                data-testid="mobile-on-air-words"
-                data-fit={chipFits ? "full" : "short"}
-                className={cn("whitespace-nowrap", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}
-              >
-                {chipFits ? chipFull : chipShort}
-              </span>
-              {/* The yardstick: the full words, laid out but never seen. Fixed,
-                  so it adds nothing to the chip's own scroll width. */}
-              <span ref={chipMeasureRef} aria-hidden="true" className="pointer-events-none invisible fixed left-0 top-0 whitespace-nowrap">
-                {chipFull}
-              </span>
-            </>
-          ) : (
-            <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
-              {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
-            </span>
-          )}
-        </span>
+        {/* A78: the phone's one answer to "am I on air?". See MobileOnAirChip
+            for why it names the programme once and never truncates. */}
+        <MobileOnAirChip live={live} />
 
         {/* No tinted tile behind it: the site sets the mark straight on the
             background, and the tile was there to give a monochrome glyph

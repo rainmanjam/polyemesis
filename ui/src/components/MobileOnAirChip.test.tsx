@@ -1,0 +1,101 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { translate } from "@/lib/i18n";
+import type { HeaderLive } from "@/lib/headerLive";
+
+/* The phone on-air chip: which words it prints, and what it keeps for a
+ * screen reader. Whether the full words fit is measured by lib/chipFit (its
+ * own tests pin the arithmetic; the e2e spec measures the real header); here
+ * that answer is set, and a ResizeObserver stub delivers it the way the
+ * browser would, on observe. */
+
+let fits = true;
+vi.mock("@/lib/chipFit", () => ({ chipFits: () => fits }));
+
+const observers: Array<() => void> = [];
+class StubResizeObserver {
+  constructor(cb: () => void) {
+    observers.push(cb);
+  }
+  observe() {}
+  disconnect() {}
+}
+
+const { MobileOnAirChip } = await import("./MobileOnAirChip");
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  observers.length = 0;
+  fits = true;
+});
+
+const scoped = (count: number): HeaderLive => ({
+  count,
+  key: "chrome.liveCountProgramme",
+  params: { programme: "Main Programme", count },
+  offKey: "chrome.offAirProgramme",
+  offParams: { programme: "Main Programme" },
+});
+
+function show(live: HeaderLive) {
+  return render(
+    <header>
+      <MobileOnAirChip live={live} />
+    </header>,
+  );
+}
+
+const en = (k: Parameters<typeof translate>[1], p?: Parameters<typeof translate>[2]) => translate("en", k, p);
+
+describe("MobileOnAirChip", () => {
+  it("prints the full words while they fit", () => {
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    show(scoped(0));
+    act(() => observers.forEach((cb) => cb()));
+    const words = screen.getByTestId("mobile-on-air-words");
+    expect(words.textContent).toBe(en("onAir.offAir"));
+    expect(words.getAttribute("data-fit")).toBe("full");
+  });
+
+  it("prints the short form, whole, where the full words do not fit", () => {
+    fits = false;
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    show(scoped(0));
+    act(() => observers.forEach((cb) => cb()));
+    const words = screen.getByTestId("mobile-on-air-words");
+    expect(words.textContent).toBe(en("chrome.offAirShort"));
+    expect(words.getAttribute("data-fit")).toBe("short");
+    expect(words.textContent).not.toContain("…");
+    expect(words.className).not.toContain("truncate");
+  });
+
+  it("prints the live count's short form when on air and short of room", () => {
+    fits = false;
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    show(scoped(3));
+    act(() => observers.forEach((cb) => cb()));
+    expect(screen.getByTestId("mobile-on-air-words").textContent).toBe(en("chrome.liveCountShort", { count: 3 }));
+  });
+
+  it("keeps the whole sentence, programme included, for a screen reader and in the title", () => {
+    fits = false;
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    const { container } = show(scoped(3));
+    act(() => observers.forEach((cb) => cb()));
+    const chip = screen.getByTestId("mobile-on-air");
+    const sentence = en("chrome.liveCountProgramme", { programme: "Main Programme", count: 3 });
+    expect(container.querySelector(".sr-only")?.textContent).toBe(sentence);
+    expect(chip.getAttribute("title")).toBe(sentence);
+    expect(screen.getByTestId("mobile-on-air-words").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("does not measure, or name the programme twice, on a single-programme install", () => {
+    vi.stubGlobal("ResizeObserver", StubResizeObserver);
+    show({ count: 0, key: "chrome.liveCount", params: { count: 0 }, offKey: "onAir.offAir" });
+    expect(observers).toHaveLength(0);
+    expect(screen.queryByTestId("mobile-on-air-words")).toBeNull();
+    expect(screen.getByTestId("mobile-on-air").textContent).toBe(en("onAir.offAir"));
+  });
+});

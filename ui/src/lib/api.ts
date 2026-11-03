@@ -587,7 +587,7 @@ export const api = {
    *  paths) that are for an operator's logs and probes, and leaving them out
    *  of the type keeps the sign-in screen from ever rendering one. A fatal
    *  check answers 503, which arrives as an ApiError. */
-  health: () => get<{ status: "ok" | "degraded" | string }>("/health"),
+  health: () => get<{ status: string }>("/health"), // "ok" or "degraded"
   /** setupCode is the one-time code the server printed at startup and wrote
    *  to <data dir>/setup-code. Without it the server answers 403: an open port
    *  on a fresh install is not an invitation to become its admin. */

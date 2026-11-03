@@ -79,5 +79,5 @@ export function ProgrammeSwitcher() {
  *  there is no such separator. Presentation only: the name itself is the
  *  operator's and is never rewritten. */
 function shortProgrammeName(name: string): string {
-  return name.split(/\s+[—–-]\s+/)[0] || name;
+  return name.split(/ [—–-] /)[0] || name;
 }

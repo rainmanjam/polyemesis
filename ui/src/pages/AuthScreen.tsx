@@ -184,9 +184,9 @@ export function AuthScreen({
                 strength word alone. */}
             <dd className="flex items-center gap-1.5 text-foreground">
               <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CONNECTION[conn].dot)} />
-              {/* On a span, not the <dd>: a role on the <dd> takes it out of
-                  the definition list's structure. */}
-              <span role="status">{t(CONNECTION[conn].key)}</span>
+              {/* An <output> (implicitly role="status"), not a role on the
+                  <dd>, which would take it out of the definition list. */}
+              <output>{t(CONNECTION[conn].key)}</output>
             </dd>
           </dl>
           <CardHeader>
