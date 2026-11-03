@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { CheckCircle2, ExternalLink, Lock, RotateCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,11 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
   const [problem, setProblem] = useState<{ code: string; message: string } | null>(null);
   const [sending, setSending] = useState(false);
   const [publication, setPublication] = useState<Publication | null>(null);
+  // Bumped when a confirmation is spent, refused or expires, so the form is checked
+  // again without the person having to edit a field to wake it.
+  const [epoch, setEpoch] = useState(0);
+  // The person has looked at the platform after an outcome_unknown failure.
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const platform: PublishPlatform | undefined = targets?.platforms.find((p) => p.id === platformId);
   const account = platform?.accounts.find((a) => a.id === accountId);
@@ -87,6 +93,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
     setPublication(null);
     setPrepared(null);
     setProblem(null);
+    setAcknowledged(false);
     api
       .publishTargets(clipJobId)
       .then((tg) => {
@@ -96,6 +103,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
         setDescription(tg.prefill.description);
         setTags(tagsText(tg.prefill.tags));
         const first = tg.platforms.find((p) => p.enabled && p.accounts.length > 0) ?? tg.platforms[0];
+        if (!first) return;
         setPlatformId(first.id);
         setAccountId(first.accounts[0]?.id ?? 0);
         setPrivacy(first.privacy.default);
@@ -113,8 +121,11 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
   };
 
   const form: PublishForm = useMemo(
-    () => ({ clipJobId, platform: platformId, accountId, title, description, tags: parseTags(tags), privacy }),
-    [clipJobId, platformId, accountId, title, description, tags, privacy],
+    () => ({
+      clipJobId, platform: platformId, accountId, title, description, tags: parseTags(tags), privacy,
+      ...(acknowledged ? { acknowledgeOutcome: true } : {}),
+    }),
+    [clipJobId, platformId, accountId, title, description, tags, privacy, acknowledged],
   );
   const key = formKey(form);
   const usable =
@@ -151,7 +162,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
     };
     // `key` stands for `form`: it changes exactly when the form does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, usable, key]);
+  }, [open, usable, key, epoch]);
 
   // A confirmation is for one form, once, for ten minutes: drop it the moment
   // the form changes or time runs out.
@@ -159,7 +170,10 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
   useEffect(() => {
     if (!confirmation) return;
     const ms = new Date(confirmation.expiresAt).getTime() - Date.now();
-    const timer = setTimeout(() => setPrepared(null), Math.max(ms, 0));
+    const timer = setTimeout(() => {
+      setPrepared(null);
+      setEpoch((e) => e + 1);
+    }, Math.max(ms, 0));
     return () => clearTimeout(timer);
   }, [confirmation]);
 
@@ -196,14 +210,17 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
           : { code: "", message: e instanceof Error ? e.message : String(e) },
       );
       setPrepared(null);
+      setEpoch((e) => e + 1);
     } finally {
       setSending(false);
     }
   }, [confirmation, form]);
 
-  const tryAgain = () => {
+  const tryAgain = (acknowledgedOutcome: boolean) => {
+    setAcknowledged(acknowledgedOutcome);
     setPublication(null);
     setPrepared(null);
+    setEpoch((e) => e + 1);
   };
 
   const forcedPrivacyNote =
@@ -467,8 +484,9 @@ function PublicationStatus({
   pub: Publication;
   account?: { connectPath?: string };
   t: Tr;
-  onAgain: () => void;
+  onAgain: (acknowledgedOutcome: boolean) => void;
 }) {
+  const [checked, setChecked] = useState(false);
   const pct = Math.round((pub.job?.progress ?? 0) * 100);
   if (pub.state === "posted") {
     return (
@@ -504,8 +522,21 @@ function PublicationStatus({
               <a href={account.connectPath}>{t("publish.reconnect")}</a>
             </Button>
           )}
+          {cause === "outcome_unknown" && (
+            // The last request may have landed. Publishing again needs the person
+            // to have looked: the server refuses the re-arm without it.
+            <label className="flex w-full items-center gap-2">
+              <Checkbox checked={checked} onCheckedChange={(v) => setChecked(v === true)} />
+              <span>{t("publish.ackOutcome", { platform: t(PLATFORM_LABEL[pub.platform]) })}</span>
+            </label>
+          )}
           {cause !== "gated" && (
-            <Button size="sm" variant="outline" onClick={onAgain}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cause === "outcome_unknown" && !checked}
+              onClick={() => onAgain(cause === "outcome_unknown")}
+            >
               <RotateCw /> {t("publish.again")}
             </Button>
           )}

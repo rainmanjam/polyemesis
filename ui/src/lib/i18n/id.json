@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "Tambahkan judul untuk memublikasikan.",
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "Di portal pengembang TikTok, buka aplikasi Anda dan salin Client key dari halaman detail aplikasi.",
-  "credLabels.tiktok.secretWhere": "Di halaman detail yang sama, tampilkan dan salin Client secret."
+  "credLabels.tiktok.secretWhere": "Di halaman detail yang sama, tampilkan dan salin Client secret.",
+  "publish.ackOutcome": "Saya sudah memeriksa {platform} dan kiriman itu tidak ada di sana."
 }

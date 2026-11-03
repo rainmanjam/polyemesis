@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "公開するにはタイトルを入力してください。",
   "credLabels.clientKey": "クライアントキー",
   "credLabels.tiktok.idWhere": "TikTok の開発者ポータルでアプリを開き、アプリの詳細ページからクライアントキーをコピーします。",
-  "credLabels.tiktok.secretWhere": "同じアプリの詳細ページでクライアントシークレットを表示してコピーします。"
+  "credLabels.tiktok.secretWhere": "同じアプリの詳細ページでクライアントシークレットを表示してコピーします。",
+  "publish.ackOutcome": "{platform} を確認しました。投稿は見当たりません。"
 }

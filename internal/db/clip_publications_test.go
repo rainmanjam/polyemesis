@@ -144,7 +144,7 @@ func TestSessionSecretIsSealedAtRest(t *testing.T) {
 	box := pubBox(t)
 	p, _, _ := d.ClaimPublication(sampleClaim())
 	const secret = "https://upload.example/session?token=abc"
-	if err := d.SetPublicationSession(box, p.ID, secret, "meta1"); err != nil {
+	if err := d.SetPublicationSession(box, p.ID, "n1", secret, "meta1"); err != nil {
 		t.Fatal(err)
 	}
 	var raw []byte
@@ -162,7 +162,7 @@ func TestSessionSecretIsSealedAtRest(t *testing.T) {
 	if !row.HasSession {
 		t.Errorf("HasSession = false")
 	}
-	if err := d.ClearPublicationSession(p.ID); err != nil {
+	if err := d.ClearPublicationSession(p.ID, "n1"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _, _ := d.GetPublicationSession(box, p.ID); got != "" {
@@ -173,11 +173,11 @@ func TestSessionSecretIsSealedAtRest(t *testing.T) {
 func TestStampIrreversibleOnce(t *testing.T) {
 	d := testDB(t)
 	p, _, _ := d.ClaimPublication(sampleClaim())
-	first, err := d.StampPublicationFinalizing(p.ID)
+	first, err := d.StampPublicationFinalizing(p.ID, "n1")
 	if err != nil || !first {
 		t.Fatalf("first stamp = %v, %v", first, err)
 	}
-	if again, _ := d.StampPublicationFinalizing(p.ID); again {
+	if again, _ := d.StampPublicationFinalizing(p.ID, "n1"); again {
 		t.Errorf("the finalize stamp was granted twice")
 	}
 }
@@ -194,10 +194,10 @@ func TestJobNoteAndRemoteOnlyTouchAnInFlightRowWithTheLiveNonce(t *testing.T) {
 	if err := d.SetPublicationJob(p.ID, "n1", 42); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetPublicationNote(p.ID, "will retry: busy"); err != nil {
+	if err := d.SetPublicationNote(p.ID, "n1", "will retry: busy"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetPublicationRemote(p.ID, "v_pub_file~9"); err != nil {
+	if err := d.SetPublicationRemote(p.ID, "n1", "v_pub_file~9"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := d.GetPublication(p.ID)
@@ -208,8 +208,8 @@ func TestJobNoteAndRemoteOnlyTouchAnInFlightRowWithTheLiveNonce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A failed row takes no more notes or remote ids: the note is the failure.
-	_ = d.SetPublicationNote(p.ID, "ignored")
-	_ = d.SetPublicationRemote(p.ID, "ignored")
+	_ = d.SetPublicationNote(p.ID, "n1", "ignored")
+	_ = d.SetPublicationRemote(p.ID, "n1", "ignored")
 	got, _ = d.GetPublication(p.ID)
 	if got.FailDetail != "gone" || got.PlatformPostID != "v_pub_file~9" {
 		t.Fatalf("a failed row was edited: %+v", got)
@@ -237,5 +237,95 @@ func TestAMissingPublicationIsNotFoundAndANilTagListIsEmpty(t *testing.T) {
 	}
 	if err := d.RecordPublicationPost(9999, "x", "", ""); err == nil {
 		t.Error("a post was recorded on a missing row")
+	}
+}
+
+// A worker left over from a cancelled run must not be able to touch the run that
+// replaced it: every worker write carries the nonce.
+func TestAStaleWorkersWritesAreRefusedAfterAReArm(t *testing.T) {
+	d := testDB(t)
+	box := pubBox(t)
+	p, _, _ := d.ClaimPublication(sampleClaim()) // nonce n1
+	if err := d.FailPublication(p.ID, "cancelled", "Publishing was cancelled."); err != nil {
+		t.Fatal(err)
+	}
+	re := sampleClaim()
+	re.Nonce = "n2"
+	if _, out, _ := d.ClaimPublication(re); out != ClaimRearmed {
+		t.Fatalf("outcome = %v", out)
+	}
+	stale := "n1"
+	for name, err := range map[string]error{
+		"session": d.SetPublicationSession(box, p.ID, stale, "https://up/x", "h"),
+		"clear":   d.ClearPublicationSession(p.ID, stale),
+		"remote":  d.SetPublicationRemote(p.ID, stale, "v1"),
+		"note":    d.SetPublicationNote(p.ID, stale, "late"),
+		"fail":    d.FailPublicationFor(p.ID, stale, "network", "late"),
+	} {
+		if !errors.Is(err, ErrPublicationNotArmed) {
+			t.Errorf("a stale %s write = %v, want ErrPublicationNotArmed", name, err)
+		}
+	}
+	if _, err := d.StampPublicationFinalizing(p.ID, stale); !errors.Is(err, ErrPublicationNotArmed) {
+		t.Errorf("a stale stamp = %v", err)
+	}
+	got, _ := d.GetPublication(p.ID)
+	if got.State != PublicationConfirmed || got.HasSession || got.PlatformPostID != "" || !got.FinalizingAt.IsZero() {
+		t.Fatalf("the new run's row was touched: %+v", got)
+	}
+	// The live nonce still works.
+	if err := d.SetPublicationSession(box, p.ID, "n2", "https://up/y", "h"); err != nil {
+		t.Fatalf("live write = %v", err)
+	}
+}
+
+// If the platform has the post, the ledger says so even over a local failure.
+func TestAPostThatLandedIsRecordedOverALocalFailure(t *testing.T) {
+	d := testDB(t)
+	p, _, _ := d.ClaimPublication(sampleClaim())
+	if err := d.FailPublication(p.ID, "cancelled", "Publishing was cancelled."); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RecordPublicationPost(p.ID, "vid7", "https://youtu.be/vid7", "private"); err != nil {
+		t.Fatalf("record over a failure = %v", err)
+	}
+	got, _ := d.GetPublication(p.ID)
+	if got.State != PublicationPosted || got.PlatformPostID != "vid7" || got.FailCause != "" {
+		t.Fatalf("row = %+v", got)
+	}
+	if _, out, _ := d.ClaimPublication(sampleClaim()); out != ClaimPosted {
+		t.Fatalf("a click after that = %v, want ClaimPosted", out)
+	}
+}
+
+// The finalize stamp is the only memory of "a request may have gone out". A new
+// click does not erase it; only re-arming an outcome_unknown failure does, and the
+// API demands the person's acknowledgement for that.
+func TestTheFinalizeStampSurvivesAReArmExceptAfterOutcomeUnknown(t *testing.T) {
+	d := testDB(t)
+	p, _, _ := d.ClaimPublication(sampleClaim())
+	if first, err := d.StampPublicationFinalizing(p.ID, "n1"); err != nil || !first {
+		t.Fatalf("stamp = %v, %v", first, err)
+	}
+	if err := d.FailPublicationFor(p.ID, "n1", "network", "dropped"); err != nil {
+		t.Fatal(err)
+	}
+	re := sampleClaim()
+	re.Nonce = "n2"
+	if _, out, _ := d.ClaimPublication(re); out != ClaimRearmed {
+		t.Fatal("not rearmed")
+	}
+	if got, _ := d.GetPublication(p.ID); got.FinalizingAt.IsZero() {
+		t.Fatal("an ordinary re-arm erased the finalize stamp")
+	}
+	if err := d.FailPublicationFor(p.ID, "n2", "outcome_unknown", "look at the account"); err != nil {
+		t.Fatal(err)
+	}
+	re.Nonce = "n3"
+	if _, out, _ := d.ClaimPublication(re); out != ClaimRearmed {
+		t.Fatal("not rearmed")
+	}
+	if got, _ := d.GetPublication(p.ID); !got.FinalizingAt.IsZero() {
+		t.Fatal("re-arming an acknowledged outcome_unknown kept the stamp")
 	}
 }

@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "Add a title to publish.",
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "In the TikTok developer portal, open your app and copy the Client key from its App details page.",
-  "credLabels.tiktok.secretWhere": "On the same App details page, reveal and copy the Client secret."
+  "credLabels.tiktok.secretWhere": "On the same App details page, reveal and copy the Client secret.",
+  "publish.ackOutcome": "I checked {platform} and the post is not there."
 }

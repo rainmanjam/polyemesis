@@ -192,8 +192,8 @@ func TestAnInterruptedUploadResumesFromTheByteYouTubeHolds(t *testing.T) {
 	e, f, _ := ytEnv(t)
 	p, params := e.claim(PlatformYouTube)
 	// A session exists and holds 1000 bytes.
-	if err := e.d.SetPublicationSession(e.box, p.ID, e.ad[PlatformYouTube].(*YouTube).Base+"/session/abc?upload_id=SESSIONSECRET",
-		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, 3000)); err != nil {
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", e.ad[PlatformYouTube].(*YouTube).Base+"/session/abc?upload_id=SESSIONSECRET",
+		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, e.clip)); err != nil {
 		t.Fatal(err)
 	}
 	f.uploaded = 1000

@@ -79,10 +79,26 @@ resumes or asks the platform instead of starting again:
   A retry polls the `publish_id`.
 - **X**: the post is the one step that cannot be asked about, so intent is stamped
   first and a retry that finds the stamp does not repeat it; it reports that the
-  outcome is unknown and tells you to look at the account.
+  outcome is unknown and tells you to look at the account. The media upload
+  remembers how far it got, so a retry redoes an unfinished append or finalize
+  rather than posting half-uploaded media.
 
 Session and upload URLs are capabilities, so they are stored sealed, and are kept
-out of job parameters, the job log, results and error text.
+out of job parameters, the job log, results and error text; anything that looks
+like a link or a token is redacted from stored and displayed failure text as a
+second layer.
+
+**One run at a time.** Every write a worker makes to its row carries the nonce of
+the click that started it. If you cancel and click Publish again, a worker left
+over from the first run finds its writes refused and stops; it cannot disturb the
+new run. The one exception is on purpose: if the platform has the post, the ledger
+records it even over a local failure, so the next click cannot post it again.
+
+**When the last request may have landed.** If a request that cannot be asked about
+afterwards (the final upload byte, the X post) loses its answer, the failure is
+`outcome_unknown`, nothing is sent again, and the dialog asks you to look at the
+account. Publishing again is only possible after you tick that you checked and the
+post is not there; the server refuses the re-arm without it.
 
 ## Failure reasons
 

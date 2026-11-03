@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -67,9 +68,24 @@ func statusFailure(code int, detail string) *Failure {
 	return fail(CauseRefused, false, "the platform refused the request, HTTP %d: %s", code, detail)
 }
 
+var (
+	urlPattern    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>)]+`)
+	secretPattern = regexp.MustCompile(`(?i)\b(upload_?id|upload_?token|token|signature|sig|key|secret|code)=[^\s&"'<>]+`)
+)
+
+// Redact removes anything that could be a capability from text that is about to
+// be stored or shown: URLs (an upload address is a credential, and platform
+// error bodies and Go's own errors both like to quote one) and key=value
+// pairs that look like tokens. It is a second layer; the adapters already avoid
+// producing such text.
+func Redact(s string) string {
+	s = urlPattern.ReplaceAllString(s, "[link]")
+	return secretPattern.ReplaceAllString(s, "$1=[redacted]")
+}
+
 // oneLine trims a platform message to something safe to store and show.
 func oneLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
+	s = Redact(strings.Join(strings.Fields(s), " "))
 	if len(s) > 300 {
 		s = s[:300] + "..."
 	}

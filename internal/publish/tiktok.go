@@ -30,7 +30,6 @@ const tikTokBase = "https://open.tiktokapis.com"
 const TikTokScope = "video.publish"
 
 const (
-	tikTokMinChunk  = 5 << 20
 	tikTokChunk     = 10 << 20
 	tikTokPollEvery = 3 * time.Second
 	tikTokPollFor   = 4 * time.Minute
@@ -149,7 +148,10 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 	if total <= 0 {
 		return Done{}, fail(CauseClipMissing, false, "the exported clip is empty")
 	}
-	upload, _ := r.Sess.Get()
+	upload, _, gerr := r.Sess.Get()
+	if gerr != nil {
+		return Done{}, fail(CauseUnknown, true, "could not read the stored upload address, so nothing was sent")
+	}
 
 	if r.Sess.Remote != "" {
 		st, f := t.status(ctx, r.Cred.AccessToken, r.Sess.Remote)
@@ -167,15 +169,22 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 			upload = ""
 			r.Sess.Remote = ""
 		default:
-			if st.UploadedBytes >= total || upload == "" {
-				// Every byte is in (or the URL to send more is gone and TikTok
-				// is still waiting): poll, do not re-send.
-				if st.UploadedBytes >= total {
-					return t.poll(ctx, r, r.Sess.Remote)
+			switch {
+			case st.UploadedBytes >= total:
+				// Every byte is in: poll, do not re-send.
+				return t.poll(ctx, r, r.Sess.Remote)
+			case upload == "" && !r.Pub.FinalizingAt.IsZero():
+				// The final chunk may have gone out and its address has since
+				// expired. TikTok is still processing this publish id; starting
+				// another would be a second post. Wait for its verdict.
+				return t.poll(ctx, r, r.Sess.Remote)
+			case upload == "":
+				// No bytes went out and there is no address to send them to: the
+				// publish id can never complete, so a fresh init is safe.
+				if err := r.Sess.SaveRemote(""); err != nil {
+					return Done{}, fail(CauseUnknown, true, "could not forget the unusable publish id")
 				}
-				_ = r.Sess.SaveRemote("")
-				r.Sess.Remote = ""
-			} else {
+			default:
 				return t.sendAndPoll(ctx, r, upload, r.Sess.Remote, st.UploadedBytes)
 			}
 		}
@@ -241,7 +250,9 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 // tikTokChunks follows TikTok's chunk rules: 5-64 MB chunks, the last may be
 // larger, under 5 MB goes whole, and the count is the floor of size/chunk.
 func tikTokChunks(total int64) (chunk int64, count int64) {
-	if total < tikTokChunk {
+	// Under two chunks' worth, send it whole with chunk_size equal to
+	// video_size, so a single chunk can never disagree with what init declared.
+	if total < 2*tikTokChunk {
 		return total, 1
 	}
 	return tikTokChunk, total / tikTokChunk
@@ -268,6 +279,13 @@ func (t *TikTok) sendAndPoll(ctx context.Context, r Run, uploadURL, publishID st
 			end = total - 1
 		}
 		n := end - start + 1
+		if idx == count-1 {
+			// From the final chunk on, TikTok may complete the post without our
+			// ever hearing; a later attempt must poll rather than start over.
+			if _, err := r.Sess.StampFinalizing(); err != nil {
+				return Done{}, fail(CauseUnknown, true, "could not record the final upload, so nothing was sent")
+			}
+		}
 		body := &progressReader{r: io.NewSectionReader(f, start, n), of: total, done: start, fn: r.Rep.Progress}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, body)
 		if err != nil {

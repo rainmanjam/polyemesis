@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "Aggiungi un titolo per pubblicare.",
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "Nel portale sviluppatori di TikTok apri la tua app e copia la Client key dalla pagina dei dettagli.",
-  "credLabels.tiktok.secretWhere": "Nella stessa pagina dei dettagli mostra e copia il Client secret."
+  "credLabels.tiktok.secretWhere": "Nella stessa pagina dei dettagli mostra e copia il Client secret.",
+  "publish.ackOutcome": "Ho controllato {platform} e il post non c'è."
 }

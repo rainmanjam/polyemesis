@@ -25,21 +25,27 @@ func (l dbLedger) Begin(id int64, nonce string) (db.Publication, error) {
 func (l dbLedger) Session(id int64) (string, string, error) {
 	return l.d.GetPublicationSession(l.box, id)
 }
-func (l dbLedger) SaveSession(id int64, secret, hash string) error {
-	return l.d.SetPublicationSession(l.box, id, secret, hash)
+func (l dbLedger) SaveSession(id int64, nonce, secret, hash string) error {
+	return l.d.SetPublicationSession(l.box, id, nonce, secret, hash)
 }
-func (l dbLedger) ClearSession(id int64) error { return l.d.ClearPublicationSession(id) }
-func (l dbLedger) SaveRemote(id int64, remote string) error {
-	return l.d.SetPublicationRemote(id, remote)
+func (l dbLedger) ClearSession(id int64, nonce string) error {
+	return l.d.ClearPublicationSession(id, nonce)
 }
-func (l dbLedger) StampFinalizing(id int64) (bool, error) { return l.d.StampPublicationFinalizing(id) }
+func (l dbLedger) SaveRemote(id int64, nonce, remote string) error {
+	return l.d.SetPublicationRemote(id, nonce, remote)
+}
+func (l dbLedger) StampFinalizing(id int64, nonce string) (bool, error) {
+	return l.d.StampPublicationFinalizing(id, nonce)
+}
 func (l dbLedger) RecordPost(id int64, postID, url, privacy string) error {
 	return l.d.RecordPublicationPost(id, postID, url, privacy)
 }
-func (l dbLedger) Fail(id int64, cause, detail string) error {
-	return l.d.FailPublication(id, cause, detail)
+func (l dbLedger) Fail(id int64, nonce, cause, detail string) error {
+	return l.d.FailPublicationFor(id, nonce, cause, detail)
 }
-func (l dbLedger) Note(id int64, note string) error { return l.d.SetPublicationNote(id, note) }
+func (l dbLedger) Note(id int64, nonce, note string) error {
+	return l.d.SetPublicationNote(id, nonce, note)
+}
 
 // JobReader is the slice of the job store the clip resolver needs.
 type JobReader interface {
@@ -75,5 +81,5 @@ func ResolveClip(store JobReader, exportDir string, clipJobID int64) (File, erro
 	if err != nil || st.IsDir() {
 		return File{}, ErrClipGone
 	}
-	return File{Path: path, Size: st.Size(), Seconds: res.Seconds, Vertical: res.Vertical}, nil
+	return File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano(), Seconds: res.Seconds, Vertical: res.Vertical}, nil
 }

@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "请先填写标题再发布。",
   "credLabels.clientKey": "客户端密钥标识",
   "credLabels.tiktok.idWhere": "在 TikTok 开发者门户中打开你的应用，从应用详情页复制客户端密钥标识。",
-  "credLabels.tiktok.secretWhere": "在同一应用详情页中显示并复制客户端密钥。"
+  "credLabels.tiktok.secretWhere": "在同一应用详情页中显示并复制客户端密钥。",
+  "publish.ackOutcome": "我已查看 {platform}，那里没有这条发布内容。"
 }

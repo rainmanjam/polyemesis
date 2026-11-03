@@ -64,7 +64,7 @@ func TestAGoneYouTubeSessionIsReplacedAndAChangedFormOpensANewOne(t *testing.T) 
 	p, params := e.claim(PlatformYouTube)
 	// A session stored for DIFFERENT words: the old one holds nothing final, so a
 	// fresh one is opened for what the person confirmed.
-	if err := e.d.SetPublicationSession(e.box, p.ID, e.ad[PlatformYouTube].(*YouTube).Base+"/session/old", "some-other-hash"); err != nil {
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", e.ad[PlatformYouTube].(*YouTube).Base+"/session/old", "some-other-hash"); err != nil {
 		t.Fatal(err)
 	}
 	f.uploaded = 0
@@ -91,8 +91,8 @@ func TestAYouTubeSessionThatIsGoneIsReplaced(t *testing.T) {
 	url = srv.URL
 	e.ad[PlatformYouTube] = &YouTube{Base: srv.URL}
 	p, params := e.claim(PlatformYouTube)
-	if err := e.d.SetPublicationSession(e.box, p.ID, srv.URL+"/session/dead",
-		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, 3000)); err != nil {
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", srv.URL+"/session/dead",
+		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, e.clip)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.run(params, 1); err != nil {
@@ -185,10 +185,10 @@ func TestTikTokResumesFromAChunkBoundaryAndSkipsTheInitWhenTheIDIsAlive(t *testi
 		t.Fatal(err)
 	}
 	p, params := e.claim(PlatformTikTok)
-	if err := e.d.SetPublicationRemote(p.ID, "v_pub_file~1"); err != nil {
+	if err := e.d.SetPublicationRemote(p.ID, "nonce-click-1", "v_pub_file~1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.d.SetPublicationSession(e.box, p.ID, f.srvURL+"/upload?upload_token=TTSECRET", "tiktok"); err != nil {
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", f.srvURL+"/upload?upload_token=TTSECRET", "tiktok"); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -323,5 +323,187 @@ func TestNetworkErrorsNeverCarryTheRequestURL(t *testing.T) {
 	row := e.row(p.ID)
 	if strings.Contains(row.FailDetail, "SECRETQUERY") || strings.Contains(row.FailDetail, "http://") {
 		t.Fatalf("the request URL leaked into the failure detail: %q", row.FailDetail)
+	}
+}
+
+func TestRedactStripsLinksAndTokenPairs(t *testing.T) {
+	in := `Put "https://up.example/s?upload_id=ABC123&x=1": 403 token=SECRETVALUE and key=K1 then http://h/p`
+	out := Redact(in)
+	for _, leak := range []string{"https://", "http://", "ABC123", "SECRETVALUE", "K1", "up.example"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("Redact left %q in %q", leak, out)
+		}
+	}
+}
+
+func TestAPlatformErrorBodyThatQuotesTheUploadURLIsRedacted(t *testing.T) {
+	e := newEnv(t)
+	srv, _ := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/post/publish/creator_info/query/":
+			fmt.Fprint(w, `{"data":{"privacy_level_options":["SELF_ONLY"],"max_video_post_duration_sec":300},"error":{"code":"ok"}}`)
+		case "/v2/post/publish/video/init/":
+			fmt.Fprintf(w, `{"data":{"publish_id":"p1","upload_url":"http://%s/upload?upload_token=LEAKME"},"error":{"code":"ok"}}`, r.Host)
+		case "/upload":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprintf(w, "<Error>denied for http://%s/upload?upload_token=LEAKME</Error>", r.Host)
+		}
+	})
+	e.ad[PlatformTikTok] = &TikTok{Base: srv.URL}
+	p, params := e.claim(PlatformTikTok)
+	_, err := e.run(params, 3)
+	row := e.row(p.ID)
+	if all := row.FailDetail + fmt.Sprint(err); strings.Contains(all, "LEAKME") || strings.Contains(all, "upload_token") {
+		t.Fatalf("an upload capability leaked: %q", all)
+	}
+}
+
+// A lost final response followed by a vanished session cannot say whether the
+// video landed. Opening a new session could be a second video.
+func TestAVanishedSessionAfterBytesWentOutIsOutcomeUnknownNotANewUpload(t *testing.T) {
+	e, f, cnt := ytEnv(t)
+	f.dropFinalResponse.Store(true)
+	p, params := e.claim(PlatformYouTube)
+	if _, err := e.run(params, 1); err == nil {
+		t.Fatal("expected the dropped response to fail")
+	}
+	// The session is now gone on YouTube's side.
+	srv2, cnt2 := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	_ = cnt
+	// Re-aim the adapter at a host that answers 404 to the stored session URL.
+	sess, _, _ := e.d.GetPublicationSession(e.box, p.ID)
+	if sess == "" {
+		t.Fatal("no session was stored")
+	}
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", srv2.URL+"/session/abc",
+		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, e.clip)); err != nil {
+		t.Fatal(err)
+	}
+	e.ad[PlatformYouTube] = &YouTube{Base: srv2.URL}
+	if _, err := e.run(params, 2); !jobs.IsPermanent(err) {
+		t.Fatalf("err = %v, want a permanent outcome-unknown", err)
+	}
+	if cnt2.count("POST /upload/youtube/v3/videos") != 0 {
+		t.Fatal("a new upload session was opened after bytes may have been sent")
+	}
+	if row := e.row(p.ID); row.FailCause != string(CauseOutcomeUnknown) {
+		t.Fatalf("cause = %q", row.FailCause)
+	}
+}
+
+type brokenSessionLedger struct{ Ledger }
+
+func (brokenSessionLedger) Session(int64) (string, string, error) {
+	return "", "", fmt.Errorf("disk error")
+}
+
+func TestAFailedSessionReadStopsTheAttemptInsteadOfOpeningASecondUpload(t *testing.T) {
+	e, _, cnt := ytEnv(t)
+	_, params := e.claim(PlatformYouTube)
+	w := NewWorker(WorkerDeps{
+		Ledger: brokenSessionLedger{LedgerFor(e.d, e.box)}, Adapters: e.ad,
+		Tokens: func(context.Context, int64) (Credential, error) { return e.cred, nil },
+		Clips:  func(context.Context, int64) (File, error) { return e.clip, nil },
+	})
+	err := w.Run(context.Background(), jobs.Job{ID: 1, Params: mustParams(params), Attempts: 1, MaxAttempts: 3}, &rep{})
+	if err == nil || cnt.n() != 0 {
+		t.Fatalf("err = %v, requests = %d: an unreadable session must stop the attempt before any request", err, cnt.n())
+	}
+}
+
+// Worker A is mid-request when the click is cancelled and a new click re-arms the
+// row. When A's request returns, its writes are refused and the new run's row is
+// untouched.
+func TestAStaleWorkerCannotTouchTheRunThatReplacedIt(t *testing.T) {
+	e := newEnv(t)
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	srv, _ := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		w.Header().Set("Location", "http://"+r.Host+"/session/late?upload_id=LATE")
+	})
+	e.ad[PlatformYouTube] = &YouTube{Base: srv.URL}
+	p, params := e.claim(PlatformYouTube)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.worker().Run(context.Background(), jobs.Job{ID: 1, Params: mustParams(params), Attempts: 1, MaxAttempts: 3}, &rep{})
+	}()
+	<-started
+	// Cancel, then a new click re-arms the row with a new nonce.
+	if err := e.d.FailPublication(p.ID, "cancelled", "Publishing was cancelled."); err != nil {
+		t.Fatal(err)
+	}
+	re := db.Publication{ClipJobID: 11, Platform: PlatformYouTube, AccountID: 5, Title: "t", Nonce: "nonce-click-2", Privacy: "private"}
+	if _, out, _ := e.d.ClaimPublication(re); out != db.ClaimRearmed {
+		t.Fatalf("outcome = %v", out)
+	}
+	close(release)
+	if err := <-done; err == nil {
+		t.Fatal("the stale worker carried on")
+	}
+	row := e.row(p.ID)
+	if row.State != db.PublicationConfirmed || row.HasSession || row.FailCause != "" {
+		t.Fatalf("the stale worker disturbed the new run: %+v", row)
+	}
+}
+
+func TestXRetryAfterAnAppendErrorRedoesTheUploadInsteadOfPostingUnfinishedMedia(t *testing.T) {
+	e := newEnv(t)
+	appends := 0
+	srv, cnt := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/2/media/upload/initialize":
+			fmt.Fprint(w, `{"data":{"id":"m1"}}`)
+		case "/2/media/upload/m1/append":
+			appends++
+			if appends == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			fmt.Fprint(w, `{"data":{"expires_at":1}}`)
+		case "/2/media/upload/m1/finalize":
+			fmt.Fprint(w, `{"data":{"id":"m1"}}`)
+		case "/2/tweets":
+			fmt.Fprint(w, `{"data":{"id":"tw1"}}`)
+		}
+	})
+	e.ad[PlatformX] = &X{Enabled: true, Base: srv.URL, PollEvery: time.Millisecond}
+	e.cred.Scopes = "tweet.write media.write"
+	e.gates = Gates{XPublish: true}
+	p, params := e.claim(PlatformX)
+	if _, err := e.run(params, 1); err == nil {
+		t.Fatal("the first attempt should fail on the append")
+	}
+	if _, err := e.run(params, 2); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if cnt.count("POST /2/media/upload/initialize") != 1 || appends != 2 || cnt.count("POST /2/media/upload/m1/finalize") != 1 {
+		t.Fatalf("init=%d appends=%d finalize=%d", cnt.count("POST /2/media/upload/initialize"), appends, cnt.count("POST /2/media/upload/m1/finalize"))
+	}
+	if e.row(p.ID).State != db.PublicationPosted || cnt.count("POST /2/tweets") != 1 {
+		t.Fatalf("row = %+v", e.row(p.ID))
+	}
+}
+
+func TestAnXAdapterThatIsSwitchedOffSendsNothingEvenIfReached(t *testing.T) {
+	e, cnt := xEnv(t, 200)
+	e.ad[PlatformX] = &X{Base: e.ad[PlatformX].(*X).Base} // Enabled false
+	e.gates = Gates{XPublish: true}                       // the worker's own gate is open
+	p, params := e.claim(PlatformX)
+	if _, err := e.run(params, 1); !jobs.IsPermanent(err) {
+		t.Fatalf("err = %v", err)
+	}
+	if cnt.n() != 0 || e.row(p.ID).FailCause != string(CauseGated) {
+		t.Fatalf("requests = %d, cause = %q", cnt.n(), e.row(p.ID).FailCause)
 	}
 }

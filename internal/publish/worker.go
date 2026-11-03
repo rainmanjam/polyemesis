@@ -42,8 +42,11 @@ type TokenSource func(ctx context.Context, accountID int64) (Credential, error)
 
 // File is a finished clip on disk.
 type File struct {
-	Path     string
-	Size     int64
+	Path string
+	Size int64
+	// ModTime (unix nanoseconds) is part of what an upload session is bound to,
+	// so a file replaced between attempts is never spliced into an old session.
+	ModTime  int64
 	Seconds  float64
 	Vertical bool
 }
@@ -58,48 +61,58 @@ var ErrNotAClip = errors.New("that is not a finished clip export")
 type ClipResolver func(ctx context.Context, clipJobID int64) (File, error)
 
 // Ledger is the durable half, satisfied by LedgerFor(*db.DB, box).
+//
+// EVERY WRITE CARRIES THE NONCE. The run that holds it is the only one allowed to
+// change the row: a worker left over from a cancelled or failed run, coming back
+// from a slow platform request after a new click re-armed the row, finds its
+// writes refused (db.ErrPublicationNotArmed) and stops. RecordPost is the one
+// exception, on purpose: if the platform has the post, the ledger must say so.
 type Ledger interface {
 	Begin(id int64, nonce string) (db.Publication, error)
 	Session(id int64) (secret, metaHash string, err error)
-	SaveSession(id int64, secret, metaHash string) error
-	ClearSession(id int64) error
-	SaveRemote(id int64, remote string) error
-	StampFinalizing(id int64) (bool, error)
+	SaveSession(id int64, nonce, secret, metaHash string) error
+	ClearSession(id int64, nonce string) error
+	SaveRemote(id int64, nonce, remote string) error
+	StampFinalizing(id int64, nonce string) (bool, error)
 	RecordPost(id int64, postID, url, privacy string) error
-	Fail(id int64, cause, detail string) error
-	Note(id int64, note string) error
+	Fail(id int64, nonce, cause, detail string) error
+	Note(id int64, nonce, note string) error
 }
 
 // Session is the adapter's window onto the ledger for one run.
 type Session struct {
-	l  Ledger
-	id int64
+	l     Ledger
+	id    int64
+	nonce string
 	// Remote is the platform-side id saved by an earlier attempt, if any.
 	Remote string
 }
 
-// Get returns the stored resumable session and the hash of the metadata it was
-// opened with.
-func (s *Session) Get() (secret, metaHash string) {
-	secret, metaHash, _ = s.l.Session(s.id)
-	return secret, metaHash
-}
+// Get returns the stored resumable session and the hash it was opened with. An
+// error is NOT "no session": a failed read must stop the attempt, because
+// treating it as empty would open a second upload next to a live one.
+func (s *Session) Get() (secret, metaHash string, err error) { return s.l.Session(s.id) }
 
 // Save stores a session BEFORE any byte is sent on it.
-func (s *Session) Save(secret, metaHash string) error { return s.l.SaveSession(s.id, secret, metaHash) }
+func (s *Session) Save(secret, metaHash string) error {
+	return s.l.SaveSession(s.id, s.nonce, secret, metaHash)
+}
 
 // Clear forgets the stored session.
-func (s *Session) Clear() error { return s.l.ClearSession(s.id) }
+func (s *Session) Clear() error { return s.l.ClearSession(s.id, s.nonce) }
 
 // SaveRemote stores the platform-side id of an unfinished post.
 func (s *Session) SaveRemote(remote string) error {
+	if err := s.l.SaveRemote(s.id, s.nonce, remote); err != nil {
+		return err
+	}
 	s.Remote = remote
-	return s.l.SaveRemote(s.id, remote)
+	return nil
 }
 
-// StampFinalizing records intent to make the one call that cannot be asked
-// about afterwards. It reports false when an earlier attempt already did.
-func (s *Session) StampFinalizing() (bool, error) { return s.l.StampFinalizing(s.id) }
+// StampFinalizing records intent to make a request that cannot be asked about
+// afterwards. It reports false when an earlier attempt already did.
+func (s *Session) StampFinalizing() (bool, error) { return s.l.StampFinalizing(s.id, s.nonce) }
 
 // Run is everything an adapter needs for one attempt.
 type Run struct {
@@ -145,10 +158,10 @@ type WorkerDeps struct {
 // on the worker's side, and it is why a generic job retry, a replayed job or a
 // hand-made row does nothing.
 func NewWorker(d WorkerDeps) jobs.Worker {
-	log := d.Log
-	if log == nil {
-		log = slog.Default()
+	if d.Log == nil {
+		d.Log = slog.Default()
 	}
+	log := d.Log
 	return jobs.WorkerFunc(func(ctx context.Context, job jobs.Job, rep jobs.Reporter) error {
 		var p Params
 		if err := json.Unmarshal(job.Params, &p); err != nil || p.PublicationID <= 0 {
@@ -169,7 +182,7 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 
 		ad, ok := d.Adapters[pub.Platform]
 		if !ok || (pub.Platform == PlatformX && !d.Gates.XPublish) {
-			return d.giveUp(pub, fail(CauseGated, false, "%s", gateCopy(pub.Platform)))
+			return d.giveUp(pub, p.Nonce, fail(CauseGated, false, "%s", gateCopy(pub.Platform)))
 		}
 
 		meta := Meta{Title: pub.Title, Description: pub.Description, Tags: pub.Tags, Privacy: pub.Privacy}
@@ -180,26 +193,26 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 				return ctx.Err()
 			}
 			if strings.Contains(strings.ToLower(err.Error()), "reconnect") {
-				return d.giveUp(pub, fail(CauseNeedsReconnect, false, "%s", scrubAll(err.Error())))
+				return d.giveUp(pub, p.Nonce, fail(CauseNeedsReconnect, false, "%s", scrubAll(err.Error())))
 			}
-			return d.settle(job, pub, fail(CauseTokenRejected, true, "%s", scrubAll(err.Error())), cred)
+			return d.settle(job, pub, p.Nonce, fail(CauseTokenRejected, true, "%s", scrubAll(err.Error())), cred)
 		}
 		if f := ad.Ready(cred); f != nil {
-			return d.giveUp(pub, f)
+			return d.giveUp(pub, p.Nonce, f)
 		}
 
 		file, err := d.Clips(ctx, pub.ClipJobID)
 		if err != nil {
 			if errors.Is(err, ErrClipGone) {
-				return d.giveUp(pub, fail(CauseClipMissing, false, "%s", err.Error()))
+				return d.giveUp(pub, p.Nonce, fail(CauseClipMissing, false, "%s", err.Error()))
 			}
 			if errors.Is(err, ErrNotAClip) {
-				return d.giveUp(pub, fail(CauseClipRejected, false, "%s", err.Error()))
+				return d.giveUp(pub, p.Nonce, fail(CauseClipRejected, false, "%s", err.Error()))
 			}
-			return d.settle(job, pub, fail(CauseUnknown, true, "%s", scrubAll(err.Error())), cred)
+			return d.settle(job, pub, p.Nonce, fail(CauseUnknown, true, "%s", scrubAll(err.Error())), cred)
 		}
 
-		sess := &Session{l: d.Ledger, id: pub.ID, Remote: pub.PlatformPostID}
+		sess := &Session{l: d.Ledger, id: pub.ID, nonce: p.Nonce, Remote: pub.PlatformPostID}
 		done, err := ad.Publish(ctx, Run{Pub: pub, Meta: meta, Cred: cred, File: file, Sess: sess, Rep: rep})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -211,7 +224,7 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 			if !errors.As(err, &f) {
 				f = fail(CauseNetwork, true, "%s", err.Error())
 			}
-			return d.settle(job, pub, f, cred)
+			return d.settle(job, pub, p.Nonce, f, cred)
 		}
 		if err := d.Ledger.RecordPost(pub.ID, done.PostID, done.URL, done.Privacy); err != nil {
 			// The platform has the post and the ledger could not say so. A
@@ -234,23 +247,36 @@ func gateCopy(platform string) string {
 }
 
 // giveUp ends the publication for a cause a retry cannot fix.
-func (d WorkerDeps) giveUp(pub db.Publication, f *Failure) error {
-	_ = d.Ledger.Fail(pub.ID, string(f.Cause), f.Detail)
+func (d WorkerDeps) giveUp(pub db.Publication, nonce string, f *Failure) error {
+	f.Detail = Redact(f.Detail)
+	if err := d.Ledger.Fail(pub.ID, nonce, string(f.Cause), f.Detail); err != nil {
+		if errors.Is(err, db.ErrPublicationNotArmed) {
+			return jobs.Permanent(err)
+		}
+		d.Log.Warn("could not record a failed publication; the status read will repair it", "publication", pub.ID, "err", err)
+	}
 	return jobs.Permanent(f)
 }
 
 // settle ends or continues the publication after a failed step: retryable
 // failures go back to the queue's backoff until it runs out of attempts.
-func (d WorkerDeps) settle(job jobs.Job, pub db.Publication, f *Failure, c Credential) error {
-	f.Detail = scrub(f.Detail, c.AccessToken)
+func (d WorkerDeps) settle(job jobs.Job, pub db.Publication, nonce string, f *Failure, c Credential) error {
+	f.Detail = Redact(scrub(f.Detail, c.AccessToken))
 	if !f.Retry {
-		return d.giveUp(pub, f)
+		return d.giveUp(pub, nonce, f)
 	}
 	if job.Attempts >= job.MaxAttempts {
-		_ = d.Ledger.Fail(pub.ID, string(f.Cause), f.Detail)
+		if err := d.Ledger.Fail(pub.ID, nonce, string(f.Cause), f.Detail); err != nil {
+			if errors.Is(err, db.ErrPublicationNotArmed) {
+				return jobs.Permanent(err)
+			}
+			d.Log.Warn("could not record a failed publication; the status read will repair it", "publication", pub.ID, "err", err)
+		}
 		return f
 	}
-	_ = d.Ledger.Note(pub.ID, "will retry: "+f.Detail)
+	if err := d.Ledger.Note(pub.ID, nonce, "will retry: "+f.Detail); errors.Is(err, db.ErrPublicationNotArmed) {
+		return jobs.Permanent(err)
+	}
 	return f
 }
 
@@ -263,4 +289,4 @@ func scrub(s string, secrets ...string) string {
 	return s
 }
 
-func scrubAll(s string) string { return strings.TrimSpace(s) }
+func scrubAll(s string) string { return strings.TrimSpace(Redact(s)) }

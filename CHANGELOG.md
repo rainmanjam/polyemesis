@@ -27,7 +27,7 @@ its first tagged release.
   a new sign-in for posting only (Settings, Platforms) and is **always posted private** until
   TikTok audits the app, which the dialog says; X publishing is built and **off**
   (`POLYEMESIS_X_PUBLISH`, separate from the Livestream switch). New routes `GET /publish/targets`,
-  `POST /publish/prepare`, `POST /publish`, `GET /publish/{id}`; new job kind `clip.publish`; one
+  `POST /publish/prepare`, `POST /publish`, `GET /publish/{id}`; a request whose last step may have landed (`outcome_unknown`) is only re-armed once the person confirms they checked the account; new job kind `clip.publish`; one
   new table `clip_publications`; the TikTok capability row now reads Works for sign-in. In all 15
   languages. See docs/CLIP-PUBLISHING.md.
 

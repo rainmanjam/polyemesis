@@ -166,7 +166,7 @@ func TestTikTokUploadURLIsNeverStoredInTheClear(t *testing.T) {
 func TestTikTokChunksFollowTheDocumentedRules(t *testing.T) {
 	for _, tc := range []struct{ size, chunk, count int64 }{
 		{3 << 20, 3 << 20, 1},
-		{12 << 20, 10 << 20, 1},
+		{12 << 20, 12 << 20, 1},
 		{70 << 20, 10 << 20, 7},
 	} {
 		c, n := tikTokChunks(tc.size)

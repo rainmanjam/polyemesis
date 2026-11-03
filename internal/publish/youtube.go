@@ -135,8 +135,9 @@ func ytFailure(code int, body []byte) *Failure {
 	return statusFailure(code, msg)
 }
 
-func metaHash(m Meta, size int64) string {
-	b, _ := json.Marshal([]any{m, size})
+// metaHash binds an upload session to the words AND the file it was opened for.
+func metaHash(m Meta, f File) string {
+	b, _ := json.Marshal([]any{m, f.Size, f.ModTime})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
 }
@@ -153,8 +154,13 @@ func (y *YouTube) Publish(ctx context.Context, r Run) (Done, error) {
 	}
 	defer f.Close()
 
-	want := metaHash(r.Meta, total)
-	session, have := r.Sess.Get()
+	want := metaHash(r.Meta, r.File)
+	session, have, gerr := r.Sess.Get()
+	if gerr != nil {
+		// A failed read is not "no session": opening a second upload next to a
+		// live one is the double post this ledger exists to prevent.
+		return Done{}, fail(CauseUnknown, true, "could not read the stored upload session, so nothing was sent")
+	}
 	offset := int64(0)
 	if session != "" {
 		st, perr := y.probe(ctx, r.Cred.AccessToken, session, total)
@@ -162,10 +168,28 @@ func (y *YouTube) Publish(ctx context.Context, r Run) (Done, error) {
 		case perr != nil:
 			return Done{}, perr
 		case st.done != nil:
+			// Finished. Even if it was opened for earlier words, it is THE
+			// upload for this clip: adopting it is what stops a duplicate.
+			if have != want {
+				r.Rep.Logf("the upload that finished was opened with the earlier title and description")
+			}
 			return y.done(*st.done, r), nil
-		case st.gone, have != want:
-			// The session is gone, or was opened for different words: only now
-			// is a fresh one allowed, because the old one holds nothing final.
+		case st.gone:
+			if !r.Pub.FinalizingAt.IsZero() {
+				// Bytes may already have reached YouTube and the answer was lost; a
+				// gone session cannot say. Opening a new one could be a second video.
+				return Done{}, fail(CauseOutcomeUnknown, false,
+					"the upload may or may not have reached YouTube and its session is gone. Nothing was sent again; check YouTube Studio before publishing again")
+			}
+			_ = r.Sess.Clear()
+			session = ""
+		case st.offset >= total:
+			// Every byte is in and YouTube has not answered yet: wait for it,
+			// whatever the words say now.
+			return Done{}, fail(CauseUnavailable, true, "YouTube has every byte and is still finishing the upload")
+		case have != want:
+			// Opened for different words or a different file, with bytes still
+			// to send: it holds nothing final, so a fresh one is allowed.
 			_ = r.Sess.Clear()
 			session = ""
 		default:
@@ -183,6 +207,11 @@ func (y *YouTube) Publish(ctx context.Context, r Run) (Done, error) {
 			// this one finishes. Refuse to send bytes at all.
 			return Done{}, fail(CauseUnknown, true, "could not record the upload session, so nothing was sent")
 		}
+	}
+	// Intent first: from here bytes may reach YouTube, and a session that has
+	// vanished by the next attempt can no longer be trusted to say whether they did.
+	if _, err := r.Sess.StampFinalizing(); err != nil {
+		return Done{}, fail(CauseUnknown, true, "could not record the upload attempt, so nothing was sent")
 	}
 	return y.send(ctx, r, f, session, offset, total)
 }

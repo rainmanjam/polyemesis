@@ -133,6 +133,9 @@ export interface PublishForm {
   description: string;
   tags: string[];
   privacy: string;
+  /** The person looked at the platform after an outcome_unknown failure and the
+   *  post is not there. The server refuses to re-arm that failure without it. */
+  acknowledgeOutcome?: boolean;
 }
 
 /** "fun, #clips gaming" becomes ["fun","clips","gaming"]. The # is optional on

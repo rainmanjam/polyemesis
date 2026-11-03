@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "게시하려면 제목을 입력하세요.",
   "credLabels.clientKey": "클라이언트 키",
   "credLabels.tiktok.idWhere": "TikTok 개발자 포털에서 앱을 열고 앱 세부 정보 페이지의 클라이언트 키를 복사하세요.",
-  "credLabels.tiktok.secretWhere": "같은 앱 세부 정보 페이지에서 클라이언트 시크릿을 표시한 뒤 복사하세요."
+  "credLabels.tiktok.secretWhere": "같은 앱 세부 정보 페이지에서 클라이언트 시크릿을 표시한 뒤 복사하세요.",
+  "publish.ackOutcome": "{platform}을(를) 확인했으며 게시물이 없습니다."
 }

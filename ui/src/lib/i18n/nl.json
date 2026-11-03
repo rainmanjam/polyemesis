@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "Voeg een titel toe om te publiceren.",
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "Open in het TikTok-ontwikkelaarsportaal je app en kopieer de Client key van de pagina met app-details.",
-  "credLabels.tiktok.secretWhere": "Toon op dezelfde pagina met app-details het Client secret en kopieer het."
+  "credLabels.tiktok.secretWhere": "Toon op dezelfde pagina met app-details het Client secret en kopieer het.",
+  "publish.ackOutcome": "Ik heb {platform} gecontroleerd en de post staat er niet."
 }

@@ -32,7 +32,7 @@ func xEnv(t *testing.T, tweetStatus int) (*env, *counting) {
 			http.NotFound(w, r)
 		}
 	})
-	e.ad[PlatformX] = &X{Base: srv.URL, PollEvery: time.Millisecond}
+	e.ad[PlatformX] = &X{Enabled: true, Base: srv.URL, PollEvery: time.Millisecond}
 	e.cred.Scopes = "tweet.write media.write users.read"
 	return e, cnt
 }
@@ -116,7 +116,7 @@ func TestXRetryWithinOneArmingDoesNotPostAgain(t *testing.T) {
 	e.gates = Gates{XPublish: true}
 	p, params := e.claim(PlatformX)
 	// An earlier attempt already stamped intent and then lost its answer.
-	if _, err := e.d.StampPublicationFinalizing(p.ID); err != nil {
+	if _, err := e.d.StampPublicationFinalizing(p.ID, "nonce-click-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.run(params, 2); !jobs.IsPermanent(err) {

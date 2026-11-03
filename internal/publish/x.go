@@ -27,6 +27,10 @@ import (
 // ledger before the call, and a retry that finds the stamp does NOT call again;
 // it fails with CauseOutcomeUnknown and tells the human to check the account.
 type X struct {
+	// Enabled is the operator's switch (POLYEMESIS_X_PUBLISH), checked here as
+	// well as by the API and the worker: an adapter that is switched off sends
+	// nothing even if something reaches it.
+	Enabled   bool
 	Base      string
 	Client    *http.Client
 	PollEvery time.Duration
@@ -107,11 +111,18 @@ func (x *X) do(ctx context.Context, method, path string, token string, body any,
 
 // Publish implements Adapter.
 func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
+	if !x.Enabled {
+		return Done{}, fail(CauseGated, false, "%s", XGateCopy)
+	}
 	total := r.File.Size
 	if total <= 0 {
 		return Done{}, fail(CauseClipMissing, false, "the exported clip is empty")
 	}
-	mediaID := r.Sess.Remote
+	// The remote id records how far the media got: "<id>" is initialised, and
+	// "<id>:f" has had every segment appended and been finalized. A retry after
+	// an upload error continues from the phase it reached; it never skips a
+	// phase it did not finish.
+	mediaID, finalized := strings.CutSuffix(r.Sess.Remote, ":f")
 	if mediaID == "" {
 		var ini struct {
 			Data struct {
@@ -130,6 +141,9 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 		if err := r.Sess.SaveRemote(mediaID); err != nil {
 			return Done{}, fail(CauseUnknown, true, "could not record the X media id, so nothing was sent")
 		}
+	}
+	processing := ""
+	if !finalized {
 		if f := x.append(ctx, r, mediaID, total); f != nil {
 			return Done{}, f
 		}
@@ -143,9 +157,19 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 		if f := x.do(ctx, http.MethodPost, "/2/media/upload/"+mediaID+"/finalize", r.Cred.AccessToken, nil, &fin); f != nil {
 			return Done{}, f
 		}
+		if err := r.Sess.SaveRemote(mediaID + ":f"); err != nil {
+			return Done{}, fail(CauseUnknown, true, "could not record the finalized X media, so nothing more was sent")
+		}
+		if fin.Data.Processing != nil {
+			processing = fin.Data.Processing.State
+		}
 	}
-	if f := x.waitProcessed(ctx, r, mediaID); f != nil {
-		return Done{}, f
+	// A finalize that reports no processing_info means the media is ready; a
+	// STATUS read that reports none does not, and is waited on.
+	if finalized || processing != "" {
+		if f := x.waitProcessed(ctx, r, mediaID); f != nil {
+			return Done{}, f
+		}
 	}
 
 	first, err := r.Sess.StampFinalizing()
@@ -220,7 +244,7 @@ func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 			return f
 		}
 		if st.Data.Processing == nil {
-			return nil
+			return fail(CauseUnavailable, true, "X has not reported the video's processing state yet")
 		}
 		switch st.Data.Processing.State {
 		case "succeeded":

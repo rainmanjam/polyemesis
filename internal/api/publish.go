@@ -67,6 +67,10 @@ type publishRequest struct {
 	Tags         []string `json:"tags"`
 	Privacy      string   `json:"privacy"`
 	ConfirmToken string   `json:"confirmToken,omitempty"`
+	// AcknowledgeOutcome is the person saying they looked at the platform after
+	// an outcome_unknown failure and the post is not there. Without it that
+	// failure cannot be re-armed: the earlier request may have landed.
+	AcknowledgeOutcome bool `json:"acknowledgeOutcome,omitempty"`
 }
 
 // plan is everything a request resolves to, checked.
@@ -151,6 +155,19 @@ func (s *Server) planPublish(req publishRequest) (*publishPlan, error) {
 		hash: base64.RawURLEncoding.EncodeToString(sum[:])}, nil
 }
 
+// sessionUser is the signed-in person a request is from. The routes sit behind
+// requireSession, so this never fails there; it is checked anyway so that a route
+// ever mounted without that middleware refuses to mint or spend a confirmation as
+// user 0.
+func sessionUser(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	p, ok := principalFrom(r.Context())
+	if !ok || p.token != nil || p.userID <= 0 {
+		writeError(w, http.StatusUnauthorized, "sign in to do this")
+		return 0, false
+	}
+	return p.userID, true
+}
+
 // ----------------------------------------------------------------- the views
 
 type publishJobView struct {
@@ -187,11 +204,23 @@ func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.J
 		return p, nil
 	}
 	fail := func(cause publish.Cause, detail string) (db.Publication, *jobs.Job) {
-		_ = s.store.FailPublication(p.ID, string(cause), detail)
+		if err := s.store.FailPublication(p.ID, string(cause), detail); err != nil {
+			s.log.Warn("could not fail a stranded publication", "publication", p.ID, "err", err)
+		}
 		p, _ = s.store.GetPublication(p.ID)
 		return p, nil
 	}
 	if p.PublishJobID == 0 {
+		// Submit and the link back to the row are separate writes. A live job that
+		// was never linked (a crash between them) is found by its target and linked
+		// now; only a row with no job at all, for long enough, is called unqueued.
+		if j, err := s.store.FindActiveJob(publish.JobKind, publishJobTarget(p.ID)); err == nil && j != nil {
+			if err := s.store.SetPublicationJob(p.ID, nonceOf(j), j.ID); err != nil {
+				s.log.Warn("could not link a publication to its job", "publication", p.ID, "err", err)
+			}
+			p.PublishJobID = j.ID
+			return p, j
+		}
 		if time.Since(p.UpdatedAt) > publishNeverQueuedAfter {
 			return fail(publish.CauseUnknown, "The publish job was never queued. Click Publish to try again.")
 		}
@@ -199,14 +228,19 @@ func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.J
 	}
 	j, err := s.store.GetJob(p.PublishJobID)
 	switch {
-	case err != nil || j == nil:
+	case errors.Is(err, db.ErrNotFound):
 		return fail(publish.CauseCancelled, "The publish job is gone.")
+	case err != nil || j == nil:
+		// A read that failed says nothing about the job. Leave the row alone: a
+		// worker may be mid-upload, and failing it here could let a click post again.
+		s.log.Warn("could not read a publication's job", "publication", p.ID, "err", err)
+		return p, nil
 	case j.State == jobs.StateCancelled:
 		return fail(publish.CauseCancelled, "Publishing was cancelled.")
 	case j.State == jobs.StateFailed:
 		// The worker records its own failures; this is a job that ended without
 		// one (a crash on the last attempt, a ledger write that failed).
-		detail := strings.TrimSpace(j.Error)
+		detail := strings.TrimSpace(publish.Redact(j.Error))
 		if detail == "" {
 			detail = "The publish job ended without finishing."
 		}
@@ -215,6 +249,16 @@ func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.J
 		return fail(publish.CauseUnknown, "The publish job finished without recording a post.")
 	}
 	return p, j
+}
+
+// publishJobTarget is the queue target a publication's job is submitted with.
+func publishJobTarget(id int64) string { return fmt.Sprintf("clip-publish:%d", id) }
+
+// nonceOf reads the nonce a publish job was queued with.
+func nonceOf(j *jobs.Job) string {
+	var p publish.Params
+	_ = json.Unmarshal(j.Params, &p)
+	return p.Nonce
 }
 
 func (s *Server) publicationView(p db.Publication) publicationView {
@@ -411,8 +455,11 @@ func (s *Server) handlePreparePublish(w http.ResponseWriter, r *http.Request) {
 		s.writePublishError(w, err)
 		return
 	}
-	p, _ := principalFrom(r.Context())
-	tok, exp := s.publishConfirm.issue(p.userID, plan.hash)
+	uid, ok := sessionUser(w, r)
+	if !ok {
+		return
+	}
+	tok, exp := s.publishConfirm.issue(uid, plan.hash)
 	out := publishPrepared{ConfirmToken: tok, ExpiresAt: exp, Platform: req.Platform, AccountID: req.AccountID,
 		AccountName: plan.account.AccountName, Meta: plan.meta,
 		PrivacyForced: req.Platform == publish.PlatformTikTok || req.Platform == publish.PlatformX}
@@ -444,8 +491,11 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		s.writePublishError(w, err)
 		return
 	}
-	p, _ := principalFrom(r.Context())
-	if err := s.publishConfirm.redeem(req.ConfirmToken, p.userID, plan.hash); err != nil {
+	uid, ok := sessionUser(w, r)
+	if !ok {
+		return
+	}
+	if err := s.publishConfirm.redeem(req.ConfirmToken, uid, plan.hash); err != nil {
 		writeErrorCode(w, http.StatusForbidden, "confirm_required", err.Error())
 		return
 	}
@@ -453,8 +503,16 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	// so this click re-arms it instead of being folded into a job that is gone.
 	if rows, err := s.store.ListPublicationsForClip(req.ClipJobID); err == nil {
 		for _, ex := range rows {
-			if ex.Platform == req.Platform && ex.AccountID == req.AccountID {
-				s.reconcilePublication(ex)
+			if ex.Platform != req.Platform || ex.AccountID != req.AccountID {
+				continue
+			}
+			ex, _ = s.reconcilePublication(ex)
+			if ex.State == db.PublicationFailed && ex.FailCause == string(publish.CauseOutcomeUnknown) && !req.AcknowledgeOutcome {
+				// The last request may have landed. Re-arming without the person
+				// having looked is how a lost response becomes a second post.
+				writeErrorCode(w, http.StatusConflict, "acknowledge_outcome",
+					"The last attempt may or may not have posted. Check the account, then confirm it is not there to publish again.")
+				return
 			}
 		}
 	}
@@ -468,7 +526,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	pub, outcome, err := s.store.ClaimPublication(db.Publication{
 		ClipJobID: req.ClipJobID, Platform: req.Platform, AccountID: req.AccountID,
 		AccountName: plan.account.AccountName, Title: plan.meta.Title, Description: plan.meta.Description,
-		Tags: plan.meta.Tags, Privacy: plan.meta.Privacy, ContentHash: plan.hash, Nonce: nonce, ConfirmedBy: p.userID,
+		Tags: plan.meta.Tags, Privacy: plan.meta.Privacy, ContentHash: plan.hash, Nonce: nonce, ConfirmedBy: uid,
 	})
 	if err != nil {
 		writeStoreError(w, err)
@@ -483,16 +541,31 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params, _ := json.Marshal(publish.Params{PublicationID: pub.ID, Nonce: nonce})
-	job, _, err := s.jobq.Submit(jobs.Job{
-		Kind: publish.JobKind, Target: fmt.Sprintf("clip-publish:%d", pub.ID), Params: params,
-		Priority: jobs.PriorityUser, Unique: true, MaxAttempts: publishMaxAttempts,
-	})
+	submit := func() (*jobs.Job, bool, error) {
+		return s.jobq.Submit(jobs.Job{
+			Kind: publish.JobKind, Target: publishJobTarget(pub.ID), Params: params,
+			Priority: jobs.PriorityUser, Unique: true, MaxAttempts: publishMaxAttempts,
+		})
+	}
+	job, created, err := submit()
+	if err == nil && !created && nonceOf(job) != nonce {
+		// Unique folded this click into a job that is still active under an OLDER
+		// click's nonce -- it would run, find the nonce dead, and do nothing, and
+		// this click would never publish. Retire it and queue this click's own.
+		_ = s.jobq.Cancel(job.ID)
+		job, _, err = submit()
+	}
 	if err != nil {
-		_ = s.store.FailPublication(pub.ID, string(publish.CauseUnknown), "The publish job could not be queued.")
+		if ferr := s.store.FailPublication(pub.ID, string(publish.CauseUnknown), "The publish job could not be queued."); ferr != nil {
+			s.log.Warn("could not fail a publication whose job was not queued", "publication", pub.ID, "err", ferr)
+		}
 		writeStoreError(w, err)
 		return
 	}
-	_ = s.store.SetPublicationJob(pub.ID, nonce, job.ID)
+	if err := s.store.SetPublicationJob(pub.ID, nonce, job.ID); err != nil {
+		// Not fatal: a status read links a live job to its row by its target.
+		s.log.Warn("could not link a publication to its job", "publication", pub.ID, "err", err)
+	}
 	pub, _ = s.store.GetPublication(pub.ID)
 	writeJSON(w, http.StatusAccepted, s.publicationView(pub))
 }
@@ -533,6 +606,10 @@ func (s *Server) revokePublishOnCancel(id int64) {
 	}
 	var p publish.Params
 	if json.Unmarshal(j.Params, &p) == nil && p.PublicationID > 0 {
-		_ = s.store.FailPublication(p.PublicationID, string(publish.CauseCancelled), "Publishing was cancelled.")
+		if err := s.store.FailPublication(p.PublicationID, string(publish.CauseCancelled), "Publishing was cancelled."); err != nil {
+			// The job is already cancelled; the status read fails the row if this
+			// write did not land.
+			s.log.Warn("could not revoke a cancelled publication", "publication", p.PublicationID, "err", err)
+		}
 	}
 }

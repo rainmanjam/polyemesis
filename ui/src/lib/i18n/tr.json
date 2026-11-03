@@ -3903,5 +3903,6 @@
   "publish.needsTitle": "Yayınlamak için bir başlık ekleyin.",
   "credLabels.clientKey": "Client key",
   "credLabels.tiktok.idWhere": "TikTok geliştirici portalında uygulamanızı açın ve uygulama ayrıntıları sayfasından Client key değerini kopyalayın.",
-  "credLabels.tiktok.secretWhere": "Aynı ayrıntılar sayfasında Client secret değerini gösterip kopyalayın."
+  "credLabels.tiktok.secretWhere": "Aynı ayrıntılar sayfasında Client secret değerini gösterip kopyalayın.",
+  "publish.ackOutcome": "{platform} hesabını kontrol ettim, gönderi orada yok."
 }

@@ -475,3 +475,64 @@ func TestARowThatWasNeverQueuedIsNotLeftArmedForever(t *testing.T) {
 		t.Fatalf("state = %q", got.State)
 	}
 }
+
+// outcome_unknown means the last request may have landed. A click cannot re-arm it
+// unless the person says they looked at the account.
+func TestAnOutcomeUnknownFailureNeedsTheAcknowledgementToBeReArmed(t *testing.T) {
+	f := newPubFixture(t)
+	var v publicationView
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusAccepted), &v)
+	if err := f.srv.store.FailPublication(v.ID, string(publish.CauseOutcomeUnknown), "look at the account"); err != nil {
+		t.Fatal(err)
+	}
+	var e apiError
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusConflict), &e)
+	if e.Code != "acknowledge_outcome" || len(f.publishJobs(t)) != 1 {
+		t.Fatalf("code = %q, jobs = %d", e.Code, len(f.publishJobs(t)))
+	}
+	ack := f.form("youtube", f.yt)
+	ack["acknowledgeOutcome"] = true
+	f.click(t, ack, http.StatusAccepted)
+	if len(f.publishJobs(t)) != 2 {
+		t.Fatalf("an acknowledged re-arm did not queue a job")
+	}
+}
+
+// A job that is live but was never linked to its row (a crash between Submit and
+// the link) is found by its target and linked, not failed as "never queued".
+func TestALiveJobThatWasNeverLinkedIsLinkedNotFailed(t *testing.T) {
+	f := newPubFixture(t)
+	row, _, err := f.srv.store.ClaimPublication(db.Publication{ClipJobID: f.clip, Platform: "youtube",
+		AccountID: f.yt, Title: "t", Nonce: "nonce-x", Privacy: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(publish.Params{PublicationID: row.ID, Nonce: "nonce-x"})
+	job, _, err := f.q.Submit(jobs.Job{Kind: publish.JobKind, Target: publishJobTarget(row.ID), Params: params, Unique: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.srv.store.SQL().Exec(`UPDATE clip_publications SET updated_ms = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UnixMilli(), row.ID); err != nil {
+		t.Fatal(err)
+	}
+	var got publicationView
+	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/"+strconv.FormatInt(row.ID, 10), nil, http.StatusOK), &got)
+	if got.State == db.PublicationFailed || got.PublishJobID != job.ID {
+		t.Fatalf("view = %+v, want it linked to job %d and still in flight", got, job.ID)
+	}
+}
+
+func TestAnUnreadableJobDoesNotFailALivePublication(t *testing.T) {
+	f := newPubFixture(t)
+	var v publicationView
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusAccepted), &v)
+	row, _ := f.srv.store.GetPublication(v.ID)
+	// A job id that does not parse as a row is a not-found; a read error must not
+	// be treated the same way. Closing the store would break every other call too,
+	// so the distinction is pinned on reconcile's own contract: a missing job fails
+	// the row, an existing one does not.
+	if got, j := f.srv.reconcilePublication(row); got.State == db.PublicationFailed || j == nil {
+		t.Fatalf("a live job was reconciled away: %+v", got)
+	}
+}

@@ -248,9 +248,18 @@ func (d *DB) ClaimPublication(c Publication) (Publication, ClaimOutcome, error) 
 		case PublicationPosted:
 			outcome = ClaimPosted
 		case PublicationFailed:
+			// THE FINALIZE STAMP SURVIVES A RE-ARM, except after outcome_unknown. A
+			// stamp means a request that cannot be asked about afterwards may
+			// already have gone out; erasing it on any click would let a lost
+			// response become a second post. outcome_unknown is the one failure
+			// whose whole message is "look at the account first", and the API
+			// refuses to re-arm it without the person saying they did
+			// (acknowledgeOutcome), so only that path clears the stamp.
 			if _, err := tx.Exec(`UPDATE clip_publications SET account_name = ?, title = ?, description = ?,
 				tags = ?, privacy = ?, state = ?, content_hash = ?, nonce = ?, confirmed_by = ?,
-				publish_job_id = 0, fail_cause = '', fail_detail = '', attempts = 0, finalizing_ms = 0,
+				publish_job_id = 0, attempts = 0,
+				finalizing_ms = CASE WHEN fail_cause = 'outcome_unknown' THEN 0 ELSE finalizing_ms END,
+				fail_cause = '', fail_detail = '',
 				updated_ms = ? WHERE idem_key = ?`,
 				c.AccountName, c.Title, c.Description, string(tags), c.Privacy, PublicationConfirmed,
 				c.ContentHash, c.Nonce, c.ConfirmedBy, now, key); err != nil {
@@ -309,26 +318,42 @@ func (d *DB) BeginPublication(id int64, nonce string) (Publication, error) {
 	return d.GetPublication(id)
 }
 
+// fenced runs a worker-side write that only the CURRENT click's worker may
+// make. Every one of them carries the nonce: a worker left over from a cancelled
+// or failed run that comes back from a slow request must not overwrite the
+// session, remote id or state of the run that replaced it. Zero rows means the
+// row was revoked or re-armed underneath it, and the worker stops.
+func (d *DB) fenced(query string, args ...any) error {
+	res, err := d.sql.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrPublicationNotArmed
+	}
+	return nil
+}
+
 // SetPublicationNote stores a short, non-secret progress line on an in-flight
 // row ("retrying: the platform was busy").
-func (d *DB) SetPublicationNote(id int64, note string) error {
-	_, err := d.sql.Exec(`UPDATE clip_publications SET fail_detail = ?, updated_ms = ?
-		WHERE id = ? AND state IN (?, ?)`, note, time.Now().UnixMilli(), id, PublicationConfirmed, PublicationUploading)
-	return err
+func (d *DB) SetPublicationNote(id int64, nonce, note string) error {
+	return d.fenced(`UPDATE clip_publications SET fail_detail = ?, updated_ms = ?
+		WHERE id = ? AND nonce = ? AND state IN (?, ?)`, note, time.Now().UnixMilli(), id, nonce,
+		PublicationConfirmed, PublicationUploading)
 }
 
 // SetPublicationSession seals and stores a resumable upload session (a YouTube
 // session URI, a TikTok upload URL), with a hash of the metadata it was opened
 // with. They are capabilities to write to the platform, so they never go in a
 // job's params, log or result.
-func (d *DB) SetPublicationSession(box *secrets.Box, id int64, session, metaHash string) error {
+func (d *DB) SetPublicationSession(box *secrets.Box, id int64, nonce, session, metaHash string) error {
 	sealed, err := box.Seal(session)
 	if err != nil {
 		return err
 	}
-	_, err = d.sql.Exec(`UPDATE clip_publications SET session_enc = ?, session_hash = ?, updated_ms = ? WHERE id = ?`,
-		sealed, metaHash, time.Now().UnixMilli(), id)
-	return err
+	return d.fenced(`UPDATE clip_publications SET session_enc = ?, session_hash = ?, updated_ms = ?
+		WHERE id = ? AND nonce = ? AND state IN (?, ?)`,
+		sealed, metaHash, time.Now().UnixMilli(), id, nonce, PublicationConfirmed, PublicationUploading)
 }
 
 // GetPublicationSession opens the stored session; empty when there is none.
@@ -346,39 +371,53 @@ func (d *DB) GetPublicationSession(box *secrets.Box, id int64) (session, metaHas
 }
 
 // ClearPublicationSession forgets the stored session.
-func (d *DB) ClearPublicationSession(id int64) error {
-	_, err := d.sql.Exec(`UPDATE clip_publications SET session_enc = NULL, session_hash = '', updated_ms = ? WHERE id = ?`,
-		time.Now().UnixMilli(), id)
-	return err
+func (d *DB) ClearPublicationSession(id int64, nonce string) error {
+	return d.fenced(`UPDATE clip_publications SET session_enc = NULL, session_hash = '', updated_ms = ?
+		WHERE id = ? AND nonce = ?`, time.Now().UnixMilli(), id, nonce)
 }
 
 // SetPublicationRemote records the platform's id for a post that exists but is
 // not finished (a TikTok publish_id before processing completes), so a retry
 // polls it instead of starting a second post.
-func (d *DB) SetPublicationRemote(id int64, remoteID string) error {
-	_, err := d.sql.Exec(`UPDATE clip_publications SET platform_post_id = ?, updated_ms = ?
-		WHERE id = ? AND state IN (?, ?)`, remoteID, time.Now().UnixMilli(), id,
+func (d *DB) SetPublicationRemote(id int64, nonce, remoteID string) error {
+	return d.fenced(`UPDATE clip_publications SET platform_post_id = ?, updated_ms = ?
+		WHERE id = ? AND nonce = ? AND state IN (?, ?)`, remoteID, time.Now().UnixMilli(), id, nonce,
 		PublicationConfirmed, PublicationUploading)
-	return err
 }
 
 // StampPublicationFinalizing marks the moment just before the one call that
 // cannot be asked about afterwards. It reports true only for the caller that
 // set it, so a retry that finds it already set knows the outcome is unknown
 // and must not repeat the call.
-func (d *DB) StampPublicationFinalizing(id int64) (bool, error) {
+func (d *DB) StampPublicationFinalizing(id int64, nonce string) (bool, error) {
 	res, err := d.sql.Exec(`UPDATE clip_publications SET finalizing_ms = ?, updated_ms = ?
-		WHERE id = ? AND finalizing_ms = 0`, time.Now().UnixMilli(), time.Now().UnixMilli(), id)
+		WHERE id = ? AND nonce = ? AND state IN (?, ?) AND finalizing_ms = 0`,
+		time.Now().UnixMilli(), time.Now().UnixMilli(), id, nonce, PublicationConfirmed, PublicationUploading)
 	if err != nil {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
-	return n > 0, nil
+	if n > 0 {
+		return true, nil
+	}
+	// Distinguish "already stamped" (false, nil) from "not ours any more".
+	var ok int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM clip_publications WHERE id = ? AND nonce = ? AND state IN (?, ?)`,
+		id, nonce, PublicationConfirmed, PublicationUploading).Scan(&ok); err != nil {
+		return false, err
+	}
+	if ok == 0 {
+		return false, ErrPublicationNotArmed
+	}
+	return false, nil
 }
 
 // RecordPublicationPost is the terminal success. Recording the same post id
 // again is a no-op; a different id on a posted row is refused, because it would
-// mean a second post.
+// mean a second post. It is deliberately NOT fenced by the nonce and it wins over
+// a local failure: if the platform has the post (a cancel or a reconcile marked
+// the row failed while the final request was in flight), the ledger has to say
+// so, or the next click posts it again.
 func (d *DB) RecordPublicationPost(id int64, postID, postURL, actualPrivacy string) error {
 	if postID == "" {
 		return errors.New("a post needs a platform id")
@@ -386,9 +425,9 @@ func (d *DB) RecordPublicationPost(id int64, postID, postURL, actualPrivacy stri
 	now := time.Now().UnixMilli()
 	res, err := d.sql.Exec(`UPDATE clip_publications SET state = ?, platform_post_id = ?, post_url = ?,
 		actual_privacy = ?, fail_cause = '', fail_detail = '', session_enc = NULL, posted_ms = ?, updated_ms = ?
-		WHERE id = ? AND (state IN (?, ?) OR (state = ? AND platform_post_id = ?))`,
+		WHERE id = ? AND (state IN (?, ?, ?) OR (state = ? AND platform_post_id = ?))`,
 		PublicationPosted, postID, postURL, actualPrivacy, now, now, id,
-		PublicationConfirmed, PublicationUploading, PublicationPosted, postID)
+		PublicationConfirmed, PublicationUploading, PublicationFailed, PublicationPosted, postID)
 	if err != nil {
 		return err
 	}
@@ -398,7 +437,16 @@ func (d *DB) RecordPublicationPost(id int64, postID, postURL, actualPrivacy stri
 	return nil
 }
 
-// FailPublication gives up on a row. Only a new click re-arms it.
+// FailPublicationFor is the worker's give-up: the same as FailPublication, but
+// only for the run that still holds the nonce.
+func (d *DB) FailPublicationFor(id int64, nonce, cause, detail string) error {
+	return d.fenced(`UPDATE clip_publications SET state = ?, fail_cause = ?, fail_detail = ?, updated_ms = ?
+		WHERE id = ? AND nonce = ? AND state IN (?, ?)`, PublicationFailed, cause, detail, time.Now().UnixMilli(),
+		id, nonce, PublicationConfirmed, PublicationUploading)
+}
+
+// FailPublication gives up on a row on behalf of the API (a cancel, a
+// reconcile). Only a new click re-arms it.
 func (d *DB) FailPublication(id int64, cause, detail string) error {
 	_, err := d.sql.Exec(`UPDATE clip_publications SET state = ?, fail_cause = ?, fail_detail = ?, updated_ms = ?
 		WHERE id = ? AND state IN (?, ?)`, PublicationFailed, cause, detail, time.Now().UnixMilli(), id,

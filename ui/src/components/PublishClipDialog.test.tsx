@@ -219,4 +219,40 @@ describe("the publish dialog", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("confirmation not valid");
     expect(screen.queryByTestId("publish-result")).toBeNull();
   });
+
+  it("will not offer a plain retry after an outcome it cannot know, and sends the acknowledgement once ticked", async () => {
+    api.publishClip.mockResolvedValueOnce(
+      pub({ state: "failed", reason: { cause: "outcome_unknown", line: "check the account" } }),
+    );
+    open();
+    const btn = await screen.findByRole("button", { name: "Publish" });
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(btn);
+    await screen.findByTestId("publish-failure");
+    const again = screen.getByRole("button", { name: /Publish again/ }) as HTMLButtonElement;
+    expect(again.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(again.disabled).toBe(false);
+    fireEvent.click(again);
+    await waitFor(() => expect(api.preparePublish.mock.calls.at(-1)?.[0].acknowledgeOutcome).toBe(true));
+  });
+
+  it("checks the form again after a refused click instead of leaving Publish stuck", async () => {
+    const { ApiError } = await import("@/lib/api");
+    api.publishClip.mockRejectedValueOnce(new (ApiError as unknown as new (s: number, m: string, c: string) => Error)(403, "expired", "confirm_required"));
+    open();
+    const btn = await screen.findByRole("button", { name: "Publish" });
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false));
+    const before = api.preparePublish.mock.calls.length;
+    fireEvent.click(btn);
+    await screen.findByRole("alert");
+    await waitFor(() => expect(api.preparePublish.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Publish" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("survives a server that lists no platforms", async () => {
+    api.publishTargets.mockResolvedValue(targets({ platforms: [] }));
+    open();
+    expect(await screen.findByLabelText("Platform")).toBeTruthy();
+  });
 });
