@@ -564,3 +564,7 @@ func TestBackoffGrowsAndCaps(t *testing.T) {
 	}
 	_ = base64.StdEncoding
 }
+
+// settle waits for the passes Kick started (Retry now starts one), so a test
+// reads the outcome of the pass rather than racing it.
+func (f *fixture) settle() { f.svc.kicks.Wait() }
