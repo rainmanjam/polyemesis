@@ -59,6 +59,9 @@ func TestHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		fmt.Println("grandchild started")
+		// A line on stderr too, for the test that needs a reader parked inside
+		// its sink callback while the pipes are held open.
+		fmt.Fprintln(os.Stderr, "grandchild started")
 		time.Sleep(60 * time.Second)
 	case "chatty":
 		for i := 0; i < 100; i++ {

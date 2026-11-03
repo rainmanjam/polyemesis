@@ -48,6 +48,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/config"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/db/dbtest"
 	"github.com/rainmanjam/polyemesis/internal/engine"
 	"github.com/rainmanjam/polyemesis/internal/events"
@@ -64,6 +65,16 @@ import (
 // confused with anything the engine said, and no goroutine of the engine's is
 // writing into a bytes.Buffer while the test reads it.
 func managerServer(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *bytes.Buffer, func(*http.Request)) {
+	t.Helper()
+	return managerServerWithSettings(t, tools, nil)
+}
+
+// managerServerWithSettings is managerServer with the stored settings mutated
+// BEFORE the manager starts. A test that injects a free-space halt must put its
+// floor here: the engine's recording manager sweeps once as it starts, with
+// whatever floor is stored, and a halt injected against a different floor is
+// lifted whenever that sweep lands second.
+func managerServerWithSettings(t *testing.T, tools *ffmpeg.Tools, mutate func(*db.Settings)) (*Server, http.Handler, *bytes.Buffer, func(*http.Request)) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -86,6 +97,9 @@ func managerServer(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *b
 		t.Fatalf("GetSettings: %v", err)
 	}
 	st.Listeners.SRTPort = freeUDPPort(t)
+	if mutate != nil {
+		mutate(&st)
+	}
 	if err := store.PutSettings(st); err != nil {
 		t.Fatalf("PutSettings: %v", err)
 	}
@@ -100,7 +114,7 @@ func managerServer(t *testing.T, tools *ffmpeg.Tools) (*Server, http.Handler, *b
 
 	s := New(Options{
 		Log: quiet, Config: cfg, DB: store, Secrets: box,
-		Engine: eng, Events: bus, Version: "test",
+		Engine: eng, Events: bus, Version: "test", UploadFreeBytes: ampleDisk,
 	})
 	h := s.Handler()
 	setTestServer(s, h)
@@ -306,7 +320,7 @@ func managerServerWithoutEngines(t *testing.T, tools *ffmpeg.Tools) (*Server, ht
 
 	s := New(Options{
 		Log: quiet, Config: cfg, DB: store, Secrets: box,
-		Engine: eng, Events: bus, Version: "test",
+		Engine: eng, Events: bus, Version: "test", UploadFreeBytes: ampleDisk,
 	})
 	h := s.Handler()
 	setTestServer(s, h)

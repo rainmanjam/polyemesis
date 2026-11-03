@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
+	"github.com/rainmanjam/polyemesis/internal/engine"
 )
 
 // THE RECORDINGS PAGE HAS TO BE ABLE TO EXPLAIN A RECORDER THAT STOPPED ITSELF,
@@ -28,7 +29,11 @@ import (
 // Mutation: drop `usage.Storage = s.storageVerdict()` from
 // handleRecordingUsage. Observed to fail here.
 func TestRecordingUsageReportsARecorderTheFreeSpaceFloorHalted(t *testing.T) {
-	s, h, _, sign := managerServer(t, defaultTools())
+	// The floor is stored before the engine starts; see managerServerWithSettings.
+	const floorGB = 1e9 // a floor no volume can clear
+	s, h, _, sign := managerServerWithSettings(t, defaultTools(), func(st *db.Settings) {
+		st.Recording.MinFreeGB = floorGB
+	})
 
 	engines := s.mgr.Engines()
 	if len(engines) == 0 {
@@ -36,12 +41,19 @@ func TestRecordingUsageReportsARecorderTheFreeSpaceFloorHalted(t *testing.T) {
 			"this case would pass on the zero value alone")
 	}
 	// A floor no volume can clear, which is how this fills a disk without one.
-	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: 1e9}
+	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: floorGB}
 	for _, eng := range engines {
 		eng.Recordings().CheckFreeSpace(halt)
 		if !eng.Recordings().Storage().Halted {
 			t.Fatalf("source %d's own recording manager did not halt on a %.0f GB floor, so "+
 				"the state under test was never reached", eng.SourceID(), halt.MinFreeGB)
+		}
+	}
+	for _, eng := range engines {
+		startupSweepLandsNow(eng)
+		if !eng.Recordings().Storage().Halted {
+			t.Fatalf("source %d's halt did not survive the engine's own sweep: the stored "+
+				"floor is not the one this test injected", eng.SourceID())
 		}
 	}
 	if s.recordings().Storage().Halted {
@@ -92,4 +104,15 @@ func TestRecordingUsageReportsNoHaltWithNoEngineRunning(t *testing.T) {
 		t.Errorf("an install with no engine reports recording halted (%v), which names a "+
 			"recorder that does not exist", storage)
 	}
+}
+
+// startupSweepLandsNow runs, on demand, the sweep every engine's recording
+// manager runs once the moment it starts: ScanAndSweep over the engine's own
+// stored settings. Whether that sweep lands before or after a test injects a
+// halt is a race the test does not control (it lost on a slow runner), so a
+// test that injects a halt calls this after injecting it. The halt either
+// survives the sweep, because the sweep sees the same verdict, or it does not
+// and the test fails every time instead of one run in a few hundred.
+func startupSweepLandsNow(eng *engine.Engine) {
+	eng.Recordings().ScanAndSweep(eng.Settings().Recording)
 }

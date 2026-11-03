@@ -386,6 +386,9 @@ func (s *Server) storageVerdict() recording.StorageState {
 
 // Server wires the HTTP layer to everything else.
 type Server struct {
+	// uploadFreeBytes is Options.UploadFreeBytes; nil means the real volume.
+	uploadFreeBytes func(path string) (uint64, error)
+
 	log *slog.Logger
 	// acctHealth is each connected account's last token-refresh outcome (A5).
 	// The zero value is ready; see account_health.go.
@@ -771,6 +774,13 @@ type Options struct {
 	// process -- the property that matters.
 	AutomodSecondaryBudget *automod.Budget
 
+	// UploadFreeBytes replaces the free-space reading the upload floor is
+	// checked against. Nil, which is what main passes, measures the real
+	// volume. A test that is not about disk space sets it to an ample value so
+	// the answer does not depend on how full the CI runner happens to be; a
+	// test that is about disk space sets the value it needs.
+	UploadFreeBytes func(path string) (uint64, error)
+
 	// Hooks is the lifecycle-webhook dispatcher. Optional.
 	Hooks *hooks.Dispatcher
 	// Offload copies finished recordings to S3-compatible storage targets.
@@ -827,20 +837,21 @@ func New(o Options) *Server {
 			}
 			return automod.NewBudget()
 		}(),
-		hooks:       o.Hooks,
-		offload:     o.Offload,
-		stream:      o.Stream,
-		overlayGate: o.OverlayGate,
-		obs:         o.OBS,
-		polls:       o.Polls,
-		version:     o.Version,
-		diag:        o.Diag,
-		diagLevel:   o.DiagLevel,
-		startedAt:   time.Now(),
-		logins:      auth.NewThrottle(),
-		setups:      auth.NewThrottle(),
-		setupCode:   o.SetupCode,
-		kickKeys:    &chat.KickKeyFetcher{},
+		hooks:           o.Hooks,
+		uploadFreeBytes: o.UploadFreeBytes,
+		offload:         o.Offload,
+		stream:          o.Stream,
+		overlayGate:     o.OverlayGate,
+		obs:             o.OBS,
+		polls:           o.Polls,
+		version:         o.Version,
+		diag:            o.Diag,
+		diagLevel:       o.DiagLevel,
+		startedAt:       time.Now(),
+		logins:          auth.NewThrottle(),
+		setups:          auth.NewThrottle(),
+		setupCode:       o.SetupCode,
+		kickKeys:        &chat.KickKeyFetcher{},
 		sessions: auth.New(
 			o.Secrets.Derive("session-jwt"),
 			// ServesTLS, not the legacy tls.enabled: an install that writes
