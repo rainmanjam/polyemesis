@@ -123,6 +123,51 @@ describe("texture: the hot end of the bar is a different surface, not just a dif
   });
 });
 
+describe("colour: discrete green, yellow and red zones, never a gradient", () => {
+  /* Gradients belong to the logo mark (docs/DESIGN-SYSTEM.md). A fade also
+   * blurs the one thing a meter's colour is for: which side of a break the
+   * level is on. Each zone is one flat colour that starts exactly at its break. */
+  const LOW = "#3ecf6d";
+  const MID = "#cfd23e";
+  const exact = (db: number) => ((db + 60) / 60) * WIDTH;
+  const zone = (fill: string) => rects.filter((r) => r.fill === fill && r.h > 0 && r.w > 1);
+
+  it("creates no gradient at all", () => {
+    const spy = vi.fn(() => ({ addColorStop: vi.fn() }));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+      const ctx = fakeContext();
+      ctx.createLinearGradient = spy;
+      return ctx as unknown as CanvasRenderingContext2D;
+    });
+    render(<AudioMeter rms={[-1]} peak={[-1]} />);
+    tick(16);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("lights green below -18, yellow from -18 to -2 and red from -2", () => {
+    render(<AudioMeter rms={[-1]} peak={[-30]} />);
+    tick(16);
+    const [low] = zone(LOW);
+    const [mid] = zone(MID);
+    const [hot] = zone(PEAK);
+    expect(low).toMatchObject({ x: 0 });
+    expect(low.x + low.w).toBeCloseTo(exact(-18));
+    expect(mid.x).toBeCloseTo(exact(-18));
+    expect(mid.x + mid.w).toBeCloseTo(exact(-2));
+    expect(hot.x).toBeCloseTo(exact(-2));
+    expect(hot.x + hot.w).toBeCloseTo(exact(-1));
+  });
+
+  it("lights only the zones the level has reached", () => {
+    render(<AudioMeter rms={[-24]} peak={[-30]} />);
+    tick(16);
+    expect(zone(LOW)).toHaveLength(1);
+    expect(zone(LOW)[0].x + zone(LOW)[0].w).toBeCloseTo(exact(-24));
+    expect(zone(MID)).toHaveLength(0);
+    expect(zone(PEAK)).toHaveLength(0);
+  });
+});
+
 describe("position: an operator can read level off geometry", () => {
   it("marks the zone breaks firmly over the lit bar and faintly over the trough", () => {
     // rms -12 lights the bar as far as the -12 break, so the -18 mark is under

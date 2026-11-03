@@ -187,7 +187,7 @@ function MessageRow({
       onContextMenu={openMenu}
       onDoubleClick={openMenu}
       className={cn(
-        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative border-l-2 py-0.5 pl-2 pr-6 text-[12px] leading-snug hover:bg-card-raised focus-visible:bg-card-raised",
         accent.rule,
         m.echo && "bg-primary-dim/40",
       )}
@@ -233,7 +233,7 @@ function MessageRow({
           "font-semibold",
           !m.author.color && nameTone(m.author.name),
           onOpenUser && m.author.id
-            ? "cursor-pointer hover:underline focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none"
+            ? "cursor-pointer hover:underline"
             : "cursor-default",
         )}
         style={m.author.color ? { color: m.author.color } : undefined}
@@ -271,7 +271,7 @@ function MessageRow({
           disabled={busy || !deletable.ok}
           aria-label={t("chatpage.deleteFrom", { name: m.author.name })}
           title={deletable.ok ? t("chatpage.deleteOnPlatform") : deletable.reason}
-          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex group-focus-within:flex pointer-coarse:flex"
+          className="absolute right-1 top-0.5 hidden h-4 w-4 items-center justify-center rounded text-muted-foreground hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground group-hover:flex group-focus-within:flex pointer-coarse:flex"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </button>
@@ -555,7 +555,15 @@ export function ChatComposer({
         {senders.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("chatpage.noSender")}</p>
         )}
-        <Button size="sm" onClick={() => void send()} disabled={sending || !text.trim()}>
+        {/* Compact (the Dashboard dock) drops the word, so the glyph needs a
+            name: it was the one unnamed button on the Dashboard. */}
+        <Button
+          size="sm"
+          onClick={() => void send()}
+          disabled={sending || !text.trim()}
+          aria-label={compact ? t("chatpage.send") : undefined}
+          title={compact ? t("chatpage.send") : undefined}
+        >
           {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
           {!compact && t("chatpage.send")}
         </Button>

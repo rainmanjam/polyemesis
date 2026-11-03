@@ -162,7 +162,7 @@ export function VerticalExportPanel({
 
             {options && options.templates.length > 0 && (
               <div className="flex flex-col gap-1">
-                <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+                <Label>
                   {t("clipedit.vertical.templates")}
                 </Label>
                 {options.templates.map((tpl) => (
@@ -181,7 +181,7 @@ export function VerticalExportPanel({
             )}
 
             <div className="flex flex-col gap-1">
-              <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+              <Label>
                 {t("clipedit.vertical.layout")}
               </Label>
               <div className="grid grid-cols-1 gap-1.5">
@@ -204,7 +204,7 @@ export function VerticalExportPanel({
             {spec.layout === "stacked" && (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="text-tiny uppercase tracking-wider text-muted-foreground">
+                  <Label>
                     {t("clipedit.vertical.faceBox")}
                   </Label>
                   <Button variant="secondary" size="sm" onClick={grabFrame}>
@@ -242,7 +242,7 @@ export function VerticalExportPanel({
                     tabIndex={0}
                     aria-label={t("clipedit.vertical.faceBox")}
                     data-testid="face-box"
-                    className="absolute border-2 border-primary bg-primary-dim focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute border-2 border-primary bg-primary-dim"
                     style={{
                       left: `${spec.face.x * 100}%`,
                       top: `${spec.face.y * 100}%`,
@@ -353,7 +353,6 @@ function OptionButton({ active, onClick, title, body }: { active: boolean; onCli
       aria-pressed={active}
       className={cn(
         "rounded-md border p-2 text-left transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active ? "border-primary bg-primary-dim text-foreground" : "border-border bg-card hover:bg-card-raised",
       )}
     >

@@ -214,7 +214,7 @@ export function PlayoutPage() {
   const variants = view.status.variants ?? [];
 
   return (
-    <div className="p-4">
+    <div className="p-3">
       <PageHeader
         title={t("play.title")}
         subtitle={t("play.subtitle")}

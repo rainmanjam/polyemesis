@@ -20,16 +20,19 @@ import {
    Behaviour follows a hardware meter, not a progress bar:
    - Instantaneous RMS as the solid bar (what you hear).
    - Peak as a held tick that falls back slowly (what clips you).
-   - The classic green -> yellow -> amber -> red gradient, with the colour
-     breaks at broadcast-meaningful levels rather than at even intervals.
+   - Three discrete zones, green -> yellow -> red, each one flat colour that
+     starts exactly at a broadcast-meaningful level (-18 and -2 dBFS) rather
+     than at an even interval. Not a gradient: gradients belong to the logo
+     mark, and a fade blurs the one thing a meter's colour is for, which is
+     which side of a break the level is on.
 
-   THE GRADIENT IS NOT ALLOWED TO BE THE ONLY CHANNEL. "Am I too hot?" was
+   THE COLOUR IS NOT ALLOWED TO BE THE ONLY CHANNEL. "Am I too hot?" was
    answerable here only by reading a hue, which is the one question on this
    screen a deuteranopic operator, or anybody on a washed-out laptop panel in
    daylight, could not answer at all. Three redundant channels now carry the
    same reading, and each works with the colour removed entirely:
      - POSITION: the zone boundaries are drawn ON TOP of the bar, so "past the
-       second mark" is a fact about geometry rather than about amber.
+       second mark" is a fact about geometry rather than about yellow.
      - TEXTURE: everything above -6 dBFS is hatched, so the hot part of the bar
        is a different surface, not a different colour.
      - TEXT: a clip raises a literal "CLIP" flag over the meter.
@@ -58,7 +61,6 @@ function cssVar(name: string, fallback: string): string {
 interface Palette {
   low: string;
   mid: string;
-  high: string;
   peak: string;
   bg: string;
   grid: string;
@@ -74,11 +76,9 @@ interface Palette {
 function readPalette(): Palette {
   return {
     low: cssVar("--meter-low", "#3ecf6d"),
+    // Amber is not a meter colour: it means warn. The meter is green, yellow
+    // and red, and nothing in between.
     mid: cssVar("--meter-mid", "#cfd23e"),
-    // Amber is not a meter colour: it means warn. --meter-high is gone, so the
-    // hot stop holds the yellow until the red begins. Discrete zones replace
-    // this gradient in a follow-up; until then the meter is green/yellow/red.
-    high: cssVar("--meter-mid", "#cfd23e"),
     peak: cssVar("--meter-peak", "#f76e52"),
     bg: cssVar("--meter-bg", "#12161e"),
     grid: cssVar("--meter-grid", "#232a38"),
@@ -86,27 +86,46 @@ function readPalette(): Palette {
   };
 }
 
-/** The dB levels where the gradient changes meaning. Declared once and used
- *  twice — by buildGradient below and by the boundary marks drawn over the
- *  bar — so the mark an operator reads position against can never drift away
- *  from the colour break it is standing in for. */
-const ZONE_BREAKS = [-18, -12, -6, -2];
+/** Where the colour changes: green below -18 dBFS, yellow from -18 to -2, red
+ *  from -2 to full scale. Declared once and read twice, by meterZones below and
+ *  by the boundary marks drawn over the bar, so a mark can never drift away
+ *  from the colour break it stands in for. */
+const YELLOW_FROM_DB = -18;
+const RED_FROM_DB = -2;
 
-/** Where the bar starts being hot enough to hatch. Same level as the amber
- *  break, for the same reason: below it a broadcast is fine. */
+/** The position marks drawn over the bar: both colour breaks, plus -12 and the
+ *  -6 hatch line, which the scale cannot label at small sizes. */
+const ZONE_BREAKS = [YELLOW_FROM_DB, -12, -6, RED_FROM_DB];
+
+/** Where the bar starts being hot enough to hatch: the -6 mark, below which a
+ *  broadcast is fine. */
 const HOT_DB = -6;
 
-/** Colour breaks at levels a mixer cares about, not at even fractions. */
-function buildGradient(ctx: CanvasRenderingContext2D, w: number, p: Palette, r: DbRange) {
-  const [quiet, mid, hot, clip] = ZONE_BREAKS;
-  const g = ctx.createLinearGradient(0, 0, w, 0);
-  g.addColorStop(0, p.low);
-  g.addColorStop(dbToFraction(quiet, r), p.low);
-  g.addColorStop(dbToFraction(mid, r), p.mid);
-  g.addColorStop(dbToFraction(hot, r), p.high);
-  g.addColorStop(dbToFraction(clip, r), p.peak);
-  g.addColorStop(1, p.peak);
-  return g;
+/** The three zones as x ranges across a bar `width` CSS px wide. A zoomed
+ *  range that starts above a break simply has no green (or no yellow). */
+function meterZones(width: number, p: Palette, r: DbRange): { x0: number; x1: number; fill: string }[] {
+  const at = (db: number) => Math.min(width, Math.max(0, dbToFraction(db, r) * width));
+  return [
+    { x0: 0, x1: at(YELLOW_FROM_DB), fill: p.low },
+    { x0: at(YELLOW_FROM_DB), x1: at(RED_FROM_DB), fill: p.mid },
+    { x0: at(RED_FROM_DB), x1: width, fill: p.peak },
+  ];
+}
+
+/** Light each zone as far as the bar reaches, one flat colour per zone. */
+function fillZones(
+  ctx: CanvasRenderingContext2D,
+  zones: { x0: number; x1: number; fill: string }[],
+  y: number,
+  w: number,
+  h: number,
+) {
+  for (const z of zones) {
+    const end = Math.min(z.x1, w);
+    if (end <= z.x0) continue;
+    ctx.fillStyle = z.fill;
+    ctx.fillRect(z.x0, y, end - z.x0, h);
+  }
 }
 
 /** Diagonal hatch over the hot end of a bar, clipped to the part of it that is
@@ -236,7 +255,7 @@ export function AudioMeter({
         }
       }
 
-      const gradient = buildGradient(ctx, cssWidth, p, r);
+      const zones = meterZones(cssWidth, p, r);
 
       for (let ch = 0; ch < channels; ch++) {
         const y = ch * (barHeight + barGap);
@@ -275,9 +294,8 @@ export function AudioMeter({
         // RMS bar
         const w = dbToFraction(rmsDb, r) * cssWidth;
         if (w > 0) {
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, y, w, barHeight);
-          // TEXTURE, above the amber break. The hot end of the bar is now a
+          fillZones(ctx, zones, y, w, barHeight);
+          // TEXTURE, above the -6 mark. The hot end of the bar is now a
           // different surface as well as a different hue, so "too hot" reads
           // in greyscale.
           const hotX = dbToFraction(HOT_DB, r) * cssWidth;
@@ -286,8 +304,8 @@ export function AudioMeter({
 
         // POSITION, and it is drawn OVER the bar on purpose. The scale ticks
         // above sit under it, which is right for a ruler and useless for a
-        // threshold: the moment a signal reaches the amber zone it covers the
-        // mark that says where amber starts. These four are the gradient's own
+        // threshold: the moment a signal reaches the yellow zone it covers the
+        // mark that says where it starts. These four are the zones' own
         // break points, so an operator reads level against geometry instead of
         // against hue.
         ctx.fillStyle = p.hold;
@@ -352,6 +370,7 @@ export function AudioMeter({
     <div className={cn("flex items-start gap-2", className)}>
       {labels && (
         <div
+          data-part="meter-labels"
           className="flex shrink-0 flex-col text-[9px] font-mono leading-none text-muted-foreground"
           style={{ gap: `${barGap}px` }}
         >
@@ -382,7 +401,7 @@ export function AudioMeter({
           {t("signature.meter.clip")}
         </span>
       </div>
-      <div className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
+      <div data-part="meter-db" className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
         {rms.map((_, i) => (
           <button
             key={i}

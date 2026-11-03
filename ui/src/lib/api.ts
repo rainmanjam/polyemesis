@@ -582,6 +582,12 @@ export const api = {
    *  answer as 0 and must not be rendered as one. */
   setupStatus: () =>
     get<{ needsSetup: boolean; minPasswordChars: number; sources?: number }>("/setup"),
+  /** GET /health, unauthenticated. Typed as the overall status ONLY: the
+   *  response also carries per-check `detail` strings (database errors, file
+   *  paths) that are for an operator's logs and probes, and leaving them out
+   *  of the type keeps the sign-in screen from ever rendering one. A fatal
+   *  check answers 503, which arrives as an ApiError. */
+  health: () => get<{ status: string }>("/health"), // "ok" or "degraded"
   /** setupCode is the one-time code the server printed at startup and wrote
    *  to <data dir>/setup-code. Without it the server answers 403: an open port
    *  on a fresh install is not an invitation to become its admin. */

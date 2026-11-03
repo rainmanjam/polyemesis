@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { ProgrammeSwitcher } from "@/components/ProgrammeSwitcher";
+import { MobileOnAirChip } from "@/components/MobileOnAirChip";
 import { useLiveData } from "@/hooks/useLiveData";
 import { useProgrammeIngest } from "@/hooks/useProgrammeIngest";
 import { headerLive } from "@/lib/headerLive";
@@ -249,7 +250,7 @@ export function AppLayout({
           watching. See components/Tour.tsx. */}
       <TourOffer />
 
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-background px-3">
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-background px-3 sm:gap-3">
         {/* Icon-only, and one of the two places in the shell where that is the
             right answer rather than an omission: this exists only below md,
             where the header is the width of a phone and a word beside the
@@ -268,31 +269,18 @@ export function AppLayout({
           {mobileOpen ? <X /> : <Menu />}
         </Button>
 
-        {/* A78: below sm the header carried no on-air answer at all. This is the
-            phone's one answer to "am I on air?", beside the hamburger: the live
-            count when something is running, and the words Off air otherwise.
-            It reuses the strip's own wording, so the two cannot disagree. */}
-        {/* One line, always. With the programme in it ("Main: Off air") the
-            chip wrapped onto three lines beside the logo at 390px; it now
-            keeps to one line and truncates the text, with the whole of it in
-            the title. */}
-        <span
-          data-testid="mobile-on-air"
-          className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-tiny sm:hidden"
-          title={liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
-        >
-          <StatusDot tone={liveCount > 0 ? "live" : "idle"} size="sm" />
-          <span className={cn("truncate", liveCount > 0 ? "text-foreground" : "text-muted-foreground")}>
-            {liveCount > 0 ? liveLabel : t(live.offKey, live.offParams)}
-          </span>
-        </span>
+        {/* A78: the phone's one answer to "am I on air?". See MobileOnAirChip
+            for why it names the programme once and never truncates. */}
+        <MobileOnAirChip live={live} />
 
         {/* No tinted tile behind it: the site sets the mark straight on the
             background, and the tile was there to give a monochrome glyph
             something to sit in. The mark carries its own colour. */}
         <div className="flex items-center gap-2">
           <BrandMark size={18} />
-          <span className="text-base font-semibold tracking-tight">polyemesis</span>
+          {/* The mark alone on a phone: the wordmark's 90px is what the
+              programme switcher needs to name its programme there. */}
+          <span className="hidden text-base font-semibold tracking-tight sm:inline">polyemesis</span>
         </div>
 
         {/* #638: which programme everything on screen is describing, and the
@@ -336,7 +324,7 @@ export function AppLayout({
                 <button
                   type="button"
                   aria-label={t("b1.ingestWhy")}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-down hover:bg-muted"
                 >
                   <AlertTriangle className="h-3.5 w-3.5" />
                 </button>
@@ -348,10 +336,16 @@ export function AppLayout({
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-1 sm:gap-3">
           {liveCount > 0 && (
-            <Badge variant="live" className="hidden sm:inline-flex">
-              <StatusDot tone="live" size="sm" />
+            // On air: the tally lamp, as on the On Air bar and the destination
+            // cards. Variant name unchanged; the fill is the lamp's.
+            <Badge
+              variant="live"
+              data-testid="header-on-air"
+              className="hidden border-transparent bg-tally text-tally-foreground sm:inline-flex"
+            >
+              <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-tally-foreground" />
               {liveLabel}
             </Badge>
           )}
@@ -412,6 +406,9 @@ export function AppLayout({
               <Button
                 variant="ghost"
                 size="sm"
+                // Tighter on a phone, where the header's room is what lets the
+                // on-air chip print its words whole. Still a 26px target.
+                className="px-1.5 sm:px-2.5"
                 aria-label={t("chrome.language")}
                 title={t("chrome.language")}
               >
@@ -438,6 +435,7 @@ export function AppLayout({
           <Button
             variant="ghost"
             size="sm"
+            className="px-1.5 sm:px-2.5"
             onClick={onSignOut}
             aria-label={t("chrome.signOut")}
             title={t("chrome.signOut")}
@@ -715,8 +713,22 @@ export function AppLayout({
             against a 900px viewport. Making this pane a containing block keeps
             that — and anything else a page renders — inside the scroller where
             it belongs. */}
-        <main id="main-content" tabIndex={-1} className="relative min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
+        {/* ONE GUTTER AND ONE MEASURE, set here rather than per page. Content
+            ended at x=1418 on the long pages and x=1428 on the short ones: the
+            difference was the 10px scrollbar appearing only when a page
+            scrolled. scrollbar-gutter reserves it on every page, so the right
+            edge no longer depends on page length, and one max-width keeps a
+            wide monitor from stretching a form row across 2500px. Pages keep
+            their p-3; Playout's p-4 was the one outlier. h-full so a page that
+            fills the pane (Chat) still can. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="relative min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
+        >
+          <div className="mx-auto h-full w-full max-w-screen-2xl">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

@@ -72,7 +72,7 @@ const DialogContent = React.forwardRef<
             nothing from a glyph a reader was given a word for. */}
         <DialogPrimitive.Close
           title={t("common.close")}
-          className="absolute right-3 top-3 rounded-sm text-muted-foreground opacity-70 transition-opacity hover:opacity-100 focus:outline-none"
+          className="absolute right-3 top-3 rounded-sm text-muted-foreground opacity-70 transition-opacity hover:opacity-100"
         >
           <X className="h-4 w-4" />
           <span className="sr-only">{t("common.close")}</span>

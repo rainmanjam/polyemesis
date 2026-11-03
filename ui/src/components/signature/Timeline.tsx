@@ -444,7 +444,6 @@ function Handle({
       }}
       className={cn(
         "absolute top-0 z-10 h-full w-[11px] -translate-x-1/2 cursor-ew-resize",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
       style={{ left: leftPx }}
     >

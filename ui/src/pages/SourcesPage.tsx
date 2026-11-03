@@ -1,4 +1,4 @@
-import { lazy, useCallback, useEffect, useState } from "react";
+import { lazy, useCallback, useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import {
   Activity,
@@ -412,6 +412,12 @@ export function SourceCard({
   previewOn?: boolean;
 }) {
   const t = useT();
+  // Binds each ingest caption to its field. The captions were visible but not
+  // programmatically tied to the inputs, so a screen reader announced three
+  // unnamed fields. The InfoHint sits BESIDE the <label>, not in it: a button
+  // inside a label is a second labelable element, and would end up in the
+  // field's name ("Passphrase Passphrase — More information").
+  const fieldId = useId();
   // A LOCAL DRAFT, not a per-field commit.
   //
   // These fields used to write straight through on blur, and every write
@@ -433,11 +439,15 @@ export function SourceCard({
 
   return (
     <Card className={source.running ? undefined : "border-warn/40"}>
-      <CardHeader className="flex-row items-start justify-between gap-2">
+      {/* Stacks below sm. Side by side at 390px, the Accepting block took
+          its 16rem and the programme's name was squeezed to nothing beside
+          the RUNNING badge; the badges now wrap under the name, and the switch
+          block sits under the title instead of beside it. */}
+      <CardHeader className="flex-col items-stretch justify-between gap-2 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <RadioTower className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{source.name}</span>
+            <span className="min-w-0 truncate" data-testid="source-name">{source.name}</span>
             {source.isDefault && <Badge variant="outline">{t("sources.default")}</Badge>}
             <Badge variant={source.running ? "live" : "warn"}>
               {source.running ? t("sources.running") : t("sources.notRunning")}
@@ -482,7 +492,7 @@ export function SourceCard({
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           {/* A33: the state in words and the consequence beside the switch. The
               aria-label names the switch; the visible text says what it does. */}
-          <div className="flex max-w-64 flex-col items-end gap-0.5 text-right">
+          <div className="flex flex-col items-start gap-0.5 sm:max-w-64 sm:items-end sm:text-right">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">
                 {source.enabled ? t("sources.acceptingLabel") : t("state.off")}
@@ -649,11 +659,12 @@ export function SourceCard({
                 onChange={(n) => setIngest({ srt: { ...ing.srt, latencyMs: n } })}
               />
               <div className="flex flex-col gap-1">
-                <Label className="flex items-center gap-1">
-                  {t("sources.passphrase")}
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-passphrase`}>{t("sources.passphrase")}</Label>
                   <InfoHint body="sources.help.passphrase" title="sources.passphrase" />
-                </Label>
+                </div>
                 <SecretInput
+                  id={`${fieldId}-passphrase`}
                   className="h-7 text-sm"
                   value={ing.srt.passphrase}
                   placeholder={t("sources.passphrasePlaceholder")}
@@ -666,22 +677,24 @@ export function SourceCard({
           {ing.mode === "rtmp" && (
             <>
               <div className="flex flex-col gap-1">
-                <Label className="flex items-center gap-1">
-                  {t("sources.app")}
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-app`}>{t("sources.app")}</Label>
                   <InfoHint body="sources.help.app" title="sources.app" />
-                </Label>
+                </div>
                 <Input
+                  id={`${fieldId}-app`}
                   className="h-7 text-sm"
                   value={ing.rtmp.app}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, app: e.target.value } })}
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <Label className="flex items-center gap-1">
-                  {t("sources.streamKey")}
+                <div className="flex items-center gap-1">
+                  <Label htmlFor={`${fieldId}-streamkey`}>{t("sources.streamKey")}</Label>
                   <InfoHint body="sources.help.streamKey" title="sources.streamKey" />
-                </Label>
+                </div>
                 <SecretInput
+                  id={`${fieldId}-streamkey`}
                   className="h-7 text-sm"
                   value={ing.rtmp.streamKey}
                   onChange={(e) => setIngest({ rtmp: { ...ing.rtmp, streamKey: e.target.value } })}
@@ -789,8 +802,11 @@ export function SourceCard({
         <div data-tour="source-publish-urls" className="flex flex-col gap-3">
         {publishRows(source.publishUrls, window.location.hostname).map(({ proto, url }) =>
           url ? (
-            <div key={proto} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 text-sm uppercase tracking-wider text-muted-foreground">
+            // Wraps below sm: the label takes its own line, so the address, the
+            // masked credential and the two buttons get the full width. At
+            // 360px the SRT credential was squeezed to a single dot.
+            <div key={proto} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="w-full shrink-0 text-sm uppercase tracking-wider text-muted-foreground sm:w-20">
                 {proto}
               </span>
               {/* Gated on what the string CARRIES, not on the row's label.
@@ -978,16 +994,21 @@ function NumberField({
   onChange: (n: number) => void;
 }) {
   const bad = value < min || value > max;
+  // Bound to its caption and range; the InfoHint is beside the label, not in it.
+  const id = useId();
   return (
     <div className="flex flex-col gap-1">
-      <Label className="flex items-center gap-1">
-        {label}
-        <span className="font-normal text-muted-foreground">
-          {min}–{max}
-        </span>
+      <div className="flex items-center gap-1">
+        <Label htmlFor={id} className="flex items-center gap-1">
+          {label}
+          <span className="font-normal text-muted-foreground">
+            {min}–{max}
+          </span>
+        </Label>
         {hint && <InfoHint body={hint} />}
-      </Label>
+      </div>
       <Input
+        id={id}
         className={cn("tnum h-7 font-mono text-sm", bad && "border-down")}
         type="number"
         inputMode="numeric"

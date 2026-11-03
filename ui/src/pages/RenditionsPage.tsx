@@ -712,11 +712,14 @@ export function RenditionCard({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-2">
+      {/* Stacks below sm: beside a long state badge ("Not encoding · starts
+          when the first feed goes live") the rendition's name was cut to
+          "720p — s…" at 390px. */}
+      <CardHeader className="flex-col items-start justify-between gap-2 sm:flex-row">
         <div className="min-w-0">
           <CardTitle className="flex items-center gap-2">
             <StatusDot tone={signal.tone} />
-            <span className="truncate">{r.name}</span>
+            <span className="truncate" data-testid="rendition-name">{r.name}</span>
           </CardTitle>
           <CardDescription className="font-mono">
             {sizeLabel(t, r)}
@@ -804,7 +807,9 @@ export function RenditionCard({
           </div>
         )}
 
-        <div className="flex items-center gap-1 border-t border-border pt-2">
+        {/* Wraps: at 390px the restart reason squeezed Edit and Restart into
+            each other. The reason takes its own line under the buttons there. */}
+        <div className="flex flex-wrap items-center gap-1 border-t border-border pt-2">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil /> {t("common.edit")}
           </Button>
@@ -825,7 +830,11 @@ export function RenditionCard({
               says "not reported" rather than "not running" deliberately: `proc`
               comes from the install-wide status socket, which on a
               multi-programme install describes whichever engine spoke last. */}
-          <DisabledReason id={restartReasonId} reason={restartReason} />
+          <DisabledReason
+            id={restartReasonId}
+            reason={restartReason}
+            className="order-last basis-full sm:order-none sm:basis-auto"
+          />
           {/* A33: Delete is a labelled row action, not an icon beside Restart. */}
           <Button
             variant="ghost"

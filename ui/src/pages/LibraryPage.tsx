@@ -357,7 +357,7 @@ export function LibraryPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t(transcriptsOff ? "lib.searchPlaceholderOff" : "lib.searchPlaceholder")}
-              className="h-9 border-0 bg-transparent text-[13px] focus-visible:ring-0"
+              className="h-9 border-0 bg-transparent text-[13px]"
               aria-label={t("lib.searchTranscripts")}
             />
             {searching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}

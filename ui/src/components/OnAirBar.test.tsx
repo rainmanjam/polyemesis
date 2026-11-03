@@ -68,6 +68,21 @@ describe("OnAirBar headline", () => {
   });
 });
 
+describe("OnAirBar lamp (2026-11 review, row 10)", () => {
+  // On air is the tally lamp, the same red the destination cards' badges
+  // light, not the green that also means running and healthy.
+  it("lights a solid tally lamp beside ON AIR", () => {
+    render(<OnAirBar status={status([proc("running")])} />);
+    const lamp = screen.getByTestId("on-air-lamp");
+    expect(lamp.className.split(/\s+/)).toContain("bg-tally");
+  });
+
+  it("has no lamp while off air", () => {
+    render(<OnAirBar status={status([proc("failed")])} />);
+    expect(screen.queryByTestId("on-air-lamp")).toBeNull();
+  });
+});
+
 describe("OnAirBar counts", () => {
   it("names the live, stopped and off counts in words, not as a bare fraction", () => {
     // "2/3" alone gets read as a bitrate on a console full of them.

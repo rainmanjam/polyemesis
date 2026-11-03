@@ -959,7 +959,7 @@ export function RoutingPage() {
 
       <div
         className={cn(
-          "grid gap-3 lg:grid-cols-[16rem_minmax(0,1fr)]",
+          "grid grid-cols-1 gap-3 lg:grid-cols-[16rem_minmax(0,1fr)]",
           view === "overview" && "hidden",
         )}
       >
@@ -1499,7 +1499,10 @@ function ProfileEditor({
                 <TabsTrigger value="matrix">{t("route.mixMatrix")}</TabsTrigger>
               </TabsList>
 
-              <div className="flex items-center gap-2">
+              {/* Wraps, and the select shrinks to the pane: at 390px the
+                  three controls in one row were 422px wide in a 356px card,
+                  and the pane scrolled sideways (2026-11 review, row 25). */}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {allowAnnotating && profile.mode === "simple" && (
                   <Button
                     variant={ctx.annotating ? "secondary" : "ghost"}
@@ -1516,7 +1519,7 @@ function ProfileEditor({
                   value={profile.normalize}
                   onValueChange={(v) => onPatch({ normalize: v as NormalizeMode })}
                 >
-                  <SelectTrigger id={`${idPrefix}-norm`} className="w-56">
+                  <SelectTrigger id={`${idPrefix}-norm`} className="w-56 max-w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

@@ -260,7 +260,7 @@ function OverviewCell({
       onClick={onClick}
       className={cn(
         "relative inline-flex h-9 w-14 flex-col items-center justify-center rounded-md border transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-70",
+        " disabled:cursor-not-allowed disabled:opacity-70",
         state === "musicVod" && "border-warn bg-warn-dim/40",
         state === "routed" && "border-primary/50 bg-primary/10",
         state === "off" && "border-border bg-transparent",

@@ -748,6 +748,31 @@ its first tagged release.
   computes the contrast of the palette's text, fill, button and indicator pairs from the token
   values, and fails a change that drops one below WCAG AA.
 
+- **Console quick wins from the 2026-11 design review.** Monitoring's sentence under the title now
+  reads the whole page: it says live updates have dropped or the process list has stopped updating, that the relay is losing
+  packets, or that host CPU or memory is over its threshold, before it says "All 12 running", and
+  it turns amber when it does, even with no process running. The audio meter lights flat green, yellow and red zones (green below
+  -18 dBFS, red from -2) instead of a colour ramp, and the bitrate chart is a straight green trace
+  that breaks where samples are missing, with the programme's degraded-link failover floor drawn
+  as a dashed line when that failover is on. A running process is plain text with a small green
+  dot instead of a filled green pill; filled pills stay for warnings and failures, and on air is a solid red tally lamp everywhere it
+  is shown: the header's live count (and its dot on a phone), the Dashboard's ON AIR bar, a destination
+  card's badge and the Recordings page's running recorder. Form labels
+  are sentence case instead of capitals. Every control draws the same 2px focus ring at a 2px
+  offset (tab triggers and the dialog's close button drew none), buttons move down 1px when
+  pressed, and text fields have a visible edge (3.66:1 against a card, from 1.24:1). Monitoring's
+  info icons, switches and "Show log" links have 24px targets. Pages share one right edge whether
+  or not they scroll, the programme switcher shows the programme's name instead of cutting it to
+  ten characters (on a phone, the part before the dash, with the wordmark giving way to the logo, and the on-air chip beside it keeping only its dot and state words so the programme is named once; where "Off air" has no room the chip says "Off" rather than cutting the word), headings and help text wrap evenly, and Routing no longer scrolls sideways on a
+  phone. Routing's mute-and-gain rows stack below about 42rem (name, role and channels; the meter
+  with its own L/R and dB readouts; then gain and Mute) instead of drawing the readouts over the
+  slider, and a long role wraps rather than being cut. The Sources card header, its publish rows
+  and the Renditions card header and buttons stack on a phone as well. The Dashboard's compact chat Send button has a name, and the Sources ingest fields are
+  tied to their captions for screen readers. The sign-in screen names the server it is signing in
+  to and whether that server answers (degraded only on the health check's own 503), from the
+  browser's own address and the public health check only; it shows no build or version, which
+  stay behind sign-in.
+
 - **YouTube captions by HTTP POST: the delay is applied once, by YouTube (#8).** A YouTube
   destination on *caption ingestion (HTTP POST)* still needs a 30 s or 60 s delay, and it is
   still sent as the broadcast's `broadcastStreamDelayMs`. polyemesis no longer holds that

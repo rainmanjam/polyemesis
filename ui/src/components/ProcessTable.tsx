@@ -92,7 +92,7 @@ export function ProcessTable({
                       aria-controls={expanded ? id : undefined}
                       aria-label={t("procTable.toggle", { process: p.name })}
                       onClick={() => setOpen((s) => flip(s, p.name))}
-                      className="flex min-w-0 items-center gap-1 rounded font-mono hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                      className="flex min-h-6 min-w-0 items-center gap-1 rounded font-mono hover:text-foreground"
                     >
                       <ChevronRight
                         aria-hidden="true"

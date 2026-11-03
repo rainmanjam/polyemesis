@@ -140,6 +140,7 @@ export function RoleBadge({
     <Badge
       variant={excluded ? "warn" : "outline"}
       className="min-w-0 max-w-full truncate"
+      data-part="role"
       title={name}
     >
       {name}
@@ -302,7 +303,7 @@ export function TrackRows({
           <div
             key={t.index}
             className={cn(
-              "flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors",
+              "@container flex flex-col gap-2 rounded-md border px-2.5 py-2 transition-colors",
               excluded
                 ? "border-warn/35 bg-warn-dim/25"
                 : sending
@@ -310,12 +311,21 @@ export function TrackRows({
                   : "border-border bg-card opacity-55 hover:opacity-80",
             )}
           >
+            {/* TWO LAYOUTS, BY THE ROW'S OWN WIDTH (a container query, so the
+                same rule holds in the Routing editor, the go-live sheet and a
+                destination card). Wide (42rem and up): one line, as it always
+                was. Narrow: three lines -- name, role and channel metadata;
+                the meter at full width with its L/R labels and dB readouts in
+                their own space; then gain, percentage and Mute. Squeezing the
+                five columns into a phone drew the readouts over the slider and
+                cut the role chip and the metadata to an ellipsis. */}
             <div
+              data-part="track-grid"
               className={cn(
-                "grid items-center gap-3",
+                "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 @2xl:gap-y-0",
                 muteColumn
-                  ? "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem_auto]"
-                  : "grid-cols-[auto_minmax(0,8.5rem)_minmax(0,1fr)_9rem]",
+                  ? "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem_auto]"
+                  : "@2xl:grid-cols-[auto_minmax(0,10rem)_minmax(0,1fr)_9rem]",
               )}
             >
               <Checkbox
@@ -329,8 +339,11 @@ export function TrackRows({
                 htmlFor={`${idPrefix}-track-${t.index}`}
                 className="min-w-0 cursor-pointer select-none"
               >
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="shrink-0 text-[12px] font-semibold leading-tight">
+                {/* Wraps rather than cuts: in the wide layout's 10rem column a
+                    long role ("Commentary") drops under the track name instead
+                    of being truncated to "COMMENTAR". */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <span data-part="name" className="shrink-0 text-[12px] font-semibold leading-tight">
                     {translate("lib.trackLabel", { n: t.index + 1 })}
                   </span>
                   {role !== "" && (
@@ -342,20 +355,23 @@ export function TrackRows({
                     </Badge>
                   )}
                 </div>
-                <div className="truncate font-mono text-sm leading-tight text-muted-foreground">
+                <div data-part="meta" className="truncate font-mono text-sm leading-tight text-muted-foreground">
                   {t.layout}
                   {t.channels > 2 && ` ${translate("signature.track.downmix")}`}
                   {(ann.language || t.language) && ` · ${ann.language || t.language}`}
                 </div>
               </label>
 
-              <div className="min-w-0">
+              <div data-part="meter" className="col-span-2 min-w-0 @2xl:col-span-1">
                 {hasLevels ? (
                   <AudioMeter
                     rms={rms}
                     peak={peak}
                     labels={channelLabels(t.channels)}
-                    barHeight={7}
+                    // 14px rows: each channel's dB readout is a 14px line of
+                    // mono text, and at 7px the L and R readouts were drawn
+                    // over each other.
+                    barHeight={14}
                     barGap={2}
                   />
                 ) : (
@@ -406,8 +422,12 @@ export function TrackRows({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* One line under the meter while narrow; `contents` from 42rem up,
+                  so the slider and Mute fall back into their own grid columns. */}
+              <div className="col-span-2 flex min-w-0 items-center gap-2 @2xl:contents">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 <Slider
+                  data-part="slider"
                   value={[shownGain]}
                   min={liveOk ? LIVE_MIN_GAIN : 0}
                   max={2}
@@ -430,6 +450,7 @@ export function TrackRows({
                   className={cn(!sel.enabled && "opacity-40")}
                 />
                 <span
+                  data-part="pct"
                   className={cn(
                     "tnum w-10 shrink-0 text-right font-mono text-sm",
                     sel.enabled ? "text-foreground" : "text-muted-foreground",
@@ -457,6 +478,7 @@ export function TrackRows({
                   // drop keyboard focus mid-request; a press while busy is ignored.
                   aria-disabled={rowBusy || undefined}
                   aria-busy={rowBusy || undefined}
+                  data-part="mute"
                   className={cn(sel.muted && "text-warn", rowBusy && "opacity-60")}
                   onClick={() => {
                     if (rowBusy) return;
@@ -480,6 +502,7 @@ export function TrackRows({
                   )}
                   title={draftMute.disabledReason ?? undefined}
                   disabled={!!draftMute.disabledReason}
+                  data-part="mute"
                   className={cn(sel.muted && "text-warn")}
                   onClick={() => update(t.index, { muted: !sel.muted })}
                 >
@@ -487,6 +510,7 @@ export function TrackRows({
                   {translate(sel.muted ? "route.live.unmute" : "route.live.mute")}
                 </Button>
               )}
+              </div>
             </div>
 
             {block?.inline && sel.enabled && (

@@ -87,7 +87,11 @@ export function RoutingSaveBar({
   return (
     <div
       className={cn(
-        "sticky bottom-0 z-20 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 shadow-sm",
+        "bottom-0 z-20 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 shadow-sm",
+        // Pinned while there is something to save. Clean, it pins only from
+        // sm up: at 390px it wraps to three lines and sat over the last
+        // destination row saying nothing was pending.
+        dirty ? "sticky" : "sm:sticky",
         warnRestart ? "border-warn bg-warn-dim" : "border-border bg-card",
       )}
     >
@@ -126,7 +130,10 @@ export function RoutingSaveBar({
           </ul>
         )}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {/* min-w-0, not shrink-0: at 390px the reason, Discard and Save are
+          wider than the bar, and a group that may not shrink pushed Save
+          off the right edge instead of wrapping it. */}
+      <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
         <SaveStatus state={saveState} />
         <DisabledReason id={reasonId} reason={reason} className="max-w-xs text-right" />
         <Button

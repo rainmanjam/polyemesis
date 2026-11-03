@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { useT, type TranslationKey } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const MIN_PASSWORD = 8;
 
@@ -53,6 +54,48 @@ const STRENGTH_KEYS = [
   "i18nSweep.strengthStrong",
 ] as const;
 
+/* WHICH SERVER, AND WHETHER IT ANSWERS (2026-11 review, row 27).
+ *
+ * The sign-in screen is the first surface an operator sees, and it did not say
+ * which box it was signing in to. It now carries a rack-label strip: the
+ * endpoint and the connection state. ONLY what an unauthenticated browser can
+ * already know: its own location, and the overall status of GET /health. Not
+ * /health's per-check detail (database errors, file paths), and not the build:
+ * GET /version sits behind sign-in on purpose, and this screen does not widen
+ * what the unauthenticated surface discloses.
+ *
+ * A 503 from /health is a server that answered and is unwell: degraded, not
+ * unreachable. Any other failure is unreachable: no network, a proxy's 502 or
+ * 504 for a backend that is gone, a 404 from the wrong host. */
+type Connection = "checking" | "ok" | "degraded" | "down";
+
+const CONNECTION: Record<Connection, { key: TranslationKey; dot: string }> = {
+  checking: { key: "auth.connChecking", dot: "border border-muted-foreground" },
+  ok: { key: "auth.connOk", dot: "bg-ok" },
+  degraded: { key: "auth.connDegraded", dot: "bg-warn" },
+  down: { key: "auth.connDown", dot: "bg-down" },
+};
+
+function useServerConnection(): Connection {
+  const [conn, setConn] = useState<Connection>("checking");
+  useEffect(() => {
+    let live = true;
+    const check = async () => {
+      try {
+        const h = await api.health();
+        if (live) setConn(h.status === "ok" ? "ok" : "degraded");
+      } catch (e) {
+        if (live) setConn(e instanceof ApiError && e.status === 503 ? "degraded" : "down");
+      }
+    };
+    void check();
+    return () => {
+      live = false;
+    };
+  }, []);
+  return conn;
+}
+
 export function AuthScreen({
   mode,
   onDone,
@@ -71,6 +114,7 @@ export function AuthScreen({
   const [error, setError] = useState("");
 
   const isSetup = mode === "setup";
+  const conn = useServerConnection();
   // Computed once per render: the four segments and the line below all read it.
   const strength = scorePassword(password);
   // Shown under Confirm while the operator types, not after they press the button.
@@ -116,14 +160,35 @@ export function AuthScreen({
   };
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-surface p-4">
+    <div className="flex min-h-dvh items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-4 flex items-center justify-center gap-2">
-          <BrandMark size={26} />
+        <div className="mb-3 flex items-center gap-2">
+          <BrandMark size={22} />
           <span className="text-lg font-semibold tracking-tight">polyemesis</span>
         </div>
 
-        <Card>
+        <Card className="overflow-hidden">
+          {/* The rack label: which server this is and whether it answers. */}
+          <dl
+            data-testid="auth-server"
+            className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2.5 text-sm"
+          >
+            <dt className="text-muted-foreground">{t("auth.server")}</dt>
+            <dd className="truncate font-mono text-foreground" title={window.location.origin}>
+              {window.location.host}
+            </dd>
+            <dt className="text-muted-foreground">{t("auth.connection")}</dt>
+            {/* role="status": a polite announcement when the check resolves, so
+                a screen-reader user already in the form still hears it. Not an
+                aria-live attribute, which the form keeps for the password
+                strength word alone. */}
+            <dd className="flex items-center gap-1.5 text-foreground">
+              <span aria-hidden="true" className={cn("h-1.5 w-1.5 shrink-0 rounded-full", CONNECTION[conn].dot)} />
+              {/* An <output> (implicitly role="status"), not a role on the
+                  <dd>, which would take it out of the definition list. */}
+              <output>{t(CONNECTION[conn].key)}</output>
+            </dd>
+          </dl>
           <CardHeader>
             <CardTitle>{isSetup ? t("auth.firstRun") : t("auth.signIn")}</CardTitle>
             <CardDescription>

@@ -860,7 +860,7 @@ export function ClipEditor() {
                 <TimecodeField label={t("clipedit.in")} valueMs={inMs} onCommit={(ms) => setInMs(Math.max(0, Math.min(ms, outMs - 1)))} />
                 <TimecodeField label={t("clipedit.out")} valueMs={outMs} onCommit={(ms) => setOutMs(Math.max(inMs + 1, Math.min(ms, durationMs)))} />
                 <div className="flex flex-col gap-1">
-                  <Label className="text-micro uppercase tracking-wider text-muted-foreground">
+                  <Label>
                     {t("clips.length")}
                   </Label>
                   <div className="tnum flex h-8 items-center rounded-md border border-border px-2 font-mono text-sm">
@@ -892,7 +892,7 @@ export function ClipEditor() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
-                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
+                <Label>
                   {t("set.mode")}
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -912,7 +912,7 @@ export function ClipEditor() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
+                <Label>
                   {t("golive.colAudio")}
                 </Label>
                 <label className="flex items-center gap-2 text-sm">
@@ -973,7 +973,7 @@ export function ClipEditor() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <Label className="text-micro uppercase tracking-wider text-muted-foreground">
+                <Label>
                   {t("clipedit.container")}
                 </Label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -1125,7 +1125,6 @@ function ModeButton({
       aria-pressed={active}
       className={cn(
         "rounded-md border p-2 text-left transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         active
           ? "border-primary bg-primary-dim text-foreground"
           : "border-border bg-card hover:bg-card-raised",
@@ -1158,7 +1157,7 @@ function TimecodeField({
   };
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-micro uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Label>{label}</Label>
       <Input
         value={shown}
         aria-label={t("clipedit.pointAria", { label })}

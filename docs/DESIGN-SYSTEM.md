@@ -141,13 +141,34 @@ destructive or meter red, if any source paints text with `--primary`, uses
 `--tally` as ink, or dims a text token below AA with an opacity modifier.
 Reverting any one of the 2026-11 token changes fails it.
 
-One known gap it does not assert: a text field is drawn as `bg-background`
-with a `border-input` outline on a `--card`, and neither edge reaches the 3:1
-WCAG 1.4.11 asks of a component boundary (the border is 1.24:1 against the
-card, the fill 1.09:1; `--border-strong` would be 1.56:1). Fixing it means a
-lighter input edge, which is a design decision, not a token rename.
+**Text fields have their own edge.** `--input` was `--border`'s value, 1.24:1
+against the `--card` a field sits on (the field's `--background` fill is
+1.09:1), so nothing reached the 3:1 WCAG 1.4.11 asks of a component boundary.
+It is now its own lighter step, `oklch(55% 0.03 263)`: 3.66:1 on `--card`, 3.39
+on `--card-raised`, 3.56 on `--popover`, 3.28 on `--muted` and 4.00 against
+the field's own fill. A field is a control, not a divider; `--border` keeps
+its value for hairlines. The contrast test holds `--input` at 3:1 on every
+ground a field is drawn on.
+
+**Charts and meters are flat.** The audio meter lights three discrete zones,
+green below -18 dBFS, yellow from -18 to -2 and red from -2, each one flat
+colour starting exactly at its break; the zone marks, the hatch above -6 and the
+CLIP flag still carry the reading without hue. The Monitoring bitrate chart is a
+linear `--ok` trace that breaks where samples are missing (a gap longer than
+three samples), with no fill. Its one threshold line is the programme's
+degraded-link floor, drawn in `--warn` only while that failover is on: a chart
+does not invent thresholds nobody set. `lib/no-gradients.test.ts` fails on any
+gradient in `ui/src` outside its allow-list (the overlay preview's transparency
+checkerboard, a pattern rather than a fade).
 
 ### Type scale
+
+**Case.** Form labels are sentence case at 12px/500. Capitals mark a kind of
+thing rather than name a field, so they stay on table headers, menu group
+labels, status pills and meter scales, all at one letter-spacing,
+`--tracking-caps` (0.08em, the `tracking-caps` utility). Headings balance their
+lines (`text-wrap: balance`) and paragraphs avoid a one-word last line
+(`text-wrap: pretty`), both from the base layer.
 
 A console shows numbers that are read at a glance and prose that is read
 carefully, so the scale is tighter at the small end than a marketing scale would
@@ -194,7 +215,14 @@ Every string is passed in already translated.
 `components/StatusPill.tsx`. The tone is `ok` (on air, the only green), `warn`
 (a transition, or something that needs a look), `bad` (failed) or `idle`
 (not running by choice or by absence). The indicator is the non-colour cue:
-filled, dashed, cross or ring. These are presentation words only. Never send
+filled, dashed, cross or ring. StatusPill draws an `ok` reading two ways. The
+nominal case (a process running, a signal present) is neutral text with a 6px
+`--ok` dot, because a column of identical filled green pills is wallpaper that
+hides the row that is wrong. A reading marked `lamp` (an on-air destination, a
+running recorder) is the solid `--tally` lamp under its `--tally-foreground`
+label; the destination card's state badge reads the same flag, and the
+header's live count and the Dashboard's ON AIR bar light the same lamp, so on
+air is one red everywhere it is shown. Warn and bad keep their filled pills; idle keeps its outline. These are presentation words only. Never send
 them to the server and never rename a state value; the API, MQTT, webhook and
 Stream Deck vocabularies are contracts. A new state goes in `lib/status.ts`
 with a test, not into a page.
@@ -291,6 +319,22 @@ Nothing that reflects **live state** may animate its arrival. A meter, a status
 pill and a viewer count change because reality changed; easing them in adds
 latency to the one number the operator is watching. `prefers-reduced-motion`
 collapses all three to zero.
+
+**Press.** A button moves down 1px while pressed (`active:translate-y-px`) over
+`--motion-instant`, the website's `.btn:active` exactly. No scale: a control
+that changes size shimmers in a dense row. A disabled button has
+`pointer-events: none`, so it never presses.
+
+**Focus.** One rule, in `index.css`'s base layer: `:focus-visible` draws a 2px
+`--ring` outline at a 2px offset, which is also the website's ring. Components
+do not set `focus-visible:outline-none` or `ring-*`; buttons and fields drew a
+box-shadow ring with an offset painted in `--surface`, the wrong colour on a
+card, while links drew this outline at 1px, and the controls
+that had opted out of the outline without a replacement (tab triggers, the
+dialog's close button) showed nothing at all. The one exception is a
+programmatic jump target reached by a mouse click elsewhere (the destination
+card the On Air bar jumps to), which `:focus-visible` ignores: it draws the
+same outline on `:focus`.
 
 ### Elevation
 

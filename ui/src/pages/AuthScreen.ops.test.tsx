@@ -105,7 +105,14 @@ describe("AuthScreen: a failed attempt keeps what the operator typed (A75)", () 
     fireEvent.click(screen.getByRole("button", { name: translate("en", "auth.signIn") }));
 
     await waitFor(() => expect(sent.length).toBe(1));
-    expect((screen.getByLabelText(translate("en", "auth.password")) as HTMLInputElement).value).toBe("");
+    // The clear runs in the 401's rejection handler, a microtask AFTER login()
+    // was called -- so `sent` can be 1 while the field still holds the old
+    // value. Asserting once, straight after, raced that handler and failed
+    // under a loaded full-suite run. Wait for the clear itself; a build that
+    // never clears still fails here, at the waitFor timeout.
+    await waitFor(() =>
+      expect((screen.getByLabelText(translate("en", "auth.password")) as HTMLInputElement).value).toBe(""),
+    );
   });
 
   it("shows the mismatch under Confirm while typing, and sends nothing", () => {
