@@ -46,11 +46,13 @@ const DIST = resolve(new URL("../dist/", import.meta.url).pathname);
 const WIDTHS = [1440, 1024, 768, 390];
 const TOLERANCE = 1;
 
-/* Every page the alignment work converted, and how many card grids it has at
- * minimum, checked at every width. This list is deliberately independent of
- * the class it counts: discovery below reads `.card-grid` from the HTML, so a
- * page that LOST its grid would otherwise drop out of the run and pass. Lower
- * a number only alongside the markup change that removes a grid. */
+/* Every page the alignment work converted, and EXACTLY how many card grids it
+ * has, checked at every width. This list is deliberately independent of the
+ * class it counts: discovery below reads `.card-grid` from the HTML, so a page
+ * that LOST its grid would otherwise drop out of the run and pass, and an
+ * exact count stops a grid added in one place from hiding one lost in
+ * another. Change a number alongside the markup change that adds or removes a
+ * grid. */
 const REQUIRED = {
   "/": 1,
   "/features": 1,
@@ -165,8 +167,11 @@ function measure() {
       return {
         label: g.getAttribute("aria-label") || g.id || (g.previousElementSibling?.textContent ?? "").trim().slice(0, 40) || g.className,
         isCardGrid: g.classList.contains("card-grid"),
-        // data-foot="optional": a foot only some cards have (notes on /features rooms).
-        optionalFoot: g.dataset.foot === "optional",
+        // data-foot: "required" (every card has one), "optional" (some do), or absent (none may).
+        foot: g.dataset.foot ?? "none",
+        // data-pager: the docs previous/next pair, which may hold one card at either side.
+        pager: g.hasAttribute("data-pager"),
+        spanFull: [...g.children].some((c) => c.classList.contains("card-span-full")),
         variant: [...g.classList].find((c) => /^card-grid--/.test(c)) ?? null,
         left,
         right,
@@ -218,8 +223,8 @@ try {
 
       if (m.overflow > 0) fail.push(`${at}: the page scrolls sideways by ${m.overflow}px`);
       const cardGrids = m.grids.filter((g) => g.isCardGrid).length;
-      if (REQUIRED[route] && cardGrids < REQUIRED[route]) {
-        fail.push(`${at}: ${cardGrids} .card-grid found, expected at least ${REQUIRED[route]} -- did the class move?`);
+      if (REQUIRED[route] && cardGrids !== REQUIRED[route]) {
+        fail.push(`${at}: ${cardGrids} .card-grid found, expected ${REQUIRED[route]} -- update REQUIRED with the markup change`);
       }
 
       for (const g of m.grids) {
@@ -239,21 +244,28 @@ try {
           fail.push(`${name}: .card-grid without a column variant (--2, --3 or --5)`);
           continue;
         }
-        /* The variant is chosen from the count, so the count must fit it.
-           Without this, two cards in --3 pass: the row-fill rule below has to
-           let a grid with fewer cards than columns through, for the docs
-           pager's lone "Previous". */
-        const fits = { "card-grid--2": () => true, "card-grid--3": (n) => n % 3 === 0, "card-grid--5": (n) => n === 5 };
-        if (!fits[g.variant](g.items.length)) {
-          fail.push(`${name}: ${g.items.length} cards in ${g.variant} -- pick the variant for this count`);
+        /* The variant is chosen from the count, so the count must fit it:
+           --2 an even count or an odd one closed by a .card-span-full card,
+           --3 a multiple of three, --5 five. Without this, two cards in --3
+           pass. The docs pager is the one --2 allowed a single card. */
+        const n = g.items.length;
+        const fits = {
+          "card-grid--2": () => (n >= 2 && (n % 2 === 0 || g.spanFull)) || (g.pager && n >= 1 && n <= 2),
+          "card-grid--3": () => n >= 3 && n % 3 === 0,
+          "card-grid--5": () => n === 5,
+        };
+        if (!fits[g.variant]()) {
+          fail.push(`${name}: ${n} card(s) in ${g.variant} -- pick the variant for this count`);
         }
-        /* A foot on some cards and not others is a baseline nobody can check:
-           the row compares nothing, and the card without one ends wherever
-           its text does. All or none, and one each -- unless the grid says
-           its foot is optional content rather than a recurring line. */
+        /* The foot is declared, not inferred. A grid whose cards end on a
+           recurring line says data-foot="required" and every card must carry
+           exactly one; "optional" allows at most one; no attribute allows
+           none. Inferring it let every foot be deleted and still pass. */
         const footed = g.items.filter((c) => c.feet > 0).length;
-        if (footed > 0 && footed < g.items.length && !g.optionalFoot) {
-          fail.push(`${name}: ${footed} of ${g.items.length} cards have a .card-foot -- all or none`);
+        if (g.foot === "required" && footed !== n) {
+          fail.push(`${name}: data-foot="required" but ${footed} of ${n} cards have a .card-foot`);
+        } else if (g.foot === "none" && footed > 0) {
+          fail.push(`${name}: ${footed} card(s) have a .card-foot but the grid declares no data-foot`);
         }
         if (g.items.some((c) => c.feet > 1)) fail.push(`${name}: a card has more than one .card-foot`);
 
@@ -285,17 +297,17 @@ try {
             }
           }
         });
-        /* Every row reaches the grid's right edge: a short last row is an
-           orphan, and a short FIRST row is a variant with more columns than
-           cards (two cards in --3). The one exception is a grid with fewer
-           cards than columns by content, not by design -- the docs pager on
-           the last page has only "Previous". */
-        if (g.items.length >= COLUMNS[g.variant](width)) {
+        /* Every row spans the grid, left edge to right edge: a short last
+           row is an orphan, and a short first row is a variant with more
+           columns than cards. The docs pager is exempt -- on the first and
+           last documents it holds one card, at the side it points to. */
+        if (!g.pager) {
           rows.forEach((row, i) => {
-            const short = g.right - Math.max(...row.map((c) => c.right));
-            if (short > TOLERANCE) {
+            const shortL = Math.min(...row.map((c) => c.left)) - g.left;
+            const shortR = g.right - Math.max(...row.map((c) => c.right));
+            if (shortL > TOLERANCE || shortR > TOLERANCE) {
               const what = i === rows.length - 1 && rows.length > 1 ? "an orphan" : "the row does not fill its columns";
-              fail.push(`${name} row ${i + 1}: ${row.length} card(s) stop ${short.toFixed(0)}px short of the grid's right edge -- ${what}`);
+              fail.push(`${name} row ${i + 1}: ${row.length} card(s) leave ${shortL.toFixed(0)}px / ${shortR.toFixed(0)}px of the grid empty (left / right) -- ${what}`);
             }
           });
         }
