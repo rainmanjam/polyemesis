@@ -162,3 +162,45 @@ func TestSweepTickAppliesTheFloorAndSurfacesItInUsage(t *testing.T) {
 		t.Errorf("usage must carry the halt so the UI can explain it; got %+v", u.Storage)
 	}
 }
+
+// SetFreeSpace is how a test in another package gives ONE manager a full
+// volume. The reading must reach the guard, must survive being swapped while a
+// sweep is reading it (the engine's sweep goroutine does exactly that), and nil
+// must put the real measurement back.
+func TestSetFreeSpaceReplacesTheVolumeTheGuardMeasures(t *testing.T) {
+	m, _, _ := newManager(t)
+
+	m.SetFreeSpace(func(string) (uint64, uint64, error) { return 0, gb(100), nil })
+	m.CheckFreeSpace(floorAt(5))
+	if !m.Storage().Halted {
+		t.Fatal("a volume with no room did not halt the manager it was installed on")
+	}
+
+	m.SetFreeSpace(func(string) (uint64, uint64, error) { return gb(100), gb(100), nil })
+	m.CheckFreeSpace(floorAt(5))
+	if m.Storage().Halted {
+		t.Fatal("a volume with ample room did not lift the halt")
+	}
+
+	m.SetFreeSpace(nil)
+	free, total, err := m.measureFree()
+	if err != nil || total == 0 || free > total {
+		t.Fatalf("nil did not restore the real measurement: free=%d total=%d err=%v", free, total, err)
+	}
+}
+
+func TestSetFreeSpaceIsSafeAgainstAConcurrentSweep(t *testing.T) {
+	m, _, _ := newManager(t)
+	m.SetFreeSpace(func(string) (uint64, uint64, error) { return gb(100), gb(100), nil })
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			m.CheckFreeSpace(floorAt(5))
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		m.SetFreeSpace(func(string) (uint64, uint64, error) { return gb(100), gb(100), nil })
+	}
+	<-done
+}

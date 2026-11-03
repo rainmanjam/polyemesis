@@ -678,7 +678,12 @@ func (s *Server) uploadStore() (*uploads.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return uploads.New(abs)
+	store, err := uploads.New(abs)
+	if err != nil {
+		return nil, err
+	}
+	// nil (every production caller) leaves the real statfs in place.
+	return store.WithFreeBytes(s.uploadFreeBytes), nil
 }
 
 // writeUploadError maps a store error to the status the caller deserves.

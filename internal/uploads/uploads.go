@@ -76,6 +76,17 @@ func New(dataDir string) (*Store, error) {
 	return &Store{dir: dir, freeBytes: freeBytes}, nil
 }
 
+// WithFreeBytes replaces how this Store measures free space and returns the
+// Store. nil keeps the real measurement. It exists so a caller above this
+// package (internal/api) can state the free space a test needs instead of
+// inheriting whatever the host volume happens to have.
+func (s *Store) WithFreeBytes(fn func(path string) (uint64, error)) *Store {
+	if fn != nil {
+		s.freeBytes = fn
+	}
+	return s
+}
+
 // Dir returns the absolute uploads directory.
 func (s *Store) Dir() string { return s.dir }
 

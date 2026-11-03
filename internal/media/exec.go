@@ -50,7 +50,11 @@ type Execer func(ctx context.Context, cmd Command, sink Sink) error
 // which x265 and SVT-AV1 both do — can leave those pipes open after the parent
 // is gone. Without WaitDelay the worker would sit in Wait forever and the
 // queue's cancellation would be a lie.
-const killGrace = 5 * time.Second
+//
+// A var, not a const, for one reason: the test that pins the timeout path
+// (TestExecJoinsItsReaderGoroutinesAfterADrainTimeout) would otherwise spend
+// two real graces per run. Production never assigns it.
+var killGrace = 5 * time.Second
 
 // maxStderrTail is how much of a failed command's output is quoted back in the
 // error. Enough for the reason, bounded so a chatty encoder cannot make one
@@ -148,14 +152,26 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 		wg.Wait()
 		close(drained)
 	}()
-	select {
-	case <-drained:
-	case <-time.After(killGrace):
-		// The readers are still blocked on a pipe something else is holding.
-		// c.Wait below, bounded by WaitDelay, is what frees them.
-	}
+	// If this times out the readers are still blocked on a pipe something else
+	// is holding; c.Wait below, bounded by WaitDelay, is what frees them.
+	_ = awaitReaders(drained)
 
 	err = c.Wait()
+
+	// JOIN THE READERS BEFORE RETURNING. On the timeout path above they were
+	// left running: Wait closes the pipes, which wakes them, but "wakes" is not
+	// "has returned", so Exec came back with up to three goroutines (two
+	// readers and the one waiting on them) still live, still holding the sink
+	// callbacks, and on a long-lived worker that is one leaked trio per
+	// timed-out command. Joining here also means the tail read below is
+	// complete: a line the reader was mid-way through when the pipes closed
+	// used to miss the error message.
+	//
+	// Bounded by the same grace. Wait has closed the pipes, so the only thing
+	// that can still hold a reader is a Sink callback that does not return, and
+	// a worker that hangs forever behind a stuck callback is worse than the
+	// goroutine it would be waiting for.
+	_ = awaitReaders(drained)
 
 	if err != nil {
 		mu.Lock()
@@ -173,6 +189,18 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 		return fmt.Errorf("%s failed: %w", cmd.Name, err)
 	}
 	return nil
+}
+
+// awaitReaders reports whether the reader goroutines finished within killGrace.
+func awaitReaders(drained <-chan struct{}) bool {
+	t := time.NewTimer(killGrace)
+	defer t.Stop()
+	select {
+	case <-drained:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // output runs a command and returns its stdout, for ffprobe. Separate from Exec

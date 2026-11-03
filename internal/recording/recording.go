@@ -43,6 +43,9 @@ type Manager struct {
 	// freeSpace is diskFree in production; tests substitute a volume they can
 	// fill on demand, which no real temp directory lets them do.
 	freeSpace func(string) (uint64, uint64, error)
+	// freeSpaceMu guards freeSpace once the sweep goroutine is running, which
+	// is the only time SetFreeSpace is useful.
+	freeSpaceMu sync.RWMutex
 	// recorderRunning answers whether any recorder process is alive right now.
 	// Nil means "not wired up", and Delete then falls back to recording.enabled.
 	// See WithRecorderProbe.
@@ -170,6 +173,31 @@ func (m *Manager) ScanAndSweep(s db.RecordingSettings) {
 // bytesPerGB is the binary gigabyte the size settings are expressed in.
 const bytesPerGB = 1024 * 1024 * 1024
 
+// SetFreeSpace replaces how this manager measures its volume. nil restores the
+// real measurement.
+//
+// It exists for the one caller that cannot reach the unexported field: a test
+// in another package that needs ONE programme's volume to read full while its
+// sibling's does not. Setting a floor in the stored settings cannot do that --
+// the floor is install-wide -- and halting by hand loses to the engine's
+// startup sweep, which re-reads the real disk and lifts the halt. A reading
+// installed here is what every sweep, at startup or on the 30s tick, sees.
+func (m *Manager) SetFreeSpace(fn func(path string) (free, total uint64, err error)) {
+	if fn == nil {
+		fn = diskFree
+	}
+	m.freeSpaceMu.Lock()
+	m.freeSpace = fn
+	m.freeSpaceMu.Unlock()
+}
+
+func (m *Manager) measureFree() (free, total uint64, err error) {
+	m.freeSpaceMu.RLock()
+	fn := m.freeSpace
+	m.freeSpaceMu.RUnlock()
+	return fn(m.dir)
+}
+
 // CheckFreeSpace applies the free-space floor and reports whether the halt
 // state changed. One statfs, so it is cheap enough for the sweep tick.
 //
@@ -180,7 +208,7 @@ func (m *Manager) CheckFreeSpace(s db.RecordingSettings) bool {
 	if s.MinFreeGB <= 0 {
 		return m.setStorage(StorageState{})
 	}
-	free, total, err := m.freeSpace(m.dir)
+	free, total, err := m.measureFree()
 	if err != nil {
 		m.log.Warn("free-space check failed", "dir", m.dir, "err", err)
 		return false
@@ -1081,7 +1109,7 @@ func (m *Manager) Usage() (DiskUsage, error) {
 	} else {
 		m.log.Warn("derived-media usage unreadable; disk figure excludes proxies", "err", err)
 	}
-	free, total, err := m.freeSpace(m.dir)
+	free, total, err := m.measureFree()
 	if err == nil {
 		u.FreeBytes, u.TotalBytes = free, total
 	}

@@ -2,7 +2,9 @@ package media
 
 import (
 	"context"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -53,5 +55,86 @@ func TestCancellingACommandDoesNotHangOnASurvivingGrandchild(t *testing.T) {
 			"goroutines are being waited on before Cmd.Wait, so WaitDelay — the " +
 			"whole reason killGrace exists — never gets the chance to close the " +
 			"pipes a surviving grandchild is holding open.")
+	}
+}
+
+// execGoroutines counts goroutines running a closure defined inside Exec: the
+// two pipe readers and the one that waits for them. Counted by stack rather
+// than by runtime.NumGoroutine so the rest of the test binary cannot move it.
+func execGoroutines() int {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	count := 0
+	for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+		if strings.Contains(g, "internal/media.Exec.func") {
+			count++
+		}
+	}
+	return count
+}
+
+// EXEC MUST NOT LEAVE ITS READERS BEHIND WHEN THE DRAIN TIMES OUT.
+//
+// A surviving grandchild holds the output pipes open, so the readers never see
+// EOF and the drain gives up after killGrace. Wait then closes the pipes, which
+// wakes the readers -- but nothing joined them, so Exec returned while up to
+// three goroutines were still unwinding. The check is made the instant Exec
+// returns, with no polling, because "they will be gone in a moment" is the
+// leak.
+func TestExecJoinsItsReaderGoroutinesAfterADrainTimeout(t *testing.T) {
+	old := killGrace
+	killGrace = 400 * time.Millisecond
+	t.Cleanup(func() { killGrace = old })
+
+	// The stderr reader is parked INSIDE its sink callback, which is what makes
+	// the leak observable on demand instead of by luck: the reader cannot have
+	// finished unless Exec waited for it. It is released after Wait has closed
+	// the pipes but inside the join's grace.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	sink := Sink{Line: func(string) {
+		once.Do(func() { close(entered) })
+		<-release
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Exec(ctx, helper("grandchild"), sink) }()
+
+	select {
+	case <-entered:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the child never wrote a line, so the reader was never parked")
+	}
+	cancel()
+	// killGrace after the kill Wait closes the pipes and returns; the join then
+	// has another killGrace. Released in the middle of that second window.
+	time.AfterFunc(killGrace+killGrace/4, func() { close(release) })
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a cancelled command reported success")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("Exec did not return after cancellation")
+	}
+	if n := execGoroutines(); n != 0 {
+		t.Fatalf("%d goroutine(s) started by Exec are still running after it returned", n)
+	}
+}
+
+// A drain that finishes normally must not be delayed by the join.
+func TestExecJoinAddsNoWaitToAChildThatExitsCleanly(t *testing.T) {
+	start := time.Now()
+	if err := Exec(context.Background(), helper("progress"), Sink{}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if d := time.Since(start); d > killGrace {
+		t.Fatalf("a clean child took %v, longer than the grace", d)
+	}
+	if n := execGoroutines(); n != 0 {
+		t.Fatalf("%d goroutine(s) started by Exec are still running after a clean exit", n)
 	}
 }
