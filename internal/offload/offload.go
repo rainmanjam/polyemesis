@@ -105,6 +105,9 @@ type Service struct {
 	partBackoff time.Duration
 	ctxMu       sync.Mutex
 	baseCtx     context.Context
+	// kicks counts the passes Kick started, so a caller (a test) can wait
+	// for the pass a Retry now kicked off instead of racing it.
+	kicks sync.WaitGroup
 }
 
 // Option configures a Service.
@@ -277,7 +280,11 @@ func (s *Service) Kick() {
 	s.ctxMu.Lock()
 	ctx := s.baseCtx
 	s.ctxMu.Unlock()
-	go s.Pass(ctx)
+	s.kicks.Add(1)
+	go func() {
+		defer s.kicks.Done()
+		s.Pass(ctx)
+	}()
 }
 
 func (s *Service) passOnce(ctx context.Context) {

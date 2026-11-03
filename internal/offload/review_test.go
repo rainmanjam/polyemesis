@@ -41,6 +41,7 @@ func TestRetryNowDuringAPassIsNotOverwrittenByIt(t *testing.T) {
 		return m, nil
 	}
 	f.svc.Pass(context.Background())
+	f.settle() // the kick Retry started may still be queued behind the pass
 	it, _ := f.item(id, name)
 	if it.State == db.OffloadStuck || it.Attempts != 1 {
 		t.Fatalf("after a retry mid-pass: %+v (want failed, attempts 1)", it)

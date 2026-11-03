@@ -47,7 +47,9 @@ func TestConsecutiveFailuresMakeAnItemStuckOnceAndRetryNowFreesIt(t *testing.T) 
 	if err != nil || n != 1 {
 		t.Fatalf("retry: %d %v", n, err)
 	}
-	f.svc.Pass(context.Background())
+	// Retry kicked a pass of its own; a Pass called while it runs defers to
+	// it and returns at once, so wait for the kick before reading the row.
+	f.settle()
 	if it, _ := f.item(id, name); it.State != db.OffloadVerified {
 		t.Fatalf("after Retry now: %+v", it)
 	}
@@ -65,13 +67,18 @@ func TestARefusedCredentialIsStuckAtOnce(t *testing.T) {
 	if it, _ := f.item(id, name); it.State != db.OffloadStuck || it.Attempts != 1 || raised != 1 {
 		t.Fatalf("%+v raised=%d", it, raised)
 	}
-	// Retry for one file, on every target.
+	// Retry for one file, on every target. A cancelled base context parks the
+	// pass Retry kicks, so the reset row is read before anything re-attempts it.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.svc.baseCtx = cancelled
 	if n, _ := f.svc.Retry(0, name); n != 1 {
 		t.Fatalf("per-file retry moved %d", n)
 	}
 	if it, _ := f.item(id, name); it.State != db.OffloadPending || it.Attempts != 0 {
 		t.Fatalf("after retry %+v", it)
 	}
+	f.settle()
 }
 
 // ---- 2. multipart ----
@@ -222,4 +229,50 @@ func (b *blockingStore) Put(ctx context.Context, key string, body io.ReadSeeker,
 type slowBody struct {
 	ctx  context.Context
 	sent bool
+}
+
+// Probe for the flake: Retry's kick pass is asynchronous. While it is running,
+// a second Pass is deferred to it (documented on Pass), not run inline, so
+// returning from Pass proves nothing until the kick has drained.
+func TestPassWhileTheKickPassRunsDefersToItAndSettleWaitsForIt(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	m := f.mems[id]
+	name := f.segment(5*time.Hour, "footage", true)
+	f.segment(time.Minute, "newest", true)
+	if err := f.store.PutOffloadItem(db.OffloadItem{TargetID: id, RelPath: name, Kind: db.OffloadKindRecording,
+		Key: "polyemesis/recordings/x/" + name, State: db.OffloadStuck, Attempts: 3}); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.svc.newClient = func(db.StorageTarget) (Client, error) {
+		once.Do(func() { close(entered); <-release })
+		return m, nil
+	}
+	if n, err := f.svc.Retry(id, ""); err != nil || n != 1 {
+		t.Fatalf("retry: %d %v", n, err)
+	}
+	<-entered // the kick pass now holds the pass lock, parked before any upload
+	// A file that appears now was not in the kick pass's scan: only the extra
+	// round the deferred Pass asked for can find it.
+	late := f.segment(6*time.Hour, "late footage", true)
+	f.svc.Pass(context.Background())
+	if it, _ := f.item(id, name); it.State != db.OffloadPending || it.Attempts != 0 {
+		t.Fatalf("a Pass during the kick pass must defer to it: %+v", it)
+	}
+	settled := make(chan struct{})
+	go func() { f.settle(); close(settled) }()
+	select {
+	case <-settled:
+		t.Fatal("settle returned while the kick pass was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-settled
+	for _, n := range []string{name, late} {
+		if it, _ := f.item(id, n); it.State != db.OffloadVerified {
+			t.Fatalf("the deferred ask was dropped for %s: %+v", n, it)
+		}
+	}
 }
