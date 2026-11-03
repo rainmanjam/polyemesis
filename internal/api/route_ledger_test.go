@@ -795,6 +795,11 @@ var excusedRoutes = map[string]coverageExcus{
 	"GET /api/v1/clipper/recordings/{id}/highlights": deniedWithCounterpart("clipHighlights"),
 	// Wave 4 #5b: saved layouts, the fonts listing and FFmpeg's capability.
 	"GET /api/v1/clipper/templates": deniedWithCounterpart("clipTemplates"),
+	// Clip publishing (#5c). Session-only, so no bearer reaches them; the
+	// counterparts plant the connected account's name and the platform post id
+	// and scan the read token's answer for both.
+	"GET /api/v1/publish/targets": sessionOnlyWithCounterpart("publishTargets"),
+	"GET /api/v1/publish/{id}":    sessionOnlyWithCounterpart("publishStatus"),
 }
 
 // The constructors below no longer take a test NAME or an ISSUE STRING. Both
@@ -822,6 +827,15 @@ func sessionOnly() coverageExcus {
 		Why:  "session-only; no bearer of either scope reaches it",
 		Want: &routeWant{As: "read", Status: http.StatusForbidden},
 	}
+}
+
+// sessionOnlyWithCounterpart is sessionOnly plus a proof that drives the route's
+// bytes, for a session-only route whose 403 would say nothing about what it
+// carries if it ever became a 200.
+func sessionOnlyWithCounterpart(proof string) coverageExcus {
+	e := sessionOnly()
+	e.Counterpart = proof
+	return e
 }
 
 // sourceOnlyPreview is sessionOnly plus a counterpart that actually drives the
@@ -1267,6 +1281,8 @@ var counterpartProofs = map[string]counterpartProof{
 	"analyticsReport":                       proveAnalyticsReport,
 	"clipHighlights":                        proveClipHighlights,
 	"clipTemplates":                         proveClipTemplates,
+	"publishTargets":                        provePublishTargets,
+	"publishStatus":                         provePublishStatus,
 }
 
 // patternDriven drives a request and reports the chi pattern that MATCHED, so a

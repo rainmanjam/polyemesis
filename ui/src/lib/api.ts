@@ -126,6 +126,7 @@ import type {
 } from "./types";
 import type { ChatOverlay, OverlayInput, OverlaysResponse } from "./overlay";
 import type { Poll, PollSpec, PollsResponse } from "./polls";
+import type { Publication, PublishForm, PublishPrepared, PublishTargets } from "./publish";
 
 const BASE = "/api/v1";
 
@@ -530,6 +531,16 @@ export const api = {
     post<AutomodTestResult>("/automod/test", req),
 
   // --- media uploads ---
+  /* Clip publishing (#5c). Every route is session-only server-side; the
+     console is the only caller, and publishClip needs the confirmation that
+     preparePublish minted for the same form. */
+  publishTargets: (clipJobId: number) =>
+    get<PublishTargets>(`/publish/targets?clip=${encodeURIComponent(String(clipJobId))}`),
+  preparePublish: (form: PublishForm) => post<PublishPrepared>("/publish/prepare", form),
+  publishClip: (form: PublishForm, confirmToken: string) =>
+    post<Publication>("/publish", { ...form, confirmToken }),
+  publication: (id: number) => get<Publication>(`/publish/${id}`),
+
   media: () => get<MediaFile[]>("/media"),
   deleteMedia: (name: string) => del<void>(`/media/${encodeURIComponent(name)}`),
   uploadMedia,

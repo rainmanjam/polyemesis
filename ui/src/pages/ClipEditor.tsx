@@ -17,6 +17,7 @@ import {
   Play,
   Scissors,
   Search,
+  Send,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import {
 } from "@/lib/timeline";
 import { autoApi } from "@/lib/autoApi";
 import { HighlightsPanel } from "@/components/HighlightsPanel";
+import { PublishClipDialog } from "@/components/PublishClipDialog";
 import { VerticalExportPanel } from "@/components/VerticalExportPanel";
 import { defaultVerticalSpec, verticalBody, type ClipTemplatesView, type VerticalSpec } from "@/lib/vertical";
 import { bytes } from "@/lib/format";
@@ -1353,6 +1355,7 @@ function TranscriptRow({
 
 function JobRow({ job }: { job: ClipJob }) {
   const t = useT();
+  const [publishing, setPublishing] = useState(false);
   const done = job.state === "done";
   const failed = job.state === "failed" || job.state === "cancelled";
   const res = job.result;
@@ -1370,7 +1373,13 @@ function JobRow({ job }: { job: ClipJob }) {
             </a>
           </Button>
         )}
+        {done && (
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setPublishing(true)}>
+            <Send /> {t("publish.open")}
+          </Button>
+        )}
       </div>
+      {done && <PublishClipDialog clipJobId={job.id} open={publishing} onOpenChange={setPublishing} />}
       {!done && !failed && (
         <div className="h-1 overflow-hidden rounded-full bg-muted">
           <div

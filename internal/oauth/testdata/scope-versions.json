@@ -25,6 +25,14 @@
     ]
   },
   {
+    "platform": "tiktok",
+    "scopeVersion": 1,
+    "scopes": [
+      "user.info.basic",
+      "video.publish"
+    ]
+  },
+  {
     "platform": "twitch",
     "scopeVersion": 4,
     "scopes": [

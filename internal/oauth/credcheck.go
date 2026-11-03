@@ -98,6 +98,9 @@ var unverifiableProviders = map[db.Platform]string{
 	db.PlatformX: "X's OAuth 2.0 token endpoint has no client-only verification that " +
 		"runs without a user consent round-trip. The credentials are checked for shape " +
 		"only; the real verdict arrives the first time you connect an account.",
+	db.PlatformTikTok: "TikTok's token endpoint verifies a client key and secret only together " +
+		"with an authorization code from a user consent round-trip. The credentials are " +
+		"checked for shape only; the real verdict arrives the first time you connect an account.",
 }
 
 // CheckCredentialsFor dispatches to the provider, or reports honestly that no

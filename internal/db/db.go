@@ -402,6 +402,12 @@ func Open(path string, opts ...Option) (*DB, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// The clip publishing ledger (Wave 4 #5c). New table only; see
+	// clip_publications.go.
+	if err := d.MigrateClipPublications(); err != nil {
+		sqldb.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	// Last, because it reads settings and writes to destinations, renditions
 	// and recordings: every column those tables are going to have must already
 	// be there. It also creates the first source from the existing ingest

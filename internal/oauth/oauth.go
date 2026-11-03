@@ -170,6 +170,10 @@ func ProvidersWith(opts ...ProviderOption) map[db.Platform]Provider {
 		// X (Twitter) sign-in is open to everyone; the Livestream family behind it
 		// is whitelisted by X and switched off until the app is. See x.go.
 		db.PlatformX: NewX(opts...),
+		// TikTok signs in for ONE reason: posting a finished clip with the
+		// Content Posting API. It has no destination and no stream key. See
+		// tiktok.go.
+		db.PlatformTikTok: NewTikTok(opts...),
 	}
 }
 
@@ -906,6 +910,27 @@ func guides() []SetupGuide {
 				"In Vimeo, create a recurring live event and open its setup panel. Copy the RTMPS server URL and " +
 					"the stream key into this destination. Streaming to it then works exactly as well as to any " +
 					"other destination.",
+			},
+		},
+		{
+			Platform:     db.PlatformTikTok,
+			Name:         "TikTok (clip publishing)",
+			ConsoleURL:   "https://developers.tiktok.com/apps/",
+			RedirectPath: "/api/v1/oauth/tiktok/callback",
+			Supported:    true,
+			Scopes:       (&TikTok{}).Scopes(),
+			Note: "Connect a TikTok account to publish finished clips and shorts from the clip editor. " +
+				"Until TikTok has audited your app, every post it accepts is private to the account " +
+				"(TikTok's own rule for unaudited apps), and polyemesis says so before you publish. " +
+				"This connection does not stream to TikTok LIVE; that stays a pasted server URL and key.",
+			Steps: []string{
+				"Open developers.tiktok.com, create an app, and add the Login Kit and Content Posting API products.",
+				"Under Login Kit, add exactly the redirect URI shown below.",
+				"Request the user.info.basic and video.publish scopes.",
+				"Copy the Client key and Client secret into the fields on this page and save.",
+				"Open Settings, Platforms, and click Connect on TikTok. TikTok asks you to approve the scopes.",
+				"Add the TikTok account as a target user for the app while it is unaudited, so TikTok lets it post.",
+				"Open a finished clip and click Publish. The post is private on TikTok until the app is audited.",
 			},
 		},
 	}

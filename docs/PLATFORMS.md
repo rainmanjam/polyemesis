@@ -39,7 +39,7 @@ The same matrix is rendered in `Settings → Platform credentials` and served fr
 | **DLive** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Odysee** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Dailymotion** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
-| **TikTok LIVE** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
+| **TikTok LIVE** | Works | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **LinkedIn Live** | Unverified | By hand | Unverified | Unverified | Unverified | Unverified | Unverified | Unverified |
 | **Instagram Live** | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible | Not possible |
 | *Everything else* | — | By hand | — | — | — | — | — | — |
@@ -249,6 +249,10 @@ authentication error, not a 404 — but the live surfaces sit behind partner
 programmes rather than open developer registration. Partner-gated is not the
 same as absent, and this project has not applied, so *unverified* is the honest
 word. Somebody inside either programme may well find every column is a yes.
+
+TikTok sign-in works, and it is there for **clip publishing**: connect a TikTok
+account and the clip editor can post a finished short to it (privately until
+TikTok audits the app). It does not stream to TikTok LIVE.
 
 The stream key on both is *by hand* and, worth knowing, **per broadcast**:
 TikTok issues it for the LIVE session and LinkedIn for the event, so a saved

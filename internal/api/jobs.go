@@ -15,6 +15,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploadverify"
 )
@@ -119,6 +120,8 @@ var kindCatalogue = []struct {
 		"A keyframe-accurate cut out of a finished recording, copied losslessly wherever the cut lands on a keyframe."},
 	{highlights.JobKind, "Highlight scan",
 		"Finds moments worth a short: chat bursts, loudness peaks and, if asked, the Automod model's opinion of what was said. It only suggests; nothing is clipped until somebody accepts a suggestion."},
+	{publish.JobKind, "Clip publish",
+		"Sends a finished clip or short to a platform, after somebody clicked Publish. It resumes an interrupted upload instead of starting a second post, and it waits while a broadcast is live so the upload does not compete with the stream."},
 	{playlistmedia.KindNormalise, "Playlist normalise",
 		"Transcodes one uploaded playlist item to the single fixed profile every item must share. A playlist will not go on air until every one of its items has been through this."},
 	{uploadverify.Kind, "Media re-check",
@@ -662,10 +665,20 @@ func (s *Server) handleResumeJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
-	s.jobAction(w, r, func(id int64) error { return s.jobq.Cancel(id) })
+	s.jobAction(w, r, func(id int64) error {
+		err := s.jobq.Cancel(id)
+		if err == nil {
+			// Cancelling a publish revokes the click that started it.
+			s.revokePublishOnCancel(id)
+		}
+		return err
+	})
 }
 
 func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
+	if id, err := idParam(r, "id"); err == nil && s.jobq != nil && s.rejectPublishJobRetry(w, id) {
+		return
+	}
 	s.jobAction(w, r, func(id int64) error { return s.jobq.Retry(id) })
 }
 

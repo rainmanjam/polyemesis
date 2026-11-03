@@ -526,11 +526,11 @@ var platformCapabilities = []PlatformCapability{
 		"Paste your ingest URL and stream key from Dailymotion. Streaming works; there is no integration to connect.",
 		"api.dailymotion.com is live and openly readable. Whether it exposes live-stream chat has not been checked, so every column below is genuinely unknown rather than known to be absent.",
 	),
-	manualUnverified(
-		"tiktok", "TikTok LIVE",
-		"Paste the server URL and key TikTok issues for the broadcast. Streaming works; there is no integration to connect.",
-		"TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
-	),
+	// A TikTok account CAN be connected now -- to post finished clips (tiktok.go)
+	// -- so SSO reads yes and the row is partial. The key itself stays pasted:
+	// TikTok LIVE access is a partner programme, and nothing signing in changes
+	// that. Every other cell is still unverified.
+	tikTokRow(),
 	manualUnverified(
 		"linkedin", "LinkedIn Live",
 		"Paste the ingest URL and key LinkedIn issues for the event. Streaming works; there is no integration to connect.",
@@ -568,6 +568,20 @@ var platformCapabilities = []PlatformCapability{
 // SupportUnknown, not SupportNo, throughout. See the sourcing rule at the top
 // of this file: an unverified capability is reported as unverified and tried
 // anyway. Nothing here is a refusal.
+// tikTokRow is the TikTok LIVE row: sign-in works (for clip publishing), the
+// stream key is pasted, and the live surface is unverified.
+func tikTokRow() PlatformCapability {
+	c := manualUnverified(
+		"tiktok", "TikTok LIVE",
+		"Paste the server URL and key TikTok issues for the broadcast. Streaming works. Connecting a TikTok account is for posting finished clips, not for going live.",
+		"TikTok's developer APIs are real and answering — open.tiktokapis.com returns a structured auth error rather than a 404 — but the live surface is gated behind a partner programme, not open registration. Nothing here is reachable by pasting a token from a developer console.",
+	)
+	c.Platform = db.PlatformTikTok
+	c.Tier = TierPartial
+	c.Caps[CapSSO] = SupportYes
+	return c
+}
+
 func manualUnverified(presetID, name, summary, readFirst string) PlatformCapability {
 	return PlatformCapability{
 		PresetID:  presetID,

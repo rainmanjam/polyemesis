@@ -33,6 +33,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
+	"github.com/rainmanjam/polyemesis/internal/publish"
 	// Aliased: main.go already has a `hooks` type for the service lifecycle
 	// callbacks, and that name is the older claim on it.
 	webhooks "github.com/rainmanjam/polyemesis/internal/hooks"
@@ -483,7 +484,11 @@ func run(h *hooks) error {
 		// The post-production tier. Optional in the API's eyes; wired here so
 		// the jobs page governs a real queue instead of answering 503.
 		Jobs: pp.queue, Governor: pp.gov, Whisper: pp.whisper,
+		// The same switches the publish worker was registered with.
+		PublishGates: publish.GatesFromEnv(),
 	})
+	// The publish worker refreshes tokens through the server's own path.
+	pp.publishTokens.Set(srv.PublishTokens())
 	// FIRST, before any loop below can call YouTube: every YouTube Data API
 	// call internal/oauth makes -- title push, compliance, the lifecycle and
 	// its startup reconciliation, preannounce, recurring, rollover -- is
