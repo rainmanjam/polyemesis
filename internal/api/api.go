@@ -44,6 +44,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/offload"
 	"github.com/rainmanjam/polyemesis/internal/overlay"
 	"github.com/rainmanjam/polyemesis/internal/polls"
+	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/recording"
 	"github.com/rainmanjam/polyemesis/internal/relay"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
@@ -543,6 +544,10 @@ type Server struct {
 	gov     *jobs.Governor
 	whisper *transcribe.Tools
 
+	// publishGates and publishConfirm belong to clip publishing (publish.go).
+	publishGates   publish.Gates
+	publishConfirm *confirmBook
+
 	// chat is the unified cross-platform chat fan-in. Optional like everything
 	// above it: a build with no chat wired serves the pane read-only from the
 	// stored scrollback rather than hiding it.
@@ -762,6 +767,10 @@ type Options struct {
 	// perfectly ordinary machine without it installed; every method on Tools
 	// is nil-receiver safe for exactly this reason.
 	Whisper *transcribe.Tools
+
+	// PublishGates are the operator switches for clip publishing; the zero
+	// value leaves X off.
+	PublishGates publish.Gates
 	// Chat is the chat Hub. Optional: without it the chat page reports that no
 	// platform is connected and still shows the stored history.
 	Chat *chat.Hub
@@ -865,6 +874,10 @@ func New(o Options) *Server {
 			// request, with no window in which a revoked token still works.
 			o.DB.TokenEpoch,
 		),
+
+		// Clip publishing (publish.go).
+		publishGates:   o.PublishGates,
+		publishConfirm: newConfirmBook(time.Now),
 	}
 	// Config.Validate has already refused a malformed trustedProxies, so an
 	// error here means a caller skipped it; loopback-only is the safe reading.
@@ -1334,6 +1347,14 @@ func (s *Server) registerRoutes(r chi.Router) {
 				r.Use(s.requireSession)
 				r.Post("/automod/test", s.handleAutomodTest)
 				r.Post("/storage/targets/test", s.handleTestStorageTarget)
+
+				// Clip publishing (Wave 4 #5c). SESSION-ONLY, and that is the
+				// whole of "nothing publishes without a click": no token
+				// scope reaches these, and there is no MCP tool for them.
+				r.Get("/publish/targets", s.handlePublishTargets)
+				r.Post("/publish/prepare", s.handlePreparePublish)
+				r.Post("/publish", s.handlePublish)
+				r.Get("/publish/{id}", s.handleGetPublication)
 			})
 
 			// The read half of media. POST /media and DELETE /media/{name} are

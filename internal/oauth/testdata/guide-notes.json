@@ -24,6 +24,19 @@
     ]
   },
   {
+    "platform": "tiktok",
+    "note": "Connect a TikTok account to publish finished clips and shorts from the clip editor. Until TikTok has audited your app, every post it accepts is private to the account (TikTok's own rule for unaudited apps), and polyemesis says so before you publish. This connection does not stream to TikTok LIVE; that stays a pasted server URL and key.",
+    "steps": [
+      "Open developers.tiktok.com, create an app, and add the Login Kit and Content Posting API products.",
+      "Under Login Kit, add exactly the redirect URI shown below.",
+      "Request the user.info.basic and video.publish scopes.",
+      "Copy the Client key and Client secret into the fields on this page and save.",
+      "Open Settings, Platforms, and click Connect on TikTok. TikTok asks you to approve the scopes.",
+      "Add the TikTok account as a target user for the app while it is unaudited, so TikTok lets it post.",
+      "Open a finished clip and click Publish. The post is private on TikTok until the app is audited."
+    ]
+  },
+  {
     "platform": "twitch",
     "note": "",
     "steps": [

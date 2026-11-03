@@ -187,6 +187,11 @@ func TestProvidersOnlyClaimPKCEWhereItIsDocumented(t *testing.T) {
 		// carries code_challenge with S256. PROVISIONAL until one live authorize
 		// request confirms X accepts it.
 		db.PlatformX: true,
+		// TikTok's Login Kit web flow documents client_key, scope, redirect_uri,
+		// state and response_type for authorize and no code_challenge; PKCE is
+		// documented for its desktop flow only. Off, so the strict authorize
+		// endpoint cannot reject the request.
+		db.PlatformTikTok: false,
 	}
 	for platform, p := range Providers() {
 		w, ok := want[platform]

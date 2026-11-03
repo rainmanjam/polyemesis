@@ -93,6 +93,11 @@ const (
 	// the live API, and say so at connect time rather than letting a refusal
 	// arrive mid-broadcast. See internal/oauth/vimeo.go.
 	PlatformVimeo Platform = "vimeo"
+	// PlatformTikTok exists to POST CLIPS (Wave 4 #5c): a connected account is
+	// where a finished short is published, and nothing else. It is not a
+	// destination platform -- Validate does not accept it -- because TikTok LIVE
+	// stays a pasted key. See oauth/tiktok.go.
+	PlatformTikTok Platform = "tiktok"
 )
 
 // ErrNotFound is returned by the typed getters.

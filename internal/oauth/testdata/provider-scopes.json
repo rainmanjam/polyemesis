@@ -26,6 +26,15 @@
     "manualKeyReason": "This Kick account was connected before polyemesis asked for the stream-key scope, and granting a scope never upgrades a token that has already been issued. Disconnect the account and connect it again — once, and the key is fetched automatically from then on. Until then, paste the stream URL and key from your Kick dashboard under Settings → Stream."
   },
   {
+    "platform": "tiktok",
+    "scopeVersion": 1,
+    "scopes": [
+      "user.info.basic",
+      "video.publish"
+    ],
+    "manualKeyReason": "TikTok issues the LIVE server URL and key per broadcast, and only to accounts granted LIVE access, so polyemesis cannot fetch one. Connecting a TikTok account is for posting finished clips; copy the URL and key from TikTok LIVE Studio or LIVE Center and paste them into the destination."
+  },
+  {
     "platform": "twitch",
     "scopeVersion": 5,
     "scopes": [

@@ -103,6 +103,7 @@ describe("platform credential fields use the console's own words", () => {
     ["twitch", "Twitch", "Client ID", "Client Secret", "New Secret"],
     ["kick", "Kick", "Client ID", "Client Secret", "Developer"],
     ["vimeo", "Vimeo", "Client identifier", "Client secret", "Manage App Secrets"],
+    ["tiktok", "TikTok (clip publishing)", "Client key", "Client secret", "App details"],
   ])("labels %s with its console's terms and says where to find them", (platform, name, idLabel, secretLabel, where) => {
     renderCard(platform, name);
 
