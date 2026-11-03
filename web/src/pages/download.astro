@@ -59,135 +59,178 @@ const REPO = "https://github.com/rainmanjam/polyemesis";
 
       Two install cards side by side at 768 gives each ~360px, which the
       commands fit now that they wrap. */}
-  <section class="wrap card-grid card-grid--2 pb-16">
-    <div class="card p-6">
-      <div class="flex items-baseline justify-between gap-3">
-        <h2 class="text-lg font-medium">Docker</h2>
-        <span class="chip">recommended</span>
+  <section class="wrap pb-16">
+    <div class="card-grid card-grid--2">
+      <div class="card p-6">
+        <div class="flex items-baseline justify-between gap-3">
+          <h2 class="text-lg font-medium">Docker</h2>
+          <span class="chip">recommended</span>
+        </div>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          FFmpeg is pinned and bundled, so the SRT support is known-good. This is
+          the build the container test suites run against.
+        </p>
+        <CodeBlock
+          label="docker"
+          code={`docker run -d --name polyemesis \\
+    -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
+    -v polyemesis-data:/data \\
+    rainmanjam/polyemesis:latest`}
+        />
+        {/* A DEFINITION LIST, NOT A DOT-SEPARATED LINE (2026-11 design review).
+            Three ports are three facts a reader looks up one at a time, usually
+            while writing a firewall rule, so each gets its own row. */}
+        <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
+          <dt class="text-subtle">UI</dt>
+          <dd class="font-mono text-fg">:8080</dd>
+          <dt class="text-subtle">SRT ingest</dt>
+          <dd class="font-mono text-fg">:6000/udp</dd>
+          <dt class="text-subtle">RTMP ingest</dt>
+          <dd class="font-mono text-fg">:1935</dd>
+        </dl>
+        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
+          Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
+          and omitting the suffix is the classic reason an ingest silently
+          receives nothing. 1935 is published up front because a container's port
+          mappings are fixed when it is created: an RTMP source added later has
+          nothing listening for it, and says so nowhere.
+        </p>
       </div>
-      <p class="mt-2 text-sm leading-relaxed text-muted">
-        FFmpeg is pinned and bundled, so the SRT support is known-good. This is
-        the build the container test suites run against.
-      </p>
-      <CodeBlock
-        label="docker"
-        code={`docker run -d --name polyemesis \\
-  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
-  -v polyemesis-data:/data \\
-  rainmanjam/polyemesis:latest`}
-      />
-      {/* A DEFINITION LIST, NOT A DOT-SEPARATED LINE (2026-11 design review).
-          Three ports are three facts a reader looks up one at a time, usually
-          while writing a firewall rule, so each gets its own row. */}
-      <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
-        <dt class="text-subtle">UI</dt>
-        <dd class="font-mono text-fg">:8080</dd>
-        <dt class="text-subtle">SRT ingest</dt>
-        <dd class="font-mono text-fg">:6000/udp</dd>
-        <dt class="text-subtle">RTMP ingest</dt>
-        <dd class="font-mono text-fg">:1935</dd>
-      </dl>
-      <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-        Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
-        and omitting the suffix is the classic reason an ingest silently
-        receives nothing. 1935 is published up front because a container's port
-        mappings are fixed when it is created: an RTMP source added later has
-        nothing listening for it, and says so nowhere.
-      </p>
+
+      <div class="card p-6">
+        <h2 class="text-lg font-medium">Installer script</h2>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          Asks what you want, then sets up Docker or a static binary with a
+          systemd unit, a data directory and TLS. Read it before you pipe it to a
+          root shell. It is long, but it is one file and declares every flag up
+          front.
+        </p>
+        <CodeBlock
+          label="install.sh"
+          code={`curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\\
+  rainmanjam/polyemesis/main/scripts/install.sh \\
+    | sudo bash -s -- --tls selfsigned`}
+        />
+        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+          It installs a self-signed certificate unless told otherwise. For Let's
+          Encrypt pass <span class="font-mono">--tls acme</span> with{" "}
+          <span class="font-mono">--hostname</span> and{" "}
+          <span class="font-mono">--email</span>; it refuses acme without both.
+          Behind a reverse proxy that already terminates TLS, pass{" "}
+          <span class="font-mono">--tls off</span>.
+        </p>
+        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
+          In binary mode it also installs the fonts burned-in captions are drawn
+          with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean,
+          Arabic and Hebrew captions render out of the box. CJK is the large
+          part (60–190 MB by distribution);{" "}
+          <span class="font-mono">--no-cjk-fonts</span> leaves it out.
+        </p>
+      </div>
+
+      <div class="card p-6">
+        <h2 class="text-lg font-medium">Static binary</h2>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg, and it
+          needs one built with <span class="font-mono">--enable-libsrt</span> if
+          you want multitrack ingest.
+        </p>
+        <p class="mt-4">
+          <a href={`${REPO}/releases/latest`} rel="noopener" class="btn btn-ghost text-sm">
+            Releases on GitHub →
+          </a>
+        </p>
+        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+          Homebrew's FFmpeg on macOS ships without SRT. polyemesis needs FFmpeg
+          8.0 or later, which carries SRT and Enhanced RTMP multitrack alike;
+          Ubuntu 26.04 packages it, the installer can fetch a pinned 8.1 build,
+          and the container bundles one. (OBS does not send multitrack audio over
+          RTMP at any version we have tested, so for OBS users SRT is the path.)
+        </p>
+        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
+          Linux is the operated target, and the broadcast path is tested on
+          Windows and macOS in CI too; that suite has caught Windows-only bugs
+          before they shipped. What is not yet proven on Windows is long-running
+          service operation: the service wrapper is unexercised and recording can
+          truncate on service stop. Run it on Linux for production, and on Windows
+          or macOS to build and evaluate.
+        </p>
+      </div>
+
+      {/* BUILD FROM A CLONE, which the site did not offer at all — the static
+          binary card sent a reader to the releases page and stopped. This is a
+          single static Go binary with `make build` as its own README's second
+          install path, and the audience that self-hosts a broadcast server is the
+          audience most likely to want to read the source it is running first.
+
+          The block is README.md's "Try it" verbatim, comment included. A build
+          recipe that is nearly right is worse than none: `make build` is what
+          embeds the UI, and a reader who runs `go build` instead gets a binary
+          that starts and serves nothing. */}
+      <div class="card p-6">
+        <h2 class="text-lg font-medium">Build from a clone</h2>
+        <p class="mt-2 text-sm leading-relaxed text-muted">
+          Go 1.27.0+, Node 20.19+/22.12+ and FFmpeg. The UI is built and embedded
+          by the same target, so there is one artefact at the end of it.
+        </p>
+        <CodeBlock
+          label="make"
+          code={`git clone https://github.com/rainmanjam/polyemesis
+  cd polyemesis
+  make build            # builds the UI, embeds it, produces ./polyemesis
+  ./polyemesis -data ./data`}
+        />
+        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
+          <span class="font-mono">make check</span> runs go vet, the Go test suite
+          and the UI typecheck; <span class="font-mono">make help</span> lists
+          every target. The contributing guide states the constraints that are not
+          negotiable, so you find out before writing rather than after.
+        </p>
+      </div>
+
+      {/* SPANS BOTH COLUMNS, and not only to avoid the orphan a fifth card would
+          leave on the last row. The four above are alternatives — pick one — and
+          this one is what everybody does next whichever they picked, so the card
+          that reads differently is the one that IS different. */}
+      <div class="card card-span-full p-6">
+        <h2 class="text-lg font-medium">Then point OBS at it</h2>
+        <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
+          <li>
+            <span class="font-mono text-subtle">1.</span> Open the UI and set an admin
+            password. If it is ever lost, <span class="font-mono">-reset-admin</span> on
+            the box sets a new one; there is no recovery from anywhere else.
+          </li>
+          <li>
+            <span class="font-mono text-subtle">2.</span> Choose an ingest mode. A fresh
+            install has none: SRT carries many tracks from many sources and is what the
+            routing needs; RTMP shares its port between sources the same way, told apart
+            by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. Then
+            copy the ingest URL: it carries the credential that addresses this source.
+          </li>
+          <li>
+            <span class="font-mono text-subtle">3.</span> In OBS, Settings → Output →
+            Advanced → Recording, set Type to “Custom Output (FFmpeg)”, FFmpeg Output
+            Type to “Output to URL”, container <span class="font-mono">mpegts</span>,
+            and tick the audio tracks to send. Paste the ingest URL, then press Start{" "}
+            <em>Recording</em>. With Output to URL, that is the SRT push.
+          </li>
+          <li>
+            <span class="font-mono text-subtle">4.</span> Add destinations, then tick
+            which tracks each one receives.
+          </li>
+        </ol>
+        <p class="mt-4">
+          <a
+            href="/how-to-multistream-from-obs"
+            class="inline-block py-1 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
+          >
+            The full OBS guide →
+          </a>
+        </p>
+      </div>
     </div>
 
-    <div class="card p-6">
-      <h2 class="text-lg font-medium">Installer script</h2>
-      <p class="mt-2 text-sm leading-relaxed text-muted">
-        Asks what you want, then sets up Docker or a static binary with a
-        systemd unit, a data directory and TLS. Read it before you pipe it to a
-        root shell. It is long, but it is one file and declares every flag up
-        front.
-      </p>
-      <CodeBlock
-        label="install.sh"
-        code={`curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\\
-rainmanjam/polyemesis/main/scripts/install.sh \\
-  | sudo bash -s -- --tls selfsigned`}
-      />
-      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-        It installs a self-signed certificate unless told otherwise. For Let's
-        Encrypt pass <span class="font-mono">--tls acme</span> with{" "}
-        <span class="font-mono">--hostname</span> and{" "}
-        <span class="font-mono">--email</span>; it refuses acme without both.
-        Behind a reverse proxy that already terminates TLS, pass{" "}
-        <span class="font-mono">--tls off</span>.
-      </p>
-      <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-        In binary mode it also installs the fonts burned-in captions are drawn
-        with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean,
-        Arabic and Hebrew captions render out of the box. CJK is the large
-        part (60–190 MB by distribution);{" "}
-        <span class="font-mono">--no-cjk-fonts</span> leaves it out.
-      </p>
-    </div>
-
-    <div class="card p-6">
-      <h2 class="text-lg font-medium">Static binary</h2>
-      <p class="mt-2 text-sm leading-relaxed text-muted">
-        The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg, and it
-        needs one built with <span class="font-mono">--enable-libsrt</span> if
-        you want multitrack ingest.
-      </p>
-      <p class="mt-4">
-        <a href={`${REPO}/releases/latest`} rel="noopener" class="btn btn-ghost text-sm">
-          Releases on GitHub →
-        </a>
-      </p>
-      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-        Homebrew's FFmpeg on macOS ships without SRT. polyemesis needs FFmpeg
-        8.0 or later, which carries SRT and Enhanced RTMP multitrack alike;
-        Ubuntu 26.04 packages it, the installer can fetch a pinned 8.1 build,
-        and the container bundles one. (OBS does not send multitrack audio over
-        RTMP at any version we have tested, so for OBS users SRT is the path.)
-      </p>
-      <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-        Linux is the operated target, and the broadcast path is tested on
-        Windows and macOS in CI too; that suite has caught Windows-only bugs
-        before they shipped. What is not yet proven on Windows is long-running
-        service operation: the service wrapper is unexercised and recording can
-        truncate on service stop. Run it on Linux for production, and on Windows
-        or macOS to build and evaluate.
-      </p>
-    </div>
-
-    {/* BUILD FROM A CLONE, which the site did not offer at all — the static
-        binary card sent a reader to the releases page and stopped. This is a
-        single static Go binary with `make build` as its own README's second
-        install path, and the audience that self-hosts a broadcast server is the
-        audience most likely to want to read the source it is running first.
-
-        The block is README.md's "Try it" verbatim, comment included. A build
-        recipe that is nearly right is worse than none: `make build` is what
-        embeds the UI, and a reader who runs `go build` instead gets a binary
-        that starts and serves nothing. */}
-    <div class="card p-6">
-      <h2 class="text-lg font-medium">Build from a clone</h2>
-      <p class="mt-2 text-sm leading-relaxed text-muted">
-        Go 1.27.0+, Node 20.19+/22.12+ and FFmpeg. The UI is built and embedded
-        by the same target, so there is one artefact at the end of it.
-      </p>
-      <CodeBlock
-        label="make"
-        code={`git clone https://github.com/rainmanjam/polyemesis
-cd polyemesis
-make build            # builds the UI, embeds it, produces ./polyemesis
-./polyemesis -data ./data`}
-      />
-      <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-        <span class="font-mono">make check</span> runs go vet, the Go test suite
-        and the UI typecheck; <span class="font-mono">make help</span> lists
-        every target. The contributing guide states the constraints that are not
-        negotiable, so you find out before writing rather than after.
-      </p>
-    </div>
-
-    {/* HowTo, describing the four steps rendered immediately below and nothing
+    {/* HowTo, describing the four steps rendered immediately above and nothing
         else. Every step text is a condensation of the visible <li> it names — if
         the list changes and this does not, the markup describes a page that no
         longer exists, which is worse than having no structured data at all.
@@ -197,7 +240,10 @@ make build            # builds the UI, embeds it, produces ./polyemesis
         is the whole test. FAQPage was considered for the "Is this for you?"
         block on the home page and rejected — that is two bullet lists, not
         question-and-answer pairs, and marking it up as FAQ would be a claim
-        about content that is not there. */}
+        about content that is not there.
+
+        Outside the card grid, not in it: a <script> child still counts in the
+        grid's :nth-child() positions, which .card-grid--5 places cards by. */}
     <script type="application/ld+json" is:inline set:html={JSON.stringify({
       "@context": "https://schema.org",
       "@type": "HowTo",
@@ -243,47 +289,6 @@ make build            # builds the UI, embeds it, produces ./polyemesis
         },
       ],
     })} />
-
-    {/* SPANS BOTH COLUMNS, and not only to avoid the orphan a fifth card would
-        leave on the last row. The four above are alternatives — pick one — and
-        this one is what everybody does next whichever they picked, so the card
-        that reads differently is the one that IS different. */}
-    <div class="card card-span-full p-6">
-      <h2 class="text-lg font-medium">Then point OBS at it</h2>
-      <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
-        <li>
-          <span class="font-mono text-subtle">1.</span> Open the UI and set an admin
-          password. If it is ever lost, <span class="font-mono">-reset-admin</span> on
-          the box sets a new one; there is no recovery from anywhere else.
-        </li>
-        <li>
-          <span class="font-mono text-subtle">2.</span> Choose an ingest mode. A fresh
-          install has none: SRT carries many tracks from many sources and is what the
-          routing needs; RTMP shares its port between sources the same way, told apart
-          by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. Then
-          copy the ingest URL: it carries the credential that addresses this source.
-        </li>
-        <li>
-          <span class="font-mono text-subtle">3.</span> In OBS, Settings → Output →
-          Advanced → Recording, set Type to “Custom Output (FFmpeg)”, FFmpeg Output
-          Type to “Output to URL”, container <span class="font-mono">mpegts</span>,
-          and tick the audio tracks to send. Paste the ingest URL, then press Start{" "}
-          <em>Recording</em>. With Output to URL, that is the SRT push.
-        </li>
-        <li>
-          <span class="font-mono text-subtle">4.</span> Add destinations, then tick
-          which tracks each one receives.
-        </li>
-      </ol>
-      <p class="mt-4">
-        <a
-          href="/how-to-multistream-from-obs"
-          class="inline-block py-1 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
-        >
-          The full OBS guide →
-        </a>
-      </p>
-    </div>
   </section>
 
   <section class="border-t border-line bg-surface/30 py-16">

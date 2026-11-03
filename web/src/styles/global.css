@@ -325,8 +325,8 @@
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
-  /* `> .card`, not `> *`: /download keeps its HowTo JSON-LD <script> inside
-     the grid, and `display: flex` on `> *` printed it onto the page. */
+  /* `> .card`, not `> *`: a <script> that sat inside the /download grid was
+     printed onto the page by `display: flex` on `> *`. */
   .card-grid > .card {
     display: flex;
     flex-direction: column;

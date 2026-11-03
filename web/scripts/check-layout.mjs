@@ -46,15 +46,34 @@ const DIST = resolve(new URL("../dist/", import.meta.url).pathname);
 const WIDTHS = [1440, 1024, 768, 390];
 const TOLERANCE = 1;
 
-/* The pages the alignment work covered, and how many card grids each has at
- * minimum. Lower a number only alongside the markup change that removes a
- * grid; raising one is always safe. */
+/* Every page the alignment work converted, and how many card grids it has at
+ * minimum, checked at every width. This list is deliberately independent of
+ * the class it counts: discovery below reads `.card-grid` from the HTML, so a
+ * page that LOST its grid would otherwise drop out of the run and pass. Lower
+ * a number only alongside the markup change that removes a grid. */
 const REQUIRED = {
   "/": 1,
   "/features": 1,
   "/comparison": 3,
   "/download": 1,
+  "/multistream": 1,
+  "/how-to-multistream-from-obs": 1,
+  "/free-restream-service": 1,
+  "/vs/aitum-multistream": 3,
+  "/vs/obs-multi-rtmp": 2,
+  "/vs/restreamer": 3,
+  "/vs/streamelements": 3,
+  "/vs/streamlabs": 1,
   "/docs/install": 1,
+};
+
+/* How many cards the FIRST row of each variant holds at a viewport width --
+ * the breakpoints in global.css. Without this a grid that collapsed to one
+ * column passes everything: one card per row has no neighbour to differ from. */
+const COLUMNS = {
+  "card-grid--2": (w) => (w >= 768 ? 2 : 1),
+  "card-grid--3": (w) => (w >= 1024 ? 3 : 1),
+  "card-grid--5": (w) => (w >= 1024 ? 3 : w >= 768 ? 2 : 1),
 };
 
 const TYPES = {
@@ -146,14 +165,24 @@ function measure() {
       return {
         label: g.getAttribute("aria-label") || g.id || (g.previousElementSibling?.textContent ?? "").trim().slice(0, 40) || g.className,
         isCardGrid: g.classList.contains("card-grid"),
+        // data-foot="optional": a foot only some cards have (notes on /features rooms).
+        optionalFoot: g.dataset.foot === "optional",
+        variant: [...g.classList].find((c) => /^card-grid--/.test(c)) ?? null,
         left,
         right,
         column: columnOf(g),
         columnGap: px(cs.columnGap),
         items: items.map((c) => {
           const r = c.getBoundingClientRect();
-          const ctas = [...c.querySelectorAll(".card-foot")].map((a) => a.getBoundingClientRect().bottom);
-          return { top: r.top, left: r.left, right: r.right, height: r.height, cta: ctas.length ? Math.max(...ctas) : null };
+          const feet = [...c.querySelectorAll(".card-foot")].filter((a) => a.getClientRects().length > 0);
+          return {
+            top: r.top,
+            left: r.left,
+            right: r.right,
+            height: r.height,
+            feet: feet.length,
+            cta: feet.length ? Math.max(...feet.map((a) => a.getBoundingClientRect().bottom)) : null,
+          };
         }),
       };
     }),
@@ -189,7 +218,7 @@ try {
 
       if (m.overflow > 0) fail.push(`${at}: the page scrolls sideways by ${m.overflow}px`);
       const cardGrids = m.grids.filter((g) => g.isCardGrid).length;
-      if (width === WIDTHS[0] && REQUIRED[route] && cardGrids < REQUIRED[route]) {
+      if (REQUIRED[route] && cardGrids < REQUIRED[route]) {
         fail.push(`${at}: ${cardGrids} .card-grid found, expected at least ${REQUIRED[route]} -- did the class move?`);
       }
 
@@ -206,12 +235,37 @@ try {
         }
         if (!g.isCardGrid) continue;
         if (g.items.length > 1) gaps.set(g.columnGap, `${name}`);
+        if (!g.variant || !COLUMNS[g.variant]) {
+          fail.push(`${name}: .card-grid without a column variant (--2, --3 or --5)`);
+          continue;
+        }
+        /* The variant is chosen from the count, so the count must fit it.
+           Without this, two cards in --3 pass: the row-fill rule below has to
+           let a grid with fewer cards than columns through, for the docs
+           pager's lone "Previous". */
+        const fits = { "card-grid--2": () => true, "card-grid--3": (n) => n % 3 === 0, "card-grid--5": (n) => n === 5 };
+        if (!fits[g.variant](g.items.length)) {
+          fail.push(`${name}: ${g.items.length} cards in ${g.variant} -- pick the variant for this count`);
+        }
+        /* A foot on some cards and not others is a baseline nobody can check:
+           the row compares nothing, and the card without one ends wherever
+           its text does. All or none, and one each -- unless the grid says
+           its foot is optional content rather than a recurring line. */
+        const footed = g.items.filter((c) => c.feet > 0).length;
+        if (footed > 0 && footed < g.items.length && !g.optionalFoot) {
+          fail.push(`${name}: ${footed} of ${g.items.length} cards have a .card-foot -- all or none`);
+        }
+        if (g.items.some((c) => c.feet > 1)) fail.push(`${name}: a card has more than one .card-foot`);
 
         const rows = [];
         for (const it of g.items) {
           const row = rows.find((r) => Math.abs(r[0].top - it.top) <= TOLERANCE);
           if (row) row.push(it);
           else rows.push([it]);
+        }
+        const want = Math.min(COLUMNS[g.variant](width), g.items.length);
+        if (rows.length && rows[0].length !== want) {
+          fail.push(`${name}: first row holds ${rows[0].length} card(s), ${g.variant} at ${width}px should hold ${want}`);
         }
         rows.forEach((row, i) => {
           row.sort((a, b) => a.left - b.left);
@@ -231,12 +285,19 @@ try {
             }
           }
         });
-        if (rows.length > 1) {
-          const last = rows[rows.length - 1];
-          const lastRight = Math.max(...last.map((c) => c.right));
-          if (last.length < rows[0].length && g.right - lastRight > TOLERANCE) {
-            fail.push(`${name}: last row has ${last.length} of ${rows[0].length} cards and stops ${(g.right - lastRight).toFixed(0)}px short -- an orphan`);
-          }
+        /* Every row reaches the grid's right edge: a short last row is an
+           orphan, and a short FIRST row is a variant with more columns than
+           cards (two cards in --3). The one exception is a grid with fewer
+           cards than columns by content, not by design -- the docs pager on
+           the last page has only "Previous". */
+        if (g.items.length >= COLUMNS[g.variant](width)) {
+          rows.forEach((row, i) => {
+            const short = g.right - Math.max(...row.map((c) => c.right));
+            if (short > TOLERANCE) {
+              const what = i === rows.length - 1 && rows.length > 1 ? "an orphan" : "the row does not fill its columns";
+              fail.push(`${name} row ${i + 1}: ${row.length} card(s) stop ${short.toFixed(0)}px short of the grid's right edge -- ${what}`);
+            }
+          });
         }
       }
     }
@@ -250,9 +311,9 @@ try {
 if (gaps.size > 1) {
   fail.push(`card grids use ${gaps.size} different gutters (${[...gaps.keys()].join("px, ")}px); there is one: ${[...gaps.values()].join(" | ")}`);
 }
-/* Every required page has at least one multi-card row at each width of 768 and
- * up (390 is one column by design). Fewer than that means the measurement
- * stopped seeing the cards. */
+/* A floor of one multi-card row per required page per width from 768 up (390
+ * is one column by design). The site measures far more; fewer than this means
+ * the measurement stopped seeing the cards. */
 const MIN_ROWS = Object.keys(REQUIRED).length * WIDTHS.filter((w) => w >= 768).length;
 if (rowsMeasured < MIN_ROWS) {
   fail.push(`only ${rowsMeasured} multi-card rows measured across the site, expected at least ${MIN_ROWS} -- the check is not looking`);
