@@ -341,3 +341,20 @@ func TestALineThatRunsOutOfRoomReportsItOnceWhileStillFilling(t *testing.T) {
 		t.Fatal("the drop report carried no reason")
 	}
 }
+
+// INGESTED COUNTS EVERY DATAGRAM THE LINE HAS TAKEN IN. A test that stops a
+// feed uses it to know nothing is still on its way in.
+//
+// Mutation: never count, or count only the pushes that succeed.
+func TestIngestedCountsEveryDatagramPushed(t *testing.T) {
+	rec := &recorder{}
+	l := newTestLine(t, 2*time.Second, rec, nil)
+	if got := l.Ingested(); got != 0 {
+		t.Fatalf("a fresh line has ingested %d", got)
+	}
+	sendAll(t, l, 5)
+	waitFor(t, "the line to ingest all five", 5*time.Second, func() bool { return l.Ingested() >= 5 })
+	if got := l.Ingested(); got != 5 {
+		t.Fatalf("ingested %d, want 5", got)
+	}
+}

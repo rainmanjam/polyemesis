@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,24 +34,57 @@ func dumpRow(t *testing.T, e *Engine, seconds int) *db.Destination {
 
 // feedTS delivers a synthetic stream into a hub at its own pace, in
 // datagrams of seven packets, until stop closes.
-func feedTS(h *relay.Hub, s *delaytest.Stream, stop <-chan struct{}) {
-	start := time.Now()
-	for i := 0; i < len(s.Pkts); {
-		at := s.Times[i]
-		var dgram []byte
-		for n := 0; n < 7 && i < len(s.Pkts) && s.Times[i] == at; n++ {
-			dgram = append(dgram, s.Pkts[i]...)
-			i++
-		}
-		if wait := time.Until(start.Add(at)); wait > 0 {
+func feedTS(h *relay.Hub, s *delaytest.Stream, stop <-chan struct{}) *feeder {
+	f := &feeder{done: make(chan struct{})}
+	go func() {
+		defer close(f.done)
+		start := time.Now()
+		for i := 0; i < len(s.Pkts); {
+			// Checked every datagram, not only while waiting for its time: a
+			// feed that has fallen behind (a slow runner) never waits, and
+			// would otherwise deliver the rest of the stream after a stop.
 			select {
-			case <-time.After(wait):
 			case <-stop:
 				return
+			default:
 			}
+			at := s.Times[i]
+			var dgram []byte
+			for n := 0; n < 7 && i < len(s.Pkts) && s.Times[i] == at; n++ {
+				dgram = append(dgram, s.Pkts[i]...)
+				i++
+			}
+			if wait := time.Until(start.Add(at)); wait > 0 {
+				select {
+				case <-time.After(wait):
+				case <-stop:
+					return
+				}
+			}
+			h.Deliver(dgram)
+			f.sent.Add(1)
 		}
-		h.Deliver(dgram)
+	}()
+	return f
+}
+
+// feeder is a running feedTS. After stop, Settled says that the feed has
+// ended and the line has pushed every datagram it delivered, so nothing is
+// still on its way in that could bring a dump its resume keyframe.
+type feeder struct {
+	done chan struct{}
+	sent atomic.Int64
+}
+
+// Settled reports whether the feed has ended and the line has pushed all of
+// the datagrams it delivered. ingested is the line's Ingested count.
+func (f *feeder) Settled(ingested uint64) bool {
+	select {
+	case <-f.done:
+	default:
+		return false
 	}
+	return int64(ingested) >= f.sent.Load()
 }
 
 // A DUMP ON A RUNNING DESTINATION. The engine finds the destination's line,
@@ -72,7 +106,7 @@ func TestDumpingARunningDelayedDestinationShortensItsDelayAndAnnouncesIt(t *test
 
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
-	go feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop) // 1 s GOPs
+	feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop) // 1 s GOPs
 	eventually(t, "the delayed feed to go on air", 10*time.Second, func() bool {
 		d := statusFor(t, e, row.ID).Delay
 		return d != nil && d.Phase == DelayOnAir && d.Dumpable
@@ -189,7 +223,7 @@ func TestConcurrentDumpsKeepTheirOwnCallbacksAndAStopReportsTheAbort(t *testing.
 		t.Fatalf("startDest: %v", err)
 	}
 	stop := make(chan struct{})
-	go feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop)
+	feed := feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop)
 	eventually(t, "the delayed feed to go on air", 10*time.Second, func() bool {
 		d := statusFor(t, e, row.ID).Delay
 		return d != nil && d.Phase == DelayOnAir && d.Dumpable
@@ -197,7 +231,16 @@ func TestConcurrentDumpsKeepTheirOwnCallbacksAndAStopReportsTheAbort(t *testing.
 	if got := statusFor(t, e, row.ID).DelayDumpSeconds; got != 4 {
 		t.Errorf("status delayDumpSeconds %d, want the row's 4", got)
 	}
-	close(stop) // no resume keyframe will come
+	// No resume keyframe will come: stop the feed, and wait until it has ended
+	// and the line has taken in everything it sent, so no datagram is still on
+	// its way in when the dump is asked for.
+	close(stop)
+	eventually(t, "the stopped feed to be taken in by the line", 10*time.Second, func() bool {
+		e.mu.RLock()
+		line := e.dests[row.ID].delay.line
+		e.mu.RUnlock()
+		return feed.Settled(line.Ingested())
+	})
 
 	type call struct {
 		res delayline.DumpResult
@@ -246,5 +289,38 @@ func TestConcurrentDumpsKeepTheirOwnCallbacksAndAStopReportsTheAbort(t *testing.
 	case r := <-calls[refused].cb:
 		t.Fatalf("the refused dump's callback ran: %+v", r)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// THE FEED STOPS WHEN TOLD, EVEN BEHIND SCHEDULE. The dump tests rely on a
+// stopped feed delivering nothing more. A feed that has fallen behind (a slow
+// runner) never waits for a datagram's time, so a stop seen only while waiting
+// is never seen: the feed ran on, delivered the next keyframe, and the dump
+// the test expected to stay pending completed. The first datagram is due at
+// 0, so it is already late here.
+//
+// Mutation: check stop only inside the wait for a datagram's time.
+func TestAStoppedFeedDeliversNothingMoreEvenWhenBehindSchedule(t *testing.T) {
+	e, _ := storeEngine(t)
+	stop := make(chan struct{})
+	close(stop)
+	f := feedTS(e.hub, delaytest.New(30).Mux(30*time.Second), stop)
+	select {
+	case <-f.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stopped feed did not end")
+	}
+	if n := f.sent.Load(); n != 0 {
+		t.Fatalf("the stopped feed delivered %d datagrams after the stop", n)
+	}
+	if !f.Settled(0) {
+		t.Fatal("an ended feed that sent nothing is not settled")
+	}
+	f.sent.Store(3)
+	if f.Settled(2) || !f.Settled(3) {
+		t.Fatal("an ended feed is settled once the line has pushed what it sent, and not before")
+	}
+	if running := (&feeder{done: make(chan struct{})}); running.Settled(1 << 20) {
+		t.Fatal("a running feed reads as settled")
 	}
 }

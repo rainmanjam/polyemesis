@@ -99,6 +99,7 @@ type Line struct {
 
 	draining  atomic.Bool
 	releasing atomic.Bool
+	ingested  atomic.Uint64
 	closeOnce sync.Once
 	drainOnce sync.Once
 	wg        sync.WaitGroup
@@ -160,6 +161,11 @@ func (l *Line) Port() int { return l.conn.LocalAddr().(*net.UDPAddr).Port }
 // Delay is the configured delay.
 func (l *Line) Delay() time.Duration { return l.cfg.Delay }
 
+// Ingested counts the datagrams the line has read from its socket and pushed
+// (or refused). A test that has stopped a feed compares it with what the feed
+// sent to know that nothing is still on its way in.
+func (l *Line) Ingested() uint64 { return l.ingested.Load() }
+
 func (l *Line) read() {
 	defer l.wg.Done()
 	defer close(l.inputDone)
@@ -183,7 +189,9 @@ func (l *Line) read() {
 			// The hub drops these too: FFmpeg's UDP demuxer reads one as EOF.
 			continue
 		}
-		if err := l.buf.Push(time.Now(), pkt[:n]); err != nil {
+		err = l.buf.Push(time.Now(), pkt[:n])
+		l.ingested.Add(1)
+		if err != nil {
 			continue
 		}
 		// A dump resumes on a push: the one that brought its keyframe.
