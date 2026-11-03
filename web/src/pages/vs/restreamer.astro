@@ -133,25 +133,27 @@ const merits = [
   <section class="border-t border-line py-16">
     <div class="wrap">
       <h2 class="text-2xl font-medium">Which one did you mean?</h2>
-      <div class="card-grid card-grid--2 mt-8">
+      <div class="card-grid card-grid--2 mt-8" data-foot="required">
         {
           products.map((p) => (
             <div class="card p-6">
               <p class="font-medium text-fg">{p.name}</p>
               <p class="mt-1 font-mono text-[11px] text-subtle">{p.id}</p>
               <p class="mt-4 text-pretty text-sm leading-relaxed text-muted">{p.body}</p>
-              <dl class="mt-5 space-y-1.5 border-t border-line pt-4 font-mono text-[11px]">
-                {[
-                  ["Kind", p.kind],
-                  ["Licence", p.licence],
-                  ["Price", p.price],
-                ].map(([k, v]) => (
-                  <div class="flex gap-3">
-                    <dt class="w-16 shrink-0 text-subtle">{k}</dt>
-                    <dd class="text-muted">{v}</dd>
-                  </div>
-                ))}
-              </dl>
+              <div class="card-foot">
+                <dl class="space-y-1.5 border-t border-line pt-4 font-mono text-[11px]">
+                  {[
+                    ["Kind", p.kind],
+                    ["Licence", p.licence],
+                    ["Price", p.price],
+                  ].map(([k, v]) => (
+                    <div class="flex gap-3">
+                      <dt class="w-16 shrink-0 text-subtle">{k}</dt>
+                      <dd class="text-muted">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
             </div>
           ))
         }

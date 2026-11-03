@@ -172,7 +172,8 @@ function measure() {
         // data-pager: the docs previous/next pair, which may hold one card at either side.
         pager: g.hasAttribute("data-pager"),
         spanFull: [...g.children].some((c) => c.classList.contains("card-span-full")),
-        variant: [...g.classList].find((c) => /^card-grid--/.test(c)) ?? null,
+        variant: [...g.classList].find((c) => /^card-grid--[0-9]$/.test(c)) ?? null,
+        rowsVariant: g.classList.contains("card-grid--rows"),
         left,
         right,
         column: columnOf(g),
@@ -186,7 +187,9 @@ function measure() {
             right: r.right,
             height: r.height,
             feet: feet.length,
+            children: c.children.length,
             cta: feet.length ? Math.max(...feet.map((a) => a.getBoundingClientRect().bottom)) : null,
+            footTop: feet.length ? Math.min(...feet.map((a) => a.getBoundingClientRect().top)) : null,
           };
         }),
       };
@@ -285,6 +288,15 @@ try {
           const hs = row.map((c) => c.height);
           if (Math.max(...hs) - Math.min(...hs) > TOLERANCE) {
             fail.push(`${name} row ${i + 1}: card heights differ (${hs.map((h) => h.toFixed(0)).join(" / ")})`);
+          }
+          /* --rows promises more: every foot in the row STARTS on one line
+             (its rule or first line), not just ends on one. */
+          if (g.rowsVariant) {
+            const tops = row.map((c) => c.footTop).filter((c) => c != null);
+            if (tops.length > 1 && Math.max(...tops) - Math.min(...tops) > TOLERANCE) {
+              fail.push(`${name} row ${i + 1}: --rows feet start ${(Math.max(...tops) - Math.min(...tops)).toFixed(1)}px apart`);
+            }
+            if (row.some((c) => c.children !== 2)) fail.push(`${name} row ${i + 1}: a --rows card must have exactly two children (body, foot)`);
           }
           const ctas = row.map((c) => c.cta).filter((c) => c != null);
           if (ctas.length > 1 && Math.max(...ctas) - Math.min(...ctas) > TOLERANCE) {

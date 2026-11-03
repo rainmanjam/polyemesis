@@ -336,6 +336,23 @@
     margin-top: auto;
     padding-top: 1rem;
   }
+  /* WHEN THE FOOT OPENS WITH A RULE, ITS TOP IS WHAT THE EYE LINES UP.
+     margin-top: auto aligns the bottoms of the feet in a row; a foot whose
+     text runs a line longer then starts a line higher, and a border-top on it
+     visibly steps. --rows makes each card a two-row subgrid (body, foot), so
+     every foot in a row starts on the same line and the tallest sets the
+     height. A card in a --rows grid has exactly two children. */
+  .card-grid--rows > .card {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+  }
+  /* In a grid cell an auto margin is alignment: margin-top: auto would sink
+     each foot to the bottom of its row and undo the shared top. */
+  .card-grid--rows > .card > .card-foot {
+    margin-top: 0;
+  }
   @media (min-width: 48rem) {
     .card-grid--2,
     .card-grid--5 {
