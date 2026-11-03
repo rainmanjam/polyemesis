@@ -106,6 +106,11 @@ func capabilityJoins() []capabilityJoin {
 				// stale exception fails as loudly as a missing one.
 				db.PlatformVimeo: "no permanent key exists; the ingest belongs to a live " +
 					"event and every live method is behind Vimeo's Enterprise gate",
+				// TikTok is registered to POST CLIPS (tiktok.go). Its Ingest returns
+				// ErrNoStreamKeyAPI on every path, because TikTok LIVE keys are issued
+				// per broadcast to partner-programme accounts and are pasted by hand.
+				db.PlatformTikTok: "registered for clip publishing only; TikTok LIVE keys are " +
+					"pasted and Ingest declines on every path",
 			},
 		},
 		{

@@ -17,6 +17,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
+	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
@@ -894,6 +895,10 @@ func (s *Server) buildJob(kind jobs.Kind, rec db.Recording, req submitRequest) (
 		// the library's Clip action is a link into that editor rather than a
 		// second, worse submission path.
 		return jobs.Job{}, errors.New("clip exports are submitted from the clip editor")
+	case publish.JobKind:
+		// Never from here: a publish exists only as the continuation of a click
+		// on Publish in the clip editor (publish.go).
+		return jobs.Job{}, errors.New("a publish is started from the clip editor's Publish button")
 	default:
 		return jobs.Job{}, fmt.Errorf("unknown job kind %q", kind)
 	}

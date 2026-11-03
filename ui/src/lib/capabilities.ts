@@ -417,12 +417,26 @@ export const PLATFORM_CAPABILITIES: PlatformCapability[] = [
     "caps.dailymotion.summary",
     "caps.dailymotion.readFirst",
   ),
-  manualUnverified(
-    "tiktok",
-    "TikTok LIVE",
-    "caps.tiktok.summary",
-    "caps.tiktok.readFirst",
-  ),
+  {
+    presetId: "tiktok",
+    name: "TikTok LIVE",
+    connect: "tiktok",
+    /*  A TikTok account can be connected now, to post finished clips. The LIVE
+     *  key is still pasted, and every other cell is still unverified. */
+    tier: "partial",
+    summary: "caps.tiktok.summary",
+    readFirst: "caps.tiktok.readFirst",
+    caps: {
+      sso: "yes",
+      streamKey: "manual",
+      metadata: "unknown",
+      chatRead: "unknown",
+      chatSend: "unknown",
+      moderation: "unknown",
+      viewerStats: "unknown",
+      broadcastLifecycle: "unknown",
+    },
+  },
   manualUnverified(
     "linkedin",
     "LinkedIn Live",

@@ -71,7 +71,8 @@ const (
 // at a test stub is not spending anybody's quota.
 //
 // /upload/youtube/v3/ is the Data API too (R4): thumbnails.set is a write at
-// 50, and videos.insert -- which polyemesis does not make -- is 1,600.
+// 50, and videos.insert is 1,600. The clip publisher (internal/publish) makes
+// that call itself and charges it with ChargeYouTubeQuota.
 func youTubeCost(r *http.Request) (int, bool) {
 	if r.URL.Host != "www.googleapis.com" {
 		return 0, false
@@ -92,6 +93,15 @@ func costByMethod(method string) int {
 		return ytCostList
 	}
 	return ytCostWrite
+}
+
+// ChargeYouTubeQuota spends units from the installed meter, for a YouTube call
+// made outside this package's own HTTP client (the clip upload). A missing
+// meter is a no-op.
+func ChargeYouTubeQuota(units int) {
+	if m := youTubeMeter.Load(); m != nil && units > 0 {
+		m.m(units)
+	}
 }
 
 // doRequest sends a request through the shared client, charging the meter

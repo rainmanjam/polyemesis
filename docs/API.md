@@ -1343,6 +1343,46 @@ rule, or the model off or without an endpoint) is a 400 that names the cell.
 | `GET` `POST` | `/clipper/templates` |
 | `DELETE` | `/clipper/templates/{id}` |
 
+### Clip publishing
+
+| Method | Path |
+|---|---|
+| `GET` | `/publish/targets` |
+| `POST` | `/publish/prepare` |
+| `POST` | `/publish` |
+| `GET` | `/publish/{id}` |
+
+Publishing a finished clip export (or a vertical short) to YouTube Shorts or
+TikTok is **console-click only**. Every route above is **session-only**: no API
+token of any scope reaches it, and there is no MCP tool for it. See
+[CLIP-PUBLISHING](CLIP-PUBLISHING.md) for the flow, the privacy rules and the
+manual live-test steps.
+
+`GET /publish/targets?clip={exportJobId}` lists the platforms (`youtube`, `tiktok`, `x`), each with
+its connected accounts (`needsReconnect` and a `connectPath` where the grant
+cannot post), its privacy options (`forced` for TikTok) and whether it is
+`enabled` (`x` is not, and says why in `gatedReason`). It also carries the form's
+`prefill` taken from the clip and the clip's existing `publications`.
+
+`POST /publish/prepare` validates a form and answers with a one-time
+`confirmToken` for exactly that form (clip, platform, account, title,
+description, tags, privacy) and the signed-in person, good for ten minutes. It
+sends nothing to any platform.
+
+`POST /publish` is the click. It needs the same form plus that `confirmToken`;
+without a matching, unspent token it answers `403` `confirm_required` and queues
+nothing. It answers `202` with the publication when it queued a job, and `200`
+with the existing publication when the clip is already posted to that account or
+a job is already working on it, so a second click never posts twice. A failed
+publication is re-armed by a new prepare and publish, not by the jobs page:
+`POST /jobs/{id}/retry` answers `409` `publish_needs_click` for this kind.
+
+`GET /publish/{id}` is the publication: `state` (`confirmed`, `uploading`,
+`posted`, `failed`), the platform's `platformPostId` and `postUrl` once posted,
+`actualPrivacy` as the platform reports it, and for a failure a `reason`
+(`cause` plus the `line` it rests on). `job` carries the queue's progress and
+the governor's `reason` when the upload is waiting for a broadcast to end.
+
 Every download route is confined to the data directory. A name that escapes it
 is refused, not served.
 

@@ -10,6 +10,27 @@ its first tagged release.
 
 ### Added
 
+- **Publish a clip or short to YouTube Shorts or TikTok, from the clip editor (Wave 4 #5c).** Open
+  **Publish** on a finished clip export (in the clip editor or on the Jobs page), pick the
+  platform and the connected account, review the title, description and hashtags (filled in from
+  the clip) and the privacy level, and click **Publish**. The dialog follows the upload to a link
+  to the post, or to a plain-words reason it did not complete (the same cause-and-line shape as a
+  destination's failure reason), and says when the governor is holding the upload back so a live
+  stream keeps its bandwidth. **Nothing posts without that click:** every publish route is
+  session-only (no API token of any scope, no MCP tool), `POST /publish` needs a one-time
+  confirmation minted for exactly the reviewed form, and the queued job is useless without the
+  nonce the click created. Each clip, platform and account has one ledger row that records the
+  platform's post id, so a second click, a second tab or a retry never posts twice; YouTube
+  resumes from its stored session and TikTok polls its stored `publish_id`. YouTube reuses the
+  existing connection (the `youtube` scope already allows uploads; **Reconnect to allow uploads**
+  appears if a grant lacks every upload scope) and costs 1,600 quota units per upload. TikTok has
+  a new sign-in for posting only (Settings, Platforms) and is **always posted private** until
+  TikTok audits the app, which the dialog says; X publishing is built and **off**
+  (`POLYEMESIS_X_PUBLISH`, separate from the Livestream switch). New routes `GET /publish/targets`,
+  `POST /publish/prepare`, `POST /publish`, `GET /publish/{id}`; new job kind `clip.publish`; one
+  new table `clip_publications`; the TikTok capability row now reads Works for sign-in. In all 15
+  languages. See docs/CLIP-PUBLISHING.md.
+
 - **The installer sets up caption fonts, CJK included.** In binary mode `install.sh` installs
   fontconfig, DejaVu (Latin, Greek, Cyrillic, Arabic, Hebrew) and Noto CJK with the host's own
   package manager (apt-get, dnf, apk or pacman) and runs `fc-cache -f`, so burned-in captions in

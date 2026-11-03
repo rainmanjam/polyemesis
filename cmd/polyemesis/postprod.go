@@ -22,6 +22,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 	"github.com/rainmanjam/polyemesis/internal/media"
 	"github.com/rainmanjam/polyemesis/internal/playlistmedia"
+	"github.com/rainmanjam/polyemesis/internal/publish"
 	"github.com/rainmanjam/polyemesis/internal/secrets"
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 	"github.com/rainmanjam/polyemesis/internal/uploads"
@@ -46,6 +47,8 @@ type postProd struct {
 	queue   *jobs.Queue
 	gov     *jobs.Governor
 	whisper *transcribe.Tools
+	// publishTokens is handed the API server's token source once it exists.
+	publishTokens *publish.TokenGate
 	// done closes once every loop startPostProd started has returned -- which
 	// for the queue includes its in-flight workers -- after ctx is cancelled.
 	done <-chan struct{}
@@ -137,6 +140,10 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	q.SetAdmit(gov.MayStart)
 
 	registerProcessors(log, cfg, store, box, gov, q, tools, whisper, settings.PostProd)
+	// Clip publishing (Wave 4 #5c). The token source is filled in by main once
+	// the API server exists: the refresh path lives on it.
+	publishTokens := &publish.TokenGate{}
+	registerPublish(log, cfg, store, box, q, publishTokens, publish.GatesFromEnv())
 
 	// Registration before Run, always: Run calls Recover() before it claims
 	// anything, and a kind claimed with no worker registered costs a tick.
@@ -169,7 +176,7 @@ func startPostProd(ctx context.Context, log *slog.Logger, cfg config.Config, sto
 	// the CPU, which is the one thing this whole tier exists to prevent.
 	eng.SetTranscriber(whisper, cfg.ModelsDir(), niceWrapper(gov))
 
-	return postProd{queue: q, gov: gov, whisper: whisper, done: done}
+	return postProd{queue: q, gov: gov, whisper: whisper, publishTokens: publishTokens, done: done}
 }
 
 // jobRetentionSettings re-reads the stored history bound on every sweep: see
@@ -608,5 +615,36 @@ func captionFontIn(dir string) func(name string) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("font %q is not in the fonts directory", name)
+	}
+}
+
+// registerPublish wires the clip publisher into the queue (Wave 4 #5c).
+//
+// It is registered UNCONDITIONALLY, like every other kind: with no connected
+// account there is simply nothing to publish, and a kind that did not exist
+// would make the jobs page lie about what this build can do. The worker itself
+// refuses any job a confirmed click did not arm; see internal/publish.
+//
+// Concurrency 1: uploads share the machine's upstream bandwidth with the
+// stream, and the governor already holds them back while an ingest is live.
+func registerPublish(log *slog.Logger, cfg config.Config, store *db.DB, box *secrets.Box, q *jobs.Queue, tokens *publish.TokenGate, gates publish.Gates) {
+	exportDir := clipper.ExportDirIn(cfg.RecordingsDir())
+	w := publish.NewWorker(publish.WorkerDeps{
+		Log:    log,
+		Ledger: publish.LedgerFor(store, box),
+		Tokens: tokens.Source(),
+		Clips:  publish.ClipsFrom(store, exportDir),
+		Adapters: map[string]publish.Adapter{
+			publish.PlatformYouTube: &publish.YouTube{},
+			publish.PlatformTikTok:  &publish.TikTok{},
+			publish.PlatformX:       &publish.X{},
+		},
+		Gates: gates,
+	})
+	if err := q.Register(publish.JobKind, 1, w); err != nil {
+		log.Error("cannot register the clip publish job kind", "error", err)
+	}
+	if gates.XPublish {
+		log.Warn("X publishing is switched ON by " + publish.XPublishEnv)
 	}
 }

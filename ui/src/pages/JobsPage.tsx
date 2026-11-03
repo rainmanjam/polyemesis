@@ -11,6 +11,7 @@ import {
   Play,
   Plus,
   RotateCw,
+  Send,
   Thermometer,
   Trash2,
   X,
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
+import { PublishClipDialog } from "@/components/PublishClipDialog";
 import { SaveStatus } from "@/components/SaveStatus";
 import { PageHeader } from "@/components/AppLayout";
 import { Stat } from "@/components/signature/Stat";
@@ -185,6 +187,9 @@ export function JobsPage() {
   // rather than as its id: the dialog has to name what is destroyed, and only
   // the job itself knows whether a file is part of that (see CLIP_EXPORT_KIND).
   const [pendingDelete, setPendingDelete] = useState<JobView | null>(null);
+  // The clip export whose Publish dialog is open (#5c). Publishing is a
+  // click on that dialog's own Publish button, never on this row.
+  const [publishFor, setPublishFor] = useState<number | null>(null);
   // A RUNNING job asks first: cancelling it throws away the work already done.
   // A queued job has no progress to lose, so it cancels on the click (A60).
   const [pendingCancel, setPendingCancel] = useState<JobView | null>(null);
@@ -505,6 +510,7 @@ export function JobsPage() {
                 empty={t("jobs.noFinished")}
                 busy={busy}
                 onRetry={(id) => act(() => api.retryJob(id), t("jobs.jobRearmed"))}
+                onPublish={(id) => setPublishFor(id)}
                 onDelete={(id) =>
                   setPendingDelete(view.recent.find((j) => j.id === id) ?? null)
                 }
@@ -547,6 +553,16 @@ export function JobsPage() {
           defect as one that hides the loss that does -- and after the third
           "this deletes files" dialog over a transcode that deletes nothing, the
           sentence stops being read at all. */}
+      {publishFor !== null && (
+        <PublishClipDialog
+          clipJobId={publishFor}
+          open
+          onOpenChange={(o) => {
+            if (!o) setPublishFor(null);
+          }}
+        />
+      )}
+
       <ConfirmDestructive
         open={pendingDelete !== null}
         onOpenChange={(open) => {
@@ -689,6 +705,7 @@ function JobTable({
   onRetry,
   onRelease,
   onDelete,
+  onPublish,
 }: {
   jobs: JobView[];
   empty: string;
@@ -699,6 +716,8 @@ function JobTable({
   onRetry?: (id: number) => void;
   onRelease?: (id: number) => void;
   onDelete?: (id: number) => void;
+  /** Opens the Publish dialog for a finished clip export. */
+  onPublish?: (id: number) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState<number | null>(null);
@@ -781,7 +800,22 @@ function JobTable({
                         <Play />
                       </Button>
                     )}
-                    {onRetry && (
+                    {onPublish && j.kind === CLIP_EXPORT_KIND && j.state === "done" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={busy}
+                        onClick={() => onPublish(j.id)}
+                        aria-label={t("publish.open")}
+                        title={t("publish.openTitle")}
+                      >
+                        <Send />
+                      </Button>
+                    )}
+                    {/* A publish is never re-run from here: it needs a new click
+                        on Publish in the clip's dialog, and the server refuses
+                        the retry for this kind. */}
+                    {onRetry && j.kind !== "clip.publish" && (
                       <Button
                         variant="ghost"
                         size="icon-sm"
