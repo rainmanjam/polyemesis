@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "Publikasi ke X dinonaktifkan. Operator dapat mengaktifkannya di lingkungan server.",
   "publish.account": "Akun",
   "publish.noAccount": "Belum ada akun {platform} yang terhubung.",
   "publish.connectInSettings": "Hubungkan akun di Pengaturan",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "Publikasi ke platform ini dinonaktifkan.",
   "publish.cause.not_confirmed": "Publikasi ini tidak dimulai dengan mengklik Publikasikan. Buka klip, lalu klik Publikasikan.",
   "publish.cause.cancelled": "Anda membatalkan publikasi ini. Klik Publikasikan untuk memulainya lagi.",
-  "publish.cause.unknown": "Sesuatu yang tidak terduga menghentikan publikasi ini. Pesan platform ditampilkan di bawah."
+  "publish.cause.unknown": "Sesuatu yang tidak terduga menghentikan publikasi ini. Pesan platform ditampilkan di bawah.",
+  "publish.gatedFor": "Publikasi ke {platform} sedang dimatikan. Operator menyalakannya di lingkungan server.",
+  "publish.needsTitle": "Tambahkan judul untuk memublikasikan.",
+  "credLabels.clientKey": "Client key",
+  "credLabels.tiktok.idWhere": "Di portal pengembang TikTok, buka aplikasi Anda dan salin Client key dari halaman detail aplikasi.",
+  "credLabels.tiktok.secretWhere": "Di halaman detail yang sama, tampilkan dan salin Client secret."
 }

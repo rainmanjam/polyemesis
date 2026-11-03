@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "X 发布已关闭。运维人员可在服务器环境中开启。",
   "publish.account": "账号",
   "publish.noAccount": "尚未连接 {platform} 账号。",
   "publish.connectInSettings": "在设置中连接一个账号",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "向此平台发布的功能已关闭。",
   "publish.cause.not_confirmed": "此次发布并非通过点击“发布”启动。请打开片段并点击“发布”。",
   "publish.cause.cancelled": "你已取消此次发布。点击“发布”可重新开始。",
-  "publish.cause.unknown": "意外情况导致此次发布停止。平台的消息显示在下方。"
+  "publish.cause.unknown": "意外情况导致此次发布停止。平台的消息显示在下方。",
+  "publish.gatedFor": "{platform} 发布已关闭。由运维人员在服务器环境中开启。",
+  "publish.needsTitle": "请先填写标题再发布。",
+  "credLabels.clientKey": "客户端密钥标识",
+  "credLabels.tiktok.idWhere": "在 TikTok 开发者门户中打开你的应用，从应用详情页复制客户端密钥标识。",
+  "credLabels.tiktok.secretWhere": "在同一应用详情页中显示并复制客户端密钥。"
 }

@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "X への公開はオフになっています。オペレーターがサーバーの環境設定でオンにします。",
   "publish.account": "アカウント",
   "publish.noAccount": "{platform} のアカウントはまだ接続されていません。",
   "publish.connectInSettings": "設定で接続する",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "このプラットフォームへの公開はオフになっています。",
   "publish.cause.not_confirmed": "この公開は「公開」のクリックで開始されたものではありません。クリップを開いて「公開」をクリックしてください。",
   "publish.cause.cancelled": "この公開はキャンセルされました。「公開」をクリックすると、もう一度開始できます。",
-  "publish.cause.unknown": "予期しない理由でこの公開が止まりました。プラットフォームのメッセージを下に表示しています。"
+  "publish.cause.unknown": "予期しない理由でこの公開が止まりました。プラットフォームのメッセージを下に表示しています。",
+  "publish.gatedFor": "{platform} への公開はオフになっています。管理者がサーバーの環境で有効にします。",
+  "publish.needsTitle": "公開するにはタイトルを入力してください。",
+  "credLabels.clientKey": "クライアントキー",
+  "credLabels.tiktok.idWhere": "TikTok の開発者ポータルでアプリを開き、アプリの詳細ページからクライアントキーをコピーします。",
+  "credLabels.tiktok.secretWhere": "同じアプリの詳細ページでクライアントシークレットを表示してコピーします。"
 }

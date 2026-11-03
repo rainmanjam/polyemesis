@@ -19,8 +19,9 @@ import (
 // upload (https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol).
 //
 // There is no "Shorts" endpoint: a Short is an ordinary upload that is vertical
-// and under three minutes, which the export already is. #Shorts is added to the
-// description once, because YouTube uses it to classify borderline files.
+// and under three minutes, which the export already is. Nothing is added to the
+// words the person confirmed; the form is prefilled with a Shorts tag they can
+// see and remove.
 //
 // WHY THIS CANNOT DOUBLE-POST. The session URI YouTube returns is stored (sealed)
 // BEFORE the first byte is sent. A retry never opens a second session while that
@@ -237,16 +238,9 @@ func rangeEnd(h string) int64 {
 }
 
 func (y *YouTube) open(ctx context.Context, r Run, total int64) (string, error) {
-	desc := r.Meta.Description
-	if r.File.Vertical && !strings.Contains(strings.ToLower(desc), "#shorts") {
-		if desc != "" {
-			desc += "\n\n"
-		}
-		desc += "#Shorts"
-	}
 	body, _ := json.Marshal(map[string]any{
 		"snippet": map[string]any{
-			"title": r.Meta.Title, "description": desc, "tags": r.Meta.Tags,
+			"title": r.Meta.Title, "description": r.Meta.Description, "tags": r.Meta.Tags,
 			// 22 is "People & Blogs", the category the API's own samples use.
 			"categoryId": "22",
 		},

@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "X'te yayınlama kapalı. Bir operatör bunu sunucu ortamında açar.",
   "publish.account": "Hesap",
   "publish.noAccount": "Henüz bağlı bir {platform} hesabı yok.",
   "publish.connectInSettings": "Ayarlar'dan bir hesap bağlayın",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "Bu platformda yayınlama kapalı.",
   "publish.cause.not_confirmed": "Bu yayınlama Yayınla'ya tıklanarak başlatılmadı. Klibi açın ve Yayınla'ya tıklayın.",
   "publish.cause.cancelled": "Bu yayınlamayı iptal ettiniz. Yeniden başlatmak için Yayınla'ya tıklayın.",
-  "publish.cause.unknown": "Beklenmedik bir şey bu yayınlamayı durdurdu. Platformun mesajı aşağıda gösteriliyor."
+  "publish.cause.unknown": "Beklenmedik bir şey bu yayınlamayı durdurdu. Platformun mesajı aşağıda gösteriliyor.",
+  "publish.gatedFor": "{platform} yayını kapalı. Bir operatör bunu sunucunun ortamında açar.",
+  "publish.needsTitle": "Yayınlamak için bir başlık ekleyin.",
+  "credLabels.clientKey": "Client key",
+  "credLabels.tiktok.idWhere": "TikTok geliştirici portalında uygulamanızı açın ve uygulama ayrıntıları sayfasından Client key değerini kopyalayın.",
+  "credLabels.tiktok.secretWhere": "Aynı ayrıntılar sayfasında Client secret değerini gösterip kopyalayın."
 }

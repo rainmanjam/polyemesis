@@ -420,3 +420,58 @@ func TestPublishTokensHandsTheWorkerTheStoredGrant(t *testing.T) {
 		t.Fatal("an unknown account produced a credential")
 	}
 }
+
+// A job that ends WITHOUT finishing its row (a crash on the last attempt, a ledger
+// write that failed) must not strand the publication: every later click would
+// find it "in flight" and queue nothing, and the jobs page cannot retry it.
+func TestARowWhoseJobFailedUnderItIsReconciledAndAnewClickRearmsIt(t *testing.T) {
+	f := newPubFixture(t)
+	var v publicationView
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusAccepted), &v)
+	old := f.publishJobs(t)[0]
+	if err := f.srv.store.FinishJob(old.ID, jobs.StateFailed, "the server stopped on the last attempt", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var got publicationView
+	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/"+strconv.FormatInt(v.ID, 10), nil, http.StatusOK), &got)
+	if got.State != db.PublicationFailed || got.Reason == nil || !strings.Contains(got.Reason.Line, "last attempt") {
+		t.Fatalf("status = %+v", got)
+	}
+	var again publicationView
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusAccepted), &again)
+	if again.ID != v.ID || again.State != db.PublicationConfirmed || len(f.publishJobs(t)) != 2 {
+		t.Fatalf("rearm = %+v, jobs = %d", again, len(f.publishJobs(t)))
+	}
+}
+
+// The same repair happens at the click even if nobody looked at the status.
+func TestAClickReconcilesAStrandedRowBeforeClaiming(t *testing.T) {
+	f := newPubFixture(t)
+	var v publicationView
+	decodeInto(t, f.click(t, f.form("youtube", f.yt), http.StatusAccepted), &v)
+	if err := f.srv.store.FinishJob(f.publishJobs(t)[0].ID, jobs.StateDone, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.click(t, f.form("youtube", f.yt), http.StatusAccepted)
+	if len(f.publishJobs(t)) != 2 {
+		t.Fatalf("a stranded row was not re-armed by the click")
+	}
+}
+
+func TestARowThatWasNeverQueuedIsNotLeftArmedForever(t *testing.T) {
+	f := newPubFixture(t)
+	p, _, err := f.srv.store.ClaimPublication(db.Publication{ClipJobID: f.clip, Platform: "youtube",
+		AccountID: f.yt, Title: "t", Nonce: "n", Privacy: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.srv.store.SQL().Exec(`UPDATE clip_publications SET updated_ms = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UnixMilli(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	var got publicationView
+	decodeInto(t, send(t, f.h, f.sign, http.MethodGet, "/api/v1/publish/"+strconv.FormatInt(p.ID, 10), nil, http.StatusOK), &got)
+	if got.State != db.PublicationFailed {
+		t.Fatalf("state = %q", got.State)
+	}
+}

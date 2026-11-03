@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "Veröffentlichen auf X ist ausgeschaltet. Ein Betreiber schaltet es in der Serverumgebung ein.",
   "publish.account": "Konto",
   "publish.noAccount": "Es ist noch kein {platform}-Konto verbunden.",
   "publish.connectInSettings": "In den Einstellungen verbinden",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "Veröffentlichen auf dieser Plattform ist ausgeschaltet.",
   "publish.cause.not_confirmed": "Diese Veröffentlichung wurde nicht durch einen Klick auf Veröffentlichen gestartet. Öffnen Sie den Clip und klicken Sie auf Veröffentlichen.",
   "publish.cause.cancelled": "Sie haben diese Veröffentlichung abgebrochen. Klicken Sie auf Veröffentlichen, um sie erneut zu starten.",
-  "publish.cause.unknown": "Etwas Unerwartetes hat diese Veröffentlichung gestoppt. Die Meldung der Plattform wird unten angezeigt."
+  "publish.cause.unknown": "Etwas Unerwartetes hat diese Veröffentlichung gestoppt. Die Meldung der Plattform wird unten angezeigt.",
+  "publish.gatedFor": "Das Veröffentlichen auf {platform} ist ausgeschaltet. Ein Administrator schaltet es in der Umgebung des Servers ein.",
+  "publish.needsTitle": "Gib einen Titel ein, um zu veröffentlichen.",
+  "credLabels.clientKey": "Client Key",
+  "credLabels.tiktok.idWhere": "Öffne im TikTok-Entwicklerportal deine App und kopiere den Client Key von der Seite App-Details.",
+  "credLabels.tiktok.secretWhere": "Zeige auf derselben Seite App-Details das Client Secret an und kopiere es."
 }

@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "La publicación en X está desactivada. Un operador la activa en el entorno del servidor.",
   "publish.account": "Cuenta",
   "publish.noAccount": "Todavía no hay ninguna cuenta de {platform} conectada.",
   "publish.connectInSettings": "Conecta una en Ajustes",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "La publicación en esta plataforma está desactivada.",
   "publish.cause.not_confirmed": "Esta publicación no se inició con un clic en Publicar. Abre el clip y haz clic en Publicar.",
   "publish.cause.cancelled": "Cancelaste esta publicación. Haz clic en Publicar para iniciarla de nuevo.",
-  "publish.cause.unknown": "Algo inesperado detuvo esta publicación. El mensaje de la plataforma aparece abajo."
+  "publish.cause.unknown": "Algo inesperado detuvo esta publicación. El mensaje de la plataforma aparece abajo.",
+  "publish.gatedFor": "La publicación en {platform} está desactivada. Un operador la activa en el entorno del servidor.",
+  "publish.needsTitle": "Añade un título para publicar.",
+  "credLabels.clientKey": "Client key",
+  "credLabels.tiktok.idWhere": "En el portal de desarrolladores de TikTok, abre tu aplicación y copia la Client key desde su página de detalles.",
+  "credLabels.tiktok.secretWhere": "En la misma página de detalles, muestra y copia el Client secret."
 }

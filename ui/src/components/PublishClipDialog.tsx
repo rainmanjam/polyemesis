@@ -242,9 +242,16 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
                   </Button>
                 ))}
               </div>
-              {platform && !platform.enabled && (
-                <p className="text-sm text-muted-foreground">{t("publish.gated")}</p>
-              )}
+              {/* A disabled control says why, beside itself (DESIGN-SYSTEM rule 3):
+                  the switched-off platform can never be the selected one, so its
+                  reason is printed for every disabled button, not only the chosen. */}
+              {targets.platforms
+                .filter((p) => !p.enabled)
+                .map((p) => (
+                  <p key={p.id} data-testid={`publish-gated-${p.id}`} className="text-sm text-muted-foreground">
+                    {t("publish.gatedFor", { platform: t(PLATFORM_LABEL[p.id]) })}
+                  </p>
+                ))}
             </fieldset>
 
             {platform?.enabled && (
@@ -367,6 +374,9 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Props) {
               <p className="text-sm text-muted-foreground">
                 {t("publish.alreadyPosted", { account: confirmation.existing.accountName })}
               </p>
+            )}
+            {platform?.enabled && account && !account.needsReconnect && !title.trim() && (
+              <p className="text-sm text-muted-foreground">{t("publish.needsTitle")}</p>
             )}
             {usable && (
               <p className="text-sm text-muted-foreground" aria-live="polite">

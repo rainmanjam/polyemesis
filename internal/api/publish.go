@@ -171,27 +171,60 @@ type publicationView struct {
 	Job    *publishJobView `json:"job,omitempty"`
 }
 
-func (s *Server) publicationView(p db.Publication) publicationView {
-	v := publicationView{Publication: p}
-	if p.State == db.PublicationConfirmed || p.State == db.PublicationUploading {
-		if p.PublishJobID > 0 {
-			j, err := s.store.GetJob(p.PublishJobID)
-			switch {
-			case err != nil || j == nil:
-				_ = s.store.FailPublication(p.ID, string(publish.CauseCancelled), "The publish job is gone.")
-				p, _ = s.store.GetPublication(p.ID)
-				v.Publication = p
-			case j.State == jobs.StateCancelled:
-				_ = s.store.FailPublication(p.ID, string(publish.CauseCancelled), "Publishing was cancelled.")
-				p, _ = s.store.GetPublication(p.ID)
-				v.Publication = p
-			default:
-				stats := s.jobq.Stats()
-				jv := s.view(*j, s.snapshot(), stats.Paused, stats.Running < s.concurrency(), nil, time.Now())
-				v.Job = &publishJobView{ID: j.ID, State: string(j.State), Progress: j.Progress, Attempts: j.Attempts,
-					Blocked: jv.Blocked, Reason: jv.Reason, ETASeconds: jv.ETASeconds}
-			}
+// publishNeverQueuedAfter is how long a row may sit armed with no job before it
+// is treated as never having been queued (a crash between the claim and the
+// submit).
+const publishNeverQueuedAfter = 2 * time.Minute
+
+// reconcilePublication makes a row's state agree with its job. A row that is
+// still in flight while its job has ended is stuck: nothing will advance it, and
+// without this every later click would find it "in flight" and queue nothing.
+// Failing it is safe by construction -- a new click re-arms the row, and the
+// stored session or remote id makes the next attempt resume or ask the platform
+// rather than post again. It returns the job it looked at, when it is still live.
+func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.Job) {
+	if p.State != db.PublicationConfirmed && p.State != db.PublicationUploading {
+		return p, nil
+	}
+	fail := func(cause publish.Cause, detail string) (db.Publication, *jobs.Job) {
+		_ = s.store.FailPublication(p.ID, string(cause), detail)
+		p, _ = s.store.GetPublication(p.ID)
+		return p, nil
+	}
+	if p.PublishJobID == 0 {
+		if time.Since(p.UpdatedAt) > publishNeverQueuedAfter {
+			return fail(publish.CauseUnknown, "The publish job was never queued. Click Publish to try again.")
 		}
+		return p, nil
+	}
+	j, err := s.store.GetJob(p.PublishJobID)
+	switch {
+	case err != nil || j == nil:
+		return fail(publish.CauseCancelled, "The publish job is gone.")
+	case j.State == jobs.StateCancelled:
+		return fail(publish.CauseCancelled, "Publishing was cancelled.")
+	case j.State == jobs.StateFailed:
+		// The worker records its own failures; this is a job that ended without
+		// one (a crash on the last attempt, a ledger write that failed).
+		detail := strings.TrimSpace(j.Error)
+		if detail == "" {
+			detail = "The publish job ended without finishing."
+		}
+		return fail(publish.CauseUnknown, detail)
+	case j.State == jobs.StateDone:
+		return fail(publish.CauseUnknown, "The publish job finished without recording a post.")
+	}
+	return p, j
+}
+
+func (s *Server) publicationView(p db.Publication) publicationView {
+	p, j := s.reconcilePublication(p)
+	v := publicationView{Publication: p}
+	if j != nil {
+		stats := s.jobq.Stats()
+		jv := s.view(*j, s.snapshot(), stats.Paused, stats.Running < s.concurrency(), nil, time.Now())
+		v.Job = &publishJobView{ID: j.ID, State: string(j.State), Progress: j.Progress, Attempts: j.Attempts,
+			Blocked: jv.Blocked, Reason: jv.Reason, ETASeconds: jv.ETASeconds}
 	}
 	if v.State == db.PublicationFailed {
 		v.Reason = &publish.Reason{Cause: publish.Cause(v.FailCause), Line: v.FailDetail}
@@ -415,6 +448,15 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if err := s.publishConfirm.redeem(req.ConfirmToken, p.userID, plan.hash); err != nil {
 		writeErrorCode(w, http.StatusForbidden, "confirm_required", err.Error())
 		return
+	}
+	// A row stuck in flight (its job ended without finishing it) is failed first,
+	// so this click re-arms it instead of being folded into a job that is gone.
+	if rows, err := s.store.ListPublicationsForClip(req.ClipJobID); err == nil {
+		for _, ex := range rows {
+			if ex.Platform == req.Platform && ex.AccountID == req.AccountID {
+				s.reconcilePublication(ex)
+			}
+		}
 	}
 	nonceRaw := make([]byte, 24)
 	if _, err := rand.Read(nonceRaw); err != nil {

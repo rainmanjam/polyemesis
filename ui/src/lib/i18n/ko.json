@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "X 게시가 꺼져 있습니다. 운영자가 서버 환경에서 켤 수 있습니다.",
   "publish.account": "계정",
   "publish.noAccount": "아직 연결된 {platform} 계정이 없습니다.",
   "publish.connectInSettings": "설정에서 연결하기",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "이 플랫폼에 대한 게시가 꺼져 있습니다.",
   "publish.cause.not_confirmed": "이 게시는 게시 버튼 클릭으로 시작되지 않았습니다. 클립을 열고 게시를 클릭하세요.",
   "publish.cause.cancelled": "이 게시를 취소했습니다. 다시 시작하려면 게시를 클릭하세요.",
-  "publish.cause.unknown": "예기치 않은 문제로 이 게시가 중단되었습니다. 플랫폼의 메시지가 아래에 표시됩니다."
+  "publish.cause.unknown": "예기치 않은 문제로 이 게시가 중단되었습니다. 플랫폼의 메시지가 아래에 표시됩니다.",
+  "publish.gatedFor": "{platform} 게시가 꺼져 있습니다. 운영자가 서버 환경에서 켭니다.",
+  "publish.needsTitle": "게시하려면 제목을 입력하세요.",
+  "credLabels.clientKey": "클라이언트 키",
+  "credLabels.tiktok.idWhere": "TikTok 개발자 포털에서 앱을 열고 앱 세부 정보 페이지의 클라이언트 키를 복사하세요.",
+  "credLabels.tiktok.secretWhere": "같은 앱 세부 정보 페이지에서 클라이언트 시크릿을 표시한 뒤 복사하세요."
 }

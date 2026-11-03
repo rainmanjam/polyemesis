@@ -61,6 +61,12 @@ const BY_PLATFORM: Readonly<Record<string, CredentialLabels>> = {
     idWhere: "credLabels.vimeo.idWhere",
     secretWhere: "credLabels.vimeo.secretWhere",
   },
+  tiktok: {
+    id: "credLabels.clientKey",
+    secret: "set.clientSecret",
+    idWhere: "credLabels.tiktok.idWhere",
+    secretWhere: "credLabels.tiktok.secretWhere",
+  },
   x: {
     id: "credLabels.oauth2ClientId",
     secret: "credLabels.clientSecretCapital",

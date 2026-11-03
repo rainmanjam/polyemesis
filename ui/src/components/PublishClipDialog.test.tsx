@@ -141,7 +141,17 @@ describe("the publish dialog", () => {
     open();
     const x = (await screen.findByRole("radio", { name: "X" })) as HTMLButtonElement;
     expect(x.disabled).toBe(true);
+    // A disabled control says why, beside itself -- even though X can never be the selected one.
+    expect((await screen.findByTestId("publish-gated-x")).textContent).toContain("X publishing is switched off");
     expect(api.publishClip).not.toHaveBeenCalled();
+    expect(api.preparePublish.mock.calls.every(([f]) => f.platform !== "x")).toBe(true);
+  });
+
+  it("says what is missing instead of leaving Publish disabled in silence", async () => {
+    open();
+    fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "  " } });
+    expect(screen.getByText("Add a title to publish.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Publish" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("asks to reconnect instead of letting a connection that cannot upload publish", async () => {

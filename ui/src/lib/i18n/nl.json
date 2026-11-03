@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "Publiceren op X staat uit. Een beheerder zet het aan in de serveromgeving.",
   "publish.account": "Account",
   "publish.noAccount": "Er is nog geen {platform}-account gekoppeld.",
   "publish.connectInSettings": "Koppel er een in Instellingen",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "Publiceren op dit platform staat uit.",
   "publish.cause.not_confirmed": "Deze publicatie is niet gestart met een klik op Publiceren. Open de clip en klik op Publiceren.",
   "publish.cause.cancelled": "Je hebt deze publicatie geannuleerd. Klik op Publiceren om haar opnieuw te starten.",
-  "publish.cause.unknown": "Iets onverwachts heeft deze publicatie gestopt. De melding van het platform staat hieronder."
+  "publish.cause.unknown": "Iets onverwachts heeft deze publicatie gestopt. De melding van het platform staat hieronder.",
+  "publish.gatedFor": "Publiceren naar {platform} staat uit. Een beheerder zet het aan in de omgeving van de server.",
+  "publish.needsTitle": "Voeg een titel toe om te publiceren.",
+  "credLabels.clientKey": "Client key",
+  "credLabels.tiktok.idWhere": "Open in het TikTok-ontwikkelaarsportaal je app en kopieer de Client key van de pagina met app-details.",
+  "credLabels.tiktok.secretWhere": "Toon op dezelfde pagina met app-details het Client secret en kopieer het."
 }

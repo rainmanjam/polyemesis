@@ -3847,7 +3847,6 @@
   "publish.platform.youtube": "YouTube Shorts",
   "publish.platform.tiktok": "TikTok",
   "publish.platform.x": "X",
-  "publish.gated": "X publishing is switched off. An operator turns it on in the server's environment.",
   "publish.account": "Account",
   "publish.noAccount": "No {platform} account is connected yet.",
   "publish.connectInSettings": "Connect one in Settings",
@@ -3899,5 +3898,10 @@
   "publish.cause.gated": "Publishing to this platform is switched off.",
   "publish.cause.not_confirmed": "This publish was not started by a click on Publish. Open the clip and click Publish.",
   "publish.cause.cancelled": "You cancelled this publish. Click Publish to start it again.",
-  "publish.cause.unknown": "Something unexpected stopped this publish. The platform's message is shown below."
+  "publish.cause.unknown": "Something unexpected stopped this publish. The platform's message is shown below.",
+  "publish.gatedFor": "{platform} publishing is switched off. An operator turns it on in the server's environment.",
+  "publish.needsTitle": "Add a title to publish.",
+  "credLabels.clientKey": "Client key",
+  "credLabels.tiktok.idWhere": "In the TikTok developer portal, open your app and copy the Client key from its App details page.",
+  "credLabels.tiktok.secretWhere": "On the same App details page, reveal and copy the Client secret."
 }
