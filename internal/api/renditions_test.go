@@ -149,6 +149,9 @@ func engineServerWithSettings(t *testing.T, tools *ffmpeg.Tools, o Options, muta
 	o.Engine = eng
 	o.Events = bus
 	o.Version = "test"
+	if o.UploadFreeBytes == nil {
+		o.UploadFreeBytes = ampleDisk
+	}
 	s := New(o)
 	h := s.Handler()
 	setTestServer(s, h)

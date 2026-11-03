@@ -147,7 +147,11 @@ func TestRecordingStateOffWhenTheSettingIsOff(t *testing.T) {
 // Enabled with the free-space floor breached is neither "recording" nor "off".
 // It is the case the Record key must show as HALTED: DISK.
 func TestRecordingStateHaltedByDiskWhenTheFloorStopsIt(t *testing.T) {
-	s, h, _, sign := managerServer(t, defaultTools())
+	// The floor is stored before the engine starts; see managerServerWithSettings.
+	const floorGB = 1e9 // a floor no volume can clear
+	s, h, _, sign := managerServerWithSettings(t, defaultTools(), func(st *db.Settings) {
+		st.Recording.MinFreeGB = floorGB
+	})
 	if setRecording(t, h, sign, true) != http.StatusOK {
 		t.Fatal("POST /recording enabled=true was not accepted")
 	}
@@ -156,9 +160,10 @@ func TestRecordingStateHaltedByDiskWhenTheFloorStopsIt(t *testing.T) {
 		t.Fatal("the fixture started no engine, so no storage guard exists to halt")
 	}
 	// A floor no volume can clear, which is how this fills a disk without one.
-	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: 1e9}
+	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: floorGB}
 	for _, eng := range engines {
 		eng.Recordings().CheckFreeSpace(halt)
+		startupSweepLandsNow(eng)
 	}
 
 	_, body := getRecording(t, h, sign)

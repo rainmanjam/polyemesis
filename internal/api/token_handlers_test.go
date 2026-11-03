@@ -53,6 +53,9 @@ func testServerWith(t *testing.T, o Options) (*Server, http.Handler, *db.DB) {
 	o.DB = store
 	o.Secrets = box
 	o.Version = "test"
+	if o.UploadFreeBytes == nil {
+		o.UploadFreeBytes = ampleDisk
+	}
 	s := New(o)
 	return s, s.Handler(), store
 }

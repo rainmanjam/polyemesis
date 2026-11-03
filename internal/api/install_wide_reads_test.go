@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/alerts"
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -167,40 +166,25 @@ func TestAHaltedRecorderOnAnyProgrammeIsReported(t *testing.T) {
 	if err := os.MkdirAll(eng.Recordings().Dir(), 0o755); err != nil {
 		t.Fatalf("create programme %d's recordings dir: %v", second.ID, err)
 	}
-	halt := db.RecordingSettings{Enabled: true, SegmentSeconds: 3600, MinFreeGB: 1e9}
-
-	// SET IT UNTIL IT HOLDS, and the reason is a sweep this test is racing.
+	// EACH PROGRAMME GETS THE VOLUME IT IS SUPPOSED TO SEE, and that replaces a
+	// retry loop that raced the engine's startup sweep.
 	//
-	// The engine's recording manager runs ScanAndSweep once the moment it
-	// starts, and every 30s after. That sweep ends in CheckFreeSpace with the
-	// SOURCE's own settings -- a 5 GB floor, so a 6.25 GB resume threshold --
-	// sees a runner with far more than that, declares "free space recovered"
-	// and clears the halt this test just set. Whether that happens depends
-	// entirely on which side of the engine's startup sweep the line above
-	// falls on: locally it lands after and the halt sticks, on a loaded runner
-	// it lands before and the state under test is gone by the assertion.
-	//
-	// Giving the second programme a floor of its own would remove the race at
-	// the source, and settings are install-wide, so it would halt the default
-	// engine too -- destroying the discriminator below. Re-applying until the
-	// halt survives a second look is the honest alternative: it converges as
-	// soon as the startup sweep is behind us, and the guard still fails loudly
-	// if the state genuinely cannot be reached.
-	haltHolds := func() bool {
-		eng.Recordings().CheckFreeSpace(halt)
-		if !eng.Recordings().Storage().Halted {
-			return false
-		}
-		time.Sleep(50 * time.Millisecond)
-		return eng.Recordings().Storage().Halted
-	}
-	deadline := time.Now().Add(15 * time.Second)
-	for !haltHolds() {
-		if time.Now().After(deadline) {
-			t.Fatalf("source %d's recording manager would not stay halted on a %.0f GB "+
-				"floor, so the state under test was never reached", second.ID, halt.MinFreeGB)
-		}
-		time.Sleep(50 * time.Millisecond)
+	// The floor is install-wide, so a floor in the settings halts the default
+	// engine too and destroys the discriminator below. Halting programme 2 by
+	// hand fails the other way: its recording manager sweeps as it starts, and
+	// a sweep that lands after the halt reads the real disk, sees more than the
+	// floor and lifts it. Installing the volume reading on the manager is what
+	// every sweep -- startup, the 30s tick, or the one called here -- consults,
+	// so there is no ordering left to win. It also stops the default engine
+	// halting on a CI runner that is genuinely low on disk.
+	const tb = 1 << 40
+	first.Recordings().SetFreeSpace(func(string) (uint64, uint64, error) { return tb, tb, nil })
+	eng.Recordings().SetFreeSpace(func(string) (uint64, uint64, error) { return 0, tb, nil })
+	startupSweepLandsNow(first)
+	startupSweepLandsNow(eng)
+	if !eng.Recordings().Storage().Halted {
+		t.Fatalf("source %d's recording manager did not halt on a volume with no room, so "+
+			"the state under test was never reached", second.ID)
 	}
 	// THE DISCRIMINATOR. With the default engine unhalted, an endpoint that
 	// asks it answers "fine" while a recorder is stopped.
