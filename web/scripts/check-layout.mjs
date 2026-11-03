@@ -171,6 +171,7 @@ function measure() {
         foot: g.dataset.foot ?? "none",
         // data-pager: the docs previous/next pair, which may hold one card at either side.
         pager: g.hasAttribute("data-pager"),
+        inDocColumn: !!g.closest("[data-doc-column]"),
         spanFull: [...g.children].some((c) => c.classList.contains("card-span-full")),
         variant: [...g.classList].find((c) => /^card-grid--[0-9]$/.test(c)) ?? null,
         rowsVariant: g.classList.contains("card-grid--rows"),
@@ -264,6 +265,15 @@ try {
            recurring line says data-foot="required" and every card must carry
            exactly one; "optional" allows at most one; no attribute allows
            none. Inferring it let every foot be deleted and still pass. */
+        if (!["required", "optional", "none"].includes(g.foot)) {
+          fail.push(`${name}: data-foot="${g.foot}" -- use "required" or "optional", or leave it off`);
+        }
+        /* The pager exemption is for one grid: the docs previous/next pair.
+           Anywhere else, or as anything but --2, data-pager is a way round
+           the row rules, so it fails. */
+        if (g.pager && (!g.inDocColumn || g.variant !== "card-grid--2")) {
+          fail.push(`${name}: data-pager is only for the --2 previous/next grid on a documentation page`);
+        }
         const footed = g.items.filter((c) => c.feet > 0).length;
         if (g.foot === "required" && footed !== n) {
           fail.push(`${name}: data-foot="required" but ${footed} of ${n} cards have a .card-foot`);
@@ -311,9 +321,9 @@ try {
         });
         /* Every row spans the grid, left edge to right edge: a short last
            row is an orphan, and a short first row is a variant with more
-           columns than cards. The docs pager is exempt -- on the first and
-           last documents it holds one card, at the side it points to. */
-        if (!g.pager) {
+           columns than cards. The docs pager holding ONE card is exempt -- on
+           the first and last documents it sits at the side it points to. */
+        if (!(g.pager && n === 1)) {
           rows.forEach((row, i) => {
             const shortL = Math.min(...row.map((c) => c.left)) - g.left;
             const shortR = g.right - Math.max(...row.map((c) => c.right));
