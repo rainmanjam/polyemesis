@@ -196,7 +196,7 @@
      longer declared here: they are in the shared block, which is where "the
      same scale" stops being a claim about two files and becomes one file. Only
      the two the console has no equivalent for are still site-only. --- */
-  --motion-enter: 420ms; /* content arriving on scroll; nothing arrives in a console */
+  --motion-enter: 420ms; /* content arriving on page load; nothing arrives in a console */
   /* Symmetric, for anything that breathes rather than arrives. */
   --ease-breath: cubic-bezier(0.4, 0, 0.6, 1);
 }
@@ -291,6 +291,96 @@
        upward to the page instead. This lets the card shrink so that scroll
        container is the one that actually takes it. */
     min-width: 0;
+  }
+
+  /* ONE GRID FOR EVERY ROW OF CARDS.
+
+     Card rows used to be built per page from utilities, and they drifted: four
+     different gutters (16, 20, 24 and 32px), some grids capped at max-w-4xl or
+     max-w-5xl so their right edge stopped 216-344px short of the grid above
+     them on the same page, five-card sets that left a lone card beside a hole,
+     and links at the foot of a card floating at whatever height the text above
+     them ended. Measured on every page at 1440/1024/768/390;
+     scripts/check-layout.mjs measures it again on every build.
+
+     The rules, and why each is here rather than on the page:
+     - Full column width. A card row's edges are the column's edges, the same
+       lines the headings sit on. Prose keeps its reading measure; a grid does
+       not have one.
+     - One gutter, 1.5rem, as `gap`, never margins.
+     - Columns chosen from the item count, not auto-fit. auto-fit with five
+       items produces 4+1 or 3+2 at some width; a fixed variant per count does
+       not. --2 is for 2 or 4 cards, --3 for 3, --5 for five peers.
+     - Each card is a flex column, so `.card-foot` (margin-top: auto) puts the
+       recurring last line of every card in a row on the same baseline.
+
+     TAILWIND v4 PUTS UTILITIES ABOVE THIS LAYER. A `gap-*`, `grid-cols-*`,
+     `max-w-*` or `mt-*` utility on the same element silently wins over these
+     rules, so a `.card-grid` carries none of them, and a `.card-foot` carries
+     no top margin. */
+  .card-grid {
+    display: grid;
+    width: 100%;
+    gap: 1.5rem;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  /* `> .card`, not `> *`: a <script> that sat inside the /download grid was
+     printed onto the page by `display: flex` on `> *`. */
+  .card-grid > .card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .card-foot {
+    margin-top: auto;
+    padding-top: 1rem;
+  }
+  /* WHEN THE FOOT OPENS WITH A RULE, ITS TOP IS WHAT THE EYE LINES UP.
+     margin-top: auto aligns the bottoms of the feet in a row; a foot whose
+     text runs a line longer then starts a line higher, and a border-top on it
+     visibly steps. --rows makes each card a two-row subgrid (body, foot), so
+     every foot in a row starts on the same line and the tallest sets the
+     height. A card in a --rows grid has exactly two children. */
+  .card-grid--rows > .card {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+  }
+  /* In a grid cell an auto margin is alignment: margin-top: auto would sink
+     each foot to the bottom of its row and undo the shared top. */
+  .card-grid--rows > .card > .card-foot {
+    margin-top: 0;
+  }
+  @media (min-width: 48rem) {
+    .card-grid--2,
+    .card-grid--5 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    /* A deliberate full-width card: the one in the set that IS different
+       (/comparison, /download), and the fifth of five peers at two columns. */
+    .card-span-full,
+    .card-grid--5 > :nth-child(5):last-child {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (min-width: 64rem) {
+    .card-grid--3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    /* Five peers: three thirds over two halves, both rows full. Six tracks so
+       both widths come from one grid and share its column lines. */
+    .card-grid--5 {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+    .card-grid--5 > :nth-child(-n + 3) {
+      grid-column: span 2 / span 2;
+    }
+    .card-grid--5 > :nth-child(n + 4),
+    .card-grid--5 > :nth-child(5):last-child {
+      grid-column: span 3 / span 3;
+    }
   }
 
   /* A COMPARISON TABLE WHOSE ROW LABEL SCROLLS AWAY IS NOT A COMPARISON.
@@ -536,12 +626,14 @@
     font-size: 0.75rem;
     line-height: 1.5;
     /* Thin. This is a line of type, not a section: it has to be readable and
-       then forgotten, because it is above the headline on every page and a
-       visitor who arrives at the 24th document does not want a banner. */
+       then forgotten. It is on the home page only (see Announce.astro). */
     padding-block: 0.4375rem;
   }
   .announce a {
     font-weight: 500;
+    /* The same 24px hit area as .tap, for the one link in the bar. */
+    padding-block: 0.3125rem;
+    margin-block: -0.3125rem;
     text-decoration: underline;
     /* Far enough off the baseline that the descender in "p" does not sit on the
        rule, matching .doc-prose a — the same fix for the same reason. */
@@ -584,6 +676,19 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     color: var(--color-muted);
+  }
+
+  /* A 24px HIT AREA FOR A STANDALONE TEXT LINK, without moving anything
+     (WCAG 2.5.8; 2026-11 design review). A 13-14px link on its own line was
+     15-18px tall: "Docs" under each item on /features, the links under the
+     home CTA. Padding grows the box the pointer hits; the equal negative
+     margin takes the same space back, so the layout is pixel-identical. On an
+     inline link the margin does nothing and the padding already does not
+     affect the line, so the same two declarations serve both. Links inside a
+     sentence are exempt from 2.5.8 and do not need it. */
+  .tap {
+    padding-block: 0.3125rem;
+    margin-block: -0.3125rem;
   }
 
   .btn {
@@ -836,24 +941,6 @@
     animation-delay: 0s !important;
     transition-delay: 0s !important;
   }
-
-  /* Scroll-driven reveals need switching OFF, not shortening.
-     The blanket rule above zeroes animation-duration, which is the standard
-     recipe and is enough for every time-driven animation on the page. It does
-     nothing here: a scroll-driven animation takes its progress from scroll
-     position, not from elapsed time, so duration is not what advances it. With
-     `animation-fill-mode: both` the element then holds the `from` keyframe —
-     opacity 0 — for as long as it is above the entry range.
-     The result was the exact opposite of the intent: a reader who asked for
-     less motion got a page whose content was invisible until scrolled past.
-     Verified: 6 of 6 sections held at opacity 0 before this rule existed. */
-  [data-reveal] {
-    animation-name: none !important;
-    animation-timeline: auto !important;
-    opacity: 1 !important;
-    transform: none !important;
-  }
-  .reveal { opacity: 1 !important; transform: none !important; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -868,9 +955,9 @@
    --------------------------------------------------------------------------- */
 
 @layer components {
-  /* 1. Content arriving. A short rise on first paint for the hero, and on
-        entry for everything below it. 14px — far enough to read as motion,
-        short enough that a fast scroller never waits for it.
+  /* 1. Content arriving. A short rise on first paint for the hero, and
+        nothing else (see the note under .rise-5). 14px — far enough to read
+        as motion, short enough that nobody waits for it.
 
      ON THE TOKENS NOW, AND IT WAS NOT. The duration and the curve were written
      here as `0.45s cubic-bezier(0.22, 0.61, 0.36, 1)` — two literals four lines
@@ -908,42 +995,14 @@
   .rise-4 { --rise-step: 4; }
   .rise-5 { --rise-step: 5; }
 
-  /* Entry reveals. Marked in the markup with `data-reveal`, which is inert on
-     its own — nothing is hidden until one of the two mechanisms below has
-     committed to revealing it again. That ordering is the whole trick: a
-     reader with no JavaScript and no scroll-driven animation support sees the
-     page in full rather than a column of blank space.
-
-     Path 1, where the browser has it: driven entirely by scroll position, no
-     JavaScript, and it cannot fire late because there is no observer to
-     schedule. Base.astro tests the same @supports condition and skips its
-     observer here. */
-  @supports (animation-timeline: view()) {
-    [data-reveal] {
-      animation-name: rise;
-      animation-duration: 0.6s;
-      animation-timing-function: linear;
-      animation-fill-mode: both;
-      animation-timeline: view();
-      animation-range: entry 8% cover 26%;
-    }
-  }
-
-  /* Path 2, everywhere else: Base.astro adds `.reveal` — hiding the element —
-     and the observer adds `.shown` when it comes into view. */
-  /* The same duration and curve as `.rise` above, from the same tokens, because
-     it is the same event seen by a browser that cannot drive it from scroll.
-     It was 0.5s ease / 0.5s cubic-bezier here against 0.45s cubic-bezier there:
-     two hand-written approximations of one intention, which is what the token
-     block exists to stop. */
-  .reveal {
-    opacity: 0;
-    transform: translateY(18px);
-    transition:
-      opacity var(--motion-enter) var(--ease-out),
-      transform var(--motion-enter) var(--ease-out);
-  }
-  .reveal.shown { opacity: 1; transform: none; }
+  /* NO SCROLL REVEALS BELOW THE HERO, and they were here until the 2026-11
+     design review. Every section below the fold used to fade in on entry, by
+     `animation-timeline: view()` or an IntersectionObserver fallback. It moved
+     nothing a reader needed to see move, and it had real costs: a full-page
+     capture, a print, a link preview or any tool that renders without
+     scrolling saw blank space where the sections were. The hero's page-load
+     cascade above is the one entry motion left. scripts/check-build.mjs fails
+     the build if `data-reveal` or a scroll timeline comes back. */
 
   /* 2. Destination loudness bars. These carry measured LUFS figures, so the
      movement has to stay small enough that nobody could misread the bar as

@@ -45,7 +45,7 @@ import Breadcrumbs from "../components/Breadcrumbs.astro";
 const facts = [
   {
     h: "One ingest, one encode, one connection",
-    p: "The live broadcast carries the music. The VOD track does not. polyemesis builds both mixes from the tracks already arriving on your single SRT ingest, and sends them to Twitch over the same connection — your encoder uploads once and encodes video once.",
+    p: "The live broadcast carries the music. The VOD track does not. polyemesis builds both mixes from the tracks already arriving on your single SRT ingest, and sends them to Twitch over the same connection: your encoder uploads once and encodes video once.",
   },
   {
     h: "No video ladder required",
@@ -82,7 +82,7 @@ const facts = [
     </h1>
     <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
       Twitch can carry a second audio track alongside the live one, and use it
-      for the VOD. polyemesis builds that second mix from the same upload — so
+      for the VOD. polyemesis builds that second mix from the same upload, so
       what your viewers hear live and what stays on the archive can differ,
       without a second encoder, a second upload, or a second stream key.
     </p>
@@ -90,12 +90,12 @@ const facts = [
     {/* §3: THE GPU CAVEAT IS IN THE BLOCK THAT ANNOUNCES THE FEATURE. It is not
         a footnote, it is not further down the page, and it must not be moved.
         The reader most likely to want this runs a headless VPS. */}
-    <div class="mt-8 max-w-2xl rounded-xl border border-line bg-raised p-6">
+    <div class="card mt-8 max-w-2xl p-6">
       <p class="font-mono text-[11px] uppercase tracking-wide text-subtle">Before you install anything</p>
       <p class="mt-2 leading-relaxed text-muted">
         This is a <strong>Twitch Enhanced Broadcasting</strong> capability, and
         Twitch requires a GPU. A host that reports none is refused the
-        negotiation outright — so on a headless VPS, which is where a lot of
+        negotiation outright, so on a headless VPS, which is where a lot of
         self-hosted streaming lives, this particular feature will not come up.
         Everything else polyemesis does works there; this one does not.
       </p>
@@ -109,7 +109,7 @@ const facts = [
         track: that mechanism tags a second track with FLV metadata, and
         obsproject/obs-studio issue #13636 (read 15 August 2026) reports it
         conflicting with Enhanced Broadcasting, with live audio archived
-        regardless of the track exclusions. polyemesis does not use that path —
+        regardless of the track exclusions. polyemesis does not use that path;
         it negotiates the second track through Enhanced Broadcasting itself.
         What Twitch finally archives is still Twitch's decision.
       </p>

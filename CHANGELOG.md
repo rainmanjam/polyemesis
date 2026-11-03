@@ -711,6 +711,28 @@ its first tagged release.
 
 ### Changed
 
+- **Website: every row of cards lines up.** Card rows on the home, features, comparison, download,
+  multistream, how-to, free restream and five comparison pages, and the previous/next cards on
+  every documentation page, now share one grid: card edges sit on the same lines as the headings,
+  one 24px gutter everywhere, cards in a row are the same height, and the link or note at the foot
+  of each card sits on the same line as its neighbours'. Sets of five fill their rows (three over
+  two, or two, two and one full-width) instead of leaving a lone card beside a gap, wide tables
+  reach the full width of the page, callouts match the paragraph they sit in, and the multistream,
+  Streamlabs and Twitch VOD pages use the same card style as the rest of the site. A browser check
+  in the site build measures this at four screen widths.
+
+- **Website: quicker to read, quicker to try.** On the home page the routing problem and the
+  playable patchbay now come straight after the spec strip, before the hosted-pricing table. The
+  hero has one copy action for the install command, no pill above the headline, and no colour in
+  it. The announcement bar is on the home page only, and says what the latest release is (or links
+  straight to the install page). Sections no longer fade in on scroll, so a full-page capture,
+  print or link preview shows the whole page. Screenshots on the features page show a low-resolution
+  preview while they load instead of an empty frame, and the first one loads immediately. Headings
+  that named limits now name choices ("Choose polyemesis if", "Choose another tool when"), eyebrows
+  that repeated their heading are gone, the download page's ports are a list, and the spec strip
+  has one value per cell. Standalone text links have a 24px hit area. Em dashes in the site's own
+  copy became ordinary punctuation, and arrows mark a section's primary link only.
+
 - **Broadcast palette, in the console and on the website.** Failed is a lighter coral, so it can
   no longer be mistaken for an on-air lamp, and it reads better: the failed badge goes from 4.55:1
   to 6.18:1 on a card, failed text on a raised card from 4.22:1 to 5.73:1, and the destructive

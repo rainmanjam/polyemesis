@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -100,7 +100,7 @@ describe("the home hero (S1)", () => {
   const hero = home.slice(home.indexOf("<section class=\"relative overflow-hidden"));
   const heroBody = hero.slice(0, hero.indexOf("</section>"));
   const h1 = heroBody.slice(heroBody.indexOf("<h1"), heroBody.indexOf("</h1>"));
-  const sub = heroBody.slice(heroBody.indexOf("rise rise-3"), heroBody.indexOf("</p>", heroBody.indexOf("rise rise-3")));
+  const sub = heroBody.slice(heroBody.indexOf("rise rise-2"), heroBody.indexOf("</p>", heroBody.indexOf("rise rise-2")));
 
   it("sets the headline with at most one forced line break", () => {
     expect((h1.match(/<br/g) ?? []).length).toBeLessThanOrEqual(1);
@@ -119,6 +119,30 @@ describe("the home hero (S1)", () => {
 
   it("names the install command's code element for that copy action", () => {
     expect(heroBody).toMatch(/codeId="install-command"/);
+  });
+
+  /* ONE COPY ACTION (2026-11 design review). The hero had two controls that
+   * copied the same string: a small Copy in the code block's bar and the
+   * primary button under it. The block now renders none of its own
+   * (externalCopy) and the primary button is the only copy control, carrying
+   * data-code-copy so check-build still pairs the <pre> with exactly one. */
+  it("has exactly one copy control for the install command, and it is the primary button", () => {
+    expect(heroBody).toMatch(/<CodeBlock[^>]*codeId="install-command"[^>]*externalCopy/);
+    const buttons = heroBody.match(/<button[\s\S]*?<\/button>/g) ?? [];
+    expect(buttons.length).toBe(1);
+    expect(buttons[0]).toMatch(/class="btn btn-primary"/);
+    expect(buttons[0]).toMatch(/data-code-copy/);
+    expect(buttons[0]).toMatch(/data-copy-target="install-command"/);
+  });
+
+  it("puts no pill or chip above the headline", () => {
+    expect(heroBody.slice(0, heroBody.indexOf("<h1"))).not.toMatch(/class="chip/);
+  });
+
+  it("keeps the interaction colour off the headline", () => {
+    // Written without the literal class name: ui/src/lib/palette-contrast.test.ts
+    // scans web/ sources for it and would read this assertion as a use.
+    expect(h1).not.toMatch(/\bprimary\b|<span\b/);
   });
 
   it("keeps the quickstart as a text link, not a second button", () => {
@@ -213,7 +237,7 @@ describe("the home trust line (S4)", () => {
   });
 
   it("keeps a plain source link when the fetch fails", () => {
-    expect(source).toMatch(/Read the source →/);
+    expect(source).toMatch(/>Read the source<\/a/);
   });
 });
 
@@ -270,6 +294,85 @@ describe("the features page's dashboard copy", () => {
     const features = pages("features.astro");
     const dashboard = features.slice(features.indexOf("The programme you picked in the header"));
     const sentence = dashboard.slice(0, dashboard.indexOf("\n"));
-    expect(sentence).toMatch(/its ingest — bitrate, uptime,/);
+    expect(sentence).toMatch(/its ingest \(bitrate, uptime,/);
+  });
+});
+
+/* THE HOME PAGE'S ORDER (2026-11 design review). A visitor should meet the
+ * problem and try the patchbay before the hosted-pricing comparison, so the
+ * price table answers "what does this cost" for someone who already wants it. */
+describe("the home page order", () => {
+  const home = pages("index.astro");
+  const at = (needle: string) => {
+    const i = home.indexOf(needle);
+    expect(i, needle).toBeGreaterThan(-1);
+    return i;
+  };
+
+  it("puts the problem and the patchbay straight after the spec strip, before the price table", () => {
+    const spec = at("<SpecStrip />");
+    const problem = at("You send four tracks. Every platform will take one stereo pair.");
+    const patchbay = at("<MixMatrix />");
+    const prices = at("<caption class=\"sr-only\">polyemesis compared with Restream's hosted plans</caption>");
+    expect(spec).toBeLessThan(problem);
+    expect(problem).toBeLessThan(patchbay);
+    expect(patchbay).toBeLessThan(prices);
+  });
+
+  it("phrases who-it-is-for as a choice, in sentence case", () => {
+    expect(home).toMatch(/<h3[^>]*>Choose polyemesis if<\/h3>/);
+    expect(home).toMatch(/<h3[^>]*>Choose a hosted service if<\/h3>/);
+    expect(home).not.toMatch(/>\s*Not built for\s*</);
+  });
+});
+
+/* THE ANNOUNCEMENT BAR IS HOME-ONLY (2026-11 design review). Base renders it
+ * only for a page that passes `announce`; on docs and task pages it stood
+ * between the reader and the task. */
+describe("the announcement bar", () => {
+  const src = join(here, "..");
+  const astroFiles = (dir: string): string[] =>
+    readdirSync(join(src, dir), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? astroFiles(join(dir, e.name)) : e.name.endsWith(".astro") ? [join(dir, e.name)] : [],
+    );
+
+  // Pages, layouts AND components: a layout such as DocPage passing
+  // `announce` to Base would put the bar on every document.
+  const everyAstro = () => ["pages", "layouts", "components"].flatMap((d) => astroFiles(d));
+
+  it("is requested by the home page and by nothing else", () => {
+    const requesting = everyAstro().filter((f) => /\bannounce=\{/.test(readFileSync(join(src, f), "utf8")));
+    expect(requesting).toEqual([join("pages", "index.astro")]);
+  });
+
+  it("is rendered only through Base", () => {
+    const rendering = everyAstro().filter((f) => /<Announce\b/.test(readFileSync(join(src, f), "utf8")));
+    expect(rendering).toEqual([join("layouts", "Base.astro")]);
+  });
+
+  it("is rendered by Base only when a page asks for it", () => {
+    const base = readFileSync(join(src, "layouts", "Base.astro"), "utf8");
+    expect(base).toMatch(/\{announce && <Announce release=\{announce\.release\} \/>\}/);
+  });
+
+  it("prints a release only from the build-time read, with an install link otherwise", () => {
+    const bar = readFileSync(join(src, "components", "Announce.astro"), "utf8");
+    expect(bar).not.toMatch(/\bv\d+\.\d+/);
+    expect(bar).toMatch(/href="\/download"/);
+  });
+});
+
+/* THE FEATURES PAGE'S SCREENSHOTS AND SECTION HEADS (2026-11 design review). */
+describe("the features page sections", () => {
+  const features = pages("features.astro");
+
+  it("eager-loads the first capture and paints a placeholder under the lazy ones", () => {
+    expect(features).toMatch(/loading=\{i === 0 \? "eager" : "lazy"\}/);
+    expect(features).toMatch(/style=\{i === 0 \? undefined : placeholder\.get\(s\.shot\)\}/);
+    expect(features).toMatch(/style=\{placeholder\.get\(s\.setup\.shot\)\}/);
+  });
+
+  it("does not repeat each section's title in an eyebrow above it", () => {
+    expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
   });
 });

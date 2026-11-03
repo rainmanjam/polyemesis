@@ -254,6 +254,57 @@ jobs:
       - name: Build
         run: npm run build
 
+      # CARD ALIGNMENT IS A LAYOUT CLAIM, SO IT IS CHECKED IN A BROWSER.
+      #
+      # check-build.mjs reads dist/ as text and cannot see whether two cards in
+      # a row end at the same height or a grid's edge lands on the column's.
+      # scripts/check-layout.mjs loads every page with a card grid or a bordered
+      # table in Chromium at four widths and measures it. It needs dist/, so it
+      # runs after Build and is not part of `npm test` (which runs before it).
+      #
+      # The browser install is ci.yml's acceptance-browser recipe, and the cache
+      # key is the same string, so a browser cached for that suite on main at
+      # the same Playwright version is restored here too.
+      - name: Playwright version
+        id: playwright-version
+        run: |
+          v=$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")
+          [ -n "$v" ] || { echo "could not resolve playwright-core version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "playwright-core $v"
+
+      - id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      # Same reason as ci.yml's step of this name: install-deps is apt, and a
+      # stalling azure mirror holds apt through its full timeout per index.
+      - name: Prefer a reachable apt mirror
+        timeout-minutes: 3
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99polyemesis >/dev/null <<'CONF'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          CONF
+          m=/etc/apt/apt-mirrors.txt
+          if [ -f "$m" ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' "$m"
+            [ -s "$m" ] || echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee "$m" >/dev/null
+          fi
+
+      - name: Install Chromium
+        timeout-minutes: 10
+        run: |
+          npx --no-install playwright install-deps chromium
+          npx --no-install playwright install chromium
+
+      - name: Card layout (browser)
+        timeout-minutes: 5
+        run: npm run check:layout
+
       - name: Publish to Cloudflare Pages
         # Both halves are load-bearing. The gate is the credential. refs/heads/
         # main is what keeps a pull_request run — including one from a fork,

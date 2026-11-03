@@ -106,7 +106,7 @@ const breadcrumbLd = {
       }
     </nav>
 
-    <div class="min-w-0">
+    <div class="min-w-0" data-doc-column>
       {/* Visible breadcrumbs, which is what makes the JSON-LD above honest. */}
       <nav aria-label="Breadcrumb" class="text-[13px] text-subtle">
         <ol class="flex flex-wrap items-center gap-x-2">
@@ -130,7 +130,7 @@ const breadcrumbLd = {
           </a>{" "}
           in the repository, so it is versioned with the software it describes.
           It tracks <span class="font-mono text-[13px]">main</span>, which runs
-          ahead of the latest release — if you are running one, read the copy in
+          ahead of the latest release. If you are running one, read the copy in
           your own checkout. Corrections are a pull request.
         </p>
 
@@ -138,7 +138,7 @@ const breadcrumbLd = {
             rather than "Next →", because a link that names its target is worth
             something to a reader skimming and to everything else that reads
             this page. */}
-        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+        <div class="card-grid card-grid--2 mt-8" data-pager>
           {prev && (
             <a href={hrefOf(prev)} class="card group p-4 transition-colors hover:border-line-strong">
               <span class="eyebrow">Previous</span>
@@ -148,7 +148,7 @@ const breadcrumbLd = {
           {next && (
             <a
               href={hrefOf(next)}
-              class="card group p-4 transition-colors hover:border-line-strong sm:col-start-2 sm:text-right"
+              class="card group p-4 transition-colors hover:border-line-strong md:col-start-2 md:text-right"
             >
               <span class="eyebrow">Next</span>
               <span class="mt-1 block text-[15px] text-fg group-hover:text-primary-bright">{next.title}</span>
