@@ -1118,7 +1118,7 @@ to). `backupProcess` is deliberately separate from `process`: a backup that has
 been dead for an hour beside a healthy primary is the one state this must not
 hide.
 
-**Destination signals on the status (unreleased):** four optional fields, each
+**Destination signals on the status (0.12.0):** four optional fields, each
 absent while there is nothing to report.
 
 | Field | Present when | Value |

@@ -245,10 +245,10 @@ instead.
 
 ### Upgrading to 0.12.0
 
-> **Not released yet.** This note describes what is on `main` under
-> `[Unreleased]` in the [CHANGELOG](../CHANGELOG.md). The version number is the
-> one the next release is expected to take, and it may change when the release
-> is cut.
+**Native installs: FFmpeg 8.0 or later is now required.** polyemesis refuses to
+start on an older FFmpeg and names the binary and version it found. Docker users
+are unaffected (the image bundles 8.1). Check this before you upgrade; the fixes
+are in [FFmpeg 6.x or 7.x → 8.x](#ffmpeg-6x-or-7x--8x-required).
 
 **Every running destination restarts once.** The command line a destination's
 FFmpeg runs has changed in two ways. Each mixed track has a named
@@ -268,13 +268,20 @@ destination's `levelChange` status say which happened.
 [HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel)
 has the details.
 
-**Schema:** one table is added, `timeline_events`, for the stream timeline. It
-is created with `CREATE TABLE IF NOT EXISTS`, and the schema version stamped
-into the database is still `1`, so a 0.11.0 binary opens the database and
-ignores the table. One thing does not survive reinstalling the 0.11.0 binary:
-a track muted with the new mute control. 0.11.0 does not know the `muted`
-field, so that track is heard again. Restoring the backup you took is still the
-rollback this page recommends.
+**Schema:** new tables only, plus additive columns. The schema version stamped
+into the database is still `1`. 0.12.0 adds tables for the stream timeline
+(`timeline_events`), analytics, clip highlights, templates and publications,
+chat sanctions and overlays, polls, recurring broadcasts, rollover, captions
+ingest, storage offload, OBS and MCP access and the YouTube vertical pairs, and
+adds columns with defaults (nullable or `NOT NULL DEFAULT`) to existing tables
+such as `destinations`, `sources`, `schedules` and the credential tables. All of
+it is created with `CREATE TABLE IF NOT EXISTS` or a guarded `ALTER TABLE ... ADD
+COLUMN`. **A 0.11.0 binary opens a 0.12.0 database** and ignores what it does not
+know. Things that do not survive reinstalling 0.11.0: a track muted with the new
+mute control (0.11.0 does not know `muted`, so the track is heard again) and any
+setting held only in a new table or column, such as captions, templates or
+scheduled publications. Restoring the backup you took is still the rollback this
+page recommends.
 
 Nothing else to do beyond the short version above.
 
