@@ -1,147 +1,180 @@
 import * as THREE from './vendor/three.js';
+import {Line2,LineGeometry,LineMaterial,EffectComposer,RenderPass,UnrealBloomPass} from './vendor/three-addons.js';
+import {buildRoutes,pointAtDistance} from './routes.js';
 
-const COLORS = [0x91abe0, 0x69cd8a, 0xe3b76f, 0x72bad3];
+/* Identity colours: video is neutral, tracks never borrow a status colour. */
+const LANE_COLORS=[0xc3cada,0x45b5d0,0xe879f9,0x9b8cff];
+const WIRE_WIDTH=[2.6,2.6,2.6,2.6];
+const PACKETS_PER_LANE=3,TRAIL=6,TRAIL_STEP=4.2,SPEED=150;
+const MAX_INSTANCES=16*PACKETS_PER_LANE*(1+TRAIL)+16;
+const HEAD=[9,4.2],TAIL=[6,3];
 
-/** Decorative WebGL layer; all labels, controls and the static path remain in HTML/SVG. */
-export function createSignalScene(host) {
-  const renderer = new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
-  renderer.setClearColor(0x000000, 0);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
+/**
+ * Decorative WebGL layer that sits BEHIND the cards: crisp Line2 wires, instanced packets with short
+ * additive trails, and a selective bloom on the packets only. Labels, controls and the static
+ * fallback stay in HTML/SVG.
+ */
+export function createSignalScene(host){
+  const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
+  const pixelRatio=Math.min(devicePixelRatio||1,2);
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setClearColor(0x000000,0);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.toneMapping=THREE.NoToneMapping;
   renderer.domElement.setAttribute('aria-hidden','true');
   host.append(renderer.domElement);
-  const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.1,2000);
-  camera.position.z = 1000;
-  scene.add(new THREE.AmbientLight(0xffffff,2));
-  const key = new THREE.DirectionalLight(0xdce7ff,3.5);
-  key.position.set(-200,300,500);scene.add(key);
-  const fill = new THREE.DirectionalLight(0x91abe0,1.4);
-  fill.position.set(200,-100,300);scene.add(fill);
-  const network = new THREE.Group();scene.add(network);
-  const board = new THREE.Group();scene.add(board);
-  const plates = [];
-  const boardMaterial = new THREE.MeshStandardMaterial({color:0x2c3544,metalness:.62,roughness:.35});
-  const edgeMaterial = new THREE.MeshStandardMaterial({color:0x62758e,metalness:.7,roughness:.3});
-  for(let i=0;i<3;i++) {
-    const plate=new THREE.Mesh(new THREE.BoxGeometry(142,8,74),i===2?edgeMaterial:boardMaterial);
-    plate.position.y=(i-1)*12;board.add(plate);plates.push(plate);
-  }
-  const chip = new THREE.Mesh(new THREE.BoxGeometry(62,8,42),new THREE.MeshStandardMaterial({color:0x151b26,metalness:.4,roughness:.4}));
-  chip.position.y=20;board.add(chip);
-  const indicators=[];
-  for(let i=0;i<3;i++) {
-    const material=new THREE.MeshStandardMaterial({color:COLORS[i+1],emissive:COLORS[i+1],emissiveIntensity:.35,roughness:.4,metalness:.3});
-    const rail=new THREE.Mesh(new THREE.BoxGeometry(108,2.5,2.2),material);
-    rail.position.set(0,25,-14+i*13);board.add(rail);indicators.push(rail);
-    for(let x=-54;x<=54;x+=18) {
-      const pin=new THREE.Mesh(new THREE.BoxGeometry(3,3,7),edgeMaterial);
-      pin.position.set(x,11,41);board.add(pin);
-    }
-  }
-  board.rotation.set(.58,-.32,-.13);
-  let width=1,height=1,routes=[],trace=null,layout=null,disposed=false;
-  const packetGeometry=new THREE.BoxGeometry(4.5,3,3);
-  const smallPacketGeometry=new THREE.BoxGeometry(2,1.5,1.5);
-  const vector = new THREE.Vector3();
 
-  function clearNetwork() {
-    network.traverse(object=>{
-      if(object.geometry&&object.geometry!==packetGeometry&&object.geometry!==smallPacketGeometry)object.geometry.dispose();
-      if(object.material)object.material.dispose();
+  const scene=new THREE.Scene();
+  const camera=new THREE.OrthographicCamera(-1,1,1,-1,0.1,100);
+  camera.position.z=10;
+  const bloomCamera=camera.clone();
+  bloomCamera.layers.set(1);
+  const wires=new THREE.Group();scene.add(wires);
+
+  /* Packets: one InstancedMesh, per-instance colour carries the trail fade. */
+  const packetMaterial=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false});
+  const packets=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),packetMaterial,MAX_INSTANCES);
+  packets.layers.set(1);packets.frustumCulled=false;
+  packets.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  packets.count=0;scene.add(packets);
+  camera.layers.enable(1);
+
+  /* Selective bloom: only layer 1 (packets) is rendered into the bloom chain. */
+  let quadGeometry=null,composer=null,composite=null,compositeScene=null,bloomPass=null;
+  try{
+    composer=new EffectComposer(renderer);
+    composer.renderToScreen=false;
+    composer.addPass(new RenderPass(scene,bloomCamera,null,new THREE.Color(0x000000),1));
+    bloomPass=new UnrealBloomPass(new THREE.Vector2(256,256),.32,.35,.02);
+    composer.addPass(bloomPass);
+    composite=new THREE.ShaderMaterial({
+      uniforms:{tMap:{value:null},uGain:{value:1}},
+      vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+      fragmentShader:'uniform sampler2D tMap;uniform float uGain;varying vec2 vUv;void main(){vec3 c=texture2D(tMap,vUv).rgb*uGain;vec4 o=linearToOutputTexel(vec4(c,1.));gl_FragColor=vec4(o.rgb,max(o.r,max(o.g,o.b)));}',
+      blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneFactor,transparent:true,depthTest:false,depthWrite:false
     });
-    network.clear();routes=[];trace=null;
+    quadGeometry=new THREE.PlaneGeometry(2,2);
+    const quad=new THREE.Mesh(quadGeometry,composite);
+    quad.frustumCulled=false;
+    compositeScene=new THREE.Scene();compositeScene.add(quad);
+  }catch(error){composer=null;composite=null;compositeScene=null}
+
+  let bloomOn=true,width=1,height=1,routes=[],layout=null,disposed=false;
+  const tmp=[0,0],tan=[1,0];
+  const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,0,1),color=new THREE.Color();
+  const laneColors=LANE_COLORS.map(hex=>new THREE.Color(hex));
+  const lift=LANE_COLORS.map(hex=>new THREE.Color(hex).lerp(new THREE.Color(0xffffff),.35));
+
+  function clearWires(){
+    wires.traverse(object=>{object.geometry?.dispose();object.material?.dispose()});
+    wires.clear();routes=[];
   }
 
-  function curveFor(connection, lane=0) {
-    const {start,end,vertical,via}=connection;
-    const a=new THREE.Vector3(start.x-width/2+(vertical?lane:0),height/2-start.y-(vertical?0:lane),0);
-    const d=new THREE.Vector3(end.x-width/2+(vertical?lane:0),height/2-end.y-(vertical?0:lane),0);
-    let b,c;
-    if(via) {
-      b=new THREE.Vector3(via-width/2,a.y,24);
-      c=new THREE.Vector3(via-width/2,d.y,24);
-    } else if(vertical) {
-      const dy=(d.y-a.y)*.48;
-      b=new THREE.Vector3(a.x,a.y+dy,36);c=new THREE.Vector3(d.x,d.y-dy,36);
-    } else {
-      const dx=(d.x-a.x)*.5;
-      b=new THREE.Vector3(a.x+dx,a.y,36);c=new THREE.Vector3(d.x-dx,d.y,36);
-    }
-    return new THREE.CubicBezierCurve3(a,b,c,d);
-  }
-
-  function makeRoute(connection,index,track) {
-    const curve=curveFor(connection,(track-1.5)*5);
-    const color=COLORS[track];
-    const material=new THREE.MeshStandardMaterial({color,metalness:.25,roughness:.6,transparent:true,opacity:.26});
-    const tube=new THREE.Mesh(new THREE.TubeGeometry(curve,40,.65,5,false),material);
-    network.add(tube);
-    const packets=[];
-    const packetMaterial=new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:.45,roughness:.35,metalness:.3});
-    for(let j=0;j<4;j++) {
-      const mesh=new THREE.Mesh(j===0?packetGeometry:smallPacketGeometry,packetMaterial);
-      mesh.visible=false;network.add(mesh);packets.push(mesh);
-    }
-    return {index,track,curve,tube,packets};
-  }
-
-  function resize(nextLayout) {
+  function resize(nextLayout){
     if(disposed)return;
     layout=nextLayout;({width,height}=layout);
     renderer.setSize(width,height,false);
     camera.left=-width/2;camera.right=width/2;camera.top=height/2;camera.bottom=-height/2;camera.updateProjectionMatrix();
-    board.position.set(layout.core.x-width/2,height/2-layout.core.y,0);
-    const scale=Math.min(1.08,layout.core.width/190);board.scale.setScalar(scale);
-    clearNetwork();
-    layout.connections.forEach((connection,index)=>{
-      for(let track=0;track<4;track++)routes.push(makeRoute(connection,index,track));
-    });
-    const traceConnection={start:layout.musicStart,end:layout.connections[2].end,vertical:layout.mobile};
-    if(layout.mobile)traceConnection.via=layout.width-12;
-    const curve=curveFor(traceConnection);
-    const tube=new THREE.Mesh(new THREE.TubeGeometry(curve,48,1.3,6,false),new THREE.MeshBasicMaterial({color:COLORS[2],transparent:true,opacity:0}));
-    const packet=new THREE.Mesh(new THREE.SphereGeometry(3.3,10,8),new THREE.MeshBasicMaterial({color:COLORS[2]}));
-    packet.visible=false;network.add(tube,packet);trace={curve,tube,packet};
-  }
-
-  function paint(state) {
-    if(disposed||!layout)return;
-    const {elapsed,includeMusic,reduced,traceProgress,traceEnabled}=state;
-    const stage=elapsed<2600?0:elapsed<5700?1:2;
-    const movement=!reduced&&elapsed<9600;
-    const boardActivity=movement&&stage===1?Math.sin((elapsed-2600)/3100*Math.PI):0;
-    board.rotation.set(.58+boardActivity*.12,-.32+boardActivity*.08,-.13);
-    plates.forEach((plate,i)=>plate.position.y=(i-1)*(12+boardActivity*4));
-    indicators.forEach((rail,i)=>rail.material.emissiveIntensity=.3+boardActivity*(.3+i*.07));
-    routes.forEach(route=>{
-      const enabled=!(route.index===2&&route.track===2&&!includeMusic);
-      const focus=stage===0?route.index===0:stage===1?route.index>0:route.index>0;
-      route.tube.material.opacity=enabled?(focus?.52:.18):.055;
-      const begins=route.index===0?180+route.track*90:3000+route.index*260+route.track*100;
-      const duration=route.index===0?1900:1900;
-      const head=(elapsed-begins)/duration;
-      route.packets.forEach((packet,j)=>{
-        const p=head-j*.055;
-        packet.visible=movement&&enabled&&p>=0&&p<=1;
-        if(packet.visible){route.curve.getPoint(p,vector);packet.position.copy(vector);packet.rotation.set(elapsed*.001,.4,elapsed*.0007)}
+    bloomCamera.left=camera.left;bloomCamera.right=camera.right;bloomCamera.top=camera.top;bloomCamera.bottom=camera.bottom;bloomCamera.updateProjectionMatrix();
+    if(composer){composer.setPixelRatio(pixelRatio*.5);composer.setSize(width,height)}
+    clearWires();
+    const built=layout.routes||buildRoutes(layout);
+    built.forEach(connection=>{
+      connection.lanes.forEach((lane,track)=>{
+        const geometry=new LineGeometry();
+        geometry.setPositions(lane.pts.flatMap(([x,y])=>[x-width/2,height/2-y,0]));
+        const material=new LineMaterial({color:LANE_COLORS[track],linewidth:WIRE_WIDTH[track]*pixelRatio,transparent:true,opacity:.5,depthTest:false,depthWrite:false});
+        material.resolution.set(width*pixelRatio,height*pixelRatio);
+        const line=new Line2(geometry,material);
+        line.frustumCulled=false;
+        wires.add(line);
+        routes.push({index:connection.index,track,lane,line,material,opacity:.5,vis:1});
       });
     });
-    const showingTrace=!reduced&&traceProgress>=0&&traceProgress<=1;
-    trace.tube.material.opacity=showingTrace?.55:0;
-    trace.packet.visible=showingTrace;
-    if(showingTrace){trace.curve.getPoint(traceEnabled?traceProgress:Math.min(traceProgress,.045),vector);trace.packet.position.copy(vector);trace.packet.scale.setScalar(traceEnabled?1:1+Math.sin(traceProgress*Math.PI)*.5)}
-    renderer.render(scene,camera);
   }
 
-  function dispose() {
-    if(disposed)return;disposed=true;
-    clearNetwork();
-    const geometries=new Set(),materials=new Set();
-    board.traverse(object=>{if(object.geometry)geometries.add(object.geometry);if(object.material)materials.add(object.material)});
-    geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());
-    packetGeometry.dispose();smallPacketGeometry.dispose();renderer.dispose();renderer.domElement.remove();
+  function begins(route){return route.index===0?150+route.track*80:2900+route.index*220+route.track*90}
+  const ease=(current,target,dt)=>current+(target-current)*(dt>0?1-Math.exp(-dt/120):1);
+
+  function place(i,x,y,angle,sx,sy,rgb,brightness){
+    position.set(x-width/2,height/2-y,2);
+    quaternion.setFromAxisAngle(axis,angle);
+    scale.set(sx,sy,1);
+    matrix.compose(position,quaternion,scale);
+    packets.setMatrixAt(i,matrix);
+    color.copy(rgb).multiplyScalar(brightness);
+    packets.setColorAt(i,color);
   }
-  return {resize,paint,dispose};
+
+  function paint(state,dt=0){
+    if(disposed||!layout)return true;
+    const {elapsed,includeMusic,reduced,traceProgress,traceEnabled,flow}=state;
+    const stage=elapsed<2600?0:elapsed<5700?1:2;
+    const moving=!reduced;
+    let settled=true,n=0;
+    const showTrace=moving&&traceProgress>=0&&traceProgress<=1;
+    routes.forEach(route=>{
+      const enabled=!(route.index===2&&route.track===2&&!includeMusic);
+      const started=elapsed>=begins(route);
+      const focus=stage===0?route.index===0:route.index>0?true:.55;
+      const traced=showTrace&&route.index===2&&route.track===2;
+      const target=!started?(route.index===0?.5:.14):!enabled?(traced?.5:.1):focus===true?.92:stage===0?.3:.45;
+      route.opacity=reduced?target:ease(route.opacity,target,dt);
+      if(Math.abs(route.opacity-target)>.004)settled=false;
+      route.material.opacity=Math.min(1,route.opacity+(traced?.25:0));
+      route.material.linewidth=(route.track===2&&route.index===2&&enabled&&started&&includeMusic?3.2:WIRE_WIDTH[route.track])*pixelRatio;
+      if(!started||!enabled||n+PACKETS_PER_LANE*(1+TRAIL)>MAX_INSTANCES-15)return;
+      const length=route.lane.length,period=Math.max(length+40,150),flowPx=(flow||0)*.001*SPEED;
+      const bright=route.index===0||focus===true?1:.6;
+      for(let j=0;j<PACKETS_PER_LANE;j++){
+        const head=(flowPx+j*period/PACKETS_PER_LANE+route.track*23+route.index*41)%period;
+        for(let t=0;t<=TRAIL;t++){
+          const d=head-t*TRAIL_STEP;
+          if(d<2||d>length-2)continue;
+          pointAtDistance(route.lane,d,tmp,tan);
+          const fade=t===0?1:Math.pow(1-t/(TRAIL+1),1.7)*.62;
+          const size=t===0?HEAD:TAIL;
+          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),size[0]*(t===0?1:1-t*.07),size[1]*(t===0?1:1-t*.09),t===0?lift[route.track]:laneColors[route.track],fade*bright*(t===0?1.15:1));
+        }
+      }
+    });
+    if(showTrace){
+      const route=routes.find(r=>r.index===2&&r.track===2);
+      if(route){
+        const d=(traceEnabled?traceProgress:Math.min(traceProgress,.14))*route.lane.length;
+        for(let t=0;t<=12;t++){
+          const dd=d-t*3.6;
+          if(dd<1)continue;
+          pointAtDistance(route.lane,dd,tmp,tan);
+          const fade=t===0?1:Math.pow(1-t/13,1.5)*.8;
+          const fadeOut=traceEnabled?1:Math.max(0,1-Math.max(0,traceProgress-.08)*14);
+          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),(t===0?14:10)*(1-t*.04),(t===0?6.4:4.4)*(1-t*.05),t===0?lift[2]:laneColors[2],fade*fadeOut*1.25);
+        }
+      }
+    }
+    packets.count=n;
+    packets.instanceMatrix.needsUpdate=true;
+    if(packets.instanceColor)packets.instanceColor.needsUpdate=true;
+
+    renderer.autoClear=true;
+    renderer.render(scene,camera);
+    if(composer&&bloomOn&&n>0){
+      composer.render(dt/1000);
+      renderer.setRenderTarget(null);
+      composite.uniforms.tMap.value=composer.readBuffer.texture;
+      renderer.autoClear=false;
+      renderer.render(compositeScene,camera);
+      renderer.autoClear=true;
+    }
+    return settled;
+  }
+
+  function dispose(){
+    if(disposed)return;disposed=true;
+    clearWires();
+    packets.geometry.dispose();packetMaterial.dispose();packets.dispose();
+    composer?.dispose();composite?.dispose();quadGeometry?.dispose();bloomPass?.dispose?.();
+    renderer.dispose();renderer.domElement.remove();
+  }
+  return {resize,paint,dispose,canvas:renderer.domElement,get bloom(){return !!composer},setBloom(on){bloomOn=!!on}};
 }
