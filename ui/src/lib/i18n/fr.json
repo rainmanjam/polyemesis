@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Secours en direct",
   "chrome.language": "Langue",
   "chrome.liveCount": "{count} en direct",
+  "chrome.offAirShort": "Hors",
+  "chrome.liveCountShort": "{count} direct",
   "chrome.liveCountProgramme": "{programme} : {count} en direct",
   "chrome.liveCountAll": "Tous les programmes : {count} en direct",
   "chrome.offAirProgramme": "{programme} : Hors antenne",

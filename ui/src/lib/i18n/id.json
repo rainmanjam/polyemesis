@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Cadangan aktif",
   "chrome.language": "Bahasa",
   "chrome.liveCount": "{count} aktif",
+  "chrome.offAirShort": "Off",
+  "chrome.liveCountShort": "{count} aktif",
   "chrome.liveCountProgramme": "{programme}: {count} aktif",
   "chrome.liveCountAll": "Semua program: {count} aktif",
   "chrome.offAirProgramme": "{programme}: Tidak mengudara",

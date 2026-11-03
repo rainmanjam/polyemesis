@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Back-up live",
   "chrome.language": "Taal",
   "chrome.liveCount": "{count} live",
+  "chrome.offAirShort": "Uit",
+  "chrome.liveCountShort": "{count} live",
   "chrome.liveCountProgramme": "{programme}: {count} in de lucht",
   "chrome.liveCountAll": "Alle programma's: {count} in de lucht",
   "chrome.offAirProgramme": "{programme}: Uit de lucht",

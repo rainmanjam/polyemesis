@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Backup ao vivo",
   "chrome.language": "Idioma",
   "chrome.liveCount": "{count} ao vivo",
+  "chrome.offAirShort": "Fora",
+  "chrome.liveCountShort": "{count} ao vivo",
   "chrome.liveCountProgramme": "{programme}: {count} ao vivo",
   "chrome.liveCountAll": "Todos os programas: {count} ao vivo",
   "chrome.offAirProgramme": "{programme}: Fora do ar",

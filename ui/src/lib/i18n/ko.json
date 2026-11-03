@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "백업 라이브",
   "chrome.language": "언어",
   "chrome.liveCount": "{count}개의 라이브 방송",
+  "chrome.offAirShort": "오프",
+  "chrome.liveCountShort": "{count}개",
   "chrome.liveCountProgramme": "{programme}: 라이브 {count}개",
   "chrome.liveCountAll": "전체 프로그램: 라이브 {count}개",
   "chrome.offAirProgramme": "{programme}: 방송 중 아님",

@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Резерв в эфире",
   "chrome.language": "Язык",
   "chrome.liveCount": "{count} в прямом эфире",
+  "chrome.offAirShort": "Вне эфира",
+  "chrome.liveCountShort": "{count} в эфире",
   "chrome.liveCountProgramme": "{programme}: {count} в эфире",
   "chrome.liveCountAll": "Все программы: {count} в эфире",
   "chrome.offAirProgramme": "{programme}: Не в эфире",

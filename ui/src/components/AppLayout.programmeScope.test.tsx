@@ -157,11 +157,11 @@ describe("the header live badge counts and names the selected programme", () => 
     );
   });
 
-  // At 390px "Main: Off air" wrapped onto three lines beside the logo. jsdom
-  // cannot measure a wrap, so this holds the two classes that prevent it and
-  // the title that keeps the truncated text readable; the e2e layout spec
-  // measures the real height at 390px.
-  it("keeps the phone chip on one line, truncating the programme name rather than wrapping", () => {
+  // At 390px "Main: Off air" wrapped onto three lines beside the logo, and
+  // later, truncated, it read "O…" at 360px. jsdom cannot measure either, so
+  // this holds the markup that prevents both; the e2e spec
+  // header-programme-once measures the real chip at 320, 360 and 390px.
+  it("keeps the phone chip on one line and prints its words whole, never truncated", () => {
     current = {
       ...frame(1, "A programme with a long name", true, 1_000_000, 10),
       destinations: [dest(1, 1, false)],
@@ -169,16 +169,20 @@ describe("the header live badge counts and names the selected programme", () => 
     render(layout());
     const chip = screen.getByTestId("mobile-on-air");
     expect(chip.className).toContain("whitespace-nowrap");
-    // Shrinks, but never below the status dot (min-w-1.5, the dot's 6px):
-    // at 360px a min-w-0 chip collapsed to nothing beside the switcher.
+    // Never below the status dot (min-w-1.5, the dot's 6px), and in the
+    // programme-scoped case it does not shrink at all: the switcher gives way.
     expect(chip.className.split(/\s+/)).toContain("min-w-1.5");
-    expect(chip.lastElementChild?.className).toContain("truncate");
+    expect(chip.className.split(/\s+/)).toContain("shrink-0");
+    const words = screen.getByTestId("mobile-on-air-words");
+    expect(words.className).not.toContain("truncate");
+    // jsdom has no ResizeObserver, so the chip prints the full words.
+    expect(words.getAttribute("data-fit")).toBe("full");
+    expect(words.textContent).toBe(translate("en", "onAir.offAir"));
     // The whole scoped sentence is in the title and, for a screen reader, in
     // the sr-only text; the visible part is the state alone, because the
     // programme switcher beside it already names the programme (2026-11).
     const sr = chip.querySelector(".sr-only")?.textContent ?? "";
     expect(chip.getAttribute("title")).toBe(sr);
     expect(sr).toMatch(/^.+: /); // "<programme>: Off air"
-    expect(chip.lastElementChild?.textContent).toBe(translate("en", "onAir.offAir"));
   });
 });

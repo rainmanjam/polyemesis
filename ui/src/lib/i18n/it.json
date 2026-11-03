@@ -271,6 +271,8 @@
   "chrome.ingestBackup": "Backup attivo",
   "chrome.language": "Lingua",
   "chrome.liveCount": "{count} in diretta",
+  "chrome.offAirShort": "Fuori",
+  "chrome.liveCountShort": "{count} live",
   "chrome.liveCountProgramme": "{programme}: {count} in diretta",
   "chrome.liveCountAll": "Tutti i programmi: {count} in diretta",
   "chrome.offAirProgramme": "{programme}: Fuori onda",
