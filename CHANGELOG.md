@@ -8,6 +8,10 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.12.0] — 2026-11-03
+
 ### Added
 
 - **Publish a clip or short to YouTube Shorts or TikTok, from the clip editor (Wave 4 #5c).** Open
@@ -6625,7 +6629,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/rainmanjam/polyemesis/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rainmanjam/polyemesis/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rainmanjam/polyemesis/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rainmanjam/polyemesis/compare/v0.8.0...v0.9.0
