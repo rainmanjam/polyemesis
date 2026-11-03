@@ -104,7 +104,11 @@ func (x *X) do(ctx context.Context, method, path string, token string, body any,
 		return statusFailure(resp.StatusCode, firstNonEmpty(oneLine(e.Detail), oneLine(e.Title)))
 	}
 	if out != nil {
-		_ = json.Unmarshal(raw, out)
+		if err := json.Unmarshal(raw, out); err != nil {
+			// A 2xx whose body does not parse is not an answer: it must not read as
+			// an empty one (which could mean "ready").
+			return fail(CauseUnavailable, true, "X answered with something unreadable")
+		}
 	}
 	return nil
 }
@@ -145,7 +149,7 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 	processing := ""
 	if !finalized {
 		if f := x.append(ctx, r, mediaID, total); f != nil {
-			return Done{}, f
+			return Done{}, x.forgetIfDead(r, f)
 		}
 		var fin struct {
 			Data struct {
@@ -155,7 +159,7 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 			} `json:"data"`
 		}
 		if f := x.do(ctx, http.MethodPost, "/2/media/upload/"+mediaID+"/finalize", r.Cred.AccessToken, nil, &fin); f != nil {
-			return Done{}, f
+			return Done{}, x.forgetIfDead(r, f)
 		}
 		if err := r.Sess.SaveRemote(mediaID + ":f"); err != nil {
 			return Done{}, fail(CauseUnknown, true, "could not record the finalized X media, so nothing more was sent")
@@ -250,7 +254,9 @@ func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 		case "succeeded":
 			return nil
 		case "failed":
-			_ = r.Sess.SaveRemote("")
+			if err := r.Sess.SaveRemote(""); err != nil {
+				return fail(CauseUnknown, true, "could not forget the failed X media")
+			}
 			return fail(CauseClipRejected, false, "X could not process the video")
 		}
 		select {
@@ -260,4 +266,16 @@ func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 		}
 	}
 	return fail(CauseUnavailable, true, "X is still processing the video; checking again shortly")
+}
+
+// forgetIfDead drops a media id that X has refused for good (an expired or
+// rejected upload), so the next attempt starts a fresh one instead of wedging on
+// it. A transient failure keeps the id and the phase it reached.
+func (x *X) forgetIfDead(r Run, f *Failure) error {
+	if !f.Retry {
+		if err := r.Sess.SaveRemote(""); err != nil {
+			return err
+		}
+	}
+	return f
 }

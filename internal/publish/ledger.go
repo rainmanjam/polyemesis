@@ -3,6 +3,8 @@ package publish
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/rainmanjam/polyemesis/internal/clipper"
@@ -63,7 +65,14 @@ func ClipsFrom(store JobReader, exportDir string) ClipResolver {
 // ResolveClip is ClipsFrom's body, also used by the API to preflight a click.
 func ResolveClip(store JobReader, exportDir string, clipJobID int64) (File, error) {
 	job, err := store.GetJob(clipJobID)
-	if err != nil || job == nil {
+	if errors.Is(err, db.ErrNotFound) {
+		return File{}, ErrClipGone
+	}
+	if err != nil {
+		// A failed read says nothing about the clip; the worker retries it.
+		return File{}, fmt.Errorf("could not read the clip's export job: %w", err)
+	}
+	if job == nil {
 		return File{}, ErrClipGone
 	}
 	if job.Kind != clipper.JobKind || job.State != jobs.StateDone || len(job.Result) == 0 {

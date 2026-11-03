@@ -44,6 +44,11 @@ var (
 	// ErrPublicationNotArmed is the worker's refusal: the nonce is wrong or the
 	// row is failed. It is permanent for the job that hit it.
 	ErrPublicationNotArmed = errors.New("this publication was not confirmed by a click, or has already been given up on")
+	// ErrOutcomeUnacknowledged: the last attempt may have landed (outcome_unknown)
+	// and the person has not said they checked. Enforced inside the claim's
+	// transaction, so a worker failing a row between a pre-check and the claim
+	// cannot slip an unacknowledged re-arm through.
+	ErrOutcomeUnacknowledged = errors.New("the last attempt may have posted; confirm you checked the account before publishing again")
 	// ErrPublicationPosted means the post already exists; the worker's correct
 	// answer is success without sending anything.
 	ErrPublicationPosted = errors.New("this clip is already posted to that account")
@@ -97,6 +102,9 @@ type Publication struct {
 	FailCause  string `json:"failCause,omitempty"`
 	FailDetail string `json:"failDetail,omitempty"`
 	Attempts   int    `json:"attempts"`
+	// AcknowledgeOutcome is a claim-time input, never stored: the person says they
+	// checked the platform after an outcome_unknown failure.
+	AcknowledgeOutcome bool `json:"-"`
 	// HasSession is true while a resumable upload session is stored. The
 	// session itself is a secret and is never part of this struct.
 	HasSession bool `json:"-"`
@@ -248,6 +256,13 @@ func (d *DB) ClaimPublication(c Publication) (Publication, ClaimOutcome, error) 
 		case PublicationPosted:
 			outcome = ClaimPosted
 		case PublicationFailed:
+			var cause string
+			if err := tx.QueryRow(`SELECT fail_cause FROM clip_publications WHERE idem_key = ?`, key).Scan(&cause); err != nil {
+				return Publication{}, 0, err
+			}
+			if cause == "outcome_unknown" && !c.AcknowledgeOutcome {
+				return Publication{}, 0, ErrOutcomeUnacknowledged
+			}
 			// THE FINALIZE STAMP SURVIVES A RE-ARM, except after outcome_unknown. A
 			// stamp means a request that cannot be asked about afterwards may
 			// already have gone out; erasing it on any click would let a lost
@@ -373,7 +388,8 @@ func (d *DB) GetPublicationSession(box *secrets.Box, id int64) (session, metaHas
 // ClearPublicationSession forgets the stored session.
 func (d *DB) ClearPublicationSession(id int64, nonce string) error {
 	return d.fenced(`UPDATE clip_publications SET session_enc = NULL, session_hash = '', updated_ms = ?
-		WHERE id = ? AND nonce = ?`, time.Now().UnixMilli(), id, nonce)
+		WHERE id = ? AND nonce = ? AND state IN (?, ?)`, time.Now().UnixMilli(), id, nonce,
+		PublicationConfirmed, PublicationUploading)
 }
 
 // SetPublicationRemote records the platform's id for a post that exists but is

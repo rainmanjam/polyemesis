@@ -148,7 +148,8 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 	if total <= 0 {
 		return Done{}, fail(CauseClipMissing, false, "the exported clip is empty")
 	}
-	upload, _, gerr := r.Sess.Get()
+	want := metaHash(r.Meta, r.File)
+	upload, have, gerr := r.Sess.Get()
 	if gerr != nil {
 		return Done{}, fail(CauseUnknown, true, "could not read the stored upload address, so nothing was sent")
 	}
@@ -164,10 +165,13 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 		case "FAILED":
 			// Terminal on TikTok's side: nothing was posted, so a fresh init
 			// cannot double-post. Forget the dead one first.
-			_ = r.Sess.SaveRemote("")
-			_ = r.Sess.Clear()
+			if err := r.Sess.SaveRemote(""); err != nil {
+				return Done{}, err
+			}
+			if err := r.Sess.Clear(); err != nil {
+				return Done{}, err
+			}
 			upload = ""
-			r.Sess.Remote = ""
 		default:
 			switch {
 			case st.UploadedBytes >= total:
@@ -178,6 +182,16 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 				// expired. TikTok is still processing this publish id; starting
 				// another would be a second post. Wait for its verdict.
 				return t.poll(ctx, r, r.Sess.Remote)
+			case have != want && r.Pub.FinalizingAt.IsZero():
+				// The post was opened for different words or a different file and
+				// its final chunk has not gone out, so it can never complete: the
+				// person's latest confirmation gets a fresh one.
+				if err := r.Sess.SaveRemote(""); err != nil {
+					return Done{}, err
+				}
+				if err := r.Sess.Clear(); err != nil {
+					return Done{}, err
+				}
 			case upload == "":
 				// No bytes went out and there is no address to send them to: the
 				// publish id can never complete, so a fresh init is safe.
@@ -241,7 +255,7 @@ func (t *TikTok) Publish(ctx context.Context, r Run) (Done, error) {
 	if err := r.Sess.SaveRemote(ini.PublishID); err != nil {
 		return Done{}, fail(CauseUnknown, true, "could not record the TikTok publish id, so nothing was sent")
 	}
-	if err := r.Sess.Save(ini.UploadURL, "tiktok"); err != nil {
+	if err := r.Sess.Save(ini.UploadURL, want); err != nil {
 		return Done{}, fail(CauseUnknown, true, "could not record the TikTok upload address, so nothing was sent")
 	}
 	return t.sendAndPoll(ctx, r, ini.UploadURL, ini.PublishID, 0)
@@ -304,7 +318,9 @@ func (t *TikTok) sendAndPoll(ctx context.Context, r Run, uploadURL, publishID st
 			if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 				// The upload address expired. Forget it; the next attempt asks
 				// TikTok whether the publish id is alive before starting over.
-				_ = r.Sess.Clear()
+				if err := r.Sess.Clear(); err != nil {
+					return Done{}, err
+				}
 			}
 			return Done{}, statusFailure(resp.StatusCode, oneLine(string(raw)))
 		}
@@ -342,8 +358,12 @@ func (t *TikTok) poll(ctx context.Context, r Run, publishID string) (Done, error
 		case "PUBLISH_COMPLETE":
 			return t.done(publishID, st), nil
 		case "FAILED":
-			_ = r.Sess.SaveRemote("")
-			_ = r.Sess.Clear()
+			if err := r.Sess.SaveRemote(""); err != nil {
+				return Done{}, err
+			}
+			if err := r.Sess.Clear(); err != nil {
+				return Done{}, err
+			}
 			return Done{}, fail(CauseRefused, false, "TikTok could not publish the video: %s", firstNonEmpty(oneLine(st.FailReason), "no reason given"))
 		}
 		if time.Now().After(deadline) {

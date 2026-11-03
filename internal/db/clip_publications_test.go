@@ -322,6 +322,16 @@ func TestTheFinalizeStampSurvivesAReArmExceptAfterOutcomeUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	re.Nonce = "n3"
+	// Without the person's acknowledgement the claim itself refuses, in its own
+	// transaction, so a failure that lands between a pre-check and the claim
+	// cannot slip through.
+	if _, _, err := d.ClaimPublication(re); !errors.Is(err, ErrOutcomeUnacknowledged) {
+		t.Fatalf("an unacknowledged outcome_unknown re-arm = %v, want ErrOutcomeUnacknowledged", err)
+	}
+	if got, _ := d.GetPublication(p.ID); got.State != PublicationFailed || got.FinalizingAt.IsZero() {
+		t.Fatalf("a refused re-arm changed the row: %+v", got)
+	}
+	re.AcknowledgeOutcome = true
 	if _, out, _ := d.ClaimPublication(re); out != ClaimRearmed {
 		t.Fatal("not rearmed")
 	}

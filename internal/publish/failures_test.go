@@ -188,7 +188,8 @@ func TestTikTokResumesFromAChunkBoundaryAndSkipsTheInitWhenTheIDIsAlive(t *testi
 	if err := e.d.SetPublicationRemote(p.ID, "nonce-click-1", "v_pub_file~1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", f.srvURL+"/upload?upload_token=TTSECRET", "tiktok"); err != nil {
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", f.srvURL+"/upload?upload_token=TTSECRET",
+		metaHash(Meta{Title: "My short", Description: "d", Tags: []string{"fun"}, Privacy: "private"}, e.clip)); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -505,5 +506,75 @@ func TestAnXAdapterThatIsSwitchedOffSendsNothingEvenIfReached(t *testing.T) {
 	}
 	if cnt.n() != 0 || e.row(p.ID).FailCause != string(CauseGated) {
 		t.Fatalf("requests = %d, cause = %q", cnt.n(), e.row(p.ID).FailCause)
+	}
+}
+
+func TestRedactCatchesBearerJSONAndColonForms(t *testing.T) {
+	for _, in := range []string{
+		`Authorization: Bearer abcDEF123.xyz`,
+		`{"access_token":"SECRETJSON","x":1}`,
+		`upload_token: SECRETCOLON`,
+		`refresh_token=SECRETEQ&other=1`,
+		`client_secret = SECRETSPACED`,
+	} {
+		out := Redact(in)
+		if strings.Contains(out, "SECRET") || strings.Contains(out, "abcDEF123") {
+			t.Errorf("Redact(%q) = %q", in, out)
+		}
+	}
+}
+
+// Words changed after a TikTok post was opened but before its final chunk: the old
+// post can never complete, so the latest confirmation gets a fresh one.
+func TestTikTokOpensAFreshPostWhenTheWordsChangedBeforeTheFinalChunk(t *testing.T) {
+	e, f, cnt := tkEnv(t)
+	p, params := e.claim(PlatformTikTok)
+	if err := e.d.SetPublicationRemote(p.ID, "nonce-click-1", "old_publish_id"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.d.SetPublicationSession(e.box, p.ID, "nonce-click-1", f.srvURL+"/upload?upload_token=OLD", "hash-of-other-words"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.status = "PROCESSING_UPLOAD"
+	f.mu.Unlock()
+	go func() {
+		for cnt.count("PUT /upload") < 1 {
+			time.Sleep(time.Millisecond)
+		}
+		f.mu.Lock()
+		f.status = "PUBLISH_COMPLETE"
+		f.mu.Unlock()
+	}()
+	if _, err := e.run(params, 2); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if cnt.count("POST /v2/post/publish/video/init") != 1 {
+		t.Fatal("the stale post was reused instead of opening one for the confirmed words")
+	}
+}
+
+// A 2xx from X whose body is not JSON is not an empty answer.
+func TestXAnUnreadableFinalizeIsNotTreatedAsReady(t *testing.T) {
+	e := newEnv(t)
+	srv, cnt := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/2/media/upload/initialize":
+			fmt.Fprint(w, `{"data":{"id":"m1"}}`)
+		case "/2/media/upload/m1/append":
+			fmt.Fprint(w, `{"data":{"expires_at":1}}`)
+		case "/2/media/upload/m1/finalize":
+			fmt.Fprint(w, `<html>not json</html>`)
+		}
+	})
+	e.ad[PlatformX] = &X{Enabled: true, Base: srv.URL, PollEvery: time.Millisecond}
+	e.cred.Scopes = "tweet.write media.write"
+	e.gates = Gates{XPublish: true}
+	_, params := e.claim(PlatformX)
+	if _, err := e.run(params, 1); err == nil {
+		t.Fatal("expected a retryable failure")
+	}
+	if cnt.count("POST /2/tweets") != 0 {
+		t.Fatal("a post was created from unfinished media")
 	}
 }

@@ -220,9 +220,14 @@ func NewWorker(d WorkerDeps) jobs.Worker {
 				// decides whether the job comes back.
 				return ctx.Err()
 			}
+			if errors.Is(err, db.ErrPublicationNotArmed) {
+				// The click was revoked or replaced while this run was in flight.
+				rep.Logf("stopped: this publish was cancelled or replaced by a newer click")
+				return jobs.Permanent(err)
+			}
 			var f *Failure
 			if !errors.As(err, &f) {
-				f = fail(CauseNetwork, true, "%s", err.Error())
+				f = fail(CauseNetwork, true, "%s", scrubAll(err.Error()))
 			}
 			return d.settle(job, pub, p.Nonce, f, cred)
 		}

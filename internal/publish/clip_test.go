@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rainmanjam/polyemesis/internal/clipper"
+	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
 
@@ -18,7 +19,10 @@ func (f fakeJobs) GetJob(id int64) (*jobs.Job, error) {
 	if j, ok := f[id]; ok {
 		return j, nil
 	}
-	return nil, errors.New("no such job")
+	if f == nil {
+		return nil, errors.New("the database is busy")
+	}
+	return nil, db.ErrNotFound
 }
 
 func exportJob(t *testing.T, dir, name string, state jobs.State, kind jobs.Kind) (fakeJobs, string) {
@@ -143,5 +147,15 @@ func TestNormalizeCoversTheOtherPlatforms(t *testing.T) {
 	}
 	if _, err := Normalize(PlatformYouTube, Meta{Title: "t", Tags: tags}); err == nil {
 		t.Error("31 hashtags were accepted")
+	}
+}
+
+// A failed read says nothing about the clip: it must not become a permanent
+// "the clip is gone".
+func TestAFailedJobReadIsNotTheClipBeingGone(t *testing.T) {
+	var busy fakeJobs // nil: every read fails
+	_, err := ResolveClip(busy, t.TempDir(), 1)
+	if err == nil || errors.Is(err, ErrClipGone) || errors.Is(err, ErrNotAClip) {
+		t.Fatalf("err = %v, want a retryable read error", err)
 	}
 }

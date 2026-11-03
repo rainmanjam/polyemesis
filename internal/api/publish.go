@@ -204,7 +204,10 @@ func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.J
 		return p, nil
 	}
 	fail := func(cause publish.Cause, detail string) (db.Publication, *jobs.Job) {
-		if err := s.store.FailPublication(p.ID, string(cause), detail); err != nil {
+		// Fenced on the nonce this snapshot was read with: if a click re-armed the
+		// row since, this stale look must not fail the new run.
+		if err := s.store.FailPublicationFor(p.ID, p.Nonce, string(cause), detail); err != nil &&
+			!errors.Is(err, db.ErrPublicationNotArmed) {
 			s.log.Warn("could not fail a stranded publication", "publication", p.ID, "err", err)
 		}
 		p, _ = s.store.GetPublication(p.ID)
@@ -214,7 +217,12 @@ func (s *Server) reconcilePublication(p db.Publication) (db.Publication, *jobs.J
 		// Submit and the link back to the row are separate writes. A live job that
 		// was never linked (a crash between them) is found by its target and linked
 		// now; only a row with no job at all, for long enough, is called unqueued.
-		if j, err := s.store.FindActiveJob(publish.JobKind, publishJobTarget(p.ID)); err == nil && j != nil {
+		j, err := s.store.FindActiveJob(publish.JobKind, publishJobTarget(p.ID))
+		if err != nil {
+			s.log.Warn("could not look for a publication's job", "publication", p.ID, "err", err)
+			return p, nil
+		}
+		if j != nil {
 			if err := s.store.SetPublicationJob(p.ID, nonceOf(j), j.ID); err != nil {
 				s.log.Warn("could not link a publication to its job", "publication", p.ID, "err", err)
 			}
@@ -270,6 +278,9 @@ func (s *Server) publicationView(p db.Publication) publicationView {
 		v.Job = &publishJobView{ID: j.ID, State: string(j.State), Progress: j.Progress, Attempts: j.Attempts,
 			Blocked: jv.Blocked, Reason: jv.Reason, ETASeconds: jv.ETASeconds}
 	}
+	// The last redaction boundary: whatever was stored, a link or a token pair
+	// never reaches the browser.
+	v.FailDetail = publish.Redact(v.FailDetail)
 	if v.State == db.PublicationFailed {
 		v.Reason = &publish.Reason{Cause: publish.Cause(v.FailCause), Line: v.FailDetail}
 	}
@@ -506,14 +517,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 			if ex.Platform != req.Platform || ex.AccountID != req.AccountID {
 				continue
 			}
-			ex, _ = s.reconcilePublication(ex)
-			if ex.State == db.PublicationFailed && ex.FailCause == string(publish.CauseOutcomeUnknown) && !req.AcknowledgeOutcome {
-				// The last request may have landed. Re-arming without the person
-				// having looked is how a lost response becomes a second post.
-				writeErrorCode(w, http.StatusConflict, "acknowledge_outcome",
-					"The last attempt may or may not have posted. Check the account, then confirm it is not there to publish again.")
-				return
-			}
+			s.reconcilePublication(ex)
 		}
 	}
 	nonceRaw := make([]byte, 24)
@@ -527,7 +531,14 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		ClipJobID: req.ClipJobID, Platform: req.Platform, AccountID: req.AccountID,
 		AccountName: plan.account.AccountName, Title: plan.meta.Title, Description: plan.meta.Description,
 		Tags: plan.meta.Tags, Privacy: plan.meta.Privacy, ContentHash: plan.hash, Nonce: nonce, ConfirmedBy: uid,
+		AcknowledgeOutcome: req.AcknowledgeOutcome,
 	})
+	if errors.Is(err, db.ErrOutcomeUnacknowledged) {
+		// The last request may have landed. Re-arming without the person having
+		// looked is how a lost response becomes a second post.
+		writeErrorCode(w, http.StatusConflict, "acknowledge_outcome", err.Error())
+		return
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -552,8 +563,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		// Unique folded this click into a job that is still active under an OLDER
 		// click's nonce -- it would run, find the nonce dead, and do nothing, and
 		// this click would never publish. Retire it and queue this click's own.
-		_ = s.jobq.Cancel(job.ID)
-		job, _, err = submit()
+		if cerr := s.jobq.Cancel(job.ID); cerr != nil {
+			s.log.Warn("could not retire a stale publish job", "job", job.ID, "err", cerr)
+		}
+		job, created, err = submit()
+		if err == nil && !created && nonceOf(job) != nonce {
+			err = errors.New("an earlier publish job is still holding this target; try again in a moment")
+		}
 	}
 	if err != nil {
 		if ferr := s.store.FailPublication(pub.ID, string(publish.CauseUnknown), "The publish job could not be queued."); ferr != nil {
@@ -606,7 +622,8 @@ func (s *Server) revokePublishOnCancel(id int64) {
 	}
 	var p publish.Params
 	if json.Unmarshal(j.Params, &p) == nil && p.PublicationID > 0 {
-		if err := s.store.FailPublication(p.PublicationID, string(publish.CauseCancelled), "Publishing was cancelled."); err != nil {
+		if err := s.store.FailPublicationFor(p.PublicationID, p.Nonce, string(publish.CauseCancelled), "Publishing was cancelled."); err != nil &&
+			!errors.Is(err, db.ErrPublicationNotArmed) {
 			// The job is already cancelled; the status read fails the row if this
 			// write did not land.
 			s.log.Warn("could not revoke a cancelled publication", "publication", p.PublicationID, "err", err)

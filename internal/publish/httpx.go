@@ -46,7 +46,7 @@ func netFailure(err error) *Failure {
 	if errors.As(err, &dns) {
 		return fail(CauseNetwork, true, "%s: the host name did not resolve", msg)
 	}
-	return fail(CauseNetwork, true, "%s: %s", msg, strings.TrimSpace(err.Error()))
+	return fail(CauseNetwork, true, "%s: %s", msg, Redact(strings.TrimSpace(err.Error())))
 }
 
 // readBody reads at most 64 KiB of a response.
@@ -70,7 +70,9 @@ func statusFailure(code int, detail string) *Failure {
 
 var (
 	urlPattern    = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>)]+`)
-	secretPattern = regexp.MustCompile(`(?i)\b(upload_?id|upload_?token|token|signature|sig|key|secret|code)=[^\s&"'<>]+`)
+	bearerPattern = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`)
+	// key=value, key: value and "key":"value" for anything that smells like a credential.
+	secretPattern = regexp.MustCompile(`(?i)"?\b(upload[_-]?id|upload[_-]?token|access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization|token|signature|sig|secret|key|code|password)\b"?\s*[:=]\s*"?[^\s,&"'<>}]+`)
 )
 
 // Redact removes anything that could be a capability from text that is about to
@@ -80,6 +82,7 @@ var (
 // producing such text.
 func Redact(s string) string {
 	s = urlPattern.ReplaceAllString(s, "[link]")
+	s = bearerPattern.ReplaceAllString(s, "$1 [redacted]")
 	return secretPattern.ReplaceAllString(s, "$1=[redacted]")
 }
 

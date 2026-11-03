@@ -181,7 +181,9 @@ func (y *YouTube) Publish(ctx context.Context, r Run) (Done, error) {
 				return Done{}, fail(CauseOutcomeUnknown, false,
 					"the upload may or may not have reached YouTube and its session is gone. Nothing was sent again; check YouTube Studio before publishing again")
 			}
-			_ = r.Sess.Clear()
+			if err := r.Sess.Clear(); err != nil {
+				return Done{}, err
+			}
 			session = ""
 		case st.offset >= total:
 			// Every byte is in and YouTube has not answered yet: wait for it,
@@ -190,7 +192,9 @@ func (y *YouTube) Publish(ctx context.Context, r Run) (Done, error) {
 		case have != want:
 			// Opened for different words or a different file, with bytes still
 			// to send: it holds nothing final, so a fresh one is allowed.
-			_ = r.Sess.Clear()
+			if err := r.Sess.Clear(); err != nil {
+				return Done{}, err
+			}
 			session = ""
 		default:
 			offset = st.offset
