@@ -50,11 +50,7 @@ type Execer func(ctx context.Context, cmd Command, sink Sink) error
 // which x265 and SVT-AV1 both do — can leave those pipes open after the parent
 // is gone. Without WaitDelay the worker would sit in Wait forever and the
 // queue's cancellation would be a lie.
-//
-// A var, not a const, for one reason: the test that pins the timeout path
-// (TestExecJoinsItsReaderGoroutinesAfterADrainTimeout) would otherwise spend
-// two real graces per run. Production never assigns it.
-var killGrace = 5 * time.Second
+const killGrace = 5 * time.Second
 
 // maxStderrTail is how much of a failed command's output is quoted back in the
 // error. Enough for the reason, bounded so a chatty encoder cannot make one
@@ -68,8 +64,15 @@ const maxStderrTail = 20
 // to exit. A cancellation that leaks an FFmpeg is a cancellation that still
 // competes with the live stream.
 func Exec(ctx context.Context, cmd Command, sink Sink) error {
+	return execWithGrace(ctx, cmd, sink, killGrace)
+}
+
+// execWithGrace is Exec with the grace passed in rather than read from a
+// package variable, so the test that pins the timeout path can use a short one
+// without a global another Exec could observe mid-change.
+func execWithGrace(ctx context.Context, cmd Command, sink Sink, grace time.Duration) error {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
-	c.WaitDelay = killGrace
+	c.WaitDelay = grace
 
 	stdout, err := c.StdoutPipe()
 	if err != nil {
@@ -154,7 +157,7 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 	}()
 	// If this times out the readers are still blocked on a pipe something else
 	// is holding; c.Wait below, bounded by WaitDelay, is what frees them.
-	_ = awaitReaders(drained)
+	_ = awaitReaders(drained, grace)
 
 	err = c.Wait()
 
@@ -171,7 +174,7 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 	// that can still hold a reader is a Sink callback that does not return, and
 	// a worker that hangs forever behind a stuck callback is worse than the
 	// goroutine it would be waiting for.
-	_ = awaitReaders(drained)
+	_ = awaitReaders(drained, grace)
 
 	if err != nil {
 		mu.Lock()
@@ -191,9 +194,9 @@ func Exec(ctx context.Context, cmd Command, sink Sink) error {
 	return nil
 }
 
-// awaitReaders reports whether the reader goroutines finished within killGrace.
-func awaitReaders(drained <-chan struct{}) bool {
-	t := time.NewTimer(killGrace)
+// awaitReaders reports whether the reader goroutines finished within grace.
+func awaitReaders(drained <-chan struct{}, grace time.Duration) bool {
+	t := time.NewTimer(grace)
 	defer t.Stop()
 	select {
 	case <-drained:

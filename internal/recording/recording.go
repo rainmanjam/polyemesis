@@ -208,7 +208,12 @@ func (m *Manager) CheckFreeSpace(s db.RecordingSettings) bool {
 	if s.MinFreeGB <= 0 {
 		return m.setStorage(StorageState{})
 	}
-	free, total, err := m.measureFree()
+	// Held across the whole check so SetFreeSpace cannot return while a check
+	// that read the OLD volume is still deciding: it would land after the
+	// caller's halt and lift it.
+	m.freeSpaceMu.RLock()
+	defer m.freeSpaceMu.RUnlock()
+	free, total, err := m.freeSpace(m.dir)
 	if err != nil {
 		m.log.Warn("free-space check failed", "dir", m.dir, "err", err)
 		return false

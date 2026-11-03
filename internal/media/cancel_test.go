@@ -62,11 +62,17 @@ func TestCancellingACommandDoesNotHangOnASurvivingGrandchild(t *testing.T) {
 // two pipe readers and the one that waits for them. Counted by stack rather
 // than by runtime.NumGoroutine so the rest of the test binary cannot move it.
 func execGoroutines() int {
-	buf := make([]byte, 1<<20)
-	n := runtime.Stack(buf, true)
+	var buf []byte
+	for size := 1 << 20; ; size *= 2 {
+		buf = make([]byte, size)
+		if n := runtime.Stack(buf, true); n < size {
+			buf = buf[:n]
+			break
+		}
+	}
 	count := 0
-	for _, g := range strings.Split(string(buf[:n]), "\n\n") {
-		if strings.Contains(g, "internal/media.Exec.func") {
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "internal/media.execWithGrace.func") {
 			count++
 		}
 	}
@@ -82,9 +88,7 @@ func execGoroutines() int {
 // returns, with no polling, because "they will be gone in a moment" is the
 // leak.
 func TestExecJoinsItsReaderGoroutinesAfterADrainTimeout(t *testing.T) {
-	old := killGrace
-	killGrace = 400 * time.Millisecond
-	t.Cleanup(func() { killGrace = old })
+	const grace = 400 * time.Millisecond
 
 	// The stderr reader is parked INSIDE its sink callback, which is what makes
 	// the leak observable on demand instead of by luck: the reader cannot have
@@ -92,7 +96,11 @@ func TestExecJoinsItsReaderGoroutinesAfterADrainTimeout(t *testing.T) {
 	// the pipes but inside the join's grace.
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	var once sync.Once
+	var once, releaseOnce sync.Once
+	free := func() { releaseOnce.Do(func() { close(release) }) }
+	// Closed on every exit, so a test that fails early cannot leave the reader
+	// parked for the tests after it.
+	t.Cleanup(free)
 	sink := Sink{Line: func(string) {
 		once.Do(func() { close(entered) })
 		<-release
@@ -100,17 +108,20 @@ func TestExecJoinsItsReaderGoroutinesAfterADrainTimeout(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Exec(ctx, helper("grandchild"), sink) }()
+	go func() { done <- execWithGrace(ctx, helper("grandchild"), sink, grace) }()
 
 	select {
 	case <-entered:
 	case <-time.After(20 * time.Second):
 		t.Fatal("the child never wrote a line, so the reader was never parked")
 	}
+	// Sit through one whole grace first, so the drain has certainly timed out
+	// and Exec is inside Wait however slowly the child started. Cancelling then
+	// closes the pipes at once; the join has `grace` from that moment, and the
+	// reader is released halfway through it.
+	time.Sleep(grace + grace/2)
 	cancel()
-	// killGrace after the kill Wait closes the pipes and returns; the join then
-	// has another killGrace. Released in the middle of that second window.
-	time.AfterFunc(killGrace+killGrace/4, func() { close(release) })
+	time.AfterFunc(grace/2, free)
 
 	select {
 	case err := <-done:
@@ -120,7 +131,7 @@ func TestExecJoinsItsReaderGoroutinesAfterADrainTimeout(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("Exec did not return after cancellation")
 	}
-	if n := execGoroutines(); n != 0 {
+	if n := goroutinesGone(); n != 0 {
 		t.Fatalf("%d goroutine(s) started by Exec are still running after it returned", n)
 	}
 }
@@ -134,7 +145,20 @@ func TestExecJoinAddsNoWaitToAChildThatExitsCleanly(t *testing.T) {
 	if d := time.Since(start); d > killGrace {
 		t.Fatalf("a clean child took %v, longer than the grace", d)
 	}
-	if n := execGoroutines(); n != 0 {
+	if n := goroutinesGone(); n != 0 {
 		t.Fatalf("%d goroutine(s) started by Exec are still running after a clean exit", n)
 	}
+}
+
+// goroutinesGone is execGoroutines after letting goroutines that have already
+// signalled completion finish popping their frames. A goroutine parked inside a
+// callback never gets there, so a real leak still fails; only the few
+// microseconds between "signalled" and "exited" are forgiven.
+func goroutinesGone() int {
+	n := execGoroutines()
+	for i := 0; i < 50 && n != 0; i++ {
+		time.Sleep(time.Millisecond)
+		n = execGoroutines()
+	}
+	return n
 }
