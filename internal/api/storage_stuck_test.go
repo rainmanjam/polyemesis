@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,11 +44,38 @@ func TestRetryNowRoutesResetStuckItems(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	r := &db.Recording{Filename: "rec-20261101-100000.mkv", DurationMS: 1000}
-	if err := store.UpsertRecording(r); err != nil {
+	// The file goes on disk first. The engine's startup recording scan drops
+	// every row whose file is missing, so a row with none is deleted whenever
+	// that scan lands after this upsert -- the retry route then 404s.
+	const name = "rec-20261101-100000.mkv"
+	dir := serverUnderTest(t, h).recordings().Dir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	recs, _ := store.ListRecordings()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("MASTER"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertRecording(&db.Recording{Filename: name, DurationMS: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	// Run the sweep now, after the upsert: the worst timing the startup scan
+	// can land in, on every run rather than on a slow one.
+	if _, err := serverUnderTest(t, h).recordings().Scan(); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := store.ListRecordings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recID int64
+	for _, r := range recs {
+		if r.Filename == name {
+			recID = r.ID
+		}
+	}
+	if recID == 0 {
+		t.Fatalf("recording %q is not in the index: %+v", name, recs)
+	}
 	for _, k := range []string{"rec-20261101-100000.mkv", "other.mkv"} {
 		_ = store.PutOffloadItem(db.OffloadItem{TargetID: 1, RelPath: k, Kind: db.OffloadKindRecording, Key: "k/" + k,
 			State: db.OffloadStuck, Attempts: 8})
