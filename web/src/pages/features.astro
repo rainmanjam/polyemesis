@@ -520,10 +520,12 @@ const rooms = [
       <h2 class="mt-3 text-balance text-3xl font-medium">
         Five rooms where one mix is the thing that does not work.
       </h2>
-      <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {/* data-foot="optional": only two rooms carry a note, so the foot is not
+          a recurring element and check-layout.mjs does not demand one per card. */}
+      <div class="card-grid card-grid--5 mt-8" data-foot="optional">
         {
           rooms.map((r) => (
-            <article class="card flex flex-col p-6">
+            <article class="card p-6">
               <h3 class="font-medium">{r.title}</h3>
               <p class="mt-3 text-sm leading-relaxed text-muted">{r.body}</p>
               <ul
@@ -538,11 +540,18 @@ const rooms = [
                   </li>
                 ))}
               </ul>
-              {r.note && <p class="mt-3 text-sm text-subtle">{r.note}</p>}
-              {r.link && (
-                <p class="mt-2 text-sm">
-                  <a href={r.link.href} class="tap text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
-                </p>
+              {/* The note and link sit at the foot of the card, so in a row
+                  they share a bottom line and the slack falls between the
+                  table and the note rather than above the table. */}
+              {(r.note || r.link) && (
+                <div class="card-foot">
+                  {r.note && <p class="text-sm text-subtle">{r.note}</p>}
+                  {r.link && (
+                    <p class="mt-2 text-sm">
+                      <a href={r.link.href} class="tap text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
+                    </p>
+                  )}
+                </div>
               )}
             </article>
           ))
