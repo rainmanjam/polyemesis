@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { GoLiveSheet } from "./GoLiveSheet";
 import { goLiveRows } from "@/lib/goLive";
-import { translate } from "@/lib/i18n";
+import { setLanguage, translate } from "@/lib/i18n";
 import type { DestStatus, DestinationId, SourceView } from "@/lib/types";
 
 afterEach(cleanup);
@@ -412,5 +412,34 @@ describe("Go live sheet: one press reads as one press while it runs", () => {
     const row = screen.getByText("Second").closest("[data-row]") as HTMLElement;
     expect(within(row).getByText(T("golive.failed"))).toBeTruthy();
     expect(within(row).getByText("ingest refused")).toBeTruthy();
+  });
+});
+
+describe("Go live sheet: the confirm button reads one as one in every language", () => {
+  // English "ready" does not change with the count, so these render in Spanish,
+  // where it does: the button used to read "1 listos". Polish needed the count-
+  // neutral colon form ("gotowe: 2"), since "{count} gotowych" was wrong at 1 to 4.
+  afterEach(() => setLanguage("en"));
+
+  it("says 1 listo, not 1 listos, with one destination ready", () => {
+    setLanguage("es");
+    draw([dest({ id: did(1) })]);
+
+    expect(screen.getByRole("button", { name: "Salir en directo · 1 listo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Salir en directo · 1 listos" })).toBeNull();
+  });
+
+  it("says 2 listos with two destinations ready", () => {
+    setLanguage("es");
+    draw([dest({ id: did(1) }), dest({ id: did(2), name: "Second" })]);
+
+    expect(screen.getByRole("button", { name: "Salir en directo · 2 listos" })).toBeTruthy();
+  });
+
+  it("uses the count-neutral Polish form at 2", () => {
+    setLanguage("pl");
+    draw([dest({ id: did(1) }), dest({ id: did(2), name: "Second" })]);
+
+    expect(screen.getByRole("button", { name: "Rozpocznij · gotowe: 2" })).toBeTruthy();
   });
 });

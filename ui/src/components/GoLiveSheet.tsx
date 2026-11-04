@@ -187,7 +187,7 @@ export function GoLiveSheet({
             className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn"
             data-testid="golive-vertical-reminder"
           >
-            {t("wave3.vertical.goLiveReminder", { count: pendingPairs })}
+            {t(pendingPairs === 1 ? "wave3.vertical.goLiveReminderOne" : "wave3.vertical.goLiveReminder", { count: pendingPairs })}
           </p>
         )}
 
@@ -318,7 +318,7 @@ export function GoLiveSheet({
             >
               {run
                 ? t("golive.startingProgress", { done: run.done, total: run.total })
-                : t("golive.goCount", { count: readyNow.length })}
+                : t(readyNow.length === 1 ? "golive.goCountOne" : "golive.goCount", { count: readyNow.length })}
             </Button>
           </div>
           {/* Always mounted, empty when idle: a live region that appears with

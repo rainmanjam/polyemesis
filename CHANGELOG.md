@@ -35,6 +35,14 @@ its first tagged release.
 
 ### Fixed
 
+- **Go live and Stop all say one as one, in every language.** The Go live button read "1 listos"
+  in Spanish (and "1 prêts", "1 pronti", "1 prontos" in French, Italian and Portuguese). It now
+  reads "1 listo", and Polish uses a form that is right at any count ("gotowe: 2"). The Stop all
+  dialog said "Stop all 1 destinations?" and "1 of these are YouTube broadcasts". It now says
+  "Stop 1 destination?" and "1 of these is a YouTube broadcast". The Go live sheet's YouTube
+  vertical-pair reminder no longer says "1 YouTube vertical pairs have not had…". Each of these
+  has its own key for one, the same approach as the YouTube warning.
+
 - **The meters follow the programme selected in the header.** On an install with several
   programmes, every programme's audio levels reach the console over one live connection, and the
   console drew whichever programme metered last. Tracks a smaller programme lacks read "not

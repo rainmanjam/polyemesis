@@ -796,7 +796,7 @@ function BulkDestinationControl({
       : stopCount.status === "failed"
         ? `${t("dash.stopCountFailed")} ${stopCount.message}`
         : stopCount.youtube > 0
-          ? `${consequence} ${t("golive.stopYoutube", { count: stopCount.youtube })}`
+          ? `${consequence} ${t(stopCount.youtube === 1 ? "golive.stopYoutubeOne" : "golive.stopYoutube", { count: stopCount.youtube })}`
           : consequence;
 
   return (
@@ -880,7 +880,7 @@ function BulkDestinationControl({
         // in the title and the description; a subject box would have shown
         // the verb "Stop all".
         subject={{ unnamed: true }}
-        title={t("dash.stopAllTitle", { count: shownCount })}
+        title={t(shownCount === 1 ? "dash.stopAllTitleOne" : "dash.stopAllTitle", { count: shownCount })}
         description={stopDescription}
         confirmLabel={t("dash.stopAll")}
         confirmDisabled={stopCount.status !== "ready"}

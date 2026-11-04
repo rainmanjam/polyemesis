@@ -38,7 +38,31 @@ describe("the go-live sheet's vertical reminder", () => {
         onFinished={() => {}}
       />,
     );
-    expect(screen.getByTestId("golive-vertical-reminder").textContent).toMatch(/1 YouTube vertical pair/);
+    // One pair, said as one: the reminder used to read "1 YouTube vertical pairs have not had".
+    expect(screen.getByTestId("golive-vertical-reminder").textContent).toMatch(
+      /^1 YouTube vertical pair has not had its Live Control Room step confirmed\./,
+    );
+  });
+
+  it("names two unconfirmed pairs in the plural", () => {
+    render(
+      <GoLiveSheet
+        open
+        onOpenChange={() => {}}
+        rows={[row(1), row(3)]}
+        live={[
+          dest(1, { youtubeVertical: { verticalId: 2 as DestStatus["id"], pairingConfirmed: false } }),
+          dest(3, { youtubeVertical: { verticalId: 4 as DestStatus["id"], pairingConfirmed: false } }),
+        ]}
+        youtubeAtRisk={0}
+        onStart={async () => {}}
+        onRetry={async () => {}}
+        onFinished={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("golive-vertical-reminder").textContent).toMatch(
+      /^2 YouTube vertical pairs have not had their Live Control Room step confirmed\./,
+    );
   });
 
   it("is silent when every pair being started is confirmed", () => {
