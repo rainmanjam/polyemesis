@@ -5,21 +5,23 @@ import * as THREE from './vendor/three.js';
  * Bar geometry is taken straight from the favicon: x, width 2.5, height, fully rounded ends (rx 1.25).
  * Each bar becomes a capsule cap sliding in a dark groove. At rest the caps sit on the mark's own
  * centre line, so the silhouette reads as the logo.
- * Channels: [spare, Mic, Music, Game, spare]. Spare channels hold a neutral mid position that shifts slightly with each mix.
+ * Channels: [spare, Mic, Music, Game, Co-host], the bus order of LANES after video. The spare channel
+ * holds a neutral mid position that shifts slightly with each mix. Every mix agrees with the patchbay
+ * preset for that destination (MixMatrix.astro): only YouTube drops a track, the music.
  */
 const BARS=[[2.5,6],[6.2,14],[9.9,9],[13.6,17],[17.3,8]];
 const GROOVE=20;
 
 const MIXES={
   rest:[.5,.5,.5,.5,.5],
-  twitch:[.5,.62,.92,.68,.5],
-  youtube:[.46,.62,.06,.68,.5],
-  youtubeMusic:[.5,.62,.8,.68,.5],
-  archive:[.5,.7,.82,.7,.5]
+  twitch:[.5,.62,.92,.68,.6],
+  youtube:[.46,.62,.06,.68,.6],
+  youtubeMusic:[.5,.62,.8,.68,.6],
+  archive:[.5,.7,.82,.7,.7]
 };
 
 export function createFaders(host,palette){
-  const COLORS=[palette.spareA,palette.mic,palette.music,palette.game,palette.spareB];
+  const COLORS=[palette.spareA,palette.mic,palette.music,palette.game,palette.cohost];
   const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
   renderer.setClearColor(0x000000,0);

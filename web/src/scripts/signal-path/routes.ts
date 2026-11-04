@@ -1,7 +1,12 @@
 /** Wire geometry shared by the WebGL layer and the SVG fallback. Pure functions, no DOM. */
 export const LANE_GAP=4.5;
-export const LANES=['video','mic','music','game'] as const;
-const CLUSTER_SHIFT=20;
+/* Lane order on the bus. Co-host is appended last so it sits beside game, not beside the mic cyan. */
+export const LANES=['video','mic','music','game','cohost'] as const;
+/** Index of the music lane: the one the YouTube switch turns on and off. */
+export const MUSIC_LANE=LANES.indexOf('music');
+/** On phones, how far left/right of centre the Twitch and YouTube buses leave the router. Wide
+ *  enough that three five-lane buses side by side keep a visible gap. */
+export const CLUSTER_SHIFT=26;
 
 export type Point=[number,number];
 export interface Lane{pts:Point[];cum:number[];length:number}
@@ -55,7 +60,7 @@ export function pointAtDistance(lane:Lane,d:number,out:number[],tan?:number[]):n
 }
 
 /**
- * Four lanes (video, mic, music, game) per connection.
+ * One lane per entry in LANES (video, mic, music, game, co-host) per connection.
  * Desktop: horizontal S-curves. Phone/tablet: vertical bus with rounded corners. The Twitch and
  * YouTube routes leave the router left and right of centre and the archive route drops straight
  * down the gutter between those two cards, so no route ever crosses a card.
@@ -64,8 +69,9 @@ export function buildRoutes(layout:{connections:Connection[]}):Route[]{
   return layout.connections.map((connection,index)=>{
     const {start:a,end:b}=connection;
     const lanes:Lane[]=[];
-    for(let k=0;k<4;k++){
-      const o=(k-1.5)*LANE_GAP;
+    const count=LANES.length,mid=(count-1)/2;
+    for(let k=0;k<count;k++){
+      const o=(k-mid)*LANE_GAP;
       let pts:Point[];
       if(!connection.vertical){
         const dx=(b.x-a.x)*.5;
@@ -74,7 +80,7 @@ export function buildRoutes(layout:{connections:Connection[]}):Route[]{
         const cluster=index===1?-1:index===2?1:0;
         const sx=a.x+cluster*CLUSTER_SHIFT+o,ex=b.x+o;
         const gap=b.y-a.y;
-        const ym=cluster===0?a.y+gap/2:a.y+Math.min(gap*.34,22)+(cluster<0?k:3-k)*Math.min(6,gap*.09);
+        const ym=cluster===0?a.y+gap/2:a.y+Math.min(gap*.34,22)+(cluster<0?k:count-1-k)*Math.min(6,gap*.09);
         pts=roundedPolyline([[sx,a.y],[sx,ym],[ex,ym],[ex,b.y]],6);
       }
       lanes.push(finish(pts));

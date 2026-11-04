@@ -2,7 +2,7 @@
  *
  * The wires, packets and faders draw in RGB, but the colours are defined once, as tokens, in
  * tokens.css and global.css (--color-meter for the mic, --color-cohost for music, --color-game for
- * game). Reading them at runtime keeps one palette: a token change reaches the canvas without a
+ * game, --color-second-voice for the co-host mic). Reading them at runtime keeps one palette: a token change reaches the canvas without a
  * second list of hex values to forget. The tokens are oklch(); a 1x1 canvas converts any CSS colour
  * the browser understands to sRGB bytes, which is what Three.js wants.
  *
@@ -13,8 +13,8 @@ export interface Palette {
   mic: number;
   music: number;
   game: number;
+  cohost: number;
   spareA: number;
-  spareB: number;
   groove: number;
 }
 
@@ -23,8 +23,8 @@ const SOURCES: Record<keyof Palette, [string, number]> = {
   mic: ["--sp-mic", 0x45b5d0],
   music: ["--sp-music", 0xe879f9],
   game: ["--sp-game", 0x9b8cff],
+  cohost: ["--sp-cohost", 0x0bf0e0],
   spareA: ["--sp-spare-a", 0x7d8798],
-  spareB: ["--sp-spare-b", 0xaab3c5],
   groove: ["--sp-groove", 0x2c3444],
 };
 

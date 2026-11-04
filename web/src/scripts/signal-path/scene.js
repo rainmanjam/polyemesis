@@ -1,12 +1,13 @@
 import * as THREE from './vendor/three.js';
 import {Line2,LineGeometry,LineMaterial,EffectComposer,RenderPass,UnrealBloomPass} from './vendor/three-addons.js';
-import {buildRoutes,pointAtDistance} from './routes';
+import {buildRoutes,pointAtDistance,LANES,MUSIC_LANE} from './routes';
 
 /* Identity colours: video is neutral, tracks never borrow a status colour. */
-const WIRE_WIDTH=[2.6,2.6,2.6,2.6];
+const WIRE_WIDTH=LANES.map(()=>2.6);
 const BLOOM_STRENGTH=.16,BLOOM_THRESHOLD=.1,BLOOM_GAIN=.45,HEAD_LIFT=.15;
 const PACKETS_PER_LANE=3,TRAIL=6,TRAIL_STEP=4.2,SPEED=150;
-const MAX_INSTANCES=16*PACKETS_PER_LANE*(1+TRAIL)+16;
+/* 4 connections x every lane, plus the trace's 13 marks and a little headroom. */
+const MAX_INSTANCES=4*LANES.length*PACKETS_PER_LANE*(1+TRAIL)+16;
 const HEAD=[9,4.2],TAIL=[6,3];
 
 /**
@@ -15,8 +16,8 @@ const HEAD=[9,4.2],TAIL=[6,3];
  * fallback stay in HTML/SVG.
  */
 export function createSignalScene(host,palette){
-  /* Lane order matches LANES in routes.ts: video, mic, music, game. Colours come from the site's tokens. */
-  const LANE_COLORS=[palette.video,palette.mic,palette.music,palette.game];
+  /* Lane order matches LANES in routes.ts. Colours come from the site's tokens. */
+  const LANE_COLORS=LANES.map(name=>palette[name]);
   const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
   const pixelRatio=Math.min(devicePixelRatio||1,2);
   renderer.setPixelRatio(pixelRatio);
@@ -119,15 +120,15 @@ export function createSignalScene(host,palette){
     let settled=true,n=0;
     const showTrace=moving&&traceProgress>=0&&traceProgress<=1;
     routes.forEach(route=>{
-      const enabled=!(route.index===2&&route.track===2)||includeMusic;
+      const enabled=!(route.index===2&&route.track===MUSIC_LANE)||includeMusic;
       const started=elapsed>=begins(route);
       const focus=stage===0?route.index===0:route.index>0?true:.55;
-      const traced=showTrace&&route.index===2&&route.track===2;
+      const traced=showTrace&&route.index===2&&route.track===MUSIC_LANE;
       const target=!started?(route.index===0?.5:.14):!enabled?(traced?.5:.1):focus===true?.92:stage===0?.3:.45;
       route.opacity=reduced?target:ease(route.opacity,target,dt);
       if(Math.abs(route.opacity-target)>.004)settled=false;
       route.material.opacity=Math.min(1,route.opacity+(traced?.25:0));
-      route.material.linewidth=(route.track===2&&route.index===2&&enabled&&started&&includeMusic?3.2:WIRE_WIDTH[route.track])*pixelRatio;
+      route.material.linewidth=(route.track===MUSIC_LANE&&route.index===2&&enabled&&started&&includeMusic?3.2:WIRE_WIDTH[route.track])*pixelRatio;
       if(!started||!enabled||n+PACKETS_PER_LANE*(1+TRAIL)>MAX_INSTANCES-15)return;
       const length=route.lane.length,period=Math.max(length+40,150),flowPx=(flow||0)*.001*SPEED;
       const bright=route.index===0||focus===true?1:.6;
@@ -144,7 +145,7 @@ export function createSignalScene(host,palette){
       }
     });
     if(showTrace){
-      const route=routes.find(r=>r.index===2&&r.track===2);
+      const route=routes.find(r=>r.index===2&&r.track===MUSIC_LANE);
       if(route){
         const d=(traceEnabled?traceProgress:Math.min(traceProgress,.14))*route.lane.length;
         for(let t=0;t<=12;t++){
@@ -153,7 +154,7 @@ export function createSignalScene(host,palette){
           pointAtDistance(route.lane,dd,tmp,tan);
           const fade=t===0?1:Math.pow(1-t/13,1.5)*.8;
           const fadeOut=traceEnabled?1:Math.max(0,1-Math.max(0,traceProgress-.08)*14);
-          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),(t===0?14:10)*(1-t*.04),(t===0?6.4:4.4)*(1-t*.05),t===0?lift[2]:laneColors[2],fade*fadeOut*1.25);
+          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),(t===0?14:10)*(1-t*.04),(t===0?6.4:4.4)*(1-t*.05),t===0?lift[MUSIC_LANE]:laneColors[MUSIC_LANE],fade*fadeOut*1.25);
         }
       }
     }

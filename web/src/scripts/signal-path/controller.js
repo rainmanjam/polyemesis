@@ -1,4 +1,4 @@
-import {buildRoutes,LANES} from './routes';
+import {buildRoutes,LANES,MUSIC_LANE,CLUSTER_SHIFT} from './routes';
 import {readPalette} from './palette';
 
 const root=document.querySelector('[data-signal-path]');
@@ -20,15 +20,16 @@ const state={elapsed:motion.matches?duration:0,includeMusic:false,reduced:motion
 let scene=null,faders=null,running=false,paused=false,hasStarted=motion.matches,inView=false,frameId=0,lastTime=0,lastPaint=0,currentChapter=-1;
 let traceElapsed=-1,traceRestore=null,traceComplete=false,hoverDest=null,focusDest=null,lastPreview='hover',settled=false,layout=null;
 const narration=[
-  ['One upload.','Video, microphone, music and game audio travel together.'],
+  ['One upload.','Video, two mics, music and game audio travel together.'],
   ['Choose what each platform hears.','Twitch gets the music. YouTube leaves it out.'],
   ['Same video. Different audio.','The archive keeps the original tracks for editing.']
 ];
 
-/* Live meters in the output cards. [mic, music, game] base levels per destination. */
-const meterBase={twitch:[.74,.86,.66],youtube:[.74,0,.66],archive:[.7,.8,.68]};
+/* Live meters in the output cards. [mic, music, game, co-host] base levels per destination, matching
+   the patchbay presets: every destination carries both mics and the game bed; only YouTube drops music. */
+const meterBase={twitch:[.74,.86,.66,.7],youtube:[.74,0,.66,.7],archive:[.7,.8,.68,.68]};
 const meters=[...root.querySelectorAll('.destination')].map(card=>({
-  dest:card.dataset.dest,bars:[...card.querySelectorAll('.meter')].map((el,i)=>({el,fill:el.firstElementChild,level:meterBase[card.dataset.dest][i],i}))
+  dest:card.dataset.dest,bars:[...card.querySelectorAll('.meter')].map((el,i)=>({el,fill:el.firstElementChild,level:meterBase[card.dataset.dest][i],i,switched:el.id==='sp-youtube-music'}))
 }));
 
 function makeSvgElement(tag,attributes) {
@@ -61,11 +62,11 @@ function refreshLayout() {
   /* SVG fallback wires: every lane in its identity colour, drawn behind the cards. */
   layout.routes.forEach(connection=>connection.lanes.forEach((lane,track)=>{
     const d='M'+lane.pts.map(([x,y])=>`${x.toFixed(1)} ${y.toFixed(1)}`).join(' L');
-    const off=connection.index===2&&track===2&&!state.includeMusic;
-    wires.append(makeSvgElement('path',{d,class:`wire ${LANES[track]}${off?' off':''}`,'data-music-lane':connection.index===2&&track===2?'1':'0'}));
+    const switched=connection.index===2&&track===MUSIC_LANE,off=switched&&!state.includeMusic;
+    wires.append(makeSvgElement('path',{d,class:`wire ${LANES[track]}${off?' off':''}`,'data-music-lane':switched?'1':'0'}));
   }));
   layout.connections.forEach(({start:a,end:b},i)=>{
-    const shift=layout.mobile?(i===1?-20:i===2?20:0):0;
+    const shift=layout.mobile?(i===1?-CLUSTER_SHIFT:i===2?CLUSTER_SHIFT:0):0;
     for(const p of [{x:a.x+shift,y:a.y},b])ports.append(makeSvgElement('circle',{cx:p.x,cy:p.y,r:3,class:'terminal'}));
   });
   const first=layout.connections[0];
@@ -122,7 +123,7 @@ function updateMeters(dt) {
   for(const card of meters){
     for(const bar of card.bars){
       let base=meterBase[card.dest][bar.i];
-      if(card.dest==='youtube'&&bar.i===1)base=state.includeMusic?.8:0;
+      if(bar.switched)base=state.includeMusic?.8:0;
       const wobble=state.reduced||base===0?1:.86+.14*Math.sin(t*(1.7+bar.i*.8)+bar.i*2.1)*Math.sin(t*(.9+bar.i*.3)+1.3)+.05*Math.sin(t*(5+bar.i));
       const target=base*wobble;
       const k=state.reduced?1:dt<=0?0:1-Math.exp(-dt/(base===0||target<bar.level-.2?220:90));
@@ -217,8 +218,8 @@ document.getElementById('sp-music-toggle').addEventListener('change',event=>{
   const restoreElapsed=traceRestore??state.elapsed;
   state.includeMusic=event.target.checked;state.traceEnabled=state.includeMusic;
   narration[1][1]=state.includeMusic?'YouTube includes music. Each output is controlled separately.':'Twitch gets the music. YouTube leaves it out.';
-  document.getElementById('sp-youtube-output').setAttribute('aria-label',state.includeMusic?'YouTube mix: mic, music and game':'YouTube mix: mic and game, no music');
-  document.getElementById('sp-youtube-mix').textContent=state.includeMusic?'Mic + music + game':'Mic + game · no music';
+  document.getElementById('sp-youtube-output').setAttribute('aria-label',state.includeMusic?'YouTube mix: both mics, music and game':'YouTube mix: both mics and game, no music');
+  document.getElementById('sp-youtube-mix').textContent=state.includeMusic?'Mics + music + game':'Mics + game · no music';
   document.getElementById('sp-youtube-music').classList.toggle('silent',!state.includeMusic);
   document.getElementById('sp-music-point').classList.toggle('off',!state.includeMusic);
   wires.querySelectorAll('[data-music-lane="1"]').forEach(path=>path.classList.toggle('off',!state.includeMusic));

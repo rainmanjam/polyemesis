@@ -19,12 +19,13 @@
  *                  narration, live card meters, the YouTube music switch, pointer
  *                  tilt, hover AND keyboard focus preview, and every fallback.
  *   routes.ts      wire geometry shared by the WebGL layer and the SVG fallback
- *                  (four lanes per connection: video, mic, music, game). Pure.
+ *                  (five lanes per connection: video, mic, music, game,
+ *                  co-host). Pure.
  *   scene.js       the layer behind the cards: Line2 wires, instanced packets with
  *                  additive trails, and a selective UnrealBloomPass on the packets
  *                  only.
  *   faders.js      the polyemesis mark (favicon.svg) as five 3D faders inside the
- *                  router card. Channels are spare, Mic, Music, Game, spare. A
+ *                  router card. Channels are spare, Mic, Music, Game, Co-host. A
  *                  hovered or focused destination, or the current chapter, sets the
  *                  mix.
  *   vendor/        Three.js 0.187.0 (MIT) and its examples/jsm addons, vendored.
@@ -40,8 +41,10 @@
  * markup paint first, and the videos are `preload="none"` until the demo is in view.
  *
  * COLOURS come from the site's tokens, never copies. Track identity is the
- * site's --color-meter (mic), --color-cohost (music) and --color-game, which
- * the page's legend chips and loudness bars already use. Green, amber and
+ * site's --color-meter (mic), --color-cohost (music), --color-game and
+ * --color-second-voice (co-host; see global.css for why it is not
+ * --color-cohost). The video lane is the neutral light grey the prototype
+ * drew it in (#c3cada, written as oklch). Green, amber and
  * coral are status colours and are not used here; blue is interaction only.
  * The WebGL layers need RGB, so the controller resolves the same custom
  * properties at runtime (palette.js) rather than keeping hex twins.
@@ -71,9 +74,12 @@
  *
  * NOTES ON HONESTY. This is an illustrative browser simulation, not a
  * connection to a running install, and it claims no measured loudness or live
- * telemetry. Its Mic, Music and Game lanes are a simplified three-track
- * picture; the page's patchbay below uses the seeded install's four-track
- * layout (src/data/tracks.mjs).
+ * telemetry. It carries four audio tracks, like the page's patchbay below
+ * (the seeded install's layout, src/data/tracks.mjs): Mic is the host mic,
+ * Co-host is the co-host mic, Music is the music bed, and Game stands in for
+ * the non-voice bed (the patchbay's Room). Each destination's mix agrees with
+ * the patchbay's preset: Twitch and the archive take all four, YouTube takes
+ * everything but the music.
  *
  * VIDEO. The clip (a fictional person and an unbranded car) was generated with
  * Google Veo 3.1 through OpenRouter. The source and scripts are kept outside the
@@ -103,6 +109,7 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
         <span class="legend-item"><i class="key mic"></i>Mic</span>
         <span class="legend-item"><i class="key music"></i>Music</span>
         <span class="legend-item"><i class="key game"></i>Game</span>
+        <span class="legend-item"><i class="key cohost"></i>Co-host</span>
       </div>
     </div>
 
@@ -119,9 +126,10 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
           <video class="stream source-frame" width="76" height="43" muted loop playsinline preload="none" poster={poster} aria-label="Original video: a streamer on camera over racing gameplay"><source src={webm} type="video/webm" /><source src={mp4} type="video/mp4" /></video>
           <span>Original video<br /><span class="video-note">Copied to every output</span></span>
         </div>
-        <div class="track"><span class="track-name"><i class="mic"></i>Microphone</span><svg class="wave mic" viewBox="0 0 50 18" aria-hidden="true"><path d="M1 9h4l2-3 3 9 3-14 3 13 3-8 3 5 3-8 3 12 3-9 3 5 3-4 3 3h9"/></svg></div>
+        <div class="track"><span class="track-name"><i class="mic"></i>Host mic</span><svg class="wave mic" viewBox="0 0 50 18" aria-hidden="true"><path d="M1 9h4l2-3 3 9 3-14 3 13 3-8 3 5 3-8 3 12 3-9 3 5 3-4 3 3h9"/></svg></div>
         <div class="track"><span class="track-name"><i class="music"></i>Music</span><svg class="wave music" viewBox="0 0 50 18" aria-hidden="true"><path d="M1 9h2l3-6 3 12 3-11 3 8 3-5 3 6 3-11 3 14 3-12 3 8 3-6 3 7 3-6 3 2h4"/></svg></div>
         <div class="track"><span class="track-name"><i class="game"></i>Game</span><svg class="wave game" viewBox="0 0 50 18" aria-hidden="true"><path d="M1 9h6l3-3 3 7 3-10 3 11 3-8 3 5 3-2h4l3-6 3 11 3-7 3 2h5"/></svg></div>
+        <div class="track"><span class="track-name"><i class="cohost"></i>Co-host mic</span><svg class="wave cohost" viewBox="0 0 50 18" aria-hidden="true"><path d="M1 9h5l3-4 3 8 3-11 3 12 3-6 3 3h3l3-7 3 10 3-12 3 9 3-4h5"/></svg></div>
       </div>
 
       <div class="router node" id="sp-router">
@@ -133,48 +141,49 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
             <rect x="6.2" y="4" width="2.5" height="14" rx="1.25" class="fb-mic"/>
             <rect x="9.9" y="6.5" width="2.5" height="9" rx="1.25" class="fb-music"/>
             <rect x="13.6" y="2.5" width="2.5" height="17" rx="1.25" class="fb-game"/>
-            <rect x="17.3" y="7" width="2.5" height="8" rx="1.25" class="fb-spare-b"/>
+            <rect x="17.3" y="7" width="2.5" height="8" rx="1.25" class="fb-cohost"/>
           </svg>
         </div>
-        <div class="matrix" aria-label="Audio routing: Twitch receives all three tracks; YouTube receives mic and game, with music optional">
+        <div class="matrix" aria-label="Audio routing: Twitch receives all four tracks; YouTube receives both mics and game, with music optional">
           <span></span><span class="col">Twitch</span><span class="col">YouTube</span>
-          <span class="row">Microphone</span><span class="point" aria-hidden="true"></span><span class="point" aria-hidden="true"></span>
+          <span class="row">Host mic</span><span class="point" aria-hidden="true"></span><span class="point" aria-hidden="true"></span>
           <span class="row">Music</span><span class="point music" aria-hidden="true"></span><span class="point music off" id="sp-music-point" aria-hidden="true"></span>
           <span class="row">Game</span><span class="point game" aria-hidden="true"></span><span class="point game" aria-hidden="true"></span>
+          <span class="row">Co-host mic</span><span class="point cohost" aria-hidden="true"></span><span class="point cohost" aria-hidden="true"></span>
         </div>
         <div class="router-footer"><svg fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#sp-check"/></svg>Video copied. Audio mixed.</div>
       </div>
 
       <div class="destinations">
-        <div class="destination node" id="sp-twitch-output" data-dest="twitch" tabindex="0" role="group" aria-label="Twitch mix: mic, music and game">
+        <div class="destination node" id="sp-twitch-output" data-dest="twitch" tabindex="0" role="group" aria-label="Twitch mix: both mics, music and game">
           <div class="node-heading"><svg class="mark" fill="currentColor" aria-hidden="true"><use href="#sp-twitch"/></svg>Twitch{" "}<span class="output-kind">STEREO</span></div>
           <div class="dest-body">
             <div>
-              <p class="mix-text">Mic + music + game</p>
-              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music"><i></i></span><span class="meter game"><i></i></span></div>
+              <p class="mix-text">Mics + music + game</p>
+              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music"><i></i></span><span class="meter game"><i></i></span><span class="meter cohost"><i></i></span></div>
             </div>
             <div class="same-video"><video class="stream" width="64" height="36" muted loop playsinline preload="none" poster={poster} aria-label="Same original video"><source src={webm} type="video/webm" /><source src={mp4} type="video/mp4" /></video><span>Same video</span></div>
           </div>
         </div>
 
-        <div class="destination node" id="sp-youtube-output" data-dest="youtube" tabindex="0" role="group" aria-label="YouTube mix: mic and game, no music">
+        <div class="destination node" id="sp-youtube-output" data-dest="youtube" tabindex="0" role="group" aria-label="YouTube mix: both mics and game, no music">
           <div class="node-heading"><svg class="mark" fill="currentColor" aria-hidden="true"><use href="#sp-youtube"/></svg>YouTube{" "}<span class="output-kind">STEREO</span></div>
           <div class="dest-body">
             <div>
-              <p class="mix-text" id="sp-youtube-mix">Mic + game · no music</p>
-              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music silent" id="sp-youtube-music"><i style="transform:scaleX(0)"></i></span><span class="meter game"><i></i></span></div>
+              <p class="mix-text" id="sp-youtube-mix">Mics + game · no music</p>
+              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music silent" id="sp-youtube-music"><i style="transform:scaleX(0)"></i></span><span class="meter game"><i></i></span><span class="meter cohost"><i></i></span></div>
             </div>
             <div class="same-video"><video class="stream" width="64" height="36" muted loop playsinline preload="none" poster={poster} aria-label="Same original video"><source src={webm} type="video/webm" /><source src={mp4} type="video/mp4" /></video><span>Same video</span></div>
           </div>
           <label class="music-toggle" data-needs-js><input type="checkbox" id="sp-music-toggle" role="switch" /><span>Include music on YouTube</span></label>
         </div>
 
-        <div class="destination node archive" id="sp-archive-output" data-dest="archive" tabindex="0" role="group" aria-label="Local archive mix: mic, music and game, kept as separate tracks">
+        <div class="destination node archive" id="sp-archive-output" data-dest="archive" tabindex="0" role="group" aria-label="Local archive mix: both mics, music and game, kept as separate tracks">
           <div class="node-heading"><svg fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><use href="#sp-file"/></svg>Local archive{" "}<span class="output-kind">FILE</span></div>
           <div class="dest-body">
             <div>
               <p class="mix-text">Original audio tracks, kept separately</p>
-              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music"><i></i></span><span class="meter game"><i></i></span></div>
+              <div class="tracks" aria-hidden="true"><span class="meter mic"><i></i></span><span class="meter music"><i></i></span><span class="meter game"><i></i></span><span class="meter cohost"><i></i></span></div>
             </div>
             <div class="same-video"><video class="stream" width="64" height="36" muted loop playsinline preload="none" poster={poster} aria-label="Same original video"><source src={webm} type="video/webm" /><source src={mp4} type="video/mp4" /></video><span>Same video</span></div>
           </div>
@@ -183,7 +192,7 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
     </div>
 
     <div class="narration">
-      <div class="story"><p id="sp-story"><strong>One upload.</strong> Video, microphone, music and game audio travel together.</p></div>
+      <div class="story"><p id="sp-story"><strong>One upload.</strong> Video, two mics, music and game audio travel together.</p></div>
       <div class="transport" data-needs-js>
         <span class="time" id="sp-time" aria-hidden="true">00:00 / 00:10</span>
         <button type="button" class="icon-button" id="sp-pause" aria-label="Pause animation" title="Pause animation"><svg class="pause-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 3h3v10H4zm5 0h3v10H9z"/></svg><svg class="play-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m5 3 8 5-8 5Z"/></svg></button>
@@ -206,13 +215,15 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
      because the controller creates SVG nodes at runtime that a scoped sheet
      would never match. Colours are the site's tokens; nothing here is a hex. */
   .sp {
-    --sp-video: var(--muted-foreground);
+    /* The video lane is the prototype's light grey, #c3cada, exactly: a neutral
+       that frames the coloured audio lanes in white. No token holds it. */
+    --sp-video: oklch(83.8% 0.0236 266.9);
     --sp-mic: var(--color-meter);
     --sp-music: var(--color-cohost);
     --sp-game: var(--color-game);
+    --sp-cohost: var(--color-second-voice);
     --sp-control: var(--color-subtle);
     --sp-spare-a: var(--muted-foreground);
-    --sp-spare-b: var(--secondary-foreground);
     --sp-groove: var(--border-strong);
     --sp-meter-off: var(--muted);
   }
@@ -233,13 +244,13 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
   .sp .legend-items { display: flex; align-items: center; gap: 20px; }
   .sp .legend-item { display: flex; align-items: center; gap: 7px; }
   .sp .key { width: 14px; height: 4px; background: var(--sp-video); border-radius: 2px; }
-  .sp .key.mic { background: var(--sp-mic); } .sp .key.music { background: var(--sp-music); } .sp .key.game { background: var(--sp-game); }
+  .sp .key.mic { background: var(--sp-mic); } .sp .key.music { background: var(--sp-music); } .sp .key.game { background: var(--sp-game); } .sp .key.cohost { background: var(--sp-cohost); }
 
   .sp .diagram { position: relative; padding: 28px 32px; display: grid; grid-template-columns: .96fr 1.12fr 1.05fr; column-gap: 8%; align-items: center; min-height: 470px; isolation: isolate; }
   .sp .wires, .sp .ports { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
   .sp .wires { z-index: 0; } .sp .ports { z-index: 2; }
   .sp .wire { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: .7; }
-  .sp .wire.video { stroke: var(--sp-video); } .sp .wire.mic { stroke: var(--sp-mic); } .sp .wire.music { stroke: var(--sp-music); } .sp .wire.game { stroke: var(--sp-game); } .sp .wire.off { opacity: .12; }
+  .sp .wire.video { stroke: var(--sp-video); } .sp .wire.mic { stroke: var(--sp-mic); } .sp .wire.music { stroke: var(--sp-music); } .sp .wire.game { stroke: var(--sp-game); } .sp .wire.cohost { stroke: var(--sp-cohost); } .sp .wire.off { opacity: .12; }
   .sp .three-ready .wires { visibility: hidden; }
   .sp .terminal { fill: var(--color-surface); stroke: var(--color-muted); stroke-width: 1.5; }
   .sp .wire-label { position: absolute; z-index: 2; transform: translate(-50%, -100%); font: 12px var(--font-mono); color: var(--color-fg); pointer-events: none; background: var(--color-ink); padding: 1px 6px; border-radius: 3px; }
@@ -257,7 +268,7 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
   .sp .track:last-child { border: 0; padding-bottom: 0; }
   .sp .track-name { display: flex; align-items: center; gap: 7px; color: var(--color-fg); }
   .sp .track-name i { width: 6px; height: 6px; background: currentColor; border-radius: 50%; }
-  .sp .mic { color: var(--sp-mic); } .sp .music { color: var(--sp-music); } .sp .game { color: var(--sp-game); }
+  .sp .mic { color: var(--sp-mic); } .sp .music { color: var(--sp-music); } .sp .game { color: var(--sp-game); } .sp .cohost { color: var(--sp-cohost); }
   .sp .wave { width: 50px; height: 19px; overflow: visible; }
   .sp .wave path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   .sp .router { padding: 18px 18px 0; border-color: var(--sp-control); }
@@ -266,12 +277,12 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
   .sp .router-core canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
   .sp .core-fallback { width: 124px; height: 124px; margin: auto; }
   .sp .core-ready .core-fallback { visibility: hidden; }
-  .sp .fb-spare-a { fill: var(--sp-spare-a); } .sp .fb-mic { fill: var(--sp-mic); } .sp .fb-music { fill: var(--sp-music); } .sp .fb-game { fill: var(--sp-game); } .sp .fb-spare-b { fill: var(--sp-spare-b); }
+  .sp .fb-spare-a { fill: var(--sp-spare-a); } .sp .fb-mic { fill: var(--sp-mic); } .sp .fb-music { fill: var(--sp-music); } .sp .fb-game { fill: var(--sp-game); } .sp .fb-cohost { fill: var(--sp-cohost); }
   .sp .matrix { display: grid; grid-template-columns: minmax(72px, 1fr) 61px 66px; align-items: center; row-gap: 14px; margin: 4px 0 20px; font-size: 13px; }
   .sp .matrix .col { color: var(--color-muted); font-size: 12px; text-align: center; } .sp .matrix .row { color: var(--color-fg); font-size: 13px; }
   .sp .point { height: 14px; width: 14px; border-radius: 2px; justify-self: center; background: color-mix(in srgb, currentColor 24%, var(--color-surface)); border: 1px solid currentColor; color: var(--sp-mic); position: relative; }
   .sp .point::after { content: ''; width: 4px; height: 4px; background: currentColor; position: absolute; inset: 0; margin: auto; border-radius: 1px; }
-  .sp .point.music { color: var(--sp-music); } .sp .point.game { color: var(--sp-game); }
+  .sp .point.music { color: var(--sp-music); } .sp .point.game { color: var(--sp-game); } .sp .point.cohost { color: var(--sp-cohost); }
   .sp .point.off { color: var(--sp-control); background: var(--color-surface); } .sp .point.off::after { background: transparent; }
   .sp .point.active { outline: 3px solid color-mix(in srgb, var(--color-fg) 8%, transparent); outline-offset: 3px; }
   .sp .router-footer { margin: 0 -18px; padding: 13px 18px; border-top: 1px solid var(--color-line); color: var(--color-muted); font-size: 12px; display: flex; align-items: center; gap: 7px; }
@@ -324,7 +335,7 @@ import poster from "../assets/signal-path/stream-poster.webp?url";
     .sp .steps { gap: 12px; padding-top: 16px; } .sp .step { display: block; } .sp .step-number { display: block; margin-bottom: 6px; } .sp .step-title { font-size: 13px; }
     .sp .foot { display: block; } .sp .foot span { display: block; margin-top: 6px; } .sp .legend { padding: 14px 16px; } .sp .legend-label { display: none; }
   }
-  @media (max-width: 420px) { .sp .music-toggle { flex-direction: column; align-items: flex-start; gap: 6px; } }
+  @media (max-width: 420px) { .sp .music-toggle { flex-direction: column; align-items: flex-start; gap: 6px; } .sp .legend-items { flex-wrap: wrap; gap: 6px 14px; } }
   @media (prefers-reduced-motion: reduce) { .sp *, .sp *::before, .sp *::after { transition: none !important; } }
 </style>
 

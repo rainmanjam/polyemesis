@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRoutes, LANES, LANE_GAP, pointAtDistance, type Connection } from "./routes";
+import { buildRoutes, LANES, LANE_GAP, MUSIC_LANE, pointAtDistance, type Connection } from "./routes";
 import { cssColorToHex } from "./palette";
 
 /* The wire geometry is pure, so it is tested directly: the WebGL layer and the
@@ -20,19 +20,21 @@ const vertical: Connection[] = horizontal.map((c, i) => ({
 }));
 
 describe("buildRoutes", () => {
-  it("draws four lanes (video, mic, music, game) per connection", () => {
-    expect(LANES).toEqual(["video", "mic", "music", "game"]);
+  it("draws five lanes (video, mic, music, game, co-host) per connection", () => {
+    /* Four audio tracks, matching the patchbay (src/data/tracks.mjs), plus the video. */
+    expect(LANES).toEqual(["video", "mic", "music", "game", "cohost"]);
+    expect(MUSIC_LANE).toBe(2);
     for (const layout of [horizontal, vertical]) {
       const routes = buildRoutes({ connections: layout });
       expect(routes.map((r) => r.index)).toEqual([0, 1, 2, 3]);
-      for (const r of routes) expect(r.lanes).toHaveLength(4);
+      for (const r of routes) expect(r.lanes).toHaveLength(5);
     }
   });
 
   it("starts and ends each lane on its port, offset by the lane gap", () => {
     const [first] = buildRoutes({ connections: horizontal });
     first.lanes.forEach((lane, k) => {
-      const offset = (k - 1.5) * LANE_GAP;
+      const offset = (k - 2) * LANE_GAP;
       expect(lane.pts[0][0]).toBeCloseTo(0);
       expect(lane.pts[0][1]).toBeCloseTo(100 + offset);
       expect(lane.pts.at(-1)![0]).toBeCloseTo(100);

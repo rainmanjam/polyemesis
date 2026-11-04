@@ -186,7 +186,7 @@ describe("the home hero (S1)", () => {
     expect(from).toBeGreaterThan(-1);
     expect(to).toBeGreaterThan(from);
     const markup = sp.slice(from, to);
-    for (const text of ["Twitch", "YouTube", "Local archive", "Mic + music + game", "Mic + game · no music", "Original audio tracks, kept separately"]) {
+    for (const text of ["Twitch", "YouTube", "Local archive", "Mics + music + game", "Mics + game · no music", "Original audio tracks, kept separately"]) {
       expect(markup, text).toContain(text);
     }
   });
