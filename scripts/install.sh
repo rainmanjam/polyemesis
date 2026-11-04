@@ -2556,15 +2556,16 @@ fi
 # here to catch the case it can see, not to invent certainty it does not have.
 publishing_now() {
 	local cg procs cmd
-	cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
 	[ -r "\$cg" ] || return 1
 	procs=\$(cat "\$cg" 2>/dev/null) || return 1
 	for pid in \$procs; do
 		[ -r "/proc/\$pid/cmdline" ] || continue
 		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
 		case "\$cmd" in
-			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-				echo "\$cmd" | cut -c1-160 >&2
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				# The PID, never the command line: it carries the stream key.
+				echo "    pid \$pid is publishing" >&2
 				return 0 ;;
 		esac
 	done
@@ -2891,15 +2892,16 @@ is_media() {
 # the cgroup cannot be read.
 publishing_now() {
 	local cg procs cmd
-	cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
 	[ -r "\$cg" ] || return 1
 	procs=\$(cat "\$cg" 2>/dev/null) || return 1
 	for pid in \$procs; do
 		[ -r "/proc/\$pid/cmdline" ] || continue
 		cmd=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null) || continue
 		case "\$cmd" in
-			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-				echo "\$cmd" | cut -c1-160 >&2
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+				# The PID, never the command line: it carries the stream key.
+				echo "    pid \$pid is publishing" >&2
 				return 0 ;;
 		esac
 	done
@@ -3053,16 +3055,17 @@ fi
 # unrelated ffmpeg, or one left behind by a test run, is not this service's
 # broadcast and must not block an uninstall.
 publishing_now() {
-	local cg="/sys/fs/cgroup/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
+	local cg="\${POLYEMESIS_CGROUP_ROOT:-/sys/fs/cgroup}/system.slice/\${SERVICE_NAME}.service/cgroup.procs"
 	local pid args n=0
 	[ -r "\$cg" ] || return 1
 	while read -r pid; do
 		[ -r "/proc/\$pid/cmdline" ] || continue
 		args=\$(tr '\\0' ' ' < "/proc/\$pid/cmdline" 2>/dev/null || true)
 		case "\$args" in
-			*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
 				n=\$((n+1))
-				echo "    pid \$pid: \$(echo "\$args" | grep -oE '(rtmp|srt)://[^ ]{0,40}' | tail -1)" >&2 ;;
+				# The PID, never the URL: its path is the stream key.
+				echo "    pid \$pid is publishing" >&2 ;;
 		esac
 	done < "\$cg"
 	[ "\$n" -gt 0 ]
@@ -3215,8 +3218,9 @@ publishing_now() {
 	local out
 	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
-		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+		*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			# PIDs only, never the command line: it carries the stream key.
+			echo "\$out" | grep -E 'ffmpeg.*(rtmps?|srt):|ffmpeg.*-f flv' | awk '{print "    pid " \$2 " is publishing"}' | head -3 >&2
 			return 0 ;;
 	esac
 	return 1
@@ -3439,8 +3443,9 @@ publishing_now() {
 	local out
 	out=\$(\$COMPOSE_CMD top 2>/dev/null || true)
 	case "\$out" in
-		*ffmpeg*rtmp:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
-			echo "\$out" | grep -E 'ffmpeg.*(rtmp|srt):' | head -3 >&2
+		*ffmpeg*rtmp:*|*ffmpeg*rtmps:*|*ffmpeg*srt:*|*ffmpeg*"-f flv"*)
+			# PIDs only, never the command line: it carries the stream key.
+			echo "\$out" | grep -E 'ffmpeg.*(rtmps?|srt):|ffmpeg.*-f flv' | awk '{print "    pid " \$2 " is publishing"}' | head -3 >&2
 			return 0 ;;
 	esac
 	return 1
