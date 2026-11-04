@@ -135,3 +135,12 @@ describe("AcrossTheRoom", () => {
     expect(buttons[0].getAttribute("aria-label")).toBe("Close");
   });
 });
+
+describe("AcrossTheRoom before the first status frame", () => {
+  it("reads loading rather than OFF AIR with a count of none", async () => {
+    const { translate } = await import("@/lib/i18n");
+    render(<AcrossTheRoom open onClose={() => {}} status={null} />);
+    expect(screen.getByText(translate("en", "common.loading"))).toBeTruthy();
+    expect(screen.queryByText(translate("en", "room.offAir"))).toBeNull();
+  });
+});

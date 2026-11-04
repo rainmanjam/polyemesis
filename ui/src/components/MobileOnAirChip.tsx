@@ -49,11 +49,14 @@ function useChipFit(
 export function MobileOnAirChip({ live }: Readonly<{ live: HeaderLive }>) {
   const t = useT();
   const on = live.count > 0;
-  const sentence = on ? t(live.key, live.params) : t(live.offKey, live.offParams);
+  // Before the first status frame there is nothing to count, and none is not
+  // "Off air": the words say the reading is on its way instead.
+  const loading = t("common.loading");
+  const sentence = !live.known ? loading : on ? t(live.key, live.params) : t(live.offKey, live.offParams);
   // Scoped to one named programme: exactly when the programme switcher shows.
   const scoped = live.key === "chrome.liveCountProgramme";
-  const full = on ? t("chrome.liveCount", { count: live.count }) : t("onAir.offAir");
-  const short = on ? t("chrome.liveCountShort", { count: live.count }) : t("chrome.offAirShort");
+  const full = !live.known ? loading : on ? t("chrome.liveCount", { count: live.count }) : t("onAir.offAir");
+  const short = !live.known ? loading : on ? t("chrome.liveCountShort", { count: live.count }) : t("chrome.offAirShort");
   const chipRef = useRef<HTMLSpanElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const fits = useChipFit(chipRef, measureRef, scoped, full);

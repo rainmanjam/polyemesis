@@ -32,6 +32,7 @@ afterEach(() => {
 });
 
 const scoped = (count: number): HeaderLive => ({
+  known: true,
   count,
   key: "chrome.liveCountProgramme",
   params: { programme: "Main Programme", count },
@@ -94,7 +95,7 @@ describe("MobileOnAirChip", () => {
   // Row 10: on air is the tally lamp everywhere, and this dot is the phone's
   // on-air mark. Green (--ok) means healthy / signal present, not on air.
   it("lights the on-air dot in the tally red, not the healthy green", () => {
-    for (const live of [scoped(3), { count: 2, key: "chrome.liveCount", params: { count: 2 }, offKey: "onAir.offAir" } as HeaderLive]) {
+    for (const live of [scoped(3), { known: true, count: 2, key: "chrome.liveCount", params: { count: 2 }, offKey: "onAir.offAir" } as HeaderLive]) {
       const { unmount } = show(live);
       const dot = screen.getByTestId("mobile-on-air-dot");
       const cls = dot.className.split(/\s+/);
@@ -116,7 +117,7 @@ describe("MobileOnAirChip", () => {
 
   it("does not measure, or name the programme twice, on a single-programme install", () => {
     vi.stubGlobal("ResizeObserver", StubResizeObserver);
-    show({ count: 0, key: "chrome.liveCount", params: { count: 0 }, offKey: "onAir.offAir" });
+    show({ known: true, count: 0, key: "chrome.liveCount", params: { count: 0 }, offKey: "onAir.offAir" });
     expect(observers).toHaveLength(0);
     expect(screen.queryByTestId("mobile-on-air-words")).toBeNull();
     expect(screen.getByTestId("mobile-on-air").textContent).toBe(en("onAir.offAir"));

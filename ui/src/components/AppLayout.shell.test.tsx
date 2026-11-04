@@ -36,6 +36,7 @@ vi.mock("@/hooks/useLiveData", () => ({
   useIngestLive: () => false,
 }));
 
+import { translate } from "@/lib/i18n";
 import { AppLayout } from "./AppLayout";
 
 afterEach(() => {
@@ -93,6 +94,8 @@ describe("AppLayout: a phone can see whether it is on air (A78)", () => {
     renderShell();
     const indicator = screen.getByTestId("mobile-on-air");
     expect(indicator.className).toContain("sm:hidden");
-    expect(indicator.textContent).toBe("Off air");
+    // This shell has no status frame yet, and none is not "Off air": the chip
+    // says the reading is on its way, in the word the strip uses for it.
+    expect(indicator.textContent).toBe(translate("en", "common.loading"));
   });
 });

@@ -32,6 +32,7 @@ describe("headerLive", () => {
   it("counts only the selected programme's running destinations and names the programme", () => {
     const destinations = [running(1, 1), running(2, 1), running(3, 1), running(4, 2), running(5, 2), stopped(6, 1)];
     expect(headerLive({ destinations, programme: 1, programmes, sourceCount: 2 })).toEqual({
+      known: true,
       count: 3,
       key: "chrome.liveCountProgramme",
       params: { programme: "Main", count: 3 },
@@ -43,6 +44,7 @@ describe("headerLive", () => {
   it("says All programmes when a multi-programme install has no programme selected", () => {
     const destinations = [running(1, 1), running(4, 2)];
     expect(headerLive({ destinations, programme: null, programmes, sourceCount: 2 })).toEqual({
+      known: true,
       count: 2,
       key: "chrome.liveCountAll",
       params: { count: 2 },
@@ -60,6 +62,7 @@ describe("headerLive", () => {
   it("keeps the plain count on a single-programme install, where there is only one scope", () => {
     const destinations = [running(1, 1), running(2, 1), stopped(3, 1)];
     expect(headerLive({ destinations, programme: 1, programmes: [programmes[0]], sourceCount: 1 })).toEqual({
+      known: true,
       count: 2,
       key: "chrome.liveCount",
       params: { count: 2 },
@@ -67,8 +70,12 @@ describe("headerLive", () => {
     });
   });
 
-  it("counts nothing before the first status frame", () => {
-    expect(headerLive({ destinations: undefined, programme: 1, programmes, sourceCount: 2 }).count).toBe(0);
+  it("counts nothing before the first status frame, and says it does not know yet", () => {
+    const r = headerLive({ destinations: undefined, programme: 1, programmes, sourceCount: 2 });
+    expect(r.count).toBe(0);
+    expect(r.known).toBe(false);
+    // A frame with no destinations is a reading: off air is then the truth.
+    expect(headerLive({ destinations: [], programme: 1, programmes, sourceCount: 2 }).known).toBe(true);
   });
 
   it("names the programme when it is off air, so another programme's broadcast does not read as this one's", () => {

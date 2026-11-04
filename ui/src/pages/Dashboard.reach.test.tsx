@@ -213,7 +213,14 @@ describe("Dashboard: the Ingest card while the backup is on air", () => {
   });
 
   it("keeps saying Stopped when the primary is on air and nothing arrives", async () => {
-    draw(live({ status: status({ failover: { ...status().failover!, active: "primary" } }) }));
+    // "Nothing arrives" is a stats frame whose bitrate sample is zero. An empty
+    // series is no reading yet, which the card reads as loading, not Stopped.
+    draw(
+      live({
+        status: status({ failover: { ...status().failover!, active: "primary" } }),
+        bitrate: [{ t: "2026-10-30T12:00:00Z", kbps: 0 }],
+      }),
+    );
     await waitFor(() => expect(screen.getByText("Destinations")).toBeTruthy());
     expect(screen.queryByText(translate("en", "dash.ingestBackupOnAir"))).toBeNull();
     // Stopped is the console's one word for an absent process (A91).

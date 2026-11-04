@@ -165,4 +165,24 @@ describe("Dashboard: the Ingest card's uptime on the shared SRT listener", () =>
     expect(ingestCard().getByText("00:12:34"), "the SRT ingest's uptime read nothing").toBeTruthy();
     expect(ingestCard().queryByText("01:00:00")).toBeNull();
   });
+
+  // A cold load: one frame of the selected programme, live destinations, and
+  // no relay rate yet (that takes two frames a second apart). Not receiving is
+  // not known yet, so the card must not say Stopped and the strip must not say
+  // the feed is not arriving.
+  it("reads loading on the first frame, then Stopped once a rate says nothing arrives", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-30T12:00:00Z"));
+    const running = { id: 7, name: "Twitch", kind: "rtmp", platform: "twitch", enabled: true, sourceId: 1, process: { state: "running" } };
+    const first = { ...srtFrame(1, "Studio A", 1_000_000), destinations: [running] } as unknown as Status;
+    const { rerender } = render(view(first));
+    await ingestCard().findByText(translate("en", "common.loading"));
+    expect(ingestCard().queryByText(translate("en", "state.stopped"))).toBeNull();
+    expect(screen.queryByText(translate("en", "health.verdictNoIngest"))).toBeNull();
+
+    vi.setSystemTime(new Date("2026-10-30T12:00:01Z"));
+    rerender(view({ ...srtFrame(1, "Studio A", 1_000_000), destinations: [running] } as unknown as Status));
+    expect(await ingestCard().findByText(translate("en", "state.stopped"))).toBeTruthy();
+    expect(screen.getByText(translate("en", "health.verdictNoIngest"))).toBeTruthy();
+  });
 });

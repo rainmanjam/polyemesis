@@ -194,7 +194,7 @@ export function AppLayout({
   // names no programme, so this chip -- beside the switcher that picks the
   // programme -- went live on another programme's encoder and printed its
   // uptime. See useProgrammeIngest.
-  const { snapshot, live: ingestLive } = useProgrammeIngest(sourceCount);
+  const { snapshot, live: ingestLive, known: ingestKnown } = useProgrammeIngest(sourceCount);
   const ingest = snapshot?.ingest;
   // BYTES ARRIVING, not a process running.
   //
@@ -309,8 +309,9 @@ export function AppLayout({
                 Absent is not a reading. Fall back to the state, exactly as the
                 SRT case does. #663. */}
             {(() => {
-              const r = ingestChipReading(ingest, ingestLive, onBackup);
+              const r = ingestChipReading(ingest, ingestLive, onBackup, ingestKnown);
               if (r.kind === "backup") return t("chrome.ingestBackup");
+              if (r.kind === "pending") return t("common.loading");
               return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
             })()}
           </span>

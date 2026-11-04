@@ -46,7 +46,7 @@ describe("ingest liveness", () => {
     const offenders: string[] = [];
     for (const file of tsxFiles(join(ROOT, "ui/src"))) {
       const src = readFileSync(file, "utf8");
-      if (!src.includes("stateLabel(ingest?.state)")) continue;
+      if (!src.includes("stateLabel(ingest?.state)") && !src.includes("ingestChipReading(")) continue;
       // useProgrammeIngest is useIngestLive narrowed to the selected
       // programme, and calls it; the last test below pins that call.
       if (!src.includes("useIngestLive(") && !src.includes("useProgrammeIngest(")) {
@@ -68,9 +68,13 @@ describe("ingest liveness", () => {
   it("still finds the call sites it is meant to guard", () => {
     // Without this the rule above passes trivially the day someone renames
     // stateLabel or the ingest field, and the guard silently stops guarding.
-    const guarded = tsxFiles(join(ROOT, "ui/src")).filter((f) =>
-      readFileSync(f, "utf8").includes("stateLabel(ingest?.state)"),
-    );
+    // ingestChipReading( is the shape both call sites take now: the header
+    // chip and the Ingest card label the ingest through it, with the liveness
+    // and known-ness from useProgrammeIngest.
+    const guarded = tsxFiles(join(ROOT, "ui/src")).filter((f) => {
+      const src = readFileSync(f, "utf8");
+      return src.includes("stateLabel(ingest?.state)") || src.includes("ingestChipReading(");
+    });
     expect(guarded.length).toBeGreaterThan(0);
   });
 });

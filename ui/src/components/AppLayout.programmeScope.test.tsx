@@ -186,3 +186,46 @@ describe("the header live badge counts and names the selected programme", () => 
     expect(sr).toMatch(/^.+: /); // "<programme>: Off air"
   });
 });
+
+/* A COLD LOAD IS NOT A STOPPED INGEST. Until the page has what it decides
+ * liveness from -- the first status frame, and on a multi-programme install
+ * two of the programme's frames a second apart for a relay rate -- it has no
+ * reading at all. The chip printed "Stopped" for that second or two beside a
+ * live broadcast (the capture tooling had to wait it out), and the phone's
+ * on-air chip printed "Off air" before any frame had arrived. */
+describe("the header's status chips before their first reading", () => {
+  const loading = translate("en", "common.loading");
+
+  it("reads loading, not Stopped or Off air, before the first status frame", () => {
+    current = null;
+    render(layout());
+    expect(chip()).toBe(loading);
+    const phone = screen.getByTestId("mobile-on-air");
+    expect(phone.textContent).toContain(loading);
+    expect(phone.textContent).not.toContain(translate("en", "onAir.offAir"));
+  });
+
+  it("reads loading on one frame of a probed SRT programme, then decides on the second", () => {
+    seriesLive = false;
+    current = frame(1, "Studio A", true, 1_000_000);
+    const { rerender } = render(layout());
+    expect(chip(), "one frame has no relay rate yet").toBe(loading);
+
+    // A second later, the counter has not moved: now "not receiving" is a
+    // verdict, and Stopped is the truth.
+    vi.setSystemTime(new Date("2026-10-30T12:00:01Z"));
+    current = frame(1, "Studio A", true, 1_000_000);
+    rerender(layout());
+    expect(chip()).toBe(translate("en", "state.stopped"));
+  });
+
+  it("shows a process state the server reported, even before a rate exists", () => {
+    seriesLive = false;
+    current = {
+      ...frame(1, "Studio A", true, 1_000_000),
+      ingest: { state: "failed" },
+    } as unknown as Status;
+    render(layout());
+    expect(chip()).toBe(translate("en", "state.failed"));
+  });
+});
