@@ -41,6 +41,13 @@ its first tagged release.
   now name their programme, as status frames do, and the Meters and Routing pages keep only the
   selected programme's. Switching programme clears the old programme's meters until the new one
   reports, and the routing editor's "last peak" for a quiet track is kept per programme.
+- **Go live counts up through the press you made.** The sheet starts destinations one at a time,
+  and its button used to recount "Go live · 4 ready", then "3 ready", as each one came on, so one
+  click looked as if it had started a single destination. After the click it now reads
+  "Starting 2 of 4…", stays disabled until every start has been tried (a refused one included),
+  and is announced to screen readers. The YouTube warning also says "1 YouTube broadcast", not
+  "1 YouTube broadcasts", in every language.
+
 ### Security
 
 - **Expert mode is session-only, and refuses any argument that touches a file on the server.**

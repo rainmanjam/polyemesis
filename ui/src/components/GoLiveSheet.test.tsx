@@ -80,7 +80,23 @@ describe("GoLiveSheet: the whole start, before anything fires", () => {
   it("warns how many YouTube broadcasts a Stop would end, before any click", () => {
     draw([dest({ id: did(1), platform: "youtube", enabled: true })]);
 
-    expect(screen.getByText(T("golive.youtubeWarn", { count: 1 }))).toBeTruthy();
+    expect(screen.getByText(T("golive.youtubeWarnOne", { count: 1 }))).toBeTruthy();
+  });
+
+  it("says one broadcast, not one broadcasts, when a single YouTube destination is at risk", () => {
+    draw([dest({ id: did(1), platform: "youtube", enabled: true })]);
+
+    expect(screen.getByText("1 YouTube broadcast will end if stopped.")).toBeTruthy();
+    expect(screen.queryByText("1 YouTube broadcasts will end if stopped.")).toBeNull();
+  });
+
+  it("says broadcasts when more than one YouTube destination is at risk", () => {
+    draw([
+      dest({ id: did(1), platform: "youtube", enabled: true }),
+      dest({ id: did(2), name: "Second", platform: "youtube", enabled: true }),
+    ]);
+
+    expect(screen.getByText("2 YouTube broadcasts will end if stopped.")).toBeTruthy();
   });
 
   it("disables the confirm, and says why, when nothing is ready", () => {
@@ -284,5 +300,117 @@ describe("Go live sheet: the source a destination uses is never cut off (A90)", 
     const cell = screen.getByText(long);
     expect(cell.className).not.toContain("truncate");
     expect(cell.getAttribute("title")).toBe(long);
+  });
+});
+
+describe("Go live sheet: one press reads as one press while it runs", () => {
+  // The press starts destinations one at a time. The button used to recount
+  // "Go live · 3 ready" downward as each came on, so one click looked as if it
+  // had started one destination. It now counts up through the press it made.
+  function deferredStarts() {
+    const pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
+    const onStart = vi.fn(
+      (id: DestinationId) =>
+        new Promise<void>((resolve, reject) => {
+          pending.set(id as unknown as number, { resolve, reject });
+        }),
+    );
+    const settle = async (id: number, err?: Error) => {
+      await waitFor(() => expect(pending.has(id)).toBe(true));
+      const p = pending.get(id)!;
+      if (err) p.reject(err);
+      else p.resolve();
+    };
+    return { onStart, settle };
+  }
+
+  const three = () => [dest({ id: did(1) }), dest({ id: did(2), name: "Second" }), dest({ id: did(3), name: "Third" })];
+
+  it("shows Starting 1 of 3 on a disabled button, and announces it, while the first start is in flight", async () => {
+    const { onStart, settle } = deferredStarts();
+    draw(three(), { onStart });
+
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+
+    const button = await screen.findByRole("button", { name: "Starting 1 of 3…" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    const status = screen.getByTestId("golive-progress");
+    expect(status.getAttribute("role")).toBe("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toBe("Starting 1 of 3…");
+
+    await settle(1);
+    expect(await screen.findByRole("button", { name: "Starting 2 of 3…" })).toBeTruthy();
+    await settle(2);
+    await settle(3);
+    await screen.findByRole("button", { name: "Go live · 3 ready" });
+  });
+
+  it("returns to the normal, enabled button once every start is done", async () => {
+    const { onStart, settle } = deferredStarts();
+    draw(three(), { onStart });
+
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await settle(1);
+    await settle(2);
+    await settle(3);
+
+    const button = await screen.findByRole("button", { name: "Go live · 3 ready" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: /^Starting/ })).toBeNull();
+    expect(screen.getByTestId("golive-progress").textContent).toBe("");
+  });
+
+  it("keeps counting, and does not say nothing is ready, as the live list catches up mid-run", async () => {
+    // In the console the live list updates as each start lands, so readyNow
+    // empties before the walk ends. Neither the button nor the empty-state line
+    // may follow it while the press is still running.
+    const { onStart, settle } = deferredStarts();
+    const idle = three();
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows(idle, sources),
+      youtubeAtRisk: 0,
+      onStart,
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} live={idle} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await settle(1);
+    await settle(2);
+    await screen.findByRole("button", { name: "Starting 3 of 3…" });
+    rerender(<GoLiveSheet {...props} live={idle.map((d) => ({ ...d, enabled: true }))} />);
+
+    expect(screen.getByRole("button", { name: "Starting 3 of 3…" })).toBeTruthy();
+    expect(screen.queryByText(T("golive.nothingReady"))).toBeNull();
+    await settle(3);
+    await screen.findByRole("button", { name: T("golive.goCount", { count: 0 }) });
+  });
+
+  it("still counts through to the end when a start fails mid-run, and shows the failed row", async () => {
+    const { onStart, settle } = deferredStarts();
+    draw(three(), { onStart });
+
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await settle(1);
+    await screen.findByRole("button", { name: "Starting 2 of 3…" });
+    await settle(2, new Error("ingest refused"));
+
+    // The refusal does not stall or reset the count: the walk goes on to the third.
+    const third = await screen.findByRole("button", { name: "Starting 3 of 3…" });
+    expect((third as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("ingest refused")).toBeTruthy();
+    await settle(3);
+
+    const button = await screen.findByRole("button", { name: "Go live · 3 ready" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(onStart).toHaveBeenCalledTimes(3);
+    const row = screen.getByText("Second").closest("[data-row]") as HTMLElement;
+    expect(within(row).getByText(T("golive.failed"))).toBeTruthy();
+    expect(within(row).getByText("ingest refused")).toBeTruthy();
   });
 });
