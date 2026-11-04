@@ -1,6 +1,7 @@
 package srtserver
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -162,5 +163,67 @@ func TestATransientRefusalDoesNotCloseAPublisher(t *testing.T) {
 	}
 	if !srv.Publishing(7) {
 		t.Error("alternating transient failures took a healthy encoder off the air")
+	}
+}
+
+// A store that cannot be read is not a revocation. However many passes in a
+// row fail to answer, a healthy publisher stays (review follow-up: two locked
+// ticks used to drop every encoder).
+func TestLookupErrorsNeverCloseAPublisher(t *testing.T) {
+	sink := &recorder{}
+	tg := Target{SourceID: 11, Name: "Main", Enabled: true, Sink: sink}
+	m := &mutableTargets{}
+	m.set(tg)
+	srv, addr := serveMutable(t, m)
+	c, err := dial(t, addr, tokenFor(tg))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("live")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !waitFor(3*time.Second, func() bool { return srv.Publishing(11) }) {
+		t.Fatal("the publisher never went live")
+	}
+	srv.SetRevalidateLookup(func(string) (Target, bool, error) {
+		return Target{}, false, errors.New("database is locked")
+	})
+	for i := 0; i < 5; i++ {
+		if n := srv.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: an unreadable store closed %d publishers", i, n)
+		}
+	}
+	if !srv.Publishing(11) {
+		t.Error("lookup errors took a healthy encoder off the air")
+	}
+}
+
+// An engine replaced between two ticks gives the token a new sink; the
+// session still delivers into the old one, which nothing reads. It is closed
+// so the encoder reconnects to the new engine.
+func TestAReplacedEngineClosesThePublisherOfTheOldOne(t *testing.T) {
+	old := &recorder{}
+	tg := Target{SourceID: 12, Name: "Main", Enabled: true, Sink: old}
+	m := &mutableTargets{}
+	m.set(tg)
+	srv, addr := serveMutable(t, m)
+	c, err := dial(t, addr, tokenFor(tg))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("live")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !waitFor(3*time.Second, func() bool { return srv.Publishing(12) }) {
+		t.Fatal("the publisher never went live")
+	}
+	replaced := tg
+	replaced.Sink = &recorder{}
+	m.set(replaced)
+	srv.Revalidate()
+	if n := srv.Revalidate(); n != 1 {
+		t.Fatalf("Revalidate closed %d sessions after the engine was replaced, want 1", n)
 	}
 }

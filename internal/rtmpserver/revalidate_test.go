@@ -2,6 +2,7 @@ package rtmpserver
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"sync"
 	"testing"
@@ -182,5 +183,27 @@ func TestATransientRTMPRefusalDoesNotCloseAPublisher(t *testing.T) {
 	}
 	if !s.Publishing(8) {
 		t.Error("alternating transient failures took a healthy encoder off the air")
+	}
+}
+
+// A store that cannot be read is not a revocation, however many passes fail.
+func TestRTMPLookupErrorsNeverCloseAPublisher(t *testing.T) {
+	m := &mutableKeys{}
+	m.set(map[string]Target{"key": {SourceID: 13, Name: "Main", Enabled: true, Ready: true}})
+	s, addr := startMutable(t, m)
+	holdPublish(t, addr, "key")
+	if !waitUntil(3*time.Second, func() bool { return s.Publishing(13) }) {
+		t.Fatal("the publisher never went live")
+	}
+	s.SetRevalidateLookup(func(string) (Target, bool, error) {
+		return Target{}, false, errors.New("database is locked")
+	})
+	for i := 0; i < 5; i++ {
+		if n := s.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: an unreadable store closed %d publishers", i, n)
+		}
+	}
+	if !s.Publishing(13) {
+		t.Error("lookup errors took a healthy encoder off the air")
 	}
 }

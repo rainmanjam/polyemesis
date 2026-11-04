@@ -300,6 +300,8 @@ type Server struct {
 	// look like guessing. Shared with internal/srtserver -- see
 	// internal/authgate for why this is not forked per protocol.
 	gate *authgate.Gate
+	// revalidateLookup: see SetRevalidateLookup.
+	revalidateLookup atomic.Pointer[RevalidateLookup]
 }
 
 // New builds a server. It binds nothing until Start.
@@ -776,6 +778,32 @@ func (s *Server) revalidateEvery(every time.Duration) {
 // Two consecutive refusals close it, not one: the engine's lookup answers "not
 // found" when it cannot read the sources table, and a single "database is
 // locked" must not take every encoder off the air.
+// RevalidateLookup resolves a stream key like Lookup does, and returns an
+// error when it could not answer at all (the store was unreadable).
+type RevalidateLookup func(streamKey string) (Target, bool, error)
+
+// SetRevalidateLookup gives Revalidate a lookup that can say "I could not
+// answer"; see srtserver.Server.SetRevalidateLookup.
+func (s *Server) SetRevalidateLookup(fn RevalidateLookup) {
+	s.revalidateLookup.Store(&fn)
+}
+
+// HasRevalidateLookup reports whether SetRevalidateLookup was called. Exported
+// for the engine's wiring test: without it, a locked database counts as a
+// revocation, and nothing else would show that the engine forgot to set it.
+func (s *Server) HasRevalidateLookup() bool {
+	fn := s.revalidateLookup.Load()
+	return fn != nil && *fn != nil
+}
+
+func (s *Server) resolveForRevalidate(key string) (Target, bool, error) {
+	if fn := s.revalidateLookup.Load(); fn != nil && *fn != nil {
+		return (*fn)(key)
+	}
+	t, ok := s.lookup(key)
+	return t, ok, nil
+}
+
 func (s *Server) Revalidate() int {
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.live))
@@ -786,7 +814,11 @@ func (s *Server) Revalidate() int {
 
 	closed := 0
 	for _, sess := range sessions {
-		target, found := s.lookup(sess.streamKey)
+		target, found, err := s.resolveForRevalidate(sess.streamKey)
+		if err != nil {
+			// Not an answer: neither a strike nor a reset.
+			continue
+		}
 		reason := ""
 		switch {
 		case !found:

@@ -147,6 +147,9 @@ type Server struct {
 	// stopRevalidate ends the revalidation ticker Start launched. Guarded by
 	// mu; nil while the server is not started.
 	stopRevalidate chan struct{}
+	// revalidateLookup is the lookup Revalidate uses when set: it reports a
+	// failure to answer separately from "not found". See SetRevalidateLookup.
+	revalidateLookup atomic.Pointer[RevalidateLookup]
 
 	// started is the lifecycle interlock as well as the "is a Serve error worth
 	// logging" flag. Start claims it with a compare-and-swap before it binds
@@ -284,7 +287,11 @@ type session struct {
 	peer     string
 	streamID string
 	conn     srt.Conn
-	started  time.Time
+	// sink is where this session delivers, fixed at publish. Revalidate
+	// closes the session when the token now resolves to a different sink: the
+	// engine was replaced, and these bytes go to a hub nothing reads.
+	sink    Sink
+	started time.Time
 	// lastData is the unix-nano timestamp of the most recent read. Atomic
 	// because the takeover check runs on an accepting goroutine while the read
 	// loop is updating it.
@@ -781,6 +788,7 @@ func (s *Server) handlePublish(conn srt.Conn) {
 		peer:     peer,
 		streamID: conn.StreamId(),
 		conn:     conn,
+		sink:     target.Sink,
 		started:  time.Now(),
 	}
 
@@ -882,6 +890,44 @@ func (s *Server) revalidateEvery(every time.Duration, stop <-chan struct{}) {
 // briefly absent while it is replaced; closing on a single pass would take
 // every encoder off the air for one "database is locked". A real revocation
 // is still there on the next pass.
+// RevalidateLookup resolves a token like Lookup does, and returns an error when
+// it could not answer at all (the store was unreadable).
+type RevalidateLookup func(token string) (Target, bool, error)
+
+// SetRevalidateLookup gives Revalidate a lookup that can say "I could not
+// answer". Without one Revalidate uses the admission lookup, which cannot tell
+// a locked database from a revoked token; the engine always sets this.
+func (s *Server) SetRevalidateLookup(fn RevalidateLookup) {
+	s.revalidateLookup.Store(&fn)
+}
+
+// HasRevalidateLookup reports whether SetRevalidateLookup was called. Exported
+// for the engine's wiring test: without it, a locked database counts as a
+// revocation, and nothing else would show that the engine forgot to set it.
+func (s *Server) HasRevalidateLookup() bool {
+	fn := s.revalidateLookup.Load()
+	return fn != nil && *fn != nil
+}
+
+func (s *Server) resolveForRevalidate(token string) (Target, bool, error) {
+	if fn := s.revalidateLookup.Load(); fn != nil && *fn != nil {
+		return (*fn)(token)
+	}
+	t, ok := s.lookup(token)
+	return t, ok, nil
+}
+
+// sameSink compares two sinks without panicking on a dynamic type that is not
+// comparable; such a pair is treated as the same, so it never closes anything.
+func sameSink(a, b Sink) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = true
+		}
+	}()
+	return a == b
+}
+
 func (s *Server) Revalidate() int {
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.live))
@@ -892,7 +938,11 @@ func (s *Server) Revalidate() int {
 
 	closed := 0
 	for _, sess := range sessions {
-		target, ok := s.lookup(strings.TrimSpace(sess.streamID))
+		target, ok, err := s.resolveForRevalidate(strings.TrimSpace(sess.streamID))
+		if err != nil {
+			// Not an answer: neither a strike nor a reset.
+			continue
+		}
 		reason := ""
 		switch {
 		case !ok:
@@ -903,6 +953,8 @@ func (s *Server) Revalidate() int {
 			reason = "its source has no running engine"
 		case target.Key() != sess.key:
 			reason = "its token now names a different slot"
+		case !sameSink(target.Sink, sess.sink):
+			reason = "its source's engine was replaced"
 		}
 		if reason == "" {
 			sess.refusals.Store(0)
