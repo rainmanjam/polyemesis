@@ -61,10 +61,17 @@ its first tagged release.
   reports, and the routing editor's "last peak" for a quiet track is kept per programme.
 - **Go live counts up through the press you made.** The sheet starts destinations one at a time,
   and its button used to recount "Go live · 4 ready", then "3 ready", as each one came on, so one
-  click looked as if it had started a single destination. After the click it now reads
-  "Starting 2 of 4…", stays disabled until every start has been tried (a refused one included),
-  and is announced to screen readers. The YouTube warning also says "1 YouTube broadcast", not
-  "1 YouTube broadcasts", in every language.
+  click looked as if it had started a single destination. After the click it counts what is
+  actually on air, from each destination's live status: "Starting… 2 of 4 live", then "4 of 4
+  live", or "3 of 4 live · 1 failed" when one is refused or its process fails. The press is over
+  when every destination it set out to start is live or failed, not when the last request
+  returns, and the final count stays on the button for a second before it goes back to Go live.
+  A destination still starting after a minute (longer than the server takes to hold one that
+  keeps being refused) gives the button back, and the count says how many are still starting.
+  The sheet can be closed while it waits, though not while the starts are going out. Screen
+  readers hear the first count and the final one at once, and changes in between at most every
+  two seconds. The YouTube warning also says "1 YouTube broadcast", not "1 YouTube broadcasts",
+  in every language.
 
 ### Security
 
