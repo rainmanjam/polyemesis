@@ -135,6 +135,20 @@ describe("LiveDataProvider: levels on a multi-programme install", () => {
     expect(screen.getByTestId("tracks").textContent).toBe("none");
   });
 
+  it("drops an untagged reading when the operator switches, too", async () => {
+    // A server that predates the tag: the frame cannot be scoped by its tag,
+    // so the teardown of the old programme's socket is what clears it.
+    const ws = await openOnProgrammeOne();
+    act(() => ws.onmessage?.(frame(4)));
+    expect(screen.getByTestId("tracks").textContent).toBe("4");
+
+    await act(async () => {
+      screen.getByText("pick 2").click();
+    });
+    expect(screen.getByTestId("programme").textContent).toBe("2");
+    expect(screen.getByTestId("tracks").textContent).toBe("none");
+  });
+
   it("still applies an untagged frame, from a server that predates the tag", async () => {
     const ws = await openOnProgrammeOne();
     act(() => ws.onmessage?.(frame(2)));

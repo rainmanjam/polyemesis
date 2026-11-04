@@ -16,7 +16,7 @@ its first tagged release.
   measured" (tracks 3 and 4 in about 40% of samples on the three-programme demo). Levels frames
   now name their programme, as status frames do, and the Meters and Routing pages keep only the
   selected programme's. Switching programme clears the old programme's meters until the new one
-  reports.
+  reports, and the routing editor's "last peak" for a quiet track is kept per programme.
 
 ### Changed
 

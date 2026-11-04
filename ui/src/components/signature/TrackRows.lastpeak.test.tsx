@@ -93,4 +93,28 @@ describe("TrackRows last measured peak", () => {
     rerender(offline({ peak: [[-6.3, -7]], rms: [[-20, -21]] }));
     expect(screen.queryByText(/last peak/)).toBeNull();
   });
+
+  it("does not carry one programme's last peak over to another", () => {
+    // The routing editor stays mounted when the operator switches programme in
+    // the header. A quiet track on the new programme reading the OLD
+    // programme's "last peak" is the cross-programme meter bug again, in text.
+    const on = (programme: number, frame: typeof measured | null) => (
+      <TrackRows
+        idPrefix="t"
+        tracks={tracks}
+        selection={selection}
+        levels={frame}
+        programme={programme}
+        probed
+        meterFeedLive
+        onChange={() => {}}
+      />
+    );
+    const { rerender } = render(on(1, measured));
+    rerender(on(2, null));
+    expect(screen.queryByText(/last peak/)).toBeNull();
+    // And switching back finds programme 1's own history where it was.
+    rerender(on(1, null));
+    expect(screen.getByText(/last peak -6\.3 dB at /)).toBeTruthy();
+  });
 });

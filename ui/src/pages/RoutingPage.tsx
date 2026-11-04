@@ -774,6 +774,7 @@ export function RoutingPage() {
       sourceId: editedSourceId,
       tracks,
       levels,
+      meterProgramme: programme,
       probed: source?.probed ?? false,
       // The METER FEED's liveness, which `probed` does not describe: probed is
       // the ingest layout. Without it every track reads "no signal" whenever
@@ -799,6 +800,7 @@ export function RoutingPage() {
       editedSourceId,
       tracks,
       levels,
+      programme,
       source?.probed,
       connected,
       annotations,
@@ -1190,6 +1192,9 @@ interface EditorContext {
   sourceId: number | null;
   tracks: SourceTrack[];
   levels: Levels | null;
+  /** The programme `levels` is measured on: the header's, which is not
+   *  necessarily sourceId. TrackRows keeps its last-peak history per programme. */
+  meterProgramme: number | null;
   probed: boolean;
   /** Whether the socket carrying `levels` is up. See lib/trackSignal. */
   meterFeedLive: boolean;
@@ -1540,6 +1545,7 @@ function ProfileEditor({
                 tracks={ctx.tracks}
                 selection={profile.tracks ?? []}
                 levels={ctx.levels}
+                programme={ctx.meterProgramme}
                 probed={ctx.probed}
                 meterFeedLive={ctx.meterFeedLive}
                 onChange={(next: TrackSel[]) => onPatch({ tracks: next })}

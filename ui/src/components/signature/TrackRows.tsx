@@ -103,6 +103,11 @@ interface TrackRowsProps {
    *  frozen last frame from live audio. Optional and defaulting to true so the
    *  read-only callers that never had a meter feed are unchanged. */
   meterFeedLive?: boolean;
+  /** The programme `levels` is measured on: the one selected in the header.
+   *  The last-peak history is kept per programme, so a switch does not show
+   *  the old programme's "last peak" on the new one's quiet rows. Absent for
+   *  a caller with one programme or no feed. */
+  programme?: number | null;
   onChange: (next: TrackSel[]) => void;
   /** Source-side descriptions, keyed by track index. */
   annotations?: TrackAnnotation[];
@@ -155,6 +160,7 @@ export function TrackRows({
   levels,
   probed,
   meterFeedLive = true,
+  programme = null,
   onChange,
   annotations = [],
   onAnnotate,
@@ -170,7 +176,11 @@ export function TrackRows({
   /* A10: the last measured peak per track, and when it was measured. Kept in a
      ref so a quiet row can say what it last did instead of going blank. Only a
      connected feed can add to it, so a frozen frame is never recorded as new. */
-  const lastRef = useRef(new Map<number, { db: number; at: number }>());
+  /* Keyed by programme as well as track: the editor stays mounted across a
+     programme switch in the header, and track 1 of one programme is not
+     track 1 of another. */
+  const lastRef = useRef(new Map<string, { db: number; at: number }>());
+  const lastKey = (track: number) => `${programme ?? ""}:${track}`;
   useEffect(() => {
     if (!meterFeedLive) return;
     const at = Date.now();
@@ -178,9 +188,9 @@ export function TrackRows({
       const peak = levels?.peak?.[tr.index] ?? [];
       if (peak.length === 0) continue;
       const db = Math.max(...peak);
-      if (Number.isFinite(db)) lastRef.current.set(tr.index, { db, at });
+      if (Number.isFinite(db)) lastRef.current.set(`${programme ?? ""}:${tr.index}`, { db, at });
     }
-  }, [levels, tracks, meterFeedLive]);
+  }, [levels, tracks, meterFeedLive, programme]);
   /* The slider's position while a live level is pending or in flight. The
      draft is not touched until the server has stored the level, so a refused
      change snaps back to what is stored instead of leaving the form dirty. It
@@ -292,7 +302,7 @@ export function TrackRows({
         const excluded = role !== "" && excludeRoles.includes(role);
         const sending = sel.enabled && !excluded;
         const label = ann.label || t.title || "";
-        const last = lastRef.current.get(t.index);
+        const last = lastRef.current.get(lastKey(t.index));
         const block = live ? live.blocked(t.index) : null;
         const liveOk = !!live && !block;
         const rowBusy = busy[t.index] === true;
