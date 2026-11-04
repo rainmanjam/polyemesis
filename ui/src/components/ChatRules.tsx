@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,14 +30,14 @@ import type { ChatPlatform, ChatSettings, ChatStatus } from "@/lib/types";
    delay are what a channel reaches for during a raid, and follower-only with
    no minimum is the mode a raider walks straight through by pressing Follow.
 
-   Nothing here reads the platform's CURRENT state, and that is a deliberate
-   limitation rather than an oversight: polyemesis does not fetch chat settings,
-   so it does not know whether slow mode is already on. Every switch therefore
-   starts off and means "turn this on now", which is why the copy says "Apply"
-   and not "Save" — the difference between issuing a command and describing a
-   state. A toggle that showed a default-off position as though it were the
-   channel's real state would be lying about something the operator can check in
-   one glance on Twitch.
+   THE CARD READS THE ROOM FIRST (poka-yoke audit 2026-11-04). It used to start
+   every switch "off" whatever the channel's real state, and an off switch sent
+   nothing -- so a mode set from Twitch's own dashboard stayed on while this card
+   showed it removed. It now reads the current rules (GET /chat/settings) and
+   the switches show them; until that answer arrives they are disabled. With the
+   state known, Apply sends every rule explicitly, off included, so the room
+   ends up exactly as shown. If the read fails, the card falls back to what it
+   always did -- switches start off and mean "turn this on now" -- and says so.
    =========================================================================== */
 
 /** The only three values Twitch's non_moderator_chat_delay_duration accepts.
@@ -72,15 +72,63 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
   // Twitch accepts 2, 4 or 6 and nothing else here; see MOD_DELAYS below.
   const [modDelaySeconds, setModDelaySeconds] = useState(4);
   const [busy, setBusy] = useState(false);
+  // "reading" until the room answers; "known" means every switch shows the
+  // channel's real state; "unknown" means the read failed and the card is back
+  // to "switch on what you want turned on".
+  const [roomState, setRoomState] = useState<"reading" | "known" | "unknown">("reading");
+  const account = twitch?.account;
+  const present = twitch !== undefined;
+
+  useEffect(() => {
+    if (!present) return;
+    let live = true;
+    api
+      .getChatSettings("twitch" as ChatPlatform, account)
+      .then((s) => {
+        if (!live) return;
+        setSlow(!!s.slowMode);
+        if (s.slowModeSeconds) setSlowSeconds(s.slowModeSeconds);
+        setFollowers(!!s.followerMode);
+        if (typeof s.followerModeMinutes === "number") {
+          setFollowerMinutes(s.followerModeMinutes);
+        }
+        setSubsOnly(!!s.subscriberMode);
+        setEmotesOnly(!!s.emoteMode);
+        setUnique(!!s.uniqueChatMode);
+        setModDelay(!!s.nonModeratorChatDelay);
+        if (s.nonModeratorChatDelaySeconds && MOD_DELAYS.includes(s.nonModeratorChatDelaySeconds)) {
+          setModDelaySeconds(s.nonModeratorChatDelaySeconds);
+        }
+        setRoomState("known");
+      })
+      .catch(() => {
+        if (live) setRoomState("unknown");
+      });
+    return () => {
+      live = false;
+    };
+  }, [present, account]);
 
   if (!twitch) return null;
+  const reading = roomState === "reading";
 
   const apply = async () => {
     setBusy(true);
-    // Only what the operator actually switched on is sent. An omitted field
-    // means "leave it alone" all the way down to Twitch's PATCH, so this cannot
-    // switch off a mode the operator never touched.
-    const body: ChatSettings = {};
+    // With the room's state KNOWN, every rule is sent, off included: the
+    // switches are the room, so an off switch means "off". Without it, only
+    // what is switched on is sent -- an omitted field means "leave it alone"
+    // all the way down to Twitch's PATCH, so a guess cannot switch off a mode.
+    const body: ChatSettings =
+      roomState === "known"
+        ? {
+            slowMode: false,
+            followerMode: false,
+            subscriberMode: false,
+            emoteMode: false,
+            uniqueChatMode: false,
+            nonModeratorChatDelay: false,
+          }
+        : {};
     if (slow) {
       body.slowMode = true;
       body.slowModeSeconds = slowSeconds;
@@ -153,7 +201,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <div className="flex items-center gap-1.5">
-          <Switch id="rule-slow" checked={slow} onCheckedChange={setSlow} disabled={busy} />
+          <Switch id="rule-slow" checked={slow} onCheckedChange={setSlow} disabled={busy || reading} />
           <Label htmlFor="rule-slow" className="text-sm">
             {t("chatRules.slowMode")}
           </Label>
@@ -163,7 +211,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               min={1}
               max={120}
               value={slowSeconds}
-              disabled={busy}
+              disabled={busy || reading}
               onChange={(e) => setSlowSeconds(Math.max(1, Number(e.target.value) || 1))}
               aria-label={t("chatRules.slowSecondsAria")}
               className="tnum h-6 w-14 rounded border border-border bg-card-raised px-1 text-sm"
@@ -177,7 +225,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             id="rule-followers"
             checked={followers}
             onCheckedChange={setFollowers}
-            disabled={busy}
+            disabled={busy || reading}
           />
           <Label htmlFor="rule-followers" className="text-sm">
             {t("chatRules.followersOnly")}
@@ -196,7 +244,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
               min={0}
               max={MAX_FOLLOWER_MINUTES}
               value={followerMinutes}
-              disabled={busy}
+              disabled={busy || reading}
               onChange={(e) =>
                 setFollowerMinutes(
                   Math.min(MAX_FOLLOWER_MINUTES, Math.max(0, Number(e.target.value) || 0)),
@@ -214,7 +262,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <Switch id="rule-subs" checked={subsOnly} onCheckedChange={setSubsOnly} disabled={busy} />
+          <Switch id="rule-subs" checked={subsOnly} onCheckedChange={setSubsOnly} disabled={busy || reading} />
           <Label htmlFor="rule-subs" className="text-sm">
             {t("chatRules.subscribersOnly")}
           </Label>
@@ -227,7 +275,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             id="rule-emotes"
             checked={emotesOnly}
             onCheckedChange={setEmotesOnly}
-            disabled={busy}
+            disabled={busy || reading}
           />
           <Label htmlFor="rule-emotes" className="text-sm">
             {t("chatRules.emotesOnly")}
@@ -235,7 +283,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <Switch id="rule-unique" checked={unique} onCheckedChange={setUnique} disabled={busy} />
+          <Switch id="rule-unique" checked={unique} onCheckedChange={setUnique} disabled={busy || reading} />
           <Label htmlFor="rule-unique" className="text-sm">
             {t("chatRules.noRepeats")}
           </Label>
@@ -250,7 +298,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
             id="rule-mod-delay"
             checked={modDelay}
             onCheckedChange={setModDelay}
-            disabled={busy}
+            disabled={busy || reading}
           />
           <Label htmlFor="rule-mod-delay" className="text-sm">
             {t("chatRules.modDelay")}
@@ -263,7 +311,7 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
                part was wrong. */
             <select
               value={modDelaySeconds}
-              disabled={busy}
+              disabled={busy || reading}
               onChange={(e) => setModDelaySeconds(Number(e.target.value))}
               aria-label={t("chatRules.modDelayAria")}
               className="tnum h-6 rounded border border-border bg-card-raised px-1 text-sm"
@@ -280,16 +328,20 @@ export function ChatRules({ statuses }: { statuses: ChatStatus[] }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={() => void apply()} disabled={busy}>
+        <Button size="sm" onClick={() => void apply()} disabled={busy || reading}>
           {busy && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
           {t("common.apply")}
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => void clear()} disabled={busy}>
+        <Button size="sm" variant="secondary" onClick={() => void clear()} disabled={busy || reading}>
           {t("chatRules.turnAllOff")}
         </Button>
-        {/* The limitation, said out loud. See the note at the top of this file. */}
+        {/* What the switches mean, said out loud. See the note at the top. */}
         <span className="text-sm text-muted-foreground">
-          {t("chatRules.limitation")}
+          {roomState === "reading"
+            ? t("chatRules.reading")
+            : roomState === "known"
+              ? t("chatRules.readFromTwitch")
+              : t("chatRules.limitation")}
         </span>
       </div>
     </div>

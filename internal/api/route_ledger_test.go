@@ -785,6 +785,8 @@ var excusedRoutes = map[string]coverageExcus{
 	// UX Council A48: the flagged list carries the flagged message's text,
 	// which is the same content as the scrollback.
 	"GET /api/v1/chat/flags": deniedWithCounterpart("chatFlags"),
+	// The room's chat rules for the rules card (poka-yoke audit 2026-11-04).
+	"GET /api/v1/chat/settings": deniedWithCounterpart("chatSettings"),
 	// Wave 4 #4: cross-platform analytics is admin-only. Each route names
 	// something a read token is not for -- the connected channels, the
 	// broadcast titles, the top chatters -- and each proof plants it.
@@ -1276,6 +1278,7 @@ var counterpartProofs = map[string]counterpartProof{
 	"transcriptCaptionExport":               proveTranscriptCaptionExport,
 	"youtubeVerticalStatus":                 proveYouTubeVerticalStatus,
 	"chatFlags":                             proveChatFlags,
+	"chatSettings":                          proveChatSettings,
 	"analyticsLive":                         proveAnalyticsLive,
 	"analyticsStreams":                      proveAnalyticsStreams,
 	"analyticsReport":                       proveAnalyticsReport,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import type { ChatMessage, ChatPlatform, ChatStatus } from "@/lib/types";
 
@@ -66,6 +66,7 @@ vi.mock("sonner", () => ({
 
 // Imported after the mocks so the component picks them up.
 const { ChatPanel } = await import("./ChatPanel");
+const { api } = await import("@/lib/api");
 
 
 function status(platform: ChatPlatform): ChatStatus {
@@ -103,7 +104,10 @@ beforeEach(() => {
   };
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("the composer's placeholder when nothing can send (A88)", () => {
   it("keeps the placeholder short and puts the reason beneath the input, not clipped inside it", () => {
@@ -115,5 +119,66 @@ describe("the composer's placeholder when nothing can send (A88)", () => {
     const input = screen.getByRole("textbox", { name: /message/i }) as HTMLTextAreaElement;
     expect(input.placeholder).toBe("Chat not connected");
     expect(screen.getByText("No connected platform can send right now — you can still type.")).toBeTruthy();
+  });
+});
+
+/* The draft was cleared BEFORE the response was read, so a send no platform
+ * accepted lost the text mid-broadcast (poka-yoke audit 2026-11-04). */
+describe("the composer keeps a message nothing accepted", () => {
+  async function typeAndSend(text: string) {
+    const input = screen.getByRole("textbox", { name: /message/i }) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    return input;
+  }
+
+  it("keeps the draft when every platform refused it", async () => {
+    feed.statuses = [status("twitch"), status("youtube")];
+    vi.spyOn(api, "sendChat").mockResolvedValue({
+      results: [
+        { platform: "twitch", ok: false, detail: "x" },
+        { platform: "youtube", ok: false, detail: "y" },
+      ],
+      sent: 0,
+      failed: 2,
+      skipped: 0,
+    });
+    render(<ChatPanel />);
+    const input = await typeAndSend("hello chat");
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(input.value).toBe("hello chat");
+  });
+
+  it("clears a partly-sent draft but offers to put it back", async () => {
+    feed.statuses = [status("twitch"), status("youtube")];
+    vi.spyOn(api, "sendChat").mockResolvedValue({
+      results: [
+        { platform: "twitch", ok: true },
+        { platform: "youtube", ok: false, detail: "y" },
+      ],
+      sent: 1,
+      failed: 1,
+      skipped: 0,
+    });
+    render(<ChatPanel />);
+    const input = await typeAndSend("hello chat");
+    const restore = await screen.findByRole("button", { name: "Put the message back" });
+    expect(input.value).toBe("");
+    fireEvent.click(restore);
+    expect(input.value).toBe("hello chat");
+  });
+
+  it("clears the draft when everything took it, with nothing to restore", async () => {
+    feed.statuses = [status("twitch")];
+    vi.spyOn(api, "sendChat").mockResolvedValue({
+      results: [{ platform: "twitch", ok: true }],
+      sent: 1,
+      failed: 0,
+      skipped: 0,
+    });
+    render(<ChatPanel />);
+    const input = await typeAndSend("hello chat");
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(screen.queryByRole("button", { name: "Put the message back" })).toBeNull();
   });
 });

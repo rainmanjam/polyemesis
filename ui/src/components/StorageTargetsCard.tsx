@@ -4,6 +4,7 @@ import { Check, CloudUpload, Loader2, Pencil, Plus, RotateCcw, Send, Trash2, X }
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { SecretInput } from "@/components/SecretInput";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useDismissGuard } from "@/hooks/useDismissGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -148,6 +149,14 @@ export function StorageTargetsCard() {
   const [available, setAvailable] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // The editor holds a secret access key: a stray scrim click or Esc must not
+  // discard it (poka-yoke audit 2026-11-04, the destination dialog's pattern).
+  const dismissGuard = useDismissGuard(() => toast.info(t("save.dirty")));
+  const editorOpen = draft !== null;
+  const resetDismissGuard = dismissGuard.reset;
+  useEffect(() => {
+    if (editorOpen) resetDismissGuard();
+  }, [editorOpen, resetDismissGuard]);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<StorageTestResult | null>(null);
@@ -287,7 +296,7 @@ export function StorageTargetsCard() {
       </CardContent>
 
       <Dialog open={draft !== null} onOpenChange={(o) => !o && setDraft(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogContent {...dismissGuard.contentProps} className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{draft?.id ? t("storage.dialogEdit") : t("storage.dialogNew")}</DialogTitle>
             <DialogDescription>{t("storage.intro")}</DialogDescription>

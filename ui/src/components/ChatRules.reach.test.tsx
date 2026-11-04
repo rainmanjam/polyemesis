@@ -24,6 +24,10 @@ import type { ChatSettings, ChatStatus } from "@/lib/types";
  */
 
 const update = vi.spyOn(api, "updateChatSettings");
+// These tests are about what the switches SEND when the room's state is not
+// known (the read failed), which is the card's fallback; the known-state
+// behaviour is in ChatRules.roomState.test.tsx.
+const read = vi.spyOn(api, "getChatSettings");
 
 const statuses: ChatStatus[] = [
   { platform: "twitch", account: "acct", state: "live" } as ChatStatus,
@@ -32,10 +36,13 @@ const statuses: ChatStatus[] = [
 /** What was PATCHed to Twitch by the last Apply or Turn all off. */
 const sent = (): ChatSettings => update.mock.calls[0][2];
 
-beforeEach(() => {
+beforeEach(async () => {
   update.mockReset();
   update.mockResolvedValue({ status: "ok" });
+  read.mockReset();
+  read.mockRejectedValue(new Error("helix unavailable"));
   render(<ChatRules statuses={statuses} />);
+  await waitFor(() => expect(screen.getByLabelText("Slow mode")).not.toHaveProperty("disabled", true));
 });
 afterEach(cleanup);
 

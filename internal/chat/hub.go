@@ -1385,6 +1385,25 @@ func (h *Hub) UpdateChatSettings(ctx context.Context, p db.Platform, account str
 	return w.UpdateChatSettings(ctx, s)
 }
 
+// ReadChatSettings reads one platform's current channel-wide chat rules, for
+// a control that must show the room's real state rather than assume "off".
+func (h *Hub) ReadChatSettings(ctx context.Context, p db.Platform, account string) (ChatSettings, error) {
+	h.mu.Lock()
+	r := h.runners[runnerKey(p, account)]
+	h.mu.Unlock()
+
+	if r == nil {
+		return ChatSettings{}, fmt.Errorf("chat: %s is not connected", p)
+	}
+	rd, ok := r.adapter.(ChatSettingsReader)
+	if !ok {
+		return ChatSettings{}, fmt.Errorf("chat: %s publishes no API for reading its chat rules", p)
+	}
+	ctx, cancel := context.WithTimeout(ctx, h.sendTimeout)
+	defer cancel()
+	return rd.ReadChatSettings(ctx)
+}
+
 // quotaPacer is an adapter that meters itself against a daily API allowance the
 // operator can change.
 //

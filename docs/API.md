@@ -43,7 +43,7 @@ Every token carries a scope, chosen when it is created:
 
 | Scope | Reaches |
 |---|---|
-| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-five `GET`s among the twenty-seven refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
+| `read` (default) | **Metadata, not content.** Every `GET` except the twenty-six `GET`s among the twenty-eight refused routes below, plus `POST /version/check` and `POST /routing/compile` — the two POSTs that compute an answer and write nothing. Everything else is `403`. |
 | `admin` | Everything a signed-in operator can do, minus the session-only routes above. |
 | `mcp-read` | **The MCP endpoint only**, at the Read level. See [MCP.md](MCP.md). |
 | `mcp-admin` | **The MCP endpoint only**, at every level switched on in the MCP settings. |
@@ -135,10 +135,10 @@ These responses carry `Vary: Authorization, Cookie` and
 and a principal arrives in either header: a bearer in `Authorization`, the
 signed-in operator in `Cookie`.
 
-**Twenty-seven routes are refused outright**, for three different reasons. Masking
+**Twenty-eight routes are refused outright**, for three different reasons. Masking
 would have been wrong for the first two (expert mode's contract is that the
 command shown is the command that runs) and pointless for the next six, which
-are `403` because of what they *do*. The last eighteen are `403` because of what
+are `403` because of what they *do*. The last nineteen are `403` because of what
 `read` was decided to mean:
 
 | Route | Why |
@@ -165,6 +165,7 @@ are `403` because of what they *do*. The last eighteen are `403` because of what
 | `GET /chat/search` | hits are chat messages; iterating common words rebuilds the scrollback |
 | `GET /chat/users` | everything one viewer has said |
 | `GET /chat/flags` | automod's review list carries each flagged message's text, under its author's name |
+| `GET /chat/settings` | the room's chat rules, read from the platform with the moderator's token for the rules card |
 | `GET /analytics/live` | the live audience rows name the operator's connected channels. The counts alone are on the scrape (`polyemesis_platform_viewers`), which a `read` token may take |
 | `GET /analytics/streams` | each past stream's broadcast title |
 | `GET /analytics/streams/{id}` | the stream report names its top chatters |
@@ -1737,6 +1738,7 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
+| `GET` | `/chat/settings?platform=twitch` — the room's current rules (slow mode, follower-only, ...), read from the platform |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |

@@ -1673,6 +1673,7 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// route rather than a mode on the message ones.
 			// Channel-wide rules act on the ROOM, not a message or a
 			// person, so they get their own route too.
+			r.Get("/chat/settings", s.handleGetChatSettings)
 			r.Patch("/chat/settings", s.handleChatSettings)
 			r.Post("/chat/bans", s.handleChatBan)
 			r.Delete("/chat/bans", s.handleChatUnban)
@@ -2300,6 +2301,10 @@ var readScopeDeniedPatterns = map[string]bool{
 	// UX Council A48: automod's review list carries each flagged message's
 	// text, which is the scrollback again under another name.
 	"/api/v1/chat/flags": true,
+	// The room's current rules (poka-yoke audit 2026-11-04). Not content, but
+	// each read is a platform call made with the moderator's token, for the
+	// moderator's own rules card -- so it stays with the rest of chat.
+	"/api/v1/chat/settings": true,
 	// Wave 4 #4: cross-platform analytics is admin-only. The reports name the
 	// stream's top chatters -- who spoke, a cut of the scrollback -- and every
 	// analytics read names the operator's connected channels. The scrape gives

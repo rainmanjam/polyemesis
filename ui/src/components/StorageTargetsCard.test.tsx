@@ -146,3 +146,18 @@ describe("StorageTargetsCard: adding and deleting", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
   });
 });
+
+// The editor holds a secret access key. Esc on a touched form used to close it
+// with the secret gone (poka-yoke audit 2026-11-04).
+describe("StorageTargetsCard editor dismissal", () => {
+  it("keeps a touched editor open on Esc", async () => {
+    vi.spyOn(api.storage, "list").mockResolvedValue({ targets: [], available: true });
+    render(<StorageTargetsCard />);
+    fireEvent.click(await screen.findByRole("button", { name: /add|new/i }));
+    const dialog = await screen.findByRole("dialog");
+    const field = within(dialog).getAllByRole("textbox")[0];
+    fireEvent.change(field, { target: { value: "typed" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+});

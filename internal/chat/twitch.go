@@ -477,6 +477,56 @@ type ChatSettingsWriter interface {
 	UpdateChatSettings(ctx context.Context, s ChatSettings) error
 }
 
+// ChatSettingsReader is the optional capability to read a room's current
+// rules, so a control can show the real state instead of assuming "off".
+type ChatSettingsReader interface {
+	Adapter
+	ReadChatSettings(ctx context.Context) (ChatSettings, error)
+}
+
+// ReadChatSettings reads the room's current rules from Helix. Every field
+// comes back set, so the caller knows the whole state (poka-yoke audit
+// 2026-11-04: the rules card used to start every switch "off" whatever the
+// room said, so a mode set elsewhere looked removed while it was on).
+func (t *TwitchAdapter) ReadChatSettings(ctx context.Context) (ChatSettings, error) {
+	if err := t.helixReady(); err != nil {
+		return ChatSettings{}, err
+	}
+	q := url.Values{
+		"broadcaster_id": {t.cfg.BroadcasterID},
+		"moderator_id":   {t.cfg.ModeratorID},
+	}
+	var out struct {
+		Data []struct {
+			SlowMode                      bool `json:"slow_mode"`
+			SlowModeWaitTime              *int `json:"slow_mode_wait_time"`
+			FollowerMode                  bool `json:"follower_mode"`
+			FollowerModeDuration          *int `json:"follower_mode_duration"`
+			SubscriberMode                bool `json:"subscriber_mode"`
+			EmoteMode                     bool `json:"emote_mode"`
+			UniqueChatMode                bool `json:"unique_chat_mode"`
+			NonModeratorChatDelay         bool `json:"non_moderator_chat_delay"`
+			NonModeratorChatDelayDuration *int `json:"non_moderator_chat_delay_duration"`
+		} `json:"data"`
+	}
+	err := doJSONHeaders(ctx, t.cfg.HTTP, http.MethodGet,
+		t.helixBase()+"/chat/settings?"+q.Encode(),
+		t.cfg.HelixToken, map[string]string{twitchClientIDHeader: t.cfg.ClientID}, nil, &out)
+	if err != nil {
+		return ChatSettings{}, t.moderationError(err, "chat settings read")
+	}
+	if len(out.Data) == 0 {
+		return ChatSettings{}, fmt.Errorf("twitch returned no chat settings for this channel")
+	}
+	d := out.Data[0]
+	return ChatSettings{
+		SlowMode: &d.SlowMode, SlowModeSeconds: d.SlowModeWaitTime,
+		FollowerMode: &d.FollowerMode, FollowerModeMinutes: d.FollowerModeDuration,
+		SubscriberMode: &d.SubscriberMode, EmoteMode: &d.EmoteMode, UniqueChatMode: &d.UniqueChatMode,
+		NonModeratorChatDelay: &d.NonModeratorChatDelay, NonModeratorChatDelaySeconds: d.NonModeratorChatDelayDuration,
+	}, nil
+}
+
 // UpdateChatSettings applies channel-wide chat rules.
 //
 // PATCH semantics throughout: only the fields set are sent, so adjusting slow
