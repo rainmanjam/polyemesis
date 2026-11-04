@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Un encoder sta pubblicando su questa sorgente in questo momento. Il vecchio token resta valido per cinque minuti, quindi non verrà interrotto — ma va aggiornato prima che quella finestra si chiuda.",
   "sources.rtt": "RTT",
   "sources.bonded": "Aggregato su {count} collegamenti",
+  "sources.bondedOne": "Aggregato su {count} collegamento",
   "sources.share": "quota",
   "sources.bitrate": "bitrate",
   "sources.degraded": "Collegamento degradato",

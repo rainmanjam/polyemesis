@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "지금 이 소스로 인코더가 송출 중입니다. 이전 토큰은 5분 동안 계속 작동하므로 연결이 끊기지는 않지만, 그 시간이 지나기 전에 반드시 갱신해야 합니다.",
   "sources.rtt": "RTT",
   "sources.bonded": "{count}개 회선으로 본딩 중",
+  "sources.bondedOne": "{count}개 회선으로 본딩 중",
   "sources.share": "비중",
   "sources.bitrate": "비트레이트",
   "sources.degraded": "회선 저하",

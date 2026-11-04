@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "現在このソースへエンコーダーが配信中です。古いトークンは 5 分間有効なため接続はすぐには切れませんが、その期限までに更新する必要があります。",
   "sources.rtt": "RTT",
   "sources.bonded": "{count} 回線でボンディング中",
+  "sources.bondedOne": "{count} 回線でボンディング中",
   "sources.share": "割合",
   "sources.bitrate": "ビットレート",
   "sources.degraded": "回線劣化",

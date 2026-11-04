@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "An encoder is publishing to this source right now. The old token keeps working for five minutes, so it will not be cut off — but it must be updated before that window closes.",
   "sources.rtt": "RTT",
   "sources.bonded": "Bonded over {count} links",
+  "sources.bondedOne": "Bonded over {count} link",
   "sources.share": "share",
   "sources.bitrate": "bitrate",
   "sources.degraded": "Link degraded",

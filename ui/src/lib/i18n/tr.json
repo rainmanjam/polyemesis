@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Şu anda bu kaynağa bir kodlayıcı yayın gönderiyor. Eski belirteç beş dakika daha çalışmayı sürdürür, bu yüzden bağlantı kesilmez — ancak bu süre dolmadan güncellenmesi gerekir.",
   "sources.rtt": "RTT",
   "sources.bonded": "{count} bağlantı üzerinden birleştirildi",
+  "sources.bondedOne": "{count} bağlantı üzerinden birleştirildi",
   "sources.share": "pay",
   "sources.bitrate": "bit hızı",
   "sources.degraded": "Bağlantı zayıf",

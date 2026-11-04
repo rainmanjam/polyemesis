@@ -867,7 +867,9 @@ export function SourceCard({
              which has dropped to nothing. */
           <div className="flex flex-col gap-1 rounded-md border border-border px-2 py-1.5">
             <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("sources.bonded", { count: source.bonded.links?.length ?? 0 })}
+              {t((source.bonded.links?.length ?? 0) === 1 ? "sources.bondedOne" : "sources.bonded", {
+                count: source.bonded.links?.length ?? 0,
+              })}
             </span>
             {source.bonded.links?.map((l) => (
               <div key={l.peer} className="flex flex-wrap items-center gap-3">

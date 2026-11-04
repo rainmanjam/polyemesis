@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Um codificador está publicando nesta fonte agora. O token antigo continua funcionando por cinco minutos, então não será cortado — mas precisa ser atualizado antes que esse prazo termine.",
   "sources.rtt": "RTT",
   "sources.bonded": "Agregado em {count} links",
+  "sources.bondedOne": "Agregado em {count} link",
   "sources.share": "parcela",
   "sources.bitrate": "taxa",
   "sources.degraded": "Link degradado",

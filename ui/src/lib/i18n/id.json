@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Sebuah encoder sedang mengirim ke sumber ini saat ini. Token lama masih berfungsi selama lima menit, jadi tidak akan langsung terputus — tetapi harus diperbarui sebelum tenggang itu berakhir.",
   "sources.rtt": "RTT",
   "sources.bonded": "Digabung lewat {count} koneksi",
+  "sources.bondedOne": "Digabung lewat {count} koneksi",
   "sources.share": "porsi",
   "sources.bitrate": "bitrate",
   "sources.degraded": "Koneksi menurun",

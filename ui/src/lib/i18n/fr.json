@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Un encodeur publie sur cette source en ce moment. L'ancien jeton reste valable cinq minutes, la connexion ne sera donc pas coupée — mais il doit être mis à jour avant la fin de ce délai.",
   "sources.rtt": "RTT",
   "sources.bonded": "Agrégé sur {count} liaisons",
+  "sources.bondedOne": "Agrégé sur {count} liaison",
   "sources.share": "part",
   "sources.bitrate": "débit",
   "sources.degraded": "Liaison dégradée",

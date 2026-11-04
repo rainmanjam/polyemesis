@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Ein Encoder sendet gerade an diese Quelle. Das alte Token bleibt fünf Minuten gültig, die Verbindung wird also nicht sofort getrennt — es muss aber vor Ablauf dieser Frist aktualisiert werden.",
   "sources.rtt": "RTT",
   "sources.bonded": "Gebündelt über {count} Verbindungen",
+  "sources.bondedOne": "Gebündelt über {count} Verbindung",
   "sources.share": "Anteil",
   "sources.bitrate": "Bitrate",
   "sources.degraded": "Verbindung gestört",

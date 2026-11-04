@@ -1734,6 +1734,7 @@
   "sources.rotateWhilePublishing": "Er publiceert op dit moment een encoder naar deze bron. Het oude token blijft vijf minuten werken, dus de verbinding wordt niet verbroken — maar het moet vóór het einde van die periode bijgewerkt worden.",
   "sources.rtt": "RTT",
   "sources.bonded": "Gebundeld over {count} verbindingen",
+  "sources.bondedOne": "Gebundeld over {count} verbinding",
   "sources.share": "aandeel",
   "sources.bitrate": "bitrate",
   "sources.degraded": "Verbinding verslechterd",
