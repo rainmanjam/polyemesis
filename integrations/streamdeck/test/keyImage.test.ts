@@ -19,6 +19,7 @@ import {
   fitName,
   glyphFor,
   imagePainter,
+  nameRepeatsMark,
   layoutSvg,
   textWidth,
 } from "../src/keyImage.js";
@@ -153,6 +154,26 @@ describe("the name", () => {
       }
     },
   );
+
+  it("is left off when it only repeats a mark that is the platform's name: X shows its mark, not \"X X\"", () => {
+    for (const name of ["X", "x", " X ", ""]) {
+      const l = destinationLayout("live", { platform: "x", name }, 1);
+      expect(l.name, JSON.stringify(name)).toBeUndefined();
+      expect(l.glyph.id).toBe("x");
+    }
+    expect(decode(destinationImage("live", { platform: "x", name: "X" }, 1))).not.toContain("<text");
+  });
+
+  it("keeps an operator's own name on X, and the platform's name beside a symbol mark", () => {
+    expect(destinationLayout("live", { platform: "x", name: "X — clips" }, 1).name?.text).toBe("X — clips");
+    expect(destinationLayout("live", { platform: "x", name: "Xavier" }, 1).name?.text).toBe("Xavier");
+    for (const [platform, name] of [["youtube", "YouTube"], ["twitch", "Twitch"], ["kick", "Kick"], ["facebook", "Facebook"]]) {
+      expect(destinationLayout("live", { platform: platform!, name: name! }, 1).name?.text, platform).toBe(name);
+    }
+    // a custom destination named "X" has the transmitter, not X's mark: its name is not a repeat
+    expect(destinationLayout("live", { platform: "custom", name: "X" }, 1).name?.text).toBe("X");
+    expect(nameRepeatsMark({ platform: "custom", name: "X" }, "X")).toBe(false);
+  });
 
   it("shrinks before it cuts", () => {
     const fit = fitName("Facebook", 85);

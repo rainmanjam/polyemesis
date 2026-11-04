@@ -220,7 +220,9 @@ destination's own name (as you named it in the console) sit at the top of the
 key; the state and its reason are the lines below. The marks are YouTube,
 Twitch, Kick, Facebook and X, in one colour, the state's title colour; a custom
 RTMP destination, and any other platform, shows a neutral transmitter. A long
-name is shrunk, then cut with an ellipsis. When the state needs four lines or
+name is shrunk, then cut with an ellipsis. X's mark is the letter X, so an X
+destination named just "X" shows the mark alone rather than "X X"; a name of
+your own ("X — clips") is shown as usual. When the state needs four lines or
 more, the name is left off and the mark stays. The name and mark are shown
 only while the key shows that destination's own state: **Not found**, **Other
 programme**, an unreachable install and the **Needs admin token** padlock show

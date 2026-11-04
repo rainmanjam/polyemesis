@@ -18,7 +18,8 @@ its first tagged release.
   reason below as before. The image is an SVG the plugin draws itself (`setImage`); a key that is not
   showing that destination's own state (not found, other programme, unreachable, the read-token
   padlock) goes back to the plain face. A long name shrinks, then is cut; with four or more state
-  lines the name is left off. The marks are Simple Icons (CC0 1.0), listed in the plugin's new
+  lines the name is left off. On X, whose mark is its name, a destination named just "X" shows the
+  mark alone. The marks are Simple Icons (CC0 1.0), listed in the plugin's new
   `third-party-licenses.txt`. Action UUIDs, settings and the API are unchanged.
 
 - **A tap on a failed Stream Deck destination key retries it.** The Destination key started a

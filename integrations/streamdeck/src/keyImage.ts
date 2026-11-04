@@ -153,6 +153,21 @@ export function displayName(mark: DestinationMark): string {
   return own || PLATFORM_NAME[mark.platform] || mark.platform;
 }
 
+/**
+ * Platforms whose mark IS their name: X's mark is the letter X, so a key named "X" would read "X X".
+ * On these, a name that only repeats the platform's own name is left off and the mark stands alone.
+ * A name of the operator's own ("X — clips") is still drawn. YouTube's or Twitch's mark is a symbol,
+ * not its name, so "YouTube" beside the play button is not a repeat and stays.
+ */
+const MARK_IS_NAME = new Set(["x"]);
+
+/** True when the name would only repeat what the mark already says. */
+export function nameRepeatsMark(mark: DestinationMark, text: string): boolean {
+  if (!MARK_IS_NAME.has(mark.platform)) return false;
+  const own = PLATFORM_NAME[mark.platform];
+  return own !== undefined && text.toLocaleLowerCase() === own.toLocaleLowerCase();
+}
+
 /** The layout of a destination key's image for a state, its destination and its title's line count. */
 export function destinationLayout(tone: KeyTone, mark: DestinationMark, titleLines: number): FaceLayout {
   const base = KEY_COLOURS[tone] as Rgb;
@@ -165,7 +180,7 @@ export function destinationLayout(tone: KeyTone, mark: DestinationMark, titleLin
     glyph,
   };
   const text = displayName(mark);
-  if (titleLines <= NAME_TITLE_LINES_MAX && text) {
+  if (titleLines <= NAME_TITLE_LINES_MAX && text && !nameRepeatsMark(mark, text)) {
     const x = BAND.x + BAND.glyph + BAND.gap;
     const fit = fitName(text, FACE - BAND.right - x);
     // Centred on the mark: a cap-height of about 0.72 em puts the baseline 0.36 em below the middle.
