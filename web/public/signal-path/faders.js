@@ -5,7 +5,7 @@ import * as THREE from './vendor/three.js';
  * Bar geometry is taken straight from the favicon: x, width 2.5, height, fully rounded ends (rx 1.25).
  * Each bar becomes a capsule cap sliding in a dark groove. At rest the caps sit on the mark's own
  * centre line, so the silhouette reads as the logo.
- * Channels: [spare, Mic, Music, Game, spare]. Spare channels follow the average of the mix.
+ * Channels: [spare, Mic, Music, Game, spare]. Spare channels hold a neutral mid position that shifts slightly with each mix.
  */
 const BARS=[[2.5,6],[6.2,14],[9.9,9],[13.6,17],[17.3,8]];
 const COLORS=[0x7d8798,0x45b5d0,0xe879f9,0x9b8cff,0xaab3c5];
@@ -55,7 +55,7 @@ export function createFaders(host){
     const w=Math.max(40,box.width),h=Math.max(40,box.height);
     renderer.setSize(w,h,false);
     camera.aspect=w/h;
-    const fitH=26,fitW=26/camera.aspect*camera.aspect;
+    const fitH=26,fitW=26;
     const distance=Math.max(fitH/2/Math.tan(camera.fov*Math.PI/360),(fitW/2)/(Math.tan(camera.fov*Math.PI/360)*camera.aspect));
     camera.position.z=distance;camera.updateProjectionMatrix();ready=true;
   }
@@ -76,7 +76,7 @@ export function createFaders(host){
   function paint(state,dt=0){
     if(disposed||!ready)return true;
     const mix=mixFor(state);
-    const k=state.reduced||dt<=0?1:1-Math.exp(-dt/150);
+    const k=state.reduced?1:dt<=0?0:1-Math.exp(-dt/150);
     let settled=true;
     faders.forEach((f,i)=>{
       const idle=state.reduced?0:Math.sin(((state.flow||0)/1000)*(1.1+i*.37)+i*1.7)*.03;
@@ -87,7 +87,7 @@ export function createFaders(host){
       f.cap.position.y=(f.level-.5)*2*f.travel;
       f.material.emissiveIntensity=.12+Math.max(0,f.level-.5)*.25;
     });
-    const tk=state.reduced||dt<=0?1:1-Math.exp(-dt/110);
+    const tk=state.reduced?1:dt<=0?0:1-Math.exp(-dt/110);
     tilt.x+=(tiltTarget.x-tilt.x)*tk;tilt.y+=(tiltTarget.y-tilt.y)*tk;
     if(Math.abs(tilt.x-tiltTarget.x)>1e-4||Math.abs(tilt.y-tiltTarget.y)>1e-4)settled=false;
     mark.rotation.set(baseTilt.x+tilt.x,baseTilt.y+tilt.y,0);

@@ -94,7 +94,7 @@ export function createSignalScene(host){
   }
 
   function begins(route){return route.index===0?150+route.track*80:2900+route.index*220+route.track*90}
-  const ease=(current,target,dt)=>current+(target-current)*(dt>0?1-Math.exp(-dt/120):1);
+  const ease=(current,target,dt)=>dt>0?current+(target-current)*(1-Math.exp(-dt/120)):current;
 
   function place(i,x,y,angle,sx,sy,rgb,brightness){
     position.set(x-width/2,height/2-y,2);

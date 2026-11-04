@@ -105,7 +105,7 @@ function updateMeters(dt) {
       if(card.dest==='youtube'&&bar.i===1)base=state.includeMusic?.8:0;
       const wobble=state.reduced||base===0?1:.86+.14*Math.sin(t*(1.7+bar.i*.8)+bar.i*2.1)*Math.sin(t*(.9+bar.i*.3)+1.3)+.05*Math.sin(t*(5+bar.i));
       const target=base*wobble;
-      const k=state.reduced||dt<=0?1:1-Math.exp(-dt/(base===0||target<bar.level-.2?220:90));
+      const k=state.reduced?1:dt<=0?0:1-Math.exp(-dt/(base===0||target<bar.level-.2?220:90));
       bar.level=bar.level+(target-bar.level)*k;
       if(Math.abs(bar.level-target)>.004)moving=true;
       bar.fill.style.transform=`scaleX(${Math.max(0,bar.level).toFixed(3)})`;
@@ -148,7 +148,7 @@ function tick(now) {
   frameId=0;
   const rawDelta=lastTime?Math.min(now-lastTime,80):0;
   const complete=state.elapsed>=duration&&traceElapsed<0&&!running;
-  if(complete&&settled&&now-lastPaint<30){requestTick();return}
+  if(complete&&now-lastPaint<30){requestTick();return}
   lastTime=now;lastPaint=now;
   const delta=rawDelta;
   if(ambient())state.flow+=delta;
@@ -198,7 +198,7 @@ document.getElementById('music-toggle').addEventListener('change',event=>{
   document.getElementById('youtube-music').classList.toggle('silent',!state.includeMusic);
   document.getElementById('music-point').classList.toggle('off',!state.includeMusic);
   wires.querySelectorAll('[data-music-lane="1"]').forEach(path=>path.classList.toggle('off',!state.includeMusic));
-  setPlayback(false);state.elapsed=duration;traceRestore=motion.matches?null:previousElapsed;currentChapter=-1;
+  setPlayback(false);state.elapsed=duration;traceRestore=motion.matches?null:(traceRestore??previousElapsed);currentChapter=-1;
   traceElapsed=motion.matches?-1:0;state.traceProgress=motion.matches?-1:0;
   drawFrame();
   showNarration(state.includeMusic?'Music → YouTube.':'Music excluded from YouTube.',state.includeMusic?(motion.matches?'YouTube now includes the music track. The other outputs keep their mixes.':'Follow the magenta signal. The other outputs keep their mixes.'):'Twitch keeps its music. The archive keeps the original tracks.');
@@ -232,7 +232,7 @@ motion.addEventListener('change',()=>{
 });
 /* Arm the live region on first interaction so later narration is announced without chattering through autoplay. */
 const armLive=()=>{story.setAttribute('aria-live','polite');story.setAttribute('aria-atomic','true')};
-demo.addEventListener('pointerdown',armLive,{once:true});demo.addEventListener('keydown',armLive,{once:true});
+for(const target of [demo,document.querySelector('.steps')]){target.addEventListener('pointerdown',armLive,{once:true});target.addEventListener('keydown',armLive,{once:true})}
 document.addEventListener('visibilitychange',()=>{
   cancelAnimationFrame(frameId);frameId=0;lastTime=0;
   if(!document.hidden)requestTick();
