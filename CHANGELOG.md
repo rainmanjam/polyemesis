@@ -8,6 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The meters follow the programme selected in the header.** On an install with several
+  programmes, every programme's audio levels reach the console over one live connection, and the
+  console drew whichever programme metered last. Tracks a smaller programme lacks read "not
+  measured" (tracks 3 and 4 in about 40% of samples on the three-programme demo). Levels frames
+  now name their programme, as status frames do, and the Meters and Routing pages keep only the
+  selected programme's. Switching programme clears the old programme's meters until the new one
+  reports, and the routing editor's "last peak" for a quiet track is kept per programme.
+
 ### Changed
 
 - **The home page hero is now an interactive signal path.** "One stream in. Your mix, everywhere."

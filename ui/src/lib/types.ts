@@ -1288,6 +1288,12 @@ export interface FailoverStatus {
 export interface Levels {
   peak: number[][] | null;
   rms: number[][] | null;
+  /** The programme the reading was measured on, on a /ws levels frame. Every
+   *  engine publishes onto the one socket, so this is how the console keeps the
+   *  selected programme's meters (lib/dashboardFacts programmeLevels). Absent
+   *  from GET /levels, which is already scoped by ?source=, and from a server
+   *  that predates the tag. */
+  source?: { id: number; name: string } | null;
 }
 
 export interface SystemStats {

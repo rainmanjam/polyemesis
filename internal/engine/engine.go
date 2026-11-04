@@ -2672,8 +2672,9 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 				e.mu.Lock()
 				e.levels = l
 				e.levelsAt = now
+				frame := LevelsFrame{Levels: l, Source: ProgrammeRef{ID: e.sourceID, Name: e.sourceName}}
 				e.mu.Unlock()
-				e.bus.Publish(events.TypeLevels, l)
+				e.bus.Publish(events.TypeLevels, frame)
 			})
 		},
 		OnLog:   e.onLog,
@@ -5411,6 +5412,26 @@ func (e *Engine) MeterInterval() time.Duration {
 		return 0
 	}
 	return time.Duration(e.meterInterval.Load())
+}
+
+// LevelsFrame is a metering snapshot as the bus carries it: the readings, and
+// the programme they were measured on.
+//
+// Every engine publishes onto the one bus and /ws relays all of it, so a levels
+// frame that did not say whose it was got drawn over whichever programme the
+// console had selected -- a two-track programme's frame blanking tracks 3 and 4
+// of a four-track one. Source mirrors status.source.id/name, the accessor the
+// console already scopes status by. Levels is embedded so peak and rms stay at
+// the top level, where every existing client reads them.
+type LevelsFrame struct {
+	ffmpeg.Levels
+	Source ProgrammeRef `json:"source"`
+}
+
+// ProgrammeRef names the programme a frame belongs to.
+type ProgrammeRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // Levels returns the most recent metering frame, or an empty one and the zero
