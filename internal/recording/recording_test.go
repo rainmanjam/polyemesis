@@ -775,3 +775,70 @@ func TestDeleteRefusesAnEscapingFilename(t *testing.T) {
 		t.Errorf("file outside the recordings dir was deleted: %v", err)
 	}
 }
+
+// An unmounted recordings volume lists as an empty directory. Before the
+// breaker, one scan of it de-indexed every recording and cascaded their
+// transcripts, highlights and sessions away; the files came back on remount,
+// the metadata did not.
+func TestScanHoldsTheIndexWhenTheDirectoryListsEmpty(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour, 1 * time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	for _, n := range names {
+		if err := os.Remove(filepath.Join(dir, n)); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+	}
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if got := indexedFilenames(t, store); len(got) != len(names) {
+		t.Errorf("indexed %v after an empty listing, want all %d rows kept", got, len(names))
+	}
+}
+
+// More than half of a non-trivial index vanishing in one pass is held too:
+// a partly-mounted or half-synced volume, not an operator's clean-up.
+func TestScanHoldsTheIndexWhenMostOfItVanishesAtOnce(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	ages := []time.Duration{5 * time.Hour, 4 * time.Hour, 3 * time.Hour, 2 * time.Hour, 1 * time.Hour}
+	names := writeSegments(t, dir, now, ages, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	for _, n := range names[:3] {
+		if err := os.Remove(filepath.Join(dir, n)); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+	}
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	if got := indexedFilenames(t, store); len(got) != len(names) {
+		t.Errorf("indexed %d rows after 3 of 5 vanished, want all %d kept", len(got), len(names))
+	}
+}
+
+func TestMassVanish(t *testing.T) {
+	cases := []struct {
+		indexed, missing int
+		want             bool
+	}{
+		{0, 0, false},
+		{2, 1, false},
+		{5, 2, false},
+		{5, 3, true},
+		{3, 3, true},
+		{1, 1, true},
+		{3, 2, false},
+	}
+	for _, c := range cases {
+		if got := MassVanish(c.indexed, c.missing); got != c.want {
+			t.Errorf("MassVanish(%d, %d) = %v, want %v", c.indexed, c.missing, got, c.want)
+		}
+	}
+}

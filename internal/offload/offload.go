@@ -508,18 +508,36 @@ func (s *Service) candidates() ([]candidate, error) {
 
 // prune drops item rows for files that are no longer on disk. The remote object is left alone -- mirror mode keeps local
 // retention unchanged, and the bucket's own lifecycle rule owns the copy.
+//
+// A MISSING VOLUME IS NOT A MISSING FILE. With the recordings volume
+// unmounted every stat says "not exist", and pruning on that wiped every
+// item row: the archive re-uploaded in full when the volume came back, and
+// stuck or failed state (what Retry acts on) was lost. So prune holds -- the
+// same breaker as the recordings index (recording.MassVanish) -- when every
+// tracked file, or more than half of a non-trivial ledger, vanished in one
+// pass. A missing directory is the "every file" case.
 func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
+	dir := s.rec.Dir()
 	seen := map[string]bool{}
-	changed := false
+	var gone []string
 	for _, it := range items {
 		if seen[it.RelPath] {
 			continue
 		}
 		seen[it.RelPath] = true
-		if _, err := os.Stat(filepath.Join(s.rec.Dir(), filepath.FromSlash(it.RelPath))); errors.Is(err, os.ErrNotExist) {
-			if err := s.store.DeleteOffloadItemsFor(it.RelPath); err == nil {
-				changed = true
-			}
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(it.RelPath))); errors.Is(err, os.ErrNotExist) {
+			gone = append(gone, it.RelPath)
+		}
+	}
+	if recording.MassVanish(len(seen), len(gone)) {
+		s.log.Warn("offload: most tracked files vanished in one pass; not pruning the ledger "+
+			"(is the recordings volume mounted?)", "dir", dir, "tracked", len(seen), "missing", len(gone))
+		return false
+	}
+	changed := false
+	for _, rel := range gone {
+		if err := s.store.DeleteOffloadItemsFor(rel); err == nil {
+			changed = true
 		}
 	}
 	return changed

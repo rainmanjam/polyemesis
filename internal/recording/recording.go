@@ -404,6 +404,28 @@ func (m *Manager) Scan() (bool, error) {
 	}
 	m.unprobeableMu.Unlock()
 
+	missing := 0
+	for _, r := range indexed {
+		if !onDisk[r.Filename] {
+			missing++
+		}
+	}
+	// A MASS DE-INDEX IS AN UNMOUNTED VOLUME, NOT A CLEAN-UP. Every row
+	// dropped here cascades its transcripts, highlights and session
+	// membership, and none of that comes back when the files do. A volume
+	// that is not mounted yet (or dropped off the NAS) lists as an empty
+	// directory, so without this breaker one scan erased the whole archive's
+	// metadata. Losing every indexed file at once, or more than half of a
+	// non-trivial index in one pass, is held and reported instead; the
+	// operator's own deletes go through Delete and the sweeper, which remove
+	// the row themselves and never reach this loop.
+	if MassVanish(len(indexed), missing) {
+		m.log.Warn("recordings directory lost most of the index in one scan; "+
+			"not de-indexing (is the recordings volume mounted?)",
+			"dir", m.dir, "indexed", len(indexed), "missing", missing)
+		return changed, nil
+	}
+
 	for _, r := range indexed {
 		if !onDisk[r.Filename] {
 			if err := m.store.DeleteRecordingByFilename(r.Filename); err != nil {
@@ -415,6 +437,23 @@ func (m *Manager) Scan() (bool, error) {
 		}
 	}
 	return changed, nil
+}
+
+// MassVanishFloor is the smallest index the "more than half" rule applies to.
+// Below it, losing half is one or two files an operator removed by hand.
+const MassVanishFloor = 4
+
+// MassVanish reports whether dropping missing of indexed rows in one scan
+// looks like a vanished volume rather than files removed one by one: all of
+// them at once, or more than half of an index of at least MassVanishFloor.
+func MassVanish(indexed, missing int) bool {
+	if missing == 0 {
+		return false
+	}
+	if missing == indexed {
+		return true
+	}
+	return indexed >= MassVanishFloor && missing*2 > indexed
 }
 
 // errNoDuration is the one probe failure that is a fact about the file rather

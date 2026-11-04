@@ -91,6 +91,14 @@ type Runner struct {
 
 	mu   sync.Mutex
 	last []Result
+
+	// handled is the last occurrence this process has acted on (or skipped),
+	// per schedule. It backs up the stored LastRunAt for when MarkScheduleRun
+	// fails: the occurrence would otherwise stay armed for its whole grace
+	// window and re-apply every sweep, overriding an operator who toggled
+	// the destination or playlist back by hand in the meantime. Evaluate reads
+	// whichever of the two is later, so a failed mark cannot re-arm anything.
+	handled map[int64]time.Time
 }
 
 // New creates a Runner. It does nothing until Run is called.
@@ -140,6 +148,9 @@ func (r *Runner) Tick(now time.Time) []Result {
 	)
 	for _, s := range rows {
 		s = s.Normalized()
+		if h := r.handledAt(s.ID); h.After(s.LastRunAt) {
+			s.LastRunAt = h
+		}
 		d := Evaluate(s, now)
 		if !d.Fire && !d.Skip {
 			continue
@@ -150,7 +161,7 @@ func (r *Runner) Tick(now time.Time) []Result {
 			// Recorded as handled without acting: this is the missed window,
 			// and the only thing worse than not starting is starting late.
 			res.Skipped = true
-			if err := r.store.MarkScheduleRun(s.ID, d.At); err != nil {
+			if err := r.mark(s.ID, d.At); err != nil {
 				res.Err = err.Error()
 			}
 			r.log.Warn("schedule window missed; not acting on it",
@@ -183,7 +194,7 @@ func (r *Runner) Tick(now time.Time) []Result {
 			// only reconciles when something changed.
 			changed = true
 			res.Fired = true
-			if err := r.store.MarkScheduleRun(s.ID, d.At); err != nil {
+			if err := r.mark(s.ID, d.At); err != nil {
 				res.Err = err.Error()
 			}
 			// "target" rather than a playlist-specific key so one log query
@@ -240,7 +251,7 @@ func (r *Runner) Tick(now time.Time) []Result {
 		// Marked handled even when a destination flip failed: retrying the
 		// whole occurrence on the next sweep would re-apply it to the ones that
 		// worked, and the failure is already logged and surfaced.
-		if err := r.store.MarkScheduleRun(s.ID, d.At); err != nil && res.Err == "" {
+		if err := r.mark(s.ID, d.At); err != nil && res.Err == "" {
 			res.Err = err.Error()
 		}
 		r.log.Info("schedule fired",
@@ -291,6 +302,27 @@ func (r *Runner) Last() []Result {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]Result(nil), r.last...)
+}
+
+// mark records an occurrence as handled: in memory first, unconditionally, so
+// this process never acts on it again, then in the store. A store failure is
+// returned for the result, and no longer re-arms the occurrence.
+func (r *Runner) mark(id int64, at time.Time) error {
+	r.mu.Lock()
+	if r.handled == nil {
+		r.handled = map[int64]time.Time{}
+	}
+	if at.After(r.handled[id]) {
+		r.handled[id] = at
+	}
+	r.mu.Unlock()
+	return r.store.MarkScheduleRun(id, at)
+}
+
+func (r *Runner) handledAt(id int64) time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.handled[id]
 }
 
 func (r *Runner) emit(res Result) {

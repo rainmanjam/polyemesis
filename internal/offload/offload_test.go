@@ -568,3 +568,72 @@ func TestBackoffGrowsAndCaps(t *testing.T) {
 // settle waits for the passes Kick started (Retry now starts one), so a test
 // reads the outcome of the pass rather than racing it.
 func (f *fixture) settle() { f.svc.kicks.Wait() }
+
+// An unmounted recordings volume made every stat say "not exist", and prune
+// wiped the whole ledger: a full re-upload when the volume returned, and the
+// failed/stuck state Retry acts on was gone.
+func TestPruneKeepsTheLedgerWhenTheVolumeIsGone(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		unmnt func(f *fixture, names []string)
+	}{
+		{"directory missing", func(f *fixture, _ []string) {
+			if err := os.Rename(f.dir, f.dir+".away"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Rename(f.dir+".away", f.dir) })
+		}},
+		{"directory lists empty", func(f *fixture, names []string) {
+			for _, n := range names {
+				if err := os.Remove(filepath.Join(f.dir, n)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			id := f.target()
+			names := []string{
+				f.segment(5*time.Hour, "first", true),
+				f.segment(4*time.Hour, "second", true),
+			}
+			f.segment(time.Minute, "live", true)
+			f.svc.Pass(context.Background())
+			for _, n := range names {
+				if _, ok := f.item(id, n); !ok {
+					t.Fatalf("%s not tracked after the first pass", n)
+				}
+			}
+			tc.unmnt(f, names)
+			f.svc.Pass(context.Background())
+			for _, n := range names {
+				if _, ok := f.item(id, n); !ok {
+					t.Errorf("%s: ledger row pruned while the volume was gone", n)
+				}
+			}
+		})
+	}
+}
+
+// One file removed out of several is an ordinary delete, and its row goes.
+func TestPruneStillDropsASingleRemovedFile(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	var names []string
+	for i := 5; i >= 2; i-- {
+		names = append(names, f.segment(time.Duration(i)*time.Hour, "seg"+strconv.Itoa(i), true))
+	}
+	f.segment(time.Minute, "live", true)
+	f.svc.Pass(context.Background())
+	if err := os.Remove(filepath.Join(f.dir, names[0])); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.Pass(context.Background())
+	if _, ok := f.item(id, names[0]); ok {
+		t.Errorf("row for removed %s kept", names[0])
+	}
+	if _, ok := f.item(id, names[1]); !ok {
+		t.Errorf("row for %s dropped", names[1])
+	}
+}
