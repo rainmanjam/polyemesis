@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -164,6 +165,13 @@ func (t *TwitchAdapter) setHealth(state State, detail string) {
 
 // Run connects, joins and reads until ctx ends or the connection breaks.
 func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
+	// The token first, so a refresh that fails costs no connection and sends
+	// no stale credential; see passToken.
+	pass, err := t.passToken(ctx)
+	if err != nil {
+		t.setHealth(StateFailed, err.Error())
+		return err
+	}
 	conn, err := t.dial(ctx)
 	if err != nil {
 		t.setHealth(StateFailed, "could not reach Twitch chat: "+err.Error())
@@ -199,7 +207,7 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 	if err := t.writeLine(conn, "CAP REQ :twitch.tv/tags twitch.tv/commands"); err != nil {
 		return err
 	}
-	if err := t.writeLine(conn, "PASS oauth:"+t.passToken(ctx)); err != nil {
+	if err := t.writeLine(conn, "PASS oauth:"+pass); err != nil {
 		return fmt.Errorf("sending Twitch credentials failed: %w", err)
 	}
 	if err := t.writeLine(conn, "NICK "+t.cfg.Nick); err != nil {
@@ -243,16 +251,26 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 func (t *TwitchAdapter) RefreshesPassToken() bool { return t.cfg.PassToken != nil }
 
 // passToken is the token for this connect's PASS line: a fresh one from
-// PassToken when it can supply one, otherwise the configured Token. A refresh
-// that fails falls back rather than failing the connect, because the stored
-// token may still be valid and Twitch's own answer to it is the clearer error.
-func (t *TwitchAdapter) passToken(ctx context.Context) string {
-	if t.cfg.PassToken != nil {
-		if tok, err := t.cfg.PassToken(ctx); err == nil && tok != "" {
-			return tok
-		}
+// PassToken, or the configured Token when there is no supplier.
+//
+// A SUPPLIER THAT FAILS FAILS THE CONNECT, retryably. It used to fall back to
+// the attach-time Token, which by then is usually the expired one: Twitch
+// refuses it with a FATAL login notice, the Hub stops retrying, and chat is
+// dark until a restart -- the very failure PassToken exists to prevent, now
+// triggered by a refresh outage. A plain error instead lets the Hub back off
+// and ask again (review follow-up).
+func (t *TwitchAdapter) passToken(ctx context.Context) (string, error) {
+	if t.cfg.PassToken == nil {
+		return t.cfg.Token, nil
 	}
-	return t.cfg.Token
+	tok, err := t.cfg.PassToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("could not get a fresh Twitch chat token: %w", err)
+	}
+	if tok == "" {
+		return "", errors.New("could not get a fresh Twitch chat token: the account has none")
+	}
+	return tok, nil
 }
 
 // handle processes one parsed line. It returns done=true when the connection

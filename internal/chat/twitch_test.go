@@ -952,22 +952,27 @@ func TestTwitchReconnectSendsAFreshTokenEachConnect(t *testing.T) {
 	}
 }
 
-// A refresh that fails falls back to the configured token rather than
-// failing the connect.
-func TestTwitchFallsBackToTheConfiguredTokenWhenRefreshFails(t *testing.T) {
-	a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Token: "stored-token"})
-	a.cfg.PassToken = func(context.Context) (string, error) { return "", errors.New("refresh failed") }
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
-	srv.readLine(t) // CAP
-	if got := srv.readLine(t); got != "PASS oauth:stored-token" {
-		t.Errorf("sent %q, want the stored token", got)
+// A refresh that fails must not fall back to the attach-time token: by then
+// that is usually the expired one, Twitch refuses it as FATAL, and chat stays
+// dark until a restart. It fails the connect retryably and sends nothing.
+func TestTwitchRefreshFailureIsRetryableAndSendsNoToken(t *testing.T) {
+	dialled := false
+	a, err := NewTwitch(TwitchConfig{Nick: "streamer", Token: "attach-time-token",
+		Dial: func(context.Context) (net.Conn, error) { dialled = true; return nil, errors.New("unused") }})
+	if err != nil {
+		t.Fatal(err)
 	}
-	cancel()
-	srv.conn.Close()
-	<-done
+	a.cfg.PassToken = func(context.Context) (string, error) { return "", errors.New("refresh failed") }
+	runErr := a.Run(context.Background(), SinkFunc(func(Message) {}))
+	if runErr == nil {
+		t.Fatal("Run succeeded with no token to send")
+	}
+	if IsFatal(runErr) {
+		t.Errorf("a refresh failure was fatal (%v): the Hub would never retry", runErr)
+	}
+	if dialled {
+		t.Error("Run dialled Twitch without a fresh token; the stale one would have been sent")
+	}
 }
 
 // The rules card reads the room before it shows a switch, so a mode set
