@@ -200,15 +200,16 @@ Stopping is the Stop destination key's job, so a tap never takes a destination o
 | The key shows | A tap |
 |---|---|
 | **Off**, or **Draining** (stopped, its delayed tail still airing) | Starts the destination (`POST /api/v1/destinations/{id}/start`), as before |
-| **Failed**, with its cause | Retries it: the console's Retry, `POST /api/v1/destinations/{id}/restart`. The key repaints from the server at once, amber **Starting**, then **Live**, or **Failed** again with its reason |
+| **Failed**, with its cause | Retries it: the console's Retry, `POST /api/v1/destinations/{id}/restart`. The key re-reads the server straight away rather than waiting for the next poll, and shows what it reports: amber **Starting**, then **Live**, or **Failed** again with its reason |
 | **Held** after repeated quick rejections | Retries it the same way. The retry lifts the hold: the server starts a fresh attempt and drops the old rejection count |
 | **Live** (whatever its second line says), **Starting**, **Reconnecting**, **Stalled**, **Buffering** | Nothing |
 | **Held** for the whole programme (`destinationHold`, such as waiting for the ingest probe: no destination has a process yet) | Nothing: there is no failed process to retry |
 | **Other programme** | Never a retry: the key does not restart a destination of another programme |
 
 Both need an admin token; a read token shows **Needs admin token**. A refused retry shows
-the key's alert. A second tap within 4 seconds of a retry is ignored, so a double tap
-sends one retry instead of restarting the attempt the first tap began.
+the key's alert. A tap on the same destination while a retry is out, or within 4 seconds of one, is ignored,
+from this key or any other, so a double tap sends one retry instead of restarting the attempt
+the first tap began.
 
 ### What the faces mean
 

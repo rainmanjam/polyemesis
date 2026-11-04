@@ -532,6 +532,17 @@ describe("destination key retry", () => {
     expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
   });
 
+  it("two keys pressed together on one failed destination send one retry", async () => {
+    const { rt, net } = retryInstall(FAILED);
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("a", "destination", { sourceId: 7, destinationId: 5 }));
+    rt.add(surface("b", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
+    await Promise.all([rt.pressDestination("a"), rt.pressDestination("b")]);
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+  });
+
   it("a status tick that started before the retry does not paint the old Failed back", async () => {
     let current: StatusPayload["destinations"] = FAILED;
     let release!: () => void;

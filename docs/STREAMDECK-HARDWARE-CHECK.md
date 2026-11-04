@@ -115,6 +115,10 @@ Then switch the token to an **admin** token and continue.
 ## 5. Taps
 
 - [ ] Destination: tap on an off destination starts it.
+- [ ] Destination: tap on a **Failed** destination (e.g. a test destination with a
+      wrong stream key) retries it: the key goes amber **Starting**, then **Failed**
+      again with its reason. A quick double tap sends one retry (one restart in the
+      server log). Tap on a **Live** destination does nothing.
 - [ ] Go live: tap starts every destination on the key's programme.
 - [ ] Failover: shows the source on air; tap hands control back to automatic.
 - [ ] Record: tap switches install-wide recording. It is a tap, not a hold.

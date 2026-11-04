@@ -198,8 +198,9 @@ export class Runtime {
    */
   private readonly tapping = new Set<string>();
   /**
-   * Destinations retried within RETRY_COOLDOWN_MS, by destination id, not by key: two keys bound to
-   * one destination must not each restart it, the second interrupting the attempt the first began.
+   * Destinations with a Retry out, or sent within RETRY_COOLDOWN_MS, by destination id, not by key: two
+   * keys bound to one destination must not each restart it, the second interrupting the attempt the
+   * first began.
    */
   private readonly retryCooldown = new Set<number>();
   /**
@@ -965,10 +966,6 @@ export class Runtime {
    * Stopping is the stop key's job.
    */
   async pressDestination(id: string): Promise<void> {
-    await this.oneTap(id, () => this.tapDestination(id));
-  }
-
-  private async tapDestination(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client || s.settings.destinationId === undefined) return;
     if (!(await this.requireAdmin(s))) return;
@@ -981,14 +978,20 @@ export class Runtime {
     // The server picks the engine from the destination's own programme and ignores ?source=, so this
     // is the check that keeps a key bound to programme A from restarting a destination of B.
     if (!retryable(dest) || !this.ownsDestination(s, dest.id)) return;
+    // Claimed BEFORE the request, with no await between the check and the claim: a double tap, a second
+    // key on the same destination or a multi-action firing while the first restart is out sends nothing.
     if (this.retryCooldown.has(dest.id)) return;
+    this.retryCooldown.add(dest.id);
     let sent = false;
     await this.run(s, async () => {
       await this.client!.restartDestination(dest.id, s.settings.sourceId);
       sent = true;
     });
-    if (!sent) return;
-    this.retryCooldown.add(dest.id);
+    if (!sent) {
+      // Refused: nothing restarted, so the operator may tap again at once.
+      this.retryCooldown.delete(dest.id);
+      return;
+    }
     this.schedule(() => this.retryCooldown.delete(dest.id), RETRY_COOLDOWN_MS);
     // The real transition, not a guess: read the programme again and paint what the server says now --
     // Starting, then Live on a later tick, or Failed again with its reason.
