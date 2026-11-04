@@ -103,7 +103,9 @@ for o in $LIBSRT $HWENC; do echo "$o" >>value.txt; done
 # so they are listed by name. Errs towards refusal: an innocent option that
 # mentions a file is refused, never the other way round.
 FILEISH_RE='(^|[^A-Za-z_])(file|files|filename|filenames|filepath|path|paths|dir|directory|url|urls|uri|log|logs|dump|dumps|stats|statistics)([^A-Za-z_]|$)'
-BYNAME="-report -pre -vpre -apre -spre -fpre -dumpgraph -graph_file -hwaccel"
+# -max_size: a demuxer in the CI and Alpine builds (absent from Homebrew's)
+# describes it as a "file size"; excluded by name so every build agrees.
+BYNAME="-report -pre -vpre -apre -spre -fpre -dumpgraph -graph_file -hwaccel -max_size"
 {
 	grep -E '^-[A-Za-z]' help.txt | sed -E 's/^(-[^ []+)[^ ]*/\1/'
 	cat avlines.txt
