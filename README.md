@@ -80,7 +80,8 @@ hot. One upload, one video encode, different audio per platform.
 - **Post-production**: segmented multitrack recording with retention, a job
   queue, Whisper transcription with full-text search, and a clip editor that
   suggests highlights, exports 9:16 vertical shorts with burned-in captions,
-  and posts to YouTube Shorts or TikTok when you click Publish.
+  and posts to YouTube Shorts or TikTok when you click Publish (TikTok posts
+  stay private until TikTok audits the app).
   [→ CLIP-PUBLISHING.md](docs/CLIP-PUBLISHING.md)
 - **Live captions** — one audio track of a programme is transcribed on your
   own machine and sent inside the Twitch stream, to YouTube's caption ingestion
