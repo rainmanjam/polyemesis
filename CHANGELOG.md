@@ -176,8 +176,8 @@ its first tagged release.
   2026-11-04 a build of `main` on a residential connection published to X with a pasted server URL
   and key, and the picture showed in X Producer's preview. docs/PLATFORMS.md records the test; the
   X row of the capability table is unchanged (the stream key stays *By hand*, everything else
-  *Unverified*). The same destination timed out from an OVH VPS, where X's hosts and `x.com` did
-  not answer at all; whether other providers are affected is untested. docs/PLATFORMS.md says how
+  *Unverified*). The same destination timed out from an OVH VPS, where connections to X's ingest
+  hosts and a request to `x.com` timed out too; whether other providers are affected is untested. docs/PLATFORMS.md says how
   to check a server can reach X first, and docs/TROUBLESHOOTING.md has a new entry for
   "Connection timed out" on an X destination.
 

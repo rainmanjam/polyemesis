@@ -60,8 +60,8 @@ thing to say about an API nobody here has read.
 
 The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
 server URL and key published to X with picture. The rest of the X row is
-unchanged. The details, and a hosting network X would not let connect, are under
-X in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
+unchanged. The details, and a hosting network X refused, are under X in
+[the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
 
 ## The platforms that need a sentence each
 
@@ -243,16 +243,17 @@ pasted key is.
 
 **X may refuse some hosting networks.** The same day, the same X destination
 failed from an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
-`Error opening output … Connection timed out` every 6–7 seconds. The connections
-timed out, which is not `Connection refused`: nothing answered at all. Plain TCP
-checks from that host, with polyemesis out of the picture, failed the same way.
-`a.live.x.com` (ports 443 and 80), `ca.pscp.tv` and `va.pscp.tv` (80, 443 and
-1935), and even `https://x.com` all timed out, over IPv4 and IPv6 alike. From the
+`Error opening output … Connection timed out` every 6–7 seconds. Checks from that
+host without polyemesis failed the same way: TCP connections to `a.live.x.com`
+(ports 443 and 80) and to `ca.pscp.tv` and `va.pscp.tv` (80, 443 and 1935) timed
+out, and so did a request to `https://x.com`, over IPv4 and IPv6 alike. From the
 same host, Twitch (`live.twitch.tv:1935`), YouTube (`a.rtmp.youtube.com:1935`)
 and `example.com:443` all connected, and from the residential macOS machine the
 X hosts connected too. X's ingest addresses resolve to Cloudflare (172.65.x.x).
-So X refused connections from that VPS's network, by letting them time out, and
-no polyemesis setting can change that. Whether X does the same to other VPS
+So X refused connections from that VPS's network. The refusal was silent:
+nothing answered and the attempts timed out, which is why the error reads
+`Connection timed out` rather than `Connection refused`. The checks ran without
+polyemesis, so the failure was outside it. Whether X does the same to other VPS
 providers, or to datacenter ranges in general, has not been tested: this is one
 host, not a rule.
 
@@ -263,10 +264,11 @@ curl -sS --connect-timeout 10 -o /dev/null -w '%{http_code}\n' https://x.com
 nc -vz -w 10 a.live.x.com 443
 ```
 
-The first prints a status code (for example `200` or `302`) when X answers, and
-`000` with a curl error when it does not. The second is a TCP check to the
-ingest host; use the host in your own server URL if X Producer gave you a
-different one. If either times out, X needs a different host or network. See
+The first prints the HTTP status (for example `200` or `302`) when it gets a
+response; on a timeout it prints `000` and a curl error. The second is a TCP
+check to the ingest host; use the host in your own server URL if X Producer gave
+you a different one. If a check times out, X needs a different host or network.
+See
 [Troubleshooting](TROUBLESHOOTING.md#x-destination-connection-timed-out-when-opening-output).
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
