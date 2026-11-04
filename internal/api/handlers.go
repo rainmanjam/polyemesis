@@ -1734,9 +1734,15 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// And the stored model-checker blocks, which newlyEnabledUntested
 		// compares against. Copies: only their connection fields are read.
 		storedAutomod := db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
+		// Whether MQTT was already on, for AssignInstanceOnFirstEnable below.
+		storedMQTTEnabled := settings.MQTT.Enabled
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
+		// A per-install MQTT instance when MQTT is first switched on with the
+		// shared default, so two installs on one broker cannot collide. Never
+		// for an install already publishing: its topic tree is a contract.
+		settings.MQTT.AssignInstanceOnFirstEnable(storedMQTTEnabled, s.mqttInstanceForThisInstall())
 		// The one section decodeJSONInto's strictness cannot reach: automod
 		// has its own UnmarshalJSON. See db.CheckAutomodFields.
 		if err := checkSentAutomodFields(body); err != nil {
@@ -3682,4 +3688,14 @@ func captionModeAllowedNow(mode, stored string, switchOpen bool) bool {
 		return true
 	}
 	return switchOpen
+}
+
+// mqttInstanceForThisInstall is a stable per-install MQTT instance name:
+// "polyemesis-" and six hex digits derived from this install's own key, under
+// a label of its own so it says nothing about the key or any other use of it.
+func (s *Server) mqttInstanceForThisInstall() string {
+	if s.box == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s-%x", db.DefaultMQTTInstance, s.box.Derive("mqtt-instance")[:3])
 }

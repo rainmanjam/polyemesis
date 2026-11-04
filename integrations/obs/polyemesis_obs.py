@@ -18,7 +18,9 @@ token: it can report these three facts and do nothing else -- it cannot read a
 stream key, change a setting, or start a destination directly.
 
 This script never prints the token, and sends it only in the Authorization
-header of requests to the address you configure.
+header of requests to the address you configure -- and only when that address
+is https://, or http:// to this machine. Any other address is refused and
+nothing is sent, the same rule the Stream Deck plugin applies.
 """
 
 import json
@@ -26,6 +28,7 @@ import queue
 import ssl
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import obspython as obs
@@ -71,9 +74,44 @@ def script_defaults(settings):
     obs.obs_data_set_default_bool(settings, "send_scenes", True)
 
 
+# The hosts plain http:// may be used with: this machine only.
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
+
+def parse_server(raw):
+    """Return (address, refusal). The address is usable only if refusal is None.
+
+    THE TOKEN GOES ONLY WHERE IT CANNOT BE READ ON THE WAY (poka-yoke audit
+    2026-11-04). The script used to send the bearer token to whatever was typed,
+    so http://my-vps:8080 put the token and every scene name on the network in
+    the clear. Mirrors integrations/streamdeck/src/config.ts parseServerUrl:
+    https:// to anywhere, http:// only to this machine.
+    """
+    text = (raw or "").strip().rstrip("/")
+    if not text:
+        return "", None
+    try:
+        url = urllib.parse.urlsplit(text)
+        host = url.hostname
+    except ValueError:
+        return "", "the address is not a URL; use https://host:port"
+    if not host:
+        return "", "the address has no host; use https://host:port"
+    if url.scheme == "https":
+        return text, None
+    if url.scheme == "http" and host in LOOPBACK:
+        return text, None
+    return "", (
+        "refusing %s://%s: the API token would cross the network unencrypted. "
+        "Use https://, or http:// only to this machine (localhost)" % (url.scheme or "?", host)
+    )
+
+
 def script_update(settings):
     global _server, _token, _ca_file, _send_scenes
-    _server = obs.obs_data_get_string(settings, "server").strip().rstrip("/")
+    _server, refusal = parse_server(obs.obs_data_get_string(settings, "server"))
+    if refusal:
+        print("polyemesis: " + refusal)
     _token = obs.obs_data_get_string(settings, "token").strip()
     _ca_file = obs.obs_data_get_string(settings, "ca_file").strip()
     _send_scenes = obs.obs_data_get_bool(settings, "send_scenes")

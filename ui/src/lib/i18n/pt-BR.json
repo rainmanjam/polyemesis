@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Medidores de áudio",
   "set.brokerPasswordCleared": "Senha do broker apagada.",
   "set.brokerPlainNote": "mqtt:// não é criptografado. O MQTT envia usuário e senha no pacote CONNECT, então ambos atravessam a rede em texto claro — tudo bem numa LAN confiável, que é o caso usual do Home Assistant, e nada bem em qualquer coisa que você não controle. Use mqtts:// se o broker oferecer.",
+  "set.tlsSkipVerifyIgnored": "Ignorado: esta URL do broker não usa TLS, então não há certificado a aceitar. Use mqtts:// ou wss:// para que tenha efeito.",
   "set.brokerUrl": "URL do broker",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// ou wss://. Uma senha na URL é recusada: a URL vai parar em linhas de log e na saída do ps, e isso não tem volta. Coloque-a no campo abaixo, onde fica criptografada em repouso.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

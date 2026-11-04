@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Audiopegel",
   "set.brokerPasswordCleared": "Broker-Kennwort gelöscht.",
   "set.brokerPlainNote": "mqtt:// ist unverschlüsselt. MQTT sendet Benutzername und Kennwort in seinem CONNECT-Paket, sodass beide im Klartext über das Netz gehen — in einem vertrauenswürdigen LAN in Ordnung, was der übliche Home-Assistant-Fall ist, und nicht in Ordnung über alles, was Sie nicht kontrollieren. Verwenden Sie mqtts://, wenn der Broker es anbietet.",
+  "set.tlsSkipVerifyIgnored": "Wird ignoriert: Diese Broker-URL nutzt kein TLS, es gibt also kein Zertifikat zu akzeptieren. Verwende mqtts:// oder wss://, damit die Einstellung wirkt.",
   "set.brokerUrl": "Broker-URL",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// oder wss://. Ein Kennwort in der URL wird abgelehnt: Eine URL landet in Logzeilen und in der ps-Ausgabe, und das lässt sich nicht zurücknehmen. Tragen Sie es in das Feld unten ein, wo es verschlüsselt gespeichert wird.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

@@ -1415,6 +1415,7 @@
   "set.audioMeters": "音频电平表",
   "set.brokerPasswordCleared": "Broker 密码已清除。",
   "set.brokerPlainNote": "mqtt:// 未加密。MQTT 会把用户名和密码放在 CONNECT 报文中发送，因此两者都以明文穿过网络——在受信任的局域网里没问题，这也是 Home Assistant 的常见情形；但在你无法掌控的链路上就不合适。若 broker 支持，请使用 mqtts://。",
+  "set.tlsSkipVerifyIgnored": "已忽略：此代理地址不使用 TLS，因此没有可接受的证书。请使用 mqtts:// 或 wss:// 使其生效。",
   "set.brokerUrl": "Broker 地址",
   "set.brokerUrlNote": "mqtt://、mqtts://、ws:// 或 wss://。地址中携带密码会被拒绝：URL 会进入日志行和 ps 输出，事后无法收回。请填在下面的字段里，那里会在存储时加密。",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

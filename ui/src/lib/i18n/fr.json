@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Vumètres audio",
   "set.brokerPasswordCleared": "Mot de passe du courtier effacé.",
   "set.brokerPlainNote": "mqtt:// n'est pas chiffré. MQTT envoie le nom d'utilisateur et le mot de passe dans son paquet CONNECT, si bien que les deux traversent le réseau en clair — acceptable sur un réseau local de confiance, ce qui est le cas habituel avec Home Assistant, et inacceptable sur tout ce que vous ne maîtrisez pas. Utilisez mqtts:// si le courtier le propose.",
+  "set.tlsSkipVerifyIgnored": "Ignoré : cette URL de broker n'utilise pas TLS, il n'y a donc aucun certificat à accepter. Utilisez mqtts:// ou wss:// pour que le réglage ait un effet.",
   "set.brokerUrl": "URL du courtier",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// ou wss://. Un mot de passe dans l'URL est refusé : une URL se retrouve dans les journaux et dans la sortie de ps, et cela ne se rattrape pas. Mettez-le dans le champ ci-dessous, où il est chiffré au repos.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Meteran audio",
   "set.brokerPasswordCleared": "Kata sandi broker dihapus.",
   "set.brokerPlainNote": "mqtt:// tidak terenkripsi. MQTT mengirim nama pengguna dan kata sandi di dalam paket CONNECT-nya, jadi keduanya melintasi jaringan dalam bentuk terbuka — tidak masalah di LAN tepercaya, yang merupakan kasus Home Assistant yang lazim, dan tidak pantas melalui apa pun yang tidak Anda kendalikan. Gunakan mqtts:// bila broker menyediakannya.",
+  "set.tlsSkipVerifyIgnored": "Diabaikan: URL broker ini tidak memakai TLS, jadi tidak ada sertifikat untuk diterima. Gunakan mqtts:// atau wss:// agar pengaturan ini berarti.",
   "set.brokerUrl": "URL broker",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// atau wss://. Kata sandi di dalam URL ditolak: URL berakhir di baris log dan keluaran ps, dan itu tidak bisa ditarik kembali. Masukkan di kolom di bawah, tempat ia dienkripsi saat disimpan.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

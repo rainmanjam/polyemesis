@@ -98,6 +98,7 @@ import {
   type AcmeStance,
 } from "@/lib/acme-guidance";
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
+import { mqttPlainScheme } from "@/lib/mqtt";
 import { timestamp } from "@/lib/format";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
@@ -1917,7 +1918,7 @@ function PipelineSettings({
                       reasonably assumes has been closed. Not a refusal: mqtt:// on
                       a trusted LAN is the normal Home Assistant setup and what our
                       own documentation recommends. */}
-                  {(draft.mqtt?.brokerUrl ?? "").startsWith("mqtt://") && (
+                  {mqttPlainScheme(draft.mqtt?.brokerUrl) && (
                     <span className="text-sm text-warn">
                       {t("set.brokerPlainNote")}
                     </span>
@@ -2054,6 +2055,12 @@ function PipelineSettings({
                     }
                   />
                 </div>
+                {/* It was silently ignored on a plain scheme (poka-yoke audit
+                    2026-11-04): an operator who switched it on to "make TLS
+                    work" was in fact sending everything in the clear. */}
+                {(draft.mqtt?.tlsSkipVerify ?? false) && mqttPlainScheme(draft.mqtt?.brokerUrl) && (
+                  <span className="text-sm text-warn">{t("set.tlsSkipVerifyIgnored")}</span>
+                )}
               </>
             )}
 

@@ -1415,6 +1415,7 @@
   "set.audioMeters": "音声メーター",
   "set.brokerPasswordCleared": "ブローカーのパスワードを消去しました。",
   "set.brokerPlainNote": "mqtt:// は暗号化されません。MQTT はユーザー名とパスワードを CONNECT パケットで送るため、どちらも平文でネットワークを通ります。信頼できる LAN 内なら問題なく、これは Home Assistant の一般的な構成です。ただし自分の管理下にないものを経由する場合は不適切です。ブローカーが対応しているなら mqtts:// を使ってください。",
+  "set.tlsSkipVerifyIgnored": "無視されます: このブローカー URL は TLS を使わないため、受け入れる証明書がありません。効果を持たせるには mqtts:// か wss:// を使ってください。",
   "set.brokerUrl": "ブローカー URL",
   "set.brokerUrlNote": "mqtt://、mqtts://、ws:// または wss://。URL 内のパスワードは拒否されます。URL はログ行や ps の出力に残り、後から取り消せません。下の欄に入力してください。そこでは保存時に暗号化されます。",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

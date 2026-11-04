@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Audio meters",
   "set.brokerPasswordCleared": "Broker password cleared.",
   "set.brokerPlainNote": "mqtt:// is unencrypted. MQTT sends the username and password in its CONNECT packet, so both cross the network in the clear — fine on a trusted LAN, which is the usual Home Assistant case, and not fine over anything you do not control. Use mqtts:// if the broker offers it.",
+  "set.tlsSkipVerifyIgnored": "Ignored: this broker URL has no TLS, so there is no certificate to accept. Use mqtts:// or wss:// for it to mean anything.",
   "set.brokerUrl": "Broker URL",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// or wss://. A password in the URL is refused: a URL reaches log lines and ps output, and there is no taking it back. Put it in the field below, where it is encrypted at rest.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

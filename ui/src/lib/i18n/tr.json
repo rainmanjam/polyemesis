@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Ses ölçerler",
   "set.brokerPasswordCleared": "Broker parolası temizlendi.",
   "set.brokerPlainNote": "mqtt:// şifrelenmemiştir. MQTT, kullanıcı adını ve parolayı CONNECT paketinde gönderir; dolayısıyla ikisi de ağda açık metin olarak gider — güvenilen bir yerel ağda sorun değil, ki bu olağan Home Assistant durumudur, ancak denetiminizde olmayan hiçbir yerde uygun değildir. Broker sunuyorsa mqtts:// kullanın.",
+  "set.tlsSkipVerifyIgnored": "Yok sayılıyor: bu broker adresi TLS kullanmıyor, bu yüzden kabul edilecek bir sertifika yok. Etkili olması için mqtts:// veya wss:// kullanın.",
   "set.brokerUrl": "Broker URL'si",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// veya wss://. URL içindeki parola reddedilir: bir URL günlük satırlarına ve ps çıktısına düşer, bunun geri dönüşü yoktur. Parolayı, beklemede şifrelendiği aşağıdaki alana girin.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

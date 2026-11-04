@@ -1415,6 +1415,7 @@
   "set.audioMeters": "오디오 미터",
   "set.brokerPasswordCleared": "브로커 비밀번호를 지웠습니다.",
   "set.brokerPlainNote": "mqtt://는 암호화되지 않습니다. MQTT는 사용자 이름과 비밀번호를 CONNECT 패킷에 담아 보내므로 둘 다 평문으로 네트워크를 지납니다. 신뢰할 수 있는 LAN에서는 괜찮으며 이것이 일반적인 Home Assistant 구성입니다. 다만 통제할 수 없는 경로에서는 적절하지 않습니다. 브로커가 지원한다면 mqtts://를 사용하세요.",
+  "set.tlsSkipVerifyIgnored": "무시됨: 이 브로커 URL은 TLS를 쓰지 않으므로 수락할 인증서가 없습니다. 의미가 있으려면 mqtts:// 또는 wss://를 사용하세요.",
   "set.brokerUrl": "브로커 URL",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// 또는 wss://. URL에 담긴 비밀번호는 거부됩니다. URL은 로그 줄과 ps 출력에 남고, 그건 되돌릴 수 없습니다. 아래 칸에 입력하세요. 그곳에서는 저장 시 암호화됩니다.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",

@@ -1415,6 +1415,7 @@
   "set.audioMeters": "Audiometers",
   "set.brokerPasswordCleared": "Brokerwachtwoord gewist.",
   "set.brokerPlainNote": "mqtt:// is onversleuteld. MQTT stuurt de gebruikersnaam en het wachtwoord mee in het CONNECT-pakket, dus beide gaan onversleuteld over het netwerk — prima op een vertrouwd LAN, wat het gebruikelijke Home Assistant-geval is, en niet prima over iets wat je niet beheert. Gebruik mqtts:// als de broker dat aanbiedt.",
+  "set.tlsSkipVerifyIgnored": "Genegeerd: deze broker-URL gebruikt geen TLS, dus er is geen certificaat om te accepteren. Gebruik mqtts:// of wss:// om het effect te laten hebben.",
   "set.brokerUrl": "Broker-URL",
   "set.brokerUrlNote": "mqtt://, mqtts://, ws:// of wss://. Een wachtwoord in de URL wordt geweigerd: een URL belandt in logregels en in de uitvoer van ps, en dat valt niet terug te draaien. Zet het in het veld hieronder, waar het versleuteld wordt opgeslagen.",
   "set.brokerUrlPlaceholder": "mqtts://broker.local:8883",
