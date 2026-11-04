@@ -2584,7 +2584,7 @@
     {
       "route": "GET /api/v1/destinations/{id}/expert",
       "scope": "route",
-      "why": "denied to a read token outright by requireScope; there is no body to assert about because the handler never runs",
+      "why": "session-only; no bearer of either scope reaches it",
       "want": {
         "as": "read",
         "status": 403

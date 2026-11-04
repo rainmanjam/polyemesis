@@ -54,6 +54,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gortmplib"
@@ -272,6 +273,9 @@ type session struct {
 	streamKey string
 	started   time.Time
 	conn      *gortmplib.ServerConn
+	// refusals counts consecutive Revalidate passes that would not admit
+	// this session. See revokeAfter.
+	refusals atomic.Int32
 }
 
 // Server is the shared listener.
@@ -743,6 +747,10 @@ func (s *Server) releaseSlot(sess *session) *stream {
 // again; see Revalidate. A var only so a test can watch the ticker work.
 var revalidateInterval = 5 * time.Second
 
+// revokeAfter is how many consecutive Revalidate passes must refuse a session
+// before it is closed. See Revalidate.
+const revokeAfter = 2
+
 func (s *Server) revalidateEvery(every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -764,6 +772,10 @@ func (s *Server) revalidateEvery(every time.Duration) {
 // engine restarts its ingest child, and closing a publisher for that would cut
 // a healthy broadcast. Returns how many it closed; the closed session's own
 // teardown releases its slot.
+//
+// Two consecutive refusals close it, not one: the engine's lookup answers "not
+// found" when it cannot read the sources table, and a single "database is
+// locked" must not take every encoder off the air.
 func (s *Server) Revalidate() int {
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.live))
@@ -785,6 +797,10 @@ func (s *Server) Revalidate() int {
 			reason = "its stream key now names a different slot"
 		}
 		if reason == "" {
+			sess.refusals.Store(0)
+			continue
+		}
+		if sess.refusals.Add(1) < revokeAfter {
 			continue
 		}
 		s.log.Warn("rtmp publisher closed: no longer admitted", "component", "rtmp-ingest",

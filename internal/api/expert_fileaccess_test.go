@@ -36,12 +36,21 @@ func TestExpertModeRefusesArgumentsThatTouchServerFiles(t *testing.T) {
 		{"a positional on the input side", []string{"/tmp/evil.flv"}, nil, "another output"},
 		{"stdout as an output", nil, []string{"-"}, "another output"},
 		{"a dangling option swallows the destination URL", nil, []string{"-metadata"}, "needs a value"},
-		{"movie= reads a media file", nil, []string{"-vf", "movie=/etc/passwd[w];[in][w]overlay"}, "movie"},
-		{"amovie= in a complex graph", nil, []string{"-filter_complex", "amovie=/tmp/a.wav[x]"}, "amovie"},
-		{"subtitles= reads a file", nil, []string{"-vf", "subtitles=/etc/passwd"}, "subtitles"},
-		{"drawtext textfile= reads a file", nil, []string{"-vf", "drawtext=textfile=/etc/passwd:x=1"}, "textfile="},
-		{"metadata file= writes one", nil, []string{"-af", "ametadata=mode=print:file=/tmp/x"}, "file="},
-		{"escaping does not hide a filter", nil, []string{"-vf", `m\ovie=/etc/passwd`}, "movie"},
+		{"movie= reads a media file", nil, []string{"-vf", "movie=clip.mp4[w];[in][w]overlay"}, "movie"},
+		{"amovie= in a complex graph", nil, []string{"-filter_complex", "amovie=a.wav[x]"}, "amovie"},
+		{"subtitles= reads a file", nil, []string{"-vf", "subtitles=subs.srt"}, "subtitles"},
+		{"drawtext textfile= reads a file", nil, []string{"-vf", "drawtext=textfile=notes.txt:x=1"}, "drawtext"},
+		{"metadata file= writes one", nil, []string{"-af", "ametadata=mode=print:file=out.log"}, "ametadata"},
+		// The bypasses a security review found in the first, denylist, version.
+		// Relative paths on purpose: they write into FFmpeg's working directory
+		// just as well, and they keep the /option= check from also catching
+		// these, so each case tests the filter allowlist on its own.
+		{"psnr stats_file given positionally", nil, []string{"-filter_complex", "split[a][b];[a][b]psnr=polyemesis.db"}, "psnr"},
+		{"psnr stats_file by its short alias", nil, []string{"-filter_complex", "split[a][b];[a][b]psnr=f=stats.log"}, "psnr"},
+		{"a filter nobody listed", nil, []string{"-vf", "removelogo=mask.png"}, "removelogo"},
+		{"an allowed filter loading a value from a file", nil, []string{"-af", "volume=/volume=/etc/passwd"}, "/option="},
+		{"an unknown option followed by an output path", nil, []string{"-made_up_boolean", "/tmp/evil.flv"}, "-made_up_boolean"},
+		{"escaping does not hide a filter", nil, []string{"-vf", `m\ovie=clip.mp4`}, "movie"},
 		{"a file-writing muxer", nil, []string{"-f", "segment"}, "-f segment"},
 		{"tee writes beside the URL", nil, []string{"-f", "tee"}, "-f tee"},
 		{"hls segment path", nil, []string{"-hls_segment_filename", "/tmp/s%d.ts"}, "-hls_segment_filename"},

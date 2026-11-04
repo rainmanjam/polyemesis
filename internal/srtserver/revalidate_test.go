@@ -83,8 +83,12 @@ func TestRevalidateClosesAPublisherThatWouldNoLongerBeAdmitted(t *testing.T) {
 			}
 
 			m.set(tc.change(tg)...)
+			if n := srv.Revalidate(); n != 0 {
+				t.Fatalf("the first refusing pass closed %d sessions; one pass can be a "+
+					"transient lookup failure, so it must take two", n)
+			}
 			if n := srv.Revalidate(); n != 1 {
-				t.Fatalf("Revalidate closed %d sessions, want 1", n)
+				t.Fatalf("Revalidate closed %d sessions on the second refusing pass, want 1", n)
 			}
 			if srv.Publishing(3) {
 				t.Error("the source still reports a publisher after it was revalidated away")
@@ -122,5 +126,41 @@ func TestTheRevalidationTickerClosesARevokedPublisher(t *testing.T) {
 	m.set(disabled)
 	if !waitFor(3*time.Second, func() bool { return !srv.Publishing(5) }) {
 		t.Fatal("the ticker never closed the publisher of a disabled source")
+	}
+}
+
+// The engine's lookup says "not found" when it cannot read the sources table.
+// One such pass, followed by a pass that admits again, must not close a
+// healthy encoder -- and the count starts over.
+func TestATransientRefusalDoesNotCloseAPublisher(t *testing.T) {
+	sink := &recorder{}
+	tg := Target{SourceID: 7, Name: "Main", Enabled: true, Sink: sink}
+	m := &mutableTargets{}
+	m.set(tg)
+	srv, addr := serveMutable(t, m)
+
+	c, err := dial(t, addr, tokenFor(tg))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("live")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !waitFor(3*time.Second, func() bool { return srv.Publishing(7) }) {
+		t.Fatal("the publisher never went live")
+	}
+	for i := 0; i < 3; i++ {
+		m.set() // the sources table could not be read
+		if n := srv.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: one failed lookup closed %d sessions", i, n)
+		}
+		m.set(tg) // and could again
+		if n := srv.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: an admitting pass closed %d sessions", i, n)
+		}
+	}
+	if !srv.Publishing(7) {
+		t.Error("alternating transient failures took a healthy encoder off the air")
 	}
 }

@@ -293,6 +293,9 @@ type session struct {
 	// evicted marks a session displaced by a takeover, so its read loop knows
 	// not to log the close as a failure.
 	evicted atomic.Bool
+	// refusals counts consecutive Revalidate passes that would not admit this
+	// session. See revokeAfter.
+	refusals atomic.Int32
 	// rate turns the accumulated counters into per-interval figures. Guarded by
 	// its own lock because Stats and Link are called from several goroutines.
 	rateMu sync.Mutex
@@ -846,6 +849,10 @@ func (s *Server) handlePublish(conn srt.Conn) {
 // test can watch the ticker work without waiting five seconds.
 var revalidateInterval = 5 * time.Second
 
+// revokeAfter is how many consecutive Revalidate passes must refuse a session
+// before it is closed. See Revalidate.
+const revokeAfter = 2
+
 func (s *Server) revalidateEvery(every time.Duration, stop <-chan struct{}) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -868,8 +875,13 @@ func (s *Server) revalidateEvery(every time.Duration, stop <-chan struct{}) {
 // encoder feeding the programme until it chose to hang up. The session already
 // keeps the token it presented, so the same lookup decides again: unknown,
 // disabled, no sink, or now resolving to a different slot all close it. It
-// returns how many it closed. Called on a ticker by Start, and by the engine
-// after every reconcile.
+// returns how many it closed. Called on a ticker by Start.
+//
+// TWO CONSECUTIVE REFUSALS, NOT ONE. The engine's lookup answers "not found"
+// when it cannot read the sources table at all, and a source's engine is
+// briefly absent while it is replaced; closing on a single pass would take
+// every encoder off the air for one "database is locked". A real revocation
+// is still there on the next pass.
 func (s *Server) Revalidate() int {
 	s.mu.Lock()
 	sessions := make([]*session, 0, len(s.live))
@@ -893,6 +905,10 @@ func (s *Server) Revalidate() int {
 			reason = "its token now names a different slot"
 		}
 		if reason == "" {
+			sess.refusals.Store(0)
+			continue
+		}
+		if sess.refusals.Add(1) < revokeAfter {
 			continue
 		}
 		s.mu.Lock()

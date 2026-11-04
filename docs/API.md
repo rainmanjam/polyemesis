@@ -1143,10 +1143,13 @@ are refused outright, whatever is acknowledged: `-progress`, `-vstats`,
 `-vstats_file`, `-pass`, `-passlogfile`, `-dump_attachment`, `-attach`,
 `-sdp_file`, `-stats_*`, `-fpre`, `-filter_script`, `-filter_complex_script`,
 the HLS/segment file options, file-writing muxers (`-f tee`, `segment`, `hls`,
-`dash`, `image2`, ...), filters that open a file (`movie`, `amovie`,
-`subtitles`, `textfile=`, `file=`, ...), encoder params that name a file
-(`dump-yuv=`, `stats=`), and any bare token that FFmpeg would take as a second
-output. `dry-run` tells you whether the result would start, without starting it.
+`dash`, `image2`, ...), encoder params that name a file (`dump-yuv=`,
+`stats=`), and any bare token that FFmpeg would take as a second output.
+Filter graphs may use only filters on an allowlist of ones whose options name
+no file (`scale`, `fps`, `volume`, `aresample`, `overlay`, ...); any other
+filter, and the `/option=` form that loads a value from a file, is refused. An
+option the server's FFmpeg option table does not know is refused too, rather
+than guessed at. `dry-run` tells you whether the result would start, without starting it.
 
 ### Routing and renditions
 

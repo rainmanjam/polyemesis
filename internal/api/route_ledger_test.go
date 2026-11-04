@@ -600,7 +600,7 @@ var excusedRoutes = map[string]coverageExcus{
 
 	// ---- denied to read tokens outright; the 403 is DRIVEN, not asserted from
 	// the middleware's source.
-	"GET /api/v1/destinations/{id}/expert":          denied(),
+	"GET /api/v1/destinations/{id}/expert":          sessionOnly(), // poka-yoke audit 2026-11-04: all five expert routes are session-only
 	"GET /api/v1/clipper/recordings/{id}/keyframes": denied(),
 	"GET /api/v1/platforms/accounts/{id}/stats":     denied(),
 	// Same reason as the stats route above it, and the reason is the outbound

@@ -261,7 +261,7 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 		field string
 		argv  []string
 	}{{"input args", in}, {"output args", out}} {
-		if err := refuseFileAccess(side.field, side.argv); err != nil {
+		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
 			return nil, err
 		}
 	}
@@ -316,219 +316,6 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 		}
 	}
 	return guards, nil
-}
-
-// ------------------------------------------------- file access, refused
-//
-// AN FFMPEG ARGV CAN READ AND WRITE FILES ON THIS BOX, and expert mode's
-// acknowledgement does not make that safe: the operator confirms a stream
-// setting, not "overwrite polyemesis.db". Poka-yoke audit 2026-11-04 showed
-// `-progress /var/lib/polyemesis/polyemesis.db` (overwrite), a second
-// positional output (a new file anywhere the service can write), and
-// movie=/textfile= filters (read a server file out to the platform). So the
-// options, muxers and filters that open a path the operator names are refused
-// by construction, with nothing to acknowledge them away. Everything here is a
-// refusal; none of it changes what reaches the platform in a way an operator
-// streaming to it would want.
-
-// fileOptions are FFmpeg options whose value (or, for the booleans, whose mere
-// presence) opens a file on the server. Matched on the option's base name, so
-// a stream specifier (-dump_attachment:t, -stats_enc_pre:v) does not hide one.
-var fileOptions = map[string]string{
-	"-progress":               "writes progress reports to the file or URL it names",
-	"-vstats":                 "writes video statistics to a file in the server's working directory",
-	"-vstats_file":            "writes video statistics to the file it names",
-	"-pass":                   "writes a two-pass log file on the server",
-	"-passlogfile":            "writes two-pass statistics to the file it names",
-	"-dump_attachment":        "extracts attachments into files on the server",
-	"-attach":                 "reads a file from the server into the output",
-	"-sdp_file":               "writes an SDP description to the file it names",
-	"-print_graphs_file":      "writes the execution graph to the file it names",
-	"-stats_enc_pre":          "writes encoder statistics to the file it names",
-	"-stats_enc_post":         "writes encoder statistics to the file it names",
-	"-stats_mux_pre":          "writes muxer statistics to the file it names",
-	"-fpre":                   "reads options from a preset file on the server, past every check on this page",
-	"-filter_script":          "reads a filter graph from a file on the server, past every check on this page",
-	"-filter_complex_script":  "reads a filter graph from a file on the server, past every check on this page",
-	"-hls_segment_filename":   "writes HLS segments to the path it names",
-	"-hls_fmp4_init_filename": "writes an HLS init segment to the path it names",
-	"-hls_key_info_file":      "reads a key file from the server",
-	"-segment_list":           "writes a segment list to the file it names",
-	"-master_pl_name":         "writes a master playlist file on the server",
-}
-
-// fileMuxers write files beside, or instead of, the destination's URL.
-var fileMuxers = map[string]bool{
-	"tee": true, "segment": true, "ssegment": true, "stream_segment": true,
-	"hls": true, "dash": true, "image2": true, "webm_chunk": true,
-	"webm_dash_manifest": true, "smoothstreaming": true,
-}
-
-// filterGraphFlags carry a filter graph as their value.
-var filterGraphFlags = map[string]bool{
-	"-vf": true, "-af": true, "-filter": true, "-filter_complex": true, "-lavfi": true,
-}
-
-// fileFilters open a file (or load code) by name: movie and amovie read a
-// media file as a source, subtitles/ass read a subtitle file, sendcmd reads a
-// command file, the dnn/arnndn family load a model, frei0r/ladspa/lv2 load a
-// shared library, and the analysis filters write their results to a path.
-var fileFilters = []string{
-	"movie", "amovie", "subtitles", "ass", "sendcmd", "asendcmd", "zmq", "azmq",
-	"frei0r", "frei0r_src", "ladspa", "lv2", "lut3d", "lut1d", "vidstabdetect",
-	"vidstabtransform", "signature", "libvmaf", "arnndn", "sr", "dnn_processing",
-	"dnn_detect", "dnn_classify", "derain",
-}
-
-// fileFilterKeys are filter option names whose value is a path on the server:
-// drawtext's textfile, metadata's file, psnr/ssim's stats_file, and so on.
-var fileFilterKeys = []string{
-	"textfile", "file", "filename", "stats_file", "log_path", "model", "shader_path", "db_path",
-}
-
-// codecParamFlags carry an encoder's own key=value list, some of whose keys
-// are paths (x264's dump-yuv writes raw video anywhere it is told to).
-var codecParamFlags = map[string]bool{
-	"-x264-params": true, "-x264opts": true, "-x265-params": true,
-}
-
-var codecFileKeys = map[string]bool{
-	"stats": true, "dump-yuv": true, "csv": true, "analysis-save": true,
-	"analysis-load": true, "qpfile": true, "cqmfile": true, "tcfile-in": true, "tcfile-out": true,
-}
-
-// boolOptions are the FFmpeg options that take no value. Every other option
-// consumes the next token, which is how a bare token is told apart from a
-// value: a token that is not some option's value is a positional OUTPUT, and
-// FFmpeg will create it as a file. A value-taking option missing from this
-// list errs towards refusal (its value reads as positional), never towards a
-// file slipping through.
-var boolOptions = map[string]bool{
-	"-y": true, "-n": true, "-an": true, "-vn": true, "-sn": true, "-dn": true,
-	"-re": true, "-shortest": true, "-copyts": true, "-start_at_zero": true,
-	"-ignore_unknown": true, "-copy_unknown": true, "-recast_media": true,
-	"-benchmark": true, "-benchmark_all": true, "-stdin": true, "-dump": true,
-	"-hex": true, "-debug_ts": true, "-bitexact": true, "-stats": true,
-	"-hide_banner": true, "-accurate_seek": true, "-seek_timestamp": true,
-	"-find_stream_info": true, "-copyinkf": true, "-xerror": true,
-	"-autorotate": true, "-autoscale": true, "-fix_sub_duration": true,
-	"-fix_sub_duration_heartbeat": true, "-display_hflip": true, "-display_vflip": true,
-	"-auto_conversion_filters": true, "-print_graphs": true, "-psnr": true,
-	"-qphist": true, "-vstats": true,
-}
-
-// optionBase strips a stream specifier: -c:v:0 -> -c, -dump_attachment:t ->
-// -dump_attachment.
-func optionBase(flag string) string {
-	if i := strings.IndexByte(flag, ':'); i > 0 {
-		return flag[:i]
-	}
-	return flag
-}
-
-// isBoolOption reports whether flag takes no value, including the "-no"
-// negations FFmpeg accepts for every boolean (-nostdin, -noautorotate).
-func isBoolOption(flag string) bool {
-	base := optionBase(flag)
-	if boolOptions[base] {
-		return true
-	}
-	return strings.HasPrefix(base, "-no") && boolOptions["-"+strings.TrimPrefix(base, "-no")]
-}
-
-// isOption reports whether a token is an option rather than a value or a
-// positional. "-" alone is FFmpeg's name for stdout, a positional output.
-func isOption(a string) bool { return len(a) > 1 && a[0] == '-' }
-
-// refuseFileAccess walks one side's argv as FFmpeg would and refuses the first
-// thing in it that opens a file the operator named.
-func refuseFileAccess(field string, argv []string) error {
-	for i := 0; i < len(argv); i++ {
-		a := argv[i]
-		if !isOption(a) {
-			return fmt.Errorf("%s: %q is not the value of any option, so FFmpeg would treat it as "+
-				"another output and create it as a file on the server. The destination's URL is "+
-				"its only output", field, a)
-		}
-		base := optionBase(a)
-		if why, ok := fileOptions[base]; ok {
-			return fmt.Errorf("%s: %s %s. Expert mode cannot touch files on the server", field, a, why)
-		}
-		if isBoolOption(a) {
-			continue
-		}
-		if i+1 >= len(argv) {
-			return fmt.Errorf("%s: %s needs a value, and there is none after it", field, a)
-		}
-		i++
-		v := argv[i]
-		switch {
-		case base == "-f" && fileMuxers[strings.ToLower(v)]:
-			return fmt.Errorf("%s: -f %s writes files on the server beside the destination's URL. "+
-				"Expert mode cannot touch files on the server", field, v)
-		case filterGraphFlags[base]:
-			if name := filterOpensFile(v); name != "" {
-				return fmt.Errorf("%s: the filter graph after %s uses %s, which opens a file on the "+
-					"server. Expert mode cannot touch files on the server", field, a, name)
-			}
-		case codecParamFlags[base]:
-			if key := codecParamOpensFile(v); key != "" {
-				return fmt.Errorf("%s: %s= in %s names a file on the server. Expert mode cannot "+
-					"touch files on the server", field, key, a)
-			}
-		}
-	}
-	return nil
-}
-
-// filterOpensFile returns the first file-opening filter or option in a graph,
-// or "". FFmpeg unescapes quotes and backslashes inside a graph, so they are
-// removed before matching: m\ovie and 'movie' are both movie.
-func filterOpensFile(graph string) string {
-	g := strings.NewReplacer(`\`, "", `'`, "", `"`, "").Replace(strings.ToLower(graph))
-	// Tokens are separated by the graph's own punctuation. A filter name is
-	// the token before "=" or "@", and an option key the token before "=".
-	isSep := func(r rune) bool { return strings.ContainsRune("[],;:= \t\n@", r) }
-	fields := strings.FieldsFunc(g, isSep)
-	seen := map[string]bool{}
-	for _, f := range fields {
-		seen[f] = true
-	}
-	for _, name := range fileFilters {
-		if seen[name] {
-			return name
-		}
-	}
-	for _, key := range fileFilterKeys {
-		for i := 0; ; {
-			j := strings.Index(g[i:], key)
-			if j < 0 {
-				break
-			}
-			at := i + j
-			end := at + len(key)
-			before := at == 0 || isSep(rune(g[at-1]))
-			after := strings.TrimLeft(g[end:], " \t")
-			if before && strings.HasPrefix(after, "=") {
-				return key + "="
-			}
-			i = end
-		}
-	}
-	return ""
-}
-
-// codecParamOpensFile returns the first key in an x264/x265-style
-// "k=v:k=v" list that names a file, or "".
-func codecParamOpensFile(params string) string {
-	for _, kv := range strings.FieldsFunc(params, func(r rune) bool { return r == ':' || r == ',' }) {
-		k, _, _ := strings.Cut(kv, "=")
-		k = strings.ToLower(strings.TrimSpace(k))
-		if codecFileKeys[k] {
-			return k
-		}
-	}
-	return ""
 }
 
 // ------------------------------------------------------- command resolution
@@ -606,8 +393,10 @@ func quoteArgv(bin string, args []string) string {
 // is now a lower-privileged principal inside the same requireAuth boundary, and
 // it is refused both streamKey on /destinations and these routes outright --
 // GET /destinations/{id}/expert and POST /destinations/{id}/expert/preview are
-// in readScopeDeniedPatterns. A session and an admin token, which can rotate
-// the key anyway, still get the exact command.
+// in readScopeDeniedPatterns. Since the poka-yoke audit of 2026-11-04 no
+// token of either scope reaches these routes at all (they are session-only);
+// the signed-in operator, who can rotate the key anyway, gets the exact
+// command.
 //
 // Do not "fix" this by masking the argv. The next reader who is tempted should
 // read that list's comment first.

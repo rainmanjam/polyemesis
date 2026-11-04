@@ -149,3 +149,26 @@ func TestAStoredFileValueOptionNeverReachesTheCommandLine(t *testing.T) {
 		})
 	}
 }
+
+// Arguments saved before the API refused file access -- possibly by an API
+// token, which could reach the expert routes then -- must not run either.
+func TestStoredExpertArgumentsThatTouchFilesNeverReachTheCommandLine(t *testing.T) {
+	compiled := routing.Result{FilterComplex: "anull", OutLabel: "a"}
+	e := &Engine{log: testLogger()}
+	clean := backupRow()
+	want := e.destArgs(clean, compiled, "udp://127.0.0.1:1", clean.Target())
+	for _, out := range []string{
+		"-progress polyemesis.db",
+		"-c:a aac second-output.flv",
+		"-af amovie=clip.wav",
+	} {
+		t.Run(out, func(t *testing.T) {
+			row := backupRow()
+			row.ExtraOutputArgs = out
+			got := e.destArgs(row, compiled, "udp://127.0.0.1:1", row.Target())
+			if !equalArgs(got, want) {
+				t.Errorf("stored %q reached the command line: %q", out, got)
+			}
+		})
+	}
+}

@@ -127,8 +127,11 @@ func TestRevalidateClosesAPublisherWhoseKeyNoLongerAdmits(t *testing.T) {
 			}
 
 			m.set(tc.after)
+			if n := s.Revalidate(); n != 0 {
+				t.Fatalf("the first refusing pass closed %d publishers; it must take two", n)
+			}
 			if n := s.Revalidate(); n != 1 {
-				t.Fatalf("Revalidate closed %d publishers, want 1", n)
+				t.Fatalf("Revalidate closed %d publishers on the second refusing pass, want 1", n)
 			}
 			if !waitUntil(3*time.Second, func() bool { return !s.Publishing(9) }) {
 				t.Error("the revoked publisher is still live")
@@ -153,5 +156,31 @@ func TestTheRTMPRevalidationTickerClosesARevokedPublisher(t *testing.T) {
 	m.set(map[string]Target{})
 	if !waitUntil(3*time.Second, func() bool { return !s.Publishing(4) }) {
 		t.Fatal("the ticker never closed the publisher of a rotated key")
+	}
+}
+
+// One failed lookup (the sources table unreadable) between admitting passes
+// must not close a healthy encoder, and the count starts over.
+func TestATransientRTMPRefusalDoesNotCloseAPublisher(t *testing.T) {
+	live := map[string]Target{"key": {SourceID: 8, Name: "Main", Enabled: true, Ready: true}}
+	m := &mutableKeys{}
+	m.set(live)
+	s, addr := startMutable(t, m)
+	holdPublish(t, addr, "key")
+	if !waitUntil(3*time.Second, func() bool { return s.Publishing(8) }) {
+		t.Fatal("the publisher never went live")
+	}
+	for i := 0; i < 3; i++ {
+		m.set(map[string]Target{})
+		if n := s.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: one failed lookup closed %d publishers", i, n)
+		}
+		m.set(live)
+		if n := s.Revalidate(); n != 0 {
+			t.Fatalf("pass %d: an admitting pass closed %d publishers", i, n)
+		}
+	}
+	if !s.Publishing(8) {
+		t.Error("alternating transient failures took a healthy encoder off the air")
 	}
 }

@@ -884,6 +884,18 @@ func expertArgv(log *slog.Logger, row *db.Destination, raw, field string) []stri
 			return nil
 		}
 	}
+	// The same for everything else that opens a file on this box (poka-yoke
+	// audit 2026-11-04): -progress, a second positional output, movie=, an
+	// option the table cannot classify. The API refuses these now; a row saved
+	// before that -- possibly by an API token, which could reach the expert
+	// routes then -- is dropped at spawn rather than run.
+	if err := ffmpeg.CheckExpertFileAccess(field+" args", argv); err != nil {
+		if log != nil {
+			log.Warn("ignoring expert arguments that touch files on the server",
+				"dest", row.Name, "field", field, "err", err)
+		}
+		return nil
+	}
 	return argv
 }
 
