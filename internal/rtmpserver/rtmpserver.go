@@ -323,6 +323,7 @@ func (s *Server) Start() error {
 	s.mu.Unlock()
 
 	go s.acceptLoop(ln)
+	go s.revalidateEvery(revalidateInterval)
 	s.log.Info("one-port rtmp ingest listening", "component", "rtmp-ingest", "addr", s.addr)
 	return nil
 }
@@ -672,20 +673,44 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 
 	err := s.pump(sc, sess.key)
 
+	if n := endSubscribers(s.releaseSlot(sess)); n > 0 {
+		s.log.Info("rtmp subscribers ended with the publish", "component", "rtmp-ingest",
+			"subscribers", n)
+	}
+
+	s.log.Info("rtmp publisher disconnected", "component", "rtmp-ingest",
+		"source", target.Name, "role", role(target.Backup), "peer", peer,
+		"held", time.Since(sess.started).Round(time.Second), "err", err)
+}
+
+// releaseSlot is a finished publisher's teardown of the slot it held. It
+// returns the stream whose subscribers end with this publish, or nil.
+//
+// NIL WHEN THE SLOT WAS HANDED ON (poka-yoke audit 2026-11-04). A publisher
+// replaced by a reconnecting encoder still runs this when its pump returns,
+// and it used to end the subscribers of the stream unconditionally -- the
+// SUCCESSOR's subscribers, since the stream struct is per slot and is reused.
+// The engine's ingest child was cut off from a live publish for no reason, a
+// visible blip on every destination of that programme. Ending subscribers now
+// sits inside the same ownership check as the removal from s.live: a stale
+// teardown cannot touch the live session's state.
+func (s *Server) releaseSlot(sess *session) *stream {
 	s.mu.Lock()
-	if cur, ok := s.live[sess.key]; ok && cur == sess {
-		delete(s.live, sess.key)
-		// Reap the stream slot too, if nothing is reading it.
-		//
-		// Only serveSubscriber's defer did this, so a publisher that
-		// disconnected with no subscriber attached left its stream struct --
-		// and the setup messages cached in it -- until the process restarted.
-		// Bounded at one entry per PublisherKey and reused by any later
-		// subscriber on the same key, so this was small; it was also a stale
-		// onMetaData waiting to be replayed to whoever attached next.
-		if st := s.streams[sess.key]; st != nil && st.subscriberCount() == 0 {
-			delete(s.streams, sess.key)
-		}
+	defer s.mu.Unlock()
+	if cur, ok := s.live[sess.key]; !ok || cur != sess {
+		return nil
+	}
+	delete(s.live, sess.key)
+	// Reap the stream slot too, if nothing is reading it.
+	//
+	// Only serveSubscriber's defer did this, so a publisher that
+	// disconnected with no subscriber attached left its stream struct --
+	// and the setup messages cached in it -- until the process restarted.
+	// Bounded at one entry per PublisherKey and reused by any later
+	// subscriber on the same key, so this was small; it was also a stale
+	// onMetaData waiting to be replayed to whoever attached next.
+	if st := s.streams[sess.key]; st != nil && st.subscriberCount() == 0 {
+		delete(s.streams, sess.key)
 	}
 	// EVERY SUBSCRIBER IS ENDED WITH THE PUBLISH. #674
 	//
@@ -707,20 +732,69 @@ func (s *Server) admitSession(sc *gortmplib.ServerConn, target Target, peer, str
 	// here is what makes that sentence true -- AutoRestart with a 500ms floor
 	// then has it back before the next publish.
 	//
-	// Collected under s.mu and closed after it is released: sub.close() is
-	// idempotent (see #496, where a double close panicked and took the daemon
-	// down), but it also closes a socket, which is not work for a lock that
-	// every publisher and subscriber contends on.
-	st := s.streams[sess.key]
-	s.mu.Unlock()
-	if n := endSubscribers(st); n > 0 {
-		s.log.Info("rtmp subscribers ended with the publish", "component", "rtmp-ingest",
-			"subscribers", n)
-	}
+	// Collected under s.mu and closed by the caller after it is released:
+	// sub.close() is idempotent (see #496, where a double close panicked and
+	// took the daemon down), but it also closes a socket, which is not work for
+	// a lock that every publisher and subscriber contends on.
+	return s.streams[sess.key]
+}
 
-	s.log.Info("rtmp publisher disconnected", "component", "rtmp-ingest",
-		"source", target.Name, "role", role(target.Backup), "peer", peer,
-		"held", time.Since(sess.started).Round(time.Second), "err", err)
+// revalidateInterval is how often every live publisher's key is resolved
+// again; see Revalidate. A var only so a test can watch the ticker work.
+var revalidateInterval = 5 * time.Second
+
+func (s *Server) revalidateEvery(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-t.C:
+			s.Revalidate()
+		}
+	}
+}
+
+// Revalidate re-resolves every live publisher's stream key and closes the ones
+// that would no longer be admitted: the key rotated away, the source disabled,
+// or the key now naming a different slot. Admission used to be the only check,
+// so a leaked key kept publishing after the operator rotated it (poka-yoke
+// audit 2026-11-04). Ready is deliberately not re-checked: it flickers while an
+// engine restarts its ingest child, and closing a publisher for that would cut
+// a healthy broadcast. Returns how many it closed; the closed session's own
+// teardown releases its slot.
+func (s *Server) Revalidate() int {
+	s.mu.Lock()
+	sessions := make([]*session, 0, len(s.live))
+	for _, sess := range s.live {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+
+	closed := 0
+	for _, sess := range sessions {
+		target, found := s.lookup(sess.streamKey)
+		reason := ""
+		switch {
+		case !found:
+			reason = "its stream key no longer resolves (rotated or removed)"
+		case !target.Enabled:
+			reason = "its source is disabled"
+		case target.Key() != sess.key:
+			reason = "its stream key now names a different slot"
+		}
+		if reason == "" {
+			continue
+		}
+		s.log.Warn("rtmp publisher closed: no longer admitted", "component", "rtmp-ingest",
+			"peer", sess.peer, "role", role(sess.key.Backup), "reason", reason)
+		if c, ok := sess.conn.RW.(net.Conn); ok {
+			_ = c.Close()
+		}
+		closed++
+	}
+	return closed
 }
 
 // isLoopback reports whether an address is this machine talking to itself.

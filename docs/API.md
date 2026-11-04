@@ -22,10 +22,12 @@ creation, and cannot be recovered. Revoke individually with
 `DELETE /auth/tokens/{id}`.
 
 **A token cannot manage other tokens**, change the account password, upload or
-delete media, complete an OAuth connect flow, or export a debug bundle. Those
-are session-only: a leaked token should not be able to mint replacements for
-itself, lock you out, write arbitrary bytes to the server's disk, attach a
-platform account, or take a copy of the server's own logs.
+delete media, complete an OAuth connect flow, export a debug bundle, or reach
+any expert-mode route (`/destinations/{id}/expert`, its `preview` and
+`dry-run`). Those are session-only: a leaked token should not be able to mint
+replacements for itself, lock you out, write arbitrary bytes to the server's
+disk, attach a platform account, take a copy of the server's own logs, or hand
+FFmpeg an argument list.
 
 The debug split is deliberate and worth stating: `GET /debug` and `PUT /debug`
 stay token-reachable, so a dashboard can read capture state and an automation
@@ -1135,8 +1137,16 @@ carries the field. The Stream Deck plugin reads all four; see
 [STREAM-DECK.md](STREAM-DECK.md#what-the-faces-mean).
 
 **Expert mode splices arbitrary arguments into an FFmpeg command line.** Treat
-access to it as equivalent to shell access. `dry-run` tells you whether the
-result would start, without starting it.
+access to it as equivalent to shell access. Its five routes are session-only;
+an API token of any scope gets `403`. Arguments that open a file on the server
+are refused outright, whatever is acknowledged: `-progress`, `-vstats`,
+`-vstats_file`, `-pass`, `-passlogfile`, `-dump_attachment`, `-attach`,
+`-sdp_file`, `-stats_*`, `-fpre`, `-filter_script`, `-filter_complex_script`,
+the HLS/segment file options, file-writing muxers (`-f tee`, `segment`, `hls`,
+`dash`, `image2`, ...), filters that open a file (`movie`, `amovie`,
+`subtitles`, `textfile=`, `file=`, ...), encoder params that name a file
+(`dump-yuv=`, `stats=`), and any bare token that FFmpeg would take as a second
+output. `dry-run` tells you whether the result would start, without starting it.
 
 ### Routing and renditions
 

@@ -1,0 +1,116 @@
+package api
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/rainmanjam/polyemesis/internal/db"
+)
+
+/* AN FFMPEG ARGV CAN READ AND WRITE FILES ON THE SERVER (poka-yoke audit
+ * 2026-11-04, finding 2). `-progress <db path>` overwrote the database, a
+ * second positional output created a file anywhere the service could write,
+ * and movie=/textfile= read a server file out to the platform. None of that is
+ * a stream setting, so it is refused outright -- no acknowledgement covers it.
+ */
+func TestExpertModeRefusesArgumentsThatTouchServerFiles(t *testing.T) {
+	row := &db.Destination{ID: 1, Kind: db.DestRTMP}
+	for _, tc := range []struct {
+		name string
+		in   []string
+		out  []string
+		want string
+	}{
+		{"progress overwrites a file", nil, []string{"-progress", "/var/lib/polyemesis/polyemesis.db"}, "-progress"},
+		{"vstats_file writes one", nil, []string{"-vstats_file", "/tmp/x"}, "-vstats_file"},
+		{"vstats writes one in the cwd", nil, []string{"-vstats"}, "-vstats"},
+		{"passlogfile writes one", nil, []string{"-passlogfile", "/tmp/x"}, "-passlogfile"},
+		{"a stream specifier does not hide it", nil, []string{"-passlogfile:v", "/tmp/x"}, "-passlogfile"},
+		{"dump_attachment writes on the input side", []string{"-dump_attachment:t", "/tmp/x"}, nil, "-dump_attachment"},
+		{"attach reads a file out", nil, []string{"-attach", "/etc/hostname"}, "-attach"},
+		{"stats_enc_pre writes one", nil, []string{"-stats_enc_pre:v", "/tmp/x"}, "-stats_enc_pre"},
+		{"filter_complex_script reads one", nil, []string{"-filter_complex_script", "/tmp/g"}, "-filter_complex_script"},
+		{"a second positional output", nil, []string{"-c:a", "aac", "/var/lib/polyemesis/evil.flv"}, "another output"},
+		{"a positional after a boolean", nil, []string{"-an", "/tmp/evil.flv"}, "another output"},
+		{"a positional on the input side", []string{"/tmp/evil.flv"}, nil, "another output"},
+		{"stdout as an output", nil, []string{"-"}, "another output"},
+		{"a dangling option swallows the destination URL", nil, []string{"-metadata"}, "needs a value"},
+		{"movie= reads a media file", nil, []string{"-vf", "movie=/etc/passwd[w];[in][w]overlay"}, "movie"},
+		{"amovie= in a complex graph", nil, []string{"-filter_complex", "amovie=/tmp/a.wav[x]"}, "amovie"},
+		{"subtitles= reads a file", nil, []string{"-vf", "subtitles=/etc/passwd"}, "subtitles"},
+		{"drawtext textfile= reads a file", nil, []string{"-vf", "drawtext=textfile=/etc/passwd:x=1"}, "textfile="},
+		{"metadata file= writes one", nil, []string{"-af", "ametadata=mode=print:file=/tmp/x"}, "file="},
+		{"escaping does not hide a filter", nil, []string{"-vf", `m\ovie=/etc/passwd`}, "movie"},
+		{"a file-writing muxer", nil, []string{"-f", "segment"}, "-f segment"},
+		{"tee writes beside the URL", nil, []string{"-f", "tee"}, "-f tee"},
+		{"hls segment path", nil, []string{"-hls_segment_filename", "/tmp/s%d.ts"}, "-hls_segment_filename"},
+		{"x264 dump-yuv writes raw video", nil, []string{"-x264-params", "keyint=60:dump-yuv=/tmp/y"}, "dump-yuv"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := checkExpertArgs(tc.in, tc.out, row)
+			if err == nil {
+				t.Fatalf("accepted in=%q out=%q, which touches a file on the server", tc.in, tc.out)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refused with %q, which does not name %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The walk must not refuse ordinary stream settings, values that look like
+// paths, or the booleans and their -no negations.
+func TestExpertFileWalkAcceptsOrdinaryArguments(t *testing.T) {
+	row := &db.Destination{ID: 1, Kind: db.DestRTMP}
+	for _, tc := range []struct {
+		name    string
+		in, out []string
+	}{
+		{"muxer flags", nil, []string{"-muxdelay", "0.1", "-flvflags", "no_duration_filesize"}},
+		{"booleans", []string{"-re", "-nostdin"}, []string{"-shortest", "-an"}},
+		{"a value that is a path", nil, []string{"-metadata", "comment=see /docs"}},
+		{"a negative value", []string{"-itsoffset", "-1.5"}, nil},
+		{"an ordinary filter", nil, []string{"-af", "volume=0.8,aresample=48000"}},
+		{"an ordinary muxer", nil, []string{"-f", "flv"}},
+		{"ordinary x264 params", nil, []string{"-x264-params", "keyint=60:min-keyint=60"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := checkExpertArgs(tc.in, tc.out, row); err != nil {
+				t.Errorf("refused in=%q out=%q: %v", tc.in, tc.out, err)
+			}
+		})
+	}
+}
+
+// The route table is the other half: an API token -- admin scope included --
+// cannot reach any expert route, so the argv can only be saved by a signed-in
+// operator. The session still can.
+func TestAnAPITokenCannotReachTheExpertRoutes(t *testing.T) {
+	h, _, sign := renditionServer(t, defaultTools())
+	dest := createDestination(t, h, sign, destinationBody("expert-session", false, nil))
+	path := "/api/v1/destinations/" + itoa(dest.ID) + "/expert"
+	admin := createToken(t, h, sign, "automation")
+
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, path, nil},
+		{http.MethodPut, path, expertBody("", "-muxdelay 0.1", false, true)},
+		{http.MethodDelete, path, nil},
+		{http.MethodPost, path + "/preview", expertBody("", "-muxdelay 0.1", false, false)},
+		{http.MethodPost, path + "/dry-run", expertBody("", "-muxdelay 0.1", false, false)},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			r := jsonRequest(t, tc.method, tc.path, tc.body)
+			r.Header.Set("Authorization", "Bearer "+admin)
+			if w := do(t, h, r); w.Code != http.StatusForbidden {
+				t.Errorf("admin token got %d, want 403: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// The signed-in operator still saves.
+	send(t, h, sign, http.MethodPut, path, expertBody("", "-muxdelay 0.1", false, true), http.StatusOK)
+}

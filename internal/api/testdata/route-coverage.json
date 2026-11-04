@@ -4,7 +4,7 @@
   "counterpartlessExcusedCeiling": 30,
   "differentialFloor": 10,
   "sentinelWitnessFloor": 26,
-  "nonGetDifferentialFloor": 20,
+  "nonGetDifferentialFloor": 18,
   "unstableCeiling": 4,
   "inertCeiling": 6,
   "varianceExemptCeiling": 6,
@@ -475,7 +475,7 @@
     {
       "method": "DELETE",
       "pattern": "/api/v1/destinations/{id}/expert",
-      "coverage": "denied-differential",
+      "coverage": "denied-by-method",
       "zeroSource": "guarded"
     },
     {
@@ -499,7 +499,7 @@
     {
       "method": "POST",
       "pattern": "/api/v1/destinations/{id}/expert/preview",
-      "coverage": "denied-differential",
+      "coverage": "denied-by-method",
       "zeroSource": "unguarded"
     },
     {

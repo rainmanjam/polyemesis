@@ -144,6 +144,9 @@ type Server struct {
 
 	mu   sync.Mutex
 	live map[PublisherKey]*session // by (source id, role)
+	// stopRevalidate ends the revalidation ticker Start launched. Guarded by
+	// mu; nil while the server is not started.
+	stopRevalidate chan struct{}
 
 	// started is the lifecycle interlock as well as the "is a Serve error worth
 	// logging" flag. Start claims it with a compare-and-swap before it binds
@@ -517,6 +520,11 @@ func (s *Server) Start() error {
 	for _, ln := range bound {
 		go s.serve(ln)
 	}
+	stop := make(chan struct{})
+	s.mu.Lock()
+	s.stopRevalidate = stop
+	s.mu.Unlock()
+	go s.revalidateEvery(revalidateInterval, stop)
 	s.log.Info("one-port srt ingest listening",
 		"addr", s.addr, "bound", report.Bound, "degraded", report.Degraded())
 	return nil
@@ -638,6 +646,10 @@ func (s *Server) Stop() {
 	}
 	s.srvs = nil
 	s.mu.Lock()
+	if s.stopRevalidate != nil {
+		close(s.stopRevalidate)
+		s.stopRevalidate = nil
+	}
 	sessions := make([]*session, 0, len(s.live))
 	for _, sess := range s.live {
 		sessions = append(sessions, sess)
@@ -826,6 +838,74 @@ func (s *Server) handlePublish(conn srt.Conn) {
 			"bytes", sess.bytes.Load())
 	}
 	_ = conn.Close()
+}
+
+// revalidateInterval is how often every live publisher's token is resolved
+// again. A rotated token, a disabled source or a stopped engine ends the
+// session within this bound even if nothing calls Revalidate. A var only so a
+// test can watch the ticker work without waiting five seconds.
+var revalidateInterval = 5 * time.Second
+
+func (s *Server) revalidateEvery(every time.Duration, stop <-chan struct{}) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			s.Revalidate()
+		}
+	}
+}
+
+// Revalidate re-runs admission for every live publisher and closes the ones
+// that would no longer be admitted.
+//
+// ADMISSION USED TO BE THE ONLY CHECK (poka-yoke audit 2026-11-04). A token
+// was resolved at connect and at publish, and never again: rotating a leaked
+// token, disabling the source, or stopping its engine left the connected
+// encoder feeding the programme until it chose to hang up. The session already
+// keeps the token it presented, so the same lookup decides again: unknown,
+// disabled, no sink, or now resolving to a different slot all close it. It
+// returns how many it closed. Called on a ticker by Start, and by the engine
+// after every reconcile.
+func (s *Server) Revalidate() int {
+	s.mu.Lock()
+	sessions := make([]*session, 0, len(s.live))
+	for _, sess := range s.live {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+
+	closed := 0
+	for _, sess := range sessions {
+		target, ok := s.lookup(strings.TrimSpace(sess.streamID))
+		reason := ""
+		switch {
+		case !ok:
+			reason = "its token no longer resolves (rotated or removed)"
+		case !target.Enabled:
+			reason = "its source is disabled"
+		case target.Sink == nil:
+			reason = "its source has no running engine"
+		case target.Key() != sess.key:
+			reason = "its token now names a different slot"
+		}
+		if reason == "" {
+			continue
+		}
+		s.mu.Lock()
+		if cur, live := s.live[sess.key]; live && cur == sess {
+			delete(s.live, sess.key)
+		}
+		s.mu.Unlock()
+		s.log.Warn("srt publisher closed: no longer admitted",
+			"peer", sess.peer, "role", role(sess.key.Backup), "reason", reason)
+		_ = sess.conn.Close()
+		closed++
+	}
+	return closed
 }
 
 // LinkStats is one publisher's uplink health.

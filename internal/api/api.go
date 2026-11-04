@@ -1316,11 +1316,23 @@ func (s *Server) registerRoutes(r chi.Router) {
 			// same one and it arrives from the helper that actually needed the
 			// engine. The two that save carry the middleware as well, because
 			// they reconcile afterwards.
-			r.Get("/destinations/{id}/expert", s.handleGetExpert)
-			r.With(s.requireSource).Put("/destinations/{id}/expert", s.handlePutExpert)
-			r.With(s.requireSource).Delete("/destinations/{id}/expert", s.handleDeleteExpert)
-			r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
-			r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
+			//
+			// SESSION-ONLY (poka-yoke audit 2026-11-04). An FFmpeg argv can
+			// write and read files on this box, so an admin-scoped API token
+			// that could save one was shell-adjacent access with no human
+			// present. No token consumer uses these -- there is no MCP tool for
+			// them, and neither the Stream Deck plugin nor the OBS bridge
+			// touches them -- so the route table now says so, the same way it
+			// does for /media uploads and /upgrade/stage. checkExpertArgs'
+			// refusals still apply to the signed-in operator.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireSession)
+				r.Get("/destinations/{id}/expert", s.handleGetExpert)
+				r.With(s.requireSource).Put("/destinations/{id}/expert", s.handlePutExpert)
+				r.With(s.requireSource).Delete("/destinations/{id}/expert", s.handleDeleteExpert)
+				r.Post("/destinations/{id}/expert/preview", s.handlePreviewExpert)
+				r.Post("/destinations/{id}/expert/dry-run", s.handleDryRunExpert)
+			})
 
 			// Sources: the multi-programme endpoints. Placed before renditions
 			// because a rendition belongs to a source, which is the order the

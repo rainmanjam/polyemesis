@@ -87,8 +87,9 @@ type nonGetDifferentialRow struct {
 //
 // MEASURED, NOT CHOSEN, and COMPLETE over that measurement. All 83 non-GET
 // pairs the ledger classifies as denied were driven as admin with {} against a
-// per-pair fixture; these seven are every pair that came back 2xx with a
-// planted credential in the body. The other 76 are recorded in the #157
+// per-pair fixture; these seven were every pair that came back 2xx with a
+// planted credential in the body (five since the two expert rows became
+// session-only). The other 76 are recorded in the #157
 // deferral row with what the measurement could and could not see, rather than
 // being swept anyway: asserting absence over a status envelope or a 404 is
 // #165's defect, and it would fill this census with rows that cannot fail.
@@ -104,25 +105,10 @@ func nonGetDifferentialCensus() []nonGetDifferentialRow {
 			},
 			Why: "echoes the stored destination, expert argv included",
 		},
-		{
-			Method: http.MethodDelete, Pattern: "/api/v1/destinations/{id}/expert",
-			Body:      map[string]any{},
-			Sentinels: []string{sentinelDestKey},
-			// It clears the expert argv columns and answers with the
-			// destination as it now stands, so the argv sentinel that only
-			// those columns carry stops being witnessed anywhere. Declared
-			// rather than avoided: this row is why the census cannot share a
-			// fixture, and it is in the census rather than excluded from it
-			// because per-row fixtures made that a free choice.
-			Destroys: []string{sentinelExpertArgs},
-			Why:      "answers a clear-expert-mode with the whole destination row",
-		},
-		{
-			Method: http.MethodPost, Pattern: "/api/v1/destinations/{id}/expert/preview",
-			Body:      map[string]any{},
-			Sentinels: []string{sentinelDestKey},
-			Why:       "renders the resolved ffmpeg argv, which embeds the stream key",
-		},
+		// DELETE /destinations/{id}/expert and POST .../expert/preview used to
+		// be rows here. Both are session-only since the poka-yoke audit of
+		// 2026-11-04, so no bearer of either scope reaches them and there is
+		// no admin-token body left to measure.
 		{
 			Method: http.MethodPut, Pattern: "/api/v1/playout/publish",
 			Body:      map[string]any{},
