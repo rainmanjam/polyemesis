@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/captions"
@@ -75,17 +74,18 @@ func (e *Engine) startCaptionStage(row *db.Destination, upstream *relay.Hub) (*d
 	if err != nil {
 		return nil, fmt.Errorf("captions: %w", err)
 	}
-	port, err := e.allocPort()
+	// BOUND HERE, ON :0, AND HELD -- not taken from e.alloc and bound after.
+	// The allocator answers "free when I probed it" by binding the port and
+	// closing it, and between that probe and a bind here the port belongs to
+	// nobody; another process on the same range can take it, and the stage
+	// fails with "address already in use". The allocator is for ports a child
+	// must be told before it binds; this socket is in-process. See buildDelay.
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		_ = outHub.Close()
-		return nil, err
-	}
-	conn, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	if err != nil {
-		e.releasePort(port)
 		_ = outHub.Close()
 		return nil, fmt.Errorf("captions: %w", err)
 	}
+	port := conn.LocalAddr().(*net.UDPAddr).Port
 	capt := &destCaption{
 		id:       row.ID,
 		stage:    captions.NewSEIStage(),
@@ -98,7 +98,6 @@ func (e *Engine) startCaptionStage(row *db.Destination, upstream *relay.Hub) (*d
 	}
 	if _, err := upstream.Subscribe(capt.inSub, port); err != nil {
 		_ = conn.Close()
-		e.releasePort(port)
 		_ = outHub.Close()
 		return nil, err
 	}
@@ -137,7 +136,6 @@ func (e *Engine) closeCaptionStage(capt *destCaption) {
 	<-capt.done
 	capt.upstream.Unsubscribe(capt.inSub)
 	_ = capt.hub.Close()
-	e.releasePort(capt.port)
 	// Only this stage's own registration is removed. A restart may have
 	// registered a newer stage under the same id, which must be left alone.
 	e.seiStages.CompareAndDelete(capt.id, capt.stage)

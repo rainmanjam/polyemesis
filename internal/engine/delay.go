@@ -69,6 +69,7 @@ type destDelay struct {
 	// hub is the private hub the destination's FFmpeg and its backup read.
 	hub *relay.Hub
 	// inPort is the line's input port, subscribed to the upstream hub as inSub.
+	// The line bound it itself (:0); it is not one of e.alloc's ports.
 	inPort int
 	inSub  string
 	// dir is this line's own spill directory; see delaySpillDir.
@@ -213,11 +214,16 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 	if err != nil {
 		return nil, fmt.Errorf("broadcast delay: %w", err)
 	}
-	port, err := e.allocPort()
-	if err != nil {
-		_ = hub.Close()
-		return nil, err
-	}
+	// THE LINE CHOOSES ITS OWN PORT, by binding :0, and holds it from that
+	// bind on. It used to take one from e.alloc and then bind it -- but the
+	// allocator's answer is "this port was free when I probed it", given by
+	// binding the port and closing it again, so between that probe and this
+	// bind the port belonged to nobody. Another process probing or binding the
+	// same range takes it in that gap, and the destination fails to start with
+	// "address already in use" (CI: every test process builds engines on the
+	// same 21000 range). The allocator is for ports a CHILD must be told
+	// before it binds them; the line is in this process and is told nothing,
+	// so it binds the way the private hub above already does.
 	line, err := delayline.Listen(delayline.Config{
 		Delay: delay,
 		Limits: delayline.Limits{
@@ -240,13 +246,12 @@ func (e *Engine) buildDelay(row *db.Destination) (*destDelay, error) {
 		OnDumped: func(res delayline.DumpResult) { e.onDelayDumped(row, dd, res) },
 		Out:      hub.Deliver,
 		Log:      e.log.With("dest", row.Name),
-	}, port)
+	}, 0)
 	if err != nil {
-		e.releasePort(port)
 		_ = hub.Close()
 		return nil, err
 	}
-	dd.line, dd.hub, dd.inPort = line, hub, port
+	dd.line, dd.hub, dd.inPort = line, hub, line.Port()
 	built = true
 	return dd, nil
 }
@@ -300,9 +305,8 @@ func (e *Engine) closeDelay(dd *destDelay) {
 		return
 	}
 	dd.detach()
-	dd.line.Close() // deletes dd.dir, and only dd.dir
+	dd.line.Close() // deletes dd.dir, and only dd.dir; closes the line's socket
 	liveSpill.Delete(dd.dir)
-	e.releasePort(dd.inPort)
 	_ = dd.hub.Close()
 }
 

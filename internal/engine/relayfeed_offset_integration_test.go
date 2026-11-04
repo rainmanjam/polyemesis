@@ -185,6 +185,27 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 	pubArgs := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
 	if paced {
 		pubArgs = append(pubArgs, "-re")
+	} else {
+		// FAST, BUT NOT A SINGLE BURST. With no rate at all the publisher put
+		// the whole fixture -- about 860 KB, 655 datagrams -- on the wire in
+		// ~60ms, and the hop's input socket cannot hold that: FFmpeg sets its
+		// UDP receive buffer to 384 KiB (measured, rhiwat 393216 on macOS),
+		// which the kernel accounts per mbuf cluster at roughly 170 of these
+		// datagrams. Whether the rest survived depended on FFmpeg's reader
+		// thread being scheduled inside those 60ms. When it was not, the
+		// kernel dropped the tail, the hop published 90-175 datagrams, and
+		// the test failed "captured only 0.8s" -- about 1 run in 10 on an
+		// idle machine, with the head always intact and only the tail gone.
+		//
+		// readrate 4 is still four times realtime, which is all the claim
+		// below needs, and the HOP stays exactly as unpaced as production --
+		// relayFeedArgs is untouched; only the fixture's publisher is paced.
+		// The publisher sends an initial burst of half a second of media
+		// (~55 datagrams, FFmpeg's -readrate_initial_burst default), then
+		// ~440 a second. That leaves ~115 datagrams of room, so the hop's
+		// reader thread would have to be off-CPU for ~260ms, not ~60ms,
+		// before the socket filled. -readrate is FFmpeg 5.0+; CI pins 8.1.
+		pubArgs = append(pubArgs, "-readrate", "4")
 	}
 	pubArgs = append(pubArgs, "-i", fixture, "-map", "0", "-c", "copy",
 		"-f", "mpegts", "-flush_packets", "1",
@@ -413,8 +434,8 @@ func TestAnUnpacedCopyHopPublishesFasterThanRealtime(t *testing.T) {
 	if fast.span() < 1 {
 		t.Fatalf("the hop captured only %.3fs of media; there is nothing to compare", fast.span())
 	}
-	// The publisher pushes the whole fixture as fast as the socket takes it, and
-	// the hop keeps up. If this ever failed -- media taking as long as its own
+	// The publisher pushes the fixture at four times realtime (see runRelayHop
+	// for why not faster), and the hop keeps up. If this ever failed -- media taking as long as its own
 	// duration to cross an unpaced copy -- the hop would be pacing itself
 	// somewhere, and the lead this measures could not exist.
 	if fast.publishWall > time.Duration(fast.span()*float64(time.Second)) {

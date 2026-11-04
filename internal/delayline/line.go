@@ -47,6 +47,14 @@ func DiskBudgetFor(delay time.Duration) int64 {
 
 // Config is what a Line is built from.
 type Config struct {
+	// beforeRead, when set, runs before each read of the socket. A seam for
+	// tests that need the reader provably behind; nil in production.
+	beforeRead func()
+	// readQueued, when set, replaces the socket read takeQueued uses. A seam
+	// so a test can present input that never stops without flooding the
+	// loopback, which disturbs every other test using it.
+	readQueued func(buf []byte) (int, error)
+
 	Delay  time.Duration
 	Limits Limits
 	// Lead is how long before the first release OnFirstDue fires.
@@ -138,7 +146,7 @@ func Listen(cfg Config, port int) (*Line, error) {
 	}
 	// The same generous buffer the hub uses: a spill write is the one thing on
 	// the read path that can take a few milliseconds.
-	_ = conn.SetReadBuffer(8 << 20)
+	_ = conn.SetReadBuffer(readBufferBytes)
 	l := &Line{
 		cfg:       cfg,
 		conn:      conn,
@@ -172,27 +180,11 @@ func (l *Line) read() {
 	pkt := make([]byte, 2048)
 	var dropsSeen uint64
 	var lastDropReport time.Time
-	for {
-		n, err := l.conn.Read(pkt)
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			select {
-			case <-l.quit:
-				return
-			default:
-			}
-			continue
-		}
-		if n == 0 {
-			// The hub drops these too: FFmpeg's UDP demuxer reads one as EOF.
-			continue
-		}
-		err = l.buf.Push(time.Now(), pkt[:n])
+	take := func(p []byte) {
+		err := l.buf.Push(time.Now(), p)
 		l.ingested.Add(1)
 		if err != nil {
-			continue
+			return
 		}
 		// A dump resumes on a push: the one that brought its keyframe.
 		if t := l.buf.takeResumed(); t != nil && l.cfg.OnDumped != nil {
@@ -212,6 +204,99 @@ func (l *Line) read() {
 		default:
 		}
 	}
+	for {
+		if l.cfg.beforeRead != nil {
+			l.cfg.beforeRead()
+		}
+		n, err := l.conn.Read(pkt)
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if errors.Is(err, os.ErrDeadlineExceeded) && l.draining.Load() {
+				// Drain's cue: take what is already queued, then stop.
+				l.takeQueued(pkt, take)
+				return
+			}
+			select {
+			case <-l.quit:
+				return
+			default:
+			}
+			continue
+		}
+		if n == 0 {
+			// The hub drops these too: FFmpeg's UDP demuxer reads one as EOF.
+			continue
+		}
+		take(pkt[:n])
+	}
+}
+
+// readBufferBytes is the receive buffer the line asks for: the same generous
+// one the hub uses, because a spill write is the one thing on the read path
+// that can take a few milliseconds.
+const readBufferBytes = 8 << 20
+
+// drainBudget bounds what takeQueued will read after a stop, in the units the
+// kernel charges a receive queue: payload plus per-datagram overhead.
+//
+// WHY A BOUND AT ALL. UDP has no end of stream. The hub has been unsubscribed
+// by the time Drain runs, but anything else that can reach a loopback port can
+// keep sending, and a drain that reads "until the queue is empty" would then
+// never end -- and Drain, and the destination teardown waiting on it, with it.
+//
+// WHY THIS BOUND. A receive queue cannot hold more than its buffer, so the
+// datagrams queued at the moment of the stop -- the tail this exists to keep --
+// fit inside it. Linux doubles the SO_RCVBUF it is given, so twice what the
+// line asked for is an upper bound on every platform. Reading more than that
+// means reading input that arrived after the stop, which is exactly what Drain
+// does not take. Charging each datagram at least drainOverheadBytes keeps the
+// count of empty or tiny datagrams bounded too. Linux and macOS charge a
+// queued datagram more than that (an sk_buff; an mbuf header and cluster), so
+// there the budget cannot run out before a genuine tail does; the factor of two
+// is the margin for a stack that charges payload alone.
+const (
+	drainBudget        = 2 * readBufferBytes
+	drainOverheadBytes = 256
+)
+
+// takeQueued reads the datagrams already in the socket's receive queue, without
+// waiting for more, and hands each to take. It stops at an empty queue, a
+// closed socket, a Close (quit), or drainBudget -- whichever comes first.
+//
+// WHAT IT CANNOT KEEP: a datagram still inside the kernel's loopback path when
+// the queue is read. Linux usually completes loopback delivery inside the send;
+// macOS hands it to lo0's input thread and delivers it slightly later. Such a
+// datagram was sent within microseconds of the stop and arrives after the
+// line has found its queue empty; it is lost exactly as before.
+func (l *Line) takeQueued(pkt []byte, take func([]byte)) {
+	_ = l.conn.SetReadDeadline(time.Time{})
+	next := func(buf []byte) (int, error) { return readQueued(l.conn, buf) }
+	if l.cfg.readQueued != nil {
+		next = l.cfg.readQueued
+	}
+	for budget := drainBudget; budget > 0; {
+		select {
+		case <-l.quit:
+			return
+		default:
+		}
+		n, err := next(pkt)
+		if errors.Is(err, errQueueEmpty) || errors.Is(err, net.ErrClosed) {
+			return
+		}
+		budget -= n + drainOverheadBytes
+		if err != nil || n == 0 {
+			// The normal reader skips both; so does this. The budget still
+			// counts them, so a stream of errors cannot hold the drain open.
+			continue
+		}
+		take(pkt[:n])
+	}
+	l.log.Warn("broadcast delay: input kept arriving after the stop; "+
+		"the drain took a full receive buffer and stopped reading",
+		"budgetBytes", drainBudget)
 }
 
 func (l *Line) pump() {
@@ -221,7 +306,11 @@ func (l *Line) pump() {
 	for {
 		due, ok := l.buf.NextDue()
 		if !ok {
-			if l.draining.Load() {
+			// EMPTY MEANS DONE ONLY ONCE THE READER IS OUT. The draining flag
+			// is set before the reader has taken what was already queued, so
+			// it alone is not the answer: an empty buffer in that instant is
+			// one the reader is about to push into.
+			if l.draining.Load() && l.inputClosed() {
 				l.drainOnce.Do(func() { close(l.drained) })
 				return
 			}
@@ -258,6 +347,16 @@ func (l *Line) pump() {
 	}
 }
 
+// inputClosed reports whether the reader has stopped for good.
+func (l *Line) inputClosed() bool {
+	select {
+	case <-l.inputDone:
+		return true
+	default:
+		return false
+	}
+}
+
 // sleepUntil waits for t, or returns false if the line closes first.
 func (l *Line) sleepUntil(t time.Time) bool {
 	d := time.Until(t)
@@ -283,13 +382,28 @@ func (l *Line) sleepUntil(t time.Time) bool {
 // The channel closes when the last held datagram has been released -- up to
 // Delay from now. This is the default stop: the audience sees the end of the
 // programme, not a cut Delay before it.
+//
+// WHAT HAS ALREADY ARRIVED IS KEPT. The caller unsubscribes the line from its
+// hub first, so nothing new is coming -- but whatever the hub sent before that
+// may still be in this line's socket, unread, and it is the last of the
+// programme. Closing the socket here used to discard it, cutting the very tail
+// this exists to play out. Instead the reader is woken with an expired
+// deadline, takes what is already queued without waiting for more (bounded:
+// see drainBudget), and only then is the socket closed. Drain returns once
+// that is done, which is a non-blocking read of at most one receive buffer.
 func (l *Line) Drain() <-chan struct{} {
+	// The deadline goes on BEFORE the flag, so that anyone who sees Draining
+	// also sees a reader that will stop at its next read. Until the flag is
+	// set an expired read is simply retried.
+	if !l.draining.Load() {
+		_ = l.conn.SetReadDeadline(time.Now())
+	}
 	if l.draining.CompareAndSwap(false, true) {
-		_ = l.conn.Close()
 		// The reader must be out before the pump may conclude "empty means
 		// done", or a datagram read in that instant is pushed into a buffer
 		// nobody will drain.
 		<-l.inputDone
+		_ = l.conn.Close()
 		select {
 		case l.wake <- struct{}{}:
 		default:
