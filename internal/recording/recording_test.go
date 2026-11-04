@@ -861,20 +861,16 @@ func TestScanDeIndexesEverythingGoneFromAConfirmedVolume(t *testing.T) {
 // A volume the marker cannot be written to falls back to the weaker rule:
 // hold only when every indexed file is missing at once.
 func TestScanFallsBackWhenTheVolumeCannotBeMarked(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can write a read-only directory")
-	}
 	m, dir, store := newManager(t)
 	now := time.Now()
 	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour}, nil)
-	if err := os.Chmod(dir, 0o555); err != nil {
+	// A dangling symlink where the marker goes: the stat says "not there" and
+	// the write fails, for any user, root included -- which is what a
+	// read-only volume looks like to HoldForMissing.
+	if err := os.Symlink(filepath.Join(t.TempDir(), "no-such-dir", "marker"), filepath.Join(dir, VolumeMarker)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := m.Scan()
-	if cerr := os.Chmod(dir, 0o755); cerr != nil {
-		t.Fatal(cerr)
-	}
-	if err != nil {
+	if _, err := m.Scan(); err != nil {
 		t.Fatalf("first scan: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, VolumeMarker)); err == nil {
