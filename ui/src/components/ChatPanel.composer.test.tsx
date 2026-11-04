@@ -181,4 +181,17 @@ describe("the composer keeps a message nothing accepted", () => {
     await waitFor(() => expect(input.value).toBe(""));
     expect(screen.queryByRole("button", { name: "Put the message back" })).toBeNull();
   });
+
+  it("keeps a draft typed while the previous send was in flight", async () => {
+    feed.statuses = [status("twitch")];
+    let resolve: (v: Awaited<ReturnType<typeof api.sendChat>>) => void = () => {};
+    vi.spyOn(api, "sendChat").mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<ChatPanel />);
+    const input = await typeAndSend("first message");
+    fireEvent.change(input, { target: { value: "second message" } });
+    resolve({ results: [{ platform: "twitch", ok: true }], sent: 1, failed: 0, skipped: 0 });
+    await waitFor(() => expect(api.sendChat).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(input.value).toBe("second message");
+  });
 });

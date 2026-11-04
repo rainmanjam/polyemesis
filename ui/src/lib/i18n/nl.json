@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Deze publicatie is niet gestart met een klik op Publiceren. Open de clip en klik op Publiceren.",
   "publish.cause.cancelled": "Je hebt deze publicatie geannuleerd. Klik op Publiceren om haar opnieuw te starten.",
   "publish.cause.unknown": "Iets onverwachts heeft deze publicatie gestopt. De melding van het platform staat hieronder.",
+  "publish.cause.upload_limited": "Dit kanaal heeft voorlopig de limiet van het platform voor uploads bereikt. Het is een limiet per kanaal, niet het API-quotum; publiceer later opnieuw.",
   "publish.gatedFor": "Publiceren naar {platform} staat uit. Een beheerder zet het aan in de omgeving van de server.",
   "publish.needsTitle": "Voeg een titel toe om te publiceren.",
   "credLabels.clientKey": "Client key",

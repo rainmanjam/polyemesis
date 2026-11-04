@@ -304,9 +304,14 @@ func (r *Runner) Last() []Result {
 	return append([]Result(nil), r.last...)
 }
 
-// mark records an occurrence as handled: in memory first, unconditionally, so
-// this process never acts on it again, then in the store. A store failure is
-// returned for the result, and no longer re-arms the occurrence.
+// mark records an occurrence as handled: in memory first, so this process
+// never acts on it again, then in the store. A store failure is returned for
+// the result and no longer re-arms the occurrence.
+//
+// THE IN-MEMORY MARK IS ONLY A STAND-IN for a store write that failed. Once
+// the store has it, the store is the authority again and the memory is
+// dropped: kept, it would override an operator who re-armed the schedule
+// (which resets LastRunAt), suppressing it until a restart (review follow-up).
 func (r *Runner) mark(id int64, at time.Time) error {
 	r.mu.Lock()
 	if r.handled == nil {
@@ -316,7 +321,15 @@ func (r *Runner) mark(id int64, at time.Time) error {
 		r.handled[id] = at
 	}
 	r.mu.Unlock()
-	return r.store.MarkScheduleRun(id, at)
+	err := r.store.MarkScheduleRun(id, at)
+	if err == nil {
+		r.mu.Lock()
+		if !r.handled[id].After(at) {
+			delete(r.handled, id)
+		}
+		r.mu.Unlock()
+	}
+	return err
 }
 
 func (r *Runner) handledAt(id int64) time.Time {

@@ -12,9 +12,13 @@ import { useCallback, useRef } from "react";
  *    changed, Esc is refused and `onBlocked` says why. Cancel and the close
  *    button still close: those are a decision, not a slip.
  *
- *  "Typed" is any native input or change event inside the content, which is
- *  every text field, select and checkbox. Call `reset()` when the dialog opens
- *  on a new subject. */
+ *  "Touched" is any input or change event inside the content (every text
+ *  field), and any click or Enter/Space press: Radix Select, Switch and
+ *  Checkbox, and the destination dialog's preset buttons, change state without
+ *  a native input event. React's synthetic events bubble through portals, so a
+ *  Select's portaled list counts too. Over-marking is the safe direction: the
+ *  worst case is that Esc asks the operator to use Cancel. Call `reset()` when
+ *  the dialog opens on a new subject. */
 export function useDismissGuard(onBlocked: () => void) {
   const touched = useRef(false);
   const reset = useCallback(() => {
@@ -26,6 +30,10 @@ export function useDismissGuard(onBlocked: () => void) {
   const contentProps = {
     onInputCapture: mark,
     onChangeCapture: mark,
+    onClickCapture: mark,
+    onKeyDownCapture: (e: { key: string }) => {
+      if (e.key === "Enter" || e.key === " ") mark();
+    },
     onInteractOutside: (e: Event) => e.preventDefault(),
     onEscapeKeyDown: (e: KeyboardEvent) => {
       if (touched.current) {

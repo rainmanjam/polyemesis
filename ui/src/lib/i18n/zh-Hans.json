@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "此次发布并非通过点击“发布”启动。请打开片段并点击“发布”。",
   "publish.cause.cancelled": "你已取消此次发布。点击“发布”可重新开始。",
   "publish.cause.unknown": "意外情况导致此次发布停止。平台的消息显示在下方。",
+  "publish.cause.upload_limited": "此频道目前已达到平台允许上传的视频数量上限。这是频道级别的限制，不是 API 配额；请稍后再发布。",
   "publish.gatedFor": "{platform} 发布已关闭。由运维人员在服务器环境中开启。",
   "publish.needsTitle": "请先填写标题再发布。",
   "credLabels.clientKey": "客户端密钥标识",

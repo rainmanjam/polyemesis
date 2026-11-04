@@ -46,6 +46,8 @@ describe("completeness and states", () => {
   });
   it("recognises only the causes it has words for", () => {
     expect(isPublishCause("quota_exceeded")).toBe(true);
+    // Appended for YouTube's uploadLimitExceeded, which is not the daily quota.
+    expect(isPublishCause("upload_limited")).toBe(true);
     expect(isPublishCause("made_up")).toBe(false);
     expect(isPublishCause(undefined)).toBe(false);
   });

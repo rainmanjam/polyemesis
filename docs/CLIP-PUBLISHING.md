@@ -107,7 +107,8 @@ cause and the line it rests on), in plain words, with what to do next:
 `needs_reconnect`, `token_rejected`, `quota_exceeded`, `rate_limited`,
 `platform_unavailable`, `network`, `clip_missing`, `clip_rejected`,
 `privacy_unavailable`, `platform_refused`, `outcome_unknown`, `gated`,
-`not_confirmed`, `cancelled`, `unknown`. Temporary causes are retried with the
+`not_confirmed`, `cancelled`, `unknown`, `upload_limited` (the channel reached the platform's upload
+limit, which is not the API allowance). Temporary causes are retried with the
 queue's backoff, up to five attempts.
 
 ## Where it runs

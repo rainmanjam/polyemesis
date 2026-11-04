@@ -474,3 +474,21 @@ func TestAFailedMarkDoesNotReArmTheOccurrence(t *testing.T) {
 		}
 	})
 }
+
+// Once the store has the mark, the store decides again: an operator who
+// re-arms the schedule (resetting LastRunAt) gets it back, rather than having
+// it suppressed by a mark this process kept in memory.
+func TestAReArmedScheduleFiresAgainAfterASuccessfulMark(t *testing.T) {
+	at := time.Date(2026, 7, 27, 14, 0, 0, 0, time.UTC)
+	store := &fakeStore{rows: []Schedule{oneShot(1, at)}}
+	act := &fakeActuator{}
+	r := New(quietLog(), store, act)
+
+	r.Tick(at.Add(10 * time.Second))
+	first := act.setCalls
+	store.rows[0].LastRunAt = time.Time{} // the operator re-arms it
+	r.Tick(at.Add(40 * time.Second))
+	if act.setCalls == first {
+		t.Error("a re-armed schedule was suppressed by a mark the store already holds")
+	}
+}

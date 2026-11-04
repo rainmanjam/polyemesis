@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { useDismissGuard } from "./useDismissGuard";
 
 afterEach(cleanup);
@@ -30,6 +31,7 @@ function Harness({ onBlocked }: { onBlocked: () => void }) {
         <DialogContent {...guard.contentProps}>
           <DialogTitle>Destination</DialogTitle>
           <input aria-label="stream key" />
+          <Switch aria-label="record" />
         </DialogContent>
       </Dialog>
     </>
@@ -82,5 +84,17 @@ describe("useDismissGuard (poka-yoke audit 2026-11-04)", () => {
     expect(screen.getByTestId("state").textContent).toBe("open");
     expect(blocked).toHaveBeenCalledTimes(1);
     expect((key as HTMLInputElement).value).toBe("live_123");
+  });
+
+  // Radix Switch, Select and Checkbox change state without a native input
+  // event; a form touched only through them must be guarded too.
+  it("counts a switch flipped as touched", () => {
+    const blocked = vi.fn();
+    render(<Harness onBlocked={blocked} />);
+    const sw = screen.getByRole("switch", { name: "record" });
+    fireEvent.click(sw);
+    fireEvent.keyDown(sw, { key: "Escape" });
+    expect(screen.getByTestId("state").textContent).toBe("open");
+    expect(blocked).toHaveBeenCalledTimes(1);
   });
 });

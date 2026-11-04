@@ -493,13 +493,18 @@ export function ChatComposer({
     const body = text.trim();
     if (!body || sending) return;
     setSending(true);
+    // A stale offer must not overwrite the next draft with an older message.
+    setUnsent("");
     try {
       const res = await api.sendChat(body);
       setResults(res.results);
       // THE DRAFT IS CLEARED ONLY WHEN SOMETHING TOOK IT (poka-yoke audit
       // 2026-11-04). It used to be cleared before the answer was read, so a
       // send no platform accepted lost the text mid-broadcast.
-      if (res.sent > 0) setText("");
+      // Only if the box still holds what was sent: the field stays editable
+      // while the send is in flight, and a draft typed meanwhile is the
+      // operator's next message, not this one.
+      if (res.sent > 0) setText((cur) => (cur.trim() === body ? "" : cur));
       setUnsent(res.sent > 0 && res.failed > 0 ? body : "");
       if (res.failed > 0) {
         toast.error(

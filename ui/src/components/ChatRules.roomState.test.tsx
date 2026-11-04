@@ -60,4 +60,15 @@ describe("the chat rules card reads the room first", () => {
     expect(sent.subscriberMode).toBe(true);
     expect(sent.emoteMode).toBe(false);
   });
+
+  it("starts over for a different account instead of showing the previous room", async () => {
+    const read = vi.spyOn(api, "getChatSettings").mockResolvedValueOnce(room);
+    const { rerender } = render(<ChatRules statuses={statuses} />);
+    await waitFor(() => expect(checked("Slow mode")).toBe(true));
+    read.mockReturnValueOnce(new Promise(() => {})); // the new room has not answered
+    rerender(<ChatRules statuses={[{ ...statuses[0], account: "other-acct" }]} />);
+    expect(screen.getByLabelText("Slow mode")).toHaveProperty("disabled", true);
+    expect(checked("Slow mode")).toBe(false);
+    expect(read).toHaveBeenLastCalledWith("twitch", "other-acct");
+  });
 });

@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Cette publication n'a pas été lancée par un clic sur Publier. Ouvrez le clip et cliquez sur Publier.",
   "publish.cause.cancelled": "Vous avez annulé cette publication. Cliquez sur Publier pour la relancer.",
   "publish.cause.unknown": "Un événement inattendu a arrêté cette publication. Le message de la plateforme est affiché ci-dessous.",
+  "publish.cause.upload_limited": "Cette chaîne a atteint pour l'instant la limite de vidéos que la plateforme lui permet de mettre en ligne. C'est une limite par chaîne, pas le quota de l'API ; publiez de nouveau plus tard.",
   "publish.gatedFor": "La publication sur {platform} est désactivée. Un opérateur l'active dans l'environnement du serveur.",
   "publish.needsTitle": "Ajoutez un titre pour publier.",
   "credLabels.clientKey": "Client key",

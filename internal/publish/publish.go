@@ -230,6 +230,12 @@ const (
 	CauseCancelled Cause = "cancelled"
 	// CauseUnknown carries the raw line.
 	CauseUnknown Cause = "unknown"
+	// CauseUploadLimited: the channel reached the platform's limit on how many
+	// videos it may upload for now (YouTube's uploadLimitExceeded). Not the API
+	// allowance, so it is not CauseQuota, whose remedy ("after it resets at
+	// midnight Pacific") would be the wrong one. Appended, not inserted: the
+	// values are on the wire.
+	CauseUploadLimited Cause = "upload_limited"
 )
 
 // Reason is the failure shape shown on a publication; it matches

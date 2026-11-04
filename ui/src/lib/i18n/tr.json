@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Bu yayınlama Yayınla'ya tıklanarak başlatılmadı. Klibi açın ve Yayınla'ya tıklayın.",
   "publish.cause.cancelled": "Bu yayınlamayı iptal ettiniz. Yeniden başlatmak için Yayınla'ya tıklayın.",
   "publish.cause.unknown": "Beklenmedik bir şey bu yayınlamayı durdurdu. Platformun mesajı aşağıda gösteriliyor.",
+  "publish.cause.upload_limited": "Bu kanal, platformun şimdilik izin verdiği video yükleme sınırına ulaştı. Bu, API kotası değil kanal başına bir sınır; daha sonra yeniden yayımlayın.",
   "publish.gatedFor": "{platform} yayını kapalı. Bir operatör bunu sunucunun ortamında açar.",
   "publish.needsTitle": "Yayınlamak için bir başlık ekleyin.",
   "credLabels.clientKey": "Client key",

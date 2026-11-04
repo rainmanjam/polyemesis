@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "This publish was not started by a click on Publish. Open the clip and click Publish.",
   "publish.cause.cancelled": "You cancelled this publish. Click Publish to start it again.",
   "publish.cause.unknown": "Something unexpected stopped this publish. The platform's message is shown below.",
+  "publish.cause.upload_limited": "This channel has reached the platform's limit on how many videos it may upload for now. It is a per-channel limit, not the API allowance; publish again later.",
   "publish.gatedFor": "{platform} publishing is switched off. An operator turns it on in the server's environment.",
   "publish.needsTitle": "Add a title to publish.",
   "credLabels.clientKey": "Client key",

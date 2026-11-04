@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Diese Veröffentlichung wurde nicht durch einen Klick auf Veröffentlichen gestartet. Öffnen Sie den Clip und klicken Sie auf Veröffentlichen.",
   "publish.cause.cancelled": "Sie haben diese Veröffentlichung abgebrochen. Klicken Sie auf Veröffentlichen, um sie erneut zu starten.",
   "publish.cause.unknown": "Etwas Unerwartetes hat diese Veröffentlichung gestoppt. Die Meldung der Plattform wird unten angezeigt.",
+  "publish.cause.upload_limited": "Dieser Kanal hat das Limit der Plattform für Uploads vorerst erreicht. Das ist ein Limit pro Kanal, nicht das API-Kontingent; veröffentliche später erneut.",
   "publish.gatedFor": "Das Veröffentlichen auf {platform} ist ausgeschaltet. Ein Administrator schaltet es in der Umgebung des Servers ein.",
   "publish.needsTitle": "Gib einen Titel ein, um zu veröffentlichen.",
   "credLabels.clientKey": "Client Key",

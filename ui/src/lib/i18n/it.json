@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Questa pubblicazione non è stata avviata con un clic su Pubblica. Apri la clip e fai clic su Pubblica.",
   "publish.cause.cancelled": "Hai annullato questa pubblicazione. Fai clic su Pubblica per avviarla di nuovo.",
   "publish.cause.unknown": "Qualcosa di imprevisto ha interrotto questa pubblicazione. Il messaggio della piattaforma è mostrato qui sotto.",
+  "publish.cause.upload_limited": "Questo canale ha raggiunto per ora il limite di video che la piattaforma consente di caricare. È un limite per canale, non la quota dell'API; pubblica di nuovo più tardi.",
   "publish.gatedFor": "La pubblicazione su {platform} è disattivata. Un operatore la attiva nell'ambiente del server.",
   "publish.needsTitle": "Aggiungi un titolo per pubblicare.",
   "credLabels.clientKey": "Client key",

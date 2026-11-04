@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Ta publikacja nie została rozpoczęta kliknięciem Opublikuj. Otwórz klip i kliknij Opublikuj.",
   "publish.cause.cancelled": "Anulowano tę publikację. Kliknij Opublikuj, aby rozpocząć ją ponownie.",
   "publish.cause.unknown": "Coś nieoczekiwanego zatrzymało tę publikację. Komunikat platformy jest widoczny poniżej.",
+  "publish.cause.upload_limited": "Ten kanał osiągnął na razie limit filmów, które platforma pozwala przesłać. To limit kanału, a nie przydział API; opublikuj ponownie później.",
   "publish.gatedFor": "Publikowanie na {platform} jest wyłączone. Operator włącza je w środowisku serwera.",
   "publish.needsTitle": "Dodaj tytuł, aby opublikować.",
   "credLabels.clientKey": "Client key",

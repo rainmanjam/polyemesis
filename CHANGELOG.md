@@ -59,7 +59,8 @@ its first tagged release.
 - **A revoked platform sign-in ends a publish with "reconnect the account"** right away. It used
   to retry five times and report a token error.
 - **A YouTube rate limit is retried.** It used to be reported as the daily quota, and the clip was
-  dropped until midnight Pacific.
+  dropped until midnight Pacific. YouTube's per-channel upload limit now has its own cause,
+  `upload_limited`, instead of the daily-quota one.
 - **The chat box keeps your message when no platform accepted it.** When only some accepted it,
   **Put the message back** restores it.
 - **The chat rules card shows the room's real rules.** It reads them from Twitch first, and Apply

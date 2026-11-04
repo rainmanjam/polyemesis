@@ -129,7 +129,7 @@ func ytFailure(code int, body []byte) *Failure {
 	case "rateLimitExceeded", "userRateLimitExceeded":
 		return fail(CauseRateLimited, true, "YouTube asked to slow down (%s); this will be retried", reason)
 	case "uploadLimitExceeded":
-		return fail(CauseQuota, false, "this channel has reached YouTube's limit on how many videos it may upload for now (%s). "+
+		return fail(CauseUploadLimited, false, "this channel has reached YouTube's limit on how many videos it may upload for now (%s). "+
 			"It is a per-channel limit, not the API allowance; publish again later", reason)
 	case "insufficientPermissions", "forbidden":
 		if code == http.StatusForbidden {

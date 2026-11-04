@@ -3904,6 +3904,7 @@
   "publish.cause.not_confirmed": "Publikasi ini tidak dimulai dengan mengklik Publikasikan. Buka klip, lalu klik Publikasikan.",
   "publish.cause.cancelled": "Anda membatalkan publikasi ini. Klik Publikasikan untuk memulainya lagi.",
   "publish.cause.unknown": "Sesuatu yang tidak terduga menghentikan publikasi ini. Pesan platform ditampilkan di bawah.",
+  "publish.cause.upload_limited": "Kanal ini untuk sementara sudah mencapai batas jumlah video yang boleh diunggah. Ini batas per kanal, bukan kuota API; publikasikan lagi nanti.",
   "publish.gatedFor": "Publikasi ke {platform} sedang dimatikan. Operator menyalakannya di lingkungan server.",
   "publish.needsTitle": "Tambahkan judul untuk memublikasikan.",
   "credLabels.clientKey": "Client key",

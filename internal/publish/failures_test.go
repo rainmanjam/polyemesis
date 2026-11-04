@@ -636,7 +636,7 @@ func TestYouTubeLimitsAreToldApart(t *testing.T) {
 		{"dailyLimitExceeded", CauseQuota, false, "midnight Pacific"},
 		{"rateLimitExceeded", CauseRateLimited, true, "slow down"},
 		{"userRateLimitExceeded", CauseRateLimited, true, "slow down"},
-		{"uploadLimitExceeded", CauseQuota, false, "per-channel limit"},
+		{"uploadLimitExceeded", CauseUploadLimited, false, "per-channel limit"},
 	} {
 		t.Run(c.reason, func(t *testing.T) {
 			body := fmt.Sprintf(`{"error":{"code":403,"message":"m","errors":[{"reason":%q}]}}`, c.reason)

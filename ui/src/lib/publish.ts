@@ -23,7 +23,8 @@ export type PublishCause =
   | "gated"
   | "not_confirmed"
   | "cancelled"
-  | "unknown";
+  | "unknown"
+  | "upload_limited";
 
 export const PUBLISH_CAUSES: readonly PublishCause[] = [
   "needs_reconnect",
@@ -41,6 +42,7 @@ export const PUBLISH_CAUSES: readonly PublishCause[] = [
   "not_confirmed",
   "cancelled",
   "unknown",
+  "upload_limited",
 ];
 
 export interface PublishMeta {
