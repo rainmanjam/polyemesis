@@ -489,7 +489,7 @@ describe("Go live sheet: the press counts what is actually live", () => {
     expect(button().textContent).toBe("Starting… 1 of 3 live");
   });
 
-  it("does not count a stalled process as live", async () => {
+  it("does not count a stalled process as live, and counts it once its output moves again", async () => {
     vi.useFakeTimers();
     const { set } = press();
     fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
@@ -497,6 +497,34 @@ describe("Go live sheet: the press counts what is actually live", () => {
     set({ 1: "stalled", 2: "running", 3: "running" });
 
     expect(button().textContent).toBe("Starting… 2 of 3 live");
+    set({ 1: "running", 2: "running", 3: "running" });
+    expect(button().textContent).toBe("3 of 3 live");
+  });
+
+  it("counts a row live when the process seen at the click starts moving media", async () => {
+    // Same process, same startedAt: only its output has moved. That cannot be
+    // left over from an earlier run, so it counts.
+    vi.useFakeTimers();
+    const spawned = { state: "running", startedAt: "2026-11-04T12:00:00Z", restarts: 0, progress: { outTimeMs: 0 } };
+    const one = dest({ id: did(1), name: "First", process: spawned } as Record<string, unknown>);
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows([one], sources),
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} live={[one]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await flush();
+    expect(button().textContent).toBe("Starting… 0 of 1 live");
+
+    const moving = { ...spawned, progress: { outTimeMs: 4000 } };
+    rerender(<GoLiveSheet {...props} live={[{ ...one, enabled: true, process: moving } as unknown as DestStatus]} />);
+    expect(button().textContent).toBe("1 of 1 live");
   });
 
   it("gives the button back after the settle timeout, with the real counts, when a row stays in Starting", async () => {
@@ -645,6 +673,29 @@ describe("Go live sheet: the press counts what is actually live", () => {
       <GoLiveSheet {...props} live={[firstOn, { ...two, enabled: true, process: newRunFailed } as unknown as DestStatus]} />,
     );
     expect(button().textContent).toBe("1 of 2 live · 1 failed");
+  });
+
+  it("does not carry a press into a new sheet when the last row settles on the same render", async () => {
+    vi.useFakeTimers();
+    const idle = [dest({ id: did(1), name: "Dest 1" })];
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} rows={goLiveRows(idle, sources)} live={idle} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await flush();
+
+    // A fresh snapshot arrives in the same render as the row coming on air.
+    const on = [{ ...idle[0], enabled: true, process: onAir } as unknown as DestStatus];
+    rerender(<GoLiveSheet {...props} rows={goLiveRows(idle, sources)} live={on} />);
+    await flush();
+    expect(button().textContent).toBe(T("golive.goCount", { count: 0 }));
   });
 
   it("can be closed while it waits for rows to settle, but not while the starts go out", async () => {

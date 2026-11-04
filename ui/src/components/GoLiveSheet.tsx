@@ -223,12 +223,13 @@ export function GoLiveSheet({
     let failed = 0;
     for (const row of run.targets) {
       const id = row.id as unknown as number;
-      // A refused request settles the row at once. Otherwise only a status
-      // from a process started since the click counts: one with the identity
-      // seen at the click is what an earlier run left, and a row the walk has
-      // not reached yet still shows exactly that.
-      if (!errors.has(id) && processIdentity(liveOf(id)) === run.before.get(id)) continue;
+      // Live is live whenever it is seen: output moving cannot be left over.
+      // A refused request settles the row at once. Otherwise a status settles
+      // it only if it comes from a process started since the click: one with
+      // the identity seen at the click (a Failed left by an earlier run, or a
+      // row the walk has not reached yet) says nothing about this press.
       const p = progressOf(row);
+      if (p !== "live" && !errors.has(id) && processIdentity(liveOf(id)) === run.before.get(id)) continue;
       if (p === "live") live++;
       else if (p === "failed" || p === "blocked") failed++;
     }
@@ -240,8 +241,12 @@ export function GoLiveSheet({
   // count is frozen here, so a row that drops during the hold does not reopen
   // the press or restart its timeout. Set during render, as the session reset
   // above is.
-  if (run !== null && run.phase === "settling" && (allSettled || run.timedOut)) {
-    setRun({ ...run, phase: "done", final: tally });
+  // Not on the render that resets the sheet (a new snapshot, or closed): the
+  // reset above has already dropped this run, and the update is functional so
+  // it can never bring one back.
+  if (rows === session && open && run !== null && run.phase === "settling" && (allSettled || run.timedOut)) {
+    const final = tally;
+    setRun((current) => (current?.phase === "settling" ? { ...current, phase: "done", final } : current));
   }
   const phase = run?.phase ?? null;
 

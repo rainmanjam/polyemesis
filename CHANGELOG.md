@@ -64,10 +64,10 @@ its first tagged release.
   click looked as if it had started a single destination. After the click it counts what is
   actually on air, from each destination's live status: "Starting… 2 of 4 live", then "4 of 4
   live", or "3 of 4 live · 1 failed" when one is refused or its process fails. A destination is
-  live once its output is moving and not stalled, not the moment FFmpeg starts, so one the
-  platform is about to refuse is not counted (the row's LIVE chip follows the same rule). The press is over
-  when every destination it set out to start is live or failed, not when the last request
-  returns, and the final count stays on the button for a second before it goes back to Go live.
+  live once its output is moving and not stalled, not the moment FFmpeg starts, so one that
+  the platform is about to refuse is not counted (the row's LIVE chip follows the same rule).
+  The press is over when every destination it set out to start is live or failed, not when the
+  last request returns, and the final count stays on the button for a second before it goes back to Go live.
   A destination still starting after a minute (longer than the server takes to hold one that
   keeps being refused) gives the button back, and the count says how many are still starting.
   The sheet can be closed while it waits, though not while the starts are going out. Screen
