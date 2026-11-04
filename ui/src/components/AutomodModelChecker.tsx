@@ -349,12 +349,12 @@ export function AutomodModelChecker({
           )}
           {stats && (stats.decisions ?? 0) > 0 && (
             <span className="text-sm text-muted-foreground">
-              {t("automod.decisions", { count: stats.decisions ?? 0 })}
+              {t((stats.decisions ?? 0) === 1 ? "automod.decisionsOne" : "automod.decisions", { count: stats.decisions ?? 0 })}
             </span>
           )}
           {stats && stats.failures > 0 && (
             <span className="text-sm text-muted-foreground">
-              {t("automod.spendFailures", { count: stats.failures })}
+              {t(stats.failures === 1 ? "automod.spendFailuresOne" : "automod.spendFailures", { count: stats.failures })}
             </span>
           )}
           {stats?.lastError && <Problem>{t("automod.lastError", { detail: stats.lastError })}</Problem>}

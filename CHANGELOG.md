@@ -43,6 +43,15 @@ its first tagged release.
   vertical-pair reminder no longer says "1 YouTube vertical pairs have not had…". Each of these
   has its own key for one, the same approach as the YouTube warning.
 
+- **Every other count in the console says one as one too.** Poll votes ("1 vote", on the panel,
+  the history and the on-stream widget), automod's answered messages and failed calls, the log
+  verdict ("1 error"), relay subscribers, shortened debug lines, the purge report ("Purged 1
+  finished job."), recording tracks and stem files, the on-air health line ("1 running destination
+  healthy", "1 of 3 destinations needs attention"), the clip retention limit, the failed count,
+  Spanish, French, Italian and Portuguese "new messages", and the Polish live count. Where Polish,
+  Russian or Ukrainian were also wrong at 2 to 4 or 21 they now use a form that reads right at any
+  count, and Italian agrees with the feminine *destinazioni*.
+
 - **The meters follow the programme selected in the header.** On an install with several
   programmes, every programme's audio levels reach the console over one live connection, and the
   console drew whichever programme metered last. Tracks a smaller programme lacks read "not

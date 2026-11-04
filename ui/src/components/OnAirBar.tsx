@@ -159,7 +159,7 @@ export function OnAirBar({
         {air.failed > 0 && (
           <span className="flex items-center gap-1.5 text-[12px] text-down">
             <StatusDot tone="down" size="sm" />
-            {t("i18nSweep.failedCount", { count: air.failed })}
+            {t(air.failed === 1 ? "i18nSweep.failedCountOne" : "i18nSweep.failedCount", { count: air.failed })}
           </span>
         )}
 
@@ -171,7 +171,7 @@ export function OnAirBar({
           <span className="flex items-center gap-1.5 text-[12px] text-foreground">
             <StatusDot tone="live" size="sm" />
             <span data-testid="health-verdict">
-              {t("health.verdictHealthy", { count: verdict.count })}
+              {t(verdict.count === 1 ? "health.verdictHealthyOne" : "health.verdictHealthy", { count: verdict.count })}
             </span>
             {verdict.uptimeSec !== null && (
               <span className="tnum font-mono text-muted-foreground">
@@ -190,7 +190,7 @@ export function OnAirBar({
           <span className="flex items-center gap-2 text-[12px] text-warn">
             <StatusDot tone="warn" size="sm" />
             <span data-testid="health-verdict">
-              {t("health.verdictAttention", { count: verdict.count, total: verdict.total })}
+              {t(verdict.count === 1 ? "health.verdictAttentionOne" : "health.verdictAttention", { count: verdict.count, total: verdict.total })}
             </span>
             <Button
               variant="ghost"

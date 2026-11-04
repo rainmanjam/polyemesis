@@ -304,7 +304,7 @@ function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged
           <li key={`${i}-${o.label}`} className="flex flex-col gap-0.5">
             <div className="flex justify-between gap-2 text-sm">
               <span>{`${i + 1}. ${o.label}`}</span>
-              <span className="tnum font-mono">{t("polls.optionCount", { votes: o.votes, pct: pct[i] })}</span>
+              <span className="tnum font-mono">{t(o.votes === 1 ? "polls.optionCountOne" : "polls.optionCount", { votes: o.votes, pct: pct[i] })}</span>
             </div>
             <div className="h-1.5 overflow-hidden rounded bg-muted">
               <div className="h-full bg-primary" style={{ width: `${pct[i]}%` }} />
@@ -322,7 +322,7 @@ function LivePoll({ poll, now, onChanged }: { poll: Poll; now: number; onChanged
         ))}
       </ul>
       <div className="flex flex-wrap gap-x-2 text-sm text-muted-foreground" data-testid="poll-total">
-        <span>{t("polls.total", { count: poll.total })}</span>
+        <span>{t(poll.total === 1 ? "polls.totalOne" : "polls.total", { count: poll.total })}</span>
         {platformsByVotes(poll.byPlatform).map(([p, n]) => (
           <span key={p}>{t("polls.platformCount", { platform: platformLabel(p), count: n })}</span>
         ))}
@@ -374,7 +374,7 @@ function HistoryRow({ poll }: { poll: Poll }) {
   let summary: string;
   if (poll.state === "interrupted") summary = t("polls.interrupted");
   else if (winners.length === 0) summary = t("polls.noVotes");
-  else summary = t("polls.winner", { label: winners.join(", "), count: poll.total });
+  else summary = t(poll.total === 1 ? "polls.winnerOne" : "polls.winner", { label: winners.join(", "), count: poll.total });
   return (
     <li className="flex items-start justify-between gap-2 rounded border border-border px-1.5 py-1 text-sm">
       <div className="flex min-w-0 flex-col">

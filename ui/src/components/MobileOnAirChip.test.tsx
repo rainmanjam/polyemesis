@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { translate } from "@/lib/i18n";
+import { setLanguage, translate } from "@/lib/i18n";
 import type { HeaderLive } from "@/lib/headerLive";
 
 /* The phone on-air chip: which words it prints, and what it keeps for a
@@ -121,5 +121,25 @@ describe("MobileOnAirChip", () => {
     expect(observers).toHaveLength(0);
     expect(screen.queryByTestId("mobile-on-air-words")).toBeNull();
     expect(screen.getByTestId("mobile-on-air").textContent).toBe(en("onAir.offAir"));
+  });
+});
+
+describe("MobileOnAirChip: the Polish live count reads right at any count", () => {
+  // "{count} transmisji na żywo" was genitive plural: wrong at 1 ("1 transmisji")
+  // and at 2 to 4. The siblings' "{count} na żywo" reads right at every count.
+  afterEach(() => setLanguage("en"));
+  const live = (count: number): HeaderLive =>
+    ({ known: true, count, key: "chrome.liveCount", params: { count }, offKey: "onAir.offAir" }) as HeaderLive;
+
+  it("says 1 na żywo", () => {
+    setLanguage("pl");
+    show(live(1));
+    expect(screen.getByTestId("mobile-on-air").textContent).toBe("1 na żywo");
+  });
+
+  it("says 2 na żywo", () => {
+    setLanguage("pl");
+    show(live(2));
+    expect(screen.getByTestId("mobile-on-air").textContent).toBe("2 na żywo");
   });
 });

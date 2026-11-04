@@ -19,6 +19,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 let purged = 0;
 const purgeCalls: unknown[] = [];
+const toasts: string[] = [];
 
 const overview = {
   available: true,
@@ -47,7 +48,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: () => {}, success: () => {}, info: () => {} },
+  toast: { error: () => {}, success: (m: string) => toasts.push(m), info: (m: string) => toasts.push(m) },
 }));
 
 const { JobsPage } = await import("./JobsPage");
@@ -56,6 +57,8 @@ const { translate } = await import("@/lib/i18n");
 afterEach(() => {
   cleanup();
   purgeCalls.length = 0;
+  toasts.length = 0;
+  purged = 0;
 });
 
 const PURGE = translate("en", "jobs.purge");
@@ -99,5 +102,25 @@ describe("JobsPage: purging the finished history", () => {
     fireEvent.click(screen.getByRole("button", { name: translate("en", "common.cancel") }));
 
     expect(purgeCalls).toEqual([]);
+  });
+});
+
+describe("JobsPage: the purge report reads one as one", () => {
+  async function purgeAndReport(n: number) {
+    purged = n;
+    await openHistory();
+    fireEvent.click(screen.getByRole("button", { name: PURGE }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getAllByRole("button", { name: PURGE }).at(-1) as HTMLElement);
+    await waitFor(() => expect(toasts.length).toBe(1));
+    return toasts[0];
+  }
+
+  it("says Purged 1 finished job.", async () => {
+    expect(await purgeAndReport(1)).toBe("Purged 1 finished job.");
+  });
+
+  it("says Purged 2 finished jobs.", async () => {
+    expect(await purgeAndReport(2)).toBe("Purged 2 finished jobs.");
   });
 });

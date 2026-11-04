@@ -350,7 +350,7 @@ export function ChatTimeline({
       </div>
 
       <div role="status" aria-live="polite" className="sr-only">
-        {behind > 0 ? t("chatpage.newCount", { count: behind }) : ""}
+        {behind > 0 ? t(behind === 1 ? "chatpage.newCountOne" : "chatpage.newCount", { count: behind }) : ""}
       </div>
 
       {behind > 0 && (
@@ -364,7 +364,7 @@ export function ChatTimeline({
             ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" });
           }}
         >
-          {t("chatpage.newCount", { count: behind })}
+          {t(behind === 1 ? "chatpage.newCountOne" : "chatpage.newCount", { count: behind })}
         </Button>
       )}
     </div>

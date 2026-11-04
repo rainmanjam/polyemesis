@@ -261,7 +261,7 @@ export function JobsPage() {
     try {
       const { purged } = await api.purgeJobs({});
       if (purgeTone(purged) === "info") toast.info(t("jobs.nothingWasOldEnoughTo"));
-      else toast.success(t("jobs.historyPurged", { count: purged }));
+      else toast.success(t(purged === 1 ? "jobs.historyPurgedOne" : "jobs.historyPurged", { count: purged }));
       await load();
     } catch (err) {
       toast.error(errText(err, t("jobs.thatDidNotWork")));

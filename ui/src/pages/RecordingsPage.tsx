@@ -375,7 +375,7 @@ export function RecordingsPage() {
                           </TableCell>
                           <TableCell className="text-center">
                             {r.tracks > 0 ? (
-                              <Badge variant="outline" title={t("rec.tracksTitle", { count: r.tracks })}>
+                              <Badge variant="outline" title={t(r.tracks === 1 ? "rec.tracksTitleOne" : "rec.tracksTitle", { count: r.tracks })}>
                                 {r.tracks}
                               </Badge>
                             ) : (
@@ -386,7 +386,7 @@ export function RecordingsPage() {
                             {mine.length > 0 ? (
                               <Badge
                                 variant="armed"
-                                title={t("rec.stemsTitle", { count: mine.length })}
+                                title={t(mine.length === 1 ? "rec.stemsTitleOne" : "rec.stemsTitle", { count: mine.length })}
                               >
                                 <AudioLines className="h-2.5 w-2.5" />
                                 {mine.length}
@@ -499,7 +499,7 @@ export function RecordingsPage() {
               {stemsKnown && stems.length > 0 && (
                 <Stat
                   className="col-span-2"
-                  labelKey="rec.stemsUsage" labelParams={{ count: stems.length }}
+                  labelKey={stems.length === 1 ? "rec.stemsUsageOne" : "rec.stemsUsage"} labelParams={{ count: stems.length }}
                   value={bytes(stemBytes)}
                   tone="muted"
                 />
