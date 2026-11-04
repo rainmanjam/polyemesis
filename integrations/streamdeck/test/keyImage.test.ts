@@ -18,6 +18,7 @@ import {
   displayName,
   fitName,
   glyphFor,
+  imagePainter,
   layoutSvg,
   textWidth,
 } from "../src/keyImage.js";
@@ -115,6 +116,11 @@ describe("the name", () => {
   it("drops control characters and runs of space", () => {
     expect(displayName({ platform: "kick", name: "a\n\tb\u0000  c" })).toBe("a b c");
     expect(displayName({ platform: "kick", name: "a\u0007b\u007fc" })).toBe("a b c");
+  });
+
+  it("drops what XML cannot carry, so a server's name can never make the SVG malformed", () => {
+    expect(displayName({ platform: "kick", name: "a\ufffeb\uffffc\ud800d" })).toBe("a b c d");
+    expect(displayName({ platform: "kick", name: "😀 Kick" })).toBe("😀 Kick");
   });
 
   it("is escaped, so a name can never inject markup into the image", () => {
@@ -276,5 +282,54 @@ describe("the runtime paints the image on destination keys only", () => {
     const { s } = await paint({ "GET /api/v1/auth/connection": ADMIN, "GET /api/v1/status": status() }, "goLive", { sourceId: 7 });
     expect(s.titles.length).toBeGreaterThan(0);
     expect(s.images).toEqual([]);
+  });
+});
+
+describe("imagePainter: the plugin adapter's dedupe", () => {
+  function painter(fail = () => false) {
+    const sent: (string | undefined)[] = [];
+    const p = imagePainter(async (image) => {
+      if (fail()) throw new Error("socket closed");
+      sent.push(image);
+    });
+    return { p, sent };
+  }
+
+  it("sends an image once while neither it nor the state changes", async () => {
+    const { p, sent } = painter();
+    p.state(1);
+    await p.paint("a");
+    await p.paint("a");
+    expect(sent).toEqual(["a"]);
+  });
+
+  it("sends again after a state change, and for a new image", async () => {
+    const { p, sent } = painter();
+    p.state(1);
+    await p.paint("a");
+    p.state(3);
+    await p.paint("a");
+    await p.paint("b");
+    await p.paint(undefined);
+    await p.paint(undefined);
+    expect(sent).toEqual(["a", "a", "b", undefined]);
+  });
+
+  it("forgets a send that failed, so a clear that did not get through is sent again", async () => {
+    let down = false;
+    const { p, sent } = painter(() => down);
+    p.state(1);
+    await p.paint("logo");
+    down = true;
+    await expect(p.paint(undefined)).rejects.toThrow("socket closed");
+    down = false;
+    await p.paint(undefined);
+    expect(sent).toEqual(["logo", undefined]);
+    // and a failed send of the SAME image as before is not taken for that earlier success either
+    down = true;
+    await expect(p.paint("logo")).rejects.toThrow();
+    down = false;
+    await p.paint(undefined);
+    expect(sent).toEqual(["logo", undefined, undefined]);
   });
 });

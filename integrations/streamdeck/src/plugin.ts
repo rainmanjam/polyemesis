@@ -17,6 +17,7 @@ import type { JsonObject, JsonValue } from "@elgato/utils";
 import { ApiError, PolyemesisClient } from "./api.js";
 import { ConfigError, keySettings, parseServerUrl, type GlobalSettings, type KeySettings } from "./config.js";
 import { localeFor } from "./i18n.js";
+import { imagePainter } from "./keyImage.js";
 import type { StreamDeckKey } from "./keys.js";
 import { Runtime, authKeyFor, clientFor, destinationChoices, type DestinationChoice, type Surface, type SurfaceKind } from "./runtime.js";
 import { nodeTransport } from "./transport.js";
@@ -71,23 +72,20 @@ function applyGlobals(raw: Record<string, unknown>): void {
 
 /** Wraps an SDK action in the runtime's Surface shape. Keys and dials differ in which calls they accept. */
 function surfaceFor(a: Action<JsonObject>, kind: SurfaceKind, settings: KeySettings): Surface {
-  // The last state and image sent, so a tick that changes neither sends no image. Keyed on the pair:
-  // an image is re-sent after every state change, whichever states Stream Deck applies it to.
-  let state: number | undefined;
-  let painted: string | undefined;
+  // A tick that changes neither the state nor the image sends no image (src/keyImage.ts imagePainter).
+  const images = imagePainter(async (image) => {
+    if (a.isKey()) await a.setImage(image);
+  });
   return {
     id: a.id,
     kind,
     settings,
     async setState(next) {
-      state = next;
+      images.state(next);
       if (a.isKey()) await a.setState(next);
     },
     async setImage(image) {
-      const key = `${state}|${image ?? ""}`;
-      if (key === painted || !a.isKey()) return;
-      painted = key;
-      await a.setImage(image);
+      await images.paint(image);
     },
     async setTitle(title) {
       if (a.isKey()) await a.setTitle(title);

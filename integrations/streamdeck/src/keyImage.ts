@@ -135,10 +135,21 @@ export function fitName(text: string, room: number): { text: string; fontSize: n
   return { text: cut, fontSize: NAME_MIN_PX, width: textWidth(cut, NAME_MIN_PX) };
 }
 
-/** The name a key shows: the destination's own, else the platform's, without control characters. */
+/** A code point XML 1.0 can carry: anything else would make the SVG malformed, escaped or not. */
+function xmlChar(cp: number): boolean {
+  return (
+    cp === 0x9 || cp === 0xa || cp === 0xd || (cp >= 0x20 && cp <= 0xd7ff) || (cp >= 0xe000 && cp <= 0xfffd) || (cp >= 0x10000 && cp <= 0x10ffff)
+  );
+}
+
+/** The name a key shows: the destination's own, else the platform's, without control characters or
+ *  anything XML cannot carry (U+FFFE, a lone surrogate), each of which becomes a space. */
 export function displayName(mark: DestinationMark): string {
-  // eslint-disable-next-line no-control-regex
-  const own = mark.name.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  const clean = [...mark.name].map((ch) => {
+    const cp = ch.codePointAt(0) ?? 0;
+    return xmlChar(cp) && cp !== 0x7f && cp >= 0x20 ? ch : " ";
+  });
+  const own = clean.join("").replace(/\s+/g, " ").trim();
   return own || PLATFORM_NAME[mark.platform] || mark.platform;
 }
 
@@ -188,6 +199,30 @@ export function layoutSvg(l: FaceLayout): string {
     name +
     `</svg>`
   );
+}
+
+/**
+ * Sends a key's image only when it, or the key's state, has changed since the last image that was
+ * accepted. Keyed on the pair, because Stream Deck applies an image to a state: after a state change
+ * the image is sent again, whichever states the app applied the last one to. A send that fails is
+ * forgotten, so the next paint sends again; a stale mark can never be left over a padlock or a plain
+ * face because one clear did not get through.
+ */
+export function imagePainter(send: (image: string | undefined) => Promise<void>) {
+  let state: number | undefined;
+  let painted: string | undefined;
+  return {
+    state(next: number): void {
+      state = next;
+    },
+    async paint(image: string | undefined): Promise<void> {
+      const key = `${state}|${image ?? ""}`;
+      if (key === painted) return;
+      painted = undefined;
+      await send(image);
+      painted = key;
+    },
+  };
 }
 
 /**
