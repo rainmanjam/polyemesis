@@ -59,8 +59,8 @@ key; we simply have not researched their APIs, and "unverified" is the honest
 thing to say about an API nobody here has read.
 
 The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
-server URL and key published to X with picture. The rest of the X row is
-unchanged. The details, and a hosting network X refused, are under X in
+server URL and key published to X with picture. The rest of the X row
+stays *Unverified*. The details, and a hosting network X refused, are under X in
 [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
 
 ## The platforms that need a sentence each
@@ -237,9 +237,9 @@ steadily for over a minute with no reconnects, and the picture showed in X
 Producer's preview. The test feed was 1280×720 at 30 fps, H.264 at 3 Mb/s with
 AAC stereo at 128 kb/s; it came in over RTMP ingest and went out on the
 passthrough rendition. That verifies publishing with picture through a pasted
-key and nothing more: chat, metadata and every Livestream API path are as
-unverified as they were, and the stream-key cell stays *By hand*, which is what a
-pasted key is.
+key and nothing more: chat, metadata and every Livestream API path stay
+*Unverified*, and the stream-key cell stays *By hand*, which is what a pasted key
+is.
 
 **X may refuse some hosting networks.** The same day, the same X destination
 failed from an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
