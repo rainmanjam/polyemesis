@@ -297,7 +297,10 @@ test.describe("choosing a video treatment", () => {
         ),
       ).toBeVisible();
       await expect(dialog.getByText(/Stops the/)).toHaveCount(0);
-      await page.keyboard.press("Escape");
+      // Cancel, not Escape: the treatment was just changed, and a touched
+      // destination form refuses Esc so a stray key cannot discard it
+      // (poka-yoke audit 2026-11-04, useDismissGuard). Cancel is the decision.
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).toBeHidden();
 
       // ---- last one out ----
