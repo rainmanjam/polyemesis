@@ -119,7 +119,7 @@ export function createSignalScene(host,palette){
     let settled=true,n=0;
     const showTrace=moving&&traceProgress>=0&&traceProgress<=1;
     routes.forEach(route=>{
-      const enabled=!(route.index===2&&route.track===2&&!includeMusic);
+      const enabled=!(route.index===2&&route.track===2)||includeMusic;
       const started=elapsed>=begins(route);
       const focus=stage===0?route.index===0:route.index>0?true:.55;
       const traced=showTrace&&route.index===2&&route.track===2;

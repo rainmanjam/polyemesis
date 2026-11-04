@@ -278,7 +278,7 @@ const observer=new IntersectionObserver(entries=>{
 },{threshold:.12});
 observer.observe(demo);
 const resizeObserver=new ResizeObserver(refreshLayout);resizeObserver.observe(diagram);
-document.fonts.ready.then(refreshLayout);
+document.fonts.ready.then(refreshLayout).catch(()=>{});
 if(location.search.includes('debug'))window.__signalPath={state,get layout(){return layout},set layout(_){},scene:()=>scene,faders:()=>faders};
 
 async function startLayers(){
