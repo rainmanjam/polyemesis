@@ -8,7 +8,6 @@ import * as THREE from './vendor/three.js';
  * Channels: [spare, Mic, Music, Game, spare]. Spare channels hold a neutral mid position that shifts slightly with each mix.
  */
 const BARS=[[2.5,6],[6.2,14],[9.9,9],[13.6,17],[17.3,8]];
-const COLORS=[0x7d8798,0x45b5d0,0xe879f9,0x9b8cff,0xaab3c5];
 const GROOVE=20;
 
 const MIXES={
@@ -19,7 +18,8 @@ const MIXES={
   archive:[.5,.7,.82,.7,.5]
 };
 
-export function createFaders(host){
+export function createFaders(host,palette){
+  const COLORS=[palette.spareA,palette.mic,palette.music,palette.game,palette.spareB];
   const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
   renderer.setClearColor(0x000000,0);
@@ -35,7 +35,7 @@ export function createFaders(host){
   const fill=new THREE.DirectionalLight(0xaab8d8,.9);fill.position.set(24,-10,18);scene.add(fill);
 
   const mark=new THREE.Group();scene.add(mark);
-  const grooveMaterial=new THREE.MeshStandardMaterial({color:0x2c3444,roughness:.85,metalness:0});
+  const grooveMaterial=new THREE.MeshStandardMaterial({color:palette.groove,roughness:.85,metalness:0});
   const faders=BARS.map(([x,h],i)=>{
     const cx=x+1.25-11;
     const groove=new THREE.Mesh(new THREE.CapsuleGeometry(1.7,GROOVE-3.4,6,16),grooveMaterial);

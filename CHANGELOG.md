@@ -8,7 +8,19 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The home page hero is now an interactive signal path.** "One stream in. Your mix, everywhere."
+  sits above a diagram of one upload from OBS going through polyemesis to Twitch, YouTube and a
+  local archive, each with its own audio mix: wires and packets in the track colours, the
+  polyemesis mark as five faders that move to the mix of whichever destination you hover or tab to,
+  and a switch that sends the music to YouTube. It replaces the routing screenshot. The diagram is
+  real HTML first, so it reads without JavaScript, and its animation (Three.js, vendored, no CDN)
+  loads lazily after the page has painted. It pauses offscreen and in a hidden tab, and is a static
+  frame with `prefers-reduced-motion`. Each destination card is a keyboard focus stop with the same
+  2px ring as the rest of the site. The packet glow is softer (its bloom is half as strong and only the
+  brightest packet heads feed it), so the wires keep their track colour on phones. The clip in it is a fictional person and an unbranded car, generated
+  with Google Veo 3.1.
 
 ## [0.12.0] — 2026-11-03
 

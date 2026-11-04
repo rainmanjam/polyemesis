@@ -1,10 +1,10 @@
 import * as THREE from './vendor/three.js';
 import {Line2,LineGeometry,LineMaterial,EffectComposer,RenderPass,UnrealBloomPass} from './vendor/three-addons.js';
-import {buildRoutes,pointAtDistance} from './routes.js';
+import {buildRoutes,pointAtDistance} from './routes';
 
 /* Identity colours: video is neutral, tracks never borrow a status colour. */
-const LANE_COLORS=[0xc3cada,0x45b5d0,0xe879f9,0x9b8cff];
 const WIRE_WIDTH=[2.6,2.6,2.6,2.6];
+const BLOOM_STRENGTH=.16,BLOOM_THRESHOLD=.1,BLOOM_GAIN=.45,HEAD_LIFT=.15;
 const PACKETS_PER_LANE=3,TRAIL=6,TRAIL_STEP=4.2,SPEED=150;
 const MAX_INSTANCES=16*PACKETS_PER_LANE*(1+TRAIL)+16;
 const HEAD=[9,4.2],TAIL=[6,3];
@@ -14,7 +14,9 @@ const HEAD=[9,4.2],TAIL=[6,3];
  * additive trails, and a selective bloom on the packets only. Labels, controls and the static
  * fallback stay in HTML/SVG.
  */
-export function createSignalScene(host){
+export function createSignalScene(host,palette){
+  /* Lane order matches LANES in routes.ts: video, mic, music, game. Colours come from the site's tokens. */
+  const LANE_COLORS=[palette.video,palette.mic,palette.music,palette.game];
   const renderer=new THREE.WebGLRenderer({alpha:true,antialias:true,powerPreference:'low-power'});
   const pixelRatio=Math.min(devicePixelRatio||1,2);
   renderer.setPixelRatio(pixelRatio);
@@ -45,10 +47,13 @@ export function createSignalScene(host){
     composer=new EffectComposer(renderer);
     composer.renderToScreen=false;
     composer.addPass(new RenderPass(scene,bloomCamera,null,new THREE.Color(0x000000),1));
-    bloomPass=new UnrealBloomPass(new THREE.Vector2(256,256),.32,.35,.02);
+    /* Strength .16 (was .32) and threshold .1 (was .02): the glow was reading hot, and on phones the
+       wires went nearly white where the lanes converge on the cards. Only the bright packet heads
+       feed the bloom now, and it adds half as much. */
+    bloomPass=new UnrealBloomPass(new THREE.Vector2(256,256),BLOOM_STRENGTH,.35,BLOOM_THRESHOLD);
     composer.addPass(bloomPass);
     composite=new THREE.ShaderMaterial({
-      uniforms:{tMap:{value:null},uGain:{value:1}},
+      uniforms:{tMap:{value:null},uGain:{value:BLOOM_GAIN}},
       vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
       fragmentShader:'uniform sampler2D tMap;uniform float uGain;varying vec2 vUv;void main(){vec3 c=texture2D(tMap,vUv).rgb*uGain;vec4 o=linearToOutputTexel(vec4(c,1.));gl_FragColor=vec4(o.rgb,max(o.r,max(o.g,o.b)));}',
       blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneFactor,transparent:true,depthTest:false,depthWrite:false
@@ -63,7 +68,7 @@ export function createSignalScene(host){
   const tmp=[0,0],tan=[1,0];
   const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),quaternion=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,0,1),color=new THREE.Color();
   const laneColors=LANE_COLORS.map(hex=>new THREE.Color(hex));
-  const lift=LANE_COLORS.map(hex=>new THREE.Color(hex).lerp(new THREE.Color(0xffffff),.35));
+  const lift=LANE_COLORS.map(hex=>new THREE.Color(hex).lerp(new THREE.Color(0xffffff),HEAD_LIFT));
 
   function clearWires(){
     wires.traverse(object=>{object.geometry?.dispose();object.material?.dispose()});
@@ -134,7 +139,7 @@ export function createSignalScene(host){
           pointAtDistance(route.lane,d,tmp,tan);
           const fade=t===0?1:Math.pow(1-t/(TRAIL+1),1.7)*.62;
           const size=t===0?HEAD:TAIL;
-          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),size[0]*(t===0?1:1-t*.07),size[1]*(t===0?1:1-t*.09),t===0?lift[route.track]:laneColors[route.track],fade*bright*(t===0?1.15:1));
+          place(n++,tmp[0],tmp[1],Math.atan2(-tan[1],tan[0]),size[0]*(t===0?1:1-t*.07),size[1]*(t===0?1:1-t*.09),t===0?lift[route.track]:laneColors[route.track],fade*bright*(t===0?.9:.8));
         }
       }
     });

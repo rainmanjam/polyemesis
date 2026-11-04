@@ -1,10 +1,15 @@
 /** Wire geometry shared by the WebGL layer and the SVG fallback. Pure functions, no DOM. */
 export const LANE_GAP=4.5;
-export const LANES=['video','mic','music','game'];
+export const LANES=['video','mic','music','game'] as const;
 const CLUSTER_SHIFT=20;
 
-function bezier(p0,p1,p2,p3,n){
-  const out=[];
+export type Point=[number,number];
+export interface Lane{pts:Point[];cum:number[];length:number}
+export interface Connection{start:{x:number;y:number};end:{x:number;y:number};vertical:boolean}
+export interface Route{index:number;lanes:Lane[]}
+
+function bezier(p0:Point,p1:Point,p2:Point,p3:Point,n:number):Point[]{
+  const out:Point[]=[];
   for(let i=0;i<=n;i++){
     const t=i/n,u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
     out.push([a*p0[0]+b*p1[0]+c*p2[0]+d*p3[0],a*p0[1]+b*p1[1]+c*p2[1]+d*p3[1]]);
@@ -12,9 +17,9 @@ function bezier(p0,p1,p2,p3,n){
   return out;
 }
 
-function roundedPolyline(raw,radius){
+function roundedPolyline(raw:Point[],radius:number):Point[]{
   const pts=raw.filter((p,i)=>i===0||Math.hypot(p[0]-raw[i-1][0],p[1]-raw[i-1][1])>.01);
-  const out=[pts[0]];
+  const out:Point[]=[pts[0]];
   for(let i=1;i<pts.length-1;i++){
     const a=pts[i-1],b=pts[i],c=pts[i+1];
     const d1=Math.hypot(b[0]-a[0],b[1]-a[1]),d2=Math.hypot(c[0]-b[0],c[1]-b[1]);
@@ -30,14 +35,14 @@ function roundedPolyline(raw,radius){
   return out;
 }
 
-function finish(pts){
+function finish(pts:Point[]):Lane{
   const cum=[0];
   for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));
   return {pts,cum,length:cum[cum.length-1]};
 }
 
 /** Position (and optionally unit tangent) at distance d along a lane. */
-export function pointAtDistance(lane,d,out,tan){
+export function pointAtDistance(lane:Lane,d:number,out:number[],tan?:number[]):number[]{
   const {pts,cum}=lane;
   d=Math.max(0,Math.min(lane.length,d));
   let lo=0,hi=cum.length-1;
@@ -55,13 +60,13 @@ export function pointAtDistance(lane,d,out,tan){
  * YouTube routes leave the router left and right of centre and the archive route drops straight
  * down the gutter between those two cards, so no route ever crosses a card.
  */
-export function buildRoutes(layout){
+export function buildRoutes(layout:{connections:Connection[]}):Route[]{
   return layout.connections.map((connection,index)=>{
     const {start:a,end:b}=connection;
-    const lanes=[];
+    const lanes:Lane[]=[];
     for(let k=0;k<4;k++){
       const o=(k-1.5)*LANE_GAP;
-      let pts;
+      let pts:Point[];
       if(!connection.vertical){
         const dx=(b.x-a.x)*.5;
         pts=bezier([a.x,a.y+o],[a.x+dx,a.y+o],[b.x-dx,b.y+o],[b.x,b.y+o],72);
