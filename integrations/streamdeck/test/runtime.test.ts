@@ -587,6 +587,64 @@ describe("destination key retry", () => {
     expect(key.titles.at(-1)).toContain("Starting");
   });
 
+  it("a cooldown timer from before a re-pair cannot clear the new pairing's claim", async () => {
+    const net = install({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, { destinations: FAILED }),
+      "POST /api/v1/destinations/5/restart": json(200, { status: "restarting" }),
+    });
+    const timers: (() => void)[] = [];
+    const rt = new Runtime("en", () => net.transport, (fn) => {
+      timers.push(fn);
+      return () => undefined;
+    });
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.pressDestination("d");
+    rt.configure(PAIRED);
+    await rt.verify();
+    await rt.tick();
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(2);
+    timers[0]!(); // the first pairing's timer fires late
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(2);
+  });
+
+  it("a status read from before a re-pair is not stored", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let holdNext = false;
+    const transport = (answer: StatusPayload["destinations"]): Transport => ({
+      async send(req) {
+        const path = `${req.method} ${req.url.pathname}`;
+        if (path === "GET /api/v1/auth/connection") return { status: 200, body: JSON.stringify({ name: "SD", prefix: "pmk", scope: "admin", adminScope: true }) };
+        if (path === "GET /api/v1/status") {
+          if (holdNext) {
+            holdNext = false;
+            await gate;
+          }
+          return { status: 200, body: JSON.stringify({ destinations: answer }) };
+        }
+        return { status: 404, body: "{}" };
+      },
+    });
+    let n = 0;
+    const rt = new Runtime("en", () => (++n === 1 ? transport(FAILED) : transport([{ ...FAILED![0]!, process: { state: "running" }, reason: null }])), manualScheduler().schedule);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    holdNext = true;
+    const slow = rt.tick(); // the old install's read, held
+    await new Promise((r) => setTimeout(r, 0));
+    rt.configure({ url: "https://other.example", token: "t" });
+    await rt.verify();
+    release();
+    await slow;
+    // The old install's Failed is not painted on a key of the new one.
+    expect(key.titles.at(-1)).not.toContain("Failed");
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.live);
+  });
+
   it("a refused retry starts no cooldown, so the operator can tap again", async () => {
     const { rt, net } = retryInstall(FAILED, json(500, { error: "boom" }));
     await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));

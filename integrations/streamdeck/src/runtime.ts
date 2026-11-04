@@ -202,7 +202,7 @@ export class Runtime {
    * keys bound to one destination must not each restart it, the second interrupting the attempt the
    * first began.
    */
-  private readonly retryCooldown = new Set<number>();
+  private readonly retryCooldown = new Map<number, object>();
   /**
    * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
    * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
@@ -527,10 +527,13 @@ export class Runtime {
    */
   private async readScope(key: string): Promise<void> {
     const ticket = ++this.statusClock;
-    const newer = () => (this.statusAt.get(key) ?? 0) > ticket;
+    const client = this.client!;
+    // An answer is dropped when a newer read has been stored, or when the key was re-paired meanwhile:
+    // the old install's answer is not this one's.
+    const newer = () => this.client !== client || (this.statusAt.get(key) ?? 0) > ticket;
     try {
       const sourceId = key === ALL_SCOPE ? undefined : Number(key);
-      const payload = await this.client!.status(sourceId);
+      const payload = await client.status(sourceId);
       if (newer()) return;
       this.statusAt.set(key, ticket);
       this.statuses.set(key, payload);
@@ -981,7 +984,13 @@ export class Runtime {
     // Claimed BEFORE the request, with no await between the check and the claim: a double tap, a second
     // key on the same destination or a multi-action firing while the first restart is out sends nothing.
     if (this.retryCooldown.has(dest.id)) return;
-    this.retryCooldown.add(dest.id);
+    // Each claim is its own object, so a timer from an earlier claim (or an earlier pairing) can only
+    // ever clear the claim it was set for.
+    const claim = {};
+    this.retryCooldown.set(dest.id, claim);
+    const release = () => {
+      if (this.retryCooldown.get(dest.id) === claim) this.retryCooldown.delete(dest.id);
+    };
     let sent = false;
     await this.run(s, async () => {
       await this.client!.restartDestination(dest.id, s.settings.sourceId);
@@ -989,10 +998,10 @@ export class Runtime {
     });
     if (!sent) {
       // Refused: nothing restarted, so the operator may tap again at once.
-      this.retryCooldown.delete(dest.id);
+      release();
       return;
     }
-    this.schedule(() => this.retryCooldown.delete(dest.id), RETRY_COOLDOWN_MS);
+    this.schedule(release, RETRY_COOLDOWN_MS);
     // The real transition, not a guess: read the programme again and paint what the server says now --
     // Starting, then Live on a later tick, or Failed again with its reason.
     await this.repaintScope(s);
