@@ -1738,7 +1738,7 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `GET` | `/metadata`, `/metadata/broadcast-window` |
 | `POST` | `/metadata/push`, `GET` `/metadata/push/{id}` |
 | `GET` | `/chat`, `/chat/messages`, `/chat/search`, `/chat/users`, `/chat/flags` |
-| `GET` | `/chat/settings?platform=twitch` — the room's current rules (slow mode, follower-only, ...), read from the platform |
+| `GET` | `/chat/settings` — the room's current rules (slow mode, follower-only, ...), read from the platform; `platform` (Twitch only) and `account` in the query |
 | `GET` | `/analytics/live`, `/analytics/streams`, `/analytics/streams/{id}` |
 | `POST` | `/chat/send` |
 | `DELETE` | `/chat/messages` |
