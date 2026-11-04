@@ -12,10 +12,11 @@ import {
   mergeStatusDestinations,
   processAbsence,
   programmeIngestLive,
+  programmeLevels,
   programmeSnapshot,
   relayRate,
 } from "./dashboardFacts";
-import type { SourceInfo } from "./types";
+import type { Levels, SourceInfo } from "./types";
 
 /* The three claims the dashboard used to make without evidence.
  *
@@ -373,5 +374,41 @@ describe("ingestUptimeSec", () => {
   it("keeps the old reading for a stopped process with nothing arriving", () => {
     expect(ingestUptimeSec({ state: "stopped", uptimeSec: 0 }, {}, false)).toBeNull();
     expect(ingestUptimeSec(running(0), {}, false)).toBe(0);
+  });
+});
+
+/* THE METERS FOLLOW THE PROGRAMME IN THE HEADER, as the Ingest card does. */
+describe("programmeLevels", () => {
+  const lv = (tracks: number, id?: number): Levels => ({
+    peak: Array.from({ length: tracks }, () => [-12, -12]),
+    rms: Array.from({ length: tracks }, () => [-18, -18]),
+    ...(id === undefined ? {} : { source: { id, name: `s${id}` } }),
+  });
+
+  it("takes a frame measured on the selected programme", () => {
+    const next = lv(4, 1);
+    expect(programmeLevels(lv(2, 1), next, 1)).toBe(next);
+  });
+
+  it("keeps the held reading when another programme's frame arrives", () => {
+    const held = lv(4, 1);
+    expect(programmeLevels(held, lv(2, 2), 1)).toBe(held);
+    expect(programmeLevels(null, lv(2, 2), 1)).toBeNull();
+  });
+
+  it("does not keep a held reading that names another programme", () => {
+    // After a switch the held frame is the old programme's.
+    expect(programmeLevels(lv(4, 1), null, 2)).toBeNull();
+    expect(programmeLevels(lv(4, 1), lv(2, 3), 2)).toBeNull();
+  });
+
+  it("passes every frame through when no programme is selected", () => {
+    const next = lv(2, 2);
+    expect(programmeLevels(lv(4, 1), next, null)).toBe(next);
+  });
+
+  it("passes an untagged frame through, from a server that predates the tag", () => {
+    const next = lv(2);
+    expect(programmeLevels(lv(4, 1), next, 1)).toBe(next);
   });
 });

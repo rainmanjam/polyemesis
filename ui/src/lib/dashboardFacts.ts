@@ -1,4 +1,4 @@
-import type { ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
+import type { Levels, ProcessStatus, RelayStats, SourceInfo, Status } from "./types";
 
 /* What the dashboard is allowed to assert, as plain functions.
  *
@@ -200,6 +200,35 @@ export function programmeSnapshot(
   if (incoming?.source?.id === programme) return incoming;
   if (held?.source?.id === programme) return held;
   return null;
+}
+
+/** The levels the meters draw: the incoming frame if it was measured on the
+ *  programme selected in the header, otherwise the reading already held.
+ *
+ *  The same bug programmeSnapshot fixed for status. Every engine publishes its
+ *  levels onto the one socket, and replacing the reading with each frame drew
+ *  whichever programme metered last -- on a three-programme install, a
+ *  two-track programme's frame read tracks 3 and 4 of a four-track one as "not
+ *  measured". A frame names its programme in `source.id`.
+ *
+ *  Passed through when nothing is selected, and when the frame carries no tag
+ *  (a server that predates it), so an older server meters as it always did.
+ *  A held reading that names another programme is dropped too: right after a
+ *  switch the held frame is the OLD programme's. The provider also reads its
+ *  held levels through this (as `incoming`, with nothing held), so not even the one render
+ *  between a switch and its effect shows the old programme's bars. An
+ *  untagged held frame cannot be told apart; the provider clears that one when
+ *  the socket for the old programme is torn down. */
+export function programmeLevels(
+  held: Levels | null,
+  incoming: Levels | null,
+  programme: number | null,
+): Levels | null {
+  if (programme == null) return incoming;
+  const id = incoming?.source?.id;
+  if (id == null || id === programme) return incoming;
+  const heldId = held?.source?.id;
+  return heldId == null || heldId === programme ? held : null;
 }
 
 /** One programme's relay throughput, from its own status frames.

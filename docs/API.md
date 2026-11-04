@@ -2079,7 +2079,10 @@ the opening burst — the snapshot the server assembles for the client — but n
 the stream that follows: every engine publishes onto the same socket, so frames
 produced by other programmes arrive on it too. They are source-tagged, each
 `status` frame carrying `source.id` and `source.name`, so a client can tell them
-apart on `status.source.id`. What a UI cannot do is keep one status series and
+apart on `status.source.id`. A `levels` frame is tagged the same way: `peak` and
+`rms` as before, plus `source.id` and `source.name` for the programme the reading
+was measured on. Drop a levels frame whose `source.id` is not the programme you
+are drawing, or its tracks get drawn over the wrong programme's meters. What a UI cannot do is keep one status series and
 one bitrate series for the socket — those get redrawn from whichever engine
 spoke last — which is why a multi-source grid polls `GET /previews` instead of
 deriving one from this feed.

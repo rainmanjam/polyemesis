@@ -8,7 +8,7 @@ import {
 } from "react";
 import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/lib/currentProgramme";
-import { mergeStatusDestinations } from "@/lib/dashboardFacts";
+import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
 import { LiveDataContext, type LiveData } from "@/hooks/useLiveData";
 import type {
@@ -171,9 +171,17 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
           case "source":
             setSource(msg.data as SourceInfo);
             break;
-          case "levels":
-            setLevels(msg.data as Levels);
+          case "levels": {
+            // SCOPED, not replaced. Every engine meters onto this socket; a
+            // frame that names another programme is not this one's reading.
+            // See programmeLevels. A torn-down run's socket can still deliver
+            // a queued frame, and its closure holds the OLD programme, so it
+            // would pass the check and undo the teardown's clear.
+            if (cancelled) break;
+            const incoming = msg.data as Levels;
+            setLevels((prev) => programmeLevels(prev, incoming, programme));
             break;
+          }
           case "stats": {
             const d = msg.data as {
               system: SystemStats;
@@ -230,6 +238,12 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       wsRef.current?.close();
+      // THE OLD PROGRAMME'S METERS GO WITH ITS SOCKET. The next run answers
+      // for a different programme, and the held reading is this one's: left in
+      // place it draws this programme's bars under the next one's name until
+      // that one meters. `cancelled` stops onclose from clearing it, so the
+      // teardown does.
+      setLevels(null);
     };
     // Re-opened when the programme resolves: the first render has none, and a
     // socket opened without one would be answering for a programme the operator
@@ -351,6 +365,13 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [programmeKnown, programme]);
 
+  // READ THROUGH THE SCOPE, not only written through it. `levels` is cleared
+  // when the old programme's socket is torn down, but that is an effect, and
+  // the render between selectProgramme and it would draw the old programme's
+  // bars under the new one's name. A tagged frame is checked here, so no render
+  // can.
+  const scopedLevels = useMemo(() => programmeLevels(null, levels, programme), [levels, programme]);
+
   const value = useMemo<LiveData>(
     () => ({
       programme,
@@ -363,7 +384,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
       snapshotKnown: status !== null,
       status,
       source,
-      levels,
+      levels: scopedLevels,
       system,
       bitrate,
       logs,
@@ -382,7 +403,7 @@ export function LiveDataProvider({ children }: { children: ReactNode }) {
 
       status,
       source,
-      levels,
+      scopedLevels,
       system,
       bitrate,
       logs,
