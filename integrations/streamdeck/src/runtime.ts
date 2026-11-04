@@ -2,7 +2,7 @@ import { ApiError, PolyemesisClient, type Transport } from "./api.js";
 import type { StreamDeckKey } from "./keys.js";
 import { ConfigError, dumpSecondsValid, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
-import { destinationFace, failoverFace, type KeyFace } from "./keyFace.js";
+import { destinationFace, failoverFace, retryable, type KeyFace } from "./keyFace.js";
 import { HoldToConfirm, type Scheduler } from "./holdToConfirm.js";
 import { meterFace } from "./levelsFeed.js";
 import type {
@@ -157,6 +157,13 @@ export const FLASH_MS = 3000;
  */
 export const COALESCE_MS = 250;
 
+/**
+ * After a destination key sends a Retry, further Retry taps on it are ignored for this long: about two
+ * status ticks. The restart answers faster than a human double tap, and until the next status read the
+ * cache still says failed, so without it the second tap would restart the attempt the first one began.
+ */
+export const RETRY_COOLDOWN_MS = 4000;
+
 /** Kinds that read the install's stored track levels, not a programme's /status. */
 const LEVEL_KINDS: readonly SurfaceKind[] = ["trackMute", "trackGain"];
 
@@ -190,6 +197,8 @@ export class Runtime {
    * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
    */
   private readonly tapping = new Set<string>();
+  /** Destination keys that sent a Retry within RETRY_COOLDOWN_MS, with the timer that clears each. */
+  private readonly retryCooldown = new Map<string, () => void>();
   /**
    * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
    * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
@@ -343,6 +352,8 @@ export class Runtime {
     this.flashes.get(id)?.();
     this.flashes.delete(id);
     this.dumpsInFlight.delete(id);
+    this.retryCooldown.get(id)?.();
+    this.retryCooldown.delete(id);
     this.levelRefused.delete(id);
     this.dialNotices.delete(id);
     this.turns.get(id)?.cancel?.();
@@ -927,14 +938,60 @@ export class Runtime {
 
   // ---- presses -----------------------------------------------------------
 
-  /** A destination key starts its destination when it is off. Stopping is the stop key's job. */
+  /**
+   * A destination key starts its destination when it is off, and retries it when it has failed
+   * (including held after repeated quick rejections): the console's Retry, POST /destinations/{id}/restart.
+   * Any other state -- live, starting, reconnecting, a delay buffering or draining -- does nothing.
+   * Stopping is the stop key's job.
+   */
   async pressDestination(id: string): Promise<void> {
+    await this.oneTap(id, () => this.tapDestination(id));
+  }
+
+  private async tapDestination(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client || s.settings.destinationId === undefined) return;
     if (!(await this.requireAdmin(s))) return;
     const dest = this.statuses.get(scopeKey(s.settings.sourceId))?.destinations?.find((d) => d.id === s.settings.destinationId);
-    if (!dest || dest.enabled) return;
-    await this.run(s, () => this.client!.startDestination(s.settings.destinationId!, s.settings.sourceId));
+    if (!dest) return;
+    if (!dest.enabled) {
+      await this.run(s, () => this.client!.startDestination(s.settings.destinationId!, s.settings.sourceId));
+      return;
+    }
+    // The server picks the engine from the destination's own programme and ignores ?source=, so this
+    // is the check that keeps a key bound to programme A from restarting a destination of B.
+    if (!retryable(dest) || !this.ownsDestination(s, dest.id)) return;
+    if (this.retryCooldown.has(id)) return;
+    let sent = false;
+    await this.run(s, async () => {
+      await this.client!.restartDestination(dest.id, s.settings.sourceId);
+      sent = true;
+    });
+    if (!sent) return;
+    this.retryCooldown.set(
+      id,
+      this.schedule(() => this.retryCooldown.delete(id), RETRY_COOLDOWN_MS),
+    );
+    // The real transition, not a guess: read the programme again and paint what the server says now --
+    // Starting, then Live on a later tick, or Failed again with its reason.
+    await this.repaintScope(s);
+  }
+
+  /** Re-reads one key's programme status and repaints that key, unless a status tick is already reading. */
+  private async repaintScope(s: Surface): Promise<void> {
+    if (this.statusBusy) return;
+    this.statusBusy = true;
+    const key = scopeKey(s.settings.sourceId);
+    try {
+      this.statuses.set(key, await this.client!.status(s.settings.sourceId));
+      this.scopeErrors.delete(key);
+    } catch {
+      // The next tick reads it again and paints whatever it finds, unreachable included.
+      return;
+    } finally {
+      this.statusBusy = false;
+    }
+    if (this.surfaces.get(s.id) === s) await this.paintFace(s, this.faceFor(s));
   }
 
   async pressGoLive(id: string): Promise<void> {

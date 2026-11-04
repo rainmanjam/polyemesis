@@ -297,6 +297,184 @@ describe("destination keys", () => {
   });
 });
 
+describe("destination key retry", () => {
+  const FAILED: StatusPayload["destinations"] = [
+    {
+      id: 5,
+      name: "Twitch",
+      platform: "twitch",
+      enabled: true,
+      sourceId: 7,
+      process: { state: "failed", lastError: "exit status 1" },
+      reason: { cause: "key_rejected" },
+    },
+  ];
+  const HELD: StatusPayload["destinations"] = [
+    {
+      id: 5,
+      name: "Twitch",
+      platform: "twitch",
+      enabled: true,
+      sourceId: 7,
+      process: { state: "failed", lastError: "held after 3 quick rejections" },
+      reason: { cause: "key_rejected", held: true },
+    },
+  ];
+
+  /** An install whose status the test changes between reads, and whose restart answers as told. */
+  function retryInstall(first: StatusPayload["destinations"], restart: Route = json(200, { status: "restarting" })) {
+    const box = { destinations: first };
+    const env = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": () => ({ status: 200, body: JSON.stringify({ destinations: box.destinations }) }),
+      "POST /api/v1/destinations/5/restart": restart,
+      "POST /api/v1/destinations/6/start": json(200, {}),
+    });
+    return { ...env, box };
+  }
+
+  async function paired(rt: Runtime, key: ReturnType<typeof surface>) {
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(key);
+    await rt.tick();
+  }
+
+  const posts = (net: { writes: () => TransportRequest[] }) => net.writes().map((r) => r.url.pathname);
+
+  it("retries a failed destination with the console's Retry, scoped to its programme", async () => {
+    const { rt, net, box } = retryInstall(FAILED);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    box.destinations = [{ ...FAILED![0]!, process: { state: "starting" }, reason: null }];
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+    expect(net.writes()[0]!.url.searchParams.get("source")).toBe("7");
+    expect(key.oks).toBe(1);
+    // The real transition: the key repaints from the server's answer at once, amber Starting.
+    expect(key.states.at(-1)).toBe(KEY_STATE.warn);
+    expect(key.titles.at(-1)).toContain("Starting");
+    // Then Live on the next tick, as the server says.
+    box.destinations = [{ ...FAILED![0]!, process: { state: "running" }, reason: null }];
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.live);
+  });
+
+  it("shows Failed with its reason again when the retry fails again", async () => {
+    const { rt, box } = retryInstall(FAILED);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    await rt.pressDestination("d");
+    box.destinations = FAILED;
+    await rt.tick();
+    expect(key.states.at(-1)).toBe(KEY_STATE.error);
+    expect(key.titles.at(-1)).toContain("Failed");
+    expect(key.titles.at(-1)).toContain("Key rejected");
+  });
+
+  it("retries a destination held after repeated quick rejections", async () => {
+    const { rt, net } = retryInstall(HELD);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    expect(key.states.at(-1)).toBe(KEY_STATE.held);
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+  });
+
+  it("still starts an off destination, and never sends a restart for it", async () => {
+    const { rt, net } = retryInstall([
+      { id: 6, name: "YouTube", platform: "youtube", enabled: false, sourceId: 7, process: null },
+    ]);
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 6 }));
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/6/start"]);
+  });
+
+  it("sends nothing for a live destination, even one painted red by a worse issue", async () => {
+    for (const live of [
+      { id: 5, name: "Twitch", platform: "twitch", enabled: true, sourceId: 7, process: { state: "running" as const } },
+      { id: 5, name: "Twitch", platform: "twitch", enabled: true, sourceId: 7, process: { state: "running" as const }, accountHealth: "expired" as const },
+    ]) {
+      const { rt, net } = retryInstall([live]);
+      const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+      await paired(rt, key);
+      await rt.pressDestination("d");
+      expect(net.writes()).toHaveLength(0);
+    }
+  });
+
+  it("sends nothing for starting, reconnecting, or a delay that is buffering", async () => {
+    for (const other of [
+      { process: { state: "starting" as const } },
+      { process: { state: "reconnecting" as const } },
+      { process: { state: "failed" as const }, delay: { seconds: 30, phase: "buffering" as const } },
+    ]) {
+      const { rt, net } = retryInstall([{ id: 5, name: "Twitch", platform: "twitch", enabled: true, sourceId: 7, ...other }]);
+      await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+      await rt.pressDestination("d");
+      expect(net.writes()).toHaveLength(0);
+    }
+  });
+
+  it("never restarts a failed destination of another programme", async () => {
+    const { rt, net } = retryInstall([{ ...FAILED![0]!, sourceId: 9 }]);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("alerts when the server refuses the retry, and does not show ok", async () => {
+    const { rt, net } = retryInstall(FAILED, json(409, { error: "the source this destination carries is not running" }));
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+    expect(key.alerts).toBe(1);
+    expect(key.oks).toBe(0);
+  });
+
+  it("a read token sends no retry and says it needs admin", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": READ,
+      "GET /api/v1/status": json(200, { destinations: FAILED }),
+    });
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(0);
+    expect(key.alerts).toBe(1);
+  });
+
+  it("sends one retry for a double tap made while the first is still out", async () => {
+    const { rt, net } = retryInstall(FAILED);
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await Promise.all([rt.pressDestination("d"), rt.pressDestination("d")]);
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+  });
+
+  it("sends one retry for a double tap after the first answered, while the status still reads failed", async () => {
+    const { rt, net, sched } = retryInstall(FAILED);
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.pressDestination("d");
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+    // A cooldown, not a block: once it ends, a destination that failed again can be retried again.
+    sched.fireAll();
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart", "/api/v1/destinations/5/restart"]);
+  });
+
+  it("a refused retry starts no cooldown, so the operator can tap again", async () => {
+    const { rt, net } = retryInstall(FAILED, json(500, { error: "boom" }));
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.pressDestination("d");
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart", "/api/v1/destinations/5/restart"]);
+  });
+});
+
 describe("pairing states", () => {
   it("paints Not paired when there is no address or token", async () => {
     const { rt } = runtimeFor({});

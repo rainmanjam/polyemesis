@@ -8,6 +8,17 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- **A tap on a failed Stream Deck destination key retries it.** The Destination key started a
+  destination that was off and ignored every other tap, so a key showing **Failed** or **Held**
+  (after repeated quick rejections) could only be fixed from the console. A tap on it now sends the
+  console's Retry (`POST /api/v1/destinations/{id}/restart`, admin token), and the key repaints
+  from the server at once: amber **Starting**, then **Live**, or **Failed** again with its reason.
+  A refused retry shows the key's alert, and a second tap within 4 seconds is ignored so a double
+  tap does not restart the attempt the first began. Off still starts; Live, Starting and the other
+  states still ignore the tap, and Go live is unchanged.
+
 ### Fixed
 
 - **The meters follow the programme selected in the header.** On an install with several
