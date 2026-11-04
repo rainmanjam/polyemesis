@@ -34,9 +34,9 @@ const FLOOR = -40; // dBFS at which a bar reads empty
  * illustrative arrangement and later from scripts/seed_demo.go, and both were
  * correct only until the capture changed under them. */
 const DESTS = [
-  { name: "Archive", lufs: -25.8, tracks: "01 + 02 + 03 + 04", tone: "meter" },
-  { name: "Compliance", lufs: -25.8, tracks: "01 + 02 + 03 + 04", tone: "meter" },
-  { name: "Podcast", lufs: -16.0, tracks: "01 + 02", tone: "live" },
+  { name: "Archive", lufs: -25.9, tracks: "01 + 02 + 03 + 04", tone: "meter" },
+  { name: "Compliance", lufs: -25.9, tracks: "01 + 02 + 03 + 04", tone: "meter" },
+  { name: "Podcast", lufs: -16.1, tracks: "01 + 02", tone: "live" },
 ] as const;
 
 const pct = (l: number) => Math.max(0, Math.min(100, ((l - FLOOR) / -FLOOR) * 100));
