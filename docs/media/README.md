@@ -75,8 +75,10 @@ empty form beneath it as the one-time setup.
 ### `02-routing-hero.png` is a clip; `07-monitoring.png` is framed on the processes
 
 `02-routing-hero.png` is a clip of the routing screen, the track rows and the
-music-rights switch for the selected destination, taken for the home page hero
-so it can be read at that size. `07-monitoring.png` is framed on the process
+music-rights switch for the selected destination, cropped so it stays legible
+at a small size. It was taken for the home page hero, which the animated
+SignalPath component replaces ([#971](https://github.com/rainmanjam/polyemesis/pull/971));
+the clip is kept for any page that needs the routing screen at that size. `07-monitoring.png` is framed on the process
 list, with the FFmpeg log filtered to one process (the preview, when it still
 has lines). Every child that decodes the relay joins it mid-GOP and logs a burst
 of h264 decoder errors until the first keyframe; the supervisor logs that burst

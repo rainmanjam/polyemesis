@@ -66,7 +66,9 @@ hot. One upload, one video encode, different audio per platform.
   no limit in the software; upload bandwidth and CPU are the real ones, at
   roughly 4% of one core per destination.
 - **Platform sign-in** for YouTube, Twitch, Facebook and Kick, with chat and
-  metadata push where the API allows it. [→ PLATFORMS.md](docs/PLATFORMS.md)
+  metadata push where the API allows it. TikTok signs in for clip publishing.
+  X sign-in, go-live and chat are built and stay switched off until X
+  whitelists the app for its Livestream API. [→ PLATFORMS.md](docs/PLATFORMS.md)
 - **Chat moderation on all four** — delete, ban, timeout, and a moderator user
   card showing what one person has said across every platform at once, which no
   single platform's own tooling does.
@@ -76,7 +78,19 @@ hot. One upload, one video encode, different audio per platform.
 - **Failover** with a standby ingest, a generated slate, and a source selector
   that switches without restarting a single destination.
 - **Post-production**: segmented multitrack recording with retention, a job
-  queue, Whisper transcription with full-text search, and a clipper.
+  queue, Whisper transcription with full-text search, and a clip editor that
+  suggests highlights, exports 9:16 vertical shorts with burned-in captions,
+  and posts to YouTube Shorts or TikTok when you click Publish.
+  [→ CLIP-PUBLISHING.md](docs/CLIP-PUBLISHING.md)
+- **Live captions** — one audio track of a programme is transcribed on your
+  own machine and sent inside the Twitch stream, to YouTube's caption ingestion
+  (provisional), and as a Captions track on the public player, or burned into
+  a rendition. [→ CAPTIONS.md](docs/CAPTIONS.md)
+- **Cross-platform audience** — viewer counts from YouTube, Twitch, Kick and
+  the public player, live on the Dashboard and as a report per stream, with
+  CSV, Prometheus and MQTT exports. [→ MONITORING.md](docs/MONITORING.md#cross-platform-viewers)
+- **Broadcast delay** — hold one destination back by up to 15 minutes; every
+  other destination is unaffected. [→ BROADCAST-DELAY.md](docs/BROADCAST-DELAY.md)
 - **Prometheus metrics** and in-process alert rules with webhook delivery.
   [→ MONITORING.md](docs/MONITORING.md)
 - **A stream timeline** on the Monitoring page: failovers, destinations going
