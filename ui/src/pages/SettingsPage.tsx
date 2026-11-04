@@ -3210,7 +3210,7 @@ export function PlatformCredCard({
             here rather than stacking at the top of the card. */}
         <Accordion type="single" collapsible>
           <AccordionItem value="steps" className="border-b-0">
-            <AccordionTrigger>{t("settingsUx.setupGuide", { n: guide.steps.length })}</AccordionTrigger>
+            <AccordionTrigger>{t(guide.steps.length === 1 ? "settingsUx.setupGuideOne" : "settingsUx.setupGuide", { n: guide.steps.length })}</AccordionTrigger>
             <AccordionContent>
               <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
                 {guide.steps.map((step, i) => (

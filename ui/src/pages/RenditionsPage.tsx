@@ -305,7 +305,7 @@ function encodeCost(
   const rate = width * height * fps;
   const label = t("rend.costLabel", { width, height, fps });
   const mpps = `${Math.round(rate / 1e6)} MP/s`;
-  const machine = cores && cores > 0 ? t("rend.costMachineCores", { cores }) : "";
+  const machine = cores && cores > 0 ? t(cores === 1 ? "rend.costMachineCoresOne" : "rend.costMachineCores", { cores }) : "";
 
   if (hardware) {
     return {
@@ -763,7 +763,7 @@ export function RenditionCard({
               {t("rend.feeds")}
             </span>
             <span className="tnum font-mono text-sm text-muted-foreground">
-              {t("rend.enabledOfTotal", { enabled, total })}
+              {t(enabled === 1 ? "rend.enabledOfTotalOne" : "rend.enabledOfTotal", { enabled, total })}
             </span>
           </div>
           {total === 0 ? (

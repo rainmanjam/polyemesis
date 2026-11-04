@@ -35,6 +35,19 @@ its first tagged release.
 
 ### Fixed
 
+- **The rest of the console's counts say one as one too.** A second pass over every number in the
+  catalogues, not only `{count}`: the Stop all toast ("1 destination stopped."), track and line
+  counts ("1 track", "1 line"), the host's cores, the offload badges ("Upload failed on 1 target"
+  rather than "target(s)"), the setup guide ("1 step"), the platforms tile, retried uploads, the
+  automod call count, the Across the Room count, and the partial-revoke and partial-hide messages.
+  Strings that read the same in English but not elsewhere are fixed as well: Spanish, French,
+  Italian and Portuguese "received", "sent", "verified", "shown", the viewer count, automod's
+  fallback lines and the checklist progress, and German "1 läuft". A line that carries several
+  counts at once (the player's sessions and rebuffers, the overlay's shown and held lines, the
+  regroup result, the ingest's TS loss, the Go live and on-air summaries) now names each count
+  with a label ("sessions: 1 · rebuffers: 2") so it reads right whatever the numbers are. Four
+  catalogue keys nothing referenced are gone.
+
 - **Go live and Stop all say one as one, in every language.** The Go live button read "1 listos"
   in Spanish (and "1 prêts", "1 pronti", "1 prontos" in French, Italian and Portuguese). It now
   reads "1 listo", and Polish uses a form that is right at any count ("gotowe: 2"). The Stop all

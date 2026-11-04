@@ -49,8 +49,8 @@ export function OffloadBadge({
   };
 
   const badge = {
-    stuck: <Badge variant="down" title={lastError}>{t("offload.stuck", { n: failedCount })}</Badge>,
-    failed: <Badge variant="warn" title={lastError}>{t("offload.failed", { n: failedCount })}</Badge>,
+    stuck: <Badge variant="down" title={lastError}>{t(failedCount === 1 ? "offload.stuckOne" : "offload.stuck", { n: failedCount })}</Badge>,
+    failed: <Badge variant="warn" title={lastError}>{t(failedCount === 1 ? "offload.failedOne" : "offload.failed", { n: failedCount })}</Badge>,
     uploading: <Badge variant="outline">{t("offload.uploading")}</Badge>,
     verified: <Badge variant="default">{t("offload.verified")}</Badge>,
   }[kind];

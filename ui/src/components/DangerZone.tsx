@@ -51,7 +51,7 @@ export function DangerZone() {
     const results = await Promise.allSettled(list.map((tk) => api.revokeToken(tk.id)));
     const ok = results.filter((r) => r.status === "fulfilled").length;
     if (ok === list.length) toast.success(t("danger.tokensRevoked", { count: ok }));
-    else toast.warning(t("danger.tokensPartial", { done: ok, total: list.length }));
+    else toast.warning(t(list.length === 1 ? "danger.tokensPartialOne" : "danger.tokensPartial", { done: ok, total: list.length }));
     load();
   };
 

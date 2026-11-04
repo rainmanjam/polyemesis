@@ -366,7 +366,7 @@ export function JobsPage() {
             {view.stats.running > 0 && (
               <Badge variant="live">
                 <StatusDot tone="live" size="sm" />
-                {t("jobs.runningCount", { count: view.stats.running })}
+                {t(view.stats.running === 1 ? "jobs.runningCountOne" : "jobs.runningCount", { count: view.stats.running })}
               </Badge>
             )}
             {/* Pause all needs something to pause. Over an empty queue it has no

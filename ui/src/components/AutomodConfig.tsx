@@ -529,11 +529,11 @@ export function AutomodConfig({
           {/* WHICH CHECKER DECIDED, and how often the fallback had to. */}
           {stats && (stats.fallbacks ?? 0) > 0 && (
             <span className="text-sm text-muted-foreground">
-              {t("automod.fallbacks", { count: stats.fallbacks ?? 0 })}
+              {t((stats.fallbacks ?? 0) === 1 ? "automod.fallbacksOne" : "automod.fallbacks", { count: stats.fallbacks ?? 0 })}
             </span>
           )}
           {stats && (stats.failedOpen ?? 0) > 0 && (
-            <Problem>{t("automod.failedOpen", { count: stats.failedOpen ?? 0 })}</Problem>
+            <Problem>{t((stats.failedOpen ?? 0) === 1 ? "automod.failedOpenOne" : "automod.failedOpen", { count: stats.failedOpen ?? 0 })}</Problem>
           )}
           {stats?.lastDecidedBy && (
             <span className="text-sm text-muted-foreground">

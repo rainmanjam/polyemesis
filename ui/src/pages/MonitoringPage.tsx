@@ -840,7 +840,7 @@ export function MonitoringPage() {
               tone={cpuHigh ? "warn" : "default"}
             />
             <div className="mt-1 text-sm text-muted-foreground">
-              {t("i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
+              {t((system?.numCpu ?? 0) === 1 ? "i18nSweep.monCoresOne" : "i18nSweep.monCores", { cores: system?.numCpu ?? 0, pct: pct(system?.procCpuPercent ?? 0) })}
               <InfoHint body="mon.hostCpu.hint" title="mon.hostCpu" className="ml-1" />
             </div>
             <div className="mt-1 text-tiny text-muted-foreground">

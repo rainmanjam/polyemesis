@@ -94,5 +94,9 @@ export function monitorVerdict(v: MonitorVerdictInput): MonitorVerdict {
       tone: "idle",
     };
   }
-  return { key: "mon.verdictAllRunning", params: { count: v.processes }, tone: "ok" };
+  return {
+    key: v.processes === 1 ? "mon.verdictAllRunningOne" : "mon.verdictAllRunning",
+    params: { count: v.processes },
+    tone: "ok",
+  };
 }

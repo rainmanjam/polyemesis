@@ -343,8 +343,8 @@ export function AutomodModelChecker({
           {stats && (
             <span className="text-sm text-muted-foreground">
               {stats.ceiling > 0
-                ? t("automod.spend", { used: stats.callsThisHour, ceiling: stats.ceiling })
-                : t("automod.spendNoCeiling", { used: stats.callsThisHour })}
+                ? t(stats.callsThisHour === 1 ? "automod.spendOne" : "automod.spend", { used: stats.callsThisHour, ceiling: stats.ceiling })
+                : t(stats.callsThisHour === 1 ? "automod.spendNoCeilingOne" : "automod.spendNoCeiling", { used: stats.callsThisHour })}
             </span>
           )}
           {stats && (stats.decisions ?? 0) > 0 && (

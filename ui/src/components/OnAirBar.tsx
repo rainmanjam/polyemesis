@@ -153,7 +153,7 @@ export function OnAirBar({
         {air.degraded > 0 && (
           <span className="flex items-center gap-1.5 text-[12px] text-warn">
             <StatusDot tone="warn" size="sm" />
-            {t("i18nSweep.connectingCount", { count: air.degraded })}
+            {t(air.degraded === 1 ? "i18nSweep.connectingCountOne" : "i18nSweep.connectingCount", { count: air.degraded })}
           </span>
         )}
         {air.failed > 0 && (

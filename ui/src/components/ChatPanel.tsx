@@ -683,11 +683,11 @@ export function ChatStatusList({
               )}
               {!compact && (
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  {tn("chatpage.receivedCount", {
+                  {tn(s.received === 1 ? "chatpage.receivedCountOne" : "chatpage.receivedCount", {
                     n: <span className="tnum font-mono">{s.received.toLocaleString()}</span>,
                   })}
                   {" · "}
-                  {tn("chatpage.sentCount", {
+                  {tn(s.sent === 1 ? "chatpage.sentCountOne" : "chatpage.sentCount", {
                     n: <span className="tnum font-mono">{s.sent.toLocaleString()}</span>,
                   })}
                   {s.restarts > 0 && (
