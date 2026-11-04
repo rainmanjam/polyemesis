@@ -130,7 +130,15 @@ func TestDrainPlaysTheWholeTailOutOnTimeAndThenSaysSo(t *testing.T) {
 	l := newTestLine(t, delay, rec, nil)
 	const n = 200
 	sent := sendAll(t, l, n)
-	loopbackDelivered(t) // sent is not yet arrived; see the helper
+	// SENT IS NOT ARRIVED. On macOS a loopback datagram reaches the socket
+	// after Write returns, from lo0's input thread, so the last one can still
+	// be in the kernel when Drain runs -- measured as 197 of 200 once in 300
+	// runs. That is a datagram the line never had (see takeQueued). What the
+	// line does with a tail it HAS is this test's question, so it waits until
+	// the line has taken in everything; the unread-queue case has its own,
+	// deterministic test below.
+	waitFor(t, "the line to take in every datagram sent", 5*time.Second,
+		func() bool { return l.Ingested() == n })
 	drained := l.Drain()
 	if st := l.Status(); !st.Draining {
 		t.Fatal("a draining line does not say so")
@@ -166,15 +174,38 @@ func TestDrainPlaysTheWholeTailOutOnTimeAndThenSaysSo(t *testing.T) {
 // and closing a socket discards its receive queue, so the last moments before
 // the stop were cut -- exactly what Drain promises will not happen.
 //
-// The burst is unpaced so that the reader is reliably behind when Drain is
-// called, which is the condition and not an accident of scheduling. It is kept
-// small (50 x 1316 bytes) so it fits the smallest default receive buffer of
-// the three CI platforms with room to spare: a datagram the KERNEL dropped
-// never arrived, and is not what this is about.
+// The reader is HELD (Config.beforeRead) from before the first datagram until
+// Drain has been called, so the whole burst is provably unread when the stop
+// comes; nothing here depends on scheduling. 50 x 1316 bytes is ~115 KB as
+// Linux accounts it, inside even a default-capped receive buffer (rmem_max
+// 208 KiB, doubled): a datagram the kernel dropped never arrived, and is not
+// what this is about.
 func TestDrainKeepsWhatHadArrivedButHadNotYetBeenRead(t *testing.T) {
 	const delay = 100 * time.Millisecond
 	rec := &recorder{}
-	l := newTestLine(t, delay, rec, nil)
+	gate := make(chan struct{})
+	var held sync.Once
+	reading := make(chan struct{})
+	lim := Limits{MemBudget: DefaultMemBudget, DiskBudget: DiskBudgetFor(delay),
+		SegmentBytes: DefaultSegmentBytes, Dir: t.TempDir() + "/spill"}
+	l, err := Listen(Config{Delay: delay, Limits: lim, Out: rec.out, Lead: 50 * time.Millisecond,
+		beforeRead: func() {
+			held.Do(func() {
+				close(reading)
+				<-gate
+			})
+		}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Close)
+	// Runs BEFORE Close (cleanups are LIFO): a test that fails while the
+	// reader is held must let it go, or Close waits on it forever.
+	var opened sync.Once
+	open := func() { opened.Do(func() { close(gate) }) }
+	t.Cleanup(open)
+	<-reading
+
 	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: l.Port()})
 	if err != nil {
 		t.Fatal(err)
@@ -187,15 +218,28 @@ func TestDrainKeepsWhatHadArrivedButHadNotYetBeenRead(t *testing.T) {
 	}
 	_ = conn.Close()
 	loopbackDelivered(t)
-	queued := l.Ingested()
+
+	drained := make(chan (<-chan struct{}), 1)
+	go func() { drained <- l.Drain() }()
+	waitFor(t, "Drain to begin", 5*time.Second, func() bool { return l.Status().Draining })
+	if got := l.Ingested(); got != 0 {
+		t.Fatalf("the held reader took in %d datagrams; the test is not exercising an unread queue", got)
+	}
+	open()
+
 	select {
-	case <-l.Drain():
+	case ch := <-drained:
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the drain never finished")
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("the drain never finished")
+		t.Fatal("Drain never returned")
 	}
 	if got := rec.count(); got != n {
-		t.Fatalf("drain released %d of %d (the reader had taken in %d when Drain was called): "+
-			"datagrams already in the line's socket were thrown away", got, n, queued)
+		t.Fatalf("drain released %d of %d datagrams that were in the line's socket, unread, "+
+			"when Drain was called: they were thrown away", got, n)
 	}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
@@ -206,17 +250,62 @@ func TestDrainKeepsWhatHadArrivedButHadNotYetBeenRead(t *testing.T) {
 	}
 }
 
-// loopbackDelivered returns once every datagram this process has already
-// written to the loopback has reached its socket.
+// A STOP STAYS A STOP when input never stops. UDP has no end of stream, and
+// taking the queued tail must not turn into reading forever: the destination's
+// teardown waits on Drain. The queue here is a stand-in (Config.readQueued)
+// that always has another datagram, which is what an unbounded drain could
+// never get past. It is a stand-in rather than real senders because flooding
+// the loopback for long enough to exceed the budget was tried, and it made the
+// NEXT test lose a datagram while lo0 worked through the backlog.
 //
-// Write returning is not that. On macOS the loopback hands a datagram to lo0's
-// input queue and the socket gets it later, from another thread; a test that
-// writes and then acts at once is acting on datagrams that are still in
-// transit -- measured as a drain that kept 14 of 50, with the other 36
-// arriving after the line had found its socket empty. lo0's input queue is
-// FIFO, so a probe sent last and received here means everything sent before it
-// has been delivered. On Linux and Windows delivery happens inside the send,
-// and this costs one round trip.
+// What is asserted is the bound itself: Drain returns, having taken exactly
+// what drainBudget allows. The 5s is "returns at all", not a measurement.
+func TestDrainReturnsWhileInputKeepsArriving(t *testing.T) {
+	rec := &recorder{}
+	const delay = 100 * time.Millisecond
+	var served atomic.Int64
+	endless := func(buf []byte) (int, error) {
+		served.Add(1)
+		return copy(buf, datagram(uint64(served.Load()))), nil
+	}
+	lim := Limits{MemBudget: DefaultMemBudget, DiskBudget: DiskBudgetFor(delay),
+		SegmentBytes: DefaultSegmentBytes, Dir: t.TempDir() + "/spill"}
+	l, err := Listen(Config{Delay: delay, Limits: lim, Out: rec.out, Lead: 50 * time.Millisecond,
+		readQueued: endless}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Close)
+
+	returned := make(chan struct{})
+	go func() {
+		l.Drain()
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Drain did not return while input kept arriving (%d datagrams read so far): "+
+			"the drain of the queued tail is unbounded, and a teardown waiting on it never finishes",
+			served.Load())
+	}
+	const size = 1316
+	if want := int64((drainBudget + size + drainOverheadBytes - 1) / (size + drainOverheadBytes)); served.Load() != want {
+		t.Fatalf("the drain read %d datagrams; drainBudget allows exactly %d", served.Load(), want)
+	}
+}
+
+// loopbackDelivered returns once the datagrams this goroutine has already
+// written to the loopback have reached their socket -- on macOS, where that is
+// otherwise not true when Write returns.
+//
+// macOS hands a loopback datagram to lo0's input queue, and a single input
+// thread delivers it to the socket later. That queue is FIFO across sockets, so
+// a probe written after them and received here was delivered after them. This
+// is a property of XNU's loopback, not of UDP; Linux normally delivers inside
+// the send. Used only where the line's reader is held, so the wait cannot let
+// it catch up; if the property ever stopped holding, the test using it would
+// fail by releasing fewer datagrams than it sent, not pass wrongly.
 func loopbackDelivered(t *testing.T) {
 	t.Helper()
 	probe, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})

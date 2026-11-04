@@ -198,10 +198,13 @@ func runRelayHop(t *testing.T, ffmpegBin, fixture string, offset float64, paced 
 		// idle machine, with the head always intact and only the tail gone.
 		//
 		// readrate 4 is still four times realtime, which is all the claim
-		// below needs. At ~110 datagrams per second of media that is ~440 a
-		// second on the wire (after an initial burst of half a second's worth,
-		// ~55), so the reader thread would have to be off-CPU for ~380ms, not
-		// ~60ms, before the socket filled.
+		// below needs, and the HOP stays exactly as unpaced as production --
+		// relayFeedArgs is untouched; only the fixture's publisher is paced.
+		// The publisher sends an initial burst of half a second of media
+		// (~55 datagrams, FFmpeg's -readrate_initial_burst default), then
+		// ~440 a second. That leaves ~115 datagrams of room, so the hop's
+		// reader thread would have to be off-CPU for ~260ms, not ~60ms,
+		// before the socket filled. -readrate is FFmpeg 5.0+; CI pins 8.1.
 		pubArgs = append(pubArgs, "-readrate", "4")
 	}
 	pubArgs = append(pubArgs, "-i", fixture, "-map", "0", "-c", "copy",
