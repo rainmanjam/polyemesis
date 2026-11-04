@@ -886,3 +886,27 @@ func TestScanFallsBackWhenTheVolumeCannotBeMarked(t *testing.T) {
 		t.Errorf("indexed %v after one of two files went on an unmarkable volume, want %v", got, names[1:])
 	}
 }
+
+// "Nothing indexed and nothing missing" proves nothing. The offload pass asks
+// HoldForMissing(0, 0) on every tick with an empty ledger; if that wrote the
+// marker into a bare mountpoint, the next Scan would de-index the archive.
+func TestAnEmptyQuestionNeverMarksABareMountpoint(t *testing.T) {
+	m, dir, store := newManager(t)
+	now := time.Now()
+	names := writeSegments(t, dir, now, []time.Duration{3 * time.Hour, 2 * time.Hour, time.Hour}, nil)
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	unmount(t, dir)
+	writeSegments(t, dir, now, []time.Duration{time.Minute}, nil)
+	m.HoldForMissing(0, 0) // the offload pass, with nothing tracked
+	if _, err := m.Scan(); err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+	got := indexedFilenames(t, store)
+	for _, n := range names {
+		if !slices.Contains(got, n) {
+			t.Errorf("%s was de-indexed after an empty offload pass marked the bare mountpoint", n)
+		}
+	}
+}

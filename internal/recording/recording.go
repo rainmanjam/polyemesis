@@ -133,8 +133,8 @@ const VolumeMarker = ".polyemesis-volume"
 // the directory may not be the right volume.
 //
 // The marker is written whenever the directory provably holds the index's
-// files -- nothing indexed yet, or every indexed file present -- so it is on
-// the real volume and absent from an empty mountpoint. Then:
+// files -- something is indexed and every indexed file is present -- so it is
+// on the real volume and absent from an empty mountpoint. Then:
 //   - marker present: the volume is the one indexed; missing files are gone.
 //   - marker absent: hold. This is a mountpoint without its volume, even when
 //     a live recorder has written a new segment into it.
@@ -146,8 +146,14 @@ const VolumeMarker = ".polyemesis-volume"
 func (m *Manager) HoldForMissing(missing, total int) bool {
 	marker := filepath.Join(m.dir, VolumeMarker)
 	if missing == 0 {
-		// The directory holds every indexed file (or nothing is indexed): it
-		// is the right volume, so mark it.
+		// The directory holds every indexed file: it is the right volume, so
+		// mark it. ONLY WITH SOMETHING INDEXED: "nothing indexed, nothing
+		// missing" proves nothing, and the offload pass asks exactly that on
+		// every tick with an empty ledger -- so it would write the marker into
+		// a bare mountpoint and license the next Scan to de-index the archive.
+		if total == 0 {
+			return false
+		}
 		if _, err := os.Stat(marker); errors.Is(err, os.ErrNotExist) {
 			if werr := os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644); werr != nil {
 				m.markerUnwritable.Store(true)
@@ -405,6 +411,7 @@ func (m *Manager) Scan() (bool, error) {
 	}
 
 	live := newestSegment(segments)
+	upserted := 0
 	for _, rec := range segments {
 		// Probing costs an ffprobe per file, so it happens once per segment,
 		// and never on the one the recorder is still writing: its duration
@@ -444,6 +451,7 @@ func (m *Manager) Scan() (bool, error) {
 			continue
 		}
 		changed = true
+		upserted++
 	}
 
 	m.unprobeableMu.Lock()
@@ -467,7 +475,12 @@ func (m *Manager) Scan() (bool, error) {
 	// file count cannot tell: while a programme records, the recorder writes a
 	// fresh segment into the bare mountpoint, so the listing is not empty and
 	// every older row looked "deleted". See HoldForMissing.
-	if m.HoldForMissing(missing, len(indexed)) {
+	// total counts what this scan just indexed too: a scan that indexed files
+	// it found here, with nothing previously indexed missing, has proven the
+	// directory. Without that, a fresh index (read empty, before these
+	// upserts) would never be marked, and a file removed before the next scan
+	// would be held for good.
+	if m.HoldForMissing(missing, len(indexed)+upserted) {
 		if !m.deindexHeld.Swap(true) {
 			m.log.Warn("recordings directory is not the volume the index was built on "+
 				"(its "+VolumeMarker+" file is missing); not de-indexing. If the volume "+

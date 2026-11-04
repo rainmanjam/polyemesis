@@ -607,6 +607,9 @@ func TestPruneKeepsTheLedgerWhenTheVolumeIsGone(t *testing.T) {
 			}
 			f.segment(time.Minute, "live", true)
 			f.svc.Pass(context.Background())
+			// A second pass, as the next tick would: the ledger now tracks files that
+			// are all present, which is what confirms the volume (HoldForMissing).
+			f.svc.Pass(context.Background())
 			for _, n := range names {
 				if _, ok := f.item(id, n); !ok {
 					t.Fatalf("%s not tracked after the first pass", n)
@@ -633,6 +636,9 @@ func TestPruneStillDropsASingleRemovedFile(t *testing.T) {
 	}
 	f.segment(time.Minute, "live", true)
 	f.svc.Pass(context.Background())
+	// A second pass, as the next tick would: the ledger now tracks files that
+	// are all present, which is what confirms the volume (HoldForMissing).
+	f.svc.Pass(context.Background())
 	if err := os.Remove(filepath.Join(f.dir, names[0])); err != nil {
 		t.Fatal(err)
 	}
@@ -652,6 +658,9 @@ func TestPruneDropsEverythingGoneFromAConfirmedVolume(t *testing.T) {
 	id := f.target()
 	names := []string{f.segment(5*time.Hour, "a", true), f.segment(4*time.Hour, "b", true)}
 	f.segment(time.Minute, "live", true)
+	f.svc.Pass(context.Background())
+	// A second pass, as the next tick would: the ledger now tracks files that
+	// are all present, which is what confirms the volume (HoldForMissing).
 	f.svc.Pass(context.Background())
 	for _, n := range names {
 		if err := os.Remove(filepath.Join(f.dir, n)); err != nil {
