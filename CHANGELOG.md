@@ -27,7 +27,9 @@ its first tagged release.
   options are an allowlist generated from FFmpeg's own option table, with every option whose help
   mentions a file, path, URL, log, dump, stats or device left out. Filter graphs may use only
   filters vetted to open no file, the `/option=` form is refused, and so are encoder keys such as
-  `pass=`, `stats=` and `dump-yuv=`, file-writing muxers and stray output tokens. Arguments
+  `pass=`, `stats=` and `dump-yuv=`, nested option lists such as `-format_opts`, `-f` values
+  other than streaming formats (`flv`, `mpegts`, `matroska`, `mp4`, ...), `-i`, and stray output
+  tokens. Arguments
   saved before this are dropped when the destination starts, with a log line saying why. See
   docs/API.md and docs/TROUBLESHOOTING.md.
 - **A publisher whose token is rotated, or whose source is disabled, is disconnected.** The SRT
@@ -71,6 +73,12 @@ its first tagged release.
 
 ### Changed
 
+- **Expert arguments saved earlier may stop applying.** The stricter expert-mode rules (see
+  Security) also run when a destination starts. Saved arguments that now fail them are left out of
+  the command, and the destination starts on its generated command: for example, a `loudnorm` or
+  `drawtext` filter, an `-f` other than a streaming format, or an option FFmpeg's own option list
+  does not include. The expert editor names what was refused and says the destination starts
+  without those arguments, and the server log says it on every start.
 - **MQTT gets an instance of its own when you first set it up**, so two installs on one broker
   cannot share a client ID or topic tree. Installs that were ever configured keep theirs, even after
   switching MQTT off and on. The settings

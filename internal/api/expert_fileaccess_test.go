@@ -143,3 +143,27 @@ func TestAnAPITokenCannotReachTheExpertRoutes(t *testing.T) {
 	// The signed-in operator still saves.
 	send(t, h, sign, http.MethodPut, path, expertBody("", "-muxdelay 0.1", false, true), http.StatusOK)
 }
+
+// Arguments saved before the stricter rules -- a loudnorm filter, say -- stop
+// applying at the next start (the engine runs the same walk at spawn). The
+// editor must say so rather than show them as if they ran.
+func TestTheEditorSaysStoredArgumentsThatNoLongerValidateDoNotRun(t *testing.T) {
+	h, store, sign := renditionServer(t, defaultTools())
+	dest := createDestination(t, h, sign, destinationBody("stored-loudnorm", false, nil))
+	row, err := store.GetDestination(dest.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.ExtraOutputArgs = "-af loudnorm=I=-16"
+	if _, err := store.UpdateDestination(row); err != nil {
+		t.Fatalf("storing pre-upgrade expert args: %v", err)
+	}
+	var resp expertResponse
+	decodeInto(t, send(t, h, sign, http.MethodGet, "/api/v1/destinations/"+itoa(dest.ID)+"/expert", nil, http.StatusOK), &resp)
+	if !strings.Contains(resp.Warning, "starts without them") || !strings.Contains(resp.Warning, "loudnorm") {
+		t.Errorf("warning %q does not say the stored loudnorm is not applied", resp.Warning)
+	}
+	if resp.Args.OutputArgs != "-af loudnorm=I=-16" {
+		t.Errorf("the stored text was hidden: %q", resp.Args.OutputArgs)
+	}
+}

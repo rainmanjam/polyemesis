@@ -53,12 +53,20 @@ var fileOptions = map[string]string{
 	"-dumpgraph":              "dumps the filter graph out of the process",
 }
 
-// fileMuxers write files beside, or instead of, the destination's URL.
-var fileMuxers = map[string]bool{
-	"tee": true, "segment": true, "ssegment": true, "stream_segment": true,
-	"hls": true, "dash": true, "image2": true, "webm_chunk": true,
-	"webm_dash_manifest": true, "smoothstreaming": true,
+// outputFormats are the only values -f may take in the output arguments: the
+// containers a destination streams. AN ALLOWLIST (review follow-up): the old
+// list of file-writing muxers missed hds, fifo (which wraps any muxer),
+// and every libavdevice output (fbdev, v4l2, alsa, ...), each of which opens a
+// path or a device on the server.
+var outputFormats = map[string]bool{
+	"flv": true, "mpegts": true, "matroska": true, "webm": true, "mp4": true, "mov": true,
+	"nut": true, "rtp": true, "rtp_mpegts": true, "rtsp": true, "ogg": true, "adts": true, "null": true,
 }
+
+// inputFormats are the only values -f may take in the input arguments. The
+// input is the relay's MPEG-TS; any other demuxer reinterprets its URL --
+// -f lavfi as a filter graph, -f concat as a file list, a capture device.
+var inputFormats = map[string]bool{"mpegts": true}
 
 // filterGraphFlags carry a filter graph as their value.
 var filterGraphFlags = map[string]bool{
@@ -109,6 +117,7 @@ var allowedFilters = map[string]bool{
 // are paths (x264's dump-yuv writes raw video anywhere it is told to).
 var codecParamFlags = map[string]bool{
 	"-x264-params": true, "-x264opts": true, "-x265-params": true, "-svtav1-params": true,
+	"-aom-params": true,
 }
 
 // codecFileKeys are the keys, across x264, x265 and SVT-AV1's own option
@@ -127,6 +136,8 @@ var codecFileKeys = map[string]bool{
 	// SVT-AV1
 	"passes": true, "stat-file": true, "input-stat-file": true, "output-stat-file": true,
 	"fgs-table": true, "roi-map-file": true, "qp-file": true, "config": true, "c": true,
+	// x265's NAL and HDR10+ input files; libaom's film-grain table.
+	"nalu-file": true, "dhdr10-info": true, "film-grain-table": true,
 }
 
 // optionBase strips a stream specifier: -c:v:0 -> -c, -dump_attachment:t ->
@@ -176,6 +187,16 @@ func CheckExpertFileAccess(field string, argv []string) error {
 		if why, ok := fileOptions[base]; ok {
 			return fmt.Errorf("%s: %s %s. Expert mode cannot touch files on the server", field, a, why)
 		}
+		if base == "-i" {
+			// Checked here and not only by the API: this walk also runs at
+			// spawn, and a stored -i reads any file or device into the output.
+			return fmt.Errorf("%s: -i adds an input, which can read a file or device on the "+
+				"server. The destination's input is the relay and cannot be changed here", field)
+		}
+		if ffmpegNestedOptions[base] {
+			return fmt.Errorf("%s: %s passes its own option list to another component, past "+
+				"every check on this page. Expert mode cannot accept it", field, a)
+		}
 		if ffmpegFileishOptions[base] {
 			return fmt.Errorf("%s: %s names a file, path, URL or log in FFmpeg's own help for it. "+
 				"Expert mode cannot touch files on the server", field, a)
@@ -195,9 +216,22 @@ func CheckExpertFileAccess(field string, argv []string) error {
 		i++
 		v := argv[i]
 		switch {
-		case base == "-f" && fileMuxers[strings.ToLower(v)]:
-			return fmt.Errorf("%s: -f %s writes files on the server beside the destination's URL. "+
-				"Expert mode cannot touch files on the server", field, v)
+		case base == "-f":
+			allowed, side := outputFormats, "output"
+			if strings.HasPrefix(field, "input") {
+				allowed, side = inputFormats, "input"
+			}
+			if !allowed[strings.ToLower(v)] {
+				return fmt.Errorf("%s: -f %s is not one of the %s formats expert mode allows; "+
+					"other formats and devices can write or read files on the server", field, v, side)
+			}
+		case base == "-apad":
+			// -apad hands its value to the apad filter as option text, where
+			// the /option= form loads a value from a file.
+			if fileValuedFilterOption.MatchString(v) {
+				return fmt.Errorf("%s: -apad %s loads a value from a file (the /option= form). "+
+					"Expert mode cannot touch files on the server", field, v)
+			}
 		case filterGraphFlags[base]:
 			if err := checkFilterGraph(v); err != nil {
 				return fmt.Errorf("%s: the filter graph after %s %v. Expert mode cannot touch "+
@@ -261,10 +295,16 @@ func checkFilterGraph(graph string) error {
 
 // codecParamOpensFile returns the first key in an x264/x265-style
 // "k=v:k=v" list that names a file, or "".
+//
+// Keys are normalised the way the encoders read them before the lookup: the
+// list is unescaped by av_dict_parse_string (so \ ' and " vanish), and x264,
+// x265 and SVT-AV1 accept '_' for '-' and any case. Without that,
+// d\ump-yuv= or dump_yuv= walked past the check (review follow-up).
 func codecParamOpensFile(params string) string {
-	for _, kv := range strings.FieldsFunc(params, func(r rune) bool { return r == ':' || r == ',' }) {
+	clean := strings.NewReplacer(`\`, "", `'`, "", `"`, "").Replace(params)
+	for _, kv := range strings.FieldsFunc(clean, func(r rune) bool { return r == ':' || r == ',' }) {
 		k, _, _ := strings.Cut(kv, "=")
-		k = strings.ToLower(strings.TrimSpace(k))
+		k = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(k)), "_", "-")
 		if codecFileKeys[k] {
 			return k
 		}

@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -30,10 +31,18 @@ func TestEveryTableBooleanTakesNoValueInTheRealFFmpeg(t *testing.T) {
 // a path. A filter that gains one in a later FFmpeg fails here.
 func TestNoAllowedFilterHasAFileOption(t *testing.T) {
 	bin := requireFFmpeg(t)
-	fileish := regexp.MustCompile(`(?i)\b(file|filename|filepath|path)\b`)
+	fileish := regexp.MustCompile(`(?i)(^|[^A-Za-z_])(file|files|filename|filenames|filepath|path|paths|dir|directory|url|urls|uri|log|logs|dump|dumps|stats|statistics)([^A-Za-z_]|$)`)
 	// Read and judged benign: "fast path using libc memcpy" is about copying.
-	benign := map[string]string{"scale": "memcpy", "scale2ref": "memcpy"}
-	optLine := regexp.MustCompile(`^ +([a-z_0-9]+) `)
+	benign := map[string][]string{
+		"scale": {"memcpy"}, "scale2ref": {"memcpy"}, // "fast path using libc memcpy"
+		"transpose":  {"dir"},         // the transpose direction
+		"palettegen": {"stats_mode"},  // which frames the palette statistics cover
+		"acrossfade": {"inputs", "n"}, // the number of input STREAMS to cross-fade
+	}
+	// Option lines only: "  name   <type>  flags  description". The enum
+	// constants listed under an option ("log  1  ...  logarithmic") are
+	// values, not options, and name nothing.
+	optLine := regexp.MustCompile(`^ +([A-Za-z0-9_-]+) +<`)
 	for name := range allowedFilters {
 		out, _ := exec.Command(bin, "-hide_banner", "-h", "filter="+name).CombinedOutput()
 		if strings.Contains(string(out), "Unknown filter") {
@@ -41,7 +50,7 @@ func TestNoAllowedFilterHasAFileOption(t *testing.T) {
 		}
 		for _, line := range strings.Split(string(out), "\n") {
 			m := optLine.FindStringSubmatch(line)
-			if m == nil || benign[name] == m[1] {
+			if m == nil || slices.Contains(benign[name], m[1]) {
 				continue
 			}
 			if fileish.MatchString(line) {
@@ -99,6 +108,67 @@ func TestNoAllowedOptionNamesADevice(t *testing.T) {
 	for o := range ffmpegBoolOptions {
 		if strings.Contains(strings.ToLower(o), "device") {
 			t.Errorf("%s is on the allowlist, and a device option opens a path", o)
+		}
+	}
+}
+
+// THE DANGEROUS DIRECTION. A table VALUE option that FFmpeg treats as a
+// boolean makes the walk swallow the next token as its value while FFmpeg
+// takes that token as a second output file. Every value option, run alone,
+// must therefore be refused for its missing argument -- or not be one of
+// ffmpeg's own options at all (AVOptions report "Unrecognized" when given no
+// value and no stream to attach to).
+func TestEveryTableValueOptionTakesAValueInTheRealFFmpeg(t *testing.T) {
+	bin := requireFFmpeg(t)
+	type res struct {
+		opt, out string
+	}
+	opts := make(chan string)
+	results := make(chan res)
+	dir := t.TempDir()
+	for w := 0; w < 8; w++ {
+		go func() {
+			for o := range opts {
+				cmd := exec.Command(bin, "-hide_banner", "-nostdin", o)
+				cmd.Dir = dir
+				out, _ := cmd.CombinedOutput()
+				results <- res{o, string(out)}
+			}
+		}()
+	}
+	go func() {
+		for o := range ffmpegValueOptions {
+			opts <- o
+		}
+		close(opts)
+	}()
+	for range ffmpegValueOptions {
+		r := <-results
+		if !strings.Contains(r.out, "Missing argument") && !strings.Contains(r.out, "Unrecognized option") {
+			t.Errorf("%s is listed as taking a value, but FFmpeg run with it alone says: %.120q", r.opt, r.out)
+		}
+	}
+}
+
+// Nested option dictionaries hand a key=value list to another component,
+// past the walk. Only the encoder-param lists the walk checks may be allowed.
+func TestNoAllowedOptionIsAnUncheckedDictionary(t *testing.T) {
+	bin := requireFFmpeg(t)
+	out, err := exec.Command(bin, "-hide_banner", "-h", "full").Output()
+	if err != nil {
+		t.Fatalf("ffmpeg -h full: %v", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "<dictionary>") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		o := f[0]
+		if (ffmpegValueOptions[o] || ffmpegBoolOptions[o]) && !codecParamFlags[o] {
+			t.Errorf("%s is a dictionary option the walk does not check, and it is allowed", o)
 		}
 	}
 }

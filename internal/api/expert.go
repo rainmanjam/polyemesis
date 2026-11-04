@@ -257,14 +257,6 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 			return nil, fmt.Errorf(fileValueRefusal, a, "-"+strings.TrimPrefix(a, "-/"))
 		}
 	}
-	for _, side := range []struct {
-		field string
-		argv  []string
-	}{{"input args", in}, {"output args", out}} {
-		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
-			return nil, err
-		}
-	}
 	for _, a := range in {
 		if a == "-i" {
 			return nil, errors.New("input args: -i adds a second input, which renumbers every " +
@@ -313,6 +305,17 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 					"profile, and a second answer can silently override it — which is the one "+
 					"failure this product cannot have.", a),
 			})
+		}
+	}
+	// File access LAST, so the refusals above keep their own, more specific
+	// wording (a second -i "renumbers" the routing graph). It is the same walk
+	// the engine runs at spawn; see ffmpeg.CheckExpertFileAccess.
+	for _, side := range []struct {
+		field string
+		argv  []string
+	}{{"input args", in}, {"output args", out}} {
+		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
+			return nil, err
 		}
 	}
 	return guards, nil
@@ -816,7 +819,12 @@ func (s *Server) handleGetExpert(w http.ResponseWriter, r *http.Request) {
 			Enabled:       saved.set(),
 			Passthrough:   row.RenditionID == nil,
 			Applied:       true,
-			Warning:       "the saved arguments no longer validate: " + err.Error(),
+			// And they are NOT RUNNING: the engine runs the same file-access
+			// walk at spawn and starts the destination without them
+			// (poka-yoke audit 2026-11-04 made the rules stricter; a stored
+			// loudnorm or an option FFmpeg's table lacks stops applying).
+			Warning: "the saved arguments no longer validate, so this destination starts " +
+				"without them: " + err.Error(),
 		})
 		return
 	}
