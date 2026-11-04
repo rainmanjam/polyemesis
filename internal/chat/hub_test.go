@@ -535,6 +535,64 @@ func TestPartialSendFailureReportsEveryPlatformSeparately(t *testing.T) {
 	}
 }
 
+// TestAPlatformTheMatrixSaysCannotTakeChatIsNeverASendTarget: the capability
+// matrix (oauth.PlatformCapabilities, served as /platforms/capabilities and
+// printed in docs/PLATFORMS.md) is what decides whether polyemesis may post to
+// a platform's chat, not whether the adapter's Go type happens to have a Send.
+// Facebook is the case: the matrix says Not possible, so even an adapter that
+// could send is not offered in the composer (CanSend) and is skipped by both
+// fan-outs -- the REST send and the per-chat SendEach that polls and MCP use.
+// An Unknown platform (X) keeps sending.
+func TestAPlatformTheMatrixSaysCannotTakeChatIsNeverASendTarget(t *testing.T) {
+	h := testHub(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fb := &fakeAdapter{platform: db.PlatformFacebook, account: "fb"}
+	x := &fakeAdapter{platform: db.PlatformX, account: "xx"}
+	for _, a := range []Adapter{sendingAdapter{fb}, sendingAdapter{x}} {
+		if err := h.Attach(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, st := range h.Statuses() {
+		want := st.Platform != db.PlatformFacebook
+		if st.CanSend != want {
+			t.Fatalf("%s canSend = %v, want %v (the capability matrix decides)", st.Platform, st.CanSend, want)
+		}
+	}
+
+	results, err := h.Send(ctx, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	each, err := h.SendEach(ctx, func(db.Platform, string) string { return "vote 1" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rs := range [][]SendResult{results, each} {
+		for _, r := range rs {
+			switch r.Platform {
+			case db.PlatformFacebook:
+				if r.OK || !r.Skipped || r.Detail == "" {
+					t.Fatalf("facebook = %+v, want skipped with a reason", r)
+				}
+			case db.PlatformX:
+				if !r.OK {
+					t.Fatalf("x = %+v, want sent: Unknown is not No", r)
+				}
+			}
+		}
+	}
+	fb.mu.Lock()
+	sends := fb.sends
+	fb.mu.Unlock()
+	if sends != 0 {
+		t.Fatalf("the facebook adapter was asked to send %d times, want never", sends)
+	}
+}
+
 func TestSendEchoIsShownLocallyWhenThePlatformWillNotEchoIt(t *testing.T) {
 	h := testHub(t)
 	ctx, cancel := context.WithCancel(context.Background())

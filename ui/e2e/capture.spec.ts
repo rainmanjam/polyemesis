@@ -44,7 +44,9 @@ test("dashboard — the hero shot", async ({ page }) => {
   // The ingest's not-running word is Stopped since app-council A91, and
   // Stopped can also be a pipeline row's honest answer, so the guard reads the
   // header ingest chip itself rather than the whole page.
-  await expect(page.getByTestId("chrome-ingest-status")).not.toHaveText("Stopped", {
+  // "Loading…" as well: the chip says that before its first reading now, and
+  // a guard that only refused "Stopped" would pass on it at once.
+  await expect(page.getByTestId("chrome-ingest-status")).not.toHaveText(/^(Stopped|Loading…)$/, {
     timeout: 120_000,
   });
   // BEFORE the placeholder guard below, not after it. Waiting for the
@@ -185,8 +187,14 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // track card is 1000px of mostly meter bar, which the column shrinks until
   // the track names are unreadable again. At 1024 the card is ~600px, so the
   // hero shows it at close to its real size.
+  //
+  // AND TALL ENOUGH TO HOLD THE WHOLE CLIP. The music-rights card sits below
+  // the four track rows, and a clip is cut from the viewport, not the page:
+  // at 900px it ended on Track 4 under the sticky save bar, and the switch the
+  // clip exists to show was never in it. 1800px holds the tab row through the
+  // card's "Also exclude" line with room to spare.
   const fullViewport = page.viewportSize()!;
-  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.setViewportSize({ width: 1024, height: 1800 });
   await settle(page, 800);
   const simpleTab = page.getByText("Simple", { exact: true }).first();
   // Scrolled to the top and then back down past the app's sticky header,
@@ -202,9 +210,20 @@ test("routing — the thing nothing else does", async ({ page }) => {
   await settle(page, 800);
   const top = (await simpleTab.boundingBox())!;
   const tail = (await page.getByText("Also exclude", { exact: false }).first().boundingBox())!;
+  // Asserted, not assumed: a clip whose bottom edge falls outside the viewport
+  // is silently cut there, which is how the switch went missing before.
+  expect(tail.y + tail.height + 18, "the music-rights card ends below the viewport").toBeLessThan(
+    page.viewportSize()!.height,
+  );
   const vw = page.viewportSize()!.width;
   const x = Math.max(0, top.x - 14);
   const y = Math.max(0, top.y - 10);
+  // Tracks 3 and 4 can read "not measured, last peak at …" in this frame:
+  // level frames name no programme, the demo's other two programmes carry two
+  // tracks, and whichever engine spoke last decides what tracks 3 and 4 show
+  // (found while re-aiming this, reported, not fixed here). A presence check
+  // around the shutter cannot hold it -- it toggles faster than a screenshot
+  // -- so the committed frame is one checked by eye to show all four meters.
   await page.screenshot({
     path: `${OUT}/02-routing-hero.png`,
     clip: { x, y, width: vw - 12 - x, height: tail.y + tail.height + 18 - y },
@@ -272,10 +291,31 @@ test("sources — one port, many programmes", async ({ page }) => {
   // themselves are one per protocol and would reach two on a single source.
   const perSource = page.locator('[data-tour="source-publish-urls"]');
   await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
-  await maskPublishTokens(page);
+  // RE-AIMED. Each programme's card now carries its caption track and caption
+  // words above the ingest fields, so a card is about a thousand pixels tall
+  // and the 900px frame at the top of the page held the first programme's
+  // caption-word boxes and nothing else -- under a caption about three
+  // programmes on one port. Taller, and framed from the first programme's
+  // "Signal detected" and publish URL down through the second programme's
+  // whole card to the third programme's header: three programmes, two of their
+  // per-programme publish URLs, one port.
+  const fullViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: fullViewport.width, height: 1500 });
+  const names = page.locator("[data-slot=card-title]");
+  await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
+  await topOfFrame(page, page.getByText("Signal detected").first());
+  // Clear of the sticky header, which would otherwise sit on the line framed.
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
   await settle(page);
+  // The third programme's name has to be in the frame, or this is two.
+  const third = (await names.nth(2).boundingBox())!;
+  expect(third.y + third.height, "the third programme is below the frame").toBeLessThan(1500);
+  // Masked last, right before the shutter: the resize and the scroll above
+  // re-render the cards, and a re-render can put a token back.
+  await maskPublishTokens(page);
   await page.screenshot({ path: `${OUT}/05-sources.png` });
   await assertNoTokenSurvived(page);
+  await page.setViewportSize(fullViewport);
 });
 
 /** Replaces every publish token on the page with a visibly fake one.
@@ -608,6 +648,21 @@ const DEMO_CHAT = [
 ] as const;
 
 test("chat — four platforms in one hub", async ({ page }) => {
+  // WHICH PLATFORMS THE SEND BOX MAY NAME comes from the server's capability
+  // matrix, the same one the Platforms page and docs/PLATFORMS.md print, rather
+  // than from a literal here. The fixture used to say `canSend: true` for all
+  // four, and the shot read "Send to YouTube, Twitch, Facebook, Kick" while
+  // PLATFORMS.md says Facebook chat send is "Not possible". The hub decides
+  // canSend from that matrix (chat.canPost); the stand-in now asks it too.
+  const capsRes = await page.request.get("/api/v1/platforms/capabilities");
+  expect(capsRes.ok()).toBe(true);
+  const caps = (await capsRes.json()) as {
+    platforms: { platform?: string; capabilities: Record<string, string> }[];
+  };
+  const canSend = (platform: string) =>
+    caps.platforms.find((p) => p.platform === platform)?.capabilities.chatSend !== "no";
+  expect(canSend("facebook"), "the matrix still marks Facebook chat send as not possible").toBe(false);
+
   // Matched on the PATH: the overview is requested as `/chat?limit=300`, and a
   // `**/chat` glob does not match a URL carrying a query string -- which fails
   // as "no messages rendered", several steps from the cause.
@@ -622,7 +677,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
             account: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis", kick: "polyemesis" }[platform],
             state: "live",
             channel: { youtube: "polyemesis", twitch: "polyemesis", facebook: "Polyemesis Live", kick: "polyemesis" }[platform],
-            canSend: true,
+            canSend: canSend(platform),
             received: DEMO_CHAT.filter((m) => m[0] === platform).length,
             sent: i === 0 ? 1 : 0,
             restarts: 0,
@@ -638,7 +693,7 @@ test("chat — four platforms in one hub", async ({ page }) => {
             text,
             at: new Date(Date.now() - (DEMO_CHAT.length - i) * 17_000).toISOString(),
           })),
-          limits: CHAT_PLATFORMS.map((platform) => ({
+          limits: CHAT_PLATFORMS.filter(canSend).map((platform) => ({
             platform,
             maxChars: platform === "youtube" ? 200 : 500,
           })),
@@ -725,7 +780,20 @@ test("automod — the rules, and the matrix that grants them", async ({ page }) 
   // Seeded on, so a screenshot of it off would be a screenshot of the feature
   // switched off -- worth asserting rather than hoping.
   await expect(toggle).toBeChecked();
+  // RE-AIMED after the Settings reorganisation. The tab is a two-column grid
+  // now, and the model checker card (endpoint, instruction, confidence floor,
+  // hourly ceiling, then an action per category) is about 1800px tall, with
+  // the matrix below it. Scrolling the switch into view landed on the bottom
+  // of the model card's category dropdowns and the save bar, with neither
+  // card's purpose in frame. Framed instead on the top of the two automod
+  // cards, side by side: the seeded pattern rules and the model checker, off.
+  // The matrix is the subject of the caption's second sentence, not the frame.
+  const model = page.locator("[data-slot=card-title]", { hasText: "Model checker" }).first();
+  await topOfFrame(page, model);
+  // Clear of the tab's sticky save bar, which otherwise covers the titles.
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -88));
   await settle(page);
+  await expect(page.getByText("Pattern rules", { exact: true }).first()).toBeInViewport();
   await page.screenshot({ path: `${OUT}/20-automod.png` });
 });
 
@@ -742,15 +810,27 @@ test("platforms — sign-in and credentials, honestly not connected", async ({ p
   // Settings → Platform credentials, where each platform's account is attached.
   // The seeded install has NO account connected and never will: that needs live
   // OAuth credentials for a real channel. So this photographs the genuine
-  // not-connected state -- the capability table and the connect forms -- which
-  // is what a new install shows, and nothing is typed into any field.
+  // not-connected state, which is what a new install shows, and nothing is
+  // typed into any field.
+  //
+  // REDESIGNED (settings-council R1/R2): the tab is now an "Optional" banner
+  // with the developer-app explanation one click down, a Connected channels
+  // card (empty here), and an "Add a platform" list of one row per platform
+  // with a status pill and a Set up button. The old frame anchored on a "Why
+  // you need your own developer app" card that no longer exists. This opens
+  // YouTube's row, so the shot is the one-time setup itself: the empty Client
+  // ID and Client secret fields under the platform list.
   await page.goto("/settings?tab=platforms");
-  await expect(page.getByText(/Platforms differ in how much/)).toBeVisible();
-  // Framed on the "why you need your own developer app" card, so the shot is
-  // that explanation and the first setup forms (Client ID, Client secret,
-  // connect) rather than the capability table above them, which is already
-  // the subject of its own section of the site.
-  await topOfFrame(page, page.getByText("Why you need your own developer app"));
+  const connected = page.getByTestId("platforms-connected");
+  await expect(connected).toBeVisible({ timeout: 30_000 });
+  await expect(connected.getByText("No channel connected yet")).toBeVisible();
+  const setUp = page.getByRole("button", { name: /^Set up: YouTube/ });
+  await expect(setUp).toBeVisible();
+  await setUp.click();
+  await expect(page.locator("#platform-panel-youtube").getByText(/client id/i).first()).toBeVisible();
+  await topOfFrame(page, page.getByText("Optional.", { exact: true }));
+  // <main> is the scroller, not the window: clear the banner of the header.
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/21-platforms.png` });
 });
@@ -817,14 +897,20 @@ test("platforms — connected, the end state of the one-time setup", async ({ pa
   );
 
   await page.goto("/settings?tab=platforms");
-  await expect(page.getByText(/Platforms differ in how much/)).toBeVisible();
-  const connected = page.getByText("Connected accounts").first();
-  await expect(
-    connected,
-    "the stubbed accounts did not render, so this would photograph the empty form under a 'connected' name",
-  ).toBeVisible({ timeout: 20_000 });
-  await topOfFrame(page, page.getByText("Why you need your own developer app"));
-  await page.evaluate(() => window.scrollBy(0, -16));
+  // Since the redesign the connected accounts are rows in the Connected
+  // channels card, each with a Connected pill, rather than a form per
+  // platform. Asserted per row: a card that rendered its empty state would
+  // otherwise photograph "No channel connected yet" under a "connected" name.
+  const connected = page.getByTestId("platforms-connected");
+  await expect(connected).toBeVisible({ timeout: 30_000 });
+  for (const a of DEMO_ACCOUNTS) {
+    await expect(
+      connected.locator(`[data-platform-row="${a.platform}"]`).getByText(a.accountName),
+      "the stubbed accounts did not render, so this would photograph the empty state under a 'connected' name",
+    ).toBeVisible({ timeout: 20_000 });
+  }
+  await topOfFrame(page, page.getByText("Optional.", { exact: true }));
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/22-platforms-connected.png` });
 });

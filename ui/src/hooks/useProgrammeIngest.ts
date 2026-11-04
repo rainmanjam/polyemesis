@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useIngestLive, useLiveData } from "@/hooks/useLiveData";
+import { ingestReadingKnown } from "@/lib/ingestChip";
 import {
   programmeIngestLive,
   programmeSnapshot,
@@ -27,6 +28,9 @@ import type { Status } from "@/lib/types";
  *    apart, and reset when the programme changes.
  *  - `live`: whether bytes are arriving for THIS programme
  *    (programmeIngestLive).
+ *  - `known`: whether what `live` is decided from has arrived yet
+ *    (ingestReadingKnown). Until it has, `live` false is an absence, not a
+ *    verdict, and a caller must not print it as "Stopped".
  *
  *  `sourceCount` is the caller's, because the two callers know it from
  *  different reads: the dashboard from /setup (null until known), the chrome
@@ -35,8 +39,9 @@ export function useProgrammeIngest(sourceCount: number | null): {
   snapshot: Status | null;
   kbps: number | null;
   live: boolean;
+  known: boolean;
 } {
-  const { status, programme } = useLiveData();
+  const { status, programme, source, bitrate } = useLiveData();
   const [held, setHeld] = useState<Status | null>(null);
   const [sample, setSample] = useState<RelaySample | null>(null);
 
@@ -59,5 +64,12 @@ export function useProgrammeIngest(sourceCount: number | null): {
 
   const kbps = sample?.kbps ?? null;
   const live = programmeIngestLive(useIngestLive(), sourceCount, snapshot?.source, kbps);
-  return { snapshot, kbps, live };
+  const known = ingestReadingKnown({
+    snapshot,
+    sourceCount,
+    programmeKbps: kbps,
+    seriesSamples: bitrate.length,
+    seriesSource: source,
+  });
+  return { snapshot, kbps, live, known };
 }

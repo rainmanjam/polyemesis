@@ -70,7 +70,17 @@ export function AudiencePanel({ className }: { className?: string }) {
         {live && live.enabled && !live.onAir && (
           <p className="text-sm text-muted-foreground">{t("aud.offAir")}</p>
         )}
-        {live && live.enabled && live.onAir && <OnAir live={live} />}
+        {/* On air with no sample since it began: the server checks the
+            destinations when asked, so the panel no longer reads "Off air"
+            for up to a minute beside a broadcast that has just started. Its
+            own line rather than OnAir's "not reported / 0 of 0", which would
+            say a platform was asked and did not answer. */}
+        {live && live.enabled && live.onAir && live.pending && (
+          <p className="text-sm text-muted-foreground" data-testid="audience-pending">
+            {t("aud.pending")}
+          </p>
+        )}
+        {live && live.enabled && live.onAir && !live.pending && <OnAir live={live} />}
       </CardContent>
     </Card>
   );

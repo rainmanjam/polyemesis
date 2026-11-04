@@ -39,7 +39,12 @@ export function ingestChipReading(
   ingest: ProcessStatus | null | undefined,
   ingestLive: boolean,
   onBackup = false,
-): { kind: "bitrate"; kbps: number } | { kind: "backup" } | { kind: "state"; state: ProcessState | null | undefined } {
+  known = true,
+):
+  | { kind: "bitrate"; kbps: number }
+  | { kind: "backup" }
+  | { kind: "pending" }
+  | { kind: "state"; state: ProcessState | null | undefined } {
   // Before the bitrate and ingestLive branches: the process and the bitrate feed
   // describe the primary, which can recover while a manual-return failover keeps
   // the backup selected. "Running" for it would hide which ingest is on air.
@@ -53,7 +58,50 @@ export function ingestChipReading(
   if (ingestLive || ingest?.state === "running") {
     return { kind: "state", state: "running" };
   }
+  // NO READING IS NOT A STOPPED INGEST. Before the page has what it needs to
+  // decide -- the first status frame, or on a multi-programme install the two
+  // frames a relay rate takes -- there is no process state and no liveness
+  // verdict, and stateLabel(undefined) is "Stopped". A cold load printed
+  // "Ingest Stopped" beside a live broadcast for a second or two. A process
+  // state the server DID report is a reading, and still shows.
+  if (!known && !ingest) return { kind: "pending" };
   return { kind: "state", state: ingest?.state };
+}
+
+/** Whether the liveness inputs for the selected programme's ingest have
+ *  arrived, so that "not live" is a verdict rather than an absence.
+ *
+ *  - No frame for the programme yet: unknown.
+ *  - One programme (or the count not known yet): useIngestLive decides, from
+ *    the source reading and the install-wide bitrate series. Known once the
+ *    source reading has arrived and either says nothing is probed or the
+ *    series has a sample. A status frame that names a source whose own
+ *    reading has not arrived yet is not known: "not probed" would be a guess.
+ *    A frame naming no source at all is an install with nothing to ingest. 
+ *  - Several programmes: the programme's own relay rate decides, which needs
+ *    two of its frames a second apart. Known once that rate exists, or when
+ *    there is no relay counter or no probed stream to measure. */
+export function ingestReadingKnown({
+  snapshot,
+  sourceCount,
+  programmeKbps,
+  seriesSamples,
+  seriesSource,
+}: {
+  snapshot: { relay?: { rxBytes?: number } | null; source?: { probed?: boolean } | null } | null | undefined;
+  sourceCount: number | null;
+  programmeKbps: number | null;
+  seriesSamples: number;
+  /** useLiveData's source reading, null until it arrives. */
+  seriesSource: { probed?: boolean } | null | undefined;
+}): boolean {
+  if (!snapshot) return false;
+  if (sourceCount === null || sourceCount <= 1) {
+    if (!seriesSource) return !snapshot.source;
+    return seriesSource.probed !== true || seriesSamples > 0;
+  }
+  if (snapshot.source?.probed !== true) return true;
+  return programmeKbps !== null || snapshot.relay?.rxBytes === undefined;
 }
 
 /** The reason to show beside a non-pass ingest (B1), or null when there is

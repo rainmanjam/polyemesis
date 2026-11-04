@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Le nombre de spectateurs est indisponible pour le moment.",
   "aud.disabled": "L'échantillonnage de l'audience est désactivé. Activez-le dans les Réglages.",
   "aud.offAir": "Hors antenne. Les spectateurs sont comptés tant qu'une destination tourne.",
+  "aud.pending": "À l'antenne. Le premier décompte de spectateurs arrive avec le prochain relevé.",
   "aud.total": "Spectateurs au total",
   "aud.notReported": "non communiqué",
   "aud.reportedOf": "Communiqué par {n} sur {of}",

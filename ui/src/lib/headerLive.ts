@@ -15,6 +15,9 @@ import type { TranslateParams, TranslationKey } from "@/lib/i18n";
  *    - otherwise: count the install and say so ("All programmes: 5 live"),
  *      rather than print a bare number beside a programme-scoped chip. */
 export interface HeaderLive {
+  /** False before the first status frame: there are no destinations to count
+   *  yet, and a count of none is not "Off air". */
+  known: boolean;
   count: number;
   key: TranslationKey;
   params: TranslateParams;
@@ -41,14 +44,16 @@ export function headerLive({
   programmes: readonly { id: number; name: string }[];
   sourceCount: number;
 }): HeaderLive {
+  const known = destinations !== undefined;
   const live = (destinations ?? []).filter((d) => d.process?.state === "running");
   if (sourceCount <= 1) {
-    return { count: live.length, key: "chrome.liveCount", params: { count: live.length }, offKey: "onAir.offAir" };
+    return { known, count: live.length, key: "chrome.liveCount", params: { count: live.length }, offKey: "onAir.offAir" };
   }
   const name = programme == null ? undefined : programmes.find((p) => p.id === programme)?.name;
   if (name !== undefined) {
     const count = live.filter((d) => d.sourceId === programme).length;
     return {
+      known,
       count,
       key: "chrome.liveCountProgramme",
       params: { programme: name, count },
@@ -56,5 +61,11 @@ export function headerLive({
       offParams: { programme: name },
     };
   }
-  return { count: live.length, key: "chrome.liveCountAll", params: { count: live.length }, offKey: "onAir.offAir" };
+  return {
+    known,
+    count: live.length,
+    key: "chrome.liveCountAll",
+    params: { count: live.length },
+    offKey: "onAir.offAir",
+  };
 }

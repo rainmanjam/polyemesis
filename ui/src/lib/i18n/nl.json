@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Kijkersaantallen zijn nu niet beschikbaar.",
   "aud.disabled": "Publieksmeting staat uit. Zet hem aan in Instellingen.",
   "aud.offAir": "Niet in de lucht. Kijkers worden geteld zolang een bestemming loopt.",
+  "aud.pending": "In de lucht. Het eerste kijkersaantal komt bij de volgende meting.",
   "aud.total": "Totaal kijkers",
   "aud.notReported": "niet gemeld",
   "aud.reportedOf": "Gemeld door {n} van {of}",

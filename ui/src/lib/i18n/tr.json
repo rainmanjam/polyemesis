@@ -3734,6 +3734,7 @@
   "aud.unavailable": "İzleyici sayıları şu anda kullanılamıyor.",
   "aud.disabled": "İzleyici ölçümü kapalı. Ayarlar'dan açın.",
   "aud.offAir": "Yayında değil. İzleyiciler bir hedef çalışırken sayılır.",
+  "aud.pending": "Yayında. İlk izleyici sayısı bir sonraki ölçümle gelir.",
   "aud.total": "Toplam izleyici",
   "aud.notReported": "bildirilmedi",
   "aud.reportedOf": "{of} hesaptan {n} tanesi bildirdi",

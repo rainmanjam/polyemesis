@@ -240,3 +240,21 @@ describe("OnAirBar: the feed behind a running broadcast (A3)", () => {
     expect(screen.getByTestId("health-verdict").textContent).toMatch(/healthy/i);
   });
 });
+
+/* Before the first status frame there are no destinations to count, and the
+ * strip read "OFF AIR, 0 live" for that moment of a cold load over a broadcast
+ * that was going out. No reading is not off air. */
+describe("OnAirBar before the first status frame", () => {
+  it("reads loading, with no counts, rather than OFF AIR", () => {
+    render(<OnAirBar status={null} />);
+    expect(screen.getByText(translate("en", "common.loading"))).toBeTruthy();
+    expect(screen.queryByText(translate("en", "onAir.offAir"))).toBeNull();
+    expect(screen.queryByTestId("on-air-counts")).toBeNull();
+  });
+
+  it("still reads OFF AIR once a frame says nothing is running", () => {
+    render(<OnAirBar status={status([proc("stopped")])} />);
+    expect(screen.getByText(translate("en", "onAir.offAir"))).toBeTruthy();
+    expect(screen.getByTestId("on-air-counts")).toBeTruthy();
+  });
+});

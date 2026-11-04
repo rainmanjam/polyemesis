@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Zuschauerzahlen sind gerade nicht verfügbar.",
   "aud.disabled": "Die Publikumserfassung ist aus. Schalte sie in den Einstellungen ein.",
   "aud.offAir": "Nicht auf Sendung. Zuschauerzahlen werden erfasst, solange ein Ziel läuft.",
+  "aud.pending": "Auf Sendung. Die erste Zuschauerzahl kommt mit der nächsten Messung.",
   "aud.total": "Zuschauer gesamt",
   "aud.notReported": "nicht gemeldet",
   "aud.reportedOf": "Gemeldet von {n} von {of}",

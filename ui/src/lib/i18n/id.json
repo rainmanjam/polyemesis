@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Jumlah penonton tidak tersedia saat ini.",
   "aud.disabled": "Pencatatan penonton dimatikan. Nyalakan di Pengaturan.",
   "aud.offAir": "Tidak mengudara. Penonton dihitung selama ada tujuan yang berjalan.",
+  "aud.pending": "Sedang mengudara. Jumlah penonton pertama muncul pada sampel berikutnya.",
   "aud.total": "Total penonton",
   "aud.notReported": "tidak dilaporkan",
   "aud.reportedOf": "Dilaporkan oleh {n} dari {of}",

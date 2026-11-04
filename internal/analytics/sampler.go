@@ -157,9 +157,15 @@ type Store interface {
 // Live is the panel's current picture.
 type Live struct {
 	Enabled bool `json:"enabled"`
-	// OnAir is the sampler's last verdict on whether anything is streaming.
-	OnAir  bool    `json:"onAir"`
-	Stream *Stream `json:"stream,omitempty"`
+	// OnAir is whether anything is streaming: the last tick's verdict, or,
+	// when a destination has started since that tick, true with Pending set.
+	OnAir bool `json:"onAir"`
+	// Pending is set when a destination is running but the sampler has not
+	// taken a sample since it started, so there is no count yet. The readings,
+	// total and player are empty because nothing has been asked, not because
+	// nobody is watching.
+	Pending bool    `json:"pending,omitempty"`
+	Stream  *Stream `json:"stream,omitempty"`
 	// At is the last tick, nil before the first.
 	At *time.Time `json:"at,omitempty"`
 	// Total is the sum of the readings that reported, nil when none did.
@@ -283,17 +289,46 @@ func New(src Source, store Store, cfg func() Config, now func() time.Time, log *
 }
 
 // Live returns a copy of the current picture.
+//
+// THE LAST TICK'S "OFF AIR" CAN BE A WHOLE INTERVAL OLD. A destination started
+// a second after an off-air tick left the panel, the MQTT topic and the scrape
+// saying "Off air" beside a running broadcast for up to a minute (the default
+// interval) -- the dashboard was photographed that way. So the source is asked
+// now, outside s.mu: a broadcast that has begun since the tick reads as on air
+// with no sample yet (Pending), and one that has ended since reads as off air,
+// exactly as the next tick will publish it (the stream record and its
+// sparkline stay until the close grace runs out).
+//
+// ASKED BEFORE THE PICTURE IS COPIED, not after. The other order lets a tick
+// land between the copy and the question, and the answer then pairs a
+// pre-tick "off air" with a post-tick "on air": pending, with no readings,
+// over a count that had already been published.
 func (s *Sampler) Live() Live {
+	enabled := s.config().Enabled
+	now := enabled && s.src.OnAir()
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	l := s.live
 	l.Readings = append([]Reading(nil), s.live.Readings...)
 	l.Points = append([]Point(nil), s.live.Points...)
+	s.mu.Unlock()
 	if l.Readings == nil {
 		l.Readings = []Reading{}
 	}
 	if l.Points == nil {
 		l.Points = []Point{}
+	}
+	if l.Enabled && enabled {
+		switch {
+		case now && !l.OnAir:
+			l.OnAir, l.Pending = true, true
+			l.Total, l.Reported, l.Partial, l.Player = nil, 0, false, nil
+			l.Readings = []Reading{}
+		case !now && l.OnAir:
+			l.OnAir = false
+			l.Total, l.Reported, l.Partial, l.Player = nil, 0, false, nil
+			l.Readings = []Reading{}
+		}
 	}
 	return l
 }

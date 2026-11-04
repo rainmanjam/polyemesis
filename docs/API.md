@@ -1730,6 +1730,13 @@ event, and retitle edits one. See [RECURRING-EVENTS.md](RECURRING-EVENTS.md).
 | `PATCH` | `/chat/settings` |
 | `GET` | `/loudness`, `PUT` `/loudness` |
 
+`POST /chat/send` posts to every connected chat that can take a message and
+answers one result per chat. A chat is a send target (`canSend` on its row in
+`GET /chat`) only when polyemesis can post to that platform and the capability
+matrix in `GET /platforms/capabilities` does not mark its `chatSend` as `no`;
+any other chat comes back `skipped` with the reason. Facebook is the case the
+matrix rules out. Polls and the MCP tools post through the same path.
+
 `POST /platforms/credentials/{platform}/check` asks the platform whether the
 stored client credentials for it are still good, and answers with a verdict —
 never with the credential. It is a `POST` because it makes an outbound call, and
@@ -2012,7 +2019,10 @@ gap), and `player` — the public player's QoE since the stream began (sessions,
 startups, rebuffers, `sessionsWithErrors`, the startup histogram). The public
 player is a reading of its own with `platform: "player"`, counted from the
 playout origin's session table and added to the total once (the panel labels
-the total "including the public player").
+the total "including the public player"). `onAir` is checked when the request is
+made, not only at the last tick: a destination that started since that tick
+reads `onAir: true` with `pending: true` and no readings until the next
+sample, and one that stopped since reads `onAir: false`.
 
 `/analytics/streams` lists the newest 100 streams with `peakTotal` and
 `averageTotal`. `/analytics/streams/{id}` is the report: per account `samples`,

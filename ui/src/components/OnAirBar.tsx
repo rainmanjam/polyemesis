@@ -67,11 +67,17 @@ export function OnAirBar({
   const t = useT();
   const [roomOpen, setRoomOpen] = useState(false);
   const air = onAir(status?.destinations);
+  // NO FRAME YET IS NOT OFF AIR. Before the first status frame there are no
+  // destinations to count, and counting none read "OFF AIR, 0 live" over a
+  // broadcast that was going out, for the moment a cold load takes.
+  const known = status?.destinations != null;
   // Every destination row, switched off or not: the stopped count is measured
   // against the install, which is what the operator counts on the cards below.
   const total = status?.destinations?.length ?? 0;
   const items = attention(status);
-  const head = headline(air);
+  const head: { text: TranslationKey; tone: SignalTone } = known
+    ? headline(air)
+    : { text: "common.loading", tone: "idle" };
   // The ingest's uptime only means something while it is running. SRT has no
   // ingest process at all (#514), so on a healthy SRT install this is null and
   // the verdict simply omits the stability clause rather than inventing one.
@@ -131,13 +137,15 @@ export function OnAirBar({
             connecting and failed marks beside them, which appear only when
             non-zero, they add up to the install, and a switched-off card is
             never read as a fault (A2). */}
-        <span className="tnum font-mono text-[12px] text-muted-foreground" data-testid="on-air-counts">
-          {t("onAir.counts", {
-            live: String(air.live),
-            stopped: String(Math.max(0, air.enabled - air.live - air.degraded - air.failed)),
-            off: String(Math.max(0, total - air.enabled)),
-          })}
-        </span>
+        {known && (
+          <span className="tnum font-mono text-[12px] text-muted-foreground" data-testid="on-air-counts">
+            {t("onAir.counts", {
+              live: String(air.live),
+              stopped: String(Math.max(0, air.enabled - air.live - air.degraded - air.failed)),
+              off: String(Math.max(0, total - air.enabled)),
+            })}
+          </span>
+        )}
 
         {/* Counts, each with its own mark. Rendered only when non-zero: a
             steady "0 failed" is a number that teaches the eye to skip the

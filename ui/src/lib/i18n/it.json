@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Il numero di spettatori non è disponibile al momento.",
   "aud.disabled": "Il campionamento del pubblico è disattivato. Attivalo nelle Impostazioni.",
   "aud.offAir": "Fuori onda. Gli spettatori vengono contati mentre una destinazione è attiva.",
+  "aud.pending": "In onda. Il primo conteggio degli spettatori arriva con il prossimo campionamento.",
   "aud.total": "Spettatori totali",
   "aud.notReported": "non comunicato",
   "aud.reportedOf": "Comunicato da {n} su {of}",

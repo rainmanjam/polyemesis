@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Viewer counts are unavailable right now.",
   "aud.disabled": "Audience sampling is off. Turn it on in Settings.",
   "aud.offAir": "Off air. Viewer counts are sampled while a destination is running.",
+  "aud.pending": "On air. The first viewer count arrives with the next sample.",
   "aud.total": "Total viewers",
   "aud.notReported": "not reported",
   "aud.reportedOf": "Reported by {n} of {of}",

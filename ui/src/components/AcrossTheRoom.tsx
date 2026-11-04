@@ -108,6 +108,9 @@ function RoomPanel({
   const air = onAir(status?.destinations);
   const faults = attention(status);
   const live = air.live > 0;
+  // Before the first status frame there is nothing to count; "OFF AIR, 0 of 0"
+  // across a room would be a false reading, not a missing one.
+  const known = status?.destinations != null;
   const ingest = status?.ingest;
   const enabled = (status?.destinations ?? []).filter((d) => d.enabled);
 
@@ -138,10 +141,10 @@ function RoomPanel({
                 half the size this needs. A seventh scale step used by one view
                 would be a step somebody picks by accident later. */}
             <div className="text-[clamp(2.5rem,9vw,7rem)] font-semibold uppercase leading-none tracking-tight">
-              {live ? t("room.onAir") : t("room.offAir")}
+              {!known ? t("common.loading") : live ? t("room.onAir") : t("room.offAir")}
             </div>
             <div className="tnum mt-2 font-mono text-[clamp(1rem,2.5vw,1.75rem)] text-muted-foreground">
-              {t("room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
+              {known && t("room.liveOfEnabled", { live: air.live, enabled: air.enabled })}
               {ingest?.state === "running" && ` · ${kbps(ingest.progress?.bitrateKbps ?? 0)}`}
             </div>
           </div>

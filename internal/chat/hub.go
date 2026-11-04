@@ -14,6 +14,7 @@ import (
 
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/events"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 )
 
 // Hub defaults. The numbers are chosen against chat's actual shape: bursty,
@@ -358,13 +359,38 @@ func (h *Hub) Attach(ctx context.Context, a Adapter) error {
 		state:    StateConnecting,
 		since:    h.now(),
 	}
-	_, r.canSend = a.(Sender)
+	r.canSend = canPost(a)
 	h.runners[key] = r
 	h.mu.Unlock()
 
 	go r.loop(rctx)
 	h.publishState()
 	return nil
+}
+
+// canPost reports whether a can be offered as a send target: it implements
+// Sender AND the platform capability matrix does not say chat send is
+// impossible there.
+//
+// THE MATRIX IS THE SOURCE OF TRUTH, not the adapter's method set. It is what
+// GET /platforms/capabilities, the Platforms page and docs/PLATFORMS.md all
+// print, so a platform it marks "Not possible" (Facebook: the live-video
+// comments edge refuses POST) must never appear in the composer's "Send to"
+// line, nor be posted to by the REST send, a poll, or an MCP tool. Before
+// this, the hub asked only whether the Go type had a Send method; the two
+// agreed by coincidence, and an adapter that grew a Send (or a stand-in
+// built for a test or a demo) would have been offered for a platform the
+// rest of the product says cannot take one.
+//
+// Only an explicit No refuses. Unknown (X, gated behind Livestream access)
+// keeps working, because the matrix's own rule is that a No must trace to
+// something checked.
+func canPost(a Adapter) bool {
+	if _, ok := a.(Sender); !ok {
+		return false
+	}
+	row, ok := oauth.CapabilityForPlatform(a.Platform())
+	return !ok || row.Get(oauth.CapChatSend) != oauth.SupportNo
 }
 
 // Detach stops one adapter and waits for it to finish. Detaching something
@@ -1209,7 +1235,7 @@ func (r *runner) send(ctx context.Context, text string) SendResult {
 	res := SendResult{Platform: r.platform, Account: r.account}
 
 	s, ok := r.adapter.(Sender)
-	if !ok {
+	if !ok || !r.canSend {
 		res.Skipped = true
 		res.Detail = fmt.Sprintf("polyemesis reads %s chat but cannot post to it", r.platform)
 		return res

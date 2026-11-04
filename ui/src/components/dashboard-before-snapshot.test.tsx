@@ -38,6 +38,7 @@ type ChipFixture = { state?: string; progress?: { bitrateKbps?: number } };
 const ingestChip = (ingest: ChipFixture | undefined, ingestLive: boolean) => {
   const r = ingestChipReading(ingest as unknown as ProcessStatus | undefined, ingestLive);
   if (r.kind === "backup") return "backup";
+  if (r.kind === "pending") return "pending";
   return r.kind === "bitrate" ? kbps(r.kbps) : stateLabel(r.state);
 };
 

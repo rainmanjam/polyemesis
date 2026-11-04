@@ -93,8 +93,8 @@ const sections = [
       "On an install with several programmes, the ingest and pipeline cards belong to the one selected in the header and switch when you switch it, and the destinations are grouped under the programme each one carries.",
     ],
     shot: "01-dashboard.png",
-    caption: "The programme selected in the header, on air: its ingest live at about 7 Mbps with four audio tracks, the pipeline with its three-rung rendition ladder, the on-air strip with End all, and its destinations, each showing the four ingest tracks and which of them it carries. The platform destinations are seeded demo data, created stopped.",
-    alt: "polyemesis dashboard: the selected programme's ingest card reading live, the preview, and its destinations with their audio tracks",
+    caption: "The programme selected in the header, on air: the on-air strip with five destinations live and Stop all, its ingest live at about 7 Mbps with four audio tracks, the chat pane, the audience panel counting the public player, and the pipeline with its three-rung rendition ladder. The destinations and the live picture are further down the page.",
+    alt: "polyemesis dashboard: the on-air strip reading ON AIR with five destinations live, the selected programme's ingest card reading live, the chat pane, the Audience panel, and the pipeline with three renditions",
   },
   {
     id: "routing",
@@ -163,8 +163,8 @@ const sections = [
       "You can also drive it by hand: pin the source to primary, backup or slate, or hand it back with auto. That is what you want during a rehearsal, or when you know the good feed is the one the automation is not choosing.",
     ],
     shot: "05-sources.png",
-    caption: "Three programmes on one SRT port, each publishing with its own token. Failover is off by default; it is turned on in Settings → Pipeline → Failover.",
-    alt: "polyemesis sources page: three programmes on one SRT port, each showing signal detected and its live publishing state",
+    caption: "Three programmes on one SRT port: the end of the first programme's card and the whole of the second, each publishing to port 6000 with its own token (masked here), and the third programme below. Failover is off by default; it is turned on in Settings → Pipeline → Failover.",
+    alt: "polyemesis sources page: two programmes each showing signal detected, an SRT address on port 6000 and a masked publishing token, with a third programme's header below",
   },
   {
     id: "platforms",
@@ -178,12 +178,12 @@ const sections = [
     ],
     note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects, which would look like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. Rumble is a key-paste platform, and its chat needs a key from your account page because that API has no sign-in. X sign-in, go-live and chat are built and stay switched off until X whitelists the app for its Livestream API; until then an X destination takes a pasted key.",
     shot: "22-platforms-connected.png",
-    caption: "Settings, Platform credentials, after the one-time setup: an app registered and an account connected per platform. The accounts are demo data served to the real page; nothing here is anybody's channel.",
-    alt: "polyemesis Platform credentials settings: YouTube and Twitch each marked Configured, with a stored client secret and one connected demo account",
+    caption: "Settings, Platform credentials, after the one-time setup: YouTube, Twitch and Facebook each connected, with the platforms not yet set up listed below. The accounts are demo data served to the real page; nothing here is anybody's channel.",
+    alt: "polyemesis Platform credentials settings: Connected channels listing YouTube, Twitch and Facebook, each marked Connected with one demo account, above an Add a platform list",
     setup: {
       shot: "21-platforms.png",
-      caption: "Before that: the one-time setup a new install starts in: your own developer app's Client ID and secret, per platform.",
-      alt: "polyemesis Platform credentials settings on a new install: why you register your own developer app, then empty Client ID and Client secret fields for YouTube, Twitch and Facebook",
+      caption: "Before that: a new install with no channel connected, and YouTube opened to its one-time setup, where your own developer app's Client ID and secret go.",
+      alt: "polyemesis Platform credentials settings on a new install: an Optional banner, an empty Connected channels card, and YouTube's setup open with empty Client ID and Client secret fields",
     },
   },
   {
@@ -251,9 +251,9 @@ const sections = [
       "What either tier may DO is granted per platform, per action, in a matrix that starts empty. A checker that nobody has configured cannot be armed, and an irreversible action says so before you arm it: a ban needs a human to lift it and a deleted message is gone from the platform. Every cell a platform cannot honour is greyed with the reason, because Facebook has no chat ban API and a switch that silently does nothing is worse than one that is missing.",
     ],
     shot: "20-automod.png",
-    alt: "polyemesis automatic moderation settings: a model checker with endpoint, instruction and spend ceiling beside a per-platform matrix granting each action",
+    alt: "polyemesis automatic moderation settings: the Pattern rules card with no rules yet beside the Model checker card, marked Off, with its instruction, provider, endpoint, confidence floor and calls-per-hour ceiling",
     caption:
-      "The model checker, off by default, beside the per-platform matrix that grants each action. Every platform here has nothing automatic armed, which is how an install starts.",
+      "Pattern rules, none written yet, beside the model checker, off by default: your instruction, the provider and endpoint, a confidence floor and a calls-per-hour ceiling. The per-platform matrix that grants each action is further down the same tab.",
   },
 ];
 

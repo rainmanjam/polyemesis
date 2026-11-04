@@ -26,7 +26,7 @@ import {
   failoverElapsedSeconds,
   failoverSinceClock,
 } from "@/lib/failoverBanner";
-import { backupOnAir, ingestProblem } from "@/lib/ingestChip";
+import { backupOnAir, ingestChipReading, ingestProblem } from "@/lib/ingestChip";
 import { publishRows } from "@/lib/publish-url";
 import { copyToClipboard } from "@/lib/clipboard";
 import { StatusReason } from "@/components/signature/StatusReason";
@@ -1268,6 +1268,7 @@ export function Dashboard() {
     snapshot: programmeStatus,
     kbps: programmeKbps,
     live: ingestLive,
+    known: ingestKnown,
   } = useProgrammeIngest(sourceCount);
 
   // How many programmes exist, which is what decides whether this page shows a
@@ -1789,7 +1790,7 @@ export function Dashboard() {
         status={status}
         failover={failoverState}
         onEndAll={() => endAllRef.current?.()}
-        ingestReceiving={ingestLive}
+        ingestReceiving={ingestKnown ? ingestLive : undefined}
       />
 
       {/* THE WAY BACK, directly under what is on air. See FailoverControl: it
@@ -1877,11 +1878,14 @@ export function Dashboard() {
                 )}
               </CardTitle>
               <Badge variant={toneBadge[ingestTone]}>
-                {onBackup
-                  ? t("dash.ingestBackupOnAir")
-                  : ingestLive
-                    ? stateLabel("running")
-                    : stateLabel(ingest?.state)}
+                {(() => {
+                  // The header chip's decision, so the card and the chip agree,
+                  // including on a cold load: no reading yet is not "Stopped".
+                  const r = ingestChipReading(ingest, ingestLive, onBackup, ingestKnown);
+                  if (r.kind === "backup") return t("dash.ingestBackupOnAir");
+                  if (r.kind === "pending") return t("common.loading");
+                  return r.kind === "bitrate" ? stateLabel("running") : stateLabel(r.state);
+                })()}
               </Badge>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
