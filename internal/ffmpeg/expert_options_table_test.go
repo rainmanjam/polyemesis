@@ -76,14 +76,29 @@ func TestNoAllowedOptionIsDescribedAsAFile(t *testing.T) {
 }
 
 // The options the security reviews named are refused, whatever this build lists.
+// No option naming a device is allowed either: each opens a path.
 func TestTheReviewedFileOptionsAreNotAllowed(t *testing.T) {
 	for _, o := range []string{"-x265-stats", "-graph_file", "-dumpgraph", "-passlogfile", "-progress",
-		"-vstats_file", "-attach", "-sdp_file", "-key_file", "-report", "-fpre", "-vpre"} {
+		"-vstats_file", "-attach", "-sdp_file", "-key_file", "-report", "-fpre", "-vpre",
+		"-vaapi_device", "-init_hw_device", "-filter_hw_device", "-hwaccel_device"} {
 		if ffmpegValueOptions[o] || ffmpegBoolOptions[o] {
 			t.Errorf("%s is on the allowlist", o)
 		}
 		if err := CheckExpertFileAccess("output args", []string{o, "x"}); err == nil {
 			t.Errorf("%s x was accepted", o)
+		}
+	}
+}
+
+func TestNoAllowedOptionNamesADevice(t *testing.T) {
+	for o := range ffmpegValueOptions {
+		if strings.Contains(strings.ToLower(o), "device") {
+			t.Errorf("%s is on the allowlist, and a device option opens a path", o)
+		}
+	}
+	for o := range ffmpegBoolOptions {
+		if strings.Contains(strings.ToLower(o), "device") {
+			t.Errorf("%s is on the allowlist, and a device option opens a path", o)
 		}
 	}
 }

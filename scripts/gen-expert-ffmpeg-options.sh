@@ -54,8 +54,10 @@ LIBSRT="-timeout -listen_timeout -send_buffer_size -recv_buffer_size -pkt_size -
 
 # Hardware encoders' private options, by hand for the same reason as libsrt:
 # the build that generates this table (a macOS one, say) has no NVENC, VAAPI or
-# QSV, but the install that reads it may. All take a value; none names a file.
-HWENC="-vaapi_device -rc -cq -multipass -rc-lookahead -spatial-aq -temporal-aq
+# QSV, but the install that reads it may. All take a value; none names a file
+# or a device -- device selection (-vaapi_device, -init_hw_device, ...) comes
+# from the server's own encoder configuration, never from expert arguments.
+HWENC="-rc -cq -multipass -rc-lookahead -spatial-aq -temporal-aq
 -zerolatency -b_ref_mode -nonref_p -strict_gop -aq-strength -bluray-compat -surfaces
 -gpu -delay -no-scenecut -forced-idr -tier -weighted_pred -init_qpP -init_qpB -init_qpI
 -qp -qp_cb_offset -qp_cr_offset -ldkfs -intra-refresh -single-slice-intra-refresh
@@ -107,6 +109,10 @@ BYNAME="-report -pre -vpre -apre -spre -fpre -dumpgraph -graph_file"
 	cat avlines.txt
 } | grep -i -E "$FILEISH_RE" | awk '{print $1}' >fileish.txt
 for o in $BYNAME; do echo "$o" >>fileish.txt; done
+# Any option that names a DEVICE opens a path too (/dev/dri/..., or any file
+# handed to it): -vaapi_device, -init_hw_device, -filter_hw_device,
+# -hwaccel_device, the capture-device indexes. All of them, by name.
+cat main.txt value.txt | grep -i 'device' >>fileish.txt || true
 sort -u -o fileish.txt fileish.txt
 
 sort -u -o bool.txt bool.txt

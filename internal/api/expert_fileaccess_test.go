@@ -58,6 +58,12 @@ func TestExpertModeRefusesArgumentsThatTouchServerFiles(t *testing.T) {
 		{"svtav1 stats key", nil, []string{"-svtav1-params", "stats=svt.stat"}, "stats="},
 		{"x264 pass and stats keys", nil, []string{"-x264-params", "pass=2:stats=x264.log"}, "pass="},
 		{"a TLS key file read", []string{"-key_file", "key.pem"}, nil, "-key_file"},
+		// The third review: device options open an arbitrary path. Device
+		// selection belongs to the server's encoder config, not expert args.
+		{"vaapi device pointed at a file", []string{"-vaapi_device", "/etc/passwd"}, nil, "-vaapi_device"},
+		{"init_hw_device with a path", []string{"-init_hw_device", "vaapi=x:/tmp/foo"}, nil, "-init_hw_device"},
+		{"filter_hw_device", nil, []string{"-filter_hw_device", "x"}, "-filter_hw_device"},
+		{"hwaccel_device", []string{"-hwaccel_device", "/dev/sda"}, nil, "-hwaccel_device"},
 		{"escaping does not hide a filter", nil, []string{"-vf", `m\ovie=clip.mp4`}, "movie"},
 		{"a file-writing muxer", nil, []string{"-f", "segment"}, "-f segment"},
 		{"tee writes beside the URL", nil, []string{"-f", "tee"}, "-f tee"},
@@ -95,7 +101,7 @@ func TestExpertFileWalkAcceptsOrdinaryArguments(t *testing.T) {
 		{"documented examples", []string{"-analyzeduration", "10M", "-probesize", "5M"}, []string{"-metadata", "title=Rock & Roll", "-muxdelay", "0", "-flvflags", "no_duration_filesize"}},
 		{"srt options", nil, []string{"-latency", "200000", "-pbkeylen", "16"}},
 		{"nvenc as docs/HARDWARE.md spells it", nil, []string{"-preset", "p1", "-rc", "cbr"}},
-		{"vaapi upload", []string{"-vaapi_device", "/dev/dri/renderD128"}, []string{"-vf", "format=nv12,hwupload"}},
+		{"vaapi upload filters", nil, []string{"-vf", "format=nv12,hwupload"}},
 		{"a muxer flag", nil, []string{"-movflags", "+faststart"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
