@@ -128,9 +128,9 @@ describe("Dashboard: the Stop all dialog's count comes from the server", () => {
     expect(dialog.textContent ?? "").not.toMatch(/start all/i);
     expect(stopImpactCalls).toBe(1);
     expect(
-      within(dialog).queryByText(new RegExp(translate("en", "golive.stopYoutubeOne", { count: 1 }))),
+      dialog.textContent ?? "",
       "the dialog still counted the enabled YouTube row locally",
-    ).toBeNull();
+    ).not.toMatch(/YouTube broadcast/);
     expect(confirmButton(dialog).disabled).toBe(false);
   });
 
