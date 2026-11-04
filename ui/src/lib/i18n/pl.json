@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Liczba widzów jest teraz niedostępna.",
   "aud.disabled": "Pomiar widowni jest wyłączony. Włącz go w Ustawieniach.",
   "aud.offAir": "Poza anteną. Widzowie są liczeni, gdy działa jakiś cel.",
+  "aud.pending": "Na antenie. Pierwsza liczba widzów pojawi się przy następnym pomiarze.",
   "aud.total": "Łącznie widzów",
   "aud.notReported": "nie zgłoszono",
   "aud.reportedOf": "Zgłoszone przez {n} z {of}",

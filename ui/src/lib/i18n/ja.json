@@ -3734,6 +3734,7 @@
   "aud.unavailable": "現在、視聴者数を取得できません。",
   "aud.disabled": "視聴者の計測はオフです。設定でオンにしてください。",
   "aud.offAir": "オフエア中です。配信先が動作している間に視聴者数を計測します。",
+  "aud.pending": "オンエア中。最初の視聴者数は次のサンプリングで届きます。",
   "aud.total": "合計視聴者数",
   "aud.notReported": "未報告",
   "aud.reportedOf": "{of} 件中 {n} 件が報告",

@@ -2012,7 +2012,10 @@ gap), and `player` — the public player's QoE since the stream began (sessions,
 startups, rebuffers, `sessionsWithErrors`, the startup histogram). The public
 player is a reading of its own with `platform: "player"`, counted from the
 playout origin's session table and added to the total once (the panel labels
-the total "including the public player").
+the total "including the public player"). `onAir` is checked when the request is
+made, not only at the last tick: a destination that started since that tick
+reads `onAir: true` with `pending: true` and no readings until the next
+sample, and one that stopped since reads `onAir: false`.
 
 `/analytics/streams` lists the newest 100 streams with `peakTotal` and
 `averageTotal`. `/analytics/streams/{id}` is the report: per account `samples`,

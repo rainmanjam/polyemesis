@@ -3734,6 +3734,7 @@
   "aud.unavailable": "A contagem de espectadores está indisponível agora.",
   "aud.disabled": "A amostragem de público está desligada. Ative em Configurações.",
   "aud.offAir": "Fora do ar. Os espectadores são contados enquanto um destino está ativo.",
+  "aud.pending": "No ar. A primeira contagem de espectadores chega na próxima amostra.",
   "aud.total": "Total de espectadores",
   "aud.notReported": "não informado",
   "aud.reportedOf": "Informado por {n} de {of}",

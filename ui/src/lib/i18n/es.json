@@ -3734,6 +3734,7 @@
   "aud.unavailable": "Los recuentos de espectadores no están disponibles ahora.",
   "aud.disabled": "El muestreo de audiencia está desactivado. Actívalo en Ajustes.",
   "aud.offAir": "Fuera del aire. Los espectadores se cuentan mientras un destino está activo.",
+  "aud.pending": "En directo. El primer recuento de espectadores llega con la próxima muestra.",
   "aud.total": "Espectadores totales",
   "aud.notReported": "no informado",
   "aud.reportedOf": "Informado por {n} de {of}",

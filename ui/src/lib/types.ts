@@ -4180,6 +4180,9 @@ export interface AnalyticsStream {
 export interface AnalyticsLive {
   enabled: boolean;
   onAir: boolean;
+  /** On air, but no sample has been taken since the broadcast began: there is
+   *  no count yet, which is not a count of zero. */
+  pending?: boolean;
   stream?: AnalyticsStream;
   at?: string;
   /** Sum of the readings that reported; absent when none did. */

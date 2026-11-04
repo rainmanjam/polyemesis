@@ -614,6 +614,67 @@ func TestLiveBeforeTheFirstTickSaysWhetherSamplingIsOn(t *testing.T) {
 	}
 }
 
+// TestLiveFollowsADestinationThatStartedSinceTheLastTick: the last tick's
+// "off air" can be a whole interval old. A destination started a second
+// after it left the dashboard's Audience panel reading "Off air" beside a
+// running broadcast for up to a minute. Live asks the source, so a broadcast
+// begun since the tick reads as on air with no sample yet (Pending), and one
+// ended since reads as off air without its last counts.
+func TestLiveFollowsADestinationThatStartedSinceTheLastTick(t *testing.T) {
+	src := newFake()
+	src.targets = []Target{{Platform: "youtube", AccountID: 1, Account: "yt"}}
+	src.stats["yt"] = Stats{Live: true, Viewers: ip(40)}
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, newMem(), enabled(time.Minute), c.now, nil)
+
+	// Before any tick at all, with a destination already running.
+	src.mu.Lock()
+	src.onAir = true
+	src.mu.Unlock()
+	if l := s.Live(); !l.OnAir || !l.Pending || l.Total != nil || len(l.Readings) != 0 {
+		t.Fatalf("before the first tick, on air = %+v, want on air, pending, nothing read", l)
+	}
+
+	// An off-air tick, then a destination starts before the next one.
+	src.mu.Lock()
+	src.onAir = false
+	src.mu.Unlock()
+	s.Tick(context.Background())
+	src.mu.Lock()
+	src.onAir = true
+	src.mu.Unlock()
+	if l := s.Live(); !l.OnAir || !l.Pending {
+		t.Fatalf("started since an off-air tick = %+v, want on air and pending", l)
+	}
+	if src.reads["yt"] != 0 {
+		t.Fatal("Live must not read a platform; only a tick asks")
+	}
+
+	// The tick takes the sample and Pending is gone.
+	s.Tick(context.Background())
+	l := s.Live()
+	if !l.OnAir || l.Pending || l.Total == nil || *l.Total != 40 {
+		t.Fatalf("after an on-air tick = %+v, want on air with a total of 40", l)
+	}
+
+	// The broadcast ends before the next tick: off air, last counts dropped.
+	src.mu.Lock()
+	src.onAir = false
+	src.mu.Unlock()
+	if l := s.Live(); l.OnAir || l.Pending || l.Total != nil || len(l.Readings) != 0 {
+		t.Fatalf("ended since the tick = %+v, want off air with no counts", l)
+	}
+
+	// Sampling switched off: nothing is reconciled.
+	off := New(src, newMem(), func() Config { return Config{Enabled: false, Interval: time.Minute} }, c.now, nil)
+	src.mu.Lock()
+	src.onAir = true
+	src.mu.Unlock()
+	if l := off.Live(); l.OnAir || l.Pending {
+		t.Fatalf("sampling off = %+v, want neither on air nor pending", l)
+	}
+}
+
 // ---------------------------------------------------------- review round
 
 // TestAPartialTickIsAGapNotADip (#6): a tick at which a platform failed --

@@ -444,9 +444,12 @@ func TestAudienceStateForMQTTLeavesUnreportedPlatformsNil(t *testing.T) {
 		f.running[f.dest[n]] = true
 	}
 
-	off := f.s.AudienceState()
-	if off == nil || off.OnAir || off.Total != nil || off.Twitch != nil {
-		t.Fatalf("before a tick = %+v, want off air with no counts", off)
+	// Before a tick, with destinations already running: on air (the sampler
+	// asks the destinations when read, not only at its last tick), and no
+	// counts, because no platform has been asked yet.
+	pending := f.s.AudienceState()
+	if pending == nil || !pending.OnAir || pending.Total != nil || pending.Twitch != nil || pending.Reported != 0 {
+		t.Fatalf("before a tick = %+v, want on air with no counts", pending)
 	}
 	f.tick(t)
 	st := f.s.AudienceState()

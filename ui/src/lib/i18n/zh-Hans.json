@@ -3734,6 +3734,7 @@
   "aud.unavailable": "目前无法获取观众人数。",
   "aud.disabled": "观众统计已关闭。请在设置中开启。",
   "aud.offAir": "未在直播。只有在有推流目标运行时才会统计观众。",
+  "aud.pending": "正在直播。首个观众人数将在下次采样时显示。",
   "aud.total": "观众总数",
   "aud.notReported": "未报告",
   "aud.reportedOf": "{of} 个中有 {n} 个已报告",

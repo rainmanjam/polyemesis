@@ -74,6 +74,18 @@ describe("AudiencePanel", () => {
     await waitFor(() => expect(screen.getByText(translate("en", "aud.disabled"))).toBeTruthy());
   });
 
+  it("says on air with no count yet when a broadcast started since the last sample", async () => {
+    vi.spyOn(api.analytics, "live").mockResolvedValue(
+      live({ pending: true, readings: [], total: undefined, reported: 0, points: [] }),
+    );
+    render(<AudiencePanel />);
+    await waitFor(() => expect(screen.getByText(translate("en", "aud.pending"))).toBeTruthy());
+    expect(screen.queryByText(translate("en", "aud.offAir"))).toBeNull();
+    // No sample was taken, so nothing was asked and nothing "did not report".
+    expect(screen.queryByTestId("audience-total")).toBeNull();
+    expect(screen.queryByText(translate("en", "aud.reportedOf", { n: 0, of: 0 }))).toBeNull();
+  });
+
   it("labels the total as including the public player, and says when a tick is partial or stretched", async () => {
     vi.spyOn(api.analytics, "live").mockResolvedValue(
       live({ partial: true, stretched: true, effectiveIntervalSeconds: 240 }),

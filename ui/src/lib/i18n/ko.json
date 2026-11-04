@@ -3734,6 +3734,7 @@
   "aud.unavailable": "지금은 시청자 수를 확인할 수 없습니다.",
   "aud.disabled": "시청자 집계가 꺼져 있습니다. 설정에서 켜세요.",
   "aud.offAir": "방송 중이 아닙니다. 대상이 실행되는 동안 시청자 수를 집계합니다.",
+  "aud.pending": "방송 중입니다. 첫 시청자 수는 다음 샘플링 때 표시됩니다.",
   "aud.total": "전체 시청자",
   "aud.notReported": "보고되지 않음",
   "aud.reportedOf": "{of}개 중 {n}개가 보고함",
