@@ -64,6 +64,10 @@ type Client interface {
 type Recordings interface {
 	Dir() string
 	Resolve(name string) (string, error)
+	// HoldForMissing reports whether rows for missing files must be kept
+	// because the directory may not be the volume they were recorded on. See
+	// recording.Manager.HoldForMissing.
+	HoldForMissing(missing, total int) bool
 }
 
 const (
@@ -515,11 +519,10 @@ func (s *Service) candidates() ([]candidate, error) {
 // A MISSING VOLUME IS NOT A MISSING FILE. With the recordings volume
 // unmounted every stat says "not exist", and pruning on that wiped every
 // item row: the archive re-uploaded in full when the volume came back, and
-// stuck or failed state (what Retry acts on) was lost. So when EVERY tracked
-// file is missing at once -- which is what an absent or empty volume looks
-// like -- prune holds and says so. Any surviving file means the volume is
-// there, and the missing ones really are gone: a retention burst that takes
-// most of the archive still prunes, so the hold cannot latch.
+// stuck or failed state (what Retry acts on) was lost. The recordings
+// manager's volume check decides (recording.Manager.HoldForMissing: a marker
+// file on the real volume), so the ledger and the index agree on what "gone"
+// means.
 func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
 	dir := s.rec.Dir()
 	seen := map[string]bool{}
@@ -533,10 +536,11 @@ func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
 			gone = append(gone, it.RelPath)
 		}
 	}
-	if len(seen) > 0 && len(gone) == len(seen) {
+	if s.rec.HoldForMissing(len(gone), len(seen)) {
 		if !s.pruneHeld.Swap(true) {
-			s.log.Warn("offload: every tracked file is missing; not pruning the ledger "+
-				"(is the recordings volume mounted?)", "dir", dir, "tracked", len(seen))
+			s.log.Warn("offload: the recordings directory is not confirmed as the recorded "+
+				"volume; not pruning the ledger (is the recordings volume mounted?)",
+				"dir", dir, "tracked", len(seen), "missing", len(gone))
 		}
 		return false
 	}

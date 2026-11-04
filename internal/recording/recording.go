@@ -64,6 +64,9 @@ type Manager struct {
 	// directory listed no recordings; it makes the warning fire once per
 	// episode rather than every 30 seconds.
 	deindexHeld atomic.Bool
+	// markerUnwritable is set when VolumeMarker could not be created, so
+	// HoldForMissing falls back to the all-missing rule. See there.
+	markerUnwritable atomic.Bool
 }
 
 // StorageState is the free-space guard's verdict on whether the volume can
@@ -121,6 +124,47 @@ func New(log *slog.Logger, store *db.DB, dir string, onChange func(), opts ...Op
 
 // Dir is the recordings directory.
 func (m *Manager) Dir() string { return m.dir }
+
+// VolumeMarker is the file that proves the recordings directory is the volume
+// the index was built on (poka-yoke audit 2026-11-04, the audit's sentinel).
+const VolumeMarker = ".polyemesis-volume"
+
+// HoldForMissing reports whether rows for missing files must be KEPT because
+// the directory may not be the right volume.
+//
+// The marker is written whenever the directory provably holds the index's
+// files -- nothing indexed yet, or every indexed file present -- so it is on
+// the real volume and absent from an empty mountpoint. Then:
+//   - marker present: the volume is the one indexed; missing files are gone.
+//   - marker absent: hold. This is a mountpoint without its volume, even when
+//     a live recorder has written a new segment into it.
+//   - marker cannot be written (a read-only volume): fall back to the
+//     weaker rule, holding only when every indexed file is missing at once.
+//
+// Called by Scan for the index and by internal/offload for its ledger, so one
+// rule decides "is this the volume" for both.
+func (m *Manager) HoldForMissing(missing, total int) bool {
+	marker := filepath.Join(m.dir, VolumeMarker)
+	if missing == 0 {
+		// The directory holds every indexed file (or nothing is indexed): it
+		// is the right volume, so mark it.
+		if _, err := os.Stat(marker); errors.Is(err, os.ErrNotExist) {
+			if werr := os.WriteFile(marker, []byte("polyemesis recordings volume; do not delete\n"), 0o644); werr != nil {
+				m.markerUnwritable.Store(true)
+			} else {
+				m.markerUnwritable.Store(false)
+			}
+		}
+		return false
+	}
+	if _, err := os.Stat(marker); err == nil {
+		return false
+	}
+	if m.markerUnwritable.Load() {
+		return missing == total
+	}
+	return true
+}
 
 // Run scans and sweeps on an interval until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context, settings func() db.RecordingSettings) {
@@ -410,27 +454,31 @@ func (m *Manager) Scan() (bool, error) {
 	}
 	m.unprobeableMu.Unlock()
 
-	// AN EMPTY LISTING IS AN UNMOUNTED VOLUME, NOT A CLEAN-UP. Every row
-	// dropped below cascades its transcripts, highlights and session
-	// membership, and none of that comes back when the files do. A volume
-	// that is not mounted yet (or dropped off the NAS) lists as a directory
-	// with no recordings in it, so one scan of it erased the whole archive's
-	// metadata. With rows indexed and not one recording file listed, the
-	// de-index is held and reported instead. Keyed on the listing, not on how
-	// many rows went missing: a ratio rule latched on an install whose files
-	// legitimately thinned out, and kept ghost rows forever. The operator's own
-	// deletes go through Delete and the sweeper, which remove the row
-	// themselves and never reach this loop.
-	if len(indexed) > 0 && len(onDisk) == 0 {
+	missing := 0
+	for _, r := range indexed {
+		if !onDisk[r.Filename] {
+			missing++
+		}
+	}
+	// A MISSING VOLUME IS NOT A CLEAN-UP. Every row dropped below cascades its
+	// transcripts, highlights and session membership, and none of that comes
+	// back when the files do. An unmounted volume (not mounted yet, or dropped
+	// off the NAS) used to erase the whole archive's metadata in one scan. A
+	// file count cannot tell: while a programme records, the recorder writes a
+	// fresh segment into the bare mountpoint, so the listing is not empty and
+	// every older row looked "deleted". See HoldForMissing.
+	if m.HoldForMissing(missing, len(indexed)) {
 		if !m.deindexHeld.Swap(true) {
-			m.log.Warn("recordings directory lists no recordings but the index has some; "+
-				"not de-indexing (is the recordings volume mounted?)",
-				"dir", m.dir, "indexed", len(indexed))
+			m.log.Warn("recordings directory is not the volume the index was built on "+
+				"(its "+VolumeMarker+" file is missing); not de-indexing. If the volume "+
+				"is mounted and the files really are gone, run: touch "+
+				filepath.Join(m.dir, VolumeMarker),
+				"dir", m.dir, "indexed", len(indexed), "missing", missing)
 		}
 		return changed, nil
 	}
 	if m.deindexHeld.Swap(false) {
-		m.log.Info("recordings directory lists recordings again; de-indexing resumed", "dir", m.dir)
+		m.log.Info("recordings volume confirmed; de-indexing resumed", "dir", m.dir)
 	}
 
 	for _, r := range indexed {

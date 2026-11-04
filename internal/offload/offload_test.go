@@ -583,12 +583,19 @@ func TestPruneKeepsTheLedgerWhenTheVolumeIsGone(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = os.Rename(f.dir+".away", f.dir) })
 		}},
-		{"directory lists empty", func(f *fixture, names []string) {
-			for _, n := range names {
-				if err := os.Remove(filepath.Join(f.dir, n)); err != nil {
+		// The mountpoint left behind, with a live recorder writing a new
+		// segment into it: not empty, and still not the volume.
+		{"bare mountpoint with a live segment", func(f *fixture, _ []string) {
+			entries, err := os.ReadDir(f.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range entries {
+				if err := os.RemoveAll(filepath.Join(f.dir, e.Name())); err != nil {
 					t.Fatal(err)
 				}
 			}
+			f.segment(30*time.Second, "written into the bare mountpoint", true)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -638,29 +645,23 @@ func TestPruneStillDropsASingleRemovedFile(t *testing.T) {
 	}
 }
 
-// The hold must not latch: a retention burst that takes most of the archive
-// leaves a file behind, which says the volume is there, so prune proceeds.
-func TestPruneStillDropsABurstWhileSomeFilesRemain(t *testing.T) {
+// The hold must not latch: on a confirmed volume, every tracked file going
+// (retention can take them all) prunes every row.
+func TestPruneDropsEverythingGoneFromAConfirmedVolume(t *testing.T) {
 	f := newFixture(t)
 	id := f.target()
-	var names []string
-	for i := 5; i >= 2; i-- {
-		names = append(names, f.segment(time.Duration(i)*time.Hour, "seg"+strconv.Itoa(i), true))
-	}
+	names := []string{f.segment(5*time.Hour, "a", true), f.segment(4*time.Hour, "b", true)}
 	f.segment(time.Minute, "live", true)
 	f.svc.Pass(context.Background())
-	for _, n := range names[:3] {
+	for _, n := range names {
 		if err := os.Remove(filepath.Join(f.dir, n)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f.svc.Pass(context.Background())
-	for _, n := range names[:3] {
+	for _, n := range names {
 		if _, ok := f.item(id, n); ok {
-			t.Errorf("row for removed %s kept: the hold latched with a file still on disk", n)
+			t.Errorf("row for removed %s kept: the hold latched on a confirmed volume", n)
 		}
-	}
-	if _, ok := f.item(id, names[3]); !ok {
-		t.Errorf("row for surviving %s dropped", names[3])
 	}
 }
