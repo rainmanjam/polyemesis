@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 /* The on-air strip reads one as one. The catalogue has no plural rules, so
- * the connecting count has its own key at 1 (German: "1 verbindet", not
- * "1 verbinden"), and the live/stopped/off line was rewritten in Spanish to a
+ * the connecting count has its own key at 1 (German: "1 verbindet sich", not
+ * "1 verbinden sich"), and the live/stopped/off line was rewritten in Spanish to a
  * count-neutral "label: value" form ("detenidos: 1", not "1 detenidos"). */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,19 +42,19 @@ const status = (destinations: DestStatus[] = []): Status =>
   ({ ingest: null, destinations }) as Status;
 
 describe("OnAirBar: the connecting count reads one as one (de)", () => {
-  it("says 1 verbindet with one destination connecting", () => {
+  it("says 1 verbindet sich with one destination connecting", () => {
     setLanguage("de");
     render(<OnAirBar status={status([proc(1, "starting")])} />);
 
-    expect(screen.getByText("1 verbindet")).toBeTruthy();
-    expect(screen.queryByText("1 verbinden")).toBeNull();
+    expect(screen.getByText("1 verbindet sich")).toBeTruthy();
+    expect(screen.queryByText("1 verbinden sich")).toBeNull();
   });
 
-  it("says 2 verbinden with two destinations connecting", () => {
+  it("says 2 verbinden sich with two destinations connecting", () => {
     setLanguage("de");
     render(<OnAirBar status={status([proc(1, "starting"), proc(2, "starting")])} />);
 
-    expect(screen.getByText("2 verbinden")).toBeTruthy();
+    expect(screen.getByText("2 verbinden sich")).toBeTruthy();
   });
 });
 
