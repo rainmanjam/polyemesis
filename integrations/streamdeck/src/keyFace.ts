@@ -56,6 +56,10 @@ export interface KeyFace {
   /** Every current issue, most severe first. The face shows the first; the
    *  property inspector lists them all. Absent on keys that have none. */
   issues?: KeyIssue[];
+  /** The destination this face is about: its platform and name, which the key draws in its image
+   *  (src/keyImage.ts). Only on a face that IS a destination's, never on a missing, other-programme
+   *  or unreachable key, so a key never shows a destination it cannot vouch for. */
+  mark?: { platform: string; name: string };
 }
 
 /**
@@ -162,6 +166,7 @@ export function destinationFace(
   face = withWarning(face, warningFor(dest));
   if (issues.length > 0) face.issues = issues;
   if (issues.length > 1) face.more = issues.length - 1;
+  face.mark = { platform: dest.platform, name: dest.name };
   // The broadcast delay's marker line (#11): a delayed key must not look like
   // the live platform, whatever the face above it says.
   const seconds = dest.delay?.seconds ?? dest.delaySeconds ?? 0;
@@ -323,7 +328,13 @@ function stormCount(dest: DestStatus): number {
 }
 
 /** Platform names as the platforms write them. Anything else keeps the server's word. */
-const PLATFORM_NAME: Record<string, string> = { youtube: "YouTube", twitch: "Twitch", facebook: "Facebook", kick: "Kick" };
+export const PLATFORM_NAME: Record<string, string> = {
+  youtube: "YouTube",
+  twitch: "Twitch",
+  facebook: "Facebook",
+  kick: "Kick",
+  x: "X",
+};
 
 const SOURCE_ISSUE: Partial<Record<SourceKind, StreamDeckKey>> = {
   backup: "streamdeck.issue.sourceBackup",

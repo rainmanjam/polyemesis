@@ -10,6 +10,18 @@ its first tagged release.
 
 ### Added
 
+- **Stream Deck destination keys show which destination they are.** A Destination key showed only
+  its state ("Live", "Failed / Timed out"), and the plugin sets the title, so nothing on the key said
+  which of five destinations it was. The key now draws the destination's platform mark (YouTube,
+  Twitch, Kick, Facebook or X; a neutral transmitter for custom RTMP and every other platform) and
+  the destination's own name at the top, in the state's colour and title ink, with the state and its
+  reason below as before. The image is an SVG the plugin draws itself (`setImage`); a key that is not
+  showing that destination's own state (not found, other programme, unreachable, the read-token
+  padlock) goes back to the plain face. A long name shrinks, then is cut; with four or more state
+  lines the name is left off. On X, whose mark is its name, a destination named just "X" shows the
+  mark alone. The marks are Simple Icons (CC0 1.0), listed in the plugin's new
+  `third-party-licenses.txt`. Action UUIDs, settings and the API are unchanged.
+
 - **A tap on a failed Stream Deck destination key retries it.** The Destination key started a
   destination that was off and ignored every other tap, so a key showing **Failed** or **Held**
   (after repeated quick rejections) could only be fixed from the console. A tap on it now sends the

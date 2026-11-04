@@ -89,6 +89,13 @@ For each key action, on the hardware rather than the app's preview:
       preset, Chat poll and Mute track each show a face that is legible from
       normal operating distance: the label is not clipped and the corner glyph does
       not collide with the title.
+- [ ] Destination keys show the platform's mark and the destination's name at the
+      top of the key (drawn by the plugin as an SVG image), in the state's colour,
+      with the state and reason below and not overlapping them. Check a YouTube,
+      a Twitch and a custom RTMP destination (neutral transmitter), a long name
+      (shrunk, then cut with "…") and, on a warning face, a dark mark and name.
+      Switch a key between Live, Starting and Failed: the image follows the
+      state every time. Tap one with a read token: the padlock face replaces it.
 - [ ] Idle, live and error faces are told apart by colour **and** label, not by
       colour alone.
 - [ ] A warning face (e.g. a destination reconnecting) is bright amber with a
