@@ -4,7 +4,7 @@ import CodeBlock from "../components/CodeBlock.astro";
 import MixMatrix from "../components/MixMatrix.astro";
 import SpecStrip from "../components/SpecStrip.astro";
 import LoudnessBars from "../components/LoudnessBars.astro";
-import routingHero from "../assets/shots/02-routing-hero.png";
+import SignalPath from "../components/SignalPath.astro";
 import { Picture } from "astro:assets";
 import meters from "../assets/shots/04-meters.png";
 import { lqipStyle } from "../lib/lqip";
@@ -97,43 +97,32 @@ const features = [
       written out there with the commands that need them. */}
   <section class="relative overflow-hidden border-b border-line">
     <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
-    <div class="wrap relative grid gap-12 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
-      <div class="max-w-xl">
-        {/* One outcome line (S1, as the approved mockup has it): what the
-            creator gets, in the creator's words, rather than the mechanism. The
-            earlier "One stream in. A different mix out of each." was an outcome
-            too, but it wrapped to three lines at desktop width and left "each."
-            alone on the last one. The break is the one composed break, between
-            the two halves.
-
-            NO PILL ABOVE IT AND NO COLOUR IN IT (2026-11 design review). The
-            "MIT licensed · self-hosted" chip repeated the spec strip's Licence
-            cell one screen lower, and the blue on "audio mix" spent the
-            interaction colour on text nobody can click. Blue is for things you
-            act on; size and weight carry the headline. */}
-        <h1 class="rise rise-1 text-balance text-4xl font-bold leading-[1.08] sm:text-5xl lg:text-[3.4rem]">
-          Send each platform<br />
-          its own audio mix.
-        </h1>
-
-        <p class="rise rise-2 mt-6 text-pretty text-lg leading-relaxed text-muted">
-          Self-hosted restreaming: one ingest goes out to every platform, and you
-          choose which audio tracks each one gets, so a copyrighted song can stay
-          off the VOD.
-        </p>
+    <div class="wrap relative py-12 lg:py-16">
+      <div class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+        <div>
+          {/* THE HEADLINE AND LEDE ARE THE SIGNAL PATH'S (2026-11 hero). One
+              outcome line with one composed break, no pill above it and no
+              colour in it. The lede is ONE sentence on purpose (home-copy.test
+              holds that): the prototype's two sentences became one. */}
+          <h1 class="rise rise-1 text-balance text-4xl font-bold leading-[1.06] sm:text-5xl lg:text-[3.4rem]">
+            One stream in.<br />
+            Your mix, everywhere.
+          </h1>
+          <p class="rise rise-2 mt-6 max-w-lg text-pretty text-lg leading-relaxed text-muted">
+            One upload from OBS goes out as the same video everywhere, with a different audio mix for each destination.
+          </p>
+        </div>
 
         <div class="rise rise-3">
-          <div class="mt-8">
-            <CodeBlock
-              label="docker"
-              codeId="install-command"
-              externalCopy
-              code={`docker run -d --name polyemesis \\
+          <CodeBlock
+            label="docker"
+            codeId="install-command"
+            externalCopy
+            code={`docker run -d --name polyemesis \\
   -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
   -v polyemesis-data:/data \\
   rainmanjam/polyemesis:latest`}
-            />
-          </div>
+          />
 
           {/* ONE COPY ACTION, and it is the primary control (2026-11 design
               review). The block above renders no Copy of its own
@@ -164,7 +153,7 @@ const features = [
             <a href="/docs/quickstart" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">quickstart</a>.
           </p>
 
-          <p class="mt-8 text-sm text-subtle">
+          <p class="mt-4 text-sm text-subtle">
             Planning bandwidth first?{" "}
             <a
               href="/calculator"
@@ -176,47 +165,11 @@ const features = [
         </div>
       </div>
 
-      {/* The routing UI itself, at a size it can be read (S1). This is its own
-          capture -- 02-routing-hero.png, a clip the capture harness takes of
-          the track rows and the music-rights switch for the selected YouTube
-          destination -- not a CSS crop of the full routing screenshot. The CSS
-          crop scaled a 1440px screen into this column, so the track names were
-          about 5px tall, and its offsets were tuned to one capture's pixels and
-          broke on the next.
-
-          The illustrative CSS track card this hero once had (HeroRouting.astro)
-          is NOT brought back as a secondary element, although the council's
-          recommendation allowed for it. Beside a legible photograph of the real
-          screen, a drawing of the same screen is a second picture making the
-          same point less truthfully, and the hero's job is one action and one
-          picture. */}
-      <div class="relative flex items-center">
-        <figure class="rise rise-4 w-full">
-          <div class="overflow-hidden rounded-token border border-line bg-surface shadow-2xl shadow-black/40">
-            <div class="flex items-center gap-2 border-b border-line px-4 py-2.5">
-              {/* Neutral, not the live green: in the install this was taken
-                  from, the YouTube destination is configured but not
-                  broadcasting, and a green dot beside its name would say it
-                  was. */}
-              <span class="size-1.5 rounded-full bg-line-strong" aria-hidden="true"></span>
-              <span class="font-mono text-[11px] text-subtle">Routing · YouTube — main channel</span>
-            </div>
-            <Picture
-              src={routingHero}
-              formats={["avif", "webp"]}
-              fallbackFormat="webp"
-              widths={[480, 720, 1080]}
-              sizes="(min-width: 1024px) 560px, calc(100vw - 2.5rem)"
-              alt="The polyemesis routing screen for a YouTube destination: tracks 1, 2 and 4 ticked, track 3, the licensed music bed, unticked and marked not sent, and the music-rights switch reading Music excluded."
-              loading="eager"
-              decoding="async"
-              class="block w-full"
-            />
-          </div>
-          <figcaption class="mt-3 font-mono text-[11px] text-subtle">
-            From a running install: YouTube gets every track except the music.
-          </figcaption>
-        </figure>
+      {/* THE PICTURE IS THE INTERACTIVE SIGNAL PATH (replaces the routing
+          screenshot of #963). Real HTML first, so it reads without JS; its
+          animation loads lazily. See SignalPath.astro. */}
+      <div class="rise rise-4 mt-10 lg:mt-12">
+        <SignalPath />
       </div>
     </div>
   </section>

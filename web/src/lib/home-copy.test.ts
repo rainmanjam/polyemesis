@@ -163,17 +163,71 @@ describe("the home hero (S1)", () => {
     expect(heroBody).not.toMatch(/1935 is published/);
   });
 
-  it("shows the real routing product in the first screen", () => {
-    expect(heroBody).toMatch(/src=\{routingHero\}/);
-    expect(home).toMatch(/import routingHero from "\.\.\/assets\/shots\/02-routing-hero\.png"/);
+  /* THE HERO PICTURE IS THE SIGNAL PATH (2026-11). It replaced the routing
+   * screenshot (02-routing-hero.png, a clip of the real routing screen). The
+   * equivalent promise is kept: the first screen shows the routing idea, not a
+   * decoration. The hero renders the SignalPath component, that component's
+   * own source carries the crawlable destination text and per-destination mix
+   * (so it reads without JavaScript), and the old screenshot import is gone
+   * from the page rather than left to rot. */
+  it("shows the signal path, an interactive diagram of the routing, in the first screen", () => {
+    expect(heroBody).toMatch(/<SignalPath\s*\/>/);
+    expect(home).toMatch(/import SignalPath from "\.\.\/components\/SignalPath\.astro"/);
+    expect(home).not.toMatch(/routingHero/);
+    expect(home).not.toMatch(/02-routing-hero/);
+  });
+
+  it("renders the diagram's destinations and mixes as real HTML, not only in script", () => {
+    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
+    const from = sp.indexOf("<div class=\"sp\"");
+    const to = sp.indexOf("<style");
+    // A reordered or renamed marker would slice the wrong range and make every
+    // assertion below pass or fail for the wrong reason.
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const markup = sp.slice(from, to);
+    for (const text of ["Twitch", "YouTube", "Local archive", "Mics + music + game", "Mics + game · no music", "Original audio tracks, kept separately"]) {
+      expect(markup, text).toContain(text);
+    }
+  });
+
+  it("states the headline and lede of the signal path", () => {
+    expect(h1).toMatch(/One stream in\./);
+    expect(h1).toMatch(/Your mix, everywhere\./);
+    expect(sub).toMatch(/different audio mix for each destination/);
   });
 
   /* The hero picture used to be the full 1440px routing screen scaled into a
    * ~560px column with CSS offsets -- legible to nobody, and tuned to one
-   * capture's pixels. It is now a dedicated clip from the capture harness, so
-   * no arbitrary-offset crop classes belong on it. */
+   * capture's pixels. No arbitrary-offset crop classes belong in the hero. */
   it("does not crop the hero picture with CSS offsets", () => {
     expect(heroBody).not.toMatch(/left-\[-\d+%\]|top-\[-[\d.]+%\]/);
+  });
+
+  /* THE DIAGRAM'S KEYBOARD AND LOAD CONTRACT (hero items 2 and 3). */
+  it("makes each destination card a named focus stop that previews its mix", () => {
+    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
+    const cards = sp.match(/<div class="destination node[^>]*>/g) ?? [];
+    expect(cards.length).toBe(3);
+    for (const card of cards) {
+      expect(card).toMatch(/tabindex="0"/);
+      expect(card).toMatch(/role="group"/);
+      expect(card).toMatch(/aria-label="[A-Za-z ]+ mix: /);
+    }
+    expect(sp).toMatch(/\.destination:focus-visible \{ outline: 2px solid var\(--color-primary-bright\); outline-offset: 2px; \}/);
+    const controller = readFileSync(join(here, "..", "scripts", "signal-path", "controller.js"), "utf8");
+    expect(controller).toMatch(/addEventListener\('focusin'/);
+    expect(controller).toMatch(/addEventListener\('focusout'/);
+  });
+
+  it("loads the animation lazily and keeps the videos from preloading", () => {
+    const sp = readFileSync(join(here, "..", "components", "SignalPath.astro"), "utf8");
+    expect(sp).toMatch(/import\("\.\.\/scripts\/signal-path\/controller\.js"\)/);
+    expect(sp).toMatch(/new IntersectionObserver/);
+    const videos = sp.match(/<video\b[^>]*>/g) ?? [];
+    expect(videos.length).toBe(4);
+    for (const v of videos) expect(v).toMatch(/preload="none"/);
+    expect(sp).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
   });
 });
 

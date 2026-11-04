@@ -180,6 +180,18 @@
   --color-meter: var(--cat-cyan);
   --color-cohost: oklch(80.0% 0.1900 328.0);
   --color-game: oklch(65.7% 0.1262 298.0);
+  /* The second voice: the patchbay's track 2, Co-host mic, as the hero's
+     signal path draws it. Not --color-cohost: despite its name, that magenta
+     is the hero's Music lane (the hero predates the four-track layout), and
+     a co-host lane in the same magenta would be one colour on two tracks.
+     Chosen like --color-cohost was, by maximising its smallest ΔEOK to every
+     signal, meter, track and wire colour in the hero, over L 60-90 with at
+     least 3:1 on a card (a wire, not text) and away from the status hues:
+     0.150 to --color-ok and to the video lane (the nearest), 0.160 to the
+     mic cyan, 0.19 to --meter-mid. 12.3:1 against a card. That is below
+     the 0.18 --color-cohost got; the free hues left on this page are teal or
+     olive, and olive sits between the ok green and the warn amber. */
+  --color-second-voice: oklch(86.0% 0.1500 186.0);
 
   --radius-token: 0.5rem;
 
