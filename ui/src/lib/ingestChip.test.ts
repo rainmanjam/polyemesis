@@ -49,7 +49,7 @@ describe("ingestReadingKnown", () => {
     source: { probed },
     relay: rxBytes === undefined ? null : { rxBytes },
   });
-  const base = { sourceCount: 3, programmeKbps: null, seriesSamples: 0, seriesProbed: true };
+  const base = { sourceCount: 3, programmeKbps: null, seriesSamples: 0, seriesSource: { probed: true } };
 
   it("is unknown before the programme's first frame", () => {
     expect(ingestReadingKnown({ ...base, snapshot: null })).toBe(false);
@@ -69,6 +69,15 @@ describe("ingestReadingKnown", () => {
     const one = { ...base, sourceCount: 1, snapshot: snap(true, 100) };
     expect(ingestReadingKnown(one)).toBe(false);
     expect(ingestReadingKnown({ ...one, seriesSamples: 1 })).toBe(true);
-    expect(ingestReadingKnown({ ...one, seriesProbed: false })).toBe(true);
+    expect(ingestReadingKnown({ ...one, seriesSource: { probed: false } })).toBe(true);
+  });
+
+  it("does not take a missing source reading for 'not probed' on a single-programme install", () => {
+    // The status frame can arrive before the source reading. Until it does,
+    // "nothing is probed" would be a guess, and the chip would read Stopped.
+    const one = { ...base, sourceCount: 1, snapshot: snap(true, 100), seriesSource: null, seriesSamples: 1 };
+    expect(ingestReadingKnown(one)).toBe(false);
+    // An install with no source at all has nothing to wait for.
+    expect(ingestReadingKnown({ ...one, snapshot: { relay: null, source: null } })).toBe(true);
   });
 });

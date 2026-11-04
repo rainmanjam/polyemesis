@@ -72,9 +72,12 @@ export function ingestChipReading(
  *  arrived, so that "not live" is a verdict rather than an absence.
  *
  *  - No frame for the programme yet: unknown.
- *  - One programme (or the count not known yet): the install-wide bitrate
- *    series decides, so it is known once that series has a sample, or once
- *    the source says nothing is probed.
+ *  - One programme (or the count not known yet): useIngestLive decides, from
+ *    the source reading and the install-wide bitrate series. Known once the
+ *    source reading has arrived and either says nothing is probed or the
+ *    series has a sample. A status frame that names a source whose own
+ *    reading has not arrived yet is not known: "not probed" would be a guess.
+ *    A frame naming no source at all is an install with nothing to ingest. 
  *  - Several programmes: the programme's own relay rate decides, which needs
  *    two of its frames a second apart. Known once that rate exists, or when
  *    there is no relay counter or no probed stream to measure. */
@@ -83,16 +86,20 @@ export function ingestReadingKnown({
   sourceCount,
   programmeKbps,
   seriesSamples,
-  seriesProbed,
+  seriesSource,
 }: {
   snapshot: { relay?: { rxBytes?: number } | null; source?: { probed?: boolean } | null } | null | undefined;
   sourceCount: number | null;
   programmeKbps: number | null;
   seriesSamples: number;
-  seriesProbed: boolean;
+  /** useLiveData's source reading, null until it arrives. */
+  seriesSource: { probed?: boolean } | null | undefined;
 }): boolean {
   if (!snapshot) return false;
-  if (sourceCount === null || sourceCount <= 1) return !seriesProbed || seriesSamples > 0;
+  if (sourceCount === null || sourceCount <= 1) {
+    if (!seriesSource) return !snapshot.source;
+    return seriesSource.probed !== true || seriesSamples > 0;
+  }
   if (snapshot.source?.probed !== true) return true;
   return programmeKbps !== null || snapshot.relay?.rxBytes === undefined;
 }

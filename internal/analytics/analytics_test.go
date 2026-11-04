@@ -202,6 +202,9 @@ type fakeSource struct {
 	interval func(time.Duration) time.Duration
 	// targetsErr makes Targets fail.
 	targetsErr error
+	// onAirHook, when set, runs after OnAir has answered, outside f.mu: the
+	// seam a test uses to land a tick in the middle of Sampler.Live.
+	onAirHook func()
 }
 
 func (f *fakeSource) Interval(configured time.Duration, _ []Target) time.Duration {
@@ -213,7 +216,15 @@ func (f *fakeSource) Interval(configured time.Duration, _ []Target) time.Duratio
 	return configured
 }
 
-func (f *fakeSource) OnAir() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.onAir }
+func (f *fakeSource) OnAir() bool {
+	f.mu.Lock()
+	on, hook := f.onAir, f.onAirHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return on
+}
 func (f *fakeSource) Targets(context.Context) ([]Target, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -672,6 +683,40 @@ func TestLiveFollowsADestinationThatStartedSinceTheLastTick(t *testing.T) {
 	src.mu.Unlock()
 	if l := off.Live(); l.OnAir || l.Pending {
 		t.Fatalf("sampling off = %+v, want neither on air nor pending", l)
+	}
+}
+
+// TestLiveDoesNotReportPendingOverATickThatLandedMidRead: Live must not
+// return "pending, no readings" when a tick that sampled the broadcast was
+// published while Live was reading. The source is asked BEFORE the picture is
+// copied, so a tick that lands in between is in the copy. Here the tick runs
+// inside Live's own OnAir call, which is exactly the interleaving.
+func TestLiveDoesNotReportPendingOverATickThatLandedMidRead(t *testing.T) {
+	src := newFake()
+	src.targets = []Target{{Platform: "youtube", AccountID: 1, Account: "yt"}}
+	src.stats["yt"] = Stats{Live: true, Viewers: ip(40)}
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	s := New(src, newMem(), enabled(time.Minute), c.now, nil)
+	s.Tick(context.Background()) // off air
+
+	src.mu.Lock()
+	src.onAir = true
+	fired := false
+	src.onAirHook = func() {
+		if fired {
+			return
+		}
+		fired = true
+		s.Tick(context.Background())
+	}
+	src.mu.Unlock()
+
+	l := s.Live()
+	if !fired {
+		t.Fatal("the hook never ran, so this test exercised nothing")
+	}
+	if l.Pending || l.Total == nil || *l.Total != 40 {
+		t.Fatalf("live = %+v, want the tick's total of 40, not pending", l)
 	}
 }
 

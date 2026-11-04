@@ -69,7 +69,7 @@ export function useProgrammeIngest(sourceCount: number | null): {
     sourceCount,
     programmeKbps: kbps,
     seriesSamples: bitrate.length,
-    seriesProbed: source?.probed === true,
+    seriesSource: source,
   });
   return { snapshot, kbps, live, known };
 }

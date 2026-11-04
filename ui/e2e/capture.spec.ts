@@ -910,7 +910,7 @@ test("platforms — connected, the end state of the one-time setup", async ({ pa
     ).toBeVisible({ timeout: 20_000 });
   }
   await topOfFrame(page, page.getByText("Optional.", { exact: true }));
-  await page.evaluate(() => window.scrollBy(0, -16));
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
   await page.screenshot({ path: `${OUT}/22-platforms-connected.png` });
 });

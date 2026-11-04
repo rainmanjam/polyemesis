@@ -289,7 +289,24 @@ func New(src Source, store Store, cfg func() Config, now func() time.Time, log *
 }
 
 // Live returns a copy of the current picture.
+//
+// THE LAST TICK'S "OFF AIR" CAN BE A WHOLE INTERVAL OLD. A destination started
+// a second after an off-air tick left the panel, the MQTT topic and the scrape
+// saying "Off air" beside a running broadcast for up to a minute (the default
+// interval) -- the dashboard was photographed that way. So the source is asked
+// now, outside s.mu: a broadcast that has begun since the tick reads as on air
+// with no sample yet (Pending), and one that has ended since reads as off air,
+// exactly as the next tick will publish it (the stream record and its
+// sparkline stay until the close grace runs out).
+//
+// ASKED BEFORE THE PICTURE IS COPIED, not after. The other order lets a tick
+// land between the copy and the question, and the answer then pairs a
+// pre-tick "off air" with a post-tick "on air": pending, with no readings,
+// over a count that had already been published.
 func (s *Sampler) Live() Live {
+	enabled := s.config().Enabled
+	now := enabled && s.src.OnAir()
+
 	s.mu.Lock()
 	l := s.live
 	l.Readings = append([]Reading(nil), s.live.Readings...)
@@ -301,16 +318,8 @@ func (s *Sampler) Live() Live {
 	if l.Points == nil {
 		l.Points = []Point{}
 	}
-	// THE LAST TICK'S "OFF AIR" CAN BE A WHOLE INTERVAL OLD. A destination
-	// started a second after an off-air tick left the panel, the MQTT topic
-	// and the scrape saying "Off air" beside a running broadcast for up to a
-	// minute (the default interval) -- the dashboard was photographed that
-	// way. The source is asked now, outside s.mu: a broadcast that has begun
-	// since reads as on air with no sample yet, and one that has ended since
-	// reads as off air, exactly as the next tick will publish it (the stream
-	// record and its sparkline stay until the close grace runs out).
-	if l.Enabled {
-		switch now := s.src.OnAir(); {
+	if l.Enabled && enabled {
+		switch {
 		case now && !l.OnAir:
 			l.OnAir, l.Pending = true, true
 			l.Total, l.Reported, l.Partial, l.Player = nil, 0, false, nil
