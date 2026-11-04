@@ -1814,7 +1814,7 @@
   "nav.group.settings": "Configurazione",
   "failover.bannerSince": "dalle {time}",
   "health.verdictHealthy": "Tutte e {count} le destinazioni attive sono in salute",
-  "health.verdictHealthyOne": "{count} destinazione attiva in salute",
+  "health.verdictHealthyOne": "{count} destinazione attiva è in salute",
   "health.verdictAttention": "{count} su {total} destinazioni richiedono attenzione",
   "health.verdictAttentionOne": "{count} su {total} destinazioni richiede attenzione",
   "health.verdictIngest": "Ingest stabile da {uptime}",

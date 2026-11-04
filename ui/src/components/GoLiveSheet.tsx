@@ -45,10 +45,28 @@ export const FINAL_HOLD_MS = 1_000;
  *  often: a count that ticks every few hundred milliseconds is noise. */
 export const ANNOUNCE_EVERY_MS = 2_000;
 
-/** A press: the rows it set out to start, fixed at the click. Walking while the
- *  start requests go out, then settling until every one of them is live or
- *  failed (or the wait runs out). Done is derived from that, not stored. */
-type Run = { targets: GoLiveRow[]; phase: "walking" | "settling"; timedOut: boolean };
+type Tally = { live: number; failed: number; settled: number; total: number };
+
+/** A press: the rows it set out to start, fixed at the click, with what each
+ *  one's process looked like then. Walking while the start requests go out,
+ *  settling until every row is live or failed (or the wait runs out), then
+ *  done: terminal, with the count frozen while it is held. */
+type Run = {
+  targets: GoLiveRow[];
+  /** Each target's process identity at the click: see processIdentity. */
+  before: Map<number, string>;
+  phase: "walking" | "settling" | "done";
+  timedOut: boolean;
+  final?: Tally;
+};
+
+/** Which run of a process a status describes. startedAt and restarts change
+ *  with every spawn, so a status with the identity seen at the click is the
+ *  one an earlier run left, and says nothing about this press. */
+function processIdentity(d: DestStatus | undefined): string {
+  const p = d?.process;
+  return `${p?.state ?? "none"}|${p?.startedAt ?? ""}|${p?.restarts ?? ""}`;
+}
 
 const CHIP: Record<Progress, { key: TranslationKey; variant: "live" | "armed" | "down" | "warn" | "outline" }> = {
   live: { key: "golive.live", variant: "live" },
@@ -148,13 +166,16 @@ export function GoLiveSheet({
     const id = row.id as unknown as number;
     if (!row.ready) return "blocked";
     if (errors.has(id)) return "failed";
-    const state = liveOf(id)?.process?.state;
-    // Live means the process is running, and nothing else. An enabled
-    // destination with no process, or one that is retrying or stalled, is not
-    // live, and must not be drawn as if it were.
-    if (state === "running") return "live";
+    const proc = liveOf(id)?.process;
+    const state = proc?.state;
+    // Live means the process is running AND its output has moved, and it is
+    // not stalled. The supervisor says running the moment FFmpeg spawns, so a
+    // start the platform is about to refuse reads running for a moment; until
+    // media has gone out it is still starting. An enabled destination with no
+    // process, or one that is retrying, is not live either.
+    if (state === "running" && !proc?.stalled && (proc?.progress?.outTimeMs ?? 0) > 0) return "live";
     if (state === "failed") return "failed";
-    if (attempted.has(id) || state === "starting" || state === "reconnecting") return "starting";
+    if (attempted.has(id) || state === "starting" || state === "reconnecting" || state === "running") return "starting";
     return "pending";
   };
 
@@ -194,14 +215,19 @@ export function GoLiveSheet({
 
   // The press, counted from the live status of the rows it set out to start.
   // The same progressOf the row chips use, so the button and the rows agree.
-  // A row counts once its start has been sent: before that it is pending,
-  // whatever an earlier run left in its status.
-  const tally = (() => {
+  // A row counts only on a status from a process started since the click.
+  const tally = ((): Tally => {
     if (!run) return { live: 0, failed: 0, settled: 0, total: 0 };
+    if (run.final) return run.final;
     let live = 0;
     let failed = 0;
     for (const row of run.targets) {
-      if (!attempted.has(row.id as unknown as number)) continue;
+      const id = row.id as unknown as number;
+      // A refused request settles the row at once. Otherwise only a status
+      // from a process started since the click counts: one with the identity
+      // seen at the click is what an earlier run left, and a row the walk has
+      // not reached yet still shows exactly that.
+      if (!errors.has(id) && processIdentity(liveOf(id)) === run.before.get(id)) continue;
       const p = progressOf(row);
       if (p === "live") live++;
       else if (p === "failed" || p === "blocked") failed++;
@@ -210,9 +236,14 @@ export function GoLiveSheet({
   })();
   const allSettled = run !== null && tally.settled === tally.total;
   // Over when every target is live or failed, and not before the last request
-  // has gone out; or when the wait for a stuck row runs out.
-  const phase: "walking" | "settling" | "done" | null =
-    run === null ? null : run.phase === "settling" && (allSettled || run.timedOut) ? "done" : run.phase;
+  // has gone out; or when the wait for a stuck row runs out. Terminal: the
+  // count is frozen here, so a row that drops during the hold does not reopen
+  // the press or restart its timeout. Set during render, as the session reset
+  // above is.
+  if (run !== null && run.phase === "settling" && (allSettled || run.timedOut)) {
+    setRun({ ...run, phase: "done", final: tally });
+  }
+  const phase = run?.phase ?? null;
 
   // A row that never settles does not keep the button forever.
   useEffect(() => {
@@ -283,7 +314,13 @@ export function GoLiveSheet({
     const targets = readyNow;
     setErrors(new Map());
     setAttempted(new Set());
-    setRun({ targets, phase: "walking", timedOut: false });
+    setAnnounced("");
+    setRun({
+      targets,
+      before: new Map(targets.map((r) => [r.id as unknown as number, processIdentity(liveOf(r.id as unknown as number))])),
+      phase: "walking",
+      timedOut: false,
+    });
     await runPacedStarts(
       targets.map((r) => r.id as unknown as number),
       async (id) => {

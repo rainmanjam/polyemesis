@@ -1814,7 +1814,7 @@
   "nav.group.settings": "Instalación",
   "failover.bannerSince": "desde las {time}",
   "health.verdictHealthy": "Los {count} destinos en marcha están en buen estado",
-  "health.verdictHealthyOne": "{count} destino en marcha en buen estado",
+  "health.verdictHealthyOne": "{count} destino en marcha está en buen estado",
   "health.verdictAttention": "{count} de {total} destinos necesitan atención",
   "health.verdictAttentionOne": "{count} de {total} destinos necesita atención",
   "health.verdictIngest": "Ingesta estable durante {uptime}",

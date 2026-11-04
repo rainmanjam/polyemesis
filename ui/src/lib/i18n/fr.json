@@ -1814,7 +1814,7 @@
   "nav.group.settings": "Installation",
   "failover.bannerSince": "depuis {time}",
   "health.verdictHealthy": "Les {count} destinations en cours sont en bon état",
-  "health.verdictHealthyOne": "{count} destination en cours en bon état",
+  "health.verdictHealthyOne": "{count} destination en cours est en bon état",
   "health.verdictAttention": "{count} sur {total} destinations demandent une attention",
   "health.verdictAttentionOne": "{count} sur {total} destinations demande une attention",
   "health.verdictIngest": "Entrée stable depuis {uptime}",

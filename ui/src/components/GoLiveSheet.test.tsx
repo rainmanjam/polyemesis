@@ -22,6 +22,10 @@ const T = (key: Parameters<typeof translate>[1], p?: Record<string, string | num
 
 const did = (n: number) => n as unknown as DestinationId;
 
+/** A process that is on air: running, and its output has moved. "running"
+ *  alone is a spawned FFmpeg that may yet be refused, and is not live. */
+const onAir = { state: "running", startedAt: "2026-11-04T12:00:00Z", restarts: 0, progress: { outTimeMs: 4000 } };
+
 const dest = (over: Record<string, unknown> = {}) =>
   ({
     id: did(1),
@@ -159,7 +163,7 @@ describe("GoLiveSheet: starting", () => {
 
   it("shows the progress of each row while it runs, from the live status", () => {
     draw([dest({ id: did(1) })], {
-      live: [dest({ id: did(1), enabled: true, process: { state: "running" } })],
+      live: [dest({ id: did(1), enabled: true, process: onAir })],
     });
 
     const row = screen.getByText("Twitch — no music").closest("[data-row]") as HTMLElement;
@@ -266,7 +270,7 @@ describe("Go live sheet: a row that is already live says so (A8)", () => {
     // The readiness badge used to read READY on a row that was already on air,
     // while the primary button counted it as something still to start. The row
     // now says what it is, and the count leaves it out.
-    const running = dest({ id: did(1), enabled: true, process: { state: "running" } });
+    const running = dest({ id: did(1), enabled: true, process: onAir });
     const idle = dest({ id: did(2), name: "Archive", sourceId: 1 });
     draw([running, idle], { live: [running, idle] });
 
@@ -337,7 +341,15 @@ describe("Go live sheet: the press counts what is actually live", () => {
     return pending;
   }
 
-  type State = "running" | "starting" | "failed";
+  /** "spawned" is running with no media out yet; "stalled" is running, moved, then stuck. */
+  type State = "running" | "spawned" | "stalled" | "starting" | "failed";
+  const processFor = (s: State, run = 1) => {
+    const base = { startedAt: `2026-11-04T12:00:0${run}Z`, restarts: run - 1 };
+    if (s === "running") return { ...base, state: "running", progress: { outTimeMs: 4000 } };
+    if (s === "spawned") return { ...base, state: "running", progress: { outTimeMs: 0 } };
+    if (s === "stalled") return { ...base, state: "running", stalled: true, progress: { outTimeMs: 4000 } };
+    return { ...base, state: s };
+  };
 
   /** Three idle destinations; `set` re-renders with the live status given. */
   function press(opts: { n?: number; onStart?: (id: DestinationId) => Promise<void>; onFinished?: () => void } = {}) {
@@ -360,7 +372,7 @@ describe("Go live sheet: the press counts what is actually live", () => {
           {...props}
           live={idle.map((d) => {
             const s = states[d.id as unknown as number];
-            return s ? ({ ...d, enabled: true, process: { state: s } } as unknown as DestStatus) : d;
+            return s ? ({ ...d, enabled: true, process: processFor(s) } as unknown as DestStatus) : d;
           })}
         />,
       );
@@ -442,8 +454,49 @@ describe("Go live sheet: the press counts what is actually live", () => {
     set({ 1: "running", 2: "failed", 3: "running" });
 
     expect(button().textContent).toBe("2 of 3 live · 1 failed");
-    set({ 1: "failed", 2: "failed", 3: "running" });
-    expect(button().textContent).toBe("1 of 3 live · 2 failed");
+  });
+
+  it("holds the final count as it was, even if a row drops during the hold", async () => {
+    vi.useFakeTimers();
+    const onStart = vi.fn(async (id: DestinationId) => {
+      if ((id as unknown as number) === 3) throw new Error("ingest refused");
+    });
+    const { set } = press({ onStart });
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "running" });
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+
+    await wait(500);
+    set({ 1: "running", 2: "starting" });
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+    expect(status()).toBe("2 of 3 live · 1 failed");
+    await wait(500);
+    expect(button().textContent).toBe("Go live · 1 ready");
+  });
+
+  it("does not count a spawned process as live until its output has moved", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "spawned", 2: "spawned", 3: "spawned" });
+
+    expect(button().textContent).toBe("Starting… 0 of 3 live");
+    const row = screen.getByText("Dest 1").closest("[data-row]") as HTMLElement;
+    expect(within(row).queryByText(T("golive.live"))).toBeNull();
+    set({ 1: "running", 2: "spawned", 3: "spawned" });
+    expect(button().textContent).toBe("Starting… 1 of 3 live");
+  });
+
+  it("does not count a stalled process as live", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "stalled", 2: "running", 3: "running" });
+
+    expect(button().textContent).toBe("Starting… 2 of 3 live");
   });
 
   it("gives the button back after the settle timeout, with the real counts, when a row stays in Starting", async () => {
@@ -559,35 +612,39 @@ describe("Go live sheet: the press counts what is actually live", () => {
   });
 
   it("does not count a row as settled on a status left from before its start was sent", async () => {
-    // The second destination is off, but its last process ended failed. Until
-    // the walk reaches it, that old status says nothing about this press.
-    let release: () => void = () => {};
-    const onStart = vi.fn(
-      (_id: DestinationId) =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    );
+    // The second destination is off, but its last process ended failed. That
+    // status belongs to an earlier run and says nothing about this press: only
+    // a status from a new process (a new startedAt) settles the row.
+    vi.useFakeTimers();
     const one = dest({ id: did(1), name: "First" });
-    const two = dest({ id: did(2), name: "Second", process: { state: "failed" } } as Record<string, unknown>);
-    render(
-      <GoLiveSheet
-        open
-        onOpenChange={() => {}}
-        rows={goLiveRows([one, two], sources)}
-        live={[one, two]}
-        youtubeAtRisk={0}
-        onStart={onStart}
-        onRetry={async () => {}}
-        onFinished={() => {}}
-        paceMs={0}
-      />,
-    );
+    const oldRun = { state: "failed", startedAt: "2026-11-03T09:00:00Z", restarts: 4 };
+    const two = dest({ id: did(2), name: "Second", process: oldRun } as Record<string, unknown>);
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows([one, two], sources),
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} live={[one, two]} />);
     fireEvent.click(screen.getByRole("button", { name: "Go live · 2 ready" }));
-    await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
+    await flush();
+    expect(props.onStart).toHaveBeenCalledTimes(2);
 
-    expect(button().textContent).toBe("Starting… 0 of 2 live");
-    release();
+    const firstOn = { ...one, enabled: true, process: onAir } as unknown as DestStatus;
+    rerender(<GoLiveSheet {...props} live={[firstOn, { ...two, enabled: true } as DestStatus]} />);
+    await wait(3_000);
+    expect(button().textContent).toBe("Starting… 1 of 2 live");
+    expect(button().disabled).toBe(true);
+
+    const newRunFailed = { state: "failed", startedAt: "2026-11-04T12:00:05Z", restarts: 0 };
+    rerender(
+      <GoLiveSheet {...props} live={[firstOn, { ...two, enabled: true, process: newRunFailed } as unknown as DestStatus]} />,
+    );
+    expect(button().textContent).toBe("1 of 2 live · 1 failed");
   });
 
   it("can be closed while it waits for rows to settle, but not while the starts go out", async () => {

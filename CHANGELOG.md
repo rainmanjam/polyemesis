@@ -63,7 +63,9 @@ its first tagged release.
   and its button used to recount "Go live · 4 ready", then "3 ready", as each one came on, so one
   click looked as if it had started a single destination. After the click it counts what is
   actually on air, from each destination's live status: "Starting… 2 of 4 live", then "4 of 4
-  live", or "3 of 4 live · 1 failed" when one is refused or its process fails. The press is over
+  live", or "3 of 4 live · 1 failed" when one is refused or its process fails. A destination is
+  live once its output is moving and not stalled, not the moment FFmpeg starts, so one the
+  platform is about to refuse is not counted (the row's LIVE chip follows the same rule). The press is over
   when every destination it set out to start is live or failed, not when the last request
   returns, and the final count stays on the button for a second before it goes back to Go live.
   A destination still starting after a minute (longer than the server takes to hold one that
