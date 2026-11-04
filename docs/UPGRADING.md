@@ -243,6 +243,37 @@ instead.
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.13.0
+
+**Expert-mode arguments are checked again when a destination starts.** Expert
+mode is now session-only: the five expert routes answer `403` to an API token of
+any scope, so a script that set expert arguments with a token stops working.
+For the signed-in operator, options, filters, `-f` values and encoder-param keys
+are allowlists that leave out anything able to touch a file on the server.
+Arguments saved before 0.13.0 that fail those rules (for example a `loudnorm` or
+`drawtext` filter, or an `-f` that is not a streaming format) are left out of
+the command, and the destination starts on its generated command. The expert
+editor names what was refused, and the server log says so on every start. If you
+relied on expert arguments, open each such destination's expert editor after
+upgrading and check what still applies.
+
+**The OBS bridge script sends its token only over HTTPS**, or over plain HTTP
+only to the same machine. If your OBS reaches polyemesis on another machine at
+an `http://` address, the script now refuses it and sends nothing; point it at
+the `https://` address instead.
+
+**`rollback.sh` refuses while this install is on the air**, unless you pass
+`--force`. It names the changes it will lose and asks on a terminal before it
+starts.
+
+**Schema:** unchanged. 0.13.0 adds no tables and no columns, and the schema
+version stamped into the database is still `1`; a fresh 0.13.0 database is
+identical to a fresh 0.12.0 one (`internal/db/testdata/release-v0.13.0.db`
+against `release-v0.12.0.db`). **A 0.12.0 binary opens a 0.13.0 database.**
+Restoring the backup you took is still the rollback this page recommends.
+
+Nothing else to do beyond the short version above.
+
 ### Upgrading to 0.12.0
 
 **Native installs: FFmpeg 8.0 or later is now required.** polyemesis refuses to
