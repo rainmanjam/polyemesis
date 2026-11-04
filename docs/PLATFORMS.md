@@ -58,6 +58,11 @@ row reads. They stream perfectly over RTMP, RTMPS or SRT with a pasted URL and
 key; we simply have not researched their APIs, and "unverified" is the honest
 thing to say about an API nobody here has read.
 
+The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
+server URL and key published to X with picture. The rest of the X row is
+unchanged. The details, and a hosting network X would not let connect, are under
+X in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
+
 ## The platforms that need a sentence each
 
 **Facebook — read this before you start.** Full support, and Meta requires
@@ -222,6 +227,47 @@ confirmed any of the built paths yet. Two gates apply on top of the whitelist:
 X's Broadcasts list refuses accounts without X Premium or more than 1,000
 followers (HTTP 412), and X has **no hide action**, so chat moderation offers
 mute, unmute and delete only.
+
+**The stream-key path was verified live on 2026-11-04.** polyemesis built from
+`main` at `b13944ea`, on a macOS machine on a residential connection, published
+to an X destination on `rtmps://a.live.x.com:443/...`, with the server URL and
+stream key pasted from X Media Studio Producer. The log showed
+`destination publishing` about 1.6 seconds after the start, the stream then ran
+steadily for over a minute with no reconnects, and the picture showed in X
+Producer's preview. The test feed was 1280×720 at 30 fps, H.264 at 3 Mb/s with
+AAC stereo at 128 kb/s; it came in over RTMP ingest and went out on the
+passthrough rendition. That verifies publishing with picture through a pasted
+key and nothing more: chat, metadata and every Livestream API path are as
+unverified as they were, and the stream-key cell stays *By hand*, which is what a
+pasted key is.
+
+**X may refuse some hosting networks.** The same day, the same X destination
+failed from an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
+`Error opening output … Connection timed out` every 6–7 seconds. The connections
+timed out, which is not `Connection refused`: nothing answered at all. Plain TCP
+checks from that host, with polyemesis out of the picture, failed the same way.
+`a.live.x.com` (ports 443 and 80), `ca.pscp.tv` and `va.pscp.tv` (80, 443 and
+1935), and even `https://x.com` all timed out, over IPv4 and IPv6 alike. From the
+same host, Twitch (`live.twitch.tv:1935`), YouTube (`a.rtmp.youtube.com:1935`)
+and `example.com:443` all connected, and from the residential macOS machine the
+X hosts connected too. X's ingest addresses resolve to Cloudflare (172.65.x.x).
+So X refused connections from that VPS's network, by letting them time out, and
+no polyemesis setting can change that. Whether X does the same to other VPS
+providers, or to datacenter ranges in general, has not been tested: this is one
+host, not a rule.
+
+Before you rely on X from a server, check from that server that it can reach X:
+
+```sh
+curl -sS --connect-timeout 10 -o /dev/null -w '%{http_code}\n' https://x.com
+nc -vz -w 10 a.live.x.com 443
+```
+
+The first prints a status code (for example `200` or `302`) when X answers, and
+`000` with a curl error when it does not. The second is a TCP check to the
+ingest host; use the host in your own server URL if X Producer gave you a
+different one. If either times out, X needs a different host or network. See
+[Troubleshooting](TROUBLESHOOTING.md#x-destination-connection-timed-out-when-opening-output).
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
 distinction matters and this page used to collapse it. Instagram's platform

@@ -170,6 +170,17 @@ its first tagged release.
   brightest packet heads feed it), so the wires keep their track colour on phones. The clip in it is a fictional person and an unbranded car, generated
   with Google Veo 3.1.
 
+### Documentation
+
+- **X's stream-key path was tested live, and one hosting network could not reach X.** On
+  2026-11-04 a build of `main` on a residential connection published to X with a pasted server URL
+  and key, and the picture showed in X Producer's preview. docs/PLATFORMS.md records the test; the
+  X row of the capability table is unchanged (the stream key stays *By hand*, everything else
+  *Unverified*). The same destination timed out from an OVH VPS, where X's hosts and `x.com` did
+  not answer at all; whether other providers are affected is untested. docs/PLATFORMS.md says how
+  to check a server can reach X first, and docs/TROUBLESHOOTING.md has a new entry for
+  "Connection timed out" on an X destination.
+
 ## [0.12.0] — 2026-11-03
 
 ### Added

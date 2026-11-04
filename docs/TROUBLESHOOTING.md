@@ -645,6 +645,39 @@ routes are also session-only: an API token gets `403`.
   happens at a failover switch, that is a bug worth reporting — the failover
   suite measures exactly this and expects zero.
 
+### X destination: "Connection timed out" when opening output
+
+An X destination never goes live, and its process log on the Monitoring page
+repeats a line of this form, every 6–7 seconds in the case seen:
+
+```
+Error opening output … Connection timed out
+```
+
+**The server's network cannot reach X.** The connection is not refused: nothing
+answers, so it times out. On 2026-11-04 an X destination that published from a
+residential connection failed this way from an OVH VPS. From that host,
+connections to `a.live.x.com`, `ca.pscp.tv`, `va.pscp.tv` and even
+`https://x.com` timed out over IPv4 and IPv6, while Twitch, YouTube and
+`example.com` connected. Whether other VPS providers or datacenter ranges are
+affected has not been tested. The details are under X in
+[PLATFORMS.md](PLATFORMS.md#the-platforms-that-need-a-sentence-each).
+
+Check from the server, with polyemesis out of the picture:
+
+```sh
+curl -sS --connect-timeout 10 -o /dev/null -w '%{http_code}\n' https://x.com
+nc -vz -w 10 a.live.x.com 443
+```
+
+`curl` prints a status code (for example `200` or `302`) when X answers, and
+`000` with a curl error when it does not. `nc` checks TCP to the ingest host;
+use the host in your own server URL if it is a different one.
+
+**What to do:** if either check times out, no polyemesis setting will help: X
+needs a different host or network. If both connect, the network reaches X and
+the cause is elsewhere.
+
 ---
 
 ## The audio is wrong
