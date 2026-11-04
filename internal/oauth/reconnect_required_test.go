@@ -15,7 +15,9 @@ func TestARefusedGrantIsReconnectRequired(t *testing.T) {
 		want bool
 	}{
 		{"400 invalid_grant", &tokenStatusError{code: 400, body: `{"error":"invalid_grant"}`}, true},
-		{"401 from the token endpoint", &tokenStatusError{code: 401, body: `{"error":"invalid_client"}`}, true},
+		{"401 invalid_grant", &tokenStatusError{code: 401, body: `{"error":"invalid_grant"}`}, true},
+		// Wrong developer credentials: reconnecting the account cannot fix it.
+		{"401 invalid_client is not", &tokenStatusError{code: 401, body: `{"error":"invalid_client"}`}, false},
 		{"invalid_grant in a 2xx body", &tokenErrorResponse{code: "invalid_grant", desc: "revoked"}, true},
 		{"wrapped by tokenFor", fmt.Errorf("could not refresh the youtube token: %w",
 			&tokenStatusError{code: 400, body: `{"error":"invalid_grant"}`}), true},
