@@ -172,27 +172,11 @@ func (l *Line) read() {
 	pkt := make([]byte, 2048)
 	var dropsSeen uint64
 	var lastDropReport time.Time
-	for {
-		n, err := l.conn.Read(pkt)
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			select {
-			case <-l.quit:
-				return
-			default:
-			}
-			continue
-		}
-		if n == 0 {
-			// The hub drops these too: FFmpeg's UDP demuxer reads one as EOF.
-			continue
-		}
-		err = l.buf.Push(time.Now(), pkt[:n])
+	take := func(p []byte) {
+		err := l.buf.Push(time.Now(), p)
 		l.ingested.Add(1)
 		if err != nil {
-			continue
+			return
 		}
 		// A dump resumes on a push: the one that brought its keyframe.
 		if t := l.buf.takeResumed(); t != nil && l.cfg.OnDumped != nil {
@@ -212,6 +196,39 @@ func (l *Line) read() {
 		default:
 		}
 	}
+	for {
+		n, err := l.conn.Read(pkt)
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if errors.Is(err, os.ErrDeadlineExceeded) && l.draining.Load() {
+				// Drain's cue. What is already in the socket arrived before
+				// the stop and is programme: take it, then stop. See Drain.
+				_ = l.conn.SetReadDeadline(time.Time{})
+				for {
+					n, ok := readQueued(l.conn, pkt)
+					if !ok {
+						return
+					}
+					if n > 0 {
+						take(pkt[:n])
+					}
+				}
+			}
+			select {
+			case <-l.quit:
+				return
+			default:
+			}
+			continue
+		}
+		if n == 0 {
+			// The hub drops these too: FFmpeg's UDP demuxer reads one as EOF.
+			continue
+		}
+		take(pkt[:n])
+	}
 }
 
 func (l *Line) pump() {
@@ -221,7 +238,11 @@ func (l *Line) pump() {
 	for {
 		due, ok := l.buf.NextDue()
 		if !ok {
-			if l.draining.Load() {
+			// EMPTY MEANS DONE ONLY ONCE THE READER IS OUT. The draining flag
+			// is set before the reader has taken what was already queued, so
+			// it alone is not the answer: an empty buffer in that instant is
+			// one the reader is about to push into.
+			if l.draining.Load() && l.inputClosed() {
 				l.drainOnce.Do(func() { close(l.drained) })
 				return
 			}
@@ -258,6 +279,16 @@ func (l *Line) pump() {
 	}
 }
 
+// inputClosed reports whether the reader has stopped for good.
+func (l *Line) inputClosed() bool {
+	select {
+	case <-l.inputDone:
+		return true
+	default:
+		return false
+	}
+}
+
 // sleepUntil waits for t, or returns false if the line closes first.
 func (l *Line) sleepUntil(t time.Time) bool {
 	d := time.Until(t)
@@ -283,13 +314,22 @@ func (l *Line) sleepUntil(t time.Time) bool {
 // The channel closes when the last held datagram has been released -- up to
 // Delay from now. This is the default stop: the audience sees the end of the
 // programme, not a cut Delay before it.
+//
+// WHAT HAS ALREADY ARRIVED IS KEPT. The caller unsubscribes the line from its
+// hub first, so nothing new is coming -- but whatever the hub sent before that
+// may still be in this line's socket, unread, and it is the last of the
+// programme. Closing the socket here used to discard it, cutting the very tail
+// this exists to play out. Instead the reader is woken with an expired
+// deadline, takes everything still queued without waiting for more, and only
+// then is the socket closed.
 func (l *Line) Drain() <-chan struct{} {
 	if l.draining.CompareAndSwap(false, true) {
-		_ = l.conn.Close()
+		_ = l.conn.SetReadDeadline(time.Now())
 		// The reader must be out before the pump may conclude "empty means
 		// done", or a datagram read in that instant is pushed into a buffer
 		// nobody will drain.
 		<-l.inputDone
+		_ = l.conn.Close()
 		select {
 		case l.wake <- struct{}{}:
 		default:

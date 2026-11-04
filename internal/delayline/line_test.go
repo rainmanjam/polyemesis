@@ -130,6 +130,7 @@ func TestDrainPlaysTheWholeTailOutOnTimeAndThenSaysSo(t *testing.T) {
 	l := newTestLine(t, delay, rec, nil)
 	const n = 200
 	sent := sendAll(t, l, n)
+	loopbackDelivered(t) // sent is not yet arrived; see the helper
 	drained := l.Drain()
 	if st := l.Status(); !st.Draining {
 		t.Fatal("a draining line does not say so")
@@ -156,6 +157,79 @@ func TestDrainPlaysTheWholeTailOutOnTimeAndThenSaysSo(t *testing.T) {
 	time.Sleep(delay + 100*time.Millisecond)
 	if got := rec.count(); got != n {
 		t.Fatalf("a drained line released %d datagrams, want %d", got, n)
+	}
+}
+
+// DRAIN KEEPS WHAT HAD ALREADY ARRIVED. A datagram the hub delivered before
+// the stop is programme, even if the line's reader had not got to it yet: it
+// is sitting in the line's own socket. Drain used to close that socket at once,
+// and closing a socket discards its receive queue, so the last moments before
+// the stop were cut -- exactly what Drain promises will not happen.
+//
+// The burst is unpaced so that the reader is reliably behind when Drain is
+// called, which is the condition and not an accident of scheduling. It is kept
+// small (50 x 1316 bytes) so it fits the smallest default receive buffer of
+// the three CI platforms with room to spare: a datagram the KERNEL dropped
+// never arrived, and is not what this is about.
+func TestDrainKeepsWhatHadArrivedButHadNotYetBeenRead(t *testing.T) {
+	const delay = 100 * time.Millisecond
+	rec := &recorder{}
+	l := newTestLine(t, delay, rec, nil)
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: l.Port()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 50
+	for i := range n {
+		if _, err := conn.Write(datagram(uint64(i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = conn.Close()
+	loopbackDelivered(t)
+	queued := l.Ingested()
+	select {
+	case <-l.Drain():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the drain never finished")
+	}
+	if got := rec.count(); got != n {
+		t.Fatalf("drain released %d of %d (the reader had taken in %d when Drain was called): "+
+			"datagrams already in the line's socket were thrown away", got, n, queued)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for i, s := range rec.seqs {
+		if s != uint64(i) {
+			t.Fatalf("position %d released datagram %d", i, s)
+		}
+	}
+}
+
+// loopbackDelivered returns once every datagram this process has already
+// written to the loopback has reached its socket.
+//
+// Write returning is not that. On macOS the loopback hands a datagram to lo0's
+// input queue and the socket gets it later, from another thread; a test that
+// writes and then acts at once is acting on datagrams that are still in
+// transit -- measured as a drain that kept 14 of 50, with the other 36
+// arriving after the line had found its socket empty. lo0's input queue is
+// FIFO, so a probe sent last and received here means everything sent before it
+// has been delivered. On Linux and Windows delivery happens inside the send,
+// and this costs one round trip.
+func loopbackDelivered(t *testing.T) {
+	t.Helper()
+	probe, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Close()
+	if _, err := probe.WriteToUDP([]byte{1}, probe.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	_ = probe.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := probe.ReadFromUDP(make([]byte, 1)); err != nil {
+		t.Fatalf("the loopback probe never arrived: %v", err)
 	}
 }
 

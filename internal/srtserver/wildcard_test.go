@@ -6,9 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
-
-	"github.com/rainmanjam/polyemesis/internal/testenv"
 )
 
 // Issue #28 was filed as "the SRT listener may bind IPv6-only", on the evidence
@@ -67,12 +66,17 @@ func TestAnExplicitHostIsLeftAlone(t *testing.T) {
 // were false, the wildcard split would fail to bind its second family on every
 // platform and the fix would be worse than the bug.
 func TestBothFamiliesCanHoldTheSamePort(t *testing.T) {
-	port := freeUDPPort(t)
-	p4, err := net.ListenPacket("udp4", "0.0.0.0:"+strconv.Itoa(port))
+	// THE FIRST BIND IS THE RESERVATION. The port is whatever the kernel hands
+	// the udp4 wildcard socket, and that socket is the one under test, so there
+	// is no moment between choosing the number and holding it. See
+	// heldWildcardPort for why the old "pick a free port, release it, bind it
+	// again" failed on Windows.
+	p4, err := net.ListenPacket("udp4", "0.0.0.0:0")
 	if err != nil {
 		t.Fatalf("udp4 bind: %v", err)
 	}
 	defer p4.Close()
+	port := p4.LocalAddr().(*net.UDPAddr).Port
 	p6, err := net.ListenPacket("udp6", "[::]:"+strconv.Itoa(port))
 	if err != nil {
 		t.Fatalf("udp6 bind on the same port failed, so the two families conflict "+
@@ -81,12 +85,55 @@ func TestBothFamiliesCanHoldTheSamePort(t *testing.T) {
 	defer p6.Close()
 }
 
-// #211: one implementation, in internal/testenv, instead of four copies of it.
-// The window between the release and the real bind is unchanged and is
-// documented there rather than here.
-func freeUDPPort(t *testing.T) int {
+// heldWildcardPort reserves a port on BOTH wildcard families -- exactly the two
+// sockets Start is about to bind -- and returns it with the function that hands
+// it back. Call release on the line before Start.
+//
+// WHY NOT testenv.FreeUDPPort, which both tests in this file used until they
+// failed together on windows-latest in one run (a udp4 bind refused with WSAEADDRINUSE, and an
+// IPv4 dial answered with a REJECT by somebody else's SRT server):
+//
+//   - FreeUDPPort draws from a LOW BAND that every test process scans, and
+//     internal/engine and internal/api start real wildcard SRT listeners on
+//     those numbers. Each process walks the band in steps of 8 from a start
+//     derived from its PID. Windows PIDs are multiples of 4, so every Windows
+//     process starts on one of only two residues mod 8, and two packages
+//     running at once are walking the same lattice of ports.
+//   - The probe asks a narrower question than the bind. It binds 127.0.0.1,
+//     and on Windows a specific-address bind is allowed alongside another
+//     socket's 0.0.0.0 bind of the same port. So the probe can pass on a port
+//     another package's wildcard SRT server is already listening on -- which
+//     is the failure seen: the probe of 24588 passed and the udp4 0.0.0.0 bind
+//     of it did not.
+//   - gosrt sets SO_REUSEADDR, which on Windows lets a bind succeed over a
+//     socket that is in active use. So Start does not fail either: it shares
+//     the port, and the publisher's handshake is answered by the other server.
+//
+// An ephemeral (:0) draw cannot collide that way: the kernel only hands out a
+// port that no socket of any family or address holds, and the low-band scans
+// never reach the ephemeral range. Reserving it on the two wildcard sockets
+// asks the same question Start's bind does, not a narrower one.
+func heldWildcardPort(t *testing.T) (port int, release func()) {
 	t.Helper()
-	return testenv.FreeUDPPort(t)
+	p4, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("reserve a udp4 wildcard port: %v", err)
+	}
+	port = p4.LocalAddr().(*net.UDPAddr).Port
+	p6, err := net.ListenPacket("udp6", "[::]:"+strconv.Itoa(port))
+	if err != nil {
+		_ = p4.Close()
+		t.Fatalf("reserve udp6 on the same port %d: %v", port, err)
+	}
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			_ = p4.Close()
+			_ = p6.Close()
+		})
+	}
+	t.Cleanup(release)
+	return port, release
 }
 
 // The end-to-end proof, and the case issue #28 is actually about: an IPv4
@@ -99,7 +146,7 @@ func freeUDPPort(t *testing.T) int {
 // platform, and because a guard that only executes where the bug was is a guard
 // nobody runs.
 func TestAWildcardListenerAcceptsAnIPv4Publisher(t *testing.T) {
-	port := freeUDPPort(t)
+	port, release := heldWildcardPort(t)
 	tg := Target{SourceID: 7, Name: "horizontal", Enabled: true, Sink: &recorder{}}
 	lookup := ConstantTimeLookup(
 		func() []Target { return []Target{tg} },
@@ -107,6 +154,7 @@ func TestAWildcardListenerAcceptsAnIPv4Publisher(t *testing.T) {
 	)
 
 	s := New(quietLog(), fmt.Sprintf(":%d", port), lookup)
+	release()
 	if err := s.Start(); err != nil {
 		t.Fatalf("Start on a wildcard address: %v", err)
 	}
