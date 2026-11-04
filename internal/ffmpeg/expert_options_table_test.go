@@ -51,3 +51,39 @@ func TestNoAllowedFilterHasAFileOption(t *testing.T) {
 		}
 	}
 }
+
+// The option allowlist is vetted by the generator against FFmpeg's own help.
+// This re-reads that help, so a table regenerated wrongly or edited by hand to
+// admit an option described as taking a file, path, URL, log, dump or stats
+// fails here. (The same expression as scripts/gen-expert-ffmpeg-options.sh.)
+func TestNoAllowedOptionIsDescribedAsAFile(t *testing.T) {
+	bin := requireFFmpeg(t)
+	out, err := exec.Command(bin, "-hide_banner", "-h", "full").Output()
+	if err != nil {
+		t.Fatalf("ffmpeg -h full: %v", err)
+	}
+	fileish := regexp.MustCompile(`(?i)(^|[^A-Za-z_])(file|files|filename|filenames|filepath|path|paths|dir|directory|url|urls|uri|log|logs|dump|dumps|stats|statistics)([^A-Za-z_]|$)`)
+	name := regexp.MustCompile(`^ {0,2}(-[A-Za-z0-9_-]+)`)
+	for _, line := range strings.Split(string(out), "\n") {
+		m := name.FindStringSubmatch(line)
+		if m == nil || !fileish.MatchString(line) {
+			continue
+		}
+		if ffmpegValueOptions[m[1]] || ffmpegBoolOptions[m[1]] {
+			t.Errorf("%s is allowed, but FFmpeg describes it as touching a file: %s", m[1], strings.TrimSpace(line))
+		}
+	}
+}
+
+// The options the security reviews named are refused, whatever this build lists.
+func TestTheReviewedFileOptionsAreNotAllowed(t *testing.T) {
+	for _, o := range []string{"-x265-stats", "-graph_file", "-dumpgraph", "-passlogfile", "-progress",
+		"-vstats_file", "-attach", "-sdp_file", "-key_file", "-report", "-fpre", "-vpre"} {
+		if ffmpegValueOptions[o] || ffmpegBoolOptions[o] {
+			t.Errorf("%s is on the allowlist", o)
+		}
+		if err := CheckExpertFileAccess("output args", []string{o, "x"}); err == nil {
+			t.Errorf("%s x was accepted", o)
+		}
+	}
+}

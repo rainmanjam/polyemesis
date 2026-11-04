@@ -52,6 +52,18 @@ LIBSRT="-timeout -listen_timeout -send_buffer_size -recv_buffer_size -pkt_size -
 -tlpktdrop -nakreport -connect_timeout -mode -sndbuf -rcvbuf -lossmaxttl -minversion
 -streamid -srt_streamid -smoother -messageapi -transtype -linger -tsbpd"
 
+# Hardware encoders' private options, by hand for the same reason as libsrt:
+# the build that generates this table (a macOS one, say) has no NVENC, VAAPI or
+# QSV, but the install that reads it may. All take a value; none names a file.
+HWENC="-vaapi_device -rc -cq -multipass -rc-lookahead -spatial-aq -temporal-aq
+-zerolatency -b_ref_mode -nonref_p -strict_gop -aq-strength -bluray-compat -surfaces
+-gpu -delay -no-scenecut -forced-idr -tier -weighted_pred -init_qpP -init_qpB -init_qpI
+-qp -qp_cb_offset -qp_cr_offset -ldkfs -intra-refresh -single-slice-intra-refresh
+-max_slice_size -constrained-encoding -split_encode_mode -lookahead_level -unidir_b
+-highbitdepth -tf_level -b_adapt -rc_mode -low_power -idr_interval -b_depth
+-async_depth -quality -sei -aud -coder -max_frame_size -blbrc -look_ahead
+-look_ahead_depth -extbrc -adaptive_i -adaptive_b -scenario -preset -tune -profile -level"
+
 "$FFMPEG" -hide_banner -h full 2>/dev/null >help.txt
 {
 	grep -E '^-[A-Za-z]' help.txt | awk '{print $1}' | sed 's/\[.*//'
@@ -72,16 +84,36 @@ while read -r o; do
 	fi
 done <main.txt
 
-grep -E '^  -[A-Za-z0-9_]' help.txt | awk '{print $1}' >>value.txt
+# Every AVOption line, with its description, for the vetting below.
+grep -E '^  -[A-Za-z0-9_]' help.txt >avlines.txt
 for p in $("$FFMPEG" -hide_banner -protocols 2>/dev/null | sed -n '/Input/,$p' | grep -v -E 'Input|Output'); do
-	"$FFMPEG" -hide_banner -h "protocol=$p" 2>/dev/null | grep -E '^  -[A-Za-z0-9_]' | awk '{print $1}' >>value.txt || true
+	"$FFMPEG" -hide_banner -h "protocol=$p" 2>/dev/null | grep -E '^  -[A-Za-z0-9_]' >>avlines.txt || true
 done
-for o in $LIBSRT; do echo "$o" >>value.txt; done
+awk '{print $1}' avlines.txt >>value.txt
+for o in $LIBSRT $HWENC; do echo "$o" >>value.txt; done
+
+# THE ALLOWLIST IS VETTED, NOT JUST MEASURED. An option is allowed only if no
+# help line for it -- its name and description, under any of the components
+# that define it -- mentions a file, a path, a directory, a URL, a log, a dump
+# or stats (two-pass and analysis files are "stats"). Those go to the
+# file-ish list instead, which expert mode refuses with a sentence saying so.
+# Preset options read a preset FILE although their help says "preset name",
+# so they are listed by name. Errs towards refusal: an innocent option that
+# mentions a file is refused, never the other way round.
+FILEISH_RE='(^|[^A-Za-z_])(file|files|filename|filenames|filepath|path|paths|dir|directory|url|urls|uri|log|logs|dump|dumps|stats|statistics)([^A-Za-z_]|$)'
+BYNAME="-report -pre -vpre -apre -spre -fpre -dumpgraph -graph_file"
+{
+	grep -E '^-[A-Za-z]' help.txt | sed -E 's/^(-[^ []+)[^ ]*/\1/'
+	cat avlines.txt
+} | grep -i -E "$FILEISH_RE" | awk '{print $1}' >fileish.txt
+for o in $BYNAME; do echo "$o" >>fileish.txt; done
+sort -u -o fileish.txt fileish.txt
 
 sort -u -o bool.txt bool.txt
+comm -23 bool.txt fileish.txt >bool.ok
 # A name that is one of ffmpeg's own booleans is a boolean, whatever an
 # AVOption of the same name says.
-sort -u value.txt | comm -23 - bool.txt >value.sorted
+sort -u value.txt | comm -23 - bool.txt | comm -23 - fileish.txt >value.sorted
 
 emit() {
 	while read -r o; do printf '\t"%s": true,\n' "$o"; done <"$1"
@@ -93,15 +125,22 @@ emit() {
 	echo
 	echo "package ffmpeg"
 	echo
-	echo "// ffmpegBoolOptions are ffmpeg's options that take no value."
+	echo "// ffmpegBoolOptions are ffmpeg's options that take no value and name no file."
 	echo "var ffmpegBoolOptions = map[string]bool{"
-	emit bool.txt
+	emit bool.ok
 	echo "}"
 	echo
-	echo "// ffmpegValueOptions are the options that consume the next token as their value."
+	echo "// ffmpegValueOptions are the options that consume the next token as their"
+	echo "// value and whose help names no file, path, URL, log, dump or stats."
 	echo "var ffmpegValueOptions = map[string]bool{"
 	emit value.sorted
 	echo "}"
+	echo
+	echo "// ffmpegFileishOptions were left out of both lists because their help"
+	echo "// mentions a file, path, URL, log, dump or stats, or they read a preset file."
+	echo "var ffmpegFileishOptions = map[string]bool{"
+	emit fileish.txt
+	echo "}"
 } >"$OUT"
 gofmt -w "$OUT"
-echo "wrote $OUT ($(wc -l <bool.txt | tr -d ' ') boolean, $(wc -l <value.sorted | tr -d ' ') value options)"
+echo "wrote $OUT ($(wc -l <bool.ok | tr -d ' ') boolean, $(wc -l <value.sorted | tr -d ' ') value, $(wc -l <fileish.txt | tr -d ' ') file-ish options)"

@@ -50,6 +50,14 @@ func TestExpertModeRefusesArgumentsThatTouchServerFiles(t *testing.T) {
 		{"a filter nobody listed", nil, []string{"-vf", "removelogo=mask.png"}, "removelogo"},
 		{"an allowed filter loading a value from a file", nil, []string{"-af", "volume=/volume=/etc/passwd"}, "/option="},
 		{"an unknown option followed by an output path", nil, []string{"-made_up_boolean", "/tmp/evil.flv"}, "-made_up_boolean"},
+		// The bypasses the second security review found: the option list
+		// itself is now an allowlist vetted against FFmpeg's own help.
+		{"x265 two-pass stats file", nil, []string{"-x265-stats", "stats.log"}, "-x265-stats"},
+		{"lavfi graph from a file", []string{"-graph_file", "graph.txt"}, nil, "-graph_file"},
+		{"lavfi graph dump", []string{"-dumpgraph", "1"}, nil, "-dumpgraph"},
+		{"svtav1 stats key", nil, []string{"-svtav1-params", "stats=svt.stat"}, "stats="},
+		{"x264 pass and stats keys", nil, []string{"-x264-params", "pass=2:stats=x264.log"}, "pass="},
+		{"a TLS key file read", []string{"-key_file", "key.pem"}, nil, "-key_file"},
 		{"escaping does not hide a filter", nil, []string{"-vf", `m\ovie=clip.mp4`}, "movie"},
 		{"a file-writing muxer", nil, []string{"-f", "segment"}, "-f segment"},
 		{"tee writes beside the URL", nil, []string{"-f", "tee"}, "-f tee"},
@@ -83,6 +91,12 @@ func TestExpertFileWalkAcceptsOrdinaryArguments(t *testing.T) {
 		{"an ordinary filter", nil, []string{"-af", "volume=0.8,aresample=48000"}},
 		{"an ordinary muxer", nil, []string{"-f", "flv"}},
 		{"ordinary x264 params", nil, []string{"-x264-params", "keyint=60:min-keyint=60"}},
+		{"encoder settings", nil, []string{"-preset", "veryfast", "-tune", "zerolatency", "-g", "60", "-force_key_frames", "expr:gte(t,n_forced*2)"}},
+		{"documented examples", []string{"-analyzeduration", "10M", "-probesize", "5M"}, []string{"-metadata", "title=Rock & Roll", "-muxdelay", "0", "-flvflags", "no_duration_filesize"}},
+		{"srt options", nil, []string{"-latency", "200000", "-pbkeylen", "16"}},
+		{"nvenc as docs/HARDWARE.md spells it", nil, []string{"-preset", "p1", "-rc", "cbr"}},
+		{"vaapi upload", []string{"-vaapi_device", "/dev/dri/renderD128"}, []string{"-vf", "format=nv12,hwupload"}},
+		{"a muxer flag", nil, []string{"-movflags", "+faststart"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := checkExpertArgs(tc.in, tc.out, row); err != nil {

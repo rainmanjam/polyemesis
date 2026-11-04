@@ -1147,9 +1147,11 @@ the HLS/segment file options, file-writing muxers (`-f tee`, `segment`, `hls`,
 `stats=`), and any bare token that FFmpeg would take as a second output.
 Filter graphs may use only filters on an allowlist of ones whose options name
 no file (`scale`, `fps`, `volume`, `aresample`, `overlay`, ...); any other
-filter, and the `/option=` form that loads a value from a file, is refused. An
-option the server's FFmpeg option table does not know is refused too, rather
-than guessed at. `dry-run` tells you whether the result would start, without starting it.
+filter, and the `/option=` form that loads a value from a file, is refused. Options
+themselves are an allowlist too: an option is accepted only if it is in the
+table generated from FFmpeg's own option list
+(`scripts/gen-expert-ffmpeg-options.sh`) and its help names no file, path, URL,
+log, dump or stats. Anything else is refused rather than guessed at. `dry-run` tells you whether the result would start, without starting it.
 
 ### Routing and renditions
 

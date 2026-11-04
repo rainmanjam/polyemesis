@@ -48,6 +48,9 @@ var fileOptions = map[string]string{
 	"-hls_key_info_file":      "reads a key file from the server",
 	"-segment_list":           "writes a segment list to the file it names",
 	"-master_pl_name":         "writes a master playlist file on the server",
+	"-x265-stats":             "writes x265's two-pass statistics to the file it names",
+	"-graph_file":             "reads a filter graph from a file on the server, past every check on this page",
+	"-dumpgraph":              "dumps the filter graph out of the process",
 }
 
 // fileMuxers write files beside, or instead of, the destination's URL.
@@ -105,12 +108,25 @@ var allowedFilters = map[string]bool{
 // codecParamFlags carry an encoder's own key=value list, some of whose keys
 // are paths (x264's dump-yuv writes raw video anywhere it is told to).
 var codecParamFlags = map[string]bool{
-	"-x264-params": true, "-x264opts": true, "-x265-params": true,
+	"-x264-params": true, "-x264opts": true, "-x265-params": true, "-svtav1-params": true,
 }
 
+// codecFileKeys are the keys, across x264, x265 and SVT-AV1's own option
+// lists, whose value is a path or which make the encoder write one: two-pass
+// state (pass/stats), reconstruction and analysis dumps, CSV logs, QP, zone,
+// quant-matrix, scaling-list, lambda, timecode, film-grain and ROI tables.
 var codecFileKeys = map[string]bool{
-	"stats": true, "dump-yuv": true, "csv": true, "analysis-save": true,
-	"analysis-load": true, "qpfile": true, "cqmfile": true, "tcfile-in": true, "tcfile-out": true,
+	// x264
+	"stats": true, "pass": true, "dump-yuv": true, "qpfile": true, "cqmfile": true,
+	"tcfile-in": true, "tcfile-out": true,
+	// x265
+	"csv": true, "csv-log-level": true, "analysis-save": true, "analysis-load": true,
+	"analysis-reuse-file": true, "zonefile": true, "scaling-list": true, "lambda-file": true,
+	"recon": true, "recon-y4m-exec": true, "dolby-vision-rpu": true, "film-grain": true,
+	"multi-pass-opt-analysis": true, "multi-pass-opt-distortion": true,
+	// SVT-AV1
+	"passes": true, "stat-file": true, "input-stat-file": true, "output-stat-file": true,
+	"fgs-table": true, "roi-map-file": true, "qp-file": true, "config": true, "c": true,
 }
 
 // optionBase strips a stream specifier: -c:v:0 -> -c, -dump_attachment:t ->
@@ -159,6 +175,10 @@ func CheckExpertFileAccess(field string, argv []string) error {
 		base := optionBase(a)
 		if why, ok := fileOptions[base]; ok {
 			return fmt.Errorf("%s: %s %s. Expert mode cannot touch files on the server", field, a, why)
+		}
+		if ffmpegFileishOptions[base] {
+			return fmt.Errorf("%s: %s names a file, path, URL or log in FFmpeg's own help for it. "+
+				"Expert mode cannot touch files on the server", field, a)
 		}
 		boolean, known := optionKind(a)
 		if !known {
