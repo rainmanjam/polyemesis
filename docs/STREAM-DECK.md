@@ -118,7 +118,7 @@ Every other key acts on a tap, except Routing preset, which is also a hold, and 
 
 | Action | Tap or hold | What it does | Needs |
 |---|---|---|---|
-| **Destination** | Tap | Shows one destination's live state. Tapping starts it when it is off, and retries it when it shows **Failed** or **Held** (the console's Retry). Any other state ignores the tap. See [Destination taps](#destination-taps). | Read to show; admin to start or retry |
+| **Destination** | Tap | Shows one destination's live state. Tapping starts it when it is off, and retries it when it shows **Failed**, or **Held** after repeated quick rejections (the console's Retry). Any other state ignores the tap. See [Destination taps](#destination-taps). | Read to show; admin to start or retry |
 | **Go live** | Tap | Starts every destination on the key's programme. | Admin |
 | **Stop all** | Hold | Stops every destination on the key's programme. Shows how many YouTube broadcasts the stop would end. If that count cannot be loaded, it refuses. | Admin |
 | **Stop destination** | Hold | Stops one destination. Shows whether the stop would end a YouTube broadcast, read from the server for that destination. It refuses if the count cannot be loaded or the destination is not the key's own. | Admin |
@@ -203,6 +203,7 @@ Stopping is the Stop destination key's job, so a tap never takes a destination o
 | **Failed**, with its cause | Retries it: the console's Retry, `POST /api/v1/destinations/{id}/restart`. The key repaints from the server at once, amber **Starting**, then **Live**, or **Failed** again with its reason |
 | **Held** after repeated quick rejections | Retries it the same way. The retry lifts the hold: the server starts a fresh attempt and drops the old rejection count |
 | **Live** (whatever its second line says), **Starting**, **Reconnecting**, **Stalled**, **Buffering** | Nothing |
+| **Held** for the whole programme (`destinationHold`, such as waiting for the ingest probe: no destination has a process yet) | Nothing: there is no failed process to retry |
 | **Other programme** | Never a retry: the key does not restart a destination of another programme |
 
 Both need an admin token; a read token shows **Needs admin token**. A refused retry shows

@@ -417,6 +417,60 @@ describe("destination key retry", () => {
     }
   });
 
+  it("sends nothing for the programme-wide hold, which also paints Held", async () => {
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": json(200, {
+        destinations: [{ id: 5, name: "Twitch", platform: "twitch", enabled: true, sourceId: 7, process: null }],
+        destinationHold: { code: "awaiting-ingest-probe", reason: "waiting for the ingest probe" },
+      }),
+    });
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    expect(key.states.at(-1)).toBe(KEY_STATE.held);
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("sends nothing for a failed destination whose delayed tail is draining", async () => {
+    const { rt, net } = retryInstall([
+      { ...FAILED![0]!, delay: { seconds: 30, phase: "draining" } },
+    ]);
+    await paired(rt, surface("d", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.pressDestination("d");
+    expect(net.writes()).toHaveLength(0);
+  });
+
+  it("a status read that fails after the retry paints unreachable, not the old Failed", async () => {
+    let reads = 0;
+    const { rt, net } = runtimeFor({
+      "GET /api/v1/auth/connection": ADMIN,
+      "GET /api/v1/status": () => (++reads > 1 ? { status: 503, body: '{"error":"down"}' } : { status: 200, body: JSON.stringify({ destinations: FAILED }) }),
+      "POST /api/v1/destinations/5/restart": json(200, { status: "restarting" }),
+    });
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    await paired(rt, key);
+    await rt.pressDestination("d");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+    expect(key.oks).toBe(1);
+    // The failed read is not evidence of the present: the key stops claiming Failed at once.
+    expect(key.titles.at(-1)).not.toContain("Failed");
+  });
+
+  it("repaints a second key on the same destination with the first", async () => {
+    const { rt, box } = retryInstall(FAILED);
+    rt.configure(PAIRED);
+    await rt.verify();
+    const a = surface("a", "destination", { sourceId: 7, destinationId: 5 });
+    const b = surface("b", "destination", { sourceId: 7, destinationId: 5 });
+    rt.add(a);
+    rt.add(b);
+    await rt.tick();
+    box.destinations = [{ ...FAILED![0]!, process: { state: "starting" }, reason: null }];
+    await rt.pressDestination("a");
+    expect(b.states.at(-1)).toBe(KEY_STATE.warn);
+  });
+
   it("never restarts a failed destination of another programme", async () => {
     const { rt, net } = retryInstall([{ ...FAILED![0]!, sourceId: 9 }]);
     const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
@@ -464,6 +518,62 @@ describe("destination key retry", () => {
     sched.fireAll();
     await rt.pressDestination("d");
     expect(posts(net)).toEqual(["/api/v1/destinations/5/restart", "/api/v1/destinations/5/restart"]);
+  });
+
+  it("two keys bound to one failed destination send one retry between them", async () => {
+    const { rt, net } = retryInstall(FAILED);
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(surface("a", "destination", { sourceId: 7, destinationId: 5 }));
+    rt.add(surface("b", "destination", { sourceId: 7, destinationId: 5 }));
+    await rt.tick();
+    await rt.pressDestination("a");
+    await rt.pressDestination("b");
+    expect(posts(net)).toEqual(["/api/v1/destinations/5/restart"]);
+  });
+
+  it("a status tick that started before the retry does not paint the old Failed back", async () => {
+    let current: StatusPayload["destinations"] = FAILED;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let holdNext = false;
+    const sent: TransportRequest[] = [];
+    const transport: Transport = {
+      async send(req) {
+        sent.push(req);
+        const path = `${req.method} ${req.url.pathname}`;
+        if (path === "GET /api/v1/auth/connection") return { status: 200, body: JSON.stringify({ name: "SD", prefix: "pmk", scope: "admin", adminScope: true }) };
+        if (path === "POST /api/v1/destinations/5/restart") return { status: 200, body: '{"status":"restarting"}' };
+        if (path === "GET /api/v1/status") {
+          const answer = JSON.stringify({ destinations: current }); // what the server says when the read starts
+          if (holdNext) {
+            holdNext = false;
+            await gate;
+          }
+          return { status: 200, body: answer };
+        }
+        return { status: 404, body: "{}" };
+      },
+    };
+    const sched = manualScheduler();
+    const rt = new Runtime("en", () => transport, sched.schedule);
+    const key = surface("d", "destination", { sourceId: 7, destinationId: 5 });
+    rt.configure(PAIRED);
+    await rt.verify();
+    rt.add(key);
+    await rt.tick();
+    // A tick starts and reads Failed, but its answer is slow.
+    holdNext = true;
+    const slowTick = rt.tick();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(holdNext).toBe(false); // the tick's read has started, and read Failed
+    current = [{ ...FAILED![0]!, process: { state: "starting" }, reason: null }];
+    await rt.pressDestination("d");
+    expect(key.states.at(-1)).toBe(KEY_STATE.warn);
+    release();
+    await slowTick;
+    expect(key.states.at(-1)).toBe(KEY_STATE.warn);
+    expect(key.titles.at(-1)).toContain("Starting");
   });
 
   it("a refused retry starts no cooldown, so the operator can tap again", async () => {

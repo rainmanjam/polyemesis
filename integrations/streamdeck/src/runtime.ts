@@ -197,8 +197,11 @@ export class Runtime {
    * double tap meant as mute-then-unmute ends muted. A tap while one is out is ignored instead.
    */
   private readonly tapping = new Set<string>();
-  /** Destination keys that sent a Retry within RETRY_COOLDOWN_MS, with the timer that clears each. */
-  private readonly retryCooldown = new Map<string, () => void>();
+  /**
+   * Destinations retried within RETRY_COOLDOWN_MS, by destination id, not by key: two keys bound to
+   * one destination must not each restart it, the second interrupting the attempt the first began.
+   */
+  private readonly retryCooldown = new Set<number>();
   /**
    * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
    * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
@@ -229,6 +232,9 @@ export class Runtime {
   private readonly presetRefused = new Set<string>();
   /** One status refresh at a time. A tick that arrives while one is in flight is skipped, not queued. */
   private statusBusy = false;
+  /** Orders status reads per programme, as levelsClock orders level reads. See readScope. */
+  private statusClock = 0;
+  private readonly statusAt = new Map<string, number>();
   /** One meter poll at a time, for the same reason. A dropped packet must not stack requests. */
   private meterBusy = false;
   /** Every destination's stored track levels, by id, read each tick while a track control is on the deck. */
@@ -287,6 +293,8 @@ export class Runtime {
     for (const cancel of this.flashes.values()) cancel();
     this.flashes.clear();
     this.dumpsInFlight.clear();
+    // Destination ids belong to the install: a re-paired install's destination 5 is not this one's.
+    this.retryCooldown.clear();
     this.dialNotices.clear();
     for (const turn of this.turns.values()) turn.cancel?.();
     this.turns.clear();
@@ -352,8 +360,6 @@ export class Runtime {
     this.flashes.get(id)?.();
     this.flashes.delete(id);
     this.dumpsInFlight.delete(id);
-    this.retryCooldown.get(id)?.();
-    this.retryCooldown.delete(id);
     this.levelRefused.delete(id);
     this.dialNotices.delete(id);
     this.turns.get(id)?.cancel?.();
@@ -510,20 +516,34 @@ export class Runtime {
       if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || s.kind === "viewers" || LEVEL_KINDS.includes(s.kind)) continue;
       scopes.add(scopeKey(s.settings.sourceId));
     }
-    for (const key of scopes) {
-      try {
-        const sourceId = key === ALL_SCOPE ? undefined : Number(key);
-        this.statuses.set(key, (await this.client!.status(sourceId)) as StatusPayload);
-        this.scopeErrors.delete(key);
-      } catch (err) {
-        // The old answer is not evidence of the present. Drop it and say unreachable.
-        this.statuses.delete(key);
-        const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
-        this.scopeErrors.set(key, apiErr);
-        if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
-          this.connection = undefined;
-          this.connectionError = apiErr;
-        }
+    for (const key of scopes) await this.readScope(key);
+  }
+
+  /**
+   * Reads one programme's status into the cache, unless the cache already holds a read that STARTED
+   * later: a destination key's post-Retry read runs beside the status tick, and a tick that started
+   * before the restart must not paint the old Failed back over the server's newer answer.
+   */
+  private async readScope(key: string): Promise<void> {
+    const ticket = ++this.statusClock;
+    const newer = () => (this.statusAt.get(key) ?? 0) > ticket;
+    try {
+      const sourceId = key === ALL_SCOPE ? undefined : Number(key);
+      const payload = await this.client!.status(sourceId);
+      if (newer()) return;
+      this.statusAt.set(key, ticket);
+      this.statuses.set(key, payload);
+      this.scopeErrors.delete(key);
+    } catch (err) {
+      if (newer()) return;
+      this.statusAt.set(key, ticket);
+      // The old answer is not evidence of the present. Drop it and say unreachable.
+      this.statuses.delete(key);
+      const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
+      this.scopeErrors.set(key, apiErr);
+      if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
+        this.connection = undefined;
+        this.connectionError = apiErr;
       }
     }
   }
@@ -961,37 +981,29 @@ export class Runtime {
     // The server picks the engine from the destination's own programme and ignores ?source=, so this
     // is the check that keeps a key bound to programme A from restarting a destination of B.
     if (!retryable(dest) || !this.ownsDestination(s, dest.id)) return;
-    if (this.retryCooldown.has(id)) return;
+    if (this.retryCooldown.has(dest.id)) return;
     let sent = false;
     await this.run(s, async () => {
       await this.client!.restartDestination(dest.id, s.settings.sourceId);
       sent = true;
     });
     if (!sent) return;
-    this.retryCooldown.set(
-      id,
-      this.schedule(() => this.retryCooldown.delete(id), RETRY_COOLDOWN_MS),
-    );
+    this.retryCooldown.add(dest.id);
+    this.schedule(() => this.retryCooldown.delete(dest.id), RETRY_COOLDOWN_MS);
     // The real transition, not a guess: read the programme again and paint what the server says now --
     // Starting, then Live on a later tick, or Failed again with its reason.
     await this.repaintScope(s);
   }
 
-  /** Re-reads one key's programme status and repaints that key, unless a status tick is already reading. */
+  /**
+   * Re-reads one key's programme status and repaints the deck from it at once, beside any status tick
+   * in flight: readScope keeps the newer of the two reads, so a tick that started before the restart
+   * cannot paint the old Failed back. Every key is repainted, so a second key on the same destination
+   * (or its stop key) moves with this one.
+   */
   private async repaintScope(s: Surface): Promise<void> {
-    if (this.statusBusy) return;
-    this.statusBusy = true;
-    const key = scopeKey(s.settings.sourceId);
-    try {
-      this.statuses.set(key, await this.client!.status(s.settings.sourceId));
-      this.scopeErrors.delete(key);
-    } catch {
-      // The next tick reads it again and paints whatever it finds, unreachable included.
-      return;
-    } finally {
-      this.statusBusy = false;
-    }
-    if (this.surfaces.get(s.id) === s) await this.paintFace(s, this.faceFor(s));
+    await this.readScope(scopeKey(s.settings.sourceId));
+    await this.paintAll();
   }
 
   async pressGoLive(id: string): Promise<void> {
