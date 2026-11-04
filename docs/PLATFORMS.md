@@ -58,6 +58,11 @@ row reads. They stream perfectly over RTMP, RTMPS or SRT with a pasted URL and
 key; we simply have not researched their APIs, and "unverified" is the honest
 thing to say about an API nobody here has read.
 
+The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
+server URL and key published to X with picture. The rest of the X row
+stays *Unverified*. The details, and a server that could not reach X, are under X
+in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
+
 ## The platforms that need a sentence each
 
 **Facebook — read this before you start.** Full support, and Meta requires
@@ -222,6 +227,49 @@ confirmed any of the built paths yet. Two gates apply on top of the whitelist:
 X's Broadcasts list refuses accounts without X Premium or more than 1,000
 followers (HTTP 412), and X has **no hide action**, so chat moderation offers
 mute, unmute and delete only.
+
+**The stream-key path was verified live on 2026-11-04.** polyemesis built from
+`main` at `b13944ea`, on a macOS machine on a residential connection, published
+to an X destination on `rtmps://a.live.x.com:443/...`, with the server URL and
+stream key pasted from X Media Studio Producer. The log showed
+`destination publishing` about 1.6 seconds after the start, the stream then ran
+steadily for over a minute with no reconnects, and the picture showed in X
+Producer's preview. The test feed was 1280×720 at 30 fps, H.264 at 3 Mb/s with
+AAC stereo at 128 kb/s; it came in over RTMP ingest and went out on the
+passthrough rendition. That verifies publishing with picture through a pasted
+key and nothing more: chat, metadata and every Livestream API path stay
+*Unverified*, and the stream-key cell stays *By hand*, which is what a pasted key
+is.
+
+**X's ingest sits behind Cloudflare, so a server that cannot reach Cloudflare
+over IPv4 cannot stream to X.** The same day, the same X destination failed from
+an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
+`Error opening output … Connection timed out` every 6–7 seconds. X was not
+refusing that host. The host could not reach Cloudflare's IPv4 network at all:
+`https://1.1.1.1` and `https://discord.com` gave no response, and neither did
+`x.com`, `api.x.com` or `abs.twimg.com`; pings to `1.1.1.1` and other Cloudflare
+IPv4 addresses got no reply. Twitch and YouTube ingest, which are not on
+Cloudflare, connected. `https://www.cloudflare.com` did answer, but over IPv6;
+`x.com` and `a.live.x.com` have no IPv6 address of their own, so connections to
+them go over IPv4. X's ingest addresses (`a.live.x.com` and the `pscp.tv` hosts) resolve
+to Cloudflare (172.65.x.x), and a trace to an `x.com` address stopped inside
+OVH's network. The cause is likely routing on the provider's side. It was seen
+on one OVH VPS; other hosts and providers have not been tested.
+
+Before you rely on X from a server, check from that server that it can reach
+Cloudflare over IPv4, and X's ingest host:
+
+```sh
+curl -sS -o /dev/null --connect-timeout 10 -w '%{http_code}\n' https://1.1.1.1
+nc -vz -w 10 a.live.x.com 443
+```
+
+The first prints an HTTP status when it gets a response; on a timeout it prints
+`000` and a curl error. The second is a TCP check to the ingest host; use the
+host in your own server URL if X Producer gave you a different one. If
+Cloudflare is unreachable, contact your provider or use another host or network.
+See
+[Troubleshooting](TROUBLESHOOTING.md#x-destination-connection-timed-out-when-opening-output).
 
 **Instagram — polyemesis cannot AUTOMATE it, but it will push to it.** The
 distinction matters and this page used to collapse it. Instagram's platform

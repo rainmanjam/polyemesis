@@ -170,6 +170,18 @@ its first tagged release.
   brightest packet heads feed it), so the wires keep their track colour on phones. The clip in it is a fictional person and an unbranded car, generated
   with Google Veo 3.1.
 
+### Documentation
+
+- **X's stream-key path was tested live, and a server that cannot reach Cloudflare cannot reach X.**
+  On 2026-11-04 a build of `main` on a residential connection published to X with a pasted server
+  URL and key, and the picture showed in X Producer's preview. docs/PLATFORMS.md records the test;
+  the X row of the capability table is unchanged (the stream key stays *By hand*, everything else
+  *Unverified*). The same destination timed out from an OVH VPS that could not reach Cloudflare's
+  IPv4 network at all, and X's ingest sits behind Cloudflare; the cause is likely routing on the
+  provider's side, and other hosts are untested. docs/PLATFORMS.md says how to check that a server
+  can reach Cloudflare and X's ingest first, and docs/TROUBLESHOOTING.md has a new entry for
+  "Connection timed out" on an X destination.
+
 ## [0.12.0] — 2026-11-03
 
 ### Added
