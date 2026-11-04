@@ -23,9 +23,13 @@ interface Props {
    * the thing they came for. `release` is the build-time read of the latest
    * tag, null when that read failed. */
   announce?: { release: string | null };
+  /** Draw the home hero's signal grid behind the top of the page, so the
+   * marketing pages share one backdrop. The home page draws its own inside the
+   * hero, and the docs leave it off: reading pages get a plain ground. */
+  grid?: boolean;
 }
 
-const { title, description, path, noindex = false, announce } = Astro.props;
+const { title, description, path, noindex = false, announce, grid = false } = Astro.props;
 const canonical = new URL(path ?? Astro.url.pathname, Astro.site ?? "https://polyemesis.com");
 const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
 ---
@@ -215,7 +219,8 @@ const ogImage = new URL("/og.png", Astro.site ?? "https://polyemesis.com");
         permanent 30px of a phone's viewport on a sentence that is read once. */}
     {announce && <Announce release={announce.release} />}
     <Nav />
-    <main id="main">
+    <main id="main" class:list={[grid && "page-grid"]}>
+      {grid && <div class="signal-grid page-grid-layer" aria-hidden="true"></div>}
       <slot />
     </main>
     <Footer />

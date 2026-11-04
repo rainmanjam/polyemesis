@@ -267,6 +267,19 @@
     overflow: hidden;
   }
 
+  /* The same grid behind the top of the other marketing pages (Base `grid`).
+     Sized like the home hero band so the fade lands at the same depth, and
+     sent behind the content: isolation keeps z-index -1 above the body's
+     ground instead of under it. */
+  .page-grid { position: relative; isolation: isolate; }
+  .page-grid-layer {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 880px;
+    z-index: -1;
+    pointer-events: none;
+  }
+
   /* No sweep. A blue light used to pass across this grid every 19 seconds: a
      linear-gradient on ::after. Gradients appear only in the logo mark
      (docs/DESIGN-SYSTEM.md), and blue is for interaction, so a decorative blue
