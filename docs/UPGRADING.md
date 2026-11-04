@@ -257,6 +257,11 @@ editor names what was refused, and the server log says so on every start. If you
 relied on expert arguments, open each such destination's expert editor after
 upgrading and check what still applies.
 
+**The OBS bridge script sends its token only over HTTPS**, or over plain HTTP
+only to the same machine. If your OBS reaches polyemesis on another machine at
+an `http://` address, the script now refuses it and sends nothing; point it at
+the `https://` address instead.
+
 **`rollback.sh` refuses while this install is on the air**, unless you pass
 `--force`. It names the changes it will lose and asks on a terminal before it
 starts.
