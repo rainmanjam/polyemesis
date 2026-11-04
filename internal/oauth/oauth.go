@@ -26,6 +26,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -545,6 +546,39 @@ type tokenStatusError struct {
 	body string
 }
 
+// ErrReconnectRequired matches a refresh the platform refused because the
+// grant itself is gone -- revoked, expired for good, or never refreshable --
+// as distinct from a refresh that failed and may work if tried again. Only
+// reconnecting the account fixes it, so callers branch on errors.Is rather
+// than reading "reconnect" back out of an error's text (poka-yoke audit
+// 2026-11-04: a revoked grant's invalid_grant matched no such string and was
+// retried five times as a generic token failure).
+var ErrReconnectRequired = errors.New("reconnect the account")
+
+// grantGone reports whether a token-endpoint answer means the grant is gone:
+// RFC 6749's invalid_grant (sent with 400, by some platforms with 401), or a
+// 401 from the token endpoint itself.
+func grantGone(code int, text string) bool {
+	return code == http.StatusUnauthorized || strings.Contains(text, "invalid_grant")
+}
+
+// Is lets errors.Is(err, ErrReconnectRequired) see a refused grant.
+func (e *tokenStatusError) Is(target error) bool {
+	return target == ErrReconnectRequired && grantGone(e.code, e.body)
+}
+
+// tokenErrorResponse is an OAuth error carried in a 2xx body, which some
+// platforms (TikTok) send instead of a 400.
+type tokenErrorResponse struct {
+	code, desc string
+}
+
+func (e *tokenErrorResponse) Error() string { return fmt.Sprintf("%s: %s", e.code, e.desc) }
+
+func (e *tokenErrorResponse) Is(target error) bool {
+	return target == ErrReconnectRequired && grantGone(0, e.code)
+}
+
 // Error's wording is unchanged from the fmt.Errorf this type replaced, so
 // nothing that previously read the message -- logs, other error text built
 // with %w -- changes behaviour.
@@ -587,7 +621,7 @@ func postForm(ctx context.Context, endpoint string, form url.Values, headers map
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
 	if out.Error != "" {
-		return nil, fmt.Errorf("%s: %s", out.Error, out.ErrorDesc)
+		return nil, &tokenErrorResponse{code: out.Error, desc: out.ErrorDesc}
 	}
 	if out.AccessToken == "" {
 		return nil, fmt.Errorf("token response contained no access_token")

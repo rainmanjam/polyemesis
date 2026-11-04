@@ -36,6 +36,7 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/clipper"
 	"github.com/rainmanjam/polyemesis/internal/db"
 	"github.com/rainmanjam/polyemesis/internal/jobs"
+	"github.com/rainmanjam/polyemesis/internal/oauth"
 	"github.com/rainmanjam/polyemesis/internal/publish"
 )
 
@@ -49,6 +50,11 @@ const publishMaxAttempts = 5
 func (s *Server) PublishTokens() publish.TokenSource {
 	return func(ctx context.Context, accountID int64) (publish.Credential, error) {
 		acct, err := s.tokenFor(ctx, accountID)
+		if errors.Is(err, oauth.ErrReconnectRequired) {
+			// Typed for the worker, which ends the publish with
+			// needs_reconnect instead of retrying a grant that is gone.
+			return publish.Credential{}, fmt.Errorf("%w: %v", publish.ErrReconnectRequired, err)
+		}
 		if err != nil {
 			return publish.Credential{}, err
 		}

@@ -99,6 +99,16 @@ type Message struct {
 	Echo bool `json:"echo,omitempty"`
 }
 
+// Trusted reports whether automod must leave this message alone: one the
+// operator sent through polyemesis, or one from the channel's broadcaster or a
+// moderator. Automod used to judge these like any viewer's, so a flood or link
+// rule could time out or ban the channel owner on their own channel (poka-yoke
+// audit 2026-11-04). One predicate, on the message, so a new platform's
+// adapter only has to fill in Author's badges -- it cannot forget the check.
+func (m Message) Trusted() bool {
+	return m.Echo || m.Author.Broadcaster || m.Author.Moderator
+}
+
 // Key identifies a message for deduplication. Platform and account are part of
 // it because message ids are only unique within a platform, and two platforms
 // will eventually both call something "1".

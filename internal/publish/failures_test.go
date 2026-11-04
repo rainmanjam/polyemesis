@@ -246,7 +246,8 @@ func TestATokenErrorThatSaysReconnectIsPermanent(t *testing.T) {
 	w := NewWorker(WorkerDeps{
 		Ledger: LedgerFor(e.d, e.box),
 		Tokens: func(context.Context, int64) (Credential, error) {
-			return Credential{}, fmt.Errorf("the youtube token has expired and there is no refresh token; reconnect the account")
+			return Credential{}, fmt.Errorf("%w: the youtube token has expired and there is no refresh token",
+				ErrReconnectRequired)
 		},
 		Clips: func(context.Context, int64) (File, error) { return e.clip, nil }, Adapters: e.ad,
 	})
@@ -254,6 +255,48 @@ func TestATokenErrorThatSaysReconnectIsPermanent(t *testing.T) {
 	err := w.Run(context.Background(), jobs.Job{ID: 1, Params: raw, Attempts: 1, MaxAttempts: 3}, &rep{})
 	if !jobs.IsPermanent(err) || cnt.n() != 0 {
 		t.Fatalf("err = %v requests = %d", err, cnt.n())
+	}
+}
+
+// A revoked refresh token answers invalid_grant, whose text says nothing about
+// reconnecting. The worker used to string-match "reconnect", so this was
+// retried five times and ended as token_rejected with no guidance. The typed
+// sentinel ends it at once as needs_reconnect, whatever the words say.
+func TestARevokedGrantEndsAsNeedsReconnectWithoutRetrying(t *testing.T) {
+	e, _, cnt := ytEnv(t)
+	p, params := e.claim(PlatformYouTube)
+	w := NewWorker(WorkerDeps{
+		Ledger: LedgerFor(e.d, e.box),
+		Tokens: func(context.Context, int64) (Credential, error) {
+			return Credential{}, fmt.Errorf("%w: could not refresh the youtube token: token endpoint returned 400: "+
+				`{"error":"invalid_grant","error_description":"Token has been expired or revoked."}`,
+				ErrReconnectRequired)
+		},
+		Clips: func(context.Context, int64) (File, error) { return e.clip, nil }, Adapters: e.ad,
+	})
+	err := w.Run(context.Background(), jobs.Job{ID: 1, Params: mustParams(params), Attempts: 1, MaxAttempts: 5}, &rep{})
+	if !jobs.IsPermanent(err) || cnt.n() != 0 {
+		t.Fatalf("err = %v requests = %d, want a permanent failure with nothing sent", err, cnt.n())
+	}
+	if got := e.row(p.ID).FailCause; got != string(CauseNeedsReconnect) {
+		t.Errorf("cause = %q, want %q", got, CauseNeedsReconnect)
+	}
+}
+
+// And an untyped token failure, however it is worded, is still retried.
+func TestAnUntypedTokenErrorIsRetried(t *testing.T) {
+	e, _, _ := ytEnv(t)
+	_, params := e.claim(PlatformYouTube)
+	w := NewWorker(WorkerDeps{
+		Ledger: LedgerFor(e.d, e.box),
+		Tokens: func(context.Context, int64) (Credential, error) {
+			return Credential{}, fmt.Errorf("token endpoint returned 503: please reconnect later")
+		},
+		Clips: func(context.Context, int64) (File, error) { return e.clip, nil }, Adapters: e.ad,
+	})
+	err := w.Run(context.Background(), jobs.Job{ID: 1, Params: mustParams(params), Attempts: 1, MaxAttempts: 5}, &rep{})
+	if err == nil || jobs.IsPermanent(err) {
+		t.Fatalf("err = %v, want a retryable failure", err)
 	}
 }
 
@@ -576,5 +619,34 @@ func TestXAnUnreadableFinalizeIsNotTreatedAsReady(t *testing.T) {
 	}
 	if cnt.count("POST /2/tweets") != 0 {
 		t.Fatal("a post was created from unfinished media")
+	}
+}
+
+// YouTube's three limits are different failures. rateLimitExceeded used to be
+// classed as the daily quota -- terminal, "wait until midnight Pacific" -- so a
+// clip a short backoff would have published was dropped.
+func TestYouTubeLimitsAreToldApart(t *testing.T) {
+	for _, c := range []struct {
+		reason string
+		cause  Cause
+		retry  bool
+		says   string
+	}{
+		{"quotaExceeded", CauseQuota, false, "midnight Pacific"},
+		{"dailyLimitExceeded", CauseQuota, false, "midnight Pacific"},
+		{"rateLimitExceeded", CauseRateLimited, true, "slow down"},
+		{"userRateLimitExceeded", CauseRateLimited, true, "slow down"},
+		{"uploadLimitExceeded", CauseQuota, false, "per-channel limit"},
+	} {
+		t.Run(c.reason, func(t *testing.T) {
+			body := fmt.Sprintf(`{"error":{"code":403,"message":"m","errors":[{"reason":%q}]}}`, c.reason)
+			f := ytFailure(http.StatusForbidden, []byte(body))
+			if f.Cause != c.cause || f.Retry != c.retry {
+				t.Errorf("%s -> cause %q retry %v, want %q retry %v", c.reason, f.Cause, f.Retry, c.cause, c.retry)
+			}
+			if !strings.Contains(f.Detail, c.says) {
+				t.Errorf("%s detail %q does not say %q", c.reason, f.Detail, c.says)
+			}
+		})
 	}
 }

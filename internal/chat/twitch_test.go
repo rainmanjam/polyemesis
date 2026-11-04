@@ -924,3 +924,48 @@ func TestTwitchChatSettingsSendsNothingWhenNothingChanged(t *testing.T) {
 		t.Fatal("an empty settings change was sent to Twitch anyway")
 	}
 }
+
+// The Hub reconnects by calling Run again on the same adapter. The PASS line
+// used to replay the token captured at attach time, so after it expired every
+// reconnect was refused as fatal. Each connect must ask PassToken afresh.
+func TestTwitchReconnectSendsAFreshTokenEachConnect(t *testing.T) {
+	var calls int
+	tokens := []string{"first-token", "second-token"}
+	pass := func(context.Context) (string, error) {
+		tok := tokens[calls%len(tokens)]
+		calls++
+		return tok, nil
+	}
+	for i, want := range tokens {
+		a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Token: "attach-time-token"})
+		a.cfg.PassToken = pass
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
+		srv.readLine(t) // CAP
+		if got := srv.readLine(t); got != "PASS oauth:"+want {
+			t.Errorf("connect %d sent %q, want the fresh token %q", i, got, want)
+		}
+		cancel()
+		srv.conn.Close()
+		<-done
+	}
+}
+
+// A refresh that fails falls back to the configured token rather than
+// failing the connect.
+func TestTwitchFallsBackToTheConfiguredTokenWhenRefreshFails(t *testing.T) {
+	a, srv := newTwitchOverPipe(t, TwitchConfig{Nick: "streamer", Token: "stored-token"})
+	a.cfg.PassToken = func(context.Context) (string, error) { return "", errors.New("refresh failed") }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx, SinkFunc(func(Message) {})) }()
+	srv.readLine(t) // CAP
+	if got := srv.readLine(t); got != "PASS oauth:stored-token" {
+		t.Errorf("sent %q, want the stored token", got)
+	}
+	cancel()
+	srv.conn.Close()
+	<-done
+}

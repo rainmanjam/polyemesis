@@ -200,9 +200,10 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 		})
 
 	case db.PlatformTwitch:
-		// IRC wants the token itself rather than a supplier: the PASS line is
-		// written once, at connect, and the runner reconnects through this
-		// whole function when it expires.
+		// The token is read here so a missing one is a "not configured" state
+		// at attach. It is NOT what reconnects use: the runner reconnects by
+		// calling Run again on the adapter this returns, not through this
+		// function, so PassToken supplies a fresh one for every PASS line.
 		acct, err := s.tokenFor(ctx, a.ID)
 		if err != nil {
 			return nil, err
@@ -225,6 +226,7 @@ func (s *Server) chatAdapter(ctx context.Context, a db.PlatformAccount) (chat.Ad
 			Channel:    a.AccountName,
 			AccountRef: a.AccountRef,
 			Token:      acct.AccessToken,
+			PassToken:  s.chatToken(a.ID),
 			HelixToken: s.chatToken(a.ID),
 			ClientID:   clientID,
 			// Channel is set from AccountName just above, so the account IS the

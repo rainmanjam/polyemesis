@@ -1414,8 +1414,8 @@ func (s *Server) tokenFor(ctx context.Context, accountID int64) (*db.PlatformAcc
 	// this function never actually reasoned about.
 	seen := acct.Revision()
 	if acct.RefreshToken == "" {
-		return nil, fmt.Errorf("the %s token has expired and there is no refresh token; reconnect the account",
-			acct.Platform)
+		return nil, fmt.Errorf("the %s token has expired and there is no refresh token: %w",
+			acct.Platform, oauth.ErrReconnectRequired)
 	}
 
 	provider, err := s.providers.Get(acct.Platform)

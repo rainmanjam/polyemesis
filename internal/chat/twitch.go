@@ -69,6 +69,13 @@ type TwitchConfig struct {
 	// Token is the OAuth access token. It is written once, to the PASS line,
 	// and appears in no log, error or status message anywhere in this file.
 	Token string
+	// PassToken, when set, supplies the token for the PASS line on EVERY
+	// connect, and Token is used only if it fails. The Hub reconnects by
+	// calling Run again on this same adapter, so a Token captured at attach
+	// time was replayed on every reconnect; once it expired (about four hours
+	// on Twitch) the login was refused as fatal and chat stayed dark until a
+	// restart (poka-yoke audit 2026-11-04).
+	PassToken TokenFunc
 	// Dial replaces the TLS dial. It is the seam the tests use, and nothing at
 	// runtime sets it.
 	Dial func(ctx context.Context) (net.Conn, error)
@@ -192,7 +199,7 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 	if err := t.writeLine(conn, "CAP REQ :twitch.tv/tags twitch.tv/commands"); err != nil {
 		return err
 	}
-	if err := t.writeLine(conn, "PASS oauth:"+t.cfg.Token); err != nil {
+	if err := t.writeLine(conn, "PASS oauth:"+t.passToken(ctx)); err != nil {
 		return fmt.Errorf("sending Twitch credentials failed: %w", err)
 	}
 	if err := t.writeLine(conn, "NICK "+t.cfg.Nick); err != nil {
@@ -227,6 +234,25 @@ func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
 			return err
 		}
 	}
+}
+
+// RefreshesPassToken reports whether this adapter fetches a fresh token for
+// every connect. Exported for the API's wiring test: the adapter's own tests
+// build it with whatever config they like, so only a check at the production
+// construction site proves the field is set there.
+func (t *TwitchAdapter) RefreshesPassToken() bool { return t.cfg.PassToken != nil }
+
+// passToken is the token for this connect's PASS line: a fresh one from
+// PassToken when it can supply one, otherwise the configured Token. A refresh
+// that fails falls back rather than failing the connect, because the stored
+// token may still be valid and Twitch's own answer to it is the clearer error.
+func (t *TwitchAdapter) passToken(ctx context.Context) string {
+	if t.cfg.PassToken != nil {
+		if tok, err := t.cfg.PassToken(ctx); err == nil && tok != "" {
+			return tok
+		}
+	}
+	return t.cfg.Token
 }
 
 // handle processes one parsed line. It returns done=true when the connection

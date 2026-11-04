@@ -268,6 +268,11 @@ func GrantFailure(platform, scopes string) *Failure {
 	return fail(CauseUnknown, false, "unknown platform %q", platform)
 }
 
+// ErrReconnectRequired is what a TokenSource wraps when the account's grant is
+// gone (revoked, or expired with no refresh token). The worker ends the
+// publish as needs_reconnect on errors.Is, not by reading the error's text.
+var ErrReconnectRequired = errors.New("the platform no longer accepts this account's grant; connect it again in Settings")
+
 // TokenGate hands the worker a TokenSource that is filled in later. The queue
 // and its workers start before the API server exists, and the token refresh
 // path lives on the server; until Set is called the source answers with a
