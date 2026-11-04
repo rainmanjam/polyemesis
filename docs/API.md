@@ -1146,8 +1146,10 @@ are refused outright, whatever is acknowledged: `-progress`, `-vstats`,
 the HLS/segment file options, `-i`, nested option lists (`-format_opts`,
 `-protocol_opts`, ...), any `-f` other than a streaming format (`flv`, `mpegts`,
 `matroska`, `webm`, `mp4`, `mov`, `nut`, `rtp`, `rtp_mpegts`, `rtsp`, `ogg`,
-`adts`, `null` for output; `mpegts` for input), encoder params that name a file
-(`dump-yuv=`, `stats=`, `pass=`, ... however they are escaped or spelt), and
+`adts`, `null` for output; `mpegts` for input), any key in `-x264-params`,
+`-x264opts`, `-x265-params`, `-svtav1-params` or `-aom-params` outside an
+allowlist of rate-control, GOP, quality and colour keys (so `stats=`, `pass=`,
+`dump-yuv=` and their negated or aliased forms are refused), and
 any bare token that FFmpeg would take as a second output.
 Filter graphs may use only filters on an allowlist of ones whose options name
 no file (`scale`, `fps`, `volume`, `aresample`, `overlay`, ...); any other

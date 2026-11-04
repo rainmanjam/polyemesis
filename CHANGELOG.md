@@ -26,8 +26,8 @@ its first tagged release.
   API token of any scope; nothing that ships uses them with a token. For the signed-in operator,
   options are an allowlist generated from FFmpeg's own option table, with every option whose help
   mentions a file, path, URL, log, dump, stats or device left out. Filter graphs may use only
-  filters vetted to open no file, the `/option=` form is refused, and so are encoder keys such as
-  `pass=`, `stats=` and `dump-yuv=`, nested option lists such as `-format_opts`, `-f` values
+  filters vetted to open no file, the `/option=` form is refused, and so is any encoder-param key
+  outside an allowlist of tuning keys (`pass=`, `stats=`, `dump-yuv=` and their aliases are out), nested option lists such as `-format_opts`, `-f` values
   other than streaming formats (`flv`, `mpegts`, `matroska`, `mp4`, ...), `-i`, and stray output
   tokens. Arguments
   saved before this are dropped when the destination starts, with a log line saying why. See

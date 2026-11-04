@@ -59,3 +59,39 @@ func TestCheckExpertFileAccessAcceptsTheStreamingFormats(t *testing.T) {
 		}
 	}
 }
+
+// The fourth security review: encoder keys are an allowlist, because the
+// encoders accept aliases and negated forms no denylist can enumerate.
+func TestEncoderParamKeysAreAnAllowlist(t *testing.T) {
+	for _, tc := range []struct{ flag, params, want string }{
+		{"-x264-params", "no-stats=/tmp/s", "no-stats"},
+		{"-x264-params", "nostats=/tmp/s", "nostats"},
+		{"-x264-params", "Dump_YUV=/tmp/y", "dump-yuv"},
+		{"-x264opts", "keyint=60:STATS=/tmp/s", "stats"},
+		{"-x265-params", "film-grain=/tmp/model.bin", "film-grain"},
+		{"-x265-params", "zonefile=/tmp/z", "zonefile"},
+		{"-svtav1-params", "fgs-table=/tmp/t", "fgs-table"},
+		{"-x264-params", "an-alias-nobody-listed=1", "an-alias-nobody-listed"},
+	} {
+		err := CheckExpertFileAccess("output args", []string{tc.flag, tc.params})
+		if err == nil {
+			t.Errorf("accepted %s %s", tc.flag, tc.params)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s %s refused with %q, which does not name %q", tc.flag, tc.params, err, tc.want)
+		}
+	}
+	for _, ok := range []struct{ flag, params string }{
+		{"-x264-params", "keyint=60:min-keyint=60:scenecut=0"},
+		{"-x264-params", "nal-hrd=cbr:force-cfr=1"},
+		{"-x264opts", "no-mbtree:bframes=2"},
+		{"-x264-params", "No_MBTree=1"},
+		{"-x265-params", "keyint=120:no-open-gop=1:repeat-headers=1"},
+		{"-svtav1-params", "tune=0:enable-overlays=1:scd=1"},
+	} {
+		if err := CheckExpertFileAccess("output args", []string{ok.flag, ok.params}); err != nil {
+			t.Errorf("refused ordinary %s %s: %v", ok.flag, ok.params, err)
+		}
+	}
+}

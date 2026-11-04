@@ -120,24 +120,51 @@ var codecParamFlags = map[string]bool{
 	"-aom-params": true,
 }
 
-// codecFileKeys are the keys, across x264, x265 and SVT-AV1's own option
-// lists, whose value is a path or which make the encoder write one: two-pass
-// state (pass/stats), reconstruction and analysis dumps, CSV logs, QP, zone,
-// quant-matrix, scaling-list, lambda, timecode, film-grain and ROI tables.
-var codecFileKeys = map[string]bool{
-	// x264
-	"stats": true, "pass": true, "dump-yuv": true, "qpfile": true, "cqmfile": true,
-	"tcfile-in": true, "tcfile-out": true,
-	// x265
-	"csv": true, "csv-log-level": true, "analysis-save": true, "analysis-load": true,
-	"analysis-reuse-file": true, "zonefile": true, "scaling-list": true, "lambda-file": true,
-	"recon": true, "recon-y4m-exec": true, "dolby-vision-rpu": true, "film-grain": true,
-	"multi-pass-opt-analysis": true, "multi-pass-opt-distortion": true,
-	// SVT-AV1
-	"passes": true, "stat-file": true, "input-stat-file": true, "output-stat-file": true,
-	"fgs-table": true, "roi-map-file": true, "qp-file": true, "config": true, "c": true,
-	// x265's NAL and HDR10+ input files; libaom's film-grain table.
-	"nalu-file": true, "dhdr10-info": true, "film-grain-table": true,
+// codecParamKeys are the encoder keys expert mode accepts inside
+// -x264-params, -x264opts, -x265-params, -svtav1-params and -aom-params: rate
+// control, GOP, motion search, colour and tiling. AN ALLOWLIST (fourth security
+// review): the encoders accept aliases and negated forms (no-stats, nostats),
+// so no list of file-naming keys can be complete. Every key that names or
+// writes a file -- stats, pass, dump-yuv, csv, qpfile, zonefile, analysis-*,
+// recon, scaling-list, lambda-file, nalu-file, dhdr10-info, fgs-table,
+// film-grain (a model file in x265) -- is absent, so it is refused in any
+// spelling.
+var codecParamKeys = map[string]bool{
+	// rate control and GOP
+	"keyint": true, "min-keyint": true, "keyint-min": true, "scenecut": true, "bframes": true,
+	"b-adapt": true, "b-pyramid": true, "ref": true, "rc-lookahead": true, "lookahead": true,
+	"vbv-maxrate": true, "vbv-bufsize": true, "vbv-init": true, "crf": true, "qp": true,
+	"bitrate": true, "rc": true, "tbr": true, "mbr": true, "nal-hrd": true, "hrd": true,
+	"force-cfr": true, "open-gop": true, "intra-refresh": true, "irefresh-type": true,
+	"scd": true, "mbtree": true, "cutree": true, "filler": true, "min-qp": true, "max-qp": true,
+	"qpmin": true, "qpmax": true, "qpstep": true, "ipratio": true, "pbratio": true,
+	"buf-sz": true, "buf-initial-sz": true, "buf-optimal-sz": true, "undershoot-pct": true,
+	"overshoot-pct": true, "lag-in-frames": true,
+	// analysis and quality
+	"aq-mode": true, "aq-strength": true, "psy-rd": true, "psy-rdoq": true, "psy": true,
+	"me": true, "subme": true, "merange": true, "trellis": true, "weightp": true,
+	"weightb": true, "8x8dct": true, "cabac": true, "deblock": true, "partitions": true,
+	"direct": true, "mixed-refs": true, "fast-pskip": true, "dct-decimate": true, "rd": true,
+	"ctu": true, "min-cu-size": true, "tu-intra-depth": true, "tu-inter-depth": true,
+	"b-intra": true, "rect": true, "amp": true, "limit-refs": true, "sao": true,
+	"strong-intra-smoothing": true, "preset": true, "tune": true, "profile": true,
+	"level": true, "level-idc": true, "high-tier": true, "cpu-used": true,
+	"enable-tf": true, "enable-qm": true, "qm-min": true, "qm-max": true, "enable-dlf": true,
+	"enable-cdef": true, "enable-restoration": true, "sharpness": true,
+	"variance-boost-strength": true, "enable-overlays": true, "fast-decode": true,
+	"pred-struct": true, "hierarchical-levels": true, "enable-tpl-model": true,
+	"deltaq-mode": true,
+	// threading and slicing
+	"threads": true, "sliced-threads": true, "sync-lookahead": true, "slices": true,
+	"frame-threads": true, "pools": true, "wpp": true, "pmode": true, "pme": true,
+	"lookahead-slices": true, "lp": true, "pin": true, "tile-rows": true,
+	"tile-columns": true, "row-mt": true,
+	// bitstream and colour
+	"aud": true, "repeat-headers": true, "annexb": true, "bluray-compat": true, "info": true,
+	"colorprim": true, "transfer": true, "colormatrix": true, "fullrange": true, "range": true,
+	"color-primaries": true, "transfer-characteristics": true, "matrix-coefficients": true,
+	"color-range": true, "hdr10": true, "hdr10-opt": true, "master-display": true,
+	"max-cll": true, "mastering-display": true, "content-light": true,
 }
 
 // optionBase strips a stream specifier: -c:v:0 -> -c, -dump_attachment:t ->
@@ -239,8 +266,8 @@ func CheckExpertFileAccess(field string, argv []string) error {
 			}
 		case codecParamFlags[base]:
 			if key := codecParamOpensFile(v); key != "" {
-				return fmt.Errorf("%s: %s= in %s names a file on the server. Expert mode cannot "+
-					"touch files on the server", field, key, a)
+				return fmt.Errorf("%s: %s= in %s is not one of the encoder keys expert mode "+
+					"allows; keys outside that list can name a file on the server", field, key, a)
 			}
 		}
 	}
@@ -294,20 +321,28 @@ func checkFilterGraph(graph string) error {
 }
 
 // codecParamOpensFile returns the first key in an x264/x265-style
-// "k=v:k=v" list that names a file, or "".
+// "k=v:k=v" list that is not on the allowlist, or "".
 //
 // Keys are normalised the way the encoders read them before the lookup: the
-// list is unescaped by av_dict_parse_string (so \ ' and " vanish), and x264,
-// x265 and SVT-AV1 accept '_' for '-' and any case. Without that,
-// d\ump-yuv= or dump_yuv= walked past the check (review follow-up).
+// list is unescaped by av_dict_parse_string (so \ ' and " vanish), x264, x265
+// and SVT-AV1 accept '_' for '-' and any case, and a "no-" or "no" prefix
+// negates a boolean. A negation is accepted only when the key it negates is
+// allowed, so no-stats and nostats are refused like stats.
 func codecParamOpensFile(params string) string {
 	clean := strings.NewReplacer(`\`, "", `'`, "", `"`, "").Replace(params)
 	for _, kv := range strings.FieldsFunc(clean, func(r rune) bool { return r == ':' || r == ',' }) {
 		k, _, _ := strings.Cut(kv, "=")
 		k = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(k)), "_", "-")
-		if codecFileKeys[k] {
-			return k
+		if k == "" || codecParamKeys[k] {
+			continue
 		}
+		if base, ok := strings.CutPrefix(k, "no-"); ok && codecParamKeys[base] {
+			continue
+		}
+		if base, ok := strings.CutPrefix(k, "no"); ok && codecParamKeys[base] {
+			continue
+		}
+		return k
 	}
 	return ""
 }
