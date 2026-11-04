@@ -105,6 +105,10 @@ export async function settle(page: import("@playwright/test").Page, ms = 900) {
  *  is the truth. */
 async function waitForIngestChip(page: import("@playwright/test").Page) {
   const chip = page.getByTestId("chrome-ingest-status");
+  // Attached first. Straight after a navigation the chrome has often not
+  // rendered yet, and a count of zero then skipped the wait entirely: the
+  // chat shot was taken 1.5 s in, with the chip still reading "Loading…".
+  await chip.waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
   if ((await chip.count()) === 0) return;
   await expect(chip).not.toHaveText(/^(Stopped|Loading…)$/, { timeout: 15_000 }).catch(() => {});
 }

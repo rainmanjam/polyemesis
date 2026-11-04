@@ -52,13 +52,18 @@ account is attached yet"*, under a test named "four platforms in one hub". The
 picture argued the opposite of its own title, which is its own kind of
 dishonesty.
 
+Which platforms the send box may name is not part of the fixture: the capture
+reads it from `GET /platforms/capabilities`, the same matrix the server uses,
+so Facebook (chat send "Not possible") shows as receive-only.
+
 It is written down here because an undeclared exception is how a policy stops
 meaning anything.
 
 ### `21-platforms.png` and `22-platforms-connected.png`
 
 `21-platforms.png` is Settings → Platform credentials in the state every new
-install starts in: no developer app registered and no account connected, so the
+install starts in: the "Optional" banner, an empty Connected channels card, and
+YouTube's row opened with **Set up** to show its one-time setup, where the
 Client ID and Client secret fields are empty. Nothing types into those fields.
 
 `22-platforms-connected.png` is the same real page after that one-time setup,
@@ -66,8 +71,10 @@ and it is the second declared exception, on the same terms as chat. Connecting
 needs live OAuth credentials for a real channel, so the capture serves fixture
 responses for `/platforms/credentials` and `/platforms/accounts`: a client id
 reading `demo-…-client-not-real`, and accounts named "Demo Studio". The viewer
-readout says Offline, because no platform is carrying the demo stream. The page
-and its logic are genuine; whose channel it is, is not.
+readout says Offline, because no platform is carrying the demo stream. Since
+the Platform credentials redesign the shot is the Connected channels card, one
+row per connected platform with its Connected pill, above the platforms not yet
+set up. The page and its logic are genuine; whose channel it is, is not.
 
 The website's "Platform sign-in" section shows the connected state, with the
 empty form beneath it as the one-time setup.
@@ -78,7 +85,13 @@ empty form beneath it as the one-time setup.
 music-rights switch for the selected destination, cropped so it stays legible
 at a small size. It was taken for the home page hero, which the animated
 SignalPath component replaces ([#971](https://github.com/rainmanjam/polyemesis/pull/971));
-the clip is kept for any page that needs the routing screen at that size. `07-monitoring.png` is framed on the process
+the clip is kept for any page that needs the routing screen at that size. It is
+taken at 1024×1800, because the music-rights card sits below the four track
+rows and a clip is cut from the viewport: at 900px tall it ended on Track 4 and
+the switch was not in it. On the demo's three programmes the level frames name
+no programme, so tracks 3 and 4 can read "not measured" when another
+programme's two-track frame arrived last; the committed clip is a capture
+checked by eye to show all four meters. `07-monitoring.png` is framed on the process
 list, with the FFmpeg log filtered to one process (the preview, when it still
 has lines). Every child that decodes the relay joins it mid-GOP and logs a burst
 of h264 decoder errors until the first keyframe; the supervisor logs that burst
