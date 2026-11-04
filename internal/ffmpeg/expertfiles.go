@@ -61,6 +61,9 @@ var fileOptions = map[string]string{
 var outputFormats = map[string]bool{
 	"flv": true, "mpegts": true, "matroska": true, "webm": true, "mp4": true, "mov": true,
 	"nut": true, "rtp": true, "rtp_mpegts": true, "rtsp": true, "ogg": true, "adts": true, "null": true,
+	// The audio destinations' own muxers (audioFormats), so restating one is
+	// never refused. TestEveryFormatADestinationEmitsIsAllowed holds this.
+	"mp3": true, "ipod": true, "flac": true, "wav": true,
 }
 
 // inputFormats are the only values -f may take in the input arguments. The

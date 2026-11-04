@@ -95,3 +95,20 @@ func TestEncoderParamKeysAreAnAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// Every format the destination builder itself emits must be allowed in expert
+// output args, or an operator restating their own destination's -f is refused.
+func TestEveryFormatADestinationEmitsIsAllowed(t *testing.T) {
+	emitted := []string{"flv", "mpegts"}
+	for _, ext := range []string{".mp4", ".m4v", ".flv", ".ts", ".mov", ".mkv"} {
+		emitted = append(emitted, fileFormat("x"+ext))
+	}
+	for _, a := range audioFormats {
+		emitted = append(emitted, a.muxer)
+	}
+	for _, f := range emitted {
+		if err := CheckExpertFileAccess("output args", []string{"-f", f}); err != nil {
+			t.Errorf("a destination emits -f %s, and expert mode refuses it: %v", f, err)
+		}
+	}
+}
