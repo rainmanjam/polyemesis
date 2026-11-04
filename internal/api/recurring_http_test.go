@@ -159,7 +159,8 @@ func TestTheCalendarListsAWindowAndRefusesAnUnboundedOne(t *testing.T) {
 // Skipping an occurrence through the calendar cancels its event and reports the new state.
 func TestSkippingAnOccurrenceThroughTheCalendarCancelsItsEvent(t *testing.T) {
 	f := newRecurringHTTP(t)
-	at := time.Date(2026, 11, 3, 19, 0, 0, 0, time.UTC)
+	// In the future, so the API acts on it: a past occurrence is refused.
+	at := time.Now().Add(72 * time.Hour).Truncate(time.Hour)
 	id, err := f.store.ClaimOccurrence(scheduler.Occurrence{ScheduleID: f.schedule, DestinationID: f.dest.ID,
 		At: at, State: scheduler.OccurrencePending})
 	if err != nil {
@@ -221,7 +222,8 @@ func TestEditingOneOccurrenceTitleWritesThatEventOnly(t *testing.T) {
 // A title longer than the platform allows is refused before any call, the same as a template title.
 func TestAnOccurrenceTitleOverTheLimitIsRefusedBeforeAnyPlatformCall(t *testing.T) {
 	f := newRecurringHTTP(t)
-	at := time.Date(2026, 11, 3, 19, 0, 0, 0, time.UTC)
+	// In the future, so the API acts on it: a past occurrence is refused.
+	at := time.Now().Add(72 * time.Hour).Truncate(time.Hour)
 	id, err := f.store.ClaimOccurrence(scheduler.Occurrence{ScheduleID: f.schedule, DestinationID: f.dest.ID,
 		At: at, State: scheduler.OccurrencePending})
 	if err != nil {
