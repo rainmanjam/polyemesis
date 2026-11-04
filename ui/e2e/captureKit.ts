@@ -91,7 +91,20 @@ export async function topOfFrame(
 export async function settle(page: import("@playwright/test").Page, ms = 900) {
   await dismissBanners(page);
   await page.evaluate(() => document.fonts.ready);
+  await waitForIngestChip(page);
   await page.waitForTimeout(ms);
+}
+
+/** The header's ingest chip reads "Stopped" until the page's first ingest
+ *  reading arrives: no reading is labelled like a stopped process. A page that
+ *  does not wait for live data of its own (Sources, Renditions, Routing,
+ *  Settings) was photographed in that gap, with "Ingest Stopped" beside a red
+ *  "3 LIVE" tally. Wait for the chip to leave that state; if it never does,
+ *  the shot goes ahead and shows it, because then it is the truth. */
+async function waitForIngestChip(page: import("@playwright/test").Page) {
+  const chip = page.getByTestId("chrome-ingest-status");
+  if ((await chip.count()) === 0) return;
+  await expect(chip).not.toHaveText(/^Stopped$/, { timeout: 15_000 }).catch(() => {});
 }
 
 /** Photograph a page ONLY IF the frame is still true AT THE SHUTTER.
