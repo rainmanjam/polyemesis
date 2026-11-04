@@ -94,6 +94,9 @@ type Service struct {
 
 	passMu sync.Mutex
 	again  atomic.Bool
+	// pruneHeld is set while prune is holding because every tracked file is
+	// missing, so its warning fires once per episode, not once per pass.
+	pruneHeld atomic.Bool
 
 	stuckMu sync.Mutex
 	onStuck func(StuckEvent)
@@ -512,10 +515,11 @@ func (s *Service) candidates() ([]candidate, error) {
 // A MISSING VOLUME IS NOT A MISSING FILE. With the recordings volume
 // unmounted every stat says "not exist", and pruning on that wiped every
 // item row: the archive re-uploaded in full when the volume came back, and
-// stuck or failed state (what Retry acts on) was lost. So prune holds -- the
-// same breaker as the recordings index (recording.MassVanish) -- when every
-// tracked file, or more than half of a non-trivial ledger, vanished in one
-// pass. A missing directory is the "every file" case.
+// stuck or failed state (what Retry acts on) was lost. So when EVERY tracked
+// file is missing at once -- which is what an absent or empty volume looks
+// like -- prune holds and says so. Any surviving file means the volume is
+// there, and the missing ones really are gone: a retention burst that takes
+// most of the archive still prunes, so the hold cannot latch.
 func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
 	dir := s.rec.Dir()
 	seen := map[string]bool{}
@@ -529,11 +533,14 @@ func (s *Service) prune(items []db.OffloadItem, cands []candidate) bool {
 			gone = append(gone, it.RelPath)
 		}
 	}
-	if recording.MassVanish(len(seen), len(gone)) {
-		s.log.Warn("offload: most tracked files vanished in one pass; not pruning the ledger "+
-			"(is the recordings volume mounted?)", "dir", dir, "tracked", len(seen), "missing", len(gone))
+	if len(seen) > 0 && len(gone) == len(seen) {
+		if !s.pruneHeld.Swap(true) {
+			s.log.Warn("offload: every tracked file is missing; not pruning the ledger "+
+				"(is the recordings volume mounted?)", "dir", dir, "tracked", len(seen))
+		}
 		return false
 	}
+	s.pruneHeld.Store(false)
 	changed := false
 	for _, rel := range gone {
 		if err := s.store.DeleteOffloadItemsFor(rel); err == nil {

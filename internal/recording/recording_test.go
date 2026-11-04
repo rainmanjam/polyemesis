@@ -800,9 +800,10 @@ func TestScanHoldsTheIndexWhenTheDirectoryListsEmpty(t *testing.T) {
 	}
 }
 
-// More than half of a non-trivial index vanishing in one pass is held too:
-// a partly-mounted or half-synced volume, not an operator's clean-up.
-func TestScanHoldsTheIndexWhenMostOfItVanishesAtOnce(t *testing.T) {
+// The hold must not latch on an install whose files legitimately thinned out:
+// with any recording still listed the volume is there, and the rows whose
+// files went are de-indexed even when that is most of them.
+func TestScanStillDeIndexesABurstWhileSomeFilesRemain(t *testing.T) {
 	m, dir, store := newManager(t)
 	now := time.Now()
 	ages := []time.Duration{5 * time.Hour, 4 * time.Hour, 3 * time.Hour, 2 * time.Hour, 1 * time.Hour}
@@ -810,7 +811,7 @@ func TestScanHoldsTheIndexWhenMostOfItVanishesAtOnce(t *testing.T) {
 	if _, err := m.Scan(); err != nil {
 		t.Fatalf("first scan: %v", err)
 	}
-	for _, n := range names[:3] {
+	for _, n := range names[:4] {
 		if err := os.Remove(filepath.Join(dir, n)); err != nil {
 			t.Fatalf("remove: %v", err)
 		}
@@ -818,27 +819,7 @@ func TestScanHoldsTheIndexWhenMostOfItVanishesAtOnce(t *testing.T) {
 	if _, err := m.Scan(); err != nil {
 		t.Fatalf("second scan: %v", err)
 	}
-	if got := indexedFilenames(t, store); len(got) != len(names) {
-		t.Errorf("indexed %d rows after 3 of 5 vanished, want all %d kept", len(got), len(names))
-	}
-}
-
-func TestMassVanish(t *testing.T) {
-	cases := []struct {
-		indexed, missing int
-		want             bool
-	}{
-		{0, 0, false},
-		{2, 1, false},
-		{5, 2, false},
-		{5, 3, true},
-		{3, 3, true},
-		{1, 1, true},
-		{3, 2, false},
-	}
-	for _, c := range cases {
-		if got := MassVanish(c.indexed, c.missing); got != c.want {
-			t.Errorf("MassVanish(%d, %d) = %v, want %v", c.indexed, c.missing, got, c.want)
-		}
+	if got := indexedFilenames(t, store); !slices.Equal(got, names[4:]) {
+		t.Errorf("indexed %v after 4 of 5 were removed, want only %v", got, names[4:])
 	}
 }

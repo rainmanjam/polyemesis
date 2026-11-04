@@ -637,3 +637,30 @@ func TestPruneStillDropsASingleRemovedFile(t *testing.T) {
 		t.Errorf("row for %s dropped", names[1])
 	}
 }
+
+// The hold must not latch: a retention burst that takes most of the archive
+// leaves a file behind, which says the volume is there, so prune proceeds.
+func TestPruneStillDropsABurstWhileSomeFilesRemain(t *testing.T) {
+	f := newFixture(t)
+	id := f.target()
+	var names []string
+	for i := 5; i >= 2; i-- {
+		names = append(names, f.segment(time.Duration(i)*time.Hour, "seg"+strconv.Itoa(i), true))
+	}
+	f.segment(time.Minute, "live", true)
+	f.svc.Pass(context.Background())
+	for _, n := range names[:3] {
+		if err := os.Remove(filepath.Join(f.dir, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.svc.Pass(context.Background())
+	for _, n := range names[:3] {
+		if _, ok := f.item(id, n); ok {
+			t.Errorf("row for removed %s kept: the hold latched with a file still on disk", n)
+		}
+	}
+	if _, ok := f.item(id, names[3]); !ok {
+		t.Errorf("row for surviving %s dropped", names[3])
+	}
+}

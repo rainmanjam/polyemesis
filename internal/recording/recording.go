@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rainmanjam/polyemesis/internal/db"
@@ -58,6 +59,11 @@ type Manager struct {
 	// with the size it had when it failed. See Scan.
 	unprobeableMu sync.Mutex
 	unprobeable   map[string]int64
+
+	// deindexHeld is set while Scan is holding its de-index because the
+	// directory listed no recordings; it makes the warning fire once per
+	// episode rather than every 30 seconds.
+	deindexHeld atomic.Bool
 }
 
 // StorageState is the free-space guard's verdict on whether the volume can
@@ -404,26 +410,27 @@ func (m *Manager) Scan() (bool, error) {
 	}
 	m.unprobeableMu.Unlock()
 
-	missing := 0
-	for _, r := range indexed {
-		if !onDisk[r.Filename] {
-			missing++
-		}
-	}
-	// A MASS DE-INDEX IS AN UNMOUNTED VOLUME, NOT A CLEAN-UP. Every row
-	// dropped here cascades its transcripts, highlights and session
+	// AN EMPTY LISTING IS AN UNMOUNTED VOLUME, NOT A CLEAN-UP. Every row
+	// dropped below cascades its transcripts, highlights and session
 	// membership, and none of that comes back when the files do. A volume
-	// that is not mounted yet (or dropped off the NAS) lists as an empty
-	// directory, so without this breaker one scan erased the whole archive's
-	// metadata. Losing every indexed file at once, or more than half of a
-	// non-trivial index in one pass, is held and reported instead; the
-	// operator's own deletes go through Delete and the sweeper, which remove
-	// the row themselves and never reach this loop.
-	if MassVanish(len(indexed), missing) {
-		m.log.Warn("recordings directory lost most of the index in one scan; "+
-			"not de-indexing (is the recordings volume mounted?)",
-			"dir", m.dir, "indexed", len(indexed), "missing", missing)
+	// that is not mounted yet (or dropped off the NAS) lists as a directory
+	// with no recordings in it, so one scan of it erased the whole archive's
+	// metadata. With rows indexed and not one recording file listed, the
+	// de-index is held and reported instead. Keyed on the listing, not on how
+	// many rows went missing: a ratio rule latched on an install whose files
+	// legitimately thinned out, and kept ghost rows forever. The operator's own
+	// deletes go through Delete and the sweeper, which remove the row
+	// themselves and never reach this loop.
+	if len(indexed) > 0 && len(onDisk) == 0 {
+		if !m.deindexHeld.Swap(true) {
+			m.log.Warn("recordings directory lists no recordings but the index has some; "+
+				"not de-indexing (is the recordings volume mounted?)",
+				"dir", m.dir, "indexed", len(indexed))
+		}
 		return changed, nil
+	}
+	if m.deindexHeld.Swap(false) {
+		m.log.Info("recordings directory lists recordings again; de-indexing resumed", "dir", m.dir)
 	}
 
 	for _, r := range indexed {
@@ -437,23 +444,6 @@ func (m *Manager) Scan() (bool, error) {
 		}
 	}
 	return changed, nil
-}
-
-// MassVanishFloor is the smallest index the "more than half" rule applies to.
-// Below it, losing half is one or two files an operator removed by hand.
-const MassVanishFloor = 4
-
-// MassVanish reports whether dropping missing of indexed rows in one scan
-// looks like a vanished volume rather than files removed one by one: all of
-// them at once, or more than half of an index of at least MassVanishFloor.
-func MassVanish(indexed, missing int) bool {
-	if missing == 0 {
-		return false
-	}
-	if missing == indexed {
-		return true
-	}
-	return indexed >= MassVanishFloor && missing*2 > indexed
 }
 
 // errNoDuration is the one probe failure that is a fact about the file rather
