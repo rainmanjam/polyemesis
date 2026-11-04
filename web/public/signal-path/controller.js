@@ -84,6 +84,18 @@ function syncTransport() {
   pauseButton.disabled=motion.matches;
   const label=motion.matches?'Reduced motion: static diagram':paused?(ended?'Resume animation':'Play animation'):'Pause animation';
   pauseButton.setAttribute('aria-label',label);pauseButton.title=label;
+  syncVideos();
+}
+
+/* The programme video is the same stream on every card. It plays only while the demo is on screen,
+   the tab is visible, motion is allowed and the viewer has not paused; otherwise the poster shows. */
+const videos=[...document.querySelectorAll('video.stream')];
+function syncVideos() {
+  const play=inView&&!document.hidden&&!motion.matches&&!paused;
+  for(const video of videos){
+    if(play){if(video.preload!=='auto')video.preload='auto';if(video.paused)video.play().catch(()=>{})}
+    else if(!video.paused)video.pause();
+  }
 }
 
 function focusFor() {
@@ -236,6 +248,7 @@ for(const target of [demo,document.querySelector('.steps')]){target.addEventList
 document.addEventListener('visibilitychange',()=>{
   cancelAnimationFrame(frameId);frameId=0;lastTime=0;
   if(!document.hidden)requestTick();
+  syncVideos();
 });
 const observer=new IntersectionObserver(entries=>{
   inView=entries[0].isIntersecting;
@@ -243,6 +256,7 @@ const observer=new IntersectionObserver(entries=>{
     if(!hasStarted&&!motion.matches){hasStarted=true;running=true;syncTransport()}
     lastTime=0;requestTick();
   }else{cancelAnimationFrame(frameId);frameId=0;lastTime=0}
+  syncVideos();
 },{threshold:.12});
 observer.observe(demo);
 const resizeObserver=new ResizeObserver(refreshLayout);resizeObserver.observe(diagram);
