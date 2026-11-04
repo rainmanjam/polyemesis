@@ -65,6 +65,11 @@ export function GoLiveSheet({
 }>) {
   const t = useT();
   const [running, setRunning] = useState(false);
+  // How far the current press has got: `done` starts so far, of the `total` the
+  // press set out to make. Fixed at the click, not re-derived from the live
+  // list, so the button does not recount "4 ready, 3 ready…" downward and read
+  // as if one click started only one destination.
+  const [run, setRun] = useState<{ done: number; total: number } | null>(null);
   const [attempted, setAttempted] = useState<Set<number>>(new Set());
   const [errors, setErrors] = useState<Map<number, string>>(new Map());
   // Which source the sheet is scoped to, by name; null is every source. This is
@@ -81,6 +86,7 @@ export function GoLiveSheet({
     setAttempted(new Set());
     setErrors(new Map());
     setRunning(false);
+    setRun(null);
     setScope(null);
   }
 
@@ -150,9 +156,13 @@ export function GoLiveSheet({
     setErrors(new Map());
     setAttempted(new Set());
     const ids = readyNow.map((r) => r.id as unknown as number);
+    setRun({ done: 0, total: ids.length });
     await runPacedStarts(
       ids,
       async (id) => {
+        // Counted before the request, so a start that is refused still moves
+        // the count on, and the first one in flight reads "1 of N".
+        setRun((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
         setAttempted((prev) => new Set(prev).add(id));
         await onStart(id as unknown as DestinationId);
       },
@@ -160,6 +170,7 @@ export function GoLiveSheet({
       (id, message) => setErrors((prev) => new Map(prev).set(id, message)),
     );
     setRunning(false);
+    setRun(null);
     onFinished();
   };
 
@@ -182,7 +193,7 @@ export function GoLiveSheet({
 
         {youtubeAtRisk > 0 && (
           <p className="rounded-md border border-warn/40 bg-warn-dim px-3 py-2 text-sm text-warn">
-            {t("golive.youtubeWarn", { count: youtubeAtRisk })}
+            {t(youtubeAtRisk === 1 ? "golive.youtubeWarnOne" : "golive.youtubeWarn", { count: youtubeAtRisk })}
           </p>
         )}
 
@@ -305,10 +316,21 @@ export function GoLiveSheet({
               disabled={running || readyNow.length === 0}
               onClick={() => void go()}
             >
-              {t("golive.goCount", { count: readyNow.length })}
+              {run
+                ? t("golive.startingProgress", { done: run.done, total: run.total })
+                : t("golive.goCount", { count: readyNow.length })}
             </Button>
           </div>
-          {readyNow.length === 0 && (
+          {/* Always mounted, empty when idle: a live region that appears with
+              its first message is often not announced, and a disabled button's
+              changing label is not announced at all. */}
+          <div role="status" aria-live="polite" className="sr-only" data-testid="golive-progress">
+            {run ? t("golive.startingProgress", { done: run.done, total: run.total }) : ""}
+          </div>
+          {/* Not while a press runs: the last start coming on empties readyNow
+              before the walk ends, and "nothing is ready" beside "Starting 3 of
+              3…" reads as a failure. */}
+          {!running && readyNow.length === 0 && (
             <p className="w-full text-sm text-muted-foreground">{t("golive.nothingReady")}</p>
           )}
         </DialogFooter>
