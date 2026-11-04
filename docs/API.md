@@ -1143,9 +1143,12 @@ an API token of any scope gets `403`. Arguments that open a file on the server
 are refused outright, whatever is acknowledged: `-progress`, `-vstats`,
 `-vstats_file`, `-pass`, `-passlogfile`, `-dump_attachment`, `-attach`,
 `-sdp_file`, `-stats_*`, `-fpre`, `-filter_script`, `-filter_complex_script`,
-the HLS/segment file options, file-writing muxers (`-f tee`, `segment`, `hls`,
-`dash`, `image2`, ...), encoder params that name a file (`dump-yuv=`,
-`stats=`), and any bare token that FFmpeg would take as a second output.
+the HLS/segment file options, `-i`, nested option lists (`-format_opts`,
+`-protocol_opts`, ...), any `-f` other than a streaming format (`flv`, `mpegts`,
+`matroska`, `webm`, `mp4`, `mov`, `nut`, `rtp`, `rtp_mpegts`, `rtsp`, `ogg`,
+`adts`, `null` for output; `mpegts` for input), encoder params that name a file
+(`dump-yuv=`, `stats=`, `pass=`, ... however they are escaped or spelt), and
+any bare token that FFmpeg would take as a second output.
 Filter graphs may use only filters on an allowlist of ones whose options name
 no file (`scale`, `fps`, `volume`, `aresample`, `overlay`, ...); any other
 filter, and the `/option=` form that loads a value from a file, is refused. Options
