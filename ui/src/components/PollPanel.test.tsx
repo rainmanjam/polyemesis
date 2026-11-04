@@ -130,7 +130,8 @@ describe("a running poll", () => {
     render(<PollPanel />);
     expect(await screen.findByText("Next map?")).toBeTruthy();
     expect(screen.getByText("3 votes · 75%")).toBeTruthy();
-    expect(screen.getByText("1 votes · 25%")).toBeTruthy();
+    expect(screen.getByText("1 vote · 25%")).toBeTruthy();
+    expect(screen.queryByText("1 votes · 25%")).toBeNull();
     const total = screen.getByTestId("poll-total");
     expect(total.textContent).toContain("4 votes in all");
     expect(total.textContent).toContain("Twitch 2");
@@ -193,5 +194,55 @@ describe("history and export", () => {
     list.mockRejectedValue(new Error("polls need the chat hub"));
     render(<PollPanel />);
     expect(await screen.findByText(/Polls need chat/)).toBeTruthy();
+  });
+});
+
+describe("polls: one vote reads as one (no plural rules, so count 1 has its own key)", () => {
+  const one: Poll = {
+    ...running,
+    options: [
+      { label: "Dust", votes: 1, byPlatform: { twitch: 1 } },
+      { label: "Mirage", votes: 0, byPlatform: {} },
+    ],
+    total: 1,
+    byPlatform: { twitch: 1 },
+  };
+  const two: Poll = {
+    ...running,
+    options: [
+      { label: "Dust", votes: 2, byPlatform: { twitch: 2 } },
+      { label: "Mirage", votes: 0, byPlatform: {} },
+    ],
+    total: 2,
+    byPlatform: { twitch: 2 },
+  };
+
+  it("says 1 vote in all, and 1 vote on the option", async () => {
+    respond({ current: one, history: [] });
+    render(<PollPanel />);
+    await screen.findByText("Next map?");
+    expect(screen.getByTestId("poll-total").textContent).toContain("1 vote in all");
+    expect(screen.getByTestId("poll-total").textContent).not.toContain("1 votes");
+    expect(screen.getByText("1 vote · 100%")).toBeTruthy();
+  });
+
+  it("says 2 votes in all, and 2 votes on the option", async () => {
+    respond({ current: two, history: [] });
+    render(<PollPanel />);
+    await screen.findByText("Next map?");
+    expect(screen.getByTestId("poll-total").textContent).toContain("2 votes in all");
+    expect(screen.getByText("2 votes · 100%")).toBeTruthy();
+  });
+
+  it("names a one-vote winner in the singular", async () => {
+    respond({ current: null, history: [{ ...finished, ...one, id: 6, state: "ended" }] });
+    render(<PollPanel />);
+    expect(await screen.findByText("Dust won · 1 vote")).toBeTruthy();
+  });
+
+  it("names a two-vote winner in the plural", async () => {
+    respond({ current: null, history: [{ ...finished, ...two, id: 6, state: "ended" }] });
+    render(<PollPanel />);
+    expect(await screen.findByText("Dust won · 2 votes")).toBeTruthy();
   });
 });

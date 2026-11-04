@@ -258,3 +258,18 @@ describe("DebugSettings", () => {
     expect(alert.textContent).toMatch(/not answering/i);
   });
 });
+
+describe("DebugSettings: the shortened-lines note reads one as one", () => {
+  it("says 1 long line shortened", async () => {
+    debugState.mockResolvedValue(state({ recording: true, held: 12, seen: 12, recordsTruncated: 1 }));
+    render(<DebugSettings />);
+    await waitFor(() => expect(screen.getByText("1 long line shortened")).toBeDefined());
+    expect(screen.queryByText("1 long lines shortened")).toBeNull();
+  });
+
+  it("says 2 long lines shortened", async () => {
+    debugState.mockResolvedValue(state({ recording: true, held: 12, seen: 12, recordsTruncated: 2 }));
+    render(<DebugSettings />);
+    await waitFor(() => expect(screen.getByText("2 long lines shortened")).toBeDefined());
+  });
+});

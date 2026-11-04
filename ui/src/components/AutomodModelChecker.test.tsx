@@ -199,3 +199,28 @@ describe("AutomodConfig: the fallback checker and the category table", () => {
     });
   });
 });
+
+describe("AutomodModelChecker: one call, one message (no plural rules, so count 1 has its own key)", () => {
+  afterEach(cleanup);
+  const withStats = (decisions: number, failures: number) =>
+    render(
+      <AutomodModelChecker slot="primary" value={checker({ enabled: true, tested: true })} onPatch={vi.fn()}
+        presets={presets} stats={{ callsThisHour: 1, ceiling: 500, failures, decisions } as never}
+        statsFailed={false} instruction="be kind" onKeyChanged={() => undefined}
+        enableLabel="automod.modelEnabled" enableNote="automod.modelEnabledNote" />,
+    );
+
+  it("says 1 message answered and 1 call failed", () => {
+    withStats(1, 1);
+    expect(screen.getByText("1 message answered")).toBeTruthy();
+    expect(screen.getByText("1 call failed")).toBeTruthy();
+    expect(screen.queryByText("1 messages answered")).toBeNull();
+    expect(screen.queryByText("1 calls failed")).toBeNull();
+  });
+
+  it("says 2 messages answered and 2 calls failed", () => {
+    withStats(2, 2);
+    expect(screen.getByText("2 messages answered")).toBeTruthy();
+    expect(screen.getByText("2 calls failed")).toBeTruthy();
+  });
+});

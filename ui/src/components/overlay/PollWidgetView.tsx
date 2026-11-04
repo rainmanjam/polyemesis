@@ -42,9 +42,9 @@ export function PollWidgetView({ poll, style, now }: { poll: PollDisplay; style:
   };
 
   let status: string;
-  if (ended) status = t("pollWidget.ended", { count: poll.total });
-  else if (poll.state === "closing") status = t("pollWidget.closing", { count: poll.total });
-  else status = t("pollWidget.open", { count: poll.total, seconds: pollSecondsLeft(poll, now) });
+  if (ended) status = t(poll.total === 1 ? "pollWidget.endedOne" : "pollWidget.ended", { count: poll.total });
+  else if (poll.state === "closing") status = t(poll.total === 1 ? "pollWidget.closingOne" : "pollWidget.closing", { count: poll.total });
+  else status = t(poll.total === 1 ? "pollWidget.openOne" : "pollWidget.open", { count: poll.total, seconds: pollSecondsLeft(poll, now) });
 
   return (
     <div style={box} data-poll-id={poll.id} data-poll-state={poll.state} role="status" aria-live="polite">

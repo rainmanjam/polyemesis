@@ -128,16 +128,16 @@ describe("Dashboard: the Stop all dialog's count comes from the server", () => {
     expect(dialog.textContent ?? "").not.toMatch(/start all/i);
     expect(stopImpactCalls).toBe(1);
     expect(
-      within(dialog).queryByText(new RegExp(translate("en", "golive.stopYoutube", { count: 1 }))),
+      dialog.textContent ?? "",
       "the dialog still counted the enabled YouTube row locally",
-    ).toBeNull();
+    ).not.toMatch(/YouTube broadcast/);
     expect(confirmButton(dialog).disabled).toBe(false);
   });
 
   it("names the server's YouTube count when there is one", async () => {
     stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 1 } });
     const dialog = await openStopAll();
-    await within(dialog).findByText(new RegExp(translate("en", "golive.stopYoutube", { count: 1 })));
+    await within(dialog).findByText(new RegExp(translate("en", "golive.stopYoutubeOne", { count: 1 })));
   });
 
   it("cannot be confirmed while the count is loading", async () => {
@@ -152,5 +152,35 @@ describe("Dashboard: the Stop all dialog's count comes from the server", () => {
     const dialog = await openStopAll();
     await within(dialog).findByText(new RegExp(translate("en", "dash.stopCountFailed").slice(0, 40)));
     expect(confirmButton(dialog).disabled).toBe(true);
+  });
+});
+
+describe("Dashboard: the Stop all dialog reads one as one", () => {
+  // No plural rules in the catalogue: count 1 has its own key. The dialog used to
+  // say "1 of these are YouTube broadcasts" and "Stop all 1 destinations?".
+  it("says one broadcast is, not are, when a single YouTube broadcast would end", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 1 } });
+    const dialog = await openStopAll();
+    await within(dialog).findByText(/1 of these is a YouTube broadcast, which ends for good\./);
+    expect(dialog.textContent ?? "").not.toContain("1 of these are YouTube broadcasts");
+  });
+
+  it("says broadcasts are when more than one would end", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 3, youtubeBroadcasts: 2 } });
+    const dialog = await openStopAll();
+    await within(dialog).findByText(/2 of these are YouTube broadcasts, which end for good\./);
+  });
+
+  it("titles a single destination without a plural", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 1, youtubeBroadcasts: 0 } });
+    const dialog = await openStopAll();
+    await within(dialog).findByText("Stop 1 destination?");
+    expect(within(dialog).queryByText("Stop all 1 destinations?")).toBeNull();
+  });
+
+  it("titles two destinations with the plural", async () => {
+    stopImpact = async () => ({ status: 200, body: { destinations: 2, youtubeBroadcasts: 0 } });
+    const dialog = await openStopAll();
+    await within(dialog).findByText("Stop all 2 destinations?");
   });
 });

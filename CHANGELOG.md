@@ -35,6 +35,23 @@ its first tagged release.
 
 ### Fixed
 
+- **Go live and Stop all say one as one, in every language.** The Go live button read "1 listos"
+  in Spanish (and "1 prêts", "1 pronti", "1 prontos" in French, Italian and Portuguese). It now
+  reads "1 listo", and Polish uses a form that is right at any count ("gotowe: 2"). The Stop all
+  dialog said "Stop all 1 destinations?" and "1 of these are YouTube broadcasts". It now says
+  "Stop 1 destination?" and "1 of these is a YouTube broadcast". The Go live sheet's YouTube
+  vertical-pair reminder no longer says "1 YouTube vertical pairs have not had…". Each of these
+  has its own key for one, the same approach as the YouTube warning.
+
+- **Every other count in the console says one as one too.** Poll votes ("1 vote", on the panel,
+  the history and the on-stream widget), automod's answered messages and failed calls, the log
+  verdict ("1 error"), relay subscribers, shortened debug lines, the purge report ("Purged 1
+  finished job."), recording tracks and stem files, the on-air health line ("1 running destination
+  healthy", "1 of 3 destinations needs attention"), the clip retention limit, the failed count,
+  Spanish, French, Italian and Portuguese "new messages", and the Polish live count. Where Polish,
+  Russian or Ukrainian were also wrong at 2 to 4 or 21 they now use a form that reads right at any
+  count, and Italian agrees with the feminine *destinazioni*.
+
 - **The meters follow the programme selected in the header.** On an install with several
   programmes, every programme's audio levels reach the console over one live connection, and the
   console drew whichever programme metered last. Tracks a smaller programme lacks read "not
@@ -44,10 +61,19 @@ its first tagged release.
   reports, and the routing editor's "last peak" for a quiet track is kept per programme.
 - **Go live counts up through the press you made.** The sheet starts destinations one at a time,
   and its button used to recount "Go live · 4 ready", then "3 ready", as each one came on, so one
-  click looked as if it had started a single destination. After the click it now reads
-  "Starting 2 of 4…", stays disabled until every start has been tried (a refused one included),
-  and is announced to screen readers. The YouTube warning also says "1 YouTube broadcast", not
-  "1 YouTube broadcasts", in every language.
+  click looked as if it had started a single destination. After the click it counts what is
+  actually on air, from each destination's live status: "Starting… 2 of 4 live", then "4 of 4
+  live", or "3 of 4 live · 1 failed" when one is refused or its process fails. A destination is
+  live once its output is moving and not stalled, not the moment FFmpeg starts, so one that
+  the platform is about to refuse is not counted (the row's LIVE chip follows the same rule).
+  The press is over when every destination it set out to start is live or failed, not when the
+  last request returns, and the final count stays on the button for a second before it goes back to Go live.
+  A destination still starting after a minute (longer than the server takes to hold one that
+  keeps being refused) gives the button back, and the count says how many are still starting.
+  The sheet can be closed while it waits, though not while the starts are going out. Screen
+  readers hear the first count and the final one at once, and changes in between at most every
+  two seconds. The YouTube warning also says "1 YouTube broadcast", not "1 YouTube broadcasts",
+  in every language.
 
 ### Security
 

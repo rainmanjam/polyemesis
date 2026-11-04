@@ -522,7 +522,7 @@ export function ClipsPage() {
                 <Stat labelKey="clips.onDisk" value={bytes(view?.usage.usedBytes ?? 0)} tone="muted" />
               </div>
               <p className="text-sm text-muted-foreground">
-                {t("clips.retention", {
+                {t((view?.usage.maxClips ?? 0) === 1 ? "clips.retentionOne" : "clips.retention", {
                   count: view?.usage.maxClips ?? 0,
                   bytes: bytes(view?.usage.maxBytes ?? 0),
                 })}

@@ -877,7 +877,7 @@ export function MonitoringPage() {
           <CardContent className="pt-3">
             <Stat labelKey="mon.relayIn" value={status ? bytes(status.relay.rxBytes) : "—"} />
             <div className="mt-1 text-sm text-muted-foreground">
-              {t("i18nSweep.monSubscribers", {
+              {t((status?.relay.subscribers?.length ?? 0) === 1 ? "i18nSweep.monSubscribersOne" : "i18nSweep.monSubscribers", {
                 count: status?.relay.subscribers?.length ?? 0,
                 port: status?.relay.port ?? "—",
               })}
@@ -1092,7 +1092,7 @@ export function MonitoringPage() {
             <p role="status" className="text-tiny text-muted-foreground">
               {verdictState.kind === "clean"
                 ? t("monitor.verdictClean", { window: VERDICT_WINDOW_SEC })
-                : t("monitor.verdictErrors", {
+                : t(verdictState.count === 1 ? "monitor.verdictErrorsOne" : "monitor.verdictErrors", {
                     process: verdictState.process,
                     count: verdictState.count,
                     window: verdictState.windowSec,

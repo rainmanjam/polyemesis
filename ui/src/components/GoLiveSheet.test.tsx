@@ -9,10 +9,10 @@
  * confirm that names the count. Progress is per row while it runs. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { GoLiveSheet } from "./GoLiveSheet";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { FINAL_HOLD_MS, GoLiveSheet, SETTLE_TIMEOUT_MS } from "./GoLiveSheet";
 import { goLiveRows } from "@/lib/goLive";
-import { translate } from "@/lib/i18n";
+import { setLanguage, translate } from "@/lib/i18n";
 import type { DestStatus, DestinationId, SourceView } from "@/lib/types";
 
 afterEach(cleanup);
@@ -21,6 +21,10 @@ const T = (key: Parameters<typeof translate>[1], p?: Record<string, string | num
   translate("en", key, p);
 
 const did = (n: number) => n as unknown as DestinationId;
+
+/** A process that is on air: running, and its output has moved. "running"
+ *  alone is a spawned FFmpeg that may yet be refused, and is not live. */
+const onAir = { state: "running", startedAt: "2026-11-04T12:00:00Z", restarts: 0, progress: { outTimeMs: 4000 } };
 
 const dest = (over: Record<string, unknown> = {}) =>
   ({
@@ -159,7 +163,7 @@ describe("GoLiveSheet: starting", () => {
 
   it("shows the progress of each row while it runs, from the live status", () => {
     draw([dest({ id: did(1) })], {
-      live: [dest({ id: did(1), enabled: true, process: { state: "running" } })],
+      live: [dest({ id: did(1), enabled: true, process: onAir })],
     });
 
     const row = screen.getByText("Twitch — no music").closest("[data-row]") as HTMLElement;
@@ -266,7 +270,7 @@ describe("Go live sheet: a row that is already live says so (A8)", () => {
     // The readiness badge used to read READY on a row that was already on air,
     // while the primary button counted it as something still to start. The row
     // now says what it is, and the count leaves it out.
-    const running = dest({ id: did(1), enabled: true, process: { state: "running" } });
+    const running = dest({ id: did(1), enabled: true, process: onAir });
     const idle = dest({ id: did(2), name: "Archive", sourceId: 1 });
     draw([running, idle], { live: [running, idle] });
 
@@ -303,114 +307,443 @@ describe("Go live sheet: the source a destination uses is never cut off (A90)", 
   });
 });
 
-describe("Go live sheet: one press reads as one press while it runs", () => {
-  // The press starts destinations one at a time. The button used to recount
-  // "Go live · 3 ready" downward as each came on, so one click looked as if it
-  // had started one destination. It now counts up through the press it made.
-  function deferredStarts() {
-    const pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>();
-    const onStart = vi.fn(
-      (id: DestinationId) =>
-        new Promise<void>((resolve, reject) => {
-          pending.set(id as unknown as number, { resolve, reject });
-        }),
-    );
-    const settle = async (id: number, err?: Error) => {
-      await waitFor(() => expect(pending.has(id)).toBe(true));
-      const p = pending.get(id)!;
-      if (err) p.reject(err);
-      else p.resolve();
-    };
-    return { onStart, settle };
+describe("Go live sheet: the press counts what is actually live", () => {
+  // The button used to count start REQUESTS, and the last one returns within a
+  // frame, so "Starting 4 of 4" was never seen. It now counts, among the rows
+  // this press set out to start, how many the live status says are on air;
+  // failed rows count as settled and are named. The press is over when every
+  // row has settled, the final count stands for FINAL_HOLD_MS, and a row stuck
+  // in Starting gives the button back after SETTLE_TIMEOUT_MS.
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  /** The timers set from here on, with a delay, that have neither fired nor been
+   *  cleared. The dialog keeps timers of its own, so a global count is no use;
+   *  this sees only what is set after the press. Call after useFakeTimers. */
+  function watchTimers() {
+    const pending = new Set<unknown>();
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      const id: unknown = realSet(() => {
+        pending.delete(id);
+        fn(...args);
+      }, ms);
+      if ((ms ?? 0) > 0) pending.add(id);
+      return id;
+    }) as unknown as typeof setTimeout);
+    vi.spyOn(globalThis, "clearTimeout").mockImplementation(((id: unknown) => {
+      pending.delete(id);
+      realClear(id as Parameters<typeof clearTimeout>[0]);
+    }) as unknown as typeof clearTimeout);
+    return pending;
   }
 
-  const three = () => [dest({ id: did(1) }), dest({ id: did(2), name: "Second" }), dest({ id: did(3), name: "Third" })];
+  /** "spawned" is running with no media out yet; "stalled" is running, moved, then stuck. */
+  type State = "running" | "spawned" | "stalled" | "starting" | "failed";
+  const processFor = (s: State, run = 1) => {
+    const base = { startedAt: `2026-11-04T12:00:0${run}Z`, restarts: run - 1 };
+    if (s === "running") return { ...base, state: "running", progress: { outTimeMs: 4000 } };
+    if (s === "spawned") return { ...base, state: "running", progress: { outTimeMs: 0 } };
+    if (s === "stalled") return { ...base, state: "running", stalled: true, progress: { outTimeMs: 4000 } };
+    return { ...base, state: s };
+  };
 
-  it("shows Starting 1 of 3 on a disabled button, and announces it, while the first start is in flight", async () => {
-    const { onStart, settle } = deferredStarts();
-    draw(three(), { onStart });
-
-    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
-
-    const button = await screen.findByRole("button", { name: "Starting 1 of 3…" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    const status = screen.getByTestId("golive-progress");
-    expect(status.getAttribute("role")).toBe("status");
-    expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(status.textContent).toBe("Starting 1 of 3…");
-
-    await settle(1);
-    expect(await screen.findByRole("button", { name: "Starting 2 of 3…" })).toBeTruthy();
-    await settle(2);
-    await settle(3);
-    await screen.findByRole("button", { name: "Go live · 3 ready" });
-  });
-
-  it("returns to the normal, enabled button once every start is done", async () => {
-    const { onStart, settle } = deferredStarts();
-    draw(three(), { onStart });
-
-    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
-    await settle(1);
-    await settle(2);
-    await settle(3);
-
-    const button = await screen.findByRole("button", { name: "Go live · 3 ready" });
-    expect((button as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByRole("button", { name: /^Starting/ })).toBeNull();
-    expect(screen.getByTestId("golive-progress").textContent).toBe("");
-  });
-
-  it("keeps counting, and does not say nothing is ready, as the live list catches up mid-run", async () => {
-    // In the console the live list updates as each start lands, so readyNow
-    // empties before the walk ends. Neither the button nor the empty-state line
-    // may follow it while the press is still running.
-    const { onStart, settle } = deferredStarts();
-    const idle = three();
+  /** Three idle destinations; `set` re-renders with the live status given. */
+  function press(opts: { n?: number; onStart?: (id: DestinationId) => Promise<void>; onFinished?: () => void } = {}) {
+    const n = opts.n ?? 3;
+    const idle = Array.from({ length: n }, (_, i) => dest({ id: did(i + 1), name: `Dest ${i + 1}` }));
     const props = {
       open: true,
       onOpenChange: () => {},
       rows: goLiveRows(idle, sources),
       youtubeAtRisk: 0,
-      onStart,
+      onStart: opts.onStart ?? vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: opts.onFinished ?? (() => {}),
+      paceMs: 0,
+    };
+    const utils = render(<GoLiveSheet {...props} live={idle} />);
+    const set = (states: Record<number, State>) =>
+      utils.rerender(
+        <GoLiveSheet
+          {...props}
+          live={idle.map((d) => {
+            const s = states[d.id as unknown as number];
+            return s ? ({ ...d, enabled: true, process: processFor(s) } as unknown as DestStatus) : d;
+          })}
+        />,
+      );
+    const close = () => utils.rerender(<GoLiveSheet {...props} open={false} live={idle} />);
+    return { ...utils, set, close, onStart: props.onStart };
+  }
+
+  const flush = () => act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const wait = (ms: number) => act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+  const button = () => {
+    const footer = screen.getByRole("button", { name: T("golive.cancel") }).parentElement as HTMLElement;
+    return within(footer).getAllByRole("button").at(-1) as HTMLButtonElement;
+  };
+  const status = () => screen.getByTestId("golive-progress").textContent;
+
+  it("counts up as the live status says each destination came on, on a disabled button", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+
+    expect(button().textContent).toBe("Starting… 0 of 3 live");
+    expect(button().disabled).toBe(true);
+    set({ 1: "starting" });
+    expect(button().textContent).toBe("Starting… 0 of 3 live");
+    set({ 1: "running" });
+    expect(button().textContent).toBe("Starting… 1 of 3 live");
+    set({ 1: "running", 2: "running" });
+    expect(button().textContent).toBe("Starting… 2 of 3 live");
+    expect(button().disabled).toBe(true);
+  });
+
+  it("is not over when the last request returns, only when every row has settled", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "running", 3: "starting" });
+    await wait(5_000);
+    expect(button().textContent).toBe("Starting… 2 of 3 live");
+    expect(button().disabled).toBe(true);
+
+    set({ 1: "running", 2: "running", 3: "running" });
+    expect(button().textContent).toBe("3 of 3 live");
+    expect(button().disabled).toBe(true);
+  });
+
+  it("holds the final count for about a second, still at 900 ms, gone at 1100 ms", async () => {
+    vi.useFakeTimers();
+    // The third is refused, so after the press it is ready again and the
+    // button comes back enabled, which shows the hold is what disabled it.
+    const onStart = vi.fn(async (id: DestinationId) => {
+      if ((id as unknown as number) === 3) throw new Error("ingest refused");
+    });
+    const { set } = press({ onStart });
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "running" });
+
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+    expect(button().disabled).toBe(true);
+    await wait(900);
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+    expect(button().disabled).toBe(true);
+    await wait(200);
+    expect(button().textContent).toBe("Go live · 1 ready");
+    expect(button().disabled).toBe(false);
+  });
+
+  it("counts a destination whose process failed as settled, and names it", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "failed", 3: "running" });
+
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+  });
+
+  it("holds the final count as it was, even if a row drops during the hold", async () => {
+    vi.useFakeTimers();
+    const onStart = vi.fn(async (id: DestinationId) => {
+      if ((id as unknown as number) === 3) throw new Error("ingest refused");
+    });
+    const { set } = press({ onStart });
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "running" });
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+
+    await wait(500);
+    set({ 1: "running", 2: "starting" });
+    expect(button().textContent).toBe("2 of 3 live · 1 failed");
+    expect(status()).toBe("2 of 3 live · 1 failed");
+    await wait(500);
+    expect(button().textContent).toBe("Go live · 1 ready");
+  });
+
+  it("does not count a spawned process as live until its output has moved", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "spawned", 2: "spawned", 3: "spawned" });
+
+    expect(button().textContent).toBe("Starting… 0 of 3 live");
+    const row = screen.getByText("Dest 1").closest("[data-row]") as HTMLElement;
+    expect(within(row).queryByText(T("golive.live"))).toBeNull();
+    set({ 1: "running", 2: "spawned", 3: "spawned" });
+    expect(button().textContent).toBe("Starting… 1 of 3 live");
+  });
+
+  it("does not count a stalled process as live, and counts it once its output moves again", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "stalled", 2: "running", 3: "running" });
+
+    expect(button().textContent).toBe("Starting… 2 of 3 live");
+    set({ 1: "running", 2: "running", 3: "running" });
+    expect(button().textContent).toBe("3 of 3 live");
+  });
+
+  it("counts a row live when the process seen at the click starts moving media", async () => {
+    // Same process, same startedAt: only its output has moved. That cannot be
+    // left over from an earlier run, so it counts.
+    vi.useFakeTimers();
+    const spawned = { state: "running", startedAt: "2026-11-04T12:00:00Z", restarts: 0, progress: { outTimeMs: 0 } };
+    const one = dest({ id: did(1), name: "First", process: spawned } as Record<string, unknown>);
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows([one], sources),
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
       onRetry: async () => {},
       onFinished: () => {},
       paceMs: 0,
     };
-    const { rerender } = render(<GoLiveSheet {...props} live={idle} />);
+    const { rerender } = render(<GoLiveSheet {...props} live={[one]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await flush();
+    expect(button().textContent).toBe("Starting… 0 of 1 live");
 
-    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
-    await settle(1);
-    await settle(2);
-    await screen.findByRole("button", { name: "Starting 3 of 3…" });
-    rerender(<GoLiveSheet {...props} live={idle.map((d) => ({ ...d, enabled: true }))} />);
-
-    expect(screen.getByRole("button", { name: "Starting 3 of 3…" })).toBeTruthy();
-    expect(screen.queryByText(T("golive.nothingReady"))).toBeNull();
-    await settle(3);
-    await screen.findByRole("button", { name: T("golive.goCount", { count: 0 }) });
+    const moving = { ...spawned, progress: { outTimeMs: 4000 } };
+    rerender(<GoLiveSheet {...props} live={[{ ...one, enabled: true, process: moving } as unknown as DestStatus]} />);
+    expect(button().textContent).toBe("1 of 1 live");
   });
 
-  it("still counts through to the end when a start fails mid-run, and shows the failed row", async () => {
-    const { onStart, settle } = deferredStarts();
-    draw(three(), { onStart });
-
+  it("gives the button back after the settle timeout, with the real counts, when a row stays in Starting", async () => {
+    vi.useFakeTimers();
+    const onStart = vi.fn(async (id: DestinationId) => {
+      if ((id as unknown as number) === 3) throw new Error("ingest refused");
+    });
+    const { set } = press({ onStart });
     fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
-    await settle(1);
-    await screen.findByRole("button", { name: "Starting 2 of 3…" });
-    await settle(2, new Error("ingest refused"));
+    await flush();
+    set({ 1: "running", 2: "starting" });
 
-    // The refusal does not stall or reset the count: the walk goes on to the third.
-    const third = await screen.findByRole("button", { name: "Starting 3 of 3…" });
-    expect((third as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("ingest refused")).toBeTruthy();
-    await settle(3);
+    await wait(SETTLE_TIMEOUT_MS - 1);
+    expect(button().textContent).toBe("Starting… 1 of 3 live · 1 failed");
+    expect(button().disabled).toBe(true);
+    await wait(1);
+    expect(button().textContent).toBe("1 of 3 live · 1 failed · 1 still starting");
+    await wait(FINAL_HOLD_MS);
+    expect(button().textContent).toBe("Go live · 1 ready");
+    expect(button().disabled).toBe(false);
+  });
 
-    const button = await screen.findByRole("button", { name: "Go live · 3 ready" });
-    expect((button as HTMLButtonElement).disabled).toBe(false);
-    expect(onStart).toHaveBeenCalledTimes(3);
-    const row = screen.getByText("Second").closest("[data-row]") as HTMLElement;
-    expect(within(row).getByText(T("golive.failed"))).toBeTruthy();
-    expect(within(row).getByText("ingest refused")).toBeTruthy();
+  it("announces the first word and the final count at once, and changes between at most every 2 s", async () => {
+    vi.useFakeTimers();
+    const { set } = press();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    const region = screen.getByTestId("golive-progress");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(status()).toBe("Starting… 0 of 3 live");
+
+    await wait(500);
+    set({ 1: "running" });
+    await flush();
+    expect(status()).toBe("Starting… 0 of 3 live");
+    await wait(500);
+    set({ 1: "running", 2: "running" });
+    await flush();
+    expect(status()).toBe("Starting… 0 of 3 live");
+    await wait(1_000);
+    expect(status()).toBe("Starting… 2 of 3 live");
+
+    await wait(100);
+    set({ 1: "running", 2: "running", 3: "running" });
+    await flush();
+    expect(status()).toBe("3 of 3 live");
+  });
+
+  it("leaves no timer running and calls nothing back once unmounted mid-press", async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => {};
+    const onStart = vi.fn(
+      (_id: DestinationId) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const onFinished = vi.fn();
+    const { unmount } = press({ n: 1, onStart, onFinished });
+    const pending = watchTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await flush();
+
+    unmount();
+    release();
+    await flush();
+    expect(onFinished).not.toHaveBeenCalled();
+    expect(pending.size).toBe(0);
+  });
+
+  it("leaves no timer running once unmounted while waiting for rows to settle", async () => {
+    vi.useFakeTimers();
+    const { set, unmount } = press();
+    const pending = watchTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running" });
+    // The settle timeout, and the announcement held back by the throttle.
+    expect(pending.size).toBeGreaterThan(0);
+
+    unmount();
+    expect(pending.size).toBe(0);
+  });
+
+  it("leaves no timer running once unmounted while the final count is held", async () => {
+    vi.useFakeTimers();
+    const { set, unmount } = press();
+    const pending = watchTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running", 2: "running", 3: "running" });
+    await wait(500);
+    expect(button().textContent).toBe("3 of 3 live");
+    expect(pending.size).toBeGreaterThan(0);
+
+    unmount();
+    expect(pending.size).toBe(0);
+  });
+
+  it("stops waiting, with no timer left, when the sheet is closed before the rows settle", async () => {
+    vi.useFakeTimers();
+    const { set, close } = press();
+    const pending = watchTimers();
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 3 ready" }));
+    await flush();
+    set({ 1: "running" });
+    expect(pending.size).toBeGreaterThan(0);
+
+    close();
+    await flush();
+    expect(pending.size).toBe(0);
+  });
+
+  it("does not count a row as settled on a status left from before its start was sent", async () => {
+    // The second destination is off, but its last process ended failed. That
+    // status belongs to an earlier run and says nothing about this press: only
+    // a status from a new process (a new startedAt) settles the row.
+    vi.useFakeTimers();
+    const one = dest({ id: did(1), name: "First" });
+    const oldRun = { state: "failed", startedAt: "2026-11-03T09:00:00Z", restarts: 4 };
+    const two = dest({ id: did(2), name: "Second", process: oldRun } as Record<string, unknown>);
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      rows: goLiveRows([one, two], sources),
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} live={[one, two]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 2 ready" }));
+    await flush();
+    expect(props.onStart).toHaveBeenCalledTimes(2);
+
+    const firstOn = { ...one, enabled: true, process: onAir } as unknown as DestStatus;
+    rerender(<GoLiveSheet {...props} live={[firstOn, { ...two, enabled: true } as DestStatus]} />);
+    await wait(3_000);
+    expect(button().textContent).toBe("Starting… 1 of 2 live");
+    expect(button().disabled).toBe(true);
+
+    const newRunFailed = { state: "failed", startedAt: "2026-11-04T12:00:05Z", restarts: 0 };
+    rerender(
+      <GoLiveSheet {...props} live={[firstOn, { ...two, enabled: true, process: newRunFailed } as unknown as DestStatus]} />,
+    );
+    expect(button().textContent).toBe("1 of 2 live · 1 failed");
+  });
+
+  it("does not carry a press into a new sheet when the last row settles on the same render", async () => {
+    vi.useFakeTimers();
+    const idle = [dest({ id: did(1), name: "Dest 1" })];
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      youtubeAtRisk: 0,
+      onStart: vi.fn(async (_id: DestinationId) => {}),
+      onRetry: async () => {},
+      onFinished: () => {},
+      paceMs: 0,
+    };
+    const { rerender } = render(<GoLiveSheet {...props} rows={goLiveRows(idle, sources)} live={idle} />);
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await flush();
+
+    // A fresh snapshot arrives in the same render as the row coming on air.
+    const on = [{ ...idle[0], enabled: true, process: onAir } as unknown as DestStatus];
+    rerender(<GoLiveSheet {...props} rows={goLiveRows(idle, sources)} live={on} />);
+    await flush();
+    expect(button().textContent).toBe(T("golive.goCount", { count: 0 }));
+  });
+
+  it("can be closed while it waits for rows to settle, but not while the starts go out", async () => {
+    let release: () => void = () => {};
+    const onStart = vi.fn(
+      (_id: DestinationId) =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    press({ n: 1, onStart });
+    fireEvent.click(screen.getByRole("button", { name: "Go live · 1 ready" }));
+    await waitFor(() => expect(onStart).toHaveBeenCalled());
+    expect((screen.getByRole("button", { name: T("golive.cancel") }) as HTMLButtonElement).disabled).toBe(true);
+
+    release();
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: T("golive.cancel") }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect(button().disabled).toBe(true);
+  });
+});
+
+describe("Go live sheet: the confirm button reads one as one in every language", () => {
+  // English "ready" does not change with the count, so these render in Spanish,
+  // where it does: the button used to read "1 listos". Polish needed the count-
+  // neutral colon form ("gotowe: 2"), since "{count} gotowych" was wrong at 1 to 4.
+  afterEach(() => setLanguage("en"));
+
+  it("says 1 listo, not 1 listos, with one destination ready", () => {
+    setLanguage("es");
+    draw([dest({ id: did(1) })]);
+
+    expect(screen.getByRole("button", { name: "Salir en directo · 1 listo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Salir en directo · 1 listos" })).toBeNull();
+  });
+
+  it("says 2 listos with two destinations ready", () => {
+    setLanguage("es");
+    draw([dest({ id: did(1) }), dest({ id: did(2), name: "Second" })]);
+
+    expect(screen.getByRole("button", { name: "Salir en directo · 2 listos" })).toBeTruthy();
+  });
+
+  it("uses the count-neutral Polish form at 2", () => {
+    setLanguage("pl");
+    draw([dest({ id: did(1) }), dest({ id: did(2), name: "Second" })]);
+
+    expect(screen.getByRole("button", { name: "Rozpocznij · gotowe: 2" })).toBeTruthy();
   });
 });

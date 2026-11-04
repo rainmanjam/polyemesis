@@ -166,7 +166,7 @@ export function DebugSettings() {
             // well as in the bundle, so an engineer told "the log just stops" has
             // the explanation before they ask.
             <span className="ml-2 text-xs text-muted-foreground">
-              {t("debug.linesCut", { count: cutLines.toLocaleString() })}
+              {t(cutLines === 1 ? "debug.linesCutOne" : "debug.linesCut", { count: cutLines.toLocaleString() })}
             </span>
           ) : null}
           {truncated ? (

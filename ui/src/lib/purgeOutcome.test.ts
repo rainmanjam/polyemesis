@@ -28,7 +28,7 @@ describe("JobsPage, purging the history", () => {
     const src = page();
     expect(src).not.toContain("throw new Error(");
     expect(src).toContain('if (purgeTone(purged) === "info") toast.info(t("jobs.nothingWasOldEnoughTo"));');
-    expect(src).toContain('toast.success(t("jobs.historyPurged", { count: purged }))');
+    expect(src).toContain('toast.success(t(purged === 1 ? "jobs.historyPurgedOne" : "jobs.historyPurged", { count: purged }))');
   });
 });
 

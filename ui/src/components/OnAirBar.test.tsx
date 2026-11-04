@@ -14,7 +14,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { OnAirBar } from "./OnAirBar";
 import type { DestStatus, Status } from "@/lib/types";
-import { translate } from "@/lib/i18n";
+import { setLanguage, translate } from "@/lib/i18n";
 
 afterEach(cleanup);
 
@@ -154,11 +154,7 @@ describe("OnAirBar verdict line", () => {
   it("names how many destinations need attention, out of how many there are", () => {
     render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
 
-    expect(
-      screen.getByText(
-        translate("en", "health.verdictAttention", { count: 1, total: 2 }),
-      ),
-    ).toBeTruthy();
+    expect(screen.getByTestId("health-verdict").textContent).toBe("1 of 2 destinations needs attention");
   });
 
   it("names its scope: the running destinations, not the whole install (app-council A2)", () => {
@@ -256,5 +252,61 @@ describe("OnAirBar before the first status frame", () => {
     render(<OnAirBar status={status([proc("stopped")])} />);
     expect(screen.getByText(translate("en", "onAir.offAir"))).toBeTruthy();
     expect(screen.getByTestId("on-air-counts")).toBeTruthy();
+  });
+});
+
+describe("OnAirBar: one reads as one (no plural rules, so count 1 has its own key)", () => {
+  afterEach(() => setLanguage("en"));
+  const ingest = { state: "running", uptimeSec: 760 };
+
+  it("says one running destination is healthy, not all 1 destinations", () => {
+    render(<OnAirBar status={{ ingest, destinations: [proc("running")] } as unknown as Status} />);
+    expect(screen.getByTestId("health-verdict").textContent).toBe("1 running destination healthy");
+  });
+
+  it("says all 2 running destinations are healthy", () => {
+    render(
+      <OnAirBar status={{ ingest, destinations: [proc("running"), proc("running", { id: did(2) })] } as unknown as Status} />,
+    );
+    expect(screen.getByTestId("health-verdict").textContent).toBe("All 2 running destinations healthy");
+  });
+
+  it("says 2 of 3 destinations need attention", () => {
+    render(
+      <OnAirBar
+        status={status([proc("running"), proc("failed", { id: did(2) }), proc("failed", { id: did(3) })])}
+      />,
+    );
+    expect(screen.getByTestId("health-verdict").textContent).toBe("2 of 3 destinations need attention");
+  });
+
+  it("counts one failed destination in the singular (es: 1 fallido)", () => {
+    setLanguage("es");
+    render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
+    expect(screen.getByText("1 fallido")).toBeTruthy();
+    expect(screen.queryByText("1 fallidos")).toBeNull();
+  });
+
+  it("counts two failed destinations in the plural (es: 2 fallidos)", () => {
+    setLanguage("es");
+    render(
+      <OnAirBar
+        status={status([proc("running"), proc("failed", { id: did(2) }), proc("failed", { id: did(3) })])}
+      />,
+    );
+    expect(screen.getByText("2 fallidos")).toBeTruthy();
+  });
+
+  it("agrees with the feminine destinazioni in Italian (1 non riuscita, 2 non riuscite)", () => {
+    setLanguage("it");
+    render(<OnAirBar status={status([proc("running"), proc("failed", { id: did(2) })])} />);
+    expect(screen.getByText("1 non riuscita")).toBeTruthy();
+    cleanup();
+    render(
+      <OnAirBar
+        status={status([proc("running"), proc("failed", { id: did(2) }), proc("failed", { id: did(3) })])}
+      />,
+    );
+    expect(screen.getByText("2 non riuscite")).toBeTruthy();
   });
 });
