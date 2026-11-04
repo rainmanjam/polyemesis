@@ -30,7 +30,7 @@
     {
       "UUID": "com.polyemesis.streamdeck.destination",
       "Name": "Destination",
-      "Tooltip": "One destination's live state. Tap to start it when it is off.",
+      "Tooltip": "One destination's live state. Tap to start it when it is off, or to retry it when it has failed.",
       "Icon": "imgs/actions/destination",
       "Controllers": [
         "Keypad"

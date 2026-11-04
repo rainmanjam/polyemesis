@@ -77,6 +77,15 @@ describe("PolyemesisClient: requests", () => {
     expect(sent.map((r) => r.url.pathname)).toEqual(["/api/v1/destinations/12/start", "/api/v1/destinations/12/stop"]);
   });
 
+  it("sends the console's Retry as a restart of one destination, scoped to its programme, with no body", async () => {
+    const { transport, sent } = fakeTransport([ok({ status: "restarting" })]);
+    await new PolyemesisClient(BASE, "t", transport).restartDestination(12, 3);
+    expect(sent[0]!.method).toBe("POST");
+    expect(sent[0]!.url.pathname).toBe("/api/v1/destinations/12/restart");
+    expect(sent[0]!.url.searchParams.get("source")).toBe("3");
+    expect(sent[0]!.body).toBeUndefined();
+  });
+
   it("reads the stop impact", async () => {
     const { transport, sent } = fakeTransport([ok({ destinations: 3, youtubeBroadcasts: 1 })]);
     const impact = await new PolyemesisClient(BASE, "t", transport).stopImpact(3);

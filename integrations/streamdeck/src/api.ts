@@ -256,6 +256,16 @@ export class PolyemesisClient {
   }
 
   /**
+   * The console's Retry: restarts one destination's output. On a failed destination it starts a fresh
+   * attempt, and on one held after repeated quick rejections it lifts the hold (a new supervise loop
+   * clears the rejection count and the reason). It interrupts a running output too, so the runtime only
+   * sends it for a destination that has failed. Needs an admin token.
+   */
+  restartDestination(id: number, sourceId?: number): Promise<unknown> {
+    return this.call("POST", `/destinations/${id}/restart`, sourceId);
+  }
+
+  /**
    * Stops one destination. With `now`, a delayed destination's buffered tail is CUT (?now=true): nothing
    * still buffered airs, and a tail already airing from an earlier stop is cut too.
    */

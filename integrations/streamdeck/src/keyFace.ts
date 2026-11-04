@@ -191,6 +191,19 @@ function verticalIssue(dest: DestStatus, vertical: DestStatus | undefined): KeyI
   return undefined;
 }
 
+/**
+ * True when a tap on the destination key is the console's Retry: the destination is on, and its
+ * process has failed -- including held after repeated quick rejections. Read from the destination,
+ * never from the face: a live destination with a worse issue open (an expired account, a failed
+ * vertical half) is painted red or held-toned, and must not be restarted. The order is stateFace's:
+ * a draining or buffering delay comes first, and the install-wide destinationHold (no process at
+ * all) is not a failed destination.
+ */
+export function retryable(dest: DestStatus): boolean {
+  if (dest.delay?.phase === "draining" || dest.delay?.phase === "buffering") return false;
+  return dest.enabled && dest.process?.state === "failed";
+}
+
 /** The key's state, and the issue that state is, if it is one. */
 interface StateFace {
   face: KeyFace;
@@ -279,7 +292,7 @@ function stateFace(dest: DestStatus, hold: HoldStatus | null | undefined): State
     }
     case "failed": {
       // Held is its own tile: the server has stopped retrying, and only a
-      // Retry from the console will change what this key shows.
+      // Retry (the console's, or a tap on this key) will change what it shows.
       if (dest.reason?.held) {
         const face: KeyFace = { tone: "held", label: "streamdeck.state.held", ...withoutKnown(why) };
         return { face, issue: asIssue("held", face) };

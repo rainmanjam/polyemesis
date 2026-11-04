@@ -118,7 +118,7 @@ Every other key acts on a tap, except Routing preset, which is also a hold, and 
 
 | Action | Tap or hold | What it does | Needs |
 |---|---|---|---|
-| **Destination** | Tap | Shows one destination's live state. Tapping starts it when it is off. | Read to show; admin to start |
+| **Destination** | Tap | Shows one destination's live state. Tapping starts it when it is off, and retries it when it shows **Failed**, or **Held** after repeated quick rejections (the console's Retry). Any other state ignores the tap. See [Destination taps](#destination-taps). | Read to show; admin to start or retry |
 | **Go live** | Tap | Starts every destination on the key's programme. | Admin |
 | **Stop all** | Hold | Stops every destination on the key's programme. Shows how many YouTube broadcasts the stop would end. If that count cannot be loaded, it refuses. | Admin |
 | **Stop destination** | Hold | Stops one destination. Shows whether the stop would end a YouTube broadcast, read from the server for that destination. It refuses if the count cannot be loaded or the destination is not the key's own. | Admin |
@@ -192,6 +192,25 @@ flash Applied live on every step of a turn.
 How the server applies a level live is in
 [HOT-RELOAD.md](HOT-RELOAD.md#live-per-track-gain-and-mute-the-stdin-command-channel).
 
+### Destination taps
+
+A tap on a Destination key does what the key's face asks for, and nothing in any other state.
+Stopping is the Stop destination key's job, so a tap never takes a destination off the air.
+
+| The key shows | A tap |
+|---|---|
+| **Off**, or **Draining** (stopped, its delayed tail still airing) | Starts the destination (`POST /api/v1/destinations/{id}/start`), as before |
+| **Failed**, with its cause | Retries it: the console's Retry, `POST /api/v1/destinations/{id}/restart`. The key re-reads the server straight away rather than waiting for the next poll, and shows what it reports: amber **Starting**, then **Live**, or **Failed** again with its reason |
+| **Held** after repeated quick rejections | Retries it the same way. The retry lifts the hold: the server starts a fresh attempt and drops the old rejection count |
+| **Live** (whatever its second line says), **Starting**, **Reconnecting**, **Stalled**, **Buffering** | Nothing |
+| **Held** for the whole programme (`destinationHold`, such as waiting for the ingest probe: no destination has a process yet) | Nothing: there is no failed process to retry |
+| **Other programme** | Never a retry: the key does not restart a destination of another programme |
+
+Both need an admin token; a read token shows **Needs admin token**. A refused retry shows
+the key's alert. A tap on the same destination while a retry is out, or within 4 seconds of one, is ignored,
+from this key or any other, so a double tap sends one retry instead of restarting the attempt
+the first tap began.
+
 ### What the faces mean
 
 **Destination**
@@ -204,7 +223,7 @@ How the server applies a level live is in
 | Starting, Reconnecting | Coming up, or retrying after a drop |
 | Stalled | Running, but not making progress |
 | Failed | Stopped on an error. The second line names the cause the server classified (**Key rejected**, **Not ready**, **DNS failed**, **Refused**, **Timed out**, **TLS failed**, **Codec rejected**, **Unknown** with FFmpeg's own line), or **Key changed** when the connected account reports a different stream key |
-| Held | The server stopped retrying after repeated quick key or codec rejections. Press Retry on the destination card to try again |
+| Held | The server stopped retrying after repeated quick key or codec rejections. Tap the key, or press Retry on the destination card, to try again |
 | Live, Upload slow | Running, but delivering slower than realtime |
 | Off | Not running |
 | Stop warning | The last stop timed out and the process was killed without being seen to exit, so it may still have been publishing; the detail says why |

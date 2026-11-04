@@ -2,7 +2,7 @@ import { ApiError, PolyemesisClient, type Transport } from "./api.js";
 import type { StreamDeckKey } from "./keys.js";
 import { ConfigError, dumpSecondsValid, keySettings, parseServerUrl, requireToken, type GlobalSettings, type KeySettings } from "./config.js";
 import { t } from "./i18n.js";
-import { destinationFace, failoverFace, type KeyFace } from "./keyFace.js";
+import { destinationFace, failoverFace, retryable, type KeyFace } from "./keyFace.js";
 import { HoldToConfirm, type Scheduler } from "./holdToConfirm.js";
 import { meterFace } from "./levelsFeed.js";
 import type {
@@ -157,6 +157,13 @@ export const FLASH_MS = 3000;
  */
 export const COALESCE_MS = 250;
 
+/**
+ * After a destination key sends a Retry, further Retry taps on it are ignored for this long: about two
+ * status ticks. The restart answers faster than a human double tap, and until the next status read the
+ * cache still says failed, so without it the second tap would restart the attempt the first one began.
+ */
+export const RETRY_COOLDOWN_MS = 4000;
+
 /** Kinds that read the install's stored track levels, not a programme's /status. */
 const LEVEL_KINDS: readonly SurfaceKind[] = ["trackMute", "trackGain"];
 
@@ -191,6 +198,12 @@ export class Runtime {
    */
   private readonly tapping = new Set<string>();
   /**
+   * Destinations with a Retry out, or sent within RETRY_COOLDOWN_MS, by destination id, not by key: two
+   * keys bound to one destination must not each restart it, the second interrupting the attempt the
+   * first began.
+   */
+  private readonly retryCooldown = new Map<number, object>();
+  /**
    * Orders what the level cache holds. A read takes a ticket when it STARTS; a level change's answer
    * takes one when it arrives. `levelsAt` is the ticket of what the cache holds now, and an answer with
    * an older ticket is not stored: a status tick that started before a dial's answer cannot put the old
@@ -220,6 +233,9 @@ export class Runtime {
   private readonly presetRefused = new Set<string>();
   /** One status refresh at a time. A tick that arrives while one is in flight is skipped, not queued. */
   private statusBusy = false;
+  /** Orders status reads per programme, as levelsClock orders level reads. See readScope. */
+  private statusClock = 0;
+  private readonly statusAt = new Map<string, number>();
   /** One meter poll at a time, for the same reason. A dropped packet must not stack requests. */
   private meterBusy = false;
   /** Every destination's stored track levels, by id, read each tick while a track control is on the deck. */
@@ -278,6 +294,8 @@ export class Runtime {
     for (const cancel of this.flashes.values()) cancel();
     this.flashes.clear();
     this.dumpsInFlight.clear();
+    // Destination ids belong to the install: a re-paired install's destination 5 is not this one's.
+    this.retryCooldown.clear();
     this.dialNotices.clear();
     for (const turn of this.turns.values()) turn.cancel?.();
     this.turns.clear();
@@ -499,20 +517,37 @@ export class Runtime {
       if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || s.kind === "viewers" || LEVEL_KINDS.includes(s.kind)) continue;
       scopes.add(scopeKey(s.settings.sourceId));
     }
-    for (const key of scopes) {
-      try {
-        const sourceId = key === ALL_SCOPE ? undefined : Number(key);
-        this.statuses.set(key, (await this.client!.status(sourceId)) as StatusPayload);
-        this.scopeErrors.delete(key);
-      } catch (err) {
-        // The old answer is not evidence of the present. Drop it and say unreachable.
-        this.statuses.delete(key);
-        const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
-        this.scopeErrors.set(key, apiErr);
-        if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
-          this.connection = undefined;
-          this.connectionError = apiErr;
-        }
+    for (const key of scopes) await this.readScope(key);
+  }
+
+  /**
+   * Reads one programme's status into the cache, unless the cache already holds a read that STARTED
+   * later: a destination key's post-Retry read runs beside the status tick, and a tick that started
+   * before the restart must not paint the old Failed back over the server's newer answer.
+   */
+  private async readScope(key: string): Promise<void> {
+    const ticket = ++this.statusClock;
+    const client = this.client!;
+    // An answer is dropped when a newer read has been stored, or when the key was re-paired meanwhile:
+    // the old install's answer is not this one's.
+    const newer = () => this.client !== client || (this.statusAt.get(key) ?? 0) > ticket;
+    try {
+      const sourceId = key === ALL_SCOPE ? undefined : Number(key);
+      const payload = await client.status(sourceId);
+      if (newer()) return;
+      this.statusAt.set(key, ticket);
+      this.statuses.set(key, payload);
+      this.scopeErrors.delete(key);
+    } catch (err) {
+      if (newer()) return;
+      this.statusAt.set(key, ticket);
+      // The old answer is not evidence of the present. Drop it and say unreachable.
+      this.statuses.delete(key);
+      const apiErr = err instanceof ApiError ? err : new ApiError("unreachable", undefined, String(err));
+      this.scopeErrors.set(key, apiErr);
+      if (apiErr.kind === "unauthorized" || apiErr.kind === "untrusted") {
+        this.connection = undefined;
+        this.connectionError = apiErr;
       }
     }
   }
@@ -927,14 +962,60 @@ export class Runtime {
 
   // ---- presses -----------------------------------------------------------
 
-  /** A destination key starts its destination when it is off. Stopping is the stop key's job. */
+  /**
+   * A destination key starts its destination when it is off, and retries it when it has failed
+   * (including held after repeated quick rejections): the console's Retry, POST /destinations/{id}/restart.
+   * Any other state -- live, starting, reconnecting, a delay buffering or draining -- does nothing.
+   * Stopping is the stop key's job.
+   */
   async pressDestination(id: string): Promise<void> {
     const s = this.surfaces.get(id);
     if (!s || !this.client || s.settings.destinationId === undefined) return;
     if (!(await this.requireAdmin(s))) return;
     const dest = this.statuses.get(scopeKey(s.settings.sourceId))?.destinations?.find((d) => d.id === s.settings.destinationId);
-    if (!dest || dest.enabled) return;
-    await this.run(s, () => this.client!.startDestination(s.settings.destinationId!, s.settings.sourceId));
+    if (!dest) return;
+    if (!dest.enabled) {
+      await this.run(s, () => this.client!.startDestination(s.settings.destinationId!, s.settings.sourceId));
+      return;
+    }
+    // The server picks the engine from the destination's own programme and ignores ?source=, so this
+    // is the check that keeps a key bound to programme A from restarting a destination of B.
+    if (!retryable(dest) || !this.ownsDestination(s, dest.id)) return;
+    // Claimed BEFORE the request, with no await between the check and the claim: a double tap, a second
+    // key on the same destination or a multi-action firing while the first restart is out sends nothing.
+    if (this.retryCooldown.has(dest.id)) return;
+    // Each claim is its own object, so a timer from an earlier claim (or an earlier pairing) can only
+    // ever clear the claim it was set for.
+    const claim = {};
+    this.retryCooldown.set(dest.id, claim);
+    const release = () => {
+      if (this.retryCooldown.get(dest.id) === claim) this.retryCooldown.delete(dest.id);
+    };
+    let sent = false;
+    await this.run(s, async () => {
+      await this.client!.restartDestination(dest.id, s.settings.sourceId);
+      sent = true;
+    });
+    if (!sent) {
+      // Refused: nothing restarted, so the operator may tap again at once.
+      release();
+      return;
+    }
+    this.schedule(release, RETRY_COOLDOWN_MS);
+    // The real transition, not a guess: read the programme again and paint what the server says now --
+    // Starting, then Live on a later tick, or Failed again with its reason.
+    await this.repaintScope(s);
+  }
+
+  /**
+   * Re-reads one key's programme status and repaints the deck from it at once, beside any status tick
+   * in flight: readScope keeps the newer of the two reads, so a tick that started before the restart
+   * cannot paint the old Failed back. Every key is repainted, so a second key on the same destination
+   * (or its stop key) moves with this one.
+   */
+  private async repaintScope(s: Surface): Promise<void> {
+    await this.readScope(scopeKey(s.settings.sourceId));
+    await this.paintAll();
   }
 
   async pressGoLive(id: string): Promise<void> {
