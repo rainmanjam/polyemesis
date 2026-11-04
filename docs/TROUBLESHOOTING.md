@@ -654,29 +654,31 @@ form, every 6–7 seconds in the case seen:
 Error opening output … Connection timed out
 ```
 
-**Check whether the server's network can reach X at all.** A timeout means
-nothing answered. In the case seen, on 2026-11-04, the server's network could
-not reach X: an X destination that published from a residential connection
-failed this way from an OVH VPS. From that host, TCP connections to
-`a.live.x.com`, `ca.pscp.tv` and `va.pscp.tv`, and a request to `https://x.com`,
-timed out over IPv4 and IPv6, while Twitch, YouTube and `example.com` connected.
-Whether other VPS providers or datacenter ranges are affected has not been
-tested. The details are under X in
+**Check whether the server can reach Cloudflare over IPv4.** A timeout means
+nothing answered. X's ingest sits behind Cloudflare, so a server that cannot
+reach Cloudflare's IPv4 network cannot reach X either. That is what happened on
+2026-11-04: an X destination that published from a residential connection
+failed this way from an OVH VPS that could not reach Cloudflare over IPv4 at
+all. From that host `https://1.1.1.1`, `https://discord.com` and X's own hosts
+gave no response, while Twitch and YouTube ingest, which are not on Cloudflare,
+connected. The cause is likely routing on the provider's side; other hosts and
+providers have not been tested. The details are under X in
 [PLATFORMS.md](PLATFORMS.md#the-platforms-that-need-a-sentence-each).
 
 Check from the server, with polyemesis out of the picture:
 
 ```sh
-curl -sS --connect-timeout 10 -o /dev/null -w '%{http_code}\n' https://x.com
+curl -sS -o /dev/null --connect-timeout 10 -w '%{http_code}\n' https://1.1.1.1
 nc -vz -w 10 a.live.x.com 443
 ```
 
-`curl` prints the HTTP status (for example `200` or `302`) when it gets a
-response; on a timeout it prints `000` and a curl error. `nc` checks TCP to the
-ingest host; use the host in your own server URL if it is a different one.
+`curl` prints an HTTP status when it gets a response; on a timeout it prints
+`000` and a curl error. `nc` checks TCP to the ingest host; use the host in your
+own server URL if it is a different one.
 
-**What to do:** if a check times out, X needs a different host or network. If
-both connect, the server reached X when you checked, so look for another cause.
+**What to do:** if Cloudflare is unreachable, contact your provider or use
+another host or network. If both checks connect, the server reached Cloudflare
+and X when you checked, so look for another cause.
 
 ---
 

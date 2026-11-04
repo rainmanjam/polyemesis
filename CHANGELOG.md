@@ -172,13 +172,14 @@ its first tagged release.
 
 ### Documentation
 
-- **X's stream-key path was tested live, and one hosting network could not reach X.** On
-  2026-11-04 a build of `main` on a residential connection published to X with a pasted server URL
-  and key, and the picture showed in X Producer's preview. docs/PLATFORMS.md records the test; the
-  X row of the capability table is unchanged (the stream key stays *By hand*, everything else
-  *Unverified*). The same destination timed out from an OVH VPS, where connections to X's ingest
-  hosts and a request to `x.com` timed out too; whether other providers are affected is untested. docs/PLATFORMS.md says how
-  to check a server can reach X first, and docs/TROUBLESHOOTING.md has a new entry for
+- **X's stream-key path was tested live, and a server that cannot reach Cloudflare cannot reach X.**
+  On 2026-11-04 a build of `main` on a residential connection published to X with a pasted server
+  URL and key, and the picture showed in X Producer's preview. docs/PLATFORMS.md records the test;
+  the X row of the capability table is unchanged (the stream key stays *By hand*, everything else
+  *Unverified*). The same destination timed out from an OVH VPS that could not reach Cloudflare's
+  IPv4 network at all, and X's ingest sits behind Cloudflare; the cause is likely routing on the
+  provider's side, and other hosts are untested. docs/PLATFORMS.md says how to check that a server
+  can reach Cloudflare and X's ingest first, and docs/TROUBLESHOOTING.md has a new entry for
   "Connection timed out" on an X destination.
 
 ## [0.12.0] — 2026-11-03

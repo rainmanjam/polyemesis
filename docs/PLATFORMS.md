@@ -60,8 +60,8 @@ thing to say about an API nobody here has read.
 
 The X row's stream key, *By hand*, was tested live on 2026-11-04: a pasted
 server URL and key published to X with picture. The rest of the X row
-stays *Unverified*. The details, and a hosting network X refused, are under X in
-[the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
+stays *Unverified*. The details, and a server that could not reach X, are under X
+in [the platforms that need a sentence each](#the-platforms-that-need-a-sentence-each).
 
 ## The platforms that need a sentence each
 
@@ -241,33 +241,33 @@ key and nothing more: chat, metadata and every Livestream API path stay
 *Unverified*, and the stream-key cell stays *By hand*, which is what a pasted key
 is.
 
-**X may refuse some hosting networks.** The same day, the same X destination
-failed from an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
-`Error opening output … Connection timed out` every 6–7 seconds. Checks from that
-host without polyemesis failed the same way: TCP connections to `a.live.x.com`
-(ports 443 and 80) and to `ca.pscp.tv` and `va.pscp.tv` (80, 443 and 1935) timed
-out, and so did a request to `https://x.com`, over IPv4 and IPv6 alike. From the
-same host, Twitch (`live.twitch.tv:1935`), YouTube (`a.rtmp.youtube.com:1935`)
-and `example.com:443` all connected, and from the residential macOS machine the
-X hosts connected too. X's ingest addresses resolve to Cloudflare (172.65.x.x).
-So X refused connections from that VPS's network. The refusal was silent:
-nothing answered and the attempts timed out, which is why the error reads
-`Connection timed out` rather than `Connection refused`. The checks ran without
-polyemesis, so the failure was outside it. Whether X does the same to other VPS
-providers, or to datacenter ranges in general, has not been tested: this is one
-host, not a rule.
+**X's ingest sits behind Cloudflare, so a server that cannot reach Cloudflare
+over IPv4 cannot stream to X.** The same day, the same X destination failed from
+an OVH VPS (Ubuntu 24.04, polyemesis v0.12.0): its log read
+`Error opening output … Connection timed out` every 6–7 seconds. X was not
+refusing that host. The host could not reach Cloudflare's IPv4 network at all:
+`https://1.1.1.1` and `https://discord.com` gave no response, and neither did
+`x.com`, `api.x.com` or `abs.twimg.com`; pings to `1.1.1.1` and other Cloudflare
+IPv4 addresses got no reply. Twitch and YouTube ingest, which are not on
+Cloudflare, connected. `https://www.cloudflare.com` did answer, but over IPv6;
+`x.com` and `a.live.x.com` have no IPv6 address of their own, so connections to
+them go over IPv4. X's ingest addresses (`a.live.x.com` and the `pscp.tv` hosts) resolve
+to Cloudflare (172.65.x.x), and a trace to an `x.com` address stopped inside
+OVH's network. The cause is likely routing on the provider's side. It was seen
+on one OVH VPS; other hosts and providers have not been tested.
 
-Before you rely on X from a server, check from that server that it can reach X:
+Before you rely on X from a server, check from that server that it can reach
+Cloudflare over IPv4, and X's ingest host:
 
 ```sh
-curl -sS --connect-timeout 10 -o /dev/null -w '%{http_code}\n' https://x.com
+curl -sS -o /dev/null --connect-timeout 10 -w '%{http_code}\n' https://1.1.1.1
 nc -vz -w 10 a.live.x.com 443
 ```
 
-The first prints the HTTP status (for example `200` or `302`) when it gets a
-response; on a timeout it prints `000` and a curl error. The second is a TCP
-check to the ingest host; use the host in your own server URL if X Producer gave
-you a different one. If a check times out, X needs a different host or network.
+The first prints an HTTP status when it gets a response; on a timeout it prints
+`000` and a curl error. The second is a TCP check to the ingest host; use the
+host in your own server URL if X Producer gave you a different one. If
+Cloudflare is unreachable, contact your provider or use another host or network.
 See
 [Troubleshooting](TROUBLESHOOTING.md#x-destination-connection-timed-out-when-opening-output).
 
