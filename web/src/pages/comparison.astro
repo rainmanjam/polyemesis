@@ -161,7 +161,7 @@ const losses = [
     who: "MistServer",
     what: "The one tool here that is a peer rather than a different shape, at a scale and protocol breadth this project does not approach.",
     rows: [
-      ["Protocol breadth", "A directory of muxers, including WebRTC and its own SRT output. Here: SRT and RTMP in, RTMP/SRT out, HLS for preview."],
+      ["Protocol breadth", "A directory of muxers, including WebRTC and its own SRT output. Here: SRT, SRTLA and RTMP in, RTMP/SRT out, HLS for preview."],
       ["Years of production deployment, and a commercial vendor behind it", "Here: pre-release, one maintainer."],
       ["Selection without decoding", "A push target that only selects tracks is a pure copy end to end. Every polyemesis destination decodes and re-encodes its audio, always, because that is what mixing is."],
     ],
@@ -241,6 +241,7 @@ const selectors = [
     and would be worse now that this page has four children carrying the
     long-tail terms. */}
 <Base
+  grid
   title="Multistream tools compared: polyemesis vs the alternatives"
   description="Multistream to Twitch, YouTube and Kick from one ingest. Restreamer, restream.io, obs-multi-rtmp, Aitum, StreamElements and Streamlabs compared on audio."
   path="/comparison"

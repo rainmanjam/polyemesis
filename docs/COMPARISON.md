@@ -192,7 +192,7 @@ this project does not approach.
 
 | What it has | polyemesis |
 |---|---|
-| **Protocol breadth** — an `src/output/` directory of muxers, including WebRTC and its own SRT output | SRT and RTMP in, RTMP/SRT out, HLS for preview |
+| **Protocol breadth** — an `src/output/` directory of muxers, including WebRTC and its own SRT output | SRT, SRTLA and RTMP in, RTMP/SRT out, HLS for preview |
 | **Per-push track selection**, on any target, by index or codec or `all` | Selection is per destination too, but the point here is the mix |
 | **Years of production deployment**, and a commercial vendor behind it | Pre-release, one maintainer |
 | **Selection without decoding.** A push target that only selects tracks is a pure copy end to end; transcoding is a separate opt-in process | Every destination decodes and re-encodes its audio, always, because that is what mixing is |

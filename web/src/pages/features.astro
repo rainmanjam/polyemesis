@@ -176,7 +176,7 @@ const sections = [
       "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
       "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one: twenty-two other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
     ],
-    note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects, which would look like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. X and Rumble are key-paste platforms; Rumble chat needs a key from your account page because that API has no sign-in.",
+    note: "Instagram is listed and marked unsupported rather than shipped as a preset that quietly never connects, which would look like a bug in polyemesis when there is nothing to fix. There is no Live broadcast API, so nothing can create a broadcast, fetch a key, read chat or report viewers. If your account still has Live Producer, its URL and key work as a generic RTMPS destination, pasted by hand and changing every broadcast. Rumble is a key-paste platform, and its chat needs a key from your account page because that API has no sign-in. X sign-in, go-live and chat are built and stay switched off until X whitelists the app for its Livestream API; until then an X destination takes a pasted key.",
     shot: "22-platforms-connected.png",
     caption: "Settings, Platform credentials, after the one-time setup: an app registered and an account connected per platform. The accounts are demo data served to the real page; nothing here is anybody's channel.",
     alt: "polyemesis Platform credentials settings: YouTube and Twitch each marked Configured, with a stored client secret and one connected demo account",
@@ -197,8 +197,8 @@ const sections = [
       "It runs beside the fan-out rather than instead of it. The same ingest still reaches Twitch and YouTube with their own mixes; this is one more destination, for the audience that does not have an account anywhere.",
     ],
     shot: "10-playout.png",
-    caption: "The player page, its publish state, and the playback token that gates it.",
-    alt: "polyemesis playout page: public player configuration and playback token",
+    caption: "Playout on and private: the player page, HLS playlist and embed code to share, who may watch, and the audience counting the viewers pulling segments.",
+    alt: "polyemesis playout page: player page and HLS playlist links with an embed code, playback protected by a secret link and not yet public, and an audience panel counting viewers",
   },
   {
     id: "monitoring",
@@ -221,7 +221,7 @@ const sections = [
     body: [
       "Segmented recording that preserves every one of the split audio tracks your encoder sent, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
       "That archive is where your own VOD track comes from. Every track is kept unmixed, so the upload you cut afterwards need not carry the music that went out live.",
-      "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clipper. A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
+      "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clip editor that suggests highlights, cuts vertical shorts with burned-in captions, and posts to YouTube Shorts or TikTok when you click Publish (TikTok posts stay private until TikTok audits the app). A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
     ],
     shot: "15-recordings.png",
     caption: "Segments with every ingest track preserved, next to retention by age and size and the free-space floor.",
@@ -336,6 +336,7 @@ const rooms = [
 ---
 
 <Base
+  grid
   title="Multistreaming features — a different audio mix per platform"
   description="Route your OBS split audio tracks per destination: a channel-level mix matrix, shared renditions and multitrack recording. Self-hosted."
   path="/features"
@@ -561,14 +562,14 @@ const rooms = [
   </section>
 
   {/* ------------------------------------------------------------- and also -- */}
-  {/* ONE LINE EACH, EACH LINKING ITS DOC, and that restraint is the point. Nine
+  {/* ONE LINE EACH, EACH LINKING ITS DOC, and that restraint is the point. Twelve
       real capabilities that do not each deserve a section: giving them one would
       triple the page and bury the audio routing people come for. Giving them
       none leaves the product looking smaller than it is, which is the complaint
       that prompted this block.
 
-      GROUPED IN THREES rather than listed flat -- content, then integrations,
-      then operations -- because a flat nine reads as a grab-bag of whatever the
+      GROUPED IN THREES rather than listed flat -- on air, then content, then
+      integrations, then operations -- because a flat list reads as a grab-bag of whatever the
       maintainer built last, which is the specific way this pattern fails.
 
       Every line traces to a shipped package AND a published document. The audit
@@ -585,6 +586,9 @@ const rooms = [
       </h2>
       <div class="mt-8 grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
         {[
+          { h: "Live captions", p: "One audio track of a programme is transcribed on your own machine and sent the way each platform takes captions: inside the Twitch stream, to YouTube's caption ingestion (provisional), and as a Captions track on your own player. Your spellings and masked words apply to every one.", href: "/docs/captions" },
+          { h: "Broadcast delay", p: "Hold one destination back by up to 15 minutes so you can cut something before it airs there. Every other destination stays live, and video is still copied.", href: "/docs/broadcast-delay" },
+          { h: "Audience across platforms", p: "Viewer counts from YouTube, Twitch, Kick and your own player, live on the Dashboard and as a report per stream, with CSV, Prometheus and MQTT exports. A count a platform does not report reads as not reported, never 0.", href: "/docs/monitoring" },
           { h: "Transcription and search", p: "Whisper runs over the archive on a queue that yields to the live stream, and the transcript is searchable, so you can find the moment somebody said it.", href: "/docs/architecture" },
           { h: "Automated moderation", p: "Rules that act across all five chat platforms, and a moderator card showing what one person has said on every one of them at once.", href: "/docs/platforms" },
           { h: "Broadcast from a file", p: "A file on a loop as the ingest, turned on by a schedule, so a programme can go out when nobody is at the desk.", href: "/docs/scheduled-broadcast" },

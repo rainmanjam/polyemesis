@@ -209,8 +209,11 @@ GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
     go build -trimpath -ldflags "-s -w -X main.version=$DEMO_VERSION" \
       -o "$STAGE/polyemesis-linux" ./cmd/polyemesis ) \
   || { echo "cross-compile for the container failed" >&2; exit 1; }
+# Alpine 3.24, the release image's base: its ffmpeg is 8.x with libsrt. 3.20
+# carries FFmpeg 6.1, which the server refuses at startup since FFmpeg 8.0
+# became the floor, and the container exits before /health ever answers.
 docker build -q -t "$IMAGE" -f - "$STAGE" >/dev/null <<'DOCKERFILE' || { echo "docker build failed" >&2; exit 1; }
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ffmpeg ca-certificates
 COPY polyemesis-linux /usr/local/bin/polyemesis
 ENTRYPOINT ["/usr/local/bin/polyemesis"]
