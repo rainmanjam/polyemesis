@@ -397,18 +397,52 @@ func canPost(a Adapter) bool {
 // that was never attached is not an error: the caller's intent — "this account
 // is not connected" — is already satisfied.
 func (h *Hub) Detach(p db.Platform, account string) {
+	r := h.unhook(p, account)
+	if r == nil {
+		return
+	}
+	<-r.done
+	h.publishState()
+}
+
+// DetachWithin is Detach with a bound on the wait, for a caller that is
+// answering an HTTP request and must not hang on an adapter that is slow to
+// honour its cancellation.
+//
+// The adapter is unlisted and cancelled AT ONCE either way, and the change is
+// published straight away rather than when the adapter gets round to returning:
+// what the operator asked for -- the platform gone from the chat pane -- does
+// not wait on the platform's socket. Only the wait is bounded. It reports
+// whether the adapter had returned within d; one that had not finishes in the
+// background, already out of every list.
+func (h *Hub) DetachWithin(p db.Platform, account string, d time.Duration) bool {
+	r := h.unhook(p, account)
+	if r == nil {
+		return true
+	}
+	h.publishState()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-r.done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+// unhook removes one runner from the Hub and cancels it, returning it so the
+// caller can decide how long to wait; nil when nothing was attached.
+func (h *Hub) unhook(p db.Platform, account string) *runner {
 	key := runnerKey(p, account)
 	h.mu.Lock()
 	r := h.runners[key]
 	delete(h.runners, key)
 	h.mu.Unlock()
-
-	if r == nil {
-		return
+	if r != nil {
+		r.cancel()
 	}
-	r.cancel()
-	<-r.done
-	h.publishState()
+	return r
 }
 
 // Adapter returns the attached adapter for one account, so a caller can reach a
