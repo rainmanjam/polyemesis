@@ -36,11 +36,34 @@ func TestFirstEnablingMQTTGivesThisInstallItsOwnInstance(t *testing.T) {
 		t.Fatalf("instance after first enabling MQTT = %q, want polyemesis-<6 hex>", first)
 	}
 
-	// Already on: whatever the operator sets now is kept, the default included.
+	// Off and on again: the broker URL is kept, so nothing is renamed.
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", mqttWith(func(m map[string]any) {
+		m["enabled"] = false
+	}), http.StatusOK)
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", mqttWith(func(m map[string]any) {
+		m["enabled"] = true
+	}), http.StatusOK)
+	if got := instance(); got != first {
+		t.Fatalf("switching MQTT off and on renamed the instance %q -> %q", first, got)
+	}
+
+	// Configured once: whatever the operator sets now is kept, the default included.
 	send(t, h, sign, http.MethodPut, "/api/v1/settings", mqttWith(func(m map[string]any) {
 		m["instance"] = "polyemesis"
 	}), http.StatusOK)
 	if got := instance(); got != "polyemesis" {
 		t.Errorf("an enabled install's chosen instance was rewritten to %q", got)
+	}
+
+	// The install upgraded with the shared default already publishing: off and
+	// on again must not move its topics (the transition is not "first setup").
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", mqttWith(func(m map[string]any) {
+		m["enabled"] = false
+	}), http.StatusOK)
+	send(t, h, sign, http.MethodPut, "/api/v1/settings", mqttWith(func(m map[string]any) {
+		m["enabled"] = true
+	}), http.StatusOK)
+	if got := instance(); got != "polyemesis" {
+		t.Errorf("re-enabling a configured install renamed its instance to %q", got)
 	}
 }

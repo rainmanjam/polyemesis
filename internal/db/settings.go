@@ -1198,19 +1198,20 @@ func unwrapURLError(err error) error {
 // DefaultMQTTInstance is the instance every install is created with.
 const DefaultMQTTInstance = "polyemesis"
 
-// AssignInstanceOnFirstEnable gives MQTT a per-install instance at the moment
-// it is first switched on, if the instance is still the shared default.
+// AssignInstanceOnFirstSetup gives MQTT a per-install instance the first time
+// it is set up, if the instance is still the shared default.
 //
 // TWO INSTALLS ON ONE BROKER WITH THE DEFAULT COLLIDED (poka-yoke audit
 // 2026-11-04): the same client id, so the broker kicked each session in turn,
 // and the same topic tree, so each sweep cleared the other's retained topics.
-// Nothing detected it. The instance is part of the topic tree that Home
-// Assistant and every subscriber key on, so it is changed ONLY on the
-// disabled -> enabled transition: an install already publishing keeps its
-// topics exactly where its subscribers expect them. An instance the operator
-// set to anything else is theirs and is left alone.
-func (m *MQTTSettings) AssignInstanceOnFirstEnable(wasEnabled bool, unique string) {
-	if wasEnabled || !m.Enabled || unique == "" {
+// The instance is part of the topic tree Home Assistant and every subscriber
+// key on, so it is assigned ONLY when MQTT has never been configured on this
+// install -- off, and no broker URL stored. Switching MQTT off keeps the
+// broker URL, so switching it back on never renames anything; an install that
+// was ever set up keeps its topics where its subscribers expect them. An
+// instance the operator set to anything else is theirs and is left alone.
+func (m *MQTTSettings) AssignInstanceOnFirstSetup(neverConfigured bool, unique string) {
+	if !neverConfigured || !m.Enabled || unique == "" {
 		return
 	}
 	if inst := strings.TrimSpace(m.Instance); inst == "" || inst == DefaultMQTTInstance {

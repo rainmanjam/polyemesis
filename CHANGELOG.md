@@ -71,8 +71,9 @@ its first tagged release.
 
 ### Changed
 
-- **MQTT gets an instance of its own when you first turn it on**, so two installs on one broker
-  cannot share a client ID or topic tree. Installs that already publish keep theirs. The settings
+- **MQTT gets an instance of its own when you first set it up**, so two installs on one broker
+  cannot share a client ID or topic tree. Installs that were ever configured keep theirs, even after
+  switching MQTT off and on. The settings
   page and the server log now warn when credentials go over `mqtt://`, `tcp://` or `ws://` to a
   broker that is not on your network. They also say when **Accept a self-signed certificate** is
   on but has nothing to act on.

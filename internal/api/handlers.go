@@ -1734,15 +1734,16 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// And the stored model-checker blocks, which newlyEnabledUntested
 		// compares against. Copies: only their connection fields are read.
 		storedAutomod := db.AutomodSettings{Model: settings.Automod.Model, Secondary: settings.Automod.Secondary}
-		// Whether MQTT was already on, for AssignInstanceOnFirstEnable below.
-		storedMQTTEnabled := settings.MQTT.Enabled
+		// Whether MQTT has ever been set up here, for AssignInstanceOnFirstSetup
+		// below: off, with no broker URL stored.
+		mqttNeverConfigured := !settings.MQTT.Enabled && strings.TrimSpace(settings.MQTT.BrokerURL) == ""
 		if err := decodeJSONInto(body, settings); err != nil {
 			return err
 		}
-		// A per-install MQTT instance when MQTT is first switched on with the
-		// shared default, so two installs on one broker cannot collide. Never
-		// for an install already publishing: its topic tree is a contract.
-		settings.MQTT.AssignInstanceOnFirstEnable(storedMQTTEnabled, s.mqttInstanceForThisInstall())
+		// A per-install MQTT instance when MQTT is first set up with the shared
+		// default, so two installs on one broker cannot collide. Never for an
+		// install that was ever configured: its topic tree is a contract.
+		settings.MQTT.AssignInstanceOnFirstSetup(mqttNeverConfigured, s.mqttInstanceForThisInstall())
 		// The one section decodeJSONInto's strictness cannot reach: automod
 		// has its own UnmarshalJSON. See db.CheckAutomodFields.
 		if err := checkSentAutomodFields(body); err != nil {
